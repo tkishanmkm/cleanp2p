@@ -1,0 +1,56 @@
+{
+  "home": {
+    "heroTitle": "कॉइन खरीदें और बेचें",
+    "heroSubtitle": "पीयर-टू-पीयर ट्रेडिंग आपको सीधे अन्य लोगों के साथ कॉइन ट्रेड करने देती है।",
+    "joinUs": "हमसे जुड़ें",
+    "statsCountries": "समर्थित देश",
+    "statsPayments": "भुगतान के तरीके",
+    "statsTime": "औसत ट्रेड समय",
+    "howItWorksTitle": "शुरू कैसे करें",
+    "howItWorksSubtitle": "Paxones पर ट्रेडिंग आसान, सुरक्षित और तेज़ है।",
+    "step1Title": "1. अकाउंट बनाएँ",
+    "step2Title": "2. ऑफर खोजें",
+    "step3Title": "3. ट्रेड शुरू करें",
+    "step4Title": "4. पूरा करें और प्राप्त करें",
+    "whyP2PTitle": "P2P पर ट्रेड क्यों करें?",
+    "directTradingTitle": "सीधा ट्रेड",
+    "globalPaymentsTitle": "वैश्विक भुगतान तरीके",
+    "controlTitle": "आप नियंत्रण में हैं",
+    "securityTitle": "आपकी सुरक्षा हमारी प्राथमिकता है",
+    "escrowTitle": "सुरक्षित एस्क्रो सिस्टम",
+    "disputeTitle": "विवाद समाधान",
+    "supportedCoinsTitle": "समर्थित कॉइन"
+  },
+  "buySellForm": {
+    "buyTab": "मैं खरीदना चाहता हूँ",
+    "sellTab": "मैं बेचना चाहता हूँ",
+    "haveLabel": "मेरे पास है",
+    "wantLabel": "मुझे चाहिए",
+    "coinLabel": "कॉइन",
+    "amountPlaceholder": "राशि दर्ज करें",
+    "paymentMethodLabel": "भुगतान तरीका",
+    "allPaymentMethods": "सभी भुगतान तरीके",
+    "findOffers": "ऑफ़र खोजें",
+    "getApprox": "आपको लगभग मिलेगा",
+    "payApprox": "आप लगभग भुगतान करेंगे"
+  },
+  "homeSignupForm": {
+    "placeholder": "यूज़र आईडी चुनें"
+  },
+  "footer": {
+    "tagline": "विश्वास के साथ व्यापार करें। Paxones एक विश्वसनीय एस्क्रो प्रणाली के साथ एक सुरक्षित P2P प्लेटफॉर्म प्रदान करता है।",
+    "company": "कंपनी",
+    "about": "हमारे बारे में",
+    "careers": "करियर",
+    "press": "प्रेस",
+    "legal": "कानूनी",
+    "terms": "सेवा की शर्तें",
+    "privacy": "गोपनीयता नीति",
+    "aml": "AML नीति",
+    "support": "सहायता",
+    "contact": "संपर्क करें",
+    "faq": "FAQ",
+    "dispute": "विवाद समाधान",
+    "copyright": "सभी अधिकार सुरक्षित।"
+  }
+}

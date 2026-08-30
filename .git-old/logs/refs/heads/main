@@ -1,0 +1,818 @@
+0000000000000000000000000000000000000000 f2839bc33331c39937504486e6ac0d8faad3b3f8 Firebase Studio <noreply@firebase.studio> 1765329136 +0000	commit (initial): Initialized workspace with Firebase Studio
+f2839bc33331c39937504486e6ac0d8faad3b3f8 e39881086ffab2055b8c8b3862481ee32030515d Kishan Mishra <tkishanmkm@gmail.com> 1770101419 +0000	commit: Initial prototype
+e39881086ffab2055b8c8b3862481ee32030515d ab1fe0e2bb8db0e90019bf0c3a06e564d030458c Kishan Mishra <tkishanmkm@gmail.com> 1770101572 +0000	commit: Try fixing this error: `Console Error: Encountered two children with the
+ab1fe0e2bb8db0e90019bf0c3a06e564d030458c d948d61477c7fe89ae66781e46aa3aef36b22f1c Kishan Mishra <tkishanmkm@gmail.com> 1770101919 +0000	commit: Set up a Firebase backend
+d948d61477c7fe89ae66781e46aa3aef36b22f1c d0629beae99a16bc9707a7cf48428e7e18169490 Kishan Mishra <tkishanmkm@gmail.com> 1770101963 +0000	commit: File changes
+d0629beae99a16bc9707a7cf48428e7e18169490 1a8fc8cf4794b2f6112532832148a35791d6342b Kishan Mishra <tkishanmkm@gmail.com> 1770102047 +0000	commit: Try fixing this error: `Console Error: Encountered two children with the
+1a8fc8cf4794b2f6112532832148a35791d6342b b6b0b01bf10b608803220a6707b87e13328b7890 Kishan Mishra <tkishanmkm@gmail.com> 1770102175 +0000	commit: Try fixing this error: `Runtime Error: useSidebar must be used within a
+b6b0b01bf10b608803220a6707b87e13328b7890 6ad9585312f702662969789a9345efed282b49c4 Kishan Mishra <tkishanmkm@gmail.com> 1770102464 +0000	commit: add in dashboard with long and explainig dashboard add FAQ policy and t
+6ad9585312f702662969789a9345efed282b49c4 34cd00c85226cfdec7a93d2cae422d51ee7ac5e1 Kishan Mishra <tkishanmkm@gmail.com> 1770102697 +0000	commit: The wallet system is the backbone of the platform, responsible for manag
+34cd00c85226cfdec7a93d2cae422d51ee7ac5e1 cbaef93503fb57072c832335ffe17d51cfe84fba Kishan Mishra <tkishanmkm@gmail.com> 1770103853 +0000	commit: dashboard page same as image only app name same
+cbaef93503fb57072c832335ffe17d51cfe84fba f79f921cb86377ed1a5b3a6452a4e9179b8289db Kishan Mishra <tkishanmkm@gmail.com> 1770104059 +0000	commit: In User only Name dob user id and password to make account no any email
+f79f921cb86377ed1a5b3a6452a4e9179b8289db d86e40dc4d4ccc194669b2f2de0305c665fb11bc Kishan Mishra <tkishanmkm@gmail.com> 1770104312 +0000	commit: in dashboard make compaitable to obile devices also
+d86e40dc4d4ccc194669b2f2de0305c665fb11bc e4ddda8afede311106f9a7835bb37017b3b9d44c Kishan Mishra <tkishanmkm@gmail.com> 1770104623 +0000	commit: n keep every trade protected.
+e4ddda8afede311106f9a7835bb37017b3b9d44c f2660de3cc979e9360943bf8fcce7389e0b284d6 Kishan Mishra <tkishanmkm@gmail.com> 1770105782 +0000	commit: In dashboard page First BTC USDT LTC ETH Image can set from Admin panel
+f2660de3cc979e9360943bf8fcce7389e0b284d6 5e40978a205e26927890660126dc5aa7110eb19f Kishan Mishra <tkishanmkm@gmail.com> 1770105909 +0000	commit: dashboard page First BTC USDT LTC ETH Image can set from Admin panel , A
+5e40978a205e26927890660126dc5aa7110eb19f 441a8b918b6eb4c9676f6ef061a589f459804206 Kishan Mishra <tkishanmkm@gmail.com> 1770106596 +0000	commit: make dashboard like that but no change in color its blue And as per app
+441a8b918b6eb4c9676f6ef061a589f459804206 5ca5d11610fd1c7b4e1b8493c5d53901dfc5d1f7 Kishan Mishra <tkishanmkm@gmail.com> 1770106914 +0000	commit: ok now add website about like how to use whoch crypto supported about p2
+5ca5d11610fd1c7b4e1b8493c5d53901dfc5d1f7 ec830f2d4bbb4f2aaef9277a241c68f6a8eea5f1 Kishan Mishra <tkishanmkm@gmail.com> 1770107142 +0000	commit: when tapping dispute resolution then admin page open and Add logo In sec
+ec830f2d4bbb4f2aaef9277a241c68f6a8eea5f1 26de3275b40f9db05460256f4620c390e6f5e78d Kishan Mishra <tkishanmkm@gmail.com> 1770107432 +0000	commit: crypto images can edit from admin panel and reflect in site and all user
+26de3275b40f9db05460256f4620c390e6f5e78d edec9318bd016b161d601319f6025f740ac6dee9 Kishan Mishra <tkishanmkm@gmail.com> 1770107698 +0000	commit: its show login failed fix issue
+edec9318bd016b161d601319f6025f740ac6dee9 e2512d2948dafdad5b1cbe4ce52b419bff91accf Kishan Mishra <tkishanmkm@gmail.com> 1770107895 +0000	commit: from admin Page app logo, crypto logo, can set
+e2512d2948dafdad5b1cbe4ce52b419bff91accf a607229a6fcdd0968441a621bbd0d13df69896e8 Kishan Mishra <tkishanmkm@gmail.com> 1770108236 +0000	commit: app them color make dark violet blue make little noticiable
+a607229a6fcdd0968441a621bbd0d13df69896e8 9a7ca03841c73f081675ca580cf07ee1bbec85d7 Kishan Mishra <tkishanmkm@gmail.com> 1770111255 +0000	commit: Try fixing this error: `Build Error: Module not found: Can't resolve 'ne
+9a7ca03841c73f081675ca580cf07ee1bbec85d7 c48d2fde64100fb1d7b1a8b65014524db076a1f3 Kishan Mishra <tkishanmkm@gmail.com> 1770112108 +0000	commit: in admin panel option to set Qr and address for deposit for all users wh
+c48d2fde64100fb1d7b1a8b65014524db076a1f3 75590532a5af143bc1eeb14408e7b630b02c5f25 Kishan Mishra <tkishanmkm@gmail.com> 1770112657 +0000	commit: at time of withdrawal user go wallet and withdrawal select then form whe
+75590532a5af143bc1eeb14408e7b630b02c5f25 815c7cd6728137a77a1ff245631f68b1d512ac10 Kishan Mishra <tkishanmkm@gmail.com> 1770116557 +0000	commit: The app isn't starting. Please investigate what could be wrong based on
+815c7cd6728137a77a1ff245631f68b1d512ac10 b4f736efc565e8b0c521487b08dc168800166d79 Kishan Mishra <tkishanmkm@gmail.com> 1770118668 +0000	commit: The app isn't starting. Please investigate what could be wrong based on
+b4f736efc565e8b0c521487b08dc168800166d79 d8fb57ce490e1a14606b03b3ed102d5e2c37c566 Kishan Mishra <tkishanmkm@gmail.com> 1770119812 +0000	commit: User can create Id By Name Dob User id and password , User can deposit o
+d8fb57ce490e1a14606b03b3ed102d5e2c37c566 df6e8b80699cbed606d9af678f4f86f40d212977 Kishan Mishra <tkishanmkm@gmail.com> 1770120424 +0000	commit: user profile in that user can change password add Dp, change username (
+df6e8b80699cbed606d9af678f4f86f40d212977 677cee7acee2d0594c48b2bf011f5420e2ce1887 Kishan Mishra <tkishanmkm@gmail.com> 1770120782 +0000	commit: In create ad section user have to choose ad for buying crypto or selling
+677cee7acee2d0594c48b2bf011f5420e2ce1887 1af18e0356113a49055aaf923b525dd0e01e5a79 Kishan Mishra <tkishanmkm@gmail.com> 1770121226 +0000	commit: All trade chat saved in Database or admin also can check all message and
+1af18e0356113a49055aaf923b525dd0e01e5a79 e8dd7e15f3d0e3c1fcd479d36d931480fafc951f Kishan Mishra <tkishanmkm@gmail.com> 1770121476 +0000	commit: remove all mock data of ad or users make all real ad only visible if use
+e8dd7e15f3d0e3c1fcd479d36d931480fafc951f c8a4df9883ef627afe966a629aae19ccf387374f Kishan Mishra <tkishanmkm@gmail.com> 1770121748 +0000	commit: Try fixing this error: `Unhandled Runtime Error: ReferenceError: SheetTr
+c8a4df9883ef627afe966a629aae19ccf387374f fa06087f3380277e72055bcf1ef00870cda261ab Kishan Mishra <tkishanmkm@gmail.com> 1770122657 +0000	commit: buy or sell ad without login show ad list but in top same login or join
+fa06087f3380277e72055bcf1ef00870cda261ab b16eed620b368c563f59be8385c724cd55d13c26 Kishan Mishra <tkishanmkm@gmail.com> 1770122765 +0000	commit: Try fixing this error: `Unhandled Runtime Error: TypeError: Cannot read
+b16eed620b368c563f59be8385c724cd55d13c26 3ff830efddba063a5e3c64d5bb3b9612475c7a6b Kishan Mishra <tkishanmkm@gmail.com> 1770123271 +0000	commit: in wallet option to check crypto in wallet four crypto show and option t
+3ff830efddba063a5e3c64d5bb3b9612475c7a6b 05982072c4e012e6f935f041ac4b52c0806016bd Kishan Mishra <tkishanmkm@gmail.com> 1770123432 +0000	commit: username and amount also view in mobile type screen setting open in full
+05982072c4e012e6f935f041ac4b52c0806016bd 49d8b86e372436ef23b42f3a29871226118873cf Kishan Mishra <tkishanmkm@gmail.com> 1770123589 +0000	commit: user have also public profile where his username feedback trade volume b
+49d8b86e372436ef23b42f3a29871226118873cf aab6b944233bc94dfd89794181055f33e14d18d2 Kishan Mishra <tkishanmkm@gmail.com> 1770123932 +0000	commit: Try fixing this error: `Unhandled Runtime Error: Error: [object Object]
+aab6b944233bc94dfd89794181055f33e14d18d2 4ea48b2a3bad8e1c980da20362b47616fd36c147 Kishan Mishra <tkishanmkm@gmail.com> 1770124291 +0000	commit: check all feature of admin page and fix error if found and recheck
+4ea48b2a3bad8e1c980da20362b47616fd36c147 1814fefc1e7ca9a9076d212a0bd66d1132596ddb Kishan Mishra <tkishanmkm@gmail.com> 1770124425 +0000	commit: Try fixing this error: `Unhandled Runtime Error: FirebaseError: Missing
+1814fefc1e7ca9a9076d212a0bd66d1132596ddb d883a856c30386a7262821b3d928de4331b2e866 Kishan Mishra <tkishanmkm@gmail.com> 1770124549 +0000	commit: Try fixing this error: `Unhandled Runtime Error: FirebaseError: Missing
+d883a856c30386a7262821b3d928de4331b2e866 0e7ed711ea6170ae61bfcf9009b00248cf98e332 Kishan Mishra <tkishanmkm@gmail.com> 1770124905 +0000	commit: check all error in admin page and fix error and rechck untill no error f
+0e7ed711ea6170ae61bfcf9009b00248cf98e332 8370a09f68c3a72a52a5924e136bb366503ebf0f Kishan Mishra <tkishanmkm@gmail.com> 1770125009 +0000	commit: QR code upload option in wallet section in png jpg jpeg form
+8370a09f68c3a72a52a5924e136bb366503ebf0f 4fa62b6b0b10ff3c7424b9b60ad9b0b22aa5ce51 Kishan Mishra <tkishanmkm@gmail.com> 1770125089 +0000	commit: Unhandled Runtime Error
+4fa62b6b0b10ff3c7424b9b60ad9b0b22aa5ce51 5c8733ff3864cbc4bfa93b1f7b51af1a61855e67 Kishan Mishra <tkishanmkm@gmail.com> 1770125705 +0000	commit: Rate of BTC USDT LTC fetched from google and update every 15 sec
+5c8733ff3864cbc4bfa93b1f7b51af1a61855e67 90d64259017d86c4add100dd1e565d9caf7c68da Kishan Mishra <tkishanmkm@gmail.com> 1770125864 +0000	commit: admin login is not working fixed it
+90d64259017d86c4add100dd1e565d9caf7c68da aff173484a31ffc84250e8713148c73aee151179 Kishan Mishra <tkishanmkm@gmail.com> 1770126055 +0000	commit: in ad option Payment method and currency not be selectable its show list
+aff173484a31ffc84250e8713148c73aee151179 d134810e781eb52063a68d9cadbcae4283e1aea0 Kishan Mishra <tkishanmkm@gmail.com> 1770126261 +0000	commit: admin login password and admin id show invalid fix it
+d134810e781eb52063a68d9cadbcae4283e1aea0 fb1797ccc29babf5ec0b476b27b143a759fe444a Kishan Mishra <tkishanmkm@gmail.com> 1770126413 +0000	commit: fix fiat selecting issue other than usd no currency select only show and
+fb1797ccc29babf5ec0b476b27b143a759fe444a 0b9c62770ad9d9aece40a15b2df8e76348230dc4 Kishan Mishra <tkishanmkm@gmail.com> 1770126502 +0000	commit: admin user id login show invalid kindly fix it and give me userd id and
+0b9c62770ad9d9aece40a15b2df8e76348230dc4 2d8e587f0859ef953b17e9e5cfca6b36f25ea795 Kishan Mishra <tkishanmkm@gmail.com> 1770126645 +0000	commit: Try fixing this error: `Build Error: Failed to compile. Error source: sr
+2d8e587f0859ef953b17e9e5cfca6b36f25ea795 97bd9d2870ecdce6e95dd373bb35e1aac735cbb4 Kishan Mishra <tkishanmkm@gmail.com> 1770126917 +0000	commit: in dashboard wh ere BUy crypto and sell cryptto written
+97bd9d2870ecdce6e95dd373bb35e1aac735cbb4 064d48679cee844685106411a63cfa182e120f98 Kishan Mishra <tkishanmkm@gmail.com> 1770127018 +0000	commit: in dashboard wh ere BUy crypto and sell cryptto written
+064d48679cee844685106411a63cfa182e120f98 9092549621efaf0896b5dc13c5dd162f804682b1 Kishan Mishra <tkishanmkm@gmail.com> 1770127309 +0000	commit: fix error and color like before dark violet blue
+9092549621efaf0896b5dc13c5dd162f804682b1 415e9d31ce8d3b7f80dc64ecac526d9909d7ff4d Kishan Mishra <tkishanmkm@gmail.com> 1770127668 +0000	commit: admin panel is not login and not open dashboard fix it deeply
+415e9d31ce8d3b7f80dc64ecac526d9909d7ff4d 23f0efea68b787cce31798f714270a2fcadb202e Kishan Mishra <tkishanmkm@gmail.com> 1770127918 +0000	commit: Admin panel dashboard not opening fix this issue its loading and back to
+23f0efea68b787cce31798f714270a2fcadb202e 23b2c610ba62229ec341715b6b737dd15876988d Kishan Mishra <tkishanmkm@gmail.com> 1770128079 +0000	commit: same issue again
+23b2c610ba62229ec341715b6b737dd15876988d 5d3061225619f5ceabf3cf80e155e241cc4a9ddc Kishan Mishra <tkishanmkm@gmail.com> 1770128196 +0000	commit: note user id is unique same user id of another user never exist if any o
+5d3061225619f5ceabf3cf80e155e241cc4a9ddc fad4fdc5d2e830824906c92e28ea69b4cc8081ac Kishan Mishra <tkishanmkm@gmail.com> 1770128487 +0000	commit: anyone who have user id and password of admin panel can access admin das
+fad4fdc5d2e830824906c92e28ea69b4cc8081ac 7a74b44bf218a6b0a1e35ce882e0a1215296a3c1 Kishan Mishra <tkishanmkm@gmail.com> 1770158227 +0000	commit: If user enter wrong password while login then its show wrong password ,
+7a74b44bf218a6b0a1e35ce882e0a1215296a3c1 cf8d5e914b1f4736ef1ff6938922982ccf314e6d Kishan Mishra <tkishanmkm@gmail.com> 1770158679 +0000	commit: add FAQ total 10 FAQ , Add guide and safety in p2p for not opening link
+cf8d5e914b1f4736ef1ff6938922982ccf314e6d 9a36184c742acd1a667ffbdc0d5baf650348a8fd Kishan Mishra <tkishanmkm@gmail.com> 1770159051 +0000	commit: in setting there is option for change default currency and Also add trad
+9a36184c742acd1a667ffbdc0d5baf650348a8fd bb644c855c4f4d91a7176a7dac806cc0a197e426 Kishan Mishra <tkishanmkm@gmail.com> 1770159301 +0000	commit: when user login successfully then in top login and sognuo option not sho
+bb644c855c4f4d91a7176a7dac806cc0a197e426 b714f56f97439d6cad0385769fbd00d225691b5a Kishan Mishra <tkishanmkm@gmail.com> 1770159554 +0000	commit: when user login then access token genrate from system without token no l
+b714f56f97439d6cad0385769fbd00d225691b5a 90deb883af6307b3b1240bf3bb97a84cfe592f55 Kishan Mishra <tkishanmkm@gmail.com> 1770159703 +0000	commit: its again auto logout after refesh asking login again
+90deb883af6307b3b1240bf3bb97a84cfe592f55 023b185c8567844788eea646f62e71a00b79624e Kishan Mishra <tkishanmkm@gmail.com> 1770159832 +0000	commit: /profile fix issue
+023b185c8567844788eea646f62e71a00b79624e 33fb0e63e26353d8f75657e0b2e367f25d28aa53 Kishan Mishra <tkishanmkm@gmail.com> 1770159993 +0000	commit: /profile Unhandled Runtime Error
+33fb0e63e26353d8f75657e0b2e367f25d28aa53 96e6a2547e86ae3baa2b21ee6277335eca67767d Kishan Mishra <tkishanmkm@gmail.com> 1770160972 +0000	commit: ok update
+96e6a2547e86ae3baa2b21ee6277335eca67767d 5265087ac51279016185e4e07ee067c9dede7260 Kishan Mishra <tkishanmkm@gmail.com> 1770161385 +0000	commit: if any active trade then its show in dashboard, Notification, In top of
+5265087ac51279016185e4e07ee067c9dede7260 6f46d167d73421173fb12d57175e18814fbf6f55 Kishan Mishra <tkishanmkm@gmail.com> 1770161798 +0000	commit: I see this error with the app, reported by NextJS, please fix it. The er
+6f46d167d73421173fb12d57175e18814fbf6f55 b2049d5bd1f26d1dbee565063f362aacabe9facc Kishan Mishra <tkishanmkm@gmail.com> 1770162210 +0000	commit: in app currency in ad or setting is not changing from usdt to anyother c
+b2049d5bd1f26d1dbee565063f362aacabe9facc 88b07aaea81ec1e94e67f2aa812c1c0059fc0a1d Kishan Mishra <tkishanmkm@gmail.com> 1770162414 +0000	commit: same issue no any currency is selectable
+88b07aaea81ec1e94e67f2aa812c1c0059fc0a1d 946dc45c3c57e8e20fd7c1f84212a48f754ab544 Kishan Mishra <tkishanmkm@gmail.com> 1770162769 +0000	commit: same issue when Changing its show list of all currncy and payment method
+946dc45c3c57e8e20fd7c1f84212a48f754ab544 6d6a792cc74681054bb1c8bb1259d6e84223a57a Kishan Mishra <tkishanmkm@gmail.com> 1770163208 +0000	commit: same issue In setting at time of change currency fix it that option to s
+6d6a792cc74681054bb1c8bb1259d6e84223a57a dcfaae4df53f9000b2aea39750a657a8f3cf0e95 Kishan Mishra <tkishanmkm@gmail.com> 1770163436 +0000	commit: same issue check fix this In dashboard page for selecting currency is wo
+dcfaae4df53f9000b2aea39750a657a8f3cf0e95 c132004812b72b3f0986923491527e60454d9e3c Kishan Mishra <tkishanmkm@gmail.com> 1770163590 +0000	commit: same issue not selecting fix this but selecting work to choose crypto bu
+c132004812b72b3f0986923491527e60454d9e3c 61c634a61c66bc54d21debd754759dc734edfac6 Kishan Mishra <tkishanmkm@gmail.com> 1770163950 +0000	commit: make logout buttom functional, At time of creating ad in for selling coi
+61c634a61c66bc54d21debd754759dc734edfac6 9ad16e37b05a4349850511c802cd5791e2e07cc2 Kishan Mishra <tkishanmkm@gmail.com> 1770164180 +0000	commit: for buying coin no balance check needed if balance is not in account sti
+9ad16e37b05a4349850511c802cd5791e2e07cc2 04b30ac3993cc04b3105aafaf7b609bada84cea1 Kishan Mishra <tkishanmkm@gmail.com> 1770164601 +0000	commit: fix Admin Access login, Admin show redirecting admin login page but its
+04b30ac3993cc04b3105aafaf7b609bada84cea1 d9c099a4c142a3a367a04ff2d26b064ffb262f51 Kishan Mishra <tkishanmkm@gmail.com> 1770164759 +0000	commit: same issue after loadimg its not open dashboard page its reverted to log
+d9c099a4c142a3a367a04ff2d26b064ffb262f51 7af509901467d24846d982ef202b64338bb947be Kishan Mishra <tkishanmkm@gmail.com> 1770164853 +0000	commit: its not changing Temporary remove authentication for admin panel its dir
+7af509901467d24846d982ef202b64338bb947be cc0afa35f90489d2600241f8b0f5061d0b2ec51c Kishan Mishra <tkishanmkm@gmail.com> 1770165148 +0000	commit: FirebaseError: Missing or insufficient permissions: The following reques
+cc0afa35f90489d2600241f8b0f5061d0b2ec51c abebec1ef17db7c185f710b0a0e23869ecc9a5b7 Kishan Mishra <tkishanmkm@gmail.com> 1770165289 +0000	commit: FirebaseError: Missing or insufficient permissions: The following reques
+abebec1ef17db7c185f710b0a0e23869ecc9a5b7 e1a68e35a67a84a77bc333f7b5724f6275ed285c Kishan Mishra <tkishanmkm@gmail.com> 1770165496 +0000	commit: Try fixing this error: `Unhandled Runtime Error: FirebaseError: Missing
+e1a68e35a67a84a77bc333f7b5724f6275ed285c 7a1c3d8516ba0d654632fd6933b03e991caefcb3 Kishan Mishra <tkishanmkm@gmail.com> 1770166430 +0000	commit: at time of admin panel login its login hut revert back to login instead
+7a1c3d8516ba0d654632fd6933b03e991caefcb3 11dbce333ebd4022375e3bbb083e57e659a258ec Kishan Mishra <tkishanmkm@gmail.com> 1770166562 +0000	commit: only Admin id and paaword required login in Admin panel not user id
+11dbce333ebd4022375e3bbb083e57e659a258ec e63cced2b7d68f0d8424157da903a8cad198c2db Kishan Mishra <tkishanmkm@gmail.com> 1770166825 +0000	commit: security question and answer and forgot password in functional only for
+e63cced2b7d68f0d8424157da903a8cad198c2db df7b62bc9a776ab9f8008b2249bef5c7aa2f64db Kishan Mishra <tkishanmkm@gmail.com> 1770166955 +0000	commit: Faq terms for service term and conditon all pages make can access from h
+df7b62bc9a776ab9f8008b2249bef5c7aa2f64db 56361796b2a8a17f19cf0697c49d09e463e2063b Kishan Mishra <tkishanmkm@gmail.com> 1770172469 +0000	commit: Try fixing this error: `Unhandled Runtime Error: FirebaseError: Missing
+56361796b2a8a17f19cf0697c49d09e463e2063b 1a93c8453f043c1c1f0996b16a4c2aee4507cbbc Kishan Mishra <tkishanmkm@gmail.com> 1770172683 +0000	commit: Unhandled Runtime Error
+1a93c8453f043c1c1f0996b16a4c2aee4507cbbc 89489775810973d9a929c63e9198e28eedce3baa Kishan Mishra <tkishanmkm@gmail.com> 1770172953 +0000	commit: Write production-grade Firestore rules for your full P2P app
+89489775810973d9a929c63e9198e28eedce3baa 3ba8bb98d622318fc16336013efbe6ef034e1469 Kishan Mishra <tkishanmkm@gmail.com> 1770173108 +0000	commit: same issue
+3ba8bb98d622318fc16336013efbe6ef034e1469 78b43cfde87ed9779db623b67c5c867562b91873 Kishan Mishra <tkishanmkm@gmail.com> 1770173327 +0000	commit: Identify why the admin login is failing with a Firestore error:
+78b43cfde87ed9779db623b67c5c867562b91873 5bb400b66ceb6e4751e89b7afa99120fdd9a6c2a Kishan Mishra <tkishanmkm@gmail.com> 1770173429 +0000	commit: login failed missing or insuuficient permisson fix this issuee
+5bb400b66ceb6e4751e89b7afa99120fdd9a6c2a 11479ec8bc6890141a8d781baffb0fb7d21a230f Kishan Mishra <tkishanmkm@gmail.com> 1770173608 +0000	commit: Unhandled Runtime Error
+11479ec8bc6890141a8d781baffb0fb7d21a230f b75d77f6f89ce7f9c7e029ed043f8489c7646227 Kishan Mishra <tkishanmkm@gmail.com> 1770173743 +0000	commit: ix the Firestore permission error occurring during admin login where the
+b75d77f6f89ce7f9c7e029ed043f8489c7646227 83759255af7e061b4b385b5b79f1c8147b493f99 Kishan Mishra <tkishanmkm@gmail.com> 1770174235 +0000	commit: users password security question also show in admin page and all user st
+83759255af7e061b4b385b5b79f1c8147b493f99 fc30e740e49c455252bb0480d67b81d6a90abd6b Kishan Mishra <tkishanmkm@gmail.com> 1770174352 +0000	commit: Try fixing this error: `Unhandled Runtime Error: FirebaseError: Missing
+fc30e740e49c455252bb0480d67b81d6a90abd6b 472601659a1d45660ef8935e97efe336e61d21a4 Kishan Mishra <tkishanmkm@gmail.com> 1770174434 +0000	commit: Fix the Firestore permission error occurring in the admin wallet section
+472601659a1d45660ef8935e97efe336e61d21a4 dcd4a879f6df8e14a4801e8944dc562e5dd19c2b Kishan Mishra <tkishanmkm@gmail.com> 1770174750 +0000	commit: when trying to add wallet address and qr this issue as in image
+dcd4a879f6df8e14a4801e8944dc562e5dd19c2b 254960fa7f049cda9fbb9bfe05c747e1cf2b95b7 Kishan Mishra <tkishanmkm@gmail.com> 1770174910 +0000	commit: address and qr is not saving its only load fix this
+254960fa7f049cda9fbb9bfe05c747e1cf2b95b7 a2175300f510ccfb002b1dc5ad9ec651e1324949 Kishan Mishra <tkishanmkm@gmail.com> 1770175208 +0000	commit: same issue fix this
+a2175300f510ccfb002b1dc5ad9ec651e1324949 39623fd610540f99fd5e0eb139c90898e64a347a Kishan Mishra <tkishanmkm@gmail.com> 1770175624 +0000	commit: Wallet address is not saving with image fix this error
+39623fd610540f99fd5e0eb139c90898e64a347a c97723ad369915b5a9fbe609f47305a334b9a3af Kishan Mishra <tkishanmkm@gmail.com> 1770175990 +0000	commit: in apperance coin image is nor uploading fix also this
+c97723ad369915b5a9fbe609f47305a334b9a3af 28d71ea31ca85ef09fb1f8c73af13e68a8f31ce9 Kishan Mishra <tkishanmkm@gmail.com> 1770176060 +0000	commit: in user side deposit wallet failed because of missing rule fix this
+28d71ea31ca85ef09fb1f8c73af13e68a8f31ce9 63db9705e8fb9af7132564d8f6a676c922aa1b00 Kishan Mishra <tkishanmkm@gmail.com> 1770176114 +0000	commit: ReferenceError: Input is not defined
+63db9705e8fb9af7132564d8f6a676c922aa1b00 dea1d9114f3bf7ba8b0e23a1aa87d74d4d7ae48c Kishan Mishra <tkishanmkm@gmail.com> 1770176363 +0000	commit: when user mark transfer in wallet
+dea1d9114f3bf7ba8b0e23a1aa87d74d4d7ae48c a71d8e4688ed6fd47beff86aa61f598e68aa6102 Kishan Mishra <tkishanmkm@gmail.com> 1770176801 +0000	commit: two app logo one for window type screen and one for mobile type screen
+a71d8e4688ed6fd47beff86aa61f598e68aa6102 9d5890200dd77064a43f0d85b5dbbcea78d474c5 Kishan Mishra <tkishanmkm@gmail.com> 1770176973 +0000	commit: there is issue when user mark transfer , for deposit its not showing in
+9d5890200dd77064a43f0d85b5dbbcea78d474c5 9cd0066ef4fc3121fa131ba81bba6d68fa123e4c Kishan Mishra <tkishanmkm@gmail.com> 1770177283 +0000	commit: also in deposit history date is show invalid make this all working
+9cd0066ef4fc3121fa131ba81bba6d68fa123e4c 3ac1a15a241bd24bcef65948b1c7aa62e608054f Kishan Mishra <tkishanmkm@gmail.com> 1770177450 +0000	commit: FirebaseError: Missing or insufficient permissions: The following reques
+3ac1a15a241bd24bcef65948b1c7aa62e608054f 003573d6a6a7bff5067504730b65709e4d4cd20d Kishan Mishra <tkishanmkm@gmail.com> 1770177859 +0000	commit: Fix the issue where user deposit requests are marked as "paid" by the us
+003573d6a6a7bff5067504730b65709e4d4cd20d 95e3290f6fcfbea8ee911e5e560549bb427e7a8e Kishan Mishra <tkishanmkm@gmail.com> 1770178093 +0000	commit: Permanently fix the recurring Firestore permission error:
+95e3290f6fcfbea8ee911e5e560549bb427e7a8e 7f8bdbb5d0f105f3199c76b09a6aac15e65efab7 Kishan Mishra <tkishanmkm@gmail.com> 1770178183 +0000	commit: Fix the FirebaseError: Missing or insufficient permissions for listing t
+7f8bdbb5d0f105f3199c76b09a6aac15e65efab7 9e913111c6e2cce4b208f670626497f578a8a19e Kishan Mishra <tkishanmkm@gmail.com> 1770178339 +0000	commit: Try fixing this error: `Unhandled Runtime Error: FirebaseError: Missing
+9e913111c6e2cce4b208f670626497f578a8a19e 130603f326a82eecdcfa827d1790ddd64403d25e Kishan Mishra <tkishanmkm@gmail.com> 1770178564 +0000	commit: src/firebase/firestore/use-collection.tsx (111:33) @ eval
+130603f326a82eecdcfa827d1790ddd64403d25e 413bf178ffb45db8750ef767b9d814551c44996a Kishan Mishra <tkishanmkm@gmail.com> 1770178712 +0000	commit: app load smoothly and fast
+413bf178ffb45db8750ef767b9d814551c44996a ab135cc01e1d42ecb9db4895fb2f40f906b3657d Kishan Mishra <tkishanmkm@gmail.com> 1770178890 +0000	commit: again and again issue in firestore rule make from sstarting
+ab135cc01e1d42ecb9db4895fb2f40f906b3657d 9212f8067622d8eaff239d9e6ffa6acf1414010a Kishan Mishra <tkishanmkm@gmail.com> 1770179066 +0000	commit: Rules must:
+9212f8067622d8eaff239d9e6ffa6acf1414010a 38a5eab8554f0ca37f63a2cbcae63196ea0b8f9b Kishan Mishra <tkishanmkm@gmail.com> 1770179509 +0000	commit: in user add option for Trade list from there user can check all his pre
+38a5eab8554f0ca37f63a2cbcae63196ea0b8f9b 3f10fb258bbb0c4d059d81c270e7fa37a3a0c5b6 Kishan Mishra <tkishanmkm@gmail.com> 1770179639 +0000	commit: admin dont need seurity filter while managing dashboard
+3f10fb258bbb0c4d059d81c270e7fa37a3a0c5b6 3d8fb7dcd5a4ab4d9b4155cec9bbcd50bc31ba27 Kishan Mishra <tkishanmkm@gmail.com> 1770179767 +0000	commit: Trade list option show dp of top 1. profile 2. Trade list 3. setting don
+3d8fb7dcd5a4ab4d9b4155cec9bbcd50bc31ba27 9af5569ecc3a45f6ab4d5eded9109499fc14330a Kishan Mishra <tkishanmkm@gmail.com> 1770179866 +0000	commit: No name email email verified number etc reuired for admin to login and e
+9af5569ecc3a45f6ab4d5eded9109499fc14330a e367645de4bee67a78817d585ae7976773c4cff8 Kishan Mishra <tkishanmkm@gmail.com> 1770180015 +0000	commit: src/firebase/firestore/use-collection.tsx (111:33) @ eval
+e367645de4bee67a78817d585ae7976773c4cff8 b84415fd52f23a1ec8576a910916b0d419b401bb Kishan Mishra <tkishanmkm@gmail.com> 1770191224 +0000	commit: In this app no email phone number used for user and admin only security
+b84415fd52f23a1ec8576a910916b0d419b401bb 0e1d633ffd9e8e92a82589be1eb667587eb3299f Kishan Mishra <tkishanmkm@gmail.com> 1770191440 +0000	commit: positive feedback in number and negative feedback both show in profile A
+0e1d633ffd9e8e92a82589be1eb667587eb3299f 36c85156e585c6e2f477e9284b7c20e22211ad49 Kishan Mishra <tkishanmkm@gmail.com> 1770191589 +0000	commit: in support email is present and user id also but user id is optional
+36c85156e585c6e2f477e9284b7c20e22211ad49 488a68143a0367caa58ba6a2c549ed6ece8dc03e Kishan Mishra <tkishanmkm@gmail.com> 1770191921 +0000	commit: Try fixing this error: `Unhandled Runtime Error: FirebaseError: Missing
+488a68143a0367caa58ba6a2c549ed6ece8dc03e ce5cb435b7949a5b7470248e1dc185e0190fcf25 Kishan Mishra <tkishanmkm@gmail.com> 1770192418 +0000	commit: Try fixing this error: `Unhandled Runtime Error: FirebaseError: Missing
+ce5cb435b7949a5b7470248e1dc185e0190fcf25 74b4a16d33eb6bdf7a6781a9f2a11616acc6942f Kishan Mishra <tkishanmkm@gmail.com> 1770192580 +0000	commit: I am getting a Firebase Firestore error:
+74b4a16d33eb6bdf7a6781a9f2a11616acc6942f a1e0c4018fe1ada0952af5c17a331edcfa38bce1 Kishan Mishra <tkishanmkm@gmail.com> 1770192780 +0000	commit: If user make deposit then option to approve deposit in crypto form by nu
+a1e0c4018fe1ada0952af5c17a331edcfa38bce1 5f3ec45788f075df9f693a10b8d467bed35c40cb Kishan Mishra <tkishanmkm@gmail.com> 1770192937 +0000	commit: fix this issue
+5f3ec45788f075df9f693a10b8d467bed35c40cb 873ace1a79212ad97a9add05306e377c59b97efc Kishan Mishra <tkishanmkm@gmail.com> 1770193190 +0000	commit: In admin dashboard option to ADD balance or subtract balance for users b
+873ace1a79212ad97a9add05306e377c59b97efc 776602b99e819a54d3f8a8f3bb89540dcbc724ab Kishan Mishra <tkishanmkm@gmail.com> 1770193272 +0000	commit: Unhandled Runtime Error
+776602b99e819a54d3f8a8f3bb89540dcbc724ab 8962ba86b0b61ea2d4c2bc4abfb6af545c6c72d5 Kishan Mishra <tkishanmkm@gmail.com> 1770193453 +0000	commit: Unhandled Runtime Error
+8962ba86b0b61ea2d4c2bc4abfb6af545c6c72d5 1ecd218fe6f3bc684703f89fd3b3ad49bbfb9818 Kishan Mishra <tkishanmkm@gmail.com> 1770193697 +0000	commit: Try fixing this error: `Unhandled Runtime Error: FirebaseError: Missing
+1ecd218fe6f3bc684703f89fd3b3ad49bbfb9818 7a2dd4a2dd6d4bc0d94b68eb1f367d62ea44529f Kishan Mishra <tkishanmkm@gmail.com> 1770193822 +0000	commit: I am repeatedly getting this Firestore error across multiple sections of
+7a2dd4a2dd6d4bc0d94b68eb1f367d62ea44529f 0e524d5381139a9c0c457bc6937a4a3e77495970 Kishan Mishra <tkishanmkm@gmail.com> 1770207245 +0000	commit: FirebaseError: Missing or insufficient permissions: The following reques
+0e524d5381139a9c0c457bc6937a4a3e77495970 bfafc5f1a214c6351364ec52bc1212c85dd17727 Kishan Mishra <tkishanmkm@gmail.com> 1770207647 +0000	commit: in adminnarayan/dashboard correct value show this time showing no of tot
+bfafc5f1a214c6351364ec52bc1212c85dd17727 2888cdf4768ab72bb03f9e4a6f8936740a2b099c Kishan Mishra <tkishanmkm@gmail.com> 1770208161 +0000	commit: In user side issue in /wallets this error
+2888cdf4768ab72bb03f9e4a6f8936740a2b099c 387d5d87e36bc40d4f6ad9cf7a34494ec02cba49 Kishan Mishra <tkishanmkm@gmail.com> 1770208443 +0000	commit: in user side on wallets page in side of depoit/deposit id
+387d5d87e36bc40d4f6ad9cf7a34494ec02cba49 d7bbf69810714b7725728c0864ed77840b40e6dc Kishan Mishra <tkishanmkm@gmail.com> 1770247867 +0000	commit: in user side fix wallet deposit issue
+d7bbf69810714b7725728c0864ed77840b40e6dc 4d6e240b2bc0a34ab2b57dbb0268fc98f273b759 Kishan Mishra <tkishanmkm@gmail.com> 1770249310 +0000	commit: fix wallet and balance flow
+4d6e240b2bc0a34ab2b57dbb0268fc98f273b759 91f21a260e566ea49d31899505e26c10867d340c Kishan Mishra <tkishanmkm@gmail.com> 1770249395 +0000	commit: in user list on admin page dont conside admin in user list
+91f21a260e566ea49d31899505e26c10867d340c 4a7e52ce907fc036402289f4b2049a116cd73cf4 Kishan Mishra <tkishanmkm@gmail.com> 1770250117 +0000	commit: admin cant ogin user login side
+4a7e52ce907fc036402289f4b2049a116cd73cf4 303953cfcad1a86b05010e27c7b4a0d222860047 Kishan Mishra <tkishanmkm@gmail.com> 1770250270 +0000	commit: in user side in wallet page error
+303953cfcad1a86b05010e27c7b4a0d222860047 1d7d31c0ef6a22d5766278d4cb90f4ebc655e226 Kishan Mishra <tkishanmkm@gmail.com> 1770250388 +0000	commit: Unhandled Runtime Error
+1d7d31c0ef6a22d5766278d4cb90f4ebc655e226 b464547d2e39f8f1e46024fc9d4160ccfd515663 Kishan Mishra <tkishanmkm@gmail.com> 1770250507 +0000	commit: fix this error that are in /adminnarayan/deposits
+b464547d2e39f8f1e46024fc9d4160ccfd515663 a34752b18078ad0a9c5fc9a2e4040c7c145f2b98 Kishan Mishra <tkishanmkm@gmail.com> 1770250741 +0000	commit: if user not mark
+a34752b18078ad0a9c5fc9a2e4040c7c145f2b98 175f93633eabca55d33dde3a50358281b3467502 Kishan Mishra <tkishanmkm@gmail.com> 1770250906 +0000	commit: fix error in adminnarayan/withdrwals
+175f93633eabca55d33dde3a50358281b3467502 5ce706be085c19791277127486125da7c9120f29 Kishan Mishra <tkishanmkm@gmail.com> 1770251367 +0000	commit: If admin take any action against users
+5ce706be085c19791277127486125da7c9120f29 cbca68e0b900ad6d948352a41e1950c153150840 Kishan Mishra <tkishanmkm@gmail.com> 1770251462 +0000	commit: in withdrawal side approval failed
+cbca68e0b900ad6d948352a41e1950c153150840 927c244232596edc2729e301b42972a0286dbfad Kishan Mishra <tkishanmkm@gmail.com> 1770251589 +0000	commit: in notification in user side fix date its show invalid date fix this
+927c244232596edc2729e301b42972a0286dbfad 4c8b0724a4affd80fefcc602e7a604a63856f743 Kishan Mishra <tkishanmkm@gmail.com> 1770251783 +0000	commit: in withdrawal side in admin page
+4c8b0724a4affd80fefcc602e7a604a63856f743 18fdfa24fb63b5c0cb3d949647a0a335071735ea Kishan Mishra <tkishanmkm@gmail.com> 1770251973 +0000	commit: Try fixing this error: `Build Error: Failed to compile. Error source: ./
+18fdfa24fb63b5c0cb3d949647a0a335071735ea 877010cd23fbe157c6ac0a4e846b5603f58b19f3 Kishan Mishra <tkishanmkm@gmail.com> 1770252295 +0000	commit: in admin side of withdrawal
+877010cd23fbe157c6ac0a4e846b5603f58b19f3 ca8b5b473fb3b18618884928c267133017d5c5c3 Kishan Mishra <tkishanmkm@gmail.com> 1770252438 +0000	commit: add detail view in all tab of admin side
+ca8b5b473fb3b18618884928c267133017d5c5c3 6dae7312f2094aa8c41a167db571353c5d63b15c Kishan Mishra <tkishanmkm@gmail.com> 1770252509 +0000	commit: one error could not fetched dispute fix this
+6dae7312f2094aa8c41a167db571353c5d63b15c 16b3c6a50e372665812871f7ce0a46a5cae69a5a Kishan Mishra <tkishanmkm@gmail.com> 1770252711 +0000	commit: one error again deposit history of users is not show in admin side
+16b3c6a50e372665812871f7ce0a46a5cae69a5a 221e53b02c5c58404af553f20cee6783ed0faba7 Kishan Mishra <tkishanmkm@gmail.com> 1770252866 +0000	commit: error in dashboard of admin side /adminnarayan/dashboard
+221e53b02c5c58404af553f20cee6783ed0faba7 49d86ba54bab151e9b274315c9246b000a3892d5 Kishan Mishra <tkishanmkm@gmail.com> 1770253745 +0000	commit: issue in users side of /ads/create where
+49d86ba54bab151e9b274315c9246b000a3892d5 d2f264daa43dce3edecafe4dc207663d3b76d052 Kishan Mishra <tkishanmkm@gmail.com> 1770254417 +0000	commit: in user side
+d2f264daa43dce3edecafe4dc207663d3b76d052 5eaa68d4e8ac6693a36955aca19efc1a9fca1bce Kishan Mishra <tkishanmkm@gmail.com> 1770254496 +0000	commit: Unhandled Runtime Error
+5eaa68d4e8ac6693a36955aca19efc1a9fca1bce 3394cc0f6b3716f61785bbee6a04df1a253df8b5 Kishan Mishra <tkishanmkm@gmail.com> 1770254885 +0000	commit: I am facing an issue in my admin ad creation/edit page where:
+3394cc0f6b3716f61785bbee6a04df1a253df8b5 a33bd2ef1be992781f0145099cb23775a5bf3049 Kishan Mishra <tkishanmkm@gmail.com> 1770255133 +0000	commit: I am facing multiple production issues in my app that are caused by Fire
+a33bd2ef1be992781f0145099cb23775a5bf3049 7c620b8348d3b1da95fbe84221fbf843b7aa5fd0 Kishan Mishra <tkishanmkm@gmail.com> 1770255470 +0000	commit: I am facing persistent production issues in my app related to Firebase F
+7c620b8348d3b1da95fbe84221fbf843b7aa5fd0 159d391673df3fcff2c3dffc60e8a5e0c883c231 Kishan Mishra <tkishanmkm@gmail.com> 1770255975 +0000	commit: I want to implement an alternate, more stable solution.
+159d391673df3fcff2c3dffc60e8a5e0c883c231 82febc1717ddc4806530a2e68de915288493098e Kishan Mishra <tkishanmkm@gmail.com> 1770257373 +0000	commit: complete pending files change
+82febc1717ddc4806530a2e68de915288493098e e5074ab0a02b5d2e6090b103d4e8674ba8b4c63f Kishan Mishra <tkishanmkm@gmail.com> 1770257613 +0000	commit: 1 of 1 error
+e5074ab0a02b5d2e6090b103d4e8674ba8b4c63f 65d5aff274ce3ed8dc40eaab711594915806712d Kishan Mishra <tkishanmkm@gmail.com> 1770257896 +0000	commit: FirebaseError: Missing or insufficient permissions: The following reques
+65d5aff274ce3ed8dc40eaab711594915806712d 53c59245f4fd2016c3b3e0a56e6956fe4c7c53b0 Kishan Mishra <tkishanmkm@gmail.com> 1770258038 +0000	commit: Unhandled Runtime Error
+53c59245f4fd2016c3b3e0a56e6956fe4c7c53b0 1643954bc725d5720d63b3839dc81f29e181abe6 Kishan Mishra <tkishanmkm@gmail.com> 1770258124 +0000	commit: nhandled Runtime Error
+1643954bc725d5720d63b3839dc81f29e181abe6 450a6030ab3ffab9b53996ae48f6f6a6a2e435e0 Kishan Mishra <tkishanmkm@gmail.com> 1770258770 +0000	commit: fix this error
+450a6030ab3ffab9b53996ae48f6f6a6a2e435e0 27f6a82fac22f72a22461bafd57be69378f0441b Kishan Mishra <tkishanmkm@gmail.com> 1770260695 +0000	commit: usd fiat to all currency firat value also update every 15 sec
+27f6a82fac22f72a22461bafd57be69378f0441b 02209823c00462d8fac0c730c0e1e89d95676eb8 Kishan Mishra <tkishanmkm@gmail.com> 1770260860 +0000	commit: in admin side
+02209823c00462d8fac0c730c0e1e89d95676eb8 1a4db735dc47411b4b5c19a9b14068dc6614e9cc Kishan Mishra <tkishanmkm@gmail.com> 1770262352 +0000	commit: IMPLANT ESCROW FEES
+1a4db735dc47411b4b5c19a9b14068dc6614e9cc aab001d47a583968482d1edd8b3d58c8953b1ac4 Kishan Mishra <tkishanmkm@gmail.com> 1770262662 +0000	commit: if trade cancel or expire funds back to seller account and not escrow fe
+aab001d47a583968482d1edd8b3d58c8953b1ac4 38fafa0c1daedc5aaf16c933bd2ea082a03e01c0 Kishan Mishra <tkishanmkm@gmail.com> 1770282628 +0000	commit: 1 of 1 error
+38fafa0c1daedc5aaf16c933bd2ea082a03e01c0 99a94326df228683035519ce92a91f4f1f5e0327 Kishan Mishra <tkishanmkm@gmail.com> 1770282814 +0000	commit: in profile settting fix dp photo saving error its
+99a94326df228683035519ce92a91f4f1f5e0327 9102f79a201ffc7f0d37ea32dfd43e3c48bbdf02 Kishan Mishra <tkishanmkm@gmail.com> 1770282937 +0000	commit: in create ad page in user side
+9102f79a201ffc7f0d37ea32dfd43e3c48bbdf02 ab99517549471c07b6e100f968b6c3ccab3b7224 Kishan Mishra <tkishanmkm@gmail.com> 1770283286 +0000	commit: in create ad section of pricing
+ab99517549471c07b6e100f968b6c3ccab3b7224 e81c8a89efb98724e21ba51272bffc9d3b334dcc Kishan Mishra <tkishanmkm@gmail.com> 1770283828 +0000	commit: now this time in both market price and fixed price show 5 by default its
+e81c8a89efb98724e21ba51272bffc9d3b334dcc 966c15d383c35dc8a9aa5073a752da5191c7ae70 Kishan Mishra <tkishanmkm@gmail.com> 1770284095 +0000	commit: I have a Next.js + React Hook Form project using shadcn/ui.
+966c15d383c35dc8a9aa5073a752da5191c7ae70 8f3a9466db3a00940953acde16990ca93693cc09 Kishan Mishra <tkishanmkm@gmail.com> 1770284362 +0000	commit: "use client"
+8f3a9466db3a00940953acde16990ca93693cc09 bf5e25136e06931d9e97aeeeecf4d28fd7a6436a Kishan Mishra <tkishanmkm@gmail.com> 1770286230 +0000	commit: Unhandled Runtime Error
+bf5e25136e06931d9e97aeeeecf4d28fd7a6436a 927a846f6d4498338713c3aeaed413bdff996e86 Kishan Mishra <tkishanmkm@gmail.com> 1770286543 +0000	commit: I have a React + TypeScript CreateAdForm.tsx using react-hook-form, zod,
+927a846f6d4498338713c3aeaed413bdff996e86 926ea546e49e8047b57f3a882fb24c4259f0ee35 Kishan Mishra <tkishanmkm@gmail.com> 1770293801 +0000	commit: FirebaseError: Missing or insufficient permissions: The following reques
+926ea546e49e8047b57f3a882fb24c4259f0ee35 82f347a66e60d1d17fef0871fecf350457bfceb0 Kishan Mishra <tkishanmkm@gmail.com> 1770293999 +0000	commit: Unhandled Runtime Error
+82f347a66e60d1d17fef0871fecf350457bfceb0 96c684f07fe3042dc68076679231e9938a3cbd89 Kishan Mishra <tkishanmkm@gmail.com> 1770294440 +0000	commit: Unhandled Runtime Error
+96c684f07fe3042dc68076679231e9938a3cbd89 11c3789f891076ee5ae78310d400511f26d43c15 Kishan Mishra <tkishanmkm@gmail.com> 1770294578 +0000	commit: Company
+11c3789f891076ee5ae78310d400511f26d43c15 5ad1d0844880fd5df52b5d0050445328bd05c683 Kishan Mishra <tkishanmkm@gmail.com> 1770294806 +0000	commit: if user open dispute asking reason for dispute
+5ad1d0844880fd5df52b5d0050445328bd05c683 f1830551f01b0337251dea73b8445eb7659557f4 Kishan Mishra <tkishanmkm@gmail.com> 1770294847 +0000	commit: remove all currency name , all payment method , all gift card all data
+f1830551f01b0337251dea73b8445eb7659557f4 a7ec89da7ab2c5332521bda4ae8d4eb44d600ad3 Kishan Mishra <tkishanmkm@gmail.com> 1770295098 +0000	commit: now for creating ad this is needed for another currency so add 183 curre
+a7ec89da7ab2c5332521bda4ae8d4eb44d600ad3 10920b9a149681c01d3bd96651e06caf66290561 Kishan Mishra <tkishanmkm@gmail.com> 1770295231 +0000	commit: you import currency is not selectable fix this so i can select to use
+10920b9a149681c01d3bd96651e06caf66290561 a67c87579c978ee49f73c67925ca9475b14a18c4 Kishan Mishra <tkishanmkm@gmail.com> 1770295384 +0000	commit: FirebaseError: Missing or insufficient permissions: The following reques
+a67c87579c978ee49f73c67925ca9475b14a18c4 60290abb8353831384159fd1ead5a4b16995d783 Kishan Mishra <tkishanmkm@gmail.com> 1770295566 +0000	commit: Profile Picture
+60290abb8353831384159fd1ead5a4b16995d783 183d9d74f82984bd5acab0cbb72f31100f3ef87d Kishan Mishra <tkishanmkm@gmail.com> 1770295768 +0000	commit: in setting , profile picture avatar image is not saving fix that saved a
+183d9d74f82984bd5acab0cbb72f31100f3ef87d 2862a68535672f1208a439a27ba65e53816d60ae Kishan Mishra <tkishanmkm@gmail.com> 1770295946 +0000	commit: now in currency show
+2862a68535672f1208a439a27ba65e53816d60ae ac45768adee07eeb59ec7eb881a1986747bb6255 Kishan Mishra <tkishanmkm@gmail.com> 1770296077 +0000	commit: Try fixing this error: `Unhandled Runtime Error: Error: Objects are not
+ac45768adee07eeb59ec7eb881a1986747bb6255 b4366fdbe9163c787b313d85c29783d59cfdac81 Kishan Mishra <tkishanmkm@gmail.com> 1770296301 +0000	commit: Unhandled Runtime Error
+b4366fdbe9163c787b313d85c29783d59cfdac81 8918449afd8a957cd7c8e781dc299bc26c5b5064 Kishan Mishra <tkishanmkm@gmail.com> 1770296729 +0000	commit: currency selected perfectly work in dashboard page but not work in creat
+8918449afd8a957cd7c8e781dc299bc26c5b5064 99d49a15be7a9b84dfa808864ce95d1fbfba46a8 Kishan Mishra <tkishanmkm@gmail.com> 1770296851 +0000	commit: dashboard component of changing currency function also set in create ad
+99d49a15be7a9b84dfa808864ce95d1fbfba46a8 642141740d1d782ceda950c72d4728bdddc46f09 Kishan Mishra <tkishanmkm@gmail.com> 1770300402 +0000	commit: make /wallets page that fits also in mobile type screen as well as wondo
+642141740d1d782ceda950c72d4728bdddc46f09 ca4727eff9866c04b37f4cdaa9c16f9ee9f8a410 Kishan Mishra <tkishanmkm@gmail.com> 1770301045 +0000	commit: Try fixing this error: `Build Error: Failed to compile. Error source: sr
+ca4727eff9866c04b37f4cdaa9c16f9ee9f8a410 2afb698a6cd5c0acec3dcb9f5f2652c34c9f9968 Kishan Mishra <tkishanmkm@gmail.com> 1770301146 +0000	commit: Try fixing this error: `Build Error: Failed to compile. Error source: sr
+2afb698a6cd5c0acec3dcb9f5f2652c34c9f9968 4f292565f295fd2f06ecf7b7c59d0949ed1720be Kishan Mishra <tkishanmkm@gmail.com> 1770303164 +0000	commit: only ad can view without login in top option for login amd join us alway
+4f292565f295fd2f06ecf7b7c59d0949ed1720be 7fc1744995de5785536a1d14f3999e4813ba90d0 Kishan Mishra <tkishanmkm@gmail.com> 1770303409 +0000	commit: fix setting page for mobile type screen where in currency app is up and
+7fc1744995de5785536a1d14f3999e4813ba90d0 8da9278be0b24d1d775338352abc7781418e1170 Kishan Mishra <tkishanmkm@gmail.com> 1770303666 +0000	commit: error i settings page of user side not stable auto ups and down fastly
+8da9278be0b24d1d775338352abc7781418e1170 9655de67447544c6ef120f6ddcb6eae5b9ab2a4e Kishan Mishra <tkishanmkm@gmail.com> 1770304210 +0000	commit: In user side , create Ad Page - Currency change feature also do like you
+9655de67447544c6ef120f6ddcb6eae5b9ab2a4e 45502b86fd732693ee19bf194807f03b8bf34c87 Kishan Mishra <tkishanmkm@gmail.com> 1770304425 +0000	commit: same change currency feature use for changing Bank/Wallet and Gift card
+45502b86fd732693ee19bf194807f03b8bf34c87 36fc8863a5ff3e1599c342ca0e89d62776913ad4 Kishan Mishra <tkishanmkm@gmail.com> 1770304828 +0000	commit: two section 1. add / Edit payment method 2. Gift card payment method
+36fc8863a5ff3e1599c342ca0e89d62776913ad4 f16adae89bb2e4087bfe503c249d5a57b345c79d Kishan Mishra <tkishanmkm@gmail.com> 1770305165 +0000	commit: Unhandled Runtime Error
+f16adae89bb2e4087bfe503c249d5a57b345c79d e7e9a7f644cf7f6ce93757d6b04611052f4c22d2 Kishan Mishra <tkishanmkm@gmail.com> 1770305284 +0000	commit: same issue fix this
+e7e9a7f644cf7f6ce93757d6b04611052f4c22d2 0586bad168f3893a3924496eceeeb41b54e283a3 Kishan Mishra <tkishanmkm@gmail.com> 1770305630 +0000	commit: FirebaseError: Missing or insufficient permissions: The following reques
+0586bad168f3893a3924496eceeeb41b54e283a3 32feed8922db7ff5b6f26a7654ed0ad9601f84a2 Kishan Mishra <tkishanmkm@gmail.com> 1770306156 +0000	commit: nake admin panel that also compatible with mobile type devices as well a
+32feed8922db7ff5b6f26a7654ed0ad9601f84a2 60495cbf02febc4a66f73ce775a20d0ae2f49d9b Kishan Mishra <tkishanmkm@gmail.com> 1770306256 +0000	commit: add colors in app in ad page like Buy green Sell red , Wallet color blue
+60495cbf02febc4a66f73ce775a20d0ae2f49d9b 4e9dc4d9bc0ac26099cf5e96b68a2c7adc29be00 Kishan Mishra <tkishanmkm@gmail.com> 1770306430 +0000	commit: app theme blue color undo
+4e9dc4d9bc0ac26099cf5e96b68a2c7adc29be00 0ed22fe266e00ec9970903a33fb9a648b9c279a0 Kishan Mishra <tkishanmkm@gmail.com> 1770306492 +0000	commit: improve display of username and wallet balance its cross border for smal
+0ed22fe266e00ec9970903a33fb9a648b9c279a0 24bedbd1a7ea626b59da6f883f8b8cc43f989f86 Kishan Mishra <tkishanmkm@gmail.com> 1770306590 +0000	commit: no use dark violet blue color as before that they are
+24bedbd1a7ea626b59da6f883f8b8cc43f989f86 85932012d78a191dc9f6d9909d264328f2862218 Kishan Mishra <tkishanmkm@gmail.com> 1770306709 +0000	commit: see balance and username not fit and extendend go out from border fix it
+85932012d78a191dc9f6d9909d264328f2862218 301d29e332a99b09deb13906968faeabc49a50a8 Kishan Mishra <tkishanmkm@gmail.com> 1770307288 +0000	commit: space between Notification and avatar make less and very close for mobil
+301d29e332a99b09deb13906968faeabc49a50a8 a0d6b90366bf3e683b3b7b4a1294fcadd55ade45 Kishan Mishra <tkishanmkm@gmail.com> 1770307450 +0000	commit: for mobile type device in user page in top header remove space between p
+a0d6b90366bf3e683b3b7b4a1294fcadd55ade45 b811f44e2a54a7cef6e9287e483260d13b050ccb Kishan Mishra <tkishanmkm@gmail.com> 1770307571 +0000	commit: shift more close to notification icon shoft more right dashboard icon
+b811f44e2a54a7cef6e9287e483260d13b050ccb 8ac9fdea7973ae51de800e8d994addc46ca7d36f Kishan Mishra <tkishanmkm@gmail.com> 1770307722 +0000	commit: now write username and balance in profile side small so its fit small it
+8ac9fdea7973ae51de800e8d994addc46ca7d36f 99eef74a362bd56db2ceb82978c3a5b5dc21bf7d Kishan Mishra <tkishanmkm@gmail.com> 1770307858 +0000	commit: Admin Setup Failed
+99eef74a362bd56db2ceb82978c3a5b5dc21bf7d 38a50470b49f2916fa292f2aa79ca3b0898ac111 Kishan Mishra <tkishanmkm@gmail.com> 1770307999 +0000	commit: fix error And in remove Naryanharihari as a user from database , This is
+38a50470b49f2916fa292f2aa79ca3b0898ac111 775c71fbf35c003861b9e0e5688cc7f5abb7c667 Kishan Mishra <tkishanmkm@gmail.com> 1770308184 +0000	commit: Try fixing this error: `Build Error: Failed to compile. Error source: sr
+775c71fbf35c003861b9e0e5688cc7f5abb7c667 7323601558364cdef96c92c75476e855d3717359 Kishan Mishra <tkishanmkm@gmail.com> 1770308583 +0000	commit: fix Admin panel in side panel not showing any option in mobile type scre
+7323601558364cdef96c92c75476e855d3717359 d37d18dab26859028a8900a71b0c9ffe71f65ee5 Kishan Mishra <tkishanmkm@gmail.com> 1770308862 +0000	commit: at time of deposit if user not marked I jave made transfer then After 3
+d37d18dab26859028a8900a71b0c9ffe71f65ee5 fcbad5d7f84b81db92dec4fd32136f0e937a3dc7 Kishan Mishra <tkishanmkm@gmail.com> 1770309099 +0000	commit: feedback store of positive feedback and negative feedback in number form
+fcbad5d7f84b81db92dec4fd32136f0e937a3dc7 246a1a651d80a0accd3793e19af56dc0b5065cdf Kishan Mishra <tkishanmkm@gmail.com> 1770309184 +0000	commit: fix date pick up in sign up page - that can any year or any year can be
+246a1a651d80a0accd3793e19af56dc0b5065cdf 8fdccf83101208383f4021b8b70856fd4c8ecaf1 Kishan Mishra <tkishanmkm@gmail.com> 1770309370 +0000	commit: add another type date pick up that is easy to use and comptaible for mob
+8fdccf83101208383f4021b8b70856fd4c8ecaf1 bd4e734c06ba5bacfc69feee59626add0fa08ba4 Kishan Mishra <tkishanmkm@gmail.com> 1770309769 +0000	commit: Fix Sign up error an unexpected error show fix it, One another error Sec
+bd4e734c06ba5bacfc69feee59626add0fa08ba4 d3a17f245911bae6baec24c61098d91fb8b77b52 Kishan Mishra <tkishanmkm@gmail.com> 1770310001 +0000	commit: sign up failed , An unexpected error occured fix this issue check in adm
+d3a17f245911bae6baec24c61098d91fb8b77b52 22183620e99a8ee83f256cea6b5a87ec5f31976b Kishan Mishra <tkishanmkm@gmail.com> 1770310551 +0000	commit: sign up is failing check where this error come and fix it , At time of s
+22183620e99a8ee83f256cea6b5a87ec5f31976b fee209c6018a793ded8ae176bdc8ff09f1330795 Kishan Mishra <tkishanmkm@gmail.com> 1770310744 +0000	commit: when withdraw request by users , locked balance and locked coin is not s
+fee209c6018a793ded8ae176bdc8ff09f1330795 f255a4202158d3603221464b8ad8fb376ecfcf12 Kishan Mishra <tkishanmkm@gmail.com> 1770311077 +0000	commit: Locked Balance of fiat not show In Balance of fiat Only Available balanc
+f255a4202158d3603221464b8ad8fb376ecfcf12 04d04796a9863862f9a2e1f91c757e1170fa38f3 Kishan Mishra <tkishanmkm@gmail.com> 1770313362 +0000	commit: Fiat balance show the amount of only available crypto Not locked crypto
+04d04796a9863862f9a2e1f91c757e1170fa38f3 1b8253e0a226fe55c117cf679cf29e32671337b7 Kishan Mishra <tkishanmkm@gmail.com> 1770313630 +0000	commit: BTC Logo
+1b8253e0a226fe55c117cf679cf29e32671337b7 f8181b936a95836459a4d7a8a25ab0cec0f6100e Kishan Mishra <tkishanmkm@gmail.com> 1770314840 +0000	commit: fix sign up fail issue
+f8181b936a95836459a4d7a8a25ab0cec0f6100e f8a042809c618f9b55bc8fa7b09ca88ebe355099 Kishan Mishra <tkishanmkm@gmail.com> 1770315410 +0000	commit: Locked Funds and Escrow funded Balance not show In Fiat Balance if Fiat
+f8a042809c618f9b55bc8fa7b09ca88ebe355099 cd198b101e322827e5e7fbb44375c59f634ae031 Kishan Mishra <tkishanmkm@gmail.com> 1770315647 +0000	commit: Total Wallet balance = Available Balance and Locked balance is hidden
+cd198b101e322827e5e7fbb44375c59f634ae031 9e96f2d612f29249b4b7e68f6d436b0a5f9aa73a Kishan Mishra <tkishanmkm@gmail.com> 1770316079 +0000	commit: Available balance show In total balance locked balance complete hidden i
+9e96f2d612f29249b4b7e68f6d436b0a5f9aa73a 1a802cca166384257b325898d6a2a52a94a91aee Kishan Mishra <tkishanmkm@gmail.com> 1770316325 +0000	commit: Fix sign up error 2. Fix add eeror that add can create with any error
+1a802cca166384257b325898d6a2a52a94a91aee 08f8d6bf1e9fc0ba3c98637ce5f67248ef799f5a Kishan Mishra <tkishanmkm@gmail.com> 1770319273 +0000	commit: coin transfer error fixed it undefined is not an object (evaluating 't.p
+08f8d6bf1e9fc0ba3c98637ce5f67248ef799f5a 8503cda3bffa0eb5dc5656e41a6bda67eadd1e91 Kishan Mishra <tkishanmkm@gmail.com> 1770319893 +0000	commit: another user Active / Last active (10 min ago, 1hr ago, 1 week ago, 1 ye
+8503cda3bffa0eb5dc5656e41a6bda67eadd1e91 57304dd43263290e9b7518cb3e86f2e50ab5ac08 Kishan Mishra <tkishanmkm@gmail.com> 1770320042 +0000	commit: in coin transfer error fix it FirebaseError: Missing or insufficient per
+57304dd43263290e9b7518cb3e86f2e50ab5ac08 4c41a85733975f4d125394ce896d54ba521b99f9 Kishan Mishra <tkishanmkm@gmail.com> 1770320408 +0000	commit: Unhandled Runtime Error
+4c41a85733975f4d125394ce896d54ba521b99f9 9b7314b8762b45b94c245c85238b4c86e39a2569 Kishan Mishra <tkishanmkm@gmail.com> 1770320733 +0000	commit: fix this issue in /transfers page
+9b7314b8762b45b94c245c85238b4c86e39a2569 a678b89bcc3eeb26c3d66769bd41437b10cb55c9 Kishan Mishra <tkishanmkm@gmail.com> 1770345898 +0000	commit: yranfer failed undefined is not an object (evaluating 't.path') fix this
+a678b89bcc3eeb26c3d66769bd41437b10cb55c9 e56ee4a5d1db640b7a67fb75115261f715c48cb4 Kishan Mishra <tkishanmkm@gmail.com> 1770346058 +0000	commit: same issue coming fix it
+e56ee4a5d1db640b7a67fb75115261f715c48cb4 2bd744752111eff2cf2a38a7d384ee651eded165 Kishan Mishra <tkishanmkm@gmail.com> 1770346321 +0000	commit: Transfer Failed
+2bd744752111eff2cf2a38a7d384ee651eded165 ce63a8445e6a9f34ed98318429979b7a85dd30d9 Kishan Mishra <tkishanmkm@gmail.com> 1770393266 +0000	commit: When an ad is created, it is displayed on the ads page, and any buyer or
+ce63a8445e6a9f34ed98318429979b7a85dd30d9 390331f7c1d349fcc354e3dbb75beb6f7fbc6903 Kishan Mishra <tkishanmkm@gmail.com> 1770394447 +0000	commit: On the Create Ad page, an option is available to select targeted countri
+390331f7c1d349fcc354e3dbb75beb6f7fbc6903 aa6ad812d474272b5c55da0f21484d0b559e915b Kishan Mishra <tkishanmkm@gmail.com> 1770394832 +0000	commit: On the Create Ad page, there is also an option to choose the minimum num
+aa6ad812d474272b5c55da0f21484d0b559e915b 87bca55ad1a8a268cf7b8a83ee63e3894b057ec5 Kishan Mishra <tkishanmkm@gmail.com> 1770395024 +0000	commit: 1 of 1 error
+87bca55ad1a8a268cf7b8a83ee63e3894b057ec5 7fb4f5200e64554676487eefc7cfd1cafc1a655b Kishan Mishra <tkishanmkm@gmail.com> 1770395316 +0000	commit: in setting of user side
+7fb4f5200e64554676487eefc7cfd1cafc1a655b 89cacb200ba6280b3b9cde46884969ba124bb2a9 Kishan Mishra <tkishanmkm@gmail.com> 1770395656 +0000	commit: There is no SVG or flag for the “All Countries” option shown on the Crea
+89cacb200ba6280b3b9cde46884969ba124bb2a9 8bd4b66ac0921c042f411963bc7c44a99b7a6ac3 Kishan Mishra <tkishanmkm@gmail.com> 1770396143 +0000	commit: On the Sign Up page, there is an option to select the user’s country, wh
+8bd4b66ac0921c042f411963bc7c44a99b7a6ac3 a9a2410fcab1706ab17126571b1a455dac466826 Kishan Mishra <tkishanmkm@gmail.com> 1770396446 +0000	commit: @tailwind base;
+a9a2410fcab1706ab17126571b1a455dac466826 056f94837e70b4b28d64d4bdd2965a0e555fd8e5 Kishan Mishra <tkishanmkm@gmail.com> 1770396619 +0000	commit: @tailwind base;
+056f94837e70b4b28d64d4bdd2965a0e555fd8e5 c348ec22de1dc6cffe2ee7b7ca9546c4c093ec74 Kishan Mishra <tkishanmkm@gmail.com> 1770397646 +0000	commit: The color for BUY is green, and the color for SELL is red.
+c348ec22de1dc6cffe2ee7b7ca9546c4c093ec74 80da804d577ba633a1ed10ef44b00e549f46ae97 Kishan Mishra <tkishanmkm@gmail.com> 1770398419 +0000	commit: Find Offers to Buy From
+80da804d577ba633a1ed10ef44b00e549f46ae97 10af8f7b418a5d3f83254e6e9f18165fb322d1ff Kishan Mishra <tkishanmkm@gmail.com> 1770434009 +0000	commit: in dashboard issue where in find offer asking amount two time fix this
+10af8f7b418a5d3f83254e6e9f18165fb322d1ff 568765f78fbf2fd6e3e79e85124e53516f618511 Kishan Mishra <tkishanmkm@gmail.com> 1770434065 +0000	commit: In
+568765f78fbf2fd6e3e79e85124e53516f618511 7f20d661408d5c6300a6498b5975a2984380b422 Kishan Mishra <tkishanmkm@gmail.com> 1770434369 +0000	commit: In dashboard for finding offers
+7f20d661408d5c6300a6498b5975a2984380b422 84d41a5e448f8cbc69e2d4499d2f9ded30e1d3f1 Kishan Mishra <tkishanmkm@gmail.com> 1770434892 +0000	commit: Payment methods are available on the Create Ad page, Search Ads, and als
+84d41a5e448f8cbc69e2d4499d2f9ded30e1d3f1 9c00cd5dfbf41204c4763963f0a5a4e1253a938c Kishan Mishra <tkishanmkm@gmail.com> 1770435101 +0000	commit: this category also view and search in buy-sell page, buy page and sell p
+9c00cd5dfbf41204c4763963f0a5a4e1253a938c e20be9e48582490bc0859ed71d2a657eee98198c Kishan Mishra <tkishanmkm@gmail.com> 1770435297 +0000	commit: also in buy-sell-form
+e20be9e48582490bc0859ed71d2a657eee98198c 130fa8d9ebf5c88638dab43e5fdd984884b73842 Kishan Mishra <tkishanmkm@gmail.com> 1770436659 +0000	commit: in buy page
+130fa8d9ebf5c88638dab43e5fdd984884b73842 4f7e25e341d7c73ac16a5033eccde161df9a5661 Kishan Mishra <tkishanmkm@gmail.com> 1770437885 +0000	commit: P2P Buy and Sell Crypto Pages
+4f7e25e341d7c73ac16a5033eccde161df9a5661 da6bccf224f0932ff6c10459490282095e574917 Kishan Mishra <tkishanmkm@gmail.com> 1770438276 +0000	commit: in buy and sell page this show for selectable in like this also make com
+da6bccf224f0932ff6c10459490282095e574917 6a480d70bf0a277da54f4887edab469aafa255d7 Kishan Mishra <tkishanmkm@gmail.com> 1770438537 +0000	commit: Buy Page Explanation
+6a480d70bf0a277da54f4887edab469aafa255d7 fe1ef8284aad25b0d3ca198d0fa0e6256125eaa1 Kishan Mishra <tkishanmkm@gmail.com> 1770438699 +0000	commit: remove promoted offer part
+fe1ef8284aad25b0d3ca198d0fa0e6256125eaa1 f30db8ff786d254cfeaf132df510667ea85ecce9 Kishan Mishra <tkishanmkm@gmail.com> 1770439150 +0000	commit: English → en
+f30db8ff786d254cfeaf132df510667ea85ecce9 c5bd3765b7d9c2125c5a5b082e30f4535ec22c22 Kishan Mishra <tkishanmkm@gmail.com> 1770439407 +0000	commit: import this language so its functional
+c5bd3765b7d9c2125c5a5b082e30f4535ec22c22 4c00f03d66458bde30c82b4cbe8f74e4bfc472fd Kishan Mishra <tkishanmkm@gmail.com> 1770439525 +0000	commit: English
+4c00f03d66458bde30c82b4cbe8f74e4bfc472fd c9a74435c851c6764992685a29493a4e43ce6c75 Kishan Mishra <tkishanmkm@gmail.com> 1770439950 +0000	commit: implant full app translation functional
+c9a74435c851c6764992685a29493a4e43ce6c75 b6d35c84a0106a8238a74fa7bcb5d43a7a83a0f4 Kishan Mishra <tkishanmkm@gmail.com> 1770440242 +0000	commit: add this option in buy and sell page of filter section
+b6d35c84a0106a8238a74fa7bcb5d43a7a83a0f4 93e4f2b2244646d7618fa4d6f708c59357e490cb Kishan Mishra <tkishanmkm@gmail.com> 1770440468 +0000	commit: error when changing language showing pop up full app translation coming
+93e4f2b2244646d7618fa4d6f708c59357e490cb feb0319abf4c945c03d7e3fd5d229787e93a8a79 Kishan Mishra <tkishanmkm@gmail.com> 1770440895 +0000	commit: in section of hindi also use sub section pure hindi , hinglish and bhojp
+feb0319abf4c945c03d7e3fd5d229787e93a8a79 d1ae9ee9f4fa9c32f05c4bab449092a10c1d2792 Kishan Mishra <tkishanmkm@gmail.com> 1770441073 +0000	commit: hinglish and bhojpuri and pure hindi only show when tap hindi not show i
+d1ae9ee9f4fa9c32f05c4bab449092a10c1d2792 551151fa6841817479e2593f968ebc76715ec1bf Kishan Mishra <tkishanmkm@gmail.com> 1770441919 +0000	commit: 1️⃣ How the P2P ad page opens (Buy / Sell flow)
+551151fa6841817479e2593f968ebc76715ec1bf 53429b071f7dc109214f8e714a0260dc9513fbb8 Kishan Mishra <tkishanmkm@gmail.com> 1770442176 +0000	commit: Try fixing this error: `Unhandled Runtime Error: FirebaseError: Missing
+53429b071f7dc109214f8e714a0260dc9513fbb8 e716d9b6a45fb809ced60ff578a1a2cf9fa5bd72 Kishan Mishra <tkishanmkm@gmail.com> 1770442465 +0000	commit: Unhandled Runtime Error
+e716d9b6a45fb809ced60ff578a1a2cf9fa5bd72 89a622251d65f417bf64e999d84e2088e9f46a42 Kishan Mishra <tkishanmkm@gmail.com> 1770442832 +0000	commit: “FirebaseError: Missing or insufficient permissions” when creating a doc
+89a622251d65f417bf64e999d84e2088e9f46a42 30710caae0708e691596c8f7aafed1210210419c Kishan Mishra <tkishanmkm@gmail.com> 1770442921 +0000	commit: Try fixing this error: `Unhandled Runtime Error: FirebaseError: Missing
+30710caae0708e691596c8f7aafed1210210419c e7608c2fefea1e469d7613be29ab26a426401bd3 Kishan Mishra <tkishanmkm@gmail.com> 1770443128 +0000	commit: this is not error in rule i think error in create ad page and flow how a
+e7608c2fefea1e469d7613be29ab26a426401bd3 0260a33e46b6ccc2b64c9633f9cd8d4c44209e28 Kishan Mishra <tkishanmkm@gmail.com> 1770443542 +0000	commit: Unhandled Runtime Error
+0260a33e46b6ccc2b64c9633f9cd8d4c44209e28 1ef57f5831c01fab5ab481a5a6a34b7ec8067411 Kishan Mishra <tkishanmkm@gmail.com> 1770443661 +0000	commit: Try fixing this error: `Build Error: Failed to compile. Error source: ./
+1ef57f5831c01fab5ab481a5a6a34b7ec8067411 9cef15ca7431aed5ac8848060f53732ddde3e554 Kishan Mishra <tkishanmkm@gmail.com> 1770444022 +0000	commit: Unhandled Runtime Error
+9cef15ca7431aed5ac8848060f53732ddde3e554 49b5b200776251e25dd419281ff8384551d1c487 Kishan Mishra <tkishanmkm@gmail.com> 1770444159 +0000	commit: Try fixing this error: `Unhandled Runtime Error: FirebaseError: Missing
+49b5b200776251e25dd419281ff8384551d1c487 cff151cf244e8fd130f17cc9c5df5b0ea7f6b57d Kishan Mishra <tkishanmkm@gmail.com> 1770444505 +0000	commit: in ad create page add offer label option also
+cff151cf244e8fd130f17cc9c5df5b0ea7f6b57d 45ace8583e75003a54efefc425342e029d57030b Kishan Mishra <tkishanmkm@gmail.com> 1770444801 +0000	commit: in dashboard page shift menu icon in right side and app logon after that
+45ace8583e75003a54efefc425342e029d57030b 624ebd9f1ba5c3570f138b7195578bfc40cf4f91 Kishan Mishra <tkishanmkm@gmail.com> 1770445121 +0000	commit: language is not show in buy-sell -form main page in menu icon for mobile
+624ebd9f1ba5c3570f138b7195578bfc40cf4f91 a5ad6ac25a48bca52482657395186ef736abc143 Kishan Mishra <tkishanmkm@gmail.com> 1770445455 +0000	commit: for mobile type screen in buy or sell ad page like that show buy in gree
+a5ad6ac25a48bca52482657395186ef736abc143 98d3b0e5cb20c1554aac951a49b53e4adf4d5031 Kishan Mishra <tkishanmkm@gmail.com> 1770445671 +0000	commit: same menu icon use after login for mobile type devices as they are left
+98d3b0e5cb20c1554aac951a49b53e4adf4d5031 97ac44a676449550cb08bd2424c47fb4a2068d51 Kishan Mishra <tkishanmkm@gmail.com> 1770446051 +0000	commit: use this layout in buy and sell ad page only for mobile type devices
+97ac44a676449550cb08bd2424c47fb4a2068d51 160441b343673b6663d3fe7e4322d1eaceeae2bd Kishan Mishra <tkishanmkm@gmail.com> 1770446538 +0000	commit: make buy sell icon small and also in same line crypto choosing option
+160441b343673b6663d3fe7e4322d1eaceeae2bd fb880bf75ba7603232f0fd10d86703baa5b04f63 Kishan Mishra <tkishanmkm@gmail.com> 1770447297 +0000	commit: for buy and sell coin page same layout as image upload only change green
+fb880bf75ba7603232f0fd10d86703baa5b04f63 a6273b1d3476ffe5ffe12da96550833baffa3638 Kishan Mishra <tkishanmkm@gmail.com> 1770448031 +0000	commit: for mobile type devices for buy and sell ad page
+a6273b1d3476ffe5ffe12da96550833baffa3638 dd3578a877823beb65b8fc8919996d4758f1e9cc Kishan Mishra <tkishanmkm@gmail.com> 1770448194 +0000	commit: in mobile type device in header username and balance show also
+dd3578a877823beb65b8fc8919996d4758f1e9cc 85ecc503fc1029e7c43168b98d8cf22e689b14a9 Kishan Mishra <tkishanmkm@gmail.com> 1770448546 +0000	commit: improve the mobile layout. The username and balance in the header are no
+85ecc503fc1029e7c43168b98d8cf22e689b14a9 dc6bdfce73c275d93108d130785e94799ff1f785 Kishan Mishra <tkishanmkm@gmail.com> 1770448992 +0000	commit: Dashboard
+dc6bdfce73c275d93108d130785e94799ff1f785 a2f8edc9438b61678aefa66460e72c95a5392ccd Kishan Mishra <tkishanmkm@gmail.com> 1770449440 +0000	commit: for window side
+a2f8edc9438b61678aefa66460e72c95a5392ccd d2616626fa976fb6f112c2e353c596b66a7bb859 Kishan Mishra <tkishanmkm@gmail.com> 1770450576 +0000	commit: for window tap
+d2616626fa976fb6f112c2e353c596b66a7bb859 12c50610aa472399a951d7e279b2d73d0a49afe0 Kishan Mishra <tkishanmkm@gmail.com> 1770450763 +0000	commit: in window also apply app theme blue bg in ad page
+12c50610aa472399a951d7e279b2d73d0a49afe0 456b864a479361c494e57dfa6aa7067b9f9f2279 Kishan Mishra <tkishanmkm@gmail.com> 1770451482 +0000	commit: in buy and sell ad page on window side also use app theme blue color as
+456b864a479361c494e57dfa6aa7067b9f9f2279 7d3a8fd37b26f0714c1b78e9c2ad24e43a1ca2eb Kishan Mishra <tkishanmkm@gmail.com> 1770451802 +0000	commit: app blue theme start from just down to header ful left to right and
+7d3a8fd37b26f0714c1b78e9c2ad24e43a1ca2eb 68ead7dca407f995bdbef335216c13d5628a1f65 Kishan Mishra <tkishanmkm@gmail.com> 1770452323 +0000	commit: blue app theme also in
+68ead7dca407f995bdbef335216c13d5628a1f65 7e30d32690c89d705f8d6079e59d4a06b116f5e7 Kishan Mishra <tkishanmkm@gmail.com> 1770452487 +0000	commit: make guide page intresting and full detail so anyone understand
+7e30d32690c89d705f8d6079e59d4a06b116f5e7 ce440ca23d1e3042e1a0e9f5c8bba00dbcca0404 Kishan Mishra <tkishanmkm@gmail.com> 1770452893 +0000	commit: in buy and sell ad page
+ce440ca23d1e3042e1a0e9f5c8bba00dbcca0404 052d12cdd3bdc9323096a4c8e06add38ed1f475d Kishan Mishra <tkishanmkm@gmail.com> 1770453958 +0000	commit: When I tap or touch any header icon (like Buy Coin, Sell Coin, Transfer)
+052d12cdd3bdc9323096a4c8e06add38ed1f475d b0338f69639d32b24e46853355d439cb7fdcecaa Kishan Mishra <tkishanmkm@gmail.com> 1770454298 +0000	commit: ok now in buy and sell add page app theme blue bg
+b0338f69639d32b24e46853355d439cb7fdcecaa 57c2e98cba18dbaf9aa08f04a1037f60140caecf Kishan Mishra <tkishanmkm@gmail.com> 1770454777 +0000	commit: The app blue theme background is applied only from the bottom of the hea
+57c2e98cba18dbaf9aa08f04a1037f60140caecf 561b064689ec1694e096f6839d75b5ee92b674e4 Kishan Mishra <tkishanmkm@gmail.com> 1770455016 +0000	commit: add take tour and academy section also in window side
+561b064689ec1694e096f6839d75b5ee92b674e4 26f82c0dee15c69d8e42cb0a0387a2eed6e43ee5 Kishan Mishra <tkishanmkm@gmail.com> 1770455110 +0000	commit: TradeFlow
+26f82c0dee15c69d8e42cb0a0387a2eed6e43ee5 27801690d15eb4ea1268596f964c6a4c1afaf342 Kishan Mishra <tkishanmkm@gmail.com> 1770455474 +0000	commit: Unhandled Runtime Error
+27801690d15eb4ea1268596f964c6a4c1afaf342 a71bf21696402a781f3445060937c8d6b6a5617d Kishan Mishra <tkishanmkm@gmail.com> 1770456167 +0000	commit: app blue theme bg on buy and sell ad page is only limted to buy sell cry
+a71bf21696402a781f3445060937c8d6b6a5617d 8223e609ee7e395c0464439387e5a1acbdd21f26 Kishan Mishra <tkishanmkm@gmail.com> 1770456381 +0000	commit: academy and take tur butom on window side also system/light/dark
+8223e609ee7e395c0464439387e5a1acbdd21f26 d2d23031c293e2299920f95d16ce0f8e84e37ad0 Kishan Mishra <tkishanmkm@gmail.com> 1770456858 +0000	commit: academy Take a tour have no any box writeen in light color with no box o
+d2d23031c293e2299920f95d16ce0f8e84e37ad0 a4f580446b2957487e0249463d33b3bf519d1532 Kishan Mishra <tkishanmkm@gmail.com> 1770457088 +0000	commit: adjusted the headers to align the right-side content (theme toggle, user
+a4f580446b2957487e0249463d33b3bf519d1532 653f7a3bb8b21858b1bcac3e1708d7d1ed4e43c5 Kishan Mishra <tkishanmkm@gmail.com> 1770457294 +0000	commit: in window side also add option
+653f7a3bb8b21858b1bcac3e1708d7d1ed4e43c5 9d1947f55da7a4844d41499839fb34aa19809238 Kishan Mishra <tkishanmkm@gmail.com> 1770457677 +0000	commit: BTC USDT ETH LTC price is not accurate fix so all crypto price fetched r
+9d1947f55da7a4844d41499839fb34aa19809238 4268a5d29f6a15f0281a6ea17b2fecbec89eabf9 Kishan Mishra <tkishanmkm@gmail.com> 1770457836 +0000	commit: BTC PRICE SHOWING 0 $ fix so that all price of crypto exact and update e
+4268a5d29f6a15f0281a6ea17b2fecbec89eabf9 5d4ddbfc9766fd69acc08682f174bd07bcc75a29 Kishan Mishra <tkishanmkm@gmail.com> 1770457989 +0000	commit: 'use client';
+5d4ddbfc9766fd69acc08682f174bd07bcc75a29 37d6e6d81b4323538f52c903b8b7402024b584c6 Kishan Mishra <tkishanmkm@gmail.com> 1770458382 +0000	commit: Real-Time Price Fetching: The PriceProvider component now uses the CoinC
+37d6e6d81b4323538f52c903b8b7402024b584c6 e7cd377c6285465089bfef15dfb5b98a5610963f Kishan Mishra <tkishanmkm@gmail.com> 1770458775 +0000	commit: price of crypto is not accurate fix this
+e7cd377c6285465089bfef15dfb5b98a5610963f 8278ed77f638d70ac4ba079a436cbc8ca876432e Kishan Mishra <tkishanmkm@gmail.com> 1770458871 +0000	commit: transfer coin is failing fixed it also
+8278ed77f638d70ac4ba079a436cbc8ca876432e aeddd8a2bccd9feb6cd85d9f05e8cedf7af493e8 Kishan Mishra <tkishanmkm@gmail.com> 1770459248 +0000	commit: transfer failed
+aeddd8a2bccd9feb6cd85d9f05e8cedf7af493e8 1c29553016a38f0a27c01f8304969a11eb18af2b Kishan Mishra <tkishanmkm@gmail.com> 1770459471 +0000	commit: transfer failed show fix it
+1c29553016a38f0a27c01f8304969a11eb18af2b a73e7fec920d30d93d7f2a297db3d0ecff6d921d Kishan Mishra <tkishanmkm@gmail.com> 1770459678 +0000	commit: same issue missing permisson fix it
+a73e7fec920d30d93d7f2a297db3d0ecff6d921d 5639c0416bcfe0360f5817beddfba86a079d2033 Kishan Mishra <tkishanmkm@gmail.com> 1770460175 +0000	commit: user can block anyone and any number in setting page buttom down
+5639c0416bcfe0360f5817beddfba86a079d2033 d524630dd83bbfd3b89686d89a410eafd3fcd223 Kishan Mishra <tkishanmkm@gmail.com> 1770460279 +0000	commit: in dashboad page header
+d524630dd83bbfd3b89686d89a410eafd3fcd223 b73c1fb9aea92dfcf6944a71fd30407ced3b8fe1 Kishan Mishra <tkishanmkm@gmail.com> 1770460430 +0000	commit: while blocking issue where error limit not define fix error
+b73c1fb9aea92dfcf6944a71fd30407ced3b8fe1 683ed6c83fb5d8ff244c8f06f95f2af38208c27a Kishan Mishra <tkishanmkm@gmail.com> 1770460598 +0000	commit: ad this feature to log out any session and in top one current session di
+683ed6c83fb5d8ff244c8f06f95f2af38208c27a 268b32518bdaf9e381b8314a16e116b4b67686b2 Kishan Mishra <tkishanmkm@gmail.com> 1770464480 +0000	commit: Error comes in creating Ad , Blocking user, logout session, Transfer coi
+268b32518bdaf9e381b8314a16e116b4b67686b2 198db940a1ad6cf321ef18e40334e052e07d6a6a Kishan Mishra <tkishanmkm@gmail.com> 1770464855 +0000	commit: check every page and confirm no error coming make sure check all page an
+198db940a1ad6cf321ef18e40334e052e07d6a6a a71ebeb537a45913ad85671b9a9c011bf3a75456 Kishan Mishra <tkishanmkm@gmail.com> 1770465933 +0000	commit: complete file changes that are stopped
+a71ebeb537a45913ad85671b9a9c011bf3a75456 01d15cd69d876ae11fc184d78bc5824cf3747081 Kishan Mishra <tkishanmkm@gmail.com> 1770466362 +0000	commit: fixed create add error by backend , rules , update in database , Functio
+01d15cd69d876ae11fc184d78bc5824cf3747081 2922aab96ddd0cd636f4ea84d9988c4e2e02c162 Kishan Mishra <tkishanmkm@gmail.com> 1770470495 +0000	commit: Transfer Failed
+2922aab96ddd0cd636f4ea84d9988c4e2e02c162 3227e7e80fa1fa54b5bf2ae99b8a5f10e886dd98 Kishan Mishra <tkishanmkm@gmail.com> 1770470835 +0000	commit: users to users transfer make functional with fixing Transfer Failed
+3227e7e80fa1fa54b5bf2ae99b8a5f10e886dd98 87a1d7d5908b5e9cfbb7e90dc222f74a23bea811 Kishan Mishra <tkishanmkm@gmail.com> 1770471160 +0000	commit: Transfer is failed because of missing permission allow permission for us
+87a1d7d5908b5e9cfbb7e90dc222f74a23bea811 1d6ef03bfbb75d459531038087273e396f212820 Kishan Mishra <tkishanmkm@gmail.com> 1770471454 +0000	commit: again same issue same error fix this so that coins transfer to another u
+1d6ef03bfbb75d459531038087273e396f212820 5c7c1cf4c9ae5038e36d89eb4bede672ebb23720 Kishan Mishra <tkishanmkm@gmail.com> 1770471742 +0000	commit: same issue again and again fix it
+5c7c1cf4c9ae5038e36d89eb4bede672ebb23720 bee0e7c13f29137a531a38a32426622c2d76fef9 Kishan Mishra <tkishanmkm@gmail.com> 1770471953 +0000	commit: Unhandled Runtime Error
+bee0e7c13f29137a531a38a32426622c2d76fef9 1f94eea17dba3f6e04c9f598698a4bc59c336870 Kishan Mishra <tkishanmkm@gmail.com> 1770472288 +0000	commit: Same missing permission fix this Give permission for users to allow tran
+1f94eea17dba3f6e04c9f598698a4bc59c336870 071879574c8365ee80f777d1b47208ae94b03e2d Kishan Mishra <tkishanmkm@gmail.com> 1770472825 +0000	commit: fix missing error in transfer page , All fix at yime of transfer coins a
+071879574c8365ee80f777d1b47208ae94b03e2d ff86b9adccf5ebd36ef008dea930fc479b1e2d9c Kishan Mishra <tkishanmkm@gmail.com> 1770532716 +0000	commit: when in users side visit
+ff86b9adccf5ebd36ef008dea930fc479b1e2d9c ec7e78ac18bdbf3f4234e055c63d0870618a1792 Kishan Mishra <tkishanmkm@gmail.com> 1770532847 +0000	commit: all header and balance shwo as in dashboard page after login in /users/u
+ec7e78ac18bdbf3f4234e055c63d0870618a1792 4f82f1ae77a553260d88511657e79a7177b2ded4 Kishan Mishra <tkishanmkm@gmail.com> 1770533173 +0000	commit: Unhandled Runtime Error
+4f82f1ae77a553260d88511657e79a7177b2ded4 3f6a01f011fc1c1b6390e739cb8914f46096351f Kishan Mishra <tkishanmkm@gmail.com> 1770533390 +0000	commit: src/lib/ads.ts (88:9) @ createP2PAd
+3f6a01f011fc1c1b6390e739cb8914f46096351f fe843d675a9e7e6c8036413cc65595762711d586 Kishan Mishra <tkishanmkm@gmail.com> 1770639450 +0000	commit: price of crypto and fiat
+fe843d675a9e7e6c8036413cc65595762711d586 1b3083f4b4ceb682d12914c306e5b516f2202233 Kishan Mishra <tkishanmkm@gmail.com> 1770640034 +0000	commit: use gemini ai to fetched price
+1b3083f4b4ceb682d12914c306e5b516f2202233 803be9eb63f9da2b0ac8dc634a0c642630d5b10a Kishan Mishra <tkishanmkm@gmail.com> 1770640177 +0000	commit: Try fixing this error: `Build Error: Failed to compile. Error source: ./
+803be9eb63f9da2b0ac8dc634a0c642630d5b10a 994a6dd07bde9262925fba35459355115c1bf290 Kishan Mishra <tkishanmkm@gmail.com> 1770640341 +0000	commit: crypto price not accurate fix and add api that work
+994a6dd07bde9262925fba35459355115c1bf290 28d1289dc1d7aa4cd675f71fbed70458e5db4e00 Kishan Mishra <tkishanmkm@gmail.com> 1770640603 +0000	commit: currency price in accurate fix to
+28d1289dc1d7aa4cd675f71fbed70458e5db4e00 60d62187a15eaaea105dc62a32f699623878ad03 Kishan Mishra <tkishanmkm@gmail.com> 1770640949 +0000	commit: gemeini fix error in creating ad for buyer and seller
+60d62187a15eaaea105dc62a32f699623878ad03 c86f1956631cbbada6e7ffbc98896befadd9441e Kishan Mishra <tkishanmkm@gmail.com> 1770641044 +0000	commit: price of currency and crypto update every 3 sec
+c86f1956631cbbada6e7ffbc98896befadd9441e 9200ea2a464f27f04d579714337e7d5611abc685 Kishan Mishra <tkishanmkm@gmail.com> 1770641327 +0000	commit: src/lib/ads.ts (86:9) @ createP2PAd
+9200ea2a464f27f04d579714337e7d5611abc685 34140f81f9f17e2d08ec9b9c387902db2a76eb07 Kishan Mishra <tkishanmkm@gmail.com> 1770641499 +0000	commit: fix error
+34140f81f9f17e2d08ec9b9c387902db2a76eb07 5e6bb16539d55978644d14c504b1025443d8cc83 Kishan Mishra <tkishanmkm@gmail.com> 1770642119 +0000	commit: Try fixing this error: `Unhandled Runtime Error: FirebaseError: Missing
+5e6bb16539d55978644d14c504b1025443d8cc83 9f8b583ca158059ceba914de58c8585b18be3384 Kishan Mishra <tkishanmkm@gmail.com> 1770642242 +0000	commit: Your create call is failing because of rule order, not because of the da
+9f8b583ca158059ceba914de58c8585b18be3384 2012f35ac4396f25d7b4919081ea684fea3633fd Kishan Mishra <tkishanmkm@gmail.com> 1770642770 +0000	commit: again error come
+2012f35ac4396f25d7b4919081ea684fea3633fd 751c48be51f19c0242531ce40252b9c6fbcabd9b Kishan Mishra <tkishanmkm@gmail.com> 1770642984 +0000	commit: Invalid Ad Type
+751c48be51f19c0242531ce40252b9c6fbcabd9b 4a0b8ffe40e104279239e572861aa368670d9796 Kishan Mishra <tkishanmkm@gmail.com> 1770643066 +0000	commit: Unhandled Runtime Error
+4a0b8ffe40e104279239e572861aa368670d9796 a3a3658bdd6b7025ddbcbc63c4a3ec77b953d0f9 Kishan Mishra <tkishanmkm@gmail.com> 1770643411 +0000	commit: in create ad page
+a3a3658bdd6b7025ddbcbc63c4a3ec77b953d0f9 18e278410f55c788e72436a185e78547826ff69f Kishan Mishra <tkishanmkm@gmail.com> 1770643594 +0000	commit: Try fixing this error: `Unhandled Runtime Error: TypeError: _field_value
+18e278410f55c788e72436a185e78547826ff69f c45727a7bbda69147ef093424f004f217c6b7dfc Kishan Mishra <tkishanmkm@gmail.com> 1770643658 +0000	commit: FirebaseError: Missing or insufficient permissions: The following reques
+c45727a7bbda69147ef093424f004f217c6b7dfc a8118157f6f50e32a47088e2272e9bd3de273478 Kishan Mishra <tkishanmkm@gmail.com> 1770643757 +0000	commit: price of crypto and currency updat every 0.001 sec no delay
+a8118157f6f50e32a47088e2272e9bd3de273478 a92fb1720f75aac508f290ef28a59c8393dc3a81 Kishan Mishra <tkishanmkm@gmail.com> 1770644134 +0000	commit: "use client";
+a92fb1720f75aac508f290ef28a59c8393dc3a81 d5c053c3ad55985cf2c87948d1e507c64824dbbb Kishan Mishra <tkishanmkm@gmail.com> 1770644230 +0000	commit: Try fixing this error: `Unhandled Runtime Error: ReferenceError: Cannot
+d5c053c3ad55985cf2c87948d1e507c64824dbbb 6cf97cff1f830ee870a510afa1b62974b773e702 Kishan Mishra <tkishanmkm@gmail.com> 1770644816 +0000	commit: when toggle to Buy
+6cf97cff1f830ee870a510afa1b62974b773e702 91b22e4da7b8f663d6678a637fd96b683ff18a56 Kishan Mishra <tkishanmkm@gmail.com> 1770650602 +0000	commit: fix header for mobile tyoe devices for username and balance just like th
+91b22e4da7b8f663d6678a637fd96b683ff18a56 2620f2c1cd5391505420df1b6501856d26ecd77c Kishan Mishra <tkishanmkm@gmail.com> 1770651269 +0000	commit: when price fetched of crypto and currency it saved in database
+2620f2c1cd5391505420df1b6501856d26ecd77c d98e98c9f9624684c8c2b133539eafb7f69a3f7b Kishan Mishra <tkishanmkm@gmail.com> 1770651338 +0000	commit: Try fixing this error: `Unhandled Runtime Error: Error: useFirebase must
+d98e98c9f9624684c8c2b133539eafb7f69a3f7b 676baf38281ec5464343219cdbe2572092b63290 Kishan Mishra <tkishanmkm@gmail.com> 1770651476 +0000	commit: 'use client';
+676baf38281ec5464343219cdbe2572092b63290 2720040b9436ebf1248b6213ba7d9b0dcad050dc Kishan Mishra <tkishanmkm@gmail.com> 1770651618 +0000	commit: in user side from setting if any user upload his dp this dp save to goog
+2720040b9436ebf1248b6213ba7d9b0dcad050dc 008380a7f23041a5061074cfa9cdcf93d3207cbc Kishan Mishra <tkishanmkm@gmail.com> 1770651849 +0000	commit: error in dp saving its only buffer but not saving fix this
+008380a7f23041a5061074cfa9cdcf93d3207cbc 24b5ffa9524dbfc05a142102d1414e3354892788 Kishan Mishra <tkishanmkm@gmail.com> 1770652001 +0000	commit: again same error profile is not saving fix this dp save in firebase coud
+24b5ffa9524dbfc05a142102d1414e3354892788 73b55d7a2c338716a29f498968478c7a62b10151 Kishan Mishra <tkishanmkm@gmail.com> 1770652167 +0000	commit: same issue fix it that even 2 mb dp can save
+73b55d7a2c338716a29f498968478c7a62b10151 caa352d5c86aeaeb0d620ea67448b6427d1ca0f1 Kishan Mishra <tkishanmkm@gmail.com> 1770652337 +0000	commit: same error profile is not saving only buffering fix error so that its sa
+caa352d5c86aeaeb0d620ea67448b6427d1ca0f1 0a98b77cf543c18307c806b4d6da40a2cd151482 Kishan Mishra <tkishanmkm@gmail.com> 1770652476 +0000	commit: same issue dp is not saving fix this error so dp saved perfectly
+0a98b77cf543c18307c806b4d6da40a2cd151482 32b330b429b2e1319e42ce57836f152916cce2cd Kishan Mishra <tkishanmkm@gmail.com> 1770652634 +0000	commit: "use client";
+32b330b429b2e1319e42ce57836f152916cce2cd 30b368e7b77071ef10d523763ba8f8db1f3a9df6 Kishan Mishra <tkishanmkm@gmail.com> 1770652926 +0000	commit: "use client";
+30b368e7b77071ef10d523763ba8f8db1f3a9df6 b1733a3e23fc7f60d09b24aef94aa587118077b9 Kishan Mishra <tkishanmkm@gmail.com> 1770654012 +0000	commit: when api fetched price of crypto and currency its saves in firestore dat
+b1733a3e23fc7f60d09b24aef94aa587118077b9 e028dcb6606f0074a16414e70b6f67e18adeddf9 Kishan Mishra <tkishanmkm@gmail.com> 1770654266 +0000	commit: no one can tamper in price or in crypto no one can attack in this
+e028dcb6606f0074a16414e70b6f67e18adeddf9 8f8aead98b48227fe9676d9d4904245800e59f02 Kishan Mishra <tkishanmkm@gmail.com> 1770654504 +0000	commit: Instant Price Loading: When you load the app, it now immediately fetches
+8f8aead98b48227fe9676d9d4904245800e59f02 f1ec431643e450cac2c66c681a07699cf8363cdd Kishan Mishra <tkishanmkm@gmail.com> 1770654760 +0000	commit: when ad create by users then first its upload in firestore database
+f1ec431643e450cac2c66c681a07699cf8363cdd e52edc5490a5bcfda53f0d729b378fed064a0459 Kishan Mishra <tkishanmkm@gmail.com> 1770654987 +0000	commit: Try fixing this error: `Unhandled Runtime Error: FirebaseError: Missing
+e52edc5490a5bcfda53f0d729b378fed064a0459 e3bc2561d11ff3a5fa40a9c17d1507fff8b4dcd6 Kishan Mishra <tkishanmkm@gmail.com> 1770700508 +0000	commit: add some mock users with buy ad and sel ad
+e3bc2561d11ff3a5fa40a9c17d1507fff8b4dcd6 0dec940489d1348073af2efaa8506fa6a4c76636 Kishan Mishra <tkishanmkm@gmail.com> 1770700646 +0000	commit: update mock users to firestore databse
+0dec940489d1348073af2efaa8506fa6a4c76636 99f53e6aaf3472847e9f3246c1b48add5fb808d0 Kishan Mishra <tkishanmkm@gmail.com> 1770700762 +0000	commit: create some users account with ad
+99f53e6aaf3472847e9f3246c1b48add5fb808d0 54fdd23a4be9ff706fb82ce2ca4fc7c688c1e2ae Kishan Mishra <tkishanmkm@gmail.com> 1770700961 +0000	commit: remove mock users and ad
+54fdd23a4be9ff706fb82ce2ca4fc7c688c1e2ae 29fe3237ee9414a3669a3b0e63a7510087055312 Kishan Mishra <tkishanmkm@gmail.com> 1770701204 +0000	commit: Try fixing this error: `Unhandled Runtime Error: FirebaseError: Missing
+29fe3237ee9414a3669a3b0e63a7510087055312 98df2cf125d159290418d965fdf23c2a8257a6ab Kishan Mishra <tkishanmkm@gmail.com> 1770701467 +0000	commit: Unhandled Runtime Error
+98df2cf125d159290418d965fdf23c2a8257a6ab 7db5a57710b2a3c8601f8929c9ea2e56b165d2e5 Kishan Mishra <tkishanmkm@gmail.com> 1770702444 +0000	commit: create ad feature only for users not for admin
+7db5a57710b2a3c8601f8929c9ea2e56b165d2e5 4bc1a2d1c2d12336d6f324319f76e9697e084215 Kishan Mishra <tkishanmkm@gmail.com> 1770702550 +0000	commit: all rights to creating and managing ad give to users
+4bc1a2d1c2d12336d6f324319f76e9697e084215 388d00209c5e431483b182437b3b0fcc688d32ec Kishan Mishra <tkishanmkm@gmail.com> 1770703098 +0000	commit: "userId": "DnpjiZYV3uWXze84Kudb0pquMa93",
+388d00209c5e431483b182437b3b0fcc688d32ec cfa072dac123f425b42cdc7dd000d401e3b60c4f Kishan Mishra <tkishanmkm@gmail.com> 1770703543 +0000	commit: feedback count in number in ad making and every where
+cfa072dac123f425b42cdc7dd000d401e3b60c4f e79b08a673356a281747171f8998e8db9f925d12 Kishan Mishra <tkishanmkm@gmail.com> 1770703912 +0000	commit: error continuosly come fix error so users can create ad and ad create an
+e79b08a673356a281747171f8998e8db9f925d12 cb6d32e3824f3968951ba7dfc8c0812a3f2abfcd Kishan Mishra <tkishanmkm@gmail.com> 1770704129 +0000	commit: for creating ad give permisoon to write for ad
+cb6d32e3824f3968951ba7dfc8c0812a3f2abfcd cf3742f45dfb1ca7f93218422109f4337d3c0719 Kishan Mishra <tkishanmkm@gmail.com> 1770704526 +0000	commit: The Firestore error is caused by security rules blocking create on the p
+cf3742f45dfb1ca7f93218422109f4337d3c0719 b73dbbc3126af0d9161af15975f699fb956b388b Kishan Mishra <tkishanmkm@gmail.com> 1770704768 +0000	commit: Try fixing this error: `Unhandled Runtime Error: FirebaseError: Missing
+b73dbbc3126af0d9161af15975f699fb956b388b dca5782bd59592fd725eec5566612f49af307d02 Kishan Mishra <tkishanmkm@gmail.com> 1770785436 +0000	commit: Try fixing this error: `Unhandled Runtime Error: FirebaseError: Missing
+dca5782bd59592fd725eec5566612f49af307d02 20da7fc4a84196a0a0f38dce8e9b5998214934aa Kishan Mishra <tkishanmkm@gmail.com> 1770785943 +0000	commit: fix src/firestore.rule and firestore.rule
+20da7fc4a84196a0a0f38dce8e9b5998214934aa 2ee4bbfefa51e3987704b455ba16daa4c683acaa Kishan Mishra <tkishanmkm@gmail.com> 1770787756 +0000	commit: P2P Advertisement (Ad) Creation & Functionality
+2ee4bbfefa51e3987704b455ba16daa4c683acaa 1e18892254f37d54eab7ddb2da6b278015994640 Kishan Mishra <tkishanmkm@gmail.com> 1770787967 +0000	commit: A user can create, delete, and turn ON/OFF a P2P advertisement. A seller
+1e18892254f37d54eab7ddb2da6b278015994640 12ac9198ef0ccd54c6c5437c6cd60a3ec300507e Kishan Mishra <tkishanmkm@gmail.com> 1770788166 +0000	commit: match /p2p_ads/{adId} fix this error in
+12ac9198ef0ccd54c6c5437c6cd60a3ec300507e 85f7cf838fb8986e6d52f8b4539b0f2a7745e7bc Kishan Mishra <tkishanmkm@gmail.com> 1770788243 +0000	commit: Change your p2p_ads rule to this:
+85f7cf838fb8986e6d52f8b4539b0f2a7745e7bc baae0cf7f275d811d3659ef56f493499bd5237bf Kishan Mishra <tkishanmkm@gmail.com> 1770788417 +0000	commit: match /p2p_ads/{adId} {
+baae0cf7f275d811d3659ef56f493499bd5237bf c361263444cc6ed9ff0b4e1c46ed5c5dfc5faee3 Kishan Mishra <tkishanmkm@gmail.com> 1770788975 +0000	commit: rules_version = '2';
+c361263444cc6ed9ff0b4e1c46ed5c5dfc5faee3 d7dd9ce8df2bcab43995f6d9b7e181e86dbb9e7f Kishan Mishra <tkishanmkm@gmail.com> 1770789050 +0000	commit: Try fixing this error: `Unhandled Runtime Error: FirebaseError: Missing
+d7dd9ce8df2bcab43995f6d9b7e181e86dbb9e7f daa72b900f0973824d42767e01fcfecb18353e98 Kishan Mishra <tkishanmkm@gmail.com> 1770789125 +0000	commit: service cloud.firestore {
+daa72b900f0973824d42767e01fcfecb18353e98 79a8907322eee6b693a1d6b386f0d03c072b643b Kishan Mishra <tkishanmkm@gmail.com> 1770789299 +0000	commit: src/firestore.rules use this
+79a8907322eee6b693a1d6b386f0d03c072b643b abe1c3af04f125f8b1783255bc3c68079896a44c Kishan Mishra <tkishanmkm@gmail.com> 1770789473 +0000	commit: fix error could not fetch transaction history
+abe1c3af04f125f8b1783255bc3c68079896a44c ddec607abafeb84effc80c45f9331123c42dcce7 Kishan Mishra <tkishanmkm@gmail.com> 1770789971 +0000	commit: wallet and transaction is not fetching fix this
+ddec607abafeb84effc80c45f9331123c42dcce7 c9ed76758e53c434a8310b6896d4e3c5f56781b9 Kishan Mishra <tkishanmkm@gmail.com> 1770790357 +0000	commit: fix error wallet transacton history and balance is not fetched fix error
+c9ed76758e53c434a8310b6896d4e3c5f56781b9 87f975a1cf8a5d4e12215d4d6bdc88d1c45efbed Kishan Mishra <tkishanmkm@gmail.com> 1770790486 +0000	commit: Try fixing this error: `Unhandled Runtime Error: Error: FIRESTORE (11.9.
+87f975a1cf8a5d4e12215d4d6bdc88d1c45efbed 5810f84151def9ea805424029354af833fa9a490 Kishan Mishra <tkishanmkm@gmail.com> 1770790863 +0000	commit: error in firestore databse and firebase permisson
+5810f84151def9ea805424029354af833fa9a490 9bba407488d7addf53f834be126961f1e1674a7f Kishan Mishra <tkishanmkm@gmail.com> 1770791045 +0000	commit: Try fixing this error: `Unhandled Runtime Error: Error: FIRESTORE (11.9.
+9bba407488d7addf53f834be126961f1e1674a7f 4cacab66fa64455b20e1ceb423281f1c5c21575c Kishan Mishra <tkishanmkm@gmail.com> 1770791243 +0000	commit: use central and realtime database fix error in database and permisson
+4cacab66fa64455b20e1ceb423281f1c5c21575c 4fb754d7ba623f3ff63ba558762294b56e25aa4c Kishan Mishra <tkishanmkm@gmail.com> 1770791574 +0000	commit: Error saving rules – Line 28: Unexpected 'if'.; Line 30: Unexpected 'let
+4fb754d7ba623f3ff63ba558762294b56e25aa4c 304407f00840a33400855b6d838f8372be2b6291 Kishan Mishra <tkishanmkm@gmail.com> 1770791625 +0000	commit: rules_version = '2';
+304407f00840a33400855b6d838f8372be2b6291 700ed9b66323855788d8a16e9e27a3d07abbd2b5 Kishan Mishra <tkishanmkm@gmail.com> 1770792342 +0000	commit: the big error is coming here
+700ed9b66323855788d8a16e9e27a3d07abbd2b5 19c414968fb4e2aa85fdf9e89e9ab06b7e0d9a9b Kishan Mishra <tkishanmkm@gmail.com> 1770793509 +0000	commit: when i try to login in at /adminnarayan/login its show Missing or Insuff
+19c414968fb4e2aa85fdf9e89e9ab06b7e0d9a9b 1fc7b3b6a30fbe363579ce0b3c4de96911860095 Kishan Mishra <tkishanmkm@gmail.com> 1770794014 +0000	commit: same issue fix
+1fc7b3b6a30fbe363579ce0b3c4de96911860095 4d402f3b21dc41f25b179405742f8a689fca7010 Kishan Mishra <tkishanmkm@gmail.com> 1770891079 +0000	commit: erro fix while login on user side
+4d402f3b21dc41f25b179405742f8a689fca7010 932e39c073069f67a67f587e03606742ef368590 Kishan Mishra <tkishanmkm@gmail.com> 1770891249 +0000	commit: same error in user side /login page fix this
+932e39c073069f67a67f587e03606742ef368590 d61e391f5a176233dedd980edc7d2632724c1581 Kishan Mishra <tkishanmkm@gmail.com> 1770891503 +0000	commit: same error fix check all page for error also in firestore database rules
+d61e391f5a176233dedd980edc7d2632724c1581 99f6fdbed643d9a1beae18f81b814ef4b5ca1909 Kishan Mishra <tkishanmkm@gmail.com> 1770891650 +0000	commit: same error coming fix error check al page i firebase to auth to dtabase
+99f6fdbed643d9a1beae18f81b814ef4b5ca1909 73a18ccf51d4eae9065650e67158aba228268f11 Kishan Mishra <tkishanmkm@gmail.com> 1770892067 +0000	commit: ad is unalble to create this error come fix it
+73a18ccf51d4eae9065650e67158aba228268f11 ad8fb3aa5bd2a0b011dc41aea38193ffdf829045 Kishan Mishra <tkishanmkm@gmail.com> 1770892535 +0000	commit: AGAIN THIS ERRO COME IN MAKING AD ON USER SIDE
+ad8fb3aa5bd2a0b011dc41aea38193ffdf829045 3588d4d15c73d3379e68e6697766bc774f1ab874 Kishan Mishra <tkishanmkm@gmail.com> 1770893055 +0000	commit: same error coming check all page and in page what error come its show wh
+3588d4d15c73d3379e68e6697766bc774f1ab874 7647c4c5d1099dbc72ca10ff215aa49c171eefb7 Kishan Mishra <tkishanmkm@gmail.com> 1770893406 +0000	commit: this error come fix it
+7647c4c5d1099dbc72ca10ff215aa49c171eefb7 7f8a29693bc8505e6b9375c781b3cc91deb2b48a Kishan Mishra <tkishanmkm@gmail.com> 1770893583 +0000	commit: now fix this error
+7f8a29693bc8505e6b9375c781b3cc91deb2b48a ea8aa4134123de2d5cbbbc84fa4460796593bdea Kishan Mishra <tkishanmkm@gmail.com> 1770893815 +0000	commit: Try fixing this error: `Unhandled Runtime Error: ReferenceError: Card is
+ea8aa4134123de2d5cbbbc84fa4460796593bdea 43a92632ce013f88797df149f53a1c8b9086b3fb Kishan Mishra <tkishanmkm@gmail.com> 1770894023 +0000	commit: user active and last seen fix
+43a92632ce013f88797df149f53a1c8b9086b3fb 6cb39ad7947382d01bf5e960eaabeb89b58d7717 Kishan Mishra <tkishanmkm@gmail.com> 1770894299 +0000	commit: active time show in buy or sell ad page of offer os users who posted ad
+6cb39ad7947382d01bf5e960eaabeb89b58d7717 7f9fa2634c07afec4dbf5762e5a376a63bc13aa3 Kishan Mishra <tkishanmkm@gmail.com> 1770895308 +0000	commit: active now or active min ago
+7f9fa2634c07afec4dbf5762e5a376a63bc13aa3 72340aef43b6d7ff626135708e3d389b0f201e13 Kishan Mishra <tkishanmkm@gmail.com> 1770895476 +0000	commit: active now or seen x min ago in green color
+72340aef43b6d7ff626135708e3d389b0f201e13 e1f080c67dede4e170250b284ba5c1edfce135b8 Kishan Mishra <tkishanmkm@gmail.com> 1770896225 +0000	commit: country flag + username show in ad page
+e1f080c67dede4e170250b284ba5c1edfce135b8 2480eaa46afa11638662ebf3b1d1a4f4b8e099fb Kishan Mishra <tkishanmkm@gmail.com> 1770896512 +0000	commit: Price
+2480eaa46afa11638662ebf3b1d1a4f4b8e099fb 6ea2a6b9396416b46d3d5bd83c4d55a6d23131b2 Kishan Mishra <tkishanmkm@gmail.com> 1770896738 +0000	commit: coin logo that user ad sell or buy 71,498.70 USD in +5.00% percentage in
+6ea2a6b9396416b46d3d5bd83c4d55a6d23131b2 32c98430f8bd35ffe768792f275daac6269235a0 Kishan Mishra <tkishanmkm@gmail.com> 1770896914 +0000	commit: user detail also show in ad page as that they are
+32c98430f8bd35ffe768792f275daac6269235a0 fa4bbef8b5b302815c43cd2dbf98c0c5364c3be9 Kishan Mishra <tkishanmkm@gmail.com> 1770897138 +0000	commit: in ad page
+fa4bbef8b5b302815c43cd2dbf98c0c5364c3be9 2fbc519bc932ac813b6e108ca8cf6479b2802a04 Kishan Mishra <tkishanmkm@gmail.com> 1770897283 +0000	commit: change in sec/component/p2p/ad-card.tsx
+2fbc519bc932ac813b6e108ca8cf6479b2802a04 b3f8e8f4973bc0080822081dab2ba75e241b13a3 Kishan Mishra <tkishanmkm@gmail.com> 1770897415 +0000	commit: for mobile type devices sell buttom in ad card show normal box not long
+b3f8e8f4973bc0080822081dab2ba75e241b13a3 9fb27c05b3f6c00191a17a9e6e0474ac0dfad4a3 Kishan Mishra <tkishanmkm@gmail.com> 1770898029 +0000	commit: sent coin to another user show in sent section in transfer page
+9fb27c05b3f6c00191a17a9e6e0474ac0dfad4a3 9b964428aef85c4355a142fb99c065353e0d521e Kishan Mishra <tkishanmkm@gmail.com> 1770898104 +0000	commit: Try fixing this error: `Unhandled Runtime Error: ReferenceError: CardFoo
+9b964428aef85c4355a142fb99c065353e0d521e cf06149ad0737a91029c646372312eeefe8cb72a Kishan Mishra <tkishanmkm@gmail.com> 1770898603 +0000	commit: curency change and country change section is difrent in setting tab make
+cf06149ad0737a91029c646372312eeefe8cb72a 094c922709d78cacc914e82804c11f8c880cc33d Kishan Mishra <tkishanmkm@gmail.com> 1770898813 +0000	commit: in ad card /buy or /sell
+094c922709d78cacc914e82804c11f8c880cc33d 70f9f753513f7381847df053684cf75d368ac5de Kishan Mishra <tkishanmkm@gmail.com> 1770899392 +0000	commit: fix initiate trade when initiate all about ad with user detail show
+70f9f753513f7381847df053684cf75d368ac5de 783b744c9b54c6163fc8caf702fd903c015e0423 Kishan Mishra <tkishanmkm@gmail.com> 1770899668 +0000	commit: @tailwind base;
+783b744c9b54c6163fc8caf702fd903c015e0423 50fd9d7e0fcd83a37ce106f0c58601d209edf9ae Kishan Mishra <tkishanmkm@gmail.com> 1770899990 +0000	commit: if any new trade initiate its can be access by /trades section also from
+50fd9d7e0fcd83a37ce106f0c58601d209edf9ae 7b5f3a7d2c8352039a94e863b4db480975f44b3f Kishan Mishra <tkishanmkm@gmail.com> 1770900115 +0000	commit: @tailwind base;
+7b5f3a7d2c8352039a94e863b4db480975f44b3f 92dacaa2ca144312ea4432db5cfe78124608d116 Kishan Mishra <tkishanmkm@gmail.com> 1770900461 +0000	commit: fix
+92dacaa2ca144312ea4432db5cfe78124608d116 7f4c71cc92853ecfd304852f0648236eedf96749 Kishan Mishra <tkishanmkm@gmail.com> 1770900633 +0000	commit: when tap sell or buy direct then this page open for fast
+7f4c71cc92853ecfd304852f0648236eedf96749 2bc695f0640a4bcba6946bf316398e9efd2fce89 Kishan Mishra <tkishanmkm@gmail.com> 1770900851 +0000	commit: /trade/GTc8MJaHs1Ov1iB5ZpDG fix this page is not work no any things fix
+2bc695f0640a4bcba6946bf316398e9efd2fce89 94b7c3449d13716f3d186e974435e50f714f5161 Kishan Mishra <tkishanmkm@gmail.com> 1770901037 +0000	commit: /trade/GTc8MJaHs1Ov1iB5ZpDG
+94b7c3449d13716f3d186e974435e50f714f5161 ec9869c70379029365a0b44cc92f0db63978eb61 Kishan Mishra <tkishanmkm@gmail.com> 1770901205 +0000	commit: trade/trade id page make compatible to mobile type devices
+ec9869c70379029365a0b44cc92f0db63978eb61 a0bb1a716b45bdd05820dce5ae48fa7a4eef55bb Kishan Mishra <tkishanmkm@gmail.com> 1770901550 +0000	commit: trade/trade id have two section
+a0bb1a716b45bdd05820dce5ae48fa7a4eef55bb 7a35cec4f79e94b76ef935ec35e13711f7640545 Kishan Mishra <tkishanmkm@gmail.com> 1770901628 +0000	commit: in my ads page alsomoption to edit existing ad
+7a35cec4f79e94b76ef935ec35e13711f7640545 1e1e882212cdb60794e3970c6eb4be349622a4c9 Kishan Mishra <tkishanmkm@gmail.com> 1770901758 +0000	commit: same issue trade/trade id page is not load its black as image i uploaded
+1e1e882212cdb60794e3970c6eb4be349622a4c9 420447a4125906b4f30a6ce760c47d526b0f1cde Kishan Mishra <tkishanmkm@gmail.com> 1770902118 +0000	commit: in ad card al detail about ad show by i icon , dont open /users/username
+420447a4125906b4f30a6ce760c47d526b0f1cde c3d7448fc8cfccde4ca018c82950135c1efe5bca Kishan Mishra <tkishanmkm@gmail.com> 1770902317 +0000	commit: Try fixing this error: `Unhandled Runtime Error: ReferenceError: ArrowLe
+c3d7448fc8cfccde4ca018c82950135c1efe5bca a76190ae2232dc617c9ebad0a874df4c4ca78eba Kishan Mishra <tkishanmkm@gmail.com> 1770915640 +0000	commit: if trade cancel or completed or expired its also show in notification fr
+a76190ae2232dc617c9ebad0a874df4c4ca78eba 3ee09cb207e95913be5541c24520df34fbe5528c Kishan Mishra <tkishanmkm@gmail.com> 1770915947 +0000	commit: dashboard page and wallet page and rade/tradeid page make comptaible for
+3ee09cb207e95913be5541c24520df34fbe5528c ccc22651cbc49fcf1fca30c0e31552acf4765f05 Kishan Mishra <tkishanmkm@gmail.com> 1770916099 +0000	commit: trade/tradeid Page is not loading fix error that page comptaible to run
+ccc22651cbc49fcf1fca30c0e31552acf4765f05 6970ec50c9149d0ddb6f16ea245cac8388ab1593 Kishan Mishra <tkishanmkm@gmail.com> 1770916332 +0000	commit: active trade is not loading no any component show
+6970ec50c9149d0ddb6f16ea245cac8388ab1593 e94babd4ed1ebad10a9077490b8270dc29afec7b Kishan Mishra <tkishanmkm@gmail.com> 1770916514 +0000	commit: trade/trade id not work fix this anylyse and fix
+e94babd4ed1ebad10a9077490b8270dc29afec7b 23256612dfab5893159163b85779c3aa6a8f884d Kishan Mishra <tkishanmkm@gmail.com> 1770916863 +0000	commit: Trade/tradeid page is not working Fix that its show all trade Chat and t
+23256612dfab5893159163b85779c3aa6a8f884d 02e956c89c017627e4aecaf24a5adf5e5ca59d81 Kishan Mishra <tkishanmkm@gmail.com> 1770974986 +0000	commit: Try fixing this error: `Unhandled Runtime Error: Error: Rendered more ho
+02e956c89c017627e4aecaf24a5adf5e5ca59d81 a22bcd8dd4ae991fd54a376bdda270152523aefe Kishan Mishra <tkishanmkm@gmail.com> 1770977106 +0000	commit: detail in left sode and chat in left side
+a22bcd8dd4ae991fd54a376bdda270152523aefe 31290b8ed539a4383cae438a25c822bc8a642457 Kishan Mishra <tkishanmkm@gmail.com> 1770977326 +0000	commit: do something so from spam message databse not got fulled
+31290b8ed539a4383cae438a25c822bc8a642457 a490ee1dea5a336e6d0ef6e61a1fc8872864ecdf Kishan Mishra <tkishanmkm@gmail.com> 1770977555 +0000	commit: trade chat and trade detail is switchable
+a490ee1dea5a336e6d0ef6e61a1fc8872864ecdf ac1deff32768785fb64da270a732e966f3349c5c Kishan Mishra <tkishanmkm@gmail.com> 1770977925 +0000	commit: Try fixing this error: `Unhandled Runtime Error: Error: Element type is
+ac1deff32768785fb64da270a732e966f3349c5c 6e3e290ecaaa0ac89350b6d954662b31f1eede93 Kishan Mishra <tkishanmkm@gmail.com> 1770978148 +0000	commit: In a P2P trading system like Binance or OKX, the trade chat works as the
+6e3e290ecaaa0ac89350b6d954662b31f1eede93 222550696b140056f086ae3ca4d2a372ea6a71c1 Kishan Mishra <tkishanmkm@gmail.com> 1770978320 +0000	commit: Try fixing this error: `Unhandled Runtime Error: Error: Element type is
+222550696b140056f086ae3ca4d2a372ea6a71c1 30ce41a087d2eff882cb0c408e3f7c063dcb93f2 Kishan Mishra <tkishanmkm@gmail.com> 1770978655 +0000	commit: In a P2P trade chat system, the chat section is the main interaction are
+30ce41a087d2eff882cb0c408e3f7c063dcb93f2 4970a8281c4be3181ccc3639710d7b10b21f2a7f Kishan Mishra <tkishanmkm@gmail.com> 1770978870 +0000	commit: Unhandled Runtime Error
+4970a8281c4be3181ccc3639710d7b10b21f2a7f f5a0ca002cbd6720dc3ee1bee4f8bfaa429514b9 Kishan Mishra <tkishanmkm@gmail.com> 1770979017 +0000	commit: Unhandled Runtime Error
+f5a0ca002cbd6720dc3ee1bee4f8bfaa429514b9 3974d875b52d9af1baf59cb74e04870a571b0f2f Kishan Mishra <tkishanmkm@gmail.com> 1770979375 +0000	commit: Try fixing this error: `Unhandled Runtime Error: Error: Element type is
+3974d875b52d9af1baf59cb74e04870a571b0f2f 60dde3ab13bd1f80236d71271f48a67033bf91be Kishan Mishra <tkishanmkm@gmail.com> 1770979640 +0000	commit: fix error Error: Element type is invalid: expected a string (for built-i
+60dde3ab13bd1f80236d71271f48a67033bf91be 7f66c6c6977d4ce3bdfdcb8cd0ecd081566988bd Kishan Mishra <tkishanmkm@gmail.com> 1770979847 +0000	commit: same error coming fix error
+7f66c6c6977d4ce3bdfdcb8cd0ecd081566988bd cde2762e8ea8ec8a93808c255ebfc8cc07a58564 Kishan Mishra <tkishanmkm@gmail.com> 1770980109 +0000	commit: same error come fix properly
+cde2762e8ea8ec8a93808c255ebfc8cc07a58564 caf95e5559a4d9438920b73c512e4d771ca0c143 Kishan Mishra <tkishanmkm@gmail.com> 1770980325 +0000	commit: Error: Element type is invalid: expected a string (for built-in componen
+caf95e5559a4d9438920b73c512e4d771ca0c143 04e3262d8f510a17d38c1a846601941f2caf7b09 Kishan Mishra <tkishanmkm@gmail.com> 1770980570 +0000	commit: Error: Element type is invalid: expected a string (for built-in componen
+04e3262d8f510a17d38c1a846601941f2caf7b09 024f4a9768f07658d538835d957cc8e373f145f9 Kishan Mishra <tkishanmkm@gmail.com> 1770981165 +0000	commit: Something Went Wrong
+024f4a9768f07658d538835d957cc8e373f145f9 11cc73d97a3d4ae4a7f3217b36c7fda43a397984 Kishan Mishra <tkishanmkm@gmail.com> 1770981912 +0000	commit: P2P trade chat interface where a buyer and seller communicate during an
+11cc73d97a3d4ae4a7f3217b36c7fda43a397984 2cc7e0abad34c0113c6f41b799991e375939286d Kishan Mishra <tkishanmkm@gmail.com> 1770982516 +0000	commit: Something Went Wrong
+2cc7e0abad34c0113c6f41b799991e375939286d 48d8956d1503f6e779fd089e3254019a91254b1b Kishan Mishra <tkishanmkm@gmail.com> 1770982773 +0000	commit: This error occurs because React is trying to render a component inside T
+48d8956d1503f6e779fd089e3254019a91254b1b 24cce140b6e352eabc9b44e252053e55c2b45c47 Kishan Mishra <tkishanmkm@gmail.com> 1770982922 +0000	commit: rror: FIRESTORE (11.9.0) INTERNAL ASSERTION FAILED: Unexpected state (ID
+24cce140b6e352eabc9b44e252053e55c2b45c47 16e7ae8426b8cc03448074f38167e63ff2e51233 Kishan Mishra <tkishanmkm@gmail.com> 1770983130 +0000	commit: (dashboard)/trade/id
+16e7ae8426b8cc03448074f38167e63ff2e51233 2b2c3c53c63b32258b2279877a1fff9eb1a899a9 Kishan Mishra <tkishanmkm@gmail.com> 1770983311 +0000	commit: trade chat in right side and trade detain in left side
+2b2c3c53c63b32258b2279877a1fff9eb1a899a9 37c4ee65835a7a6dac87dcc77cafc1d4d5d85ee3 Kishan Mishra <tkishanmkm@gmail.com> 1771064235 +0000	commit: Try fixing this error: `Unhandled Runtime Error: Error: Element type is
+37c4ee65835a7a6dac87dcc77cafc1d4d5d85ee3 b811d93e4fe2b0fd7f8776ffd550a4454684b5f0 Kishan Mishra <tkishanmkm@gmail.com> 1771065274 +0000	commit: There is a problem with making the Trade Page switchable, so please fix
+b811d93e4fe2b0fd7f8776ffd550a4454684b5f0 03b1fb5824be9bdb19ca72a352ae06b77f3bf8af Kishan Mishra <tkishanmkm@gmail.com> 1771065487 +0000	commit: (dashboard)/trade/id trade/trade status alerts trade counterparty view i
+03b1fb5824be9bdb19ca72a352ae06b77f3bf8af 1506f19d75c74ae299279e38aaa9c078c017da64 Kishan Mishra <tkishanmkm@gmail.com> 1771065802 +0000	commit: 'use client';
+1506f19d75c74ae299279e38aaa9c078c017da64 a00cbf7ac2ceb69f867849ddad7d23f9c64ab1db Kishan Mishra <tkishanmkm@gmail.com> 1771067243 +0000	commit: Trade is cancelled.
+a00cbf7ac2ceb69f867849ddad7d23f9c64ab1db 78bb12821b9ba383b469209148a63fa19deaae08 Kishan Mishra <tkishanmkm@gmail.com> 1771067395 +0000	commit: Error: Element type is invalid: expected a string (for built-in componen
+78bb12821b9ba383b469209148a63fa19deaae08 646ca5fad95956c0918dd69ed32d2be1d67d9560 Kishan Mishra <tkishanmkm@gmail.com> 1771067700 +0000	commit: same error check all page related to trade and find bug anylyse and fix
+646ca5fad95956c0918dd69ed32d2be1d67d9560 fe5b9515035cb214d11a8f7be1251372087264fa Kishan Mishra <tkishanmkm@gmail.com> 1771067911 +0000	commit: An unexpected error occurred while rendering this part of the page.
+fe5b9515035cb214d11a8f7be1251372087264fa b49614050e6c495da91d40e086550d54c7bbd036 Kishan Mishra <tkishanmkm@gmail.com> 1771068274 +0000	commit: there is two header show fix error
+b49614050e6c495da91d40e086550d54c7bbd036 69ef77bb43ef363d69a49330dc8795bf7740c45f Kishan Mishra <tkishanmkm@gmail.com> 1771068676 +0000	commit: fix error
+69ef77bb43ef363d69a49330dc8795bf7740c45f cca1eeeb6f94473791808049cadba21472d753d6 Kishan Mishra <tkishanmkm@gmail.com> 1771068952 +0000	commit: same rror come use multiple page to use and fix error
+cca1eeeb6f94473791808049cadba21472d753d6 1322366386b40390bce94f44f908c68da5ded7be Kishan Mishra <tkishanmkm@gmail.com> 1771069067 +0000	commit: change trade/id page to this
+1322366386b40390bce94f44f908c68da5ded7be 94d932c001848b06722c644e540a7e23a714b0b9 Kishan Mishra <tkishanmkm@gmail.com> 1771069219 +0000	commit: (dashboard)/trade/id trade/trade status alerts trade counterparty view i
+94d932c001848b06722c644e540a7e23a714b0b9 2a8f709e3e1e3e474f69c104df7fbddfd1bebfb5 Kishan Mishra <tkishanmkm@gmail.com> 1771069332 +0000	commit: Try fixing this error: `Unhandled Runtime Error: ReferenceError: Skeleto
+2a8f709e3e1e3e474f69c104df7fbddfd1bebfb5 b60cd2ffd7ee428586e09721017ac1518eeb52e7 Kishan Mishra <tkishanmkm@gmail.com> 1771069457 +0000	commit: remove this on page trade/trade id
+b60cd2ffd7ee428586e09721017ac1518eeb52e7 8ad96eabf99cdb5a327ce542e4793298f8e0f553 Kishan Mishra <tkishanmkm@gmail.com> 1771070391 +0000	commit: in Trade chat top instruction like that
+8ad96eabf99cdb5a327ce542e4793298f8e0f553 047f14289b087ab38fe19935f6aba6a6d71b95b5 Kishan Mishra <tkishanmkm@gmail.com> 1771070481 +0000	commit: Try fixing this error: `Unhandled Runtime Error: Error: Element type is
+047f14289b087ab38fe19935f6aba6a6d71b95b5 33e73668384311e3525fbcf2a1477d7f470f27c3 Kishan Mishra <tkishanmkm@gmail.com> 1771070580 +0000	commit: Trade T-LN5GK4ZF
+33e73668384311e3525fbcf2a1477d7f470f27c3 374b24ef0ee5c18b72d9dcd2d465cb840d63120e Kishan Mishra <tkishanmkm@gmail.com> 1771070851 +0000	commit: dont remove component
+374b24ef0ee5c18b72d9dcd2d465cb840d63120e 123b87cc8754e95603f352b32b77f058cc6dc104 Kishan Mishra <tkishanmkm@gmail.com> 1771071030 +0000	commit: You're buying 0.00024138 BTC (20,142.92 NGN) for 20,000 NGN via Bank Tra
+123b87cc8754e95603f352b32b77f058cc6dc104 2de0d909f926bf20bc08ca8dd64e69fe4a314f41 Kishan Mishra <tkishanmkm@gmail.com> 1771078557 +0000	commit: Try fixing this error: `Unhandled Runtime Error: Error: Element type is
+2de0d909f926bf20bc08ca8dd64e69fe4a314f41 1e65138e33184e36ef14c0194498ac3d90574035 Kishan Mishra <tkishanmkm@gmail.com> 1771081162 +0000	commit: Unhandled Runtime Error
+1e65138e33184e36ef14c0194498ac3d90574035 ddf5c4fe7e75acb8e11c2247e5e3e4a36d578d05 Kishan Mishra <tkishanmkm@gmail.com> 1771083265 +0000	commit: There is one more issue. When a user takes a trade from the Sell page an
+ddf5c4fe7e75acb8e11c2247e5e3e4a36d578d05 9887cc185e567f7498da4852a28aa5e9bb8097b9 Kishan Mishra <tkishanmkm@gmail.com> 1771084504 +0000	commit: Selling 0.40000000 BTC for 29,285.76 USD
+9887cc185e567f7498da4852a28aa5e9bb8097b9 bda3c263ca639ec67c40cfc8c1b3b2d5faf0135e Kishan Mishra <tkishanmkm@gmail.com> 1771084868 +0000	commit: Selling 0.40000000 BTC for 29,285.76 USD
+bda3c263ca639ec67c40cfc8c1b3b2d5faf0135e e51386bb2821b8cc7525d2e522d3339871014342 Kishan Mishra <tkishanmkm@gmail.com> 1771085011 +0000	commit: Try fixing this error: `Unhandled Runtime Error: Error: Element type is
+e51386bb2821b8cc7525d2e522d3339871014342 6bb87492152ea6dee4f9d9ce7d1c4aa0c0bc456b Kishan Mishra <tkishanmkm@gmail.com> 1771085249 +0000	commit: maintain sequence if system message come then after all message show in
+6bb87492152ea6dee4f9d9ce7d1c4aa0c0bc456b dc73a4a7ca9c0fc8238701133aa7d89818b746b8 Kishan Mishra <tkishanmkm@gmail.com> 1771085455 +0000	commit: see how color is unsaturated and light mode fix so in both ligt or dark
+dc73a4a7ca9c0fc8238701133aa7d89818b746b8 90bc0511e1f92cbdfbecc480a8d2494efa31b298 Kishan Mishra <tkishanmkm@gmail.com> 1771085752 +0000	commit: ok but still yellow color is unsaturated fix this make saturated in ligh
+90bc0511e1f92cbdfbecc480a8d2494efa31b298 aaa120724e56fbc3b31985e1ca34c4396320eba7 Kishan Mishra <tkishanmkm@gmail.com> 1771085980 +0000	commit: You're selling 0.40000000 BTC for 29,285.76 USD.
+aaa120724e56fbc3b31985e1ca34c4396320eba7 555461e41396d3266ac1ba00db0f22a2ad099f35 Kishan Mishra <tkishanmkm@gmail.com> 1771086366 +0000	commit: trade chat like window not like page
+555461e41396d3266ac1ba00db0f22a2ad099f35 9c0a1f2853252c28a70f55499fce443415f568b5 Kishan Mishra <tkishanmkm@gmail.com> 1771086645 +0000	commit: its not work like window its like page
+9c0a1f2853252c28a70f55499fce443415f568b5 662ac82745e50462b14068096bfae242d6a1506e Kishan Mishra <tkishanmkm@gmail.com> 1771086887 +0000	commit: Selling 0.40000000 BTC for 29,285.76 USD this fix color that show satura
+662ac82745e50462b14068096bfae242d6a1506e 5dfc37a6d739bd67bbd0e48af8e9408be6ed70dd Kishan Mishra <tkishanmkm@gmail.com> 1771087202 +0000	commit: trade chat header include
+5dfc37a6d739bd67bbd0e48af8e9408be6ed70dd d201b2f5b33190afbfbb53cb08d1a35d4ece7d81 Kishan Mishra <tkishanmkm@gmail.com> 1771087472 +0000	commit: make layout structure
+d201b2f5b33190afbfbb53cb08d1a35d4ece7d81 039bad130b56dcd613b11b7e917b305e26e6c572 Kishan Mishra <tkishanmkm@gmail.com> 1771087728 +0000	commit: if i scroll messgae then detail not scrolled
+039bad130b56dcd613b11b7e917b305e26e6c572 7511ea27a68ebbda3f7aed89dc4a5c5896d1ffa5 Kishan Mishra <tkishanmkm@gmail.com> 1771088236 +0000	commit: In a P2P trade page, the Details section and the Chat section must scrol
+7511ea27a68ebbda3f7aed89dc4a5c5896d1ffa5 74e6b39152aa9ec10d094e298c6a3f403a06e464 Kishan Mishra <tkishanmkm@gmail.com> 1771088516 +0000	commit: fix error Unhandled Runtime Error
+74e6b39152aa9ec10d094e298c6a3f403a06e464 e9ea74e08ccd47686fa6ee94e17d8b1368c0ddba Kishan Mishra <tkishanmkm@gmail.com> 1771088633 +0000	commit: Try fixing this error: `Unhandled Runtime Error: Error: The default expo
+e9ea74e08ccd47686fa6ee94e17d8b1368c0ddba 9c6480531ac13bbecfed4ac57796e8912004704c Kishan Mishra <tkishanmkm@gmail.com> 1771088959 +0000	commit: this is scrollable individually if this scroll then messgae coponent not
+9c6480531ac13bbecfed4ac57796e8912004704c 4512761db91a56c0814834f3bcab0f616176a716 Kishan Mishra <tkishanmkm@gmail.com> 1771089212 +0000	commit: message footer and reopen trade box in same line
+4512761db91a56c0814834f3bcab0f616176a716 7541324f5ac9b3d61651e9b1dfb5d470cc59fb0c Kishan Mishra <tkishanmkm@gmail.com> 1771089452 +0000	commit: reopne trade and message footer is same line but ypu do wrong that
+7541324f5ac9b3d61651e9b1dfb5d470cc59fb0c 481a043a7a38bfc62747b7a191b36b17a92b73a5 Kishan Mishra <tkishanmkm@gmail.com> 1771089677 +0000	commit: If scroll trade detail then only trade detail scroll not message section
+481a043a7a38bfc62747b7a191b36b17a92b73a5 3cdbc545edfa2aa2c478a8ecf45a55a97691d059 Kishan Mishra <tkishanmkm@gmail.com> 1771089910 +0000	commit: in current when i scroll down message and detail with page scrolled toge
+3cdbc545edfa2aa2c478a8ecf45a55a97691d059 fea4f870c39abdaa5124049cc68de6b66a067e99 Kishan Mishra <tkishanmkm@gmail.com> 1771090133 +0000	commit: seller instruction also show in trade chat
+fea4f870c39abdaa5124049cc68de6b66a067e99 a65d4791696177bba34ea90ea0f60f88541059ac Kishan Mishra <tkishanmkm@gmail.com> 1771090362 +0000	commit: Try fixing this error: `Build Error: Failed to compile. Error source: ./
+a65d4791696177bba34ea90ea0f60f88541059ac c6059a77b942f57d9cce86b0bb0b9e7d85a0ea0b Kishan Mishra <tkishanmkm@gmail.com> 1771090448 +0000	commit: seller terms also show in detail with tag and tagline also in trade chat
+c6059a77b942f57d9cce86b0bb0b9e7d85a0ea0b c42a3facac5e9aed17411024d48c47434f35d2ab Kishan Mishra <tkishanmkm@gmail.com> 1771090653 +0000	commit: in chat section trade chat header ( dp username buying sellin bar ) alon
+c42a3facac5e9aed17411024d48c47434f35d2ab df140b92dc8059439b1aad9c47dedc9c99912cec Kishan Mishra <tkishanmkm@gmail.com> 1771090916 +0000	commit: time show in trade chat with Date and time both
+df140b92dc8059439b1aad9c47dedc9c99912cec c65a5507b3d5f925f97b97129933a978a62fc013 Kishan Mishra <tkishanmkm@gmail.com> 1771091029 +0000	commit: when side panel open by tapping i icon that is also scrolling down and u
+c65a5507b3d5f925f97b97129933a978a62fc013 1672e57049cdebe5831dc80b9ca4bce160c3cfc2 Kishan Mishra <tkishanmkm@gmail.com> 1771091138 +0000	commit: make ip based location functional
+1672e57049cdebe5831dc80b9ca4bce160c3cfc2 1f33ff418547c2aa01d592b73b9c106257e372fa Kishan Mishra <tkishanmkm@gmail.com> 1771091290 +0000	commit: ip based country is detect ip of users and check real time users country
+1f33ff418547c2aa01d592b73b9c106257e372fa 531669a59173ab908d10988c90e0227e3804ac69 Kishan Mishra <tkishanmkm@gmail.com> 1771091626 +0000	commit: i detail section in trade chat liitle little awarness to prevent scam
+531669a59173ab908d10988c90e0227e3804ac69 4e2566edf616a1ad79f5f4a72de654966aae71d3 Kishan Mishra <tkishanmkm@gmail.com> 1771091859 +0000	commit: Try fixing this error: `Unhandled Runtime Error: TypeError: Cannot destr
+4e2566edf616a1ad79f5f4a72de654966aae71d3 8eb6ba824928b255615b6a2c3adcfd9286444cbb Kishan Mishra <tkishanmkm@gmail.com> 1771092504 +0000	commit: Of course. I will implement the requested improvements to enhance the us
+8eb6ba824928b255615b6a2c3adcfd9286444cbb 822317ca275cb07db8bd9e09666857bc97b35169 Kishan Mishra <tkishanmkm@gmail.com> 1771170506 +0000	commit: app name is
+822317ca275cb07db8bd9e09666857bc97b35169 920f5c2c354c3443d3a0503eecfada07f210d344 Kishan Mishra <tkishanmkm@gmail.com> 1771170842 +0000	commit: Error Loading Deposits
+920f5c2c354c3443d3a0503eecfada07f210d344 a9fa89e8f164fc57941b2474e6b74f79c889477d Kishan Mishra <tkishanmkm@gmail.com> 1771171452 +0000	commit: in admin side fix so deposit withdrwal request is work fix it
+a9fa89e8f164fc57941b2474e6b74f79c889477d c7785b12e0abfc67267a2f74ecf402169001060f Kishan Mishra <tkishanmkm@gmail.com> 1771171739 +0000	commit: make notification scrollable
+c7785b12e0abfc67267a2f74ecf402169001060f 4ea96f9cfde3f54fc3a3ac0a711740bc28ca0ee5 Kishan Mishra <tkishanmkm@gmail.com> 1771172064 +0000	commit: notification is not scrolling fix it
+4ea96f9cfde3f54fc3a3ac0a711740bc28ca0ee5 38c6016f1cb6a68b65be24174f7b57c161de1238 Kishan Mishra <tkishanmkm@gmail.com> 1771172479 +0000	commit: in notification only 3 notification view then arrow when tap then more n
+38c6016f1cb6a68b65be24174f7b57c161de1238 1b42dce5d835bbd435ef6bd2604690fbafbcf047 Kishan Mishra <tkishanmkm@gmail.com> 1771172895 +0000	commit: in notification panel role
+1b42dce5d835bbd435ef6bd2604690fbafbcf047 fbfd5353d9a58f53e0e72803b54204d0ec3054a1 Kishan Mishra <tkishanmkm@gmail.com> 1771173049 +0000	commit: in notification
+fbfd5353d9a58f53e0e72803b54204d0ec3054a1 8949fc9ae4e4df27243a29f0ea658996f300aa1d Kishan Mishra <tkishanmkm@gmail.com> 1771173261 +0000	commit: Try fixing this error: `Unhandled Runtime Error: ReferenceError: activeS
+8949fc9ae4e4df27243a29f0ea658996f300aa1d 8f5f52c8e075fcef5914d764d601eed35726932b Kishan Mishra <tkishanmkm@gmail.com> 1771174533 +0000	commit: in mobile type device
+8f5f52c8e075fcef5914d764d601eed35726932b 2478edbaf119464a31fea25aac07968ea5ff04ae Kishan Mishra <tkishanmkm@gmail.com> 1771174851 +0000	commit: remove recent notification from dashboard page
+2478edbaf119464a31fea25aac07968ea5ff04ae a249ac8ba0a58a7ecab32830fec58b8bc4cb2ab8 Kishan Mishra <tkishanmkm@gmail.com> 1771175127 +0000	commit: In admin side option in active trade cancel.mark paid. release by admin
+a249ac8ba0a58a7ecab32830fec58b8bc4cb2ab8 639caebf5abbd6959b0925b501f3b146d34e9b62 Kishan Mishra <tkishanmkm@gmail.com> 1771175386 +0000	commit: positive or negative is not selecting fix it
+639caebf5abbd6959b0925b501f3b146d34e9b62 3b88e01be0dc6526be8728c030acf6d7f8833cdc Kishan Mishra <tkishanmkm@gmail.com> 1771176364 +0000	commit: ok do
+3b88e01be0dc6526be8728c030acf6d7f8833cdc d3ca06602a28f2df322f0bf7c71cb9ba41b95891 Kishan Mishra <tkishanmkm@gmail.com> 1771176574 +0000	commit: use box tick in positive and negative so this works
+d3ca06602a28f2df322f0bf7c71cb9ba41b95891 c33b53a90980a5c5c4fb3a26f54c291b14316eaa Kishan Mishra <tkishanmkm@gmail.com> 1771176739 +0000	commit: feedback can also modify from detail section
+c33b53a90980a5c5c4fb3a26f54c291b14316eaa 157fc6cefa82713f73f35e7e3c866e479acb14ab Kishan Mishra <tkishanmkm@gmail.com> 1771176957 +0000	commit: Positive
+157fc6cefa82713f73f35e7e3c866e479acb14ab dfd84329418f2cdd2df3affdc62cc37f516b5c78 Kishan Mishra <tkishanmkm@gmail.com> 1771177319 +0000	commit: ok fix
+dfd84329418f2cdd2df3affdc62cc37f516b5c78 4e5c199dcc2e206d53675554e9d56beef12ab5a5 Kishan Mishra <tkishanmkm@gmail.com> 1771177504 +0000	commit: in ad page create ad page
+4e5c199dcc2e206d53675554e9d56beef12ab5a5 93cbc09941633ad63acd05ee2e64dc016e0078c8 Kishan Mishra <tkishanmkm@gmail.com> 1771178013 +0000	commit: market price a;ways default to 5%
+93cbc09941633ad63acd05ee2e64dc016e0078c8 48a6648626ca293e22bf28c281c0ddf7ba84d17b Kishan Mishra <tkishanmkm@gmail.com> 1771178370 +0000	commit: Try fixing this error: `Unhandled Runtime Error: RangeError: Invalid cur
+48a6648626ca293e22bf28c281c0ddf7ba84d17b 2dfc5728a1d878eb981ab81d9ada757032559f89 Kishan Mishra <tkishanmkm@gmail.com> 1771178543 +0000	commit: by default
+2dfc5728a1d878eb981ab81d9ada757032559f89 13ce4e3d8d3331624681e51681add6a14ff1fb82 Kishan Mishra <tkishanmkm@gmail.com> 1771178802 +0000	commit: in Buy coin or sell coin page
+13ce4e3d8d3331624681e51681add6a14ff1fb82 6499ff2d21f27ad4f2172726d942ec954b3aa69e Kishan Mishra <tkishanmkm@gmail.com> 1771179346 +0000	commit: Trade Awareness
+6499ff2d21f27ad4f2172726d942ec954b3aa69e 570c9dd58955f1604d22be5cb782d9230118501b Kishan Mishra <tkishanmkm@gmail.com> 1771179713 +0000	commit: mark paid
+570c9dd58955f1604d22be5cb782d9230118501b 5251fafab037269476d96c879e5292c5c0684a90 Kishan Mishra <tkishanmkm@gmail.com> 1771180028 +0000	commit: below this
+5251fafab037269476d96c879e5292c5c0684a90 216ee2599d00adbb698cd85fe58427995d22ce3b Kishan Mishra <tkishanmkm@gmail.com> 1771180229 +0000	commit: if users give multiple payment mode then option to select in ad/adid whi
+216ee2599d00adbb698cd85fe58427995d22ce3b c0626160206b27096e6510c83f73483ae427808e Kishan Mishra <tkishanmkm@gmail.com> 1771180379 +0000	commit: when trade release its inform by system in trade chat
+c0626160206b27096e6510c83f73483ae427808e 313c9b69a103200436113f3d745da7bdcc096835 Kishan Mishra <tkishanmkm@gmail.com> 1771180665 +0000	commit: one users to one another user can give only one time feedback
+313c9b69a103200436113f3d745da7bdcc096835 fe4d6c83623c77f99ad83b85c0f80cfb3e06b85c Kishan Mishra <tkishanmkm@gmail.com> 1771180753 +0000	commit: trade volume in any fiat its show corrected in $ show after conversion
+fe4d6c83623c77f99ad83b85c0f80cfb3e06b85c a40a1f0267cbed4c9c17121692c6602f25fe47d5 Kishan Mishra <tkishanmkm@gmail.com> 1771181024 +0000	commit: open dispute option only show when buyer marked paid also in time 3 hr
+a40a1f0267cbed4c9c17121692c6602f25fe47d5 30eace4c6fe1b4849edbaec7d9fb15073f8deea6 Kishan Mishra <tkishanmkm@gmail.com> 1771181598 +0000	commit: if trade cancel by users or time or by moderator in system message and n
+30eace4c6fe1b4849edbaec7d9fb15073f8deea6 f09b7560092179fb0be2f40127af821077d69e74 Kishan Mishra <tkishanmkm@gmail.com> 1771181890 +0000	commit: fix average releasing time and average payment time is showin like 9.828
+f09b7560092179fb0be2f40127af821077d69e74 48ff9d534d224706b7c834842b3e42552b8417d9 Kishan Mishra <tkishanmkm@gmail.com> 1771182067 +0000	commit: from i icon in trade chat
+48ff9d534d224706b7c834842b3e42552b8417d9 a714f79a13ff0c876d247a3800ee82899d62f3c7 Kishan Mishra <tkishanmkm@gmail.com> 1771182676 +0000	commit: Total Trade Volume
+a714f79a13ff0c876d247a3800ee82899d62f3c7 0dcbfb24c468e7541a5575b6b297f5dba9dc579c Kishan Mishra <tkishanmkm@gmail.com> 1771182793 +0000	commit: profile dp saved in database not in cloudstore
+0dcbfb24c468e7541a5575b6b297f5dba9dc579c ec59526caa9fcd0ce3c3efaf911ba54f5356756f Kishan Mishra <tkishanmkm@gmail.com> 1771182890 +0000	commit: Total Trade Volume
+ec59526caa9fcd0ce3c3efaf911ba54f5356756f 92dffb76495edd2ad6b5b038a79c2418e554dbe3 Kishan Mishra <tkishanmkm@gmail.com> 1771183035 +0000	commit: fix this error
+92dffb76495edd2ad6b5b038a79c2418e554dbe3 5501a6c2c42eb565f41e9cf8a9afad50e9727ffc Kishan Mishra <tkishanmkm@gmail.com> 1771183728 +0000	commit: when users create account an wallet auto create
+5501a6c2c42eb565f41e9cf8a9afad50e9727ffc e14d3b1bd6a1e5874b1514ec4c25ed2207cf4a5d Kishan Mishra <tkishanmkm@gmail.com> 1771183940 +0000	commit: In wallet , section
+e14d3b1bd6a1e5874b1514ec4c25ed2207cf4a5d 5947fed11a281c8382c2add77e10459c71d597c1 Kishan Mishra <tkishanmkm@gmail.com> 1771184011 +0000	commit: Try fixing this error: `Unhandled Runtime Error: ReferenceError: Label i
+5947fed11a281c8382c2add77e10459c71d597c1 a1372cfa80bb546c5d5e0951a96a3d434ba3f549 Kishan Mishra <tkishanmkm@gmail.com> 1771184091 +0000	commit: All existing users alot wallets
+a1372cfa80bb546c5d5e0951a96a3d434ba3f549 065fff9b8ba5b47a5d7dfa8aea26c9fef911895b Kishan Mishra <tkishanmkm@gmail.com> 1771184376 +0000	commit: if users not have wallet option to create wallets
+065fff9b8ba5b47a5d7dfa8aea26c9fef911895b 0b79e10c7c04a837cb4985030e19b8f4c76d3ab7 Kishan Mishra <tkishanmkm@gmail.com> 1771184770 +0000	commit: use fully functional crypto wallet
+0b79e10c7c04a837cb4985030e19b8f4c76d3ab7 bdbc114923fdeed0c3475563043415e5175a73a4 Kishan Mishra <tkishanmkm@gmail.com> 1771185443 +0000	commit: implant wallet fully functional
+bdbc114923fdeed0c3475563043415e5175a73a4 9144c54e9a93456ecebf1880e26486782b39f779 Kishan Mishra <tkishanmkm@gmail.com> 1771185878 +0000	commit: Remove simulation. Build real backend deposit listener and withdrawal si
+9144c54e9a93456ecebf1880e26486782b39f779 9c47110281239cb0f26c643ccee9d5d385510d16 Kishan Mishra <tkishanmkm@gmail.com> 1771186701 +0000	commit: project-root/
+9c47110281239cb0f26c643ccee9d5d385510d16 9ab046e931bea2a310afa8c3199c0d36090e8887 Kishan Mishra <tkishanmkm@gmail.com> 1771186860 +0000	commit: functions/config/networks.js
+9ab046e931bea2a310afa8c3199c0d36090e8887 9822cb128f76cd302f75071544e336d7af77b59e Kishan Mishra <tkishanmkm@gmail.com> 1771187320 +0000	commit: project-root/
+9822cb128f76cd302f75071544e336d7af77b59e ed83e0fdc07e5576a413c15a23f0d10568522129 Kishan Mishra <tkishanmkm@gmail.com> 1771187565 +0000	commit: project-root/
+ed83e0fdc07e5576a413c15a23f0d10568522129 7488131e4c91a9b27e6cd1959454a1242b640061 Kishan Mishra <tkishanmkm@gmail.com> 1771187647 +0000	commit: export interface WalletAddresses {
+7488131e4c91a9b27e6cd1959454a1242b640061 92374611b8003e116b653f25d986aa3b8cae32e2 Kishan Mishra <tkishanmkm@gmail.com> 1771192103 +0000	commit: recover and undo wallet and
+92374611b8003e116b653f25d986aa3b8cae32e2 dbc65a1ab38a5e6a876afb0e2da357a298f35bf7 Kishan Mishra <tkishanmkm@gmail.com> 1771192166 +0000	commit: Try fixing this error: `Build Error: Failed to compile. Error source: ./
+dbc65a1ab38a5e6a876afb0e2da357a298f35bf7 6705c6875431b0e2f122f814822b916a9c3a07f0 Kishan Mishra <tkishanmkm@gmail.com> 1771192375 +0000	commit: Try fixing this error: `Unhandled Runtime Error: Error: FIRESTORE (11.9.
+6705c6875431b0e2f122f814822b916a9c3a07f0 a3c18f9d257981a019b956c38f1bd8bef3dc4ea6 Kishan Mishra <tkishanmkm@gmail.com> 1771193266 +0000	commit: fix deposit history withdrwal history transafer history
+a3c18f9d257981a019b956c38f1bd8bef3dc4ea6 d0ee6bd4a69149856a2f4e90810104a2da7423cc Kishan Mishra <tkishanmkm@gmail.com> 1771194362 +0000	commit: Deposit Dialog (src/components/wallets/deposit-dialog.tsx)
+d0ee6bd4a69149856a2f4e90810104a2da7423cc b6c9fb1a817483b6a1815b4f7a286cb80c142df2 Kishan Mishra <tkishanmkm@gmail.com> 1771194476 +0000	commit: Types (src/lib/types.ts)
+b6c9fb1a817483b6a1815b4f7a286cb80c142df2 6e2fd3087b2bfcd6b0e34ca15227006f9f44fc5f Kishan Mishra <tkishanmkm@gmail.com> 1771194600 +0000	commit: Try fixing this error: `Unhandled Runtime Error: Error: Element type is
+6e2fd3087b2bfcd6b0e34ca15227006f9f44fc5f b9cb5149c268e876832c37b4429b84559cda3f16 Kishan Mishra <tkishanmkm@gmail.com> 1771194732 +0000	commit: Try fixing this error: `Unhandled Runtime Error: Error: Element type is
+b9cb5149c268e876832c37b4429b84559cda3f16 022d56a1154e5ecfcbb95aefee4a28e73d2cca88 Kishan Mishra <tkishanmkm@gmail.com> 1771199839 +0000	commit: 'use client';
+022d56a1154e5ecfcbb95aefee4a28e73d2cca88 342d1bafcf165f86190ee06c4132417cdb87e200 Kishan Mishra <tkishanmkm@gmail.com> 1771199913 +0000	commit: 'use client';
+342d1bafcf165f86190ee06c4132417cdb87e200 4b4606339e2bd993028c504aaedeae95892efe03 Kishan Mishra <tkishanmkm@gmail.com> 1771200306 +0000	commit: 'use client';
+4b4606339e2bd993028c504aaedeae95892efe03 104455ffaefb3c81c54b4513d84fabd8709c42ad Kishan Mishra <tkishanmkm@gmail.com> 1771200879 +0000	commit: Connect frontend wallet page to WithdrawDialog
+104455ffaefb3c81c54b4513d84fabd8709c42ad 6592d3c6a4caf9a5a5efcfff280fb6229dc02960 Kishan Mishra <tkishanmkm@gmail.com> 1771201148 +0000	commit: I devolep backend of wallet functio
+6592d3c6a4caf9a5a5efcfff280fb6229dc02960 b22db813b5bfc51d29d9bfe30b96da9b5144441f Kishan Mishra <tkishanmkm@gmail.com> 1771201330 +0000	commit: no i set that usdt deposit auto confirm by blockchain and so in p2p acco
+b22db813b5bfc51d29d9bfe30b96da9b5144441f 7081fab9a4eef157f1f56de45cb3d5fcaf6f439a Kishan Mishra <tkishanmkm@gmail.com> 1771201412 +0000	commit: Try fixing this error: `Build Error: Failed to compile. Error source: ./
+7081fab9a4eef157f1f56de45cb3d5fcaf6f439a 984eb6c07b760ba46647007044af04d6971c909d Kishan Mishra <tkishanmkm@gmail.com> 1771201651 +0000	commit: Why this happens
+984eb6c07b760ba46647007044af04d6971c909d d1f9b6cb6bf04fdfe49a036ccaea54503ed0b04d Kishan Mishra <tkishanmkm@gmail.com> 1771201793 +0000	commit: in wallets option to create new wallet and new seed store in admin side
+d1f9b6cb6bf04fdfe49a036ccaea54503ed0b04d 2e762c6cbaaadef550bb208740397a25df80c277 Kishan Mishra <tkishanmkm@gmail.com> 1771201882 +0000	commit: Try fixing this error: `Unhandled Runtime Error: ReferenceError: CardDes
+2e762c6cbaaadef550bb208740397a25df80c277 b5dbaf2b24c0e824dcfd847a0f1086413f1e46cf Kishan Mishra <tkishanmkm@gmail.com> 1771203105 +0000	commit: In the Wallets section, if users do not have their own wallets, there sh
+b5dbaf2b24c0e824dcfd847a0f1086413f1e46cf 353eca4c4de37233ab75d3cce20159d629e3ecbc Kishan Mishra <tkishanmkm@gmail.com> 1771229248 +0000	commit: In the Wallets section, if users do not have their own wallets, there sh
+353eca4c4de37233ab75d3cce20159d629e3ecbc 1ed820b9fb2e159847a4225a5c6ead97c7772d44 Kishan Mishra <tkishanmkm@gmail.com> 1771229588 +0000	commit: In p2p-wallet/p2p-wallet/backend, there is the backend. Please coordinat
+1ed820b9fb2e159847a4225a5c6ead97c7772d44 a78f6d1c96bfb3c32eaec379f4dd0152472c13d0 Kishan Mishra <tkishanmkm@gmail.com> 1771229837 +0000	commit: withdrawal only done my admin crypto wallet thats seed phrase and token
+a78f6d1c96bfb3c32eaec379f4dd0152472c13d0 851aff707b4d9d12b01ee568c54b76503fc22884 Kishan Mishra <tkishanmkm@gmail.com> 1771230298 +0000	commit: Existing users can create a multi-coin wallet. A wallet is automatically
+851aff707b4d9d12b01ee568c54b76503fc22884 49f5059762c2235abbb8be2d0796ce51d9639679 Kishan Mishra <tkishanmkm@gmail.com> 1771230649 +0000	commit: All withdrawals are processed exclusively through the admin’s custodial
+49f5059762c2235abbb8be2d0796ce51d9639679 21f7b075ca8bc0d03e2589e50b53b561055f3285 Kishan Mishra <tkishanmkm@gmail.com> 1771230999 +0000	commit: For user deposits, the transaction history should be recorded only withi
+21f7b075ca8bc0d03e2589e50b53b561055f3285 e0c11a7f47c5cbc4f4557dcf6bc91d645d4c152a Kishan Mishra <tkishanmkm@gmail.com> 1771231535 +0000	commit: When a user initiates a withdrawal request, the system first verifies th
+e0c11a7f47c5cbc4f4557dcf6bc91d645d4c152a ed5594843eaf321b77a31595a2592c1d41020590 Kishan Mishra <tkishanmkm@gmail.com> 1771232111 +0000	commit: The app isn't starting. Please investigate what could be wrong based on
+ed5594843eaf321b77a31595a2592c1d41020590 3772e84440e587f0b056d60c77b9d2545e6a1152 Kishan Mishra <tkishanmkm@gmail.com> 1771266751 +0000	commit: The app isn't starting. Please investigate what could be wrong based on
+3772e84440e587f0b056d60c77b9d2545e6a1152 0ae392aa5d7661242c47105d11b5c819ab302c1c Kishan Mishra <tkishanmkm@gmail.com> 1771267433 +0000	commit: The app isn't starting. Please investigate what could be wrong based on
+0ae392aa5d7661242c47105d11b5c819ab302c1c a82b61194d7aeeb6157e71acfed57aa61ec3127b Kishan Mishra <tkishanmkm@gmail.com> 1771268138 +0000	commit: The app isn't starting. Please investigate what could be wrong based on
+a82b61194d7aeeb6157e71acfed57aa61ec3127b 6f8f825b3f15a3d3f1853189e9b77de7ae103542 Kishan Mishra <tkishanmkm@gmail.com> 1771268519 +0000	commit: The app isn't starting. Please investigate what could be wrong based on
+6f8f825b3f15a3d3f1853189e9b77de7ae103542 ef9e131d94a3a151b78e6cfc973a483d2f900e13 Kishan Mishra <tkishanmkm@gmail.com> 1771269069 +0000	commit: I see this error with the app, reported by NextJS, please fix it. The er
+ef9e131d94a3a151b78e6cfc973a483d2f900e13 80418a81c3ef5055d7b659a6639a45d303c0d01a Kishan Mishra <tkishanmkm@gmail.com> 1771269438 +0000	commit: To make your platform support all major chains, you need to extend your
+80418a81c3ef5055d7b659a6639a45d303c0d01a d9c43b5b75fe8ad9bbc8e3c3edf468f6414bde42 Kishan Mishra <tkishanmkm@gmail.com> 1771269748 +0000	commit: I will give you a complete professional multi-chain architecture explana
+d9c43b5b75fe8ad9bbc8e3c3edf468f6414bde42 d7652564936fb4971174048d693ee72993735e81 Kishan Mishra <tkishanmkm@gmail.com> 1771270141 +0000	commit: User wallet creation in your platform is the process of deterministicall
+d7652564936fb4971174048d693ee72993735e81 548501f1e2267c3443fc6a7de11250dcb9470d96 Kishan Mishra <tkishanmkm@gmail.com> 1771270284 +0000	commit: also changes in p2p-wallet/p2p-wallet/backed and connct to backedna dnfr
+548501f1e2267c3443fc6a7de11250dcb9470d96 049bab8600b38df79daf81c55c6f7d1289654fc2 Kishan Mishra <tkishanmkm@gmail.com> 1771270823 +0000	commit: The app isn't starting. Please investigate what could be wrong based on
+049bab8600b38df79daf81c55c6f7d1289654fc2 b74c03d8c9ebddbe86e6332f07ca0fc170e50ef5 Kishan Mishra <tkishanmkm@gmail.com> 1771271040 +0000	commit: this is a very common issue in custodial systems.
+b74c03d8c9ebddbe86e6332f07ca0fc170e50ef5 cbcba4b3c426e6b8cd59dbd64a21670c819975d5 Kishan Mishra <tkishanmkm@gmail.com> 1771272015 +0000	commit: The app isn't starting. Please investigate what could be wrong based on
+cbcba4b3c426e6b8cd59dbd64a21670c819975d5 7c53a519090494c85a76d9cbd74f3af23cfa7c2d Kishan Mishra <tkishanmkm@gmail.com> 1771272097 +0000	commit: The app isn't starting. Please investigate what could be wrong based on
+7c53a519090494c85a76d9cbd74f3af23cfa7c2d eb171aa58548370e267c60e5865384b5f19834a6 Kishan Mishra <tkishanmkm@gmail.com> 1771272353 +0000	commit: build all
+eb171aa58548370e267c60e5865384b5f19834a6 5b9f3f524d1996be8c89ee6bffe1357d12a55539 Kishan Mishra <tkishanmkm@gmail.com> 1771272595 +0000	commit: Build a production-ready multi-chain custodial crypto wallet system insi
+5b9f3f524d1996be8c89ee6bffe1357d12a55539 db5920880d301b991c5d0af19b96548ad81bf073 Kishan Mishra <tkishanmkm@gmail.com> 1771272678 +0000	commit: The app isn't starting. Please investigate what could be wrong based on
+db5920880d301b991c5d0af19b96548ad81bf073 8461640ce5fd116a958c8b4e95399b591c282b73 Kishan Mishra <tkishanmkm@gmail.com> 1771272859 +0000	commit: Build a production-ready multi-chain wallet frontend and deposit monitor
+8461640ce5fd116a958c8b4e95399b591c282b73 f535bf961ba3ba4bef792bcd74e1d053fed49594 Kishan Mishra <tkishanmkm@gmail.com> 1771273308 +0000	commit: Build a full crypto wallet deposit system using:
+f535bf961ba3ba4bef792bcd74e1d053fed49594 a6a9c36ce75976d05aad022f8b73719004163fa3 Kishan Mishra <tkishanmkm@gmail.com> 1771273572 +0000	commit: Build a complete production-ready crypto wallet system using:
+a6a9c36ce75976d05aad022f8b73719004163fa3 7c515e4a5979d53a8684f903c6bce1c81a18af78 Kishan Mishra <tkishanmkm@gmail.com> 1771273699 +0000	commit: Try fixing this error: `Unhandled Runtime Error: FirebaseError: Firebase
+7c515e4a5979d53a8684f903c6bce1c81a18af78 9cf01ea4f9c620e2e8ef5396d5d479bec5f605c6 Kishan Mishra <tkishanmkm@gmail.com> 1771273781 +0000	commit: Try fixing this error: `Build Error: Failed to compile. Error source: Co
+9cf01ea4f9c620e2e8ef5396d5d479bec5f605c6 6ae2a6fd5deed7b7a58371120c3429f9823246b2 Kishan Mishra <tkishanmkm@gmail.com> 1771274037 +0000	commit: BNB
+6ae2a6fd5deed7b7a58371120c3429f9823246b2 38ccab52189ea254059bcd9b10041a2d56582962 Kishan Mishra <tkishanmkm@gmail.com> 1771280945 +0000	commit: restore
+38ccab52189ea254059bcd9b10041a2d56582962 01c7fdd1dfd2e3d2ee81b99386d0e401ab3f4ae3 Kishan Mishra <tkishanmkm@gmail.com> 1771281093 +0000	commit: in dashboard only coin show that they have balance not show other oin wh
+01c7fdd1dfd2e3d2ee81b99386d0e401ab3f4ae3 8e265c278639cb5c924b0d35f211943a6e1d71aa Kishan Mishra <tkishanmkm@gmail.com> 1771281339 +0000	commit: in admin side admin have to set type adress
+8e265c278639cb5c924b0d35f211943a6e1d71aa fc3f656c152b761c9c9e70c8991cb047b8821489 Kishan Mishra <tkishanmkm@gmail.com> 1771281730 +0000	commit: deposit history and withdrwal history can view
+fc3f656c152b761c9c9e70c8991cb047b8821489 150d8dea03b984e1c7eb1d6158f8efb036a39f64 Kishan Mishra <tkishanmkm@gmail.com> 1771282327 +0000	commit: fix error and only use firestore database
+150d8dea03b984e1c7eb1d6158f8efb036a39f64 89109b1f387d947ce38a4f44d66ec30d43aa51eb Kishan Mishra <tkishanmkm@gmail.com> 1771282535 +0000	commit: transaction fee - for BTC 4$, for USDT bep 20 2$ for trc 20 2$ for erc 2
+89109b1f387d947ce38a4f44d66ec30d43aa51eb db77c5c4db7833e8a6578f1cb959e5b1996fe96f Kishan Mishra <tkishanmkm@gmail.com> 1771282799 +0000	commit: BTC UST ETH LTC arrange in wallet as per balance hig to low
+db77c5c4db7833e8a6578f1cb959e5b1996fe96f 2331ecbbbc7d76cce944abf0484c73d2c2e8398a Kishan Mishra <tkishanmkm@gmail.com> 1771283026 +0000	commit: if users have coin it can be withdrwal from any chqin he want
+2331ecbbbc7d76cce944abf0484c73d2c2e8398a 84aa680673074dd37b1f57d64f57131b168d460f Kishan Mishra <tkishanmkm@gmail.com> 1771283246 +0000	commit: high to low arrangment of coin based on value in fiat
+84aa680673074dd37b1f57d64f57131b168d460f ff3d6f2a408119930e3bbd8a754ae47d61b35dd6 Kishan Mishra <tkishanmkm@gmail.com> 1771283396 +0000	commit: in deposit form when tap deposit a form open showing chain asking amount
+ff3d6f2a408119930e3bbd8a754ae47d61b35dd6 0622f938c89bcf16f611d60848a03535dd0e2c61 Kishan Mishra <tkishanmkm@gmail.com> 1771283438 +0000	commit: remove polygon attrium and base from usdt deposit section
+0622f938c89bcf16f611d60848a03535dd0e2c61 5d63df7254cab72b75ea972405133b811bd019b1 Kishan Mishra <tkishanmkm@gmail.com> 1771283619 +0000	commit: fix this error come in admin side when login
+5d63df7254cab72b75ea972405133b811bd019b1 5ed60af1725b6aa1ff4211684421b41640443d33 Kishan Mishra <tkishanmkm@gmail.com> 1771283844 +0000	commit: when user taps create deposit request first change name only deposit wri
+5ed60af1725b6aa1ff4211684421b41640443d33 cf6339f4b5de2b950c8a4dfaf5451fa0a07d4212 Kishan Mishra <tkishanmkm@gmail.com> 1771284016 +0000	commit: select chain also in BTC ETH LTC by default its BTC ETH LTC
+cf6339f4b5de2b950c8a4dfaf5451fa0a07d4212 ae3ceada578f25c18b94fce348bbfd052b59a921 Kishan Mishra <tkishanmkm@gmail.com> 1771284216 +0000	commit: Try fixing this error: `Unhandled Runtime Error: Error: Element type is
+ae3ceada578f25c18b94fce348bbfd052b59a921 9682e2a1b0a7c1197421fcccc41ea3814000945b Kishan Mishra <tkishanmkm@gmail.com> 1771284413 +0000	commit: same error come fix it
+9682e2a1b0a7c1197421fcccc41ea3814000945b a3b5ce7fcf0cd9f93274409f71cec663a891c699 Kishan Mishra <tkishanmkm@gmail.com> 1771284546 +0000	commit: submit request change name to withdraw make comptaible for mobile device
+a3b5ce7fcf0cd9f93274409f71cec663a891c699 52ddab90842a93abad00e4057c6820ea66093897 Kishan Mishra <tkishanmkm@gmail.com> 1771284663 +0000	commit: Also option to select network in btc eth ltc by default its BTC ETH LTC
+52ddab90842a93abad00e4057c6820ea66093897 e9c4aa227ea10121ee3ffe0024ce5d9b930fe2ac Kishan Mishra <tkishanmkm@gmail.com> 1771286113 +0000	commit: Try fixing this error: `Unhandled Runtime Error: Error: Element type is
+e9c4aa227ea10121ee3ffe0024ce5d9b930fe2ac ba59a8f773efca591a0c0c847d3be1ef00a020b1 Kishan Mishra <tkishanmkm@gmail.com> 1771286831 +0000	commit: Cancellation failed order by is not defined fix it
+ba59a8f773efca591a0c0c847d3be1ef00a020b1 b28ca9970e4c068d9611ceb6c59586e44bdf0822 Kishan Mishra <tkishanmkm@gmail.com> 1771331684 +0000	commit: create deposit request change name to only deposit
+b28ca9970e4c068d9611ceb6c59586e44bdf0822 6b177179d69056ef46bb4c99010f24923dcb35c2 Kishan Mishra <tkishanmkm@gmail.com> 1771332007 +0000	commit: Unhandled Runtime Error
+6b177179d69056ef46bb4c99010f24923dcb35c2 5c6021f71d0d65cf05f3c9e4bff6dd060a61d958 Kishan Mishra <tkishanmkm@gmail.com> 1771332267 +0000	commit: bitcoin Network BTC
+5c6021f71d0d65cf05f3c9e4bff6dd060a61d958 09f1970dc17ad8deeb69da7191ea8a07ff5c2f53 Kishan Mishra <tkishanmkm@gmail.com> 1771332595 +0000	commit: fix this error coming in admin side on dispute section
+09f1970dc17ad8deeb69da7191ea8a07ff5c2f53 23e9e0091bd6eedb20d5db641a7ef5840893ea76 Kishan Mishra <tkishanmkm@gmail.com> 1771333124 +0000	commit: change app name to Tradenance
+23e9e0091bd6eedb20d5db641a7ef5840893ea76 9529e058bebcf9f6e6fdf3ac07c3762565984c19 Kishan Mishra <tkishanmkm@gmail.com> 1771333440 +0000	commit: when dispute awarded to buyer its also show in trade chat by systeme lig
+9529e058bebcf9f6e6fdf3ac07c3762565984c19 e099b997010baf30f648282e42b3d9145257e128 Kishan Mishra <tkishanmkm@gmail.com> 1771333747 +0000	commit: Unhandled Runtime Error
+e099b997010baf30f648282e42b3d9145257e128 e6e85098c7ed9ba4e78c061b4ee275351a850be0 Kishan Mishra <tkishanmkm@gmail.com> 1771334215 +0000	commit: in support
+e6e85098c7ed9ba4e78c061b4ee275351a850be0 5dfd1375eb1258b477f1e8e19fccb6fb2239d9fa Kishan Mishra <tkishanmkm@gmail.com> 1771334480 +0000	commit: Try fixing this error: `Unhandled Runtime Error: FirebaseError: Expected
+5dfd1375eb1258b477f1e8e19fccb6fb2239d9fa 09e2995f795fa66c2839bc87438ce29601223039 Kishan Mishra <tkishanmkm@gmail.com> 1771334984 +0000	commit: fix active status
+09e2995f795fa66c2839bc87438ce29601223039 3b63f22b32130f80531b7ccca430dea68b391810 Kishan Mishra <tkishanmkm@gmail.com> 1771343762 +0000	commit: fix error
+3b63f22b32130f80531b7ccca430dea68b391810 02e05adbaef8910e436d95b00fc84c7c8c01774c Kishan Mishra <tkishanmkm@gmail.com> 1771344491 +0000	commit: trade page fix for window type screen also
+02e05adbaef8910e436d95b00fc84c7c8c01774c 4871a94c60d462f6fa3e301a452f793a9eecd4ee Kishan Mishra <tkishanmkm@gmail.com> 1771344661 +0000	commit: in admin side trade page chat buttom and action not showing for window t
+4871a94c60d462f6fa3e301a452f793a9eecd4ee 5d5b42c4385d793a63cb0a43be03633a955623bd Kishan Mishra <tkishanmkm@gmail.com> 1771344753 +0000	commit: users is unable to login fix it
+5d5b42c4385d793a63cb0a43be03633a955623bd 666ba1783381ee43eaf597b1dccdbcfe2349ba46 Kishan Mishra <tkishanmkm@gmail.com> 1771344887 +0000	commit: this error comes in window side where admin cant see anyother component
+666ba1783381ee43eaf597b1dccdbcfe2349ba46 e5016aeb3b88c1d943ec1db387523f1ee895a5e7 Kishan Mishra <tkishanmkm@gmail.com> 1771345015 +0000	commit: fix this error coming on user side
+e5016aeb3b88c1d943ec1db387523f1ee895a5e7 bb298e423d61af1bcb9bd600a00b1c5993edae04 Kishan Mishra <tkishanmkm@gmail.com> 1771345510 +0000	commit: same issue come in admin side fix it
+bb298e423d61af1bcb9bd600a00b1c5993edae04 b94c4e2ec01a37fbc1c4c29c6d44d307b0884b9a Kishan Mishra <tkishanmkm@gmail.com> 1771550128 +0000	commit: change app name to Paxones every page every where
+b94c4e2ec01a37fbc1c4c29c6d44d307b0884b9a 45d3c8beef9a438350a9108e0e2d420ed21836f6 Kishan Mishra <tkishanmkm@gmail.com> 1771550385 +0000	commit: Admin and user both is unable to login fix error
+45d3c8beef9a438350a9108e0e2d420ed21836f6 144bb8a6b688a817d26087ae97be1e42da33b2c3 Kishan Mishra <tkishanmkm@gmail.com> 1771550758 +0000	commit: in ad page if tapping info info come is scrollable and a X buttom on top
+144bb8a6b688a817d26087ae97be1e42da33b2c3 12ceb5f2c95f0464e7419476eb0e60681f02eab1 Kishan Mishra <tkishanmkm@gmail.com> 1771551078 +0000	commit: Trade volume fix If user trade in another currency like INR so trade vol
+12ceb5f2c95f0464e7419476eb0e60681f02eab1 a507af0c804ee57460104edcbf44a64fe8156d46 Kishan Mishra <tkishanmkm@gmail.com> 1771551350 +0000	commit: Last seen or Active detail fix show in all page fix like users/username
+a507af0c804ee57460104edcbf44a64fe8156d46 343685649eb9efae8e183a2100fd4d58e9843c9c Kishan Mishra <tkishanmkm@gmail.com> 1771551459 +0000	commit: fix feedback view If feedback not for user no feedback section show , On
+343685649eb9efae8e183a2100fd4d58e9843c9c acf25faaa1c033ce08153beef7f90104e1b0c115 Kishan Mishra <tkishanmkm@gmail.com> 1771551734 +0000	commit: in users/username in active ad of usrs the ad show of users but Active o
+acf25faaa1c033ce08153beef7f90104e1b0c115 53bc0a67606c50d88a070e03968c1d614bf116e8 Kishan Mishra <tkishanmkm@gmail.com> 1771551914 +0000	commit: in feedback section trade id not showing all is ok but not show trade id
+53bc0a67606c50d88a070e03968c1d614bf116e8 af336f7a6b591414c15144d95ed60b74195ce4c6 Kishan Mishra <tkishanmkm@gmail.com> 1771552049 +0000	commit: in users/usernam in p2p active ad the ad show of users where Username is
+af336f7a6b591414c15144d95ed60b74195ce4c6 083bccf80caafdce5d71f56a8afc67341a08bae6 Kishan Mishra <tkishanmkm@gmail.com> 1771552088 +0000	commit: remove trade id from Feedback section on users/username
+083bccf80caafdce5d71f56a8afc67341a08bae6 dc2334240cb082f5d8565b336e2055de52f1e9f0 Kishan Mishra <tkishanmkm@gmail.com> 1771552500 +0000	commit: in terms of service or other page showing in light mode text not showing
+dc2334240cb082f5d8565b336e2055de52f1e9f0 75d06f33f8817648903bb8974cd2c6e5ba9e036d Kishan Mishra <tkishanmkm@gmail.com> 1771553814 +0000	commit: Try fixing this error: `Unhandled Runtime Error: Error: useFormField sho
+75d06f33f8817648903bb8974cd2c6e5ba9e036d ad1d5faed68e8b2f91fd482e233d6a97515c93c3 Kishan Mishra <tkishanmkm@gmail.com> 1771553982 +0000	commit: when users deposit in admin side its show with all detail including txn
+ad1d5faed68e8b2f91fd482e233d6a97515c93c3 ed21514174dfd0b64ac0197a358a1f79e0d6b502 Kishan Mishra <tkishanmkm@gmail.com> 1771554156 +0000	commit: in adminnaryan/settings/deposit-address-sets option of 20 sets to add ad
+ed21514174dfd0b64ac0197a358a1f79e0d6b502 9b9c8799fcb080d11d88696156c52e2569c4486e Kishan Mishra <tkishanmkm@gmail.com> 1771554283 +0000	commit: remove seed data type
+9b9c8799fcb080d11d88696156c52e2569c4486e 035254a23f6304255feb404bb6c44c24b7c1f638 Kishan Mishra <tkishanmkm@gmail.com> 1771554486 +0000	commit: fix error in /adminnarayan/settings/deposit-address-sets
+035254a23f6304255feb404bb6c44c24b7c1f638 27bdab079864ed052ee0ee3bb7ab266e41c828e2 Kishan Mishra <tkishanmkm@gmail.com> 1771554634 +0000	commit: Try fixing this error: `Unhandled Runtime Error: Error: `AccordionHeader
+27bdab079864ed052ee0ee3bb7ab266e41c828e2 2336802e84c72806e0804dc27603cfd77646dbdc Kishan Mishra <tkishanmkm@gmail.com> 1771554968 +0000	commit: on user side apperance logo not showing fix it
+2336802e84c72806e0804dc27603cfd77646dbdc a06df425970d7e927943c5df869154e8d1fda7ac Kishan Mishra <tkishanmkm@gmail.com> 1771555531 +0000	commit: when users deposit
+a06df425970d7e927943c5df869154e8d1fda7ac ecc31e022cf2624684729cbc5ae6497990c759b5 Kishan Mishra <tkishanmkm@gmail.com> 1771555620 +0000	commit: Try fixing this error: `Unhandled Runtime Error: FirebaseError: Firebase
+ecc31e022cf2624684729cbc5ae6497990c759b5 2f7efb1b400553583415f7e1008ea76848908bfa Kishan Mishra <tkishanmkm@gmail.com> 1771555916 +0000	commit: Unhandled Runtime Error
+2f7efb1b400553583415f7e1008ea76848908bfa da43a094b655c20fc31b46ac59db3defc08e452c Kishan Mishra <tkishanmkm@gmail.com> 1771556587 +0000	commit: withdrwal cancellation failed
+da43a094b655c20fc31b46ac59db3defc08e452c 494e17cddcf6298eb42b7453d6169ebd4a01138f Kishan Mishra <tkishanmkm@gmail.com> 1771556702 +0000	commit: in wallets page in users side
+494e17cddcf6298eb42b7453d6169ebd4a01138f 5c5c8dc4281fac8990b666c2d879f1751b7d4b07 Kishan Mishra <tkishanmkm@gmail.com> 1771557020 +0000	commit: no users allot wallets
+5c5c8dc4281fac8990b666c2d879f1751b7d4b07 e3de832c1e4748854343270c041b05c71263d05f Kishan Mishra <tkishanmkm@gmail.com> 1771557156 +0000	commit: payment window make fill and time show in big
+e3de832c1e4748854343270c041b05c71263d05f c162845605f45e787ee237c78552d39fb740e741 Kishan Mishra <tkishanmkm@gmail.com> 1771557412 +0000	commit: withdrwal cancellation is failed
+c162845605f45e787ee237c78552d39fb740e741 bcf28c263d5e3a6e270aaa0b15b9afe64ea62c26 Kishan Mishra <tkishanmkm@gmail.com> 1771557600 +0000	commit: remove all feature or system seed wallets only admin approval depost and
+bcf28c263d5e3a6e270aaa0b15b9afe64ea62c26 c708506cbf31e4f124f6dff277f410cc864bd901 Kishan Mishra <tkishanmkm@gmail.com> 1771557996 +0000	commit: at time of signup securty question and answer ask and its show in admin
+c708506cbf31e4f124f6dff277f410cc864bd901 c03415683cd4a4c864db25346dd75188c1237d4a Kishan Mishra <tkishanmkm@gmail.com> 1771558088 +0000	commit: deposit in wallets
+c03415683cd4a4c864db25346dd75188c1237d4a 4444c72cb2415fa7856aee6a579b40c975db6724 Kishan Mishra <tkishanmkm@gmail.com> 1771558219 +0000	commit: deposit history in not showing error fix it
+4444c72cb2415fa7856aee6a579b40c975db6724 8bd2e273907bb9e467f72ee318075e9997a41749 Kishan Mishra <tkishanmkm@gmail.com> 1771558885 +0000	commit: deposit history not showing fix
+8bd2e273907bb9e467f72ee318075e9997a41749 3430d879c7b8afa70533704e94542544be9549c6 Kishan Mishra <tkishanmkm@gmail.com> 1771824407 +0000	commit: fix trade chat,
+3430d879c7b8afa70533704e94542544be9549c6 0790b13bfe3d5f52f363f40c958853c6bf99c323 Kishan Mishra <tkishanmkm@gmail.com> 1771824590 +0000	commit: in trade chat message sending footer part showing blank in window type m
+0790b13bfe3d5f52f363f40c958853c6bf99c323 fd03799f86cdb6df69fbb2de3a5ee1cd405acd69 Kishan Mishra <tkishanmkm@gmail.com> 1771824755 +0000	commit: same error footer part completly blank no any message sending bar and de
+fd03799f86cdb6df69fbb2de3a5ee1cd405acd69 86845bce055f7d17178717353821c7d0bdb88371 Kishan Mishra <tkishanmkm@gmail.com> 1771824895 +0000	commit: same issue showing fix it buttom section completly blank
+86845bce055f7d17178717353821c7d0bdb88371 f39ca063108da76c57321df43f45f50341f09b72 Kishan Mishra <tkishanmkm@gmail.com> 1771825061 +0000	commit: check in image upload buttom part not seen in window mode fix it error
+f39ca063108da76c57321df43f45f50341f09b72 221c91363b55621dfb0951f702c15dcb3f708068 Kishan Mishra <tkishanmkm@gmail.com> 1771825129 +0000	commit: same error fix error
+221c91363b55621dfb0951f702c15dcb3f708068 13d56a50c4e2640176effc420f8a04070de8838c Kishan Mishra <tkishanmkm@gmail.com> 1771825266 +0000	commit: in window type screen footer part completly blank fix error
+13d56a50c4e2640176effc420f8a04070de8838c 089efe2abc60e75e4d6d50241ad38d9ba695c4bf Kishan Mishra <tkishanmkm@gmail.com> 1771825405 +0000	commit: same error coming fix error
+089efe2abc60e75e4d6d50241ad38d9ba695c4bf 78440a2f7050eb14db6267ed752726dbf17a457a Kishan Mishra <tkishanmkm@gmail.com> 1771825796 +0000	commit: withdrwal cancellation is failing
+78440a2f7050eb14db6267ed752726dbf17a457a 82eefdf83b3d17ab27344fce446858c7084e5779 Kishan Mishra <tkishanmkm@gmail.com> 1771825930 +0000	commit: In wallet also crypto amount and value in selected fiat y users shows
+82eefdf83b3d17ab27344fce446858c7084e5779 4d8742b6d15064b1e7f98ef316e65e9b94ccd4d3 Kishan Mishra <tkishanmkm@gmail.com> 1771826204 +0000	commit: in top of wallets page total balance showing
+4d8742b6d15064b1e7f98ef316e65e9b94ccd4d3 7e32dd2a6003915de0be21bccac732f3c1710454 Kishan Mishra <tkishanmkm@gmail.com> 1771826455 +0000	commit: if 3 hr over and user not marked deposit after entering transaction hash
+7e32dd2a6003915de0be21bccac732f3c1710454 4f876ac1104d05d1c37f5e2c9a74f38c9d1f161f Kishan Mishra <tkishanmkm@gmail.com> 1771826743 +0000	commit: if Request Expired
+4f876ac1104d05d1c37f5e2c9a74f38c9d1f161f 7818eb2844070034fe1d84db3f0a2a9b64778920 Kishan Mishra <tkishanmkm@gmail.com> 1771827044 +0000	commit: fix error Confirm Your Deposit
+7818eb2844070034fe1d84db3f0a2a9b64778920 bc9cc45a00a14a44cf5c96a455df008774d6d5d0 Kishan Mishra <tkishanmkm@gmail.com> 1771827242 +0000	commit: In withdraw form for usdt
+bc9cc45a00a14a44cf5c96a455df008774d6d5d0 5f82eae7e0df0d7a025d6be29c653eddc8d436d2 Kishan Mishra <tkishanmkm@gmail.com> 1771827461 +0000	commit: fee is not showing and deducting in usdt
+5f82eae7e0df0d7a025d6be29c653eddc8d436d2 bf2f241e15b849f9d57485813312338d01ebc5f0 Kishan Mishra <tkishanmkm@gmail.com> 1771827752 +0000	commit: in withdrwal page
+bf2f241e15b849f9d57485813312338d01ebc5f0 e10ec75cadf0ef87c037ab4348da9c29d753333f Kishan Mishra <tkishanmkm@gmail.com> 1771827876 +0000	commit: in wallte page
+e10ec75cadf0ef87c037ab4348da9c29d753333f a5b9fe9f3b74e8f7555be4057e30cb9e7c924c23 Kishan Mishra <tkishanmkm@gmail.com> 1771828101 +0000	commit: moved the important withdrawal instructions to the top of the form for b
+a5b9fe9f3b74e8f7555be4057e30cb9e7c924c23 bf608cba7d248c00bd08b59edb2d2781d313c16c Kishan Mishra <tkishanmkm@gmail.com> 1771828395 +0000	commit: same error its nt scrolling
+bf608cba7d248c00bd08b59edb2d2781d313c16c f3542ad90c63b397661f74b7ca5323b17413f81f Kishan Mishra <tkishanmkm@gmail.com> 1771828609 +0000	commit: its not scrolling again fix andchange name request withdrwal to only wit
+f3542ad90c63b397661f74b7ca5323b17413f81f 7776f24f012f9a60741f61de5f40d5dc606d0d2b Kishan Mishra <tkishanmkm@gmail.com> 1771828900 +0000	commit: fix that error withdrwal cancelling
+7776f24f012f9a60741f61de5f40d5dc606d0d2b 9d8118b4e60ec8a50556b1d288cdb214ca224eab Kishan Mishra <tkishanmkm@gmail.com> 1771829149 +0000	commit: usdt that i cancel showin locked in trades but its also in available
+9d8118b4e60ec8a50556b1d288cdb214ca224eab 5bbe45e9ad1ecc52942f7790209f3349487d64d9 Kishan Mishra <tkishanmkm@gmail.com> 1771829240 +0000	commit: Try fixing this error: `Unhandled Runtime Error: ReferenceError: SubmitT
+5bbe45e9ad1ecc52942f7790209f3349487d64d9 0a85531a67b48f1bc29f73a04986d4ff475ee8d1 Kishan Mishra <tkishanmkm@gmail.com> 1771829557 +0000	commit: Build Error
+0a85531a67b48f1bc29f73a04986d4ff475ee8d1 3a1922d9ad94023fa717e3eb9749ab25520daaea Kishan Mishra <tkishanmkm@gmail.com> 1771829755 +0000	commit: fix error in wallet page where
+3a1922d9ad94023fa717e3eb9749ab25520daaea 454f7a6b64c2ca1f606fff78d4d95081960b66a4 Kishan Mishra <tkishanmkm@gmail.com> 1771829930 +0000	commit: Try fixing this error: `Unhandled Runtime Error: Error: Maximum update d
+454f7a6b64c2ca1f606fff78d4d95081960b66a4 d15bfa7f3e1c3179dbda7eecb0b8411f10cbe81c Kishan Mishra <tkishanmkm@gmail.com> 1771830113 +0000	commit: deposit payment window not creating fix so 3 hr time give and in reverse
+d15bfa7f3e1c3179dbda7eecb0b8411f10cbe81c bddedec52befdb83c7217b8ee7b95f59457b8564 Kishan Mishra <tkishanmkm@gmail.com> 1771830347 +0000	commit: corrected the useCountdown hook to properly initialize its state with th
+bddedec52befdb83c7217b8ee7b95f59457b8564 12dbaa0f0ab54ae36a3d28901c379d3a6a393fe5 Kishan Mishra <tkishanmkm@gmail.com> 1771831934 +0000	commit: in deposit payment window remove this Confirm Your Deposit Your deposit
+12dbaa0f0ab54ae36a3d28901c379d3a6a393fe5 f81f16ced9bb6416ca202fdc19b94cfb6a310539 Kishan Mishra <tkishanmkm@gmail.com> 1771832167 +0000	commit: crypto logo crypto name crypto amount crypto network send exactly mentio
+f81f16ced9bb6416ca202fdc19b94cfb6a310539 c62eef93f3ac6c050f5bacbde7b838e8af1cce73 Kishan Mishra <tkishanmkm@gmail.com> 1771832341 +0000	commit: 'use client';
+c62eef93f3ac6c050f5bacbde7b838e8af1cce73 a902f6deddbcb8837c024cdc99a0ba5805833328 Kishan Mishra <tkishanmkm@gmail.com> 1771832582 +0000	commit: in deposit payment window
+a902f6deddbcb8837c024cdc99a0ba5805833328 9a660bd737d777ebaf5d6b0d5e783d9163d90338 Kishan Mishra <tkishanmkm@gmail.com> 1771833281 +0000	commit: On the Transfer page, USDT is showing in two options — one with 4 USDT a
+9a660bd737d777ebaf5d6b0d5e783d9163d90338 a187379106cedf4bd4ae04d6da57ad76f9c67cfa Kishan Mishra <tkishanmkm@gmail.com> 1771833545 +0000	commit: The network or chain address should only be required at the time of depo
+a187379106cedf4bd4ae04d6da57ad76f9c67cfa 7b562c74c6f5610077147f71d7595a67200f1fb2 Kishan Mishra <tkishanmkm@gmail.com> 1771833690 +0000	commit: fix this error
+7b562c74c6f5610077147f71d7595a67200f1fb2 3fb64c5bcb0ad85375aceffa92aae5c7268ddc3b Kishan Mishra <tkishanmkm@gmail.com> 1771834236 +0000	commit: designed the deposit dialog to match the clean, dark-themed layout you p
+3fb64c5bcb0ad85375aceffa92aae5c7268ddc3b 16b89223cef20f6a814377007b22b756eb47c306 Kishan Mishra <tkishanmkm@gmail.com> 1771834405 +0000	commit: Tx ID:
+16b89223cef20f6a814377007b22b756eb47c306 d6baa2684d26e42c5e9be50ad837c31d1d5af437 Kishan Mishra <tkishanmkm@gmail.com> 1771834462 +0000	commit: Try fixing this error: `Unhandled Runtime Error: ReferenceError: useFire
+d6baa2684d26e42c5e9be50ad837c31d1d5af437 621c80fd776566a95e480642b8dd65e2dd90f810 Kishan Mishra <tkishanmkm@gmail.com> 1771834695 +0000	commit: fix that netwrok showing loading
+621c80fd776566a95e480642b8dd65e2dd90f810 c660acdaaaa1b8d80c84f2f055f9b07375f15468 Kishan Mishra <tkishanmkm@gmail.com> 1771834909 +0000	commit: Transfers history not showing fix its so sent amount to users and receiv
+c660acdaaaa1b8d80c84f2f055f9b07375f15468 9abe376043d8ecce04424b95ce57c2f206c42dc3 Kishan Mishra <tkishanmkm@gmail.com> 1771838838 +0000	commit: fix in eth and ltc
+9abe376043d8ecce04424b95ce57c2f206c42dc3 97642553c33536840bfc6ffd2fc49817b73e053f Kishan Mishra <tkishanmkm@gmail.com> 1771838974 +0000	commit: Try fixing this error: `Build Error: Failed to compile. Error source: sr
+97642553c33536840bfc6ffd2fc49817b73e053f 961db59c94e587ce5ce36181df0b2db8b4a0b096 Kishan Mishra <tkishanmkm@gmail.com> 1771839109 +0000	commit: src/app/adminnarayan/(panel)/escrow/page.tsx
+961db59c94e587ce5ce36181df0b2db8b4a0b096 d66412e1f6104bf831b4049d1e41b1657463c01d Kishan Mishra <tkishanmkm@gmail.com> 1771839587 +0000	commit: at time of withdrwal
+d66412e1f6104bf831b4049d1e41b1657463c01d b214df8f5730c78de9c87a01cd29231d26d0caab Kishan Mishra <tkishanmkm@gmail.com> 1771840035 +0000	commit: Remove all wallet functions related to seed phrase wallets.
+b214df8f5730c78de9c87a01cd29231d26d0caab 08fa17df2b8aa00ed173610abd7cc6aa195f08ab Kishan Mishra <tkishanmkm@gmail.com> 1771840276 +0000	commit: no wallets system works
+08fa17df2b8aa00ed173610abd7cc6aa195f08ab 5587c1869dd19a94fe35b0ab72c2f4913477a534 Kishan Mishra <tkishanmkm@gmail.com> 1771840521 +0000	commit: Try fixing this error: `Unhandled Runtime Error: ReferenceError: AlertDi
+5587c1869dd19a94fe35b0ab72c2f4913477a534 9c1d3ac1187f63765936220fec072d57f23ae292 Kishan Mishra <tkishanmkm@gmail.com> 1771840762 +0000	commit: db is not defined error comes when trying cancel trade fix it
+9c1d3ac1187f63765936220fec072d57f23ae292 6b30bd4900e7c1cf82741e1a18431bac4daa4ae5 Kishan Mishra <tkishanmkm@gmail.com> 1771840874 +0000	commit: when trade is cancelled a system message comes in trade chat showing tra
+6b30bd4900e7c1cf82741e1a18431bac4daa4ae5 57aad13bd4f006dbcf31e5be6ecc7bca4f5d14f6 Kishan Mishra <tkishanmkm@gmail.com> 1771841355 +0000	commit: when trade is completed a system message comes in trade chat showing tra
+57aad13bd4f006dbcf31e5be6ecc7bca4f5d14f6 be7b8c478d851b91208b35671eb05f67b64e79a9 Kishan Mishra <tkishanmkm@gmail.com> 1772216190 +0000	commit: Try fixing this error: `Build Error: Failed to compile. Error source: sr
+be7b8c478d851b91208b35671eb05f67b64e79a9 c68660ec6a62bb92f6d09a84a0265723270a5c36 Kishan Mishra <tkishanmkm@gmail.com> 1772216320 +0000	commit: Build Error
+c68660ec6a62bb92f6d09a84a0265723270a5c36 adff45b7cbdcee4a88c32e44934390ab5b585071 Kishan Mishra <tkishanmkm@gmail.com> 1772216458 +0000	commit: Try fixing this error: `Build Error: Failed to compile. Error source: sr
+adff45b7cbdcee4a88c32e44934390ab5b585071 953ed7b7ea1f3b5ce2fe3ffdad692fe52209ca45 Kishan Mishra <tkishanmkm@gmail.com> 1772216591 +0000	commit: Try fixing this error: `Build Error: Failed to compile. Error source: sr
+953ed7b7ea1f3b5ce2fe3ffdad692fe52209ca45 2ae192d9616a417066a1a4a6c5e23ac98d720070 Kishan Mishra <tkishanmkm@gmail.com> 1772216825 +0000	commit: Build Error
+2ae192d9616a417066a1a4a6c5e23ac98d720070 4f10392723dae6573e5a322131fceaa021317988 Kishan Mishra <tkishanmkm@gmail.com> 1772216909 +0000	commit: src/app/adminnarayan/(panel)/users/[username]/page.tsx
+4f10392723dae6573e5a322131fceaa021317988 b555e6b8ed3a6db5611b7b956aaf6ddf830cd308 Kishan Mishra <tkishanmkm@gmail.com> 1773133086 +0000	commit: When USER have funds in BTC USDT or any crypto on any chain and that is
+b555e6b8ed3a6db5611b7b956aaf6ddf830cd308 f40346aa2ea7dee351e25e048e0f85c904a6dc9f Kishan Mishra <tkishanmkm@gmail.com> 1773133301 +0000	commit: fix error Build Error
+f40346aa2ea7dee351e25e048e0f85c904a6dc9f 111778b05de79c03e9c81c13fbe8edab81a2b6cc Kishan Mishra <tkishanmkm@gmail.com> 1773133821 +0000	commit: Try fixing this error: `Build Error: Failed to compile. Error source: sr
+111778b05de79c03e9c81c13fbe8edab81a2b6cc 0b882202f4ac7e67a42d2020fcf82eaf1a5fdcd9 Kishan Mishra <tkishanmkm@gmail.com> 1773133966 +0000	commit: Build Error
+0b882202f4ac7e67a42d2020fcf82eaf1a5fdcd9 e726eb9033cd3b546a8e4cf38e14ff2cb33f1937 Kishan Mishra <tkishanmkm@gmail.com> 1773134627 +0000	commit: Try fixing this error: `Build Error: Failed to compile. Error source: sr
+e726eb9033cd3b546a8e4cf38e14ff2cb33f1937 0bb604c75a14797a4627455b2d1ed5908ac891a3 Kishan Mishra <tkishanmkm@gmail.com> 1773134684 +0000	commit: Build Error
+0bb604c75a14797a4627455b2d1ed5908ac891a3 71fa0d5204a42b308e72e5c41e7da196f56d2809 Kishan Mishra <tkishanmkm@gmail.com> 1773134848 +0000	commit: Try fixing this error: `Build Error: Failed to compile. Error source: sr
+71fa0d5204a42b308e72e5c41e7da196f56d2809 82b2d282a3e701cf82d8ca2181e67fa41d27be65 Kishan Mishra <tkishanmkm@gmail.com> 1773135021 +0000	commit: Try fixing this error: `Build Error: Failed to compile. Error source: sr
+82b2d282a3e701cf82d8ca2181e67fa41d27be65 35097a58fd832e04179f1f9466a5cd1958705d56 Kishan Mishra <tkishanmkm@gmail.com> 1773135136 +0000	commit: Try fixing this error: `Build Error: Failed to compile. Error source: sr
+35097a58fd832e04179f1f9466a5cd1958705d56 35fad0baccd18282872c420e21800cf44b71d9c6 Kishan Mishra <tkishanmkm@gmail.com> 1773135567 +0000	commit: Delete permanantly this adminnarayan/(panel) and also update in layout a
+35fad0baccd18282872c420e21800cf44b71d9c6 b4c6c51bc08322c006f57dc123c2e0780afacedb Kishan Mishra <tkishanmkm@gmail.com> 1773135650 +0000	commit: Try fixing this error: `Build Error: Failed to compile. Error source: sr
+b4c6c51bc08322c006f57dc123c2e0780afacedb beb6985647303e957c7c6437ef8a3f8424cf7597 Kishan Mishra <tkishanmkm@gmail.com> 1773157425 +0000	commit: I see this error with the app, reported by NextJS, please fix it. The er
+beb6985647303e957c7c6437ef8a3f8424cf7597 ef58b82b29f6fe263dfed6d055db51138d0931af Kishan Mishra <tkishanmkm@gmail.com> 1773157631 +0000	commit: Build Error
+ef58b82b29f6fe263dfed6d055db51138d0931af a67abf3bc4502a28e1bfde0852728490342d5649 Kishan Mishra <tkishanmkm@gmail.com> 1773158043 +0000	commit: Try fixing this error: `Build Error: Failed to compile. Error source: sr
+a67abf3bc4502a28e1bfde0852728490342d5649 dc81e88e609999c92632c9c95aab89efcbf8bbb2 Kishan Mishra <tkishanmkm@gmail.com> 1773159248 +0000	commit: I see this error with the app, reported by NextJS, please fix it. The er
+dc81e88e609999c92632c9c95aab89efcbf8bbb2 45466649dcc3590b39af0326c5a5050ac9ff1f1e Kishan Mishra <tkishanmkm@gmail.com> 1773245478 +0000	commit: Fix the Next.js routing conflict causing the build error. The project cu
+45466649dcc3590b39af0326c5a5050ac9ff1f1e 40272d1d1386586a3b26dd5aac8f609ca69f40f1 Kishan Mishra <tkishanmkm@gmail.com> 1773245590 +0000	commit: I see this error with the app, reported by NextJS, please fix it. The er
+40272d1d1386586a3b26dd5aac8f609ca69f40f1 7f491632fc828f61130ce2020a146b54d02bd51f Kishan Mishra <tkishanmkm@gmail.com> 1773249388 +0000	commit: Try fixing this error: `Build Error: Failed to compile. Error source: sr
+7f491632fc828f61130ce2020a146b54d02bd51f 79331b835b3d117d98cff6c49aec33ab2e9708ab Kishan Mishra <tkishanmkm@gmail.com> 1773249550 +0000	commit: Try fixing this error: `Build Error: Failed to compile. Error source: sr
+79331b835b3d117d98cff6c49aec33ab2e9708ab 9425ed6468cbf756f1757aa12016e70595a68274 Kishan Mishra <tkishanmkm@gmail.com> 1773249907 +0000	commit: same error fix
+9425ed6468cbf756f1757aa12016e70595a68274 86b0b0faa0ecec35d518ee171ca8ab9201b102e5 Kishan Mishra <tkishanmkm@gmail.com> 1773250114 +0000	commit: same error only one path remove and delete parallel path
+86b0b0faa0ecec35d518ee171ca8ab9201b102e5 5b0dfebc77ea8ed1c0b672366bc12bbe77675572 Kishan Mishra <tkishanmkm@gmail.com> 1773250247 +0000	commit: same error delete this path src/app/adminnarayan/(panel)/dashboard/page.
+5b0dfebc77ea8ed1c0b672366bc12bbe77675572 9e97300057cb0a9cceb3b84a3a573c08bbd7b2c1 Kishan Mishra <tkishanmkm@gmail.com> 1773250781 +0000	commit: I see this error with the app, reported by NextJS, please fix it. The er
+9e97300057cb0a9cceb3b84a3a573c08bbd7b2c1 4f562e8d7d0ec0a47441a4af92ccb48b608278c0 Kishan Mishra <tkishanmkm@gmail.com> 1773253553 +0000	commit: do change
+4f562e8d7d0ec0a47441a4af92ccb48b608278c0 a7b258be09f322282a0b82802bdb22b8fae130e2 Kishan Mishra <tkishanmkm@gmail.com> 1773255599 +0000	commit: I see this error with the app, reported by NextJS, please fix it. The er
+a7b258be09f322282a0b82802bdb22b8fae130e2 e8f7d89e39e81225cc538c34c35424626e3a0b75 Kishan Mishra <tkishanmkm@gmail.com> 1773255774 +0000	commit: Try fixing this error: `Build Error: Failed to compile. Error source: ./
+e8f7d89e39e81225cc538c34c35424626e3a0b75 dcfdff25591a90c05ca79239b5901bf290de10f9 Kishan Mishra <tkishanmkm@gmail.com> 1773256733 +0000	commit: I see this error with the app, reported by NextJS, please fix it. The er
+dcfdff25591a90c05ca79239b5901bf290de10f9 ed6d1fbae0f9ededfacc4d38dcaa044917660798 Kishan Mishra <tkishanmkm@gmail.com> 1773257265 +0000	commit: Try fixing this error: `Build Error: Failed to compile. Error source: ./
+ed6d1fbae0f9ededfacc4d38dcaa044917660798 daccd90e42c9d898e0c78912e968e8ca5061713c Kishan Mishra <tkishanmkm@gmail.com> 1774047523 +0000	commit: completly delete src/app/adminnarayan/(panel) and layout of that path co
+daccd90e42c9d898e0c78912e968e8ca5061713c ed2a2675fcf562a067e7ef49bd0d1a590640338f Kishan Mishra <tkishanmkm@gmail.com> 1774048809 +0000	commit: I see this error with the app, reported by NextJS, please fix it. The er
+ed2a2675fcf562a067e7ef49bd0d1a590640338f 78ca612fd109e3ddeeaac4c157ac6f88b4acc853 Kishan Mishra <tkishanmkm@gmail.com> 1774049296 +0000	commit: src/app/adminnarayan/(panel) i delete this path and all pages inside rem
+78ca612fd109e3ddeeaac4c157ac6f88b4acc853 4da4021cb760d2dbd0cd5257797bc9d048c55f76 Kishan Mishra <tkishanmkm@gmail.com> 1774050157 +0000	commit: src/app/adminnarayan/(panel) files i deleted dont regrentae i edit and d
+4da4021cb760d2dbd0cd5257797bc9d048c55f76 fddbc1fd552f9410e4bc480990786a039fa74f3b Kishan Mishra <tkishanmkm@gmail.com> 1774050486 +0000	commit: Build Error
+fddbc1fd552f9410e4bc480990786a039fa74f3b 0d8cecb14d62c6236c2d16051f63e66aec6fba5c Kishan Mishra <tkishanmkm@gmail.com> 1774050779 +0000	commit: remove and delete and diconnect to firebase project
+0d8cecb14d62c6236c2d16051f63e66aec6fba5c fe2c3c254c28e5e8ad13925f6b6197f0eff25f83 Kishan Mishra <tkishanmkm@gmail.com> 1774051039 +0000	commit: remove and delete and diconnect to firebase project firebase database fi
+fe2c3c254c28e5e8ad13925f6b6197f0eff25f83 239a9833d3e77de3de501b1356d292df21dcba9c Kishan Mishra <tkishanmkm@gmail.com> 1774051226 +0000	commit: Terms of Service
+239a9833d3e77de3de501b1356d292df21dcba9c a379945d7c7e9c8f807cc7c4a0b14c47aadb008d Kishan Mishra <tkishanmkm@gmail.com> 1774051484 +0000	commit: in terms of service and privacy policy
+a379945d7c7e9c8f807cc7c4a0b14c47aadb008d 90db06b5fbc81d16896fafb7e4b13abea282a2ed Kishan Mishra <tkishanmkm@gmail.com> 1774051889 +0000	commit: trade failed seller has insufficient funds
+90db06b5fbc81d16896fafb7e4b13abea282a2ed c3f53be87c352bc5c2154a0d593682432a165c18 Kishan Mishra <tkishanmkm@gmail.com> 1774052221 +0000	commit: chain is asking only at time of deposit and withdrwal
+c3f53be87c352bc5c2154a0d593682432a165c18 34bf1c3f3f54d24e61e946d72299118c42554f95 Kishan Mishra <tkishanmkm@gmail.com> 1774052407 +0000	commit: fix that balance in crypto not showing wallet
+34bf1c3f3f54d24e61e946d72299118c42554f95 34bf1c3f3f54d24e61e946d72299118c42554f95 Kishan Mishra <tkishanmkm@gmail.com> 1788095745 +0000	Branch: renamed refs/heads/main to refs/heads/main
+34bf1c3f3f54d24e61e946d72299118c42554f95 1ace67a8a8b0b82298087805aa33ae4cb137dc80 Kishan Mishra <tkishanmkm@gmail.com> 1788097144 +0000	commit: Clean repository for Bolt migration
