@@ -1,4 +1,8 @@
 {
-  "name": "studio-426151189",
-  "description": "App imported from Firebase Studio"
+  "name": "Paxones - Secure P2P Coin Trading",
+  "description": "A full-featured, production-quality Peer-to-Peer (P2P) coin trading platform with an escrow system.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
 }

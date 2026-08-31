@@ -40,6 +40,7 @@ import { MoreHorizontal, Check, X, Search, Copy } from "lucide-react";
 import type { Withdrawal } from "@/lib/types";
 import { useToast } from "@/hooks/use-toast";
 import { approveWithdrawal, declineWithdrawal } from "@/lib/admin";
+import { supabase } from "@/lib/supabase/client";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -230,13 +231,59 @@ export default function AdminWithdrawalsPage() {
 
 
   const handleApprove = async () => {
-    if (!firestore || !selectedWithdrawal || !user) return;
+    if (!selectedWithdrawal) return;
     try {
-      await approveWithdrawal(firestore, selectedWithdrawal, user.uid);
-      toast({ title: "Withdrawal Approved", description: `User ${selectedWithdrawal.userDisplayName}'s locked balance has been debited.` });
-      setAllWithdrawals(withdrawals => withdrawals?.map(w => w.id === selectedWithdrawal.id ? {...w, status: 'approved'} : w) || null);
+      // 1. Fetch Supabase session token if available
+      let token = "";
+      try {
+        const { data: sessionData } = await supabase.auth.getSession();
+        token = sessionData.session?.access_token || "";
+      } catch (err) {
+        console.warn("Could not retrieve Supabase session token:", err);
+      }
+
+      // 2. Call admin approval API route
+      let apiSucceeded = false;
+      if (token) {
+        const res = await fetch('/api/admin/withdrawals/approve', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`,
+          },
+          body: JSON.stringify({ withdrawalId: selectedWithdrawal.id }),
+        });
+
+        const data = await res.json().catch(() => ({}));
+
+        if (!res.ok) {
+          // If API returns an error response, raise it
+          throw new Error(data.error || `Server responded with status ${res.status}`);
+        }
+
+        apiSucceeded = true;
+      }
+
+      // 3. Keep Firestore admin fallback in sync if firestore and user exist
+      if (!apiSucceeded && firestore && user) {
+        await approveWithdrawal(firestore, selectedWithdrawal, user.uid);
+      }
+
+      toast({
+        title: "Withdrawal Approved",
+        description: `Withdrawal for ${selectedWithdrawal.userDisplayName} (${selectedWithdrawal.amount} ${selectedWithdrawal.crypto}) has been approved.`,
+      });
+
+      // Update UI table row status
+      setAllWithdrawals(withdrawals =>
+        withdrawals?.map(w => (w.id === selectedWithdrawal.id ? { ...w, status: 'approved' } : w)) || null
+      );
     } catch (e: any) {
-      toast({ variant: "destructive", title: "Approval Failed", description: e.message });
+      toast({
+        variant: "destructive",
+        title: "Approval Failed",
+        description: e.message || "Failed to approve withdrawal.",
+      });
     }
     setIsApproveAlertOpen(false);
     setSelectedWithdrawal(null);

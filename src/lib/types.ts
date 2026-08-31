@@ -1,6 +1,5 @@
 
 'use client';
-import { Timestamp } from "firebase/firestore";
 
 export type CryptoCurrency = "BTC" | "ETH" | "USDT" | "LTC" | "BNB" | "MATIC" | "TRX";
 

@@ -1,5 +1,6 @@
 "use client";
 
+import { useAuth } from "@/components/providers/auth-provider";
 import { useFirebase, useCollection, useMemoFirebase } from "@/firebase";
 import { collection, query, where, doc, updateDoc } from "firebase/firestore";
 import type { P2PAd } from "@/lib/types";
@@ -41,7 +42,8 @@ import { useRouter } from "next/navigation";
 
 
 export default function MyAdsPage() {
-  const { firestore, user, isUserLoading } = useFirebase();
+  const { user, isUserLoading } = useAuth();
+  const { firestore } = useFirebase();
   const router = useRouter();
   const { toast } = useToast();
 

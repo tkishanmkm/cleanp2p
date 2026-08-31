@@ -1,5 +1,1 @@
-
-// coming soon
-export default function DepositQR() {
-  return <div>Coming Soon</div>;
-}
+export { DepositQR, default } from '@/components/wallets/DepositQR';

@@ -4,7 +4,9 @@ import React, { DependencyList, createContext, useContext, ReactNode, useMemo, u
 import { FirebaseApp } from 'firebase/app';
 import { Firestore, doc, setDoc } from 'firebase/firestore';
 import { Auth, User, onAuthStateChanged, setPersistence, browserLocalPersistence } from 'firebase/auth';
-import { FirebaseErrorListener } from '@/components/FirebaseErrorListener'
+import { FirebaseErrorListener } from '@/components/FirebaseErrorListener';
+import { initializeFirebase } from './index';
+import { AuthContext } from '@/components/providers/auth-provider';
 
 interface FirebaseProviderProps {
   children: ReactNode;
@@ -158,22 +160,38 @@ export const FirebaseProvider: React.FC<FirebaseProviderProps> = ({
  */
 export const useFirebase = (): FirebaseServicesAndUser => {
   const context = useContext(FirebaseContext);
+  const authCtx = useContext(AuthContext);
 
-  if (context === undefined) {
-    throw new Error('useFirebase must be used within a FirebaseProvider.');
-  }
+  const fallbackUser = authCtx?.user ? ({
+    uid: authCtx.user.uid,
+    id: authCtx.user.id,
+    email: authCtx.user.email,
+    displayName: authCtx.user.displayName,
+    photoURL: authCtx.user.photoURL,
+    emailVerified: true,
+  } as unknown as User) : null;
 
-  if (!context.areServicesAvailable || !context.firebaseApp || !context.firestore || !context.auth) {
-    throw new Error('Firebase core services not available. Check FirebaseProvider props.');
+  const isUserLoading = authCtx ? authCtx.isUserLoading : false;
+
+  if (!context || !context.areServicesAvailable || !context.firebaseApp || !context.firestore || !context.auth) {
+    const services = initializeFirebase();
+    return {
+      firebaseApp: services.firebaseApp,
+      firestore: services.firestore,
+      auth: services.auth,
+      user: fallbackUser,
+      isUserLoading: isUserLoading,
+      userError: authCtx?.userError || null,
+    };
   }
 
   return {
     firebaseApp: context.firebaseApp,
     firestore: context.firestore,
     auth: context.auth,
-    user: context.user,
-    isUserLoading: context.isUserLoading,
-    userError: context.userError,
+    user: context.user || fallbackUser,
+    isUserLoading: context.isUserLoading || isUserLoading,
+    userError: context.userError || authCtx?.userError || null,
   };
 };
 

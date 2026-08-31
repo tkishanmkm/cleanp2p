@@ -1,7 +1,8 @@
 'use client';
 
-import { useFirebase, useDoc, useMemoFirebase } from '@/firebase';
-import { doc } from 'firebase/firestore';
+import { useAuth } from '@/components/providers/auth-provider';
+import { useFirebase, useDoc, useMemoFirebase, useCollection } from '@/firebase';
+import { doc, collection, query, where } from 'firebase/firestore';
 import {
   Card,
   CardContent,
@@ -31,9 +32,8 @@ import { cn, toDate } from '@/lib/utils';
 import { statusColors } from '@/lib/status-colors';
 import { useRouter } from 'next/navigation';
 import { FlagIcon } from '@/components/ui/flag-icon';
-import { collection, query, where } from 'firebase/firestore';
-import { useCollection } from '@/firebase';
 import { SUPPORTED_CRYPTOS } from '@/lib/constants';
+import { getUserWalletBalances } from '@/lib/wallet';
 
 
 const CryptoLogo = ({ crypto, className }: { crypto: CryptoCurrency; className?: string }) => {
@@ -52,9 +52,12 @@ const CryptoLogo = ({ crypto, className }: { crypto: CryptoCurrency; className?:
 };
 
 export default function DashboardPage() {
-  const { firestore, user: authUser, isUserLoading: isAuthLoading } = useFirebase();
+  const { user: authUser, profile, isUserLoading: isAuthLoading } = useAuth();
+  const { firestore } = useFirebase();
   const router = useRouter();
   const { prices, fiatRates } = usePrices();
+
+  const [supabaseBalances, setSupabaseBalances] = useState<{ [key in CryptoCurrency]?: { balance: number; lockedBalance: number } } | null>(null);
 
   useEffect(() => {
     if (!isAuthLoading && !authUser) {
@@ -62,34 +65,53 @@ export default function DashboardPage() {
     }
   }, [authUser, isAuthLoading, router]);
 
+  useEffect(() => {
+    let isMounted = true;
+    async function loadBalances() {
+      if (!authUser?.uid) return;
+      try {
+        const balances = await getUserWalletBalances(authUser.uid);
+        if (isMounted && balances && Object.keys(balances).length > 0) {
+          setSupabaseBalances(balances);
+        }
+      } catch (err) {
+        console.warn('Could not load wallet balances on dashboard:', err);
+      }
+    }
+    loadBalances();
+    return () => {
+      isMounted = false;
+    };
+  }, [authUser?.uid]);
+
   const userRef = useMemoFirebase(
-    () => (authUser ? doc(firestore, 'users', authUser.uid) : null),
-    [firestore, authUser]
+    () => (authUser?.uid && firestore ? doc(firestore, 'users', authUser.uid) : null),
+    [firestore, authUser?.uid]
   );
   const { data: user, isLoading: isUserLoading } = useDoc<User>(userRef);
   
-  // Unified balance list from the user's document wallets map
+  // Unified balance list from Supabase or the user's document wallets map
   const unifiedWallets = useMemo(() => {
     return SUPPORTED_CRYPTOS.map(crypto => {
         const coin = crypto.name;
-        const walletData = user?.wallets?.[coin] || { balance: 0, lockedBalance: 0 };
+        const walletData = supabaseBalances?.[coin] || user?.wallets?.[coin] || { balance: 0, lockedBalance: 0 };
         return {
             crypto: coin,
             balance: typeof walletData.balance === 'number' ? walletData.balance : 0,
             lockedBalance: typeof walletData.lockedBalance === 'number' ? walletData.lockedBalance : 0
         }
     });
-  }, [user]);
+  }, [supabaseBalances, user]);
 
   // For the dashboard table, only show wallets that have some activity, or all major ones
   const walletsToShow = useMemo(() => {
-      const active = unifiedWallets.filter(w => w.balance > 0 || w.lockedBalance > 0);
+      const active = unifiedWallets.filter(w => (w?.balance || 0) > 0 || (w?.lockedBalance || 0) > 0);
       return active.length > 0 ? active : unifiedWallets;
   }, [unifiedWallets]);
 
   const totalWalletValueUSD = useMemo(() => 
     unifiedWallets.reduce((acc, wallet) => {
-      const value = (wallet.balance || 0) * (prices[wallet.crypto] || 0);
+      const value = (wallet?.balance || 0) * (prices[wallet?.crypto] || 0);
       return acc + value;
     }, 0) || 0
   , [unifiedWallets, prices]);
@@ -98,10 +120,10 @@ export default function DashboardPage() {
   const exchangeRate = fiatRates[preferredCurrency] || 1;
   const totalWalletValueConverted = totalWalletValueUSD * exchangeRate;
 
-  const activeTradesAsBuyerQuery = useMemoFirebase(() => authUser ? query(collection(firestore, 'trades'), where('buyerId', '==', authUser.uid), where('status', 'in', ['active', 'paid'])) : null, [firestore, authUser]);
+  const activeTradesAsBuyerQuery = useMemoFirebase(() => authUser && firestore ? query(collection(firestore, 'trades'), where('buyerId', '==', authUser.uid), where('status', 'in', ['active', 'paid'])) : null, [firestore, authUser]);
   const { data: activeBuyerTrades, isLoading: activeBuyerTradesLoading } = useCollection<Trade>(activeTradesAsBuyerQuery);
 
-  const activeTradesAsSellerQuery = useMemoFirebase(() => authUser ? query(collection(firestore, 'trades'), where('sellerId', '==', authUser.uid), where('status', 'in', ['active', 'paid'])) : null, [firestore, authUser]);
+  const activeTradesAsSellerQuery = useMemoFirebase(() => authUser && firestore ? query(collection(firestore, 'trades'), where('sellerId', '==', authUser.uid), where('status', 'in', ['active', 'paid'])) : null, [firestore, authUser]);
   const { data: activeSellerTrades, isLoading: activeSellerTradesLoading } = useCollection<Trade>(activeTradesAsSellerQuery);
 
   const [activeTrades, setActiveTrades] = useState<Trade[]>([]);
@@ -116,12 +138,16 @@ export default function DashboardPage() {
     }
   }, [activeBuyerTrades, activeSellerTrades]);
 
-  if (isAuthLoading || !authUser) {
+  if (isAuthLoading || (!authUser && typeof window !== 'undefined')) {
     return (
-      <div className="flex flex-1 items-center justify-center">
+      <div className="flex flex-1 items-center justify-center min-h-[300px]">
         <Loader2 className="h-8 w-8 animate-spin text-primary" />
       </div>
     );
+  }
+
+  if (!authUser) {
+    return null;
   }
 
   return (

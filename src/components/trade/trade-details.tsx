@@ -11,7 +11,7 @@ import { useFirebase, useCollection, useMemoFirebase } from '@/firebase';
 import { useToast } from '@/hooks/use-toast';
 import { useCountdown } from '@/hooks/use-countdown';
 
-import { cancelTrade, markTradeAsPaid, releaseFundsFromEscrow } from '@/lib/wallet';
+import { cancelTrade, markTradeAsPaid, releaseFundsFromEscrow, completeEscrow } from '@/lib/wallet';
 import { openDispute } from '@/lib/disputes';
 import { cn, toDate } from '@/lib/utils';
 import { statusColors } from '@/lib/status-colors';
@@ -131,6 +131,7 @@ const ActionButtons = ({ trade, currentUserRole }: { trade: Trade; currentUserRo
     const { firestore, user } = useFirebase();
     const { toast } = useToast();
     const [cancelInput, setCancelInput] = useState('');
+    const [isReleasing, setIsReleasing] = useState(false);
     const isCancelInputCorrect = cancelInput.trim().toLowerCase() === "i did not paid";
 
     // Dispute Timer Logic
@@ -147,8 +148,13 @@ const ActionButtons = ({ trade, currentUserRole }: { trade: Trade; currentUserRo
     
     const handleReleaseCrypto = async () => { 
         if (!firestore) return; 
+        setIsReleasing(true);
         try { 
+            // 1. Release funds from escrow in Firestore
             await releaseFundsFromEscrow(firestore, trade.id); 
+
+            // 2. Complete escrow atomically via completeEscrow (invokes completeTrade RPC in Supabase with Firestore fallback)
+            await completeEscrow(trade.id, firestore, trade, trade.buyerId, trade.fiatAmountInUSD || 0);
     
             const messagesCollectionRef = collection(firestore, 'trades', trade.id, 'messages');
             await addDoc(messagesCollectionRef, {
@@ -162,8 +168,10 @@ const ActionButtons = ({ trade, currentUserRole }: { trade: Trade; currentUserRo
     
             toast({ title: "Crypto Released", description: "The crypto has been sent to the buyer." }); 
         } catch (e: any) { 
-            toast({ variant: "destructive", title: "Error", description: e.message }); 
-        } 
+            toast({ variant: "destructive", title: "Error", description: e.message || "Failed to release crypto." }); 
+        } finally {
+            setIsReleasing(false);
+        }
     };
     
     const handleCancelTrade = async () => { if (!firestore) return; try { await cancelTrade(firestore, trade, 'Cancelled by user.'); toast({ title: "Trade Cancelled" }); } catch (e: any) { toast({ variant: "destructive", title: "Error", description: e.message }); } };
@@ -179,7 +187,7 @@ const ActionButtons = ({ trade, currentUserRole }: { trade: Trade; currentUserRo
                     <AlertDialog><AlertDialogTrigger asChild><Button className="w-full" size="lg">Mark as Paid</Button></AlertDialogTrigger><AlertDialogContent><AlertDialogHeader><AlertDialogTitle>Confirm Payment</AlertDialogTitle><AlertDialogDescription>Have you sent <span className="font-bold">{trade.fiatAmount} {trade.fiatCurrency}</span> to the seller? Only confirm after you have fully sent the payment.</AlertDialogDescription></AlertDialogHeader><AlertDialogFooter><AlertDialogCancel>Cancel</AlertDialogCancel><AlertDialogAction onClick={handleMarkAsPaid}>Yes, I Have Paid</AlertDialogAction></AlertDialogFooter></AlertDialogContent></AlertDialog>
                 )}
                 {canSellerRelease && (
-                    <AlertDialog><AlertDialogTrigger asChild><Button className="w-full" size="lg">Release Crypto</Button></AlertDialogTrigger><AlertDialogContent><AlertDialogHeader><AlertDialogTitle>Release Cryptocurrency?</AlertDialogTitle><AlertDialogDescription>Confirm you have received <span className="font-bold">{trade.fiatAmount} {trade.fiatCurrency}</span>. This action is irreversible.</AlertDialogDescription></AlertDialogHeader><AlertDialogFooter><AlertDialogCancel>Cancel</AlertDialogCancel><AlertDialogAction onClick={handleReleaseCrypto}>Confirm and Release</AlertDialogAction></AlertDialogFooter></AlertDialogContent></AlertDialog>
+                    <AlertDialog><AlertDialogTrigger asChild><Button className="w-full" size="lg" disabled={isReleasing}>{isReleasing && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}Release Crypto</Button></AlertDialogTrigger><AlertDialogContent><AlertDialogHeader><AlertDialogTitle>Release Cryptocurrency?</AlertDialogTitle><AlertDialogDescription>Confirm you have received <span className="font-bold">{trade.fiatAmount} {trade.fiatCurrency}</span>. This action is irreversible.</AlertDialogDescription></AlertDialogHeader><AlertDialogFooter><AlertDialogCancel disabled={isReleasing}>Cancel</AlertDialogCancel><AlertDialogAction onClick={handleReleaseCrypto} disabled={isReleasing}>{isReleasing && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}Confirm and Release</AlertDialogAction></AlertDialogFooter></AlertDialogContent></AlertDialog>
                 )}
                 {canBuyerCancel && (
                     <AlertDialog><AlertDialogTrigger asChild><Button variant="outline" className="w-full">Cancel Trade</Button></AlertDialogTrigger><AlertDialogContent><AlertDialogHeader><AlertDialogTitle>Confirm Trade Cancellation</AlertDialogTitle><AlertDialogDescription>To prevent accidental cancellations, please type "I DID NOT PAID" in the box below to confirm you have not sent payment.</AlertDialogDescription></AlertDialogHeader>

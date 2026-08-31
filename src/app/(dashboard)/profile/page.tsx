@@ -1,6 +1,7 @@
 
 "use client";
 
+import { useAuth } from "@/components/providers/auth-provider";
 import { useFirebase, useDoc, useMemoFirebase } from "@/firebase";
 import { doc } from "firebase/firestore";
 import type { User } from "@/lib/types";
@@ -29,7 +30,8 @@ function DetailItem({ icon, label, value }: { icon: React.ReactNode, label: stri
 }
 
 export default function ProfilePage() {
-    const { user: authUser, firestore, isUserLoading: isAuthLoading } = useFirebase();
+    const { user: authUser, profile, isUserLoading: isAuthLoading } = useAuth();
+    const { firestore } = useFirebase();
     const router = useRouter();
 
     useEffect(() => {
@@ -38,16 +40,41 @@ export default function ProfilePage() {
         }
     }, [authUser, isAuthLoading, router]);
     
-    const userRef = useMemoFirebase(() => authUser && firestore ? doc(firestore, "users", authUser.uid) : null, [authUser, firestore]);
-    const { data: user, isLoading: isUserLoading } = useDoc<User>(userRef);
+    const userRef = useMemoFirebase(() => authUser?.uid && firestore ? doc(firestore, "users", authUser.uid) : null, [authUser?.uid, firestore]);
+    const { data: firestoreUser, isLoading: isUserLoading } = useDoc<User>(userRef);
 
-    if (isAuthLoading || isUserLoading || !user) {
+    if (isAuthLoading || (!authUser && typeof window !== 'undefined')) {
         return (
-             <div className="flex flex-1 items-center justify-center">
+             <div className="flex flex-1 items-center justify-center min-h-[300px]">
                 <Loader2 className="h-8 w-8 animate-spin text-primary" />
              </div>
-        )
+        );
     }
+
+    if (!authUser) {
+        return null;
+    }
+
+    const user = firestoreUser || {
+        id: authUser.uid,
+        userId: profile?.username || authUser.displayName || 'User',
+        fullName: profile?.full_name || authUser.displayName || 'User',
+        email: authUser.email,
+        photoURL: profile?.avatar_url || authUser.photoURL || null,
+        isBanned: false,
+        isOnHold: false,
+        tradeVolume: profile?.trade_volume || 0,
+        completedTrades: profile?.completed_trades || 0,
+        positiveFeedback: profile?.positive_feedback || 0,
+        negativeFeedback: profile?.negative_feedback || 0,
+        avgPaymentTime: 0,
+        avgReleaseTime: 0,
+        lastTradeAt: null,
+        dob: null,
+        createdAt: profile?.created_at || new Date().toISOString(),
+        preferredCurrency: 'USD',
+        wallets: {},
+    };
 
     const lastTradeDate = toDate(user.lastTradeAt);
     const dobDate = toDate(user.dob);

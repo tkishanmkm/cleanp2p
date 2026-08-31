@@ -3,6 +3,7 @@
 
 import React, { Suspense, useMemo, useState, useEffect } from 'react';
 import { useParams } from 'next/navigation';
+import { useAuth } from '@/components/providers/auth-provider';
 import { useFirebase, useDoc, useMemoFirebase } from '@/firebase';
 import { doc, collection, query, where, getDocs } from 'firebase/firestore';
 import type { P2PAd, Trade, User } from '@/lib/types';
@@ -13,12 +14,12 @@ import { CounterpartyInfoPanel } from '@/components/trade/counterparty-info-pane
 import { Button } from '@/components/ui/button';
 import { useAdminStatus } from '@/hooks/use-admin-status';
 import { usePrices } from '@/context/price-context';
-import { claimFundsForTrade } from '@/lib/wallet';
 import { useToast } from '@/hooks/use-toast';
 
 function TradePageContent() {
   const params = useParams();
-  const { firestore, user: authUser, isUserLoading } = useFirebase();
+  const { user: authUser, isUserLoading } = useAuth();
+  const { firestore } = useFirebase();
   const { isAdmin } = useAdminStatus();
   const { fiatRates } = usePrices();
   const { toast } = useToast();
@@ -83,7 +84,7 @@ function TradePageContent() {
                     const exchangeRate = fiatRates[trade.fiatCurrency] || 1;
                     usdAmount = trade.fiatAmount / exchangeRate;
                 }
-                await claimFundsForTrade(firestore, trade, trade.buyerId, usdAmount);
+                await completeEscrow(trade.id, firestore, trade, trade.buyerId, usdAmount);
                 toast({ title: 'Funds Claimed', description: `The ${trade.crypto} has been added to your wallet.` });
             } catch (error: any) {
                 console.error("Auto-claiming funds failed:", error);

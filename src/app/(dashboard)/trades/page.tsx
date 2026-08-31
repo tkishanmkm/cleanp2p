@@ -2,6 +2,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import { useAuth } from '@/components/providers/auth-provider';
 import { useFirebase, useDoc, useCollection, useMemoFirebase } from '@/firebase';
 import { doc, collection, query, where, orderBy } from 'firebase/firestore';
 import type { User, Trade } from '@/lib/types';
@@ -46,7 +47,8 @@ function DashboardCardSkeleton() {
 }
 
 export default function MyTradesPage() {
-  const { firestore, user: authUser, isUserLoading: isAuthLoading } = useFirebase();
+  const { user: authUser, isUserLoading: isAuthLoading } = useAuth();
+  const { firestore } = useFirebase();
   const router = useRouter();
 
   useEffect(() => {
@@ -55,11 +57,11 @@ export default function MyTradesPage() {
     }
   }, [authUser, isAuthLoading, router]);
   
-  const userRef = useMemoFirebase(() => authUser ? doc(firestore, 'users', authUser.uid) : null, [firestore, authUser]);
+  const userRef = useMemoFirebase(() => authUser?.uid && firestore ? doc(firestore, 'users', authUser.uid) : null, [firestore, authUser?.uid]);
   const { data: user, isLoading: isUserLoading } = useDoc<User>(userRef);
 
-  const tradesAsBuyerQuery = useMemoFirebase(() => authUser ? query(collection(firestore, 'trades'), where('buyerId', '==', authUser.uid)) : null, [firestore, authUser]);
-  const tradesAsSellerQuery = useMemoFirebase(() => authUser ? query(collection(firestore, 'trades'), where('sellerId', '==', authUser.uid)) : null, [firestore, authUser]);
+  const tradesAsBuyerQuery = useMemoFirebase(() => authUser?.uid && firestore ? query(collection(firestore, 'trades'), where('buyerId', '==', authUser.uid)) : null, [firestore, authUser?.uid]);
+  const tradesAsSellerQuery = useMemoFirebase(() => authUser?.uid && firestore ? query(collection(firestore, 'trades'), where('sellerId', '==', authUser.uid)) : null, [firestore, authUser?.uid]);
 
   const { data: buyerTrades, isLoading: buyerTradesLoading } = useCollection<Trade>(tradesAsBuyerQuery);
   const { data: sellerTrades, isLoading: sellerTradesLoading } = useCollection<Trade>(tradesAsSellerQuery);
@@ -94,12 +96,16 @@ export default function MyTradesPage() {
     document.body.removeChild(link);
   };
 
-  if (isAuthLoading || !authUser) {
+  if (isAuthLoading || (!authUser && typeof window !== 'undefined')) {
     return (
-      <div className="flex flex-1 items-center justify-center">
+      <div className="flex flex-1 items-center justify-center min-h-[300px]">
         <Loader2 className="h-8 w-8 animate-spin text-primary" />
       </div>
     );
+  }
+
+  if (!authUser) {
+    return null;
   }
 
   return (

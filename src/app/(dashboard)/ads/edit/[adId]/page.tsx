@@ -2,6 +2,7 @@
 "use client";
 
 import { useParams } from "next/navigation";
+import { useAuth } from "@/components/providers/auth-provider";
 import { useFirebase, useDoc, useMemoFirebase } from "@/firebase";
 import { doc } from "firebase/firestore";
 import type { P2PAd } from "@/lib/types";
@@ -12,7 +13,8 @@ import { Loader2 } from "lucide-react";
 
 export default function EditAdPage() {
   const params = useParams();
-  const { firestore, user } = useFirebase();
+  const { user } = useAuth();
+  const { firestore } = useFirebase();
   const adId = Array.isArray(params.adId) ? params.adId[0] : params.adId;
 
   const adRef = useMemoFirebase(

@@ -432,9 +432,11 @@ export default function AdminDepositsPage() {
                                     <span className="text-muted-foreground">TxID:</span>
                                     <div className="flex items-center gap-2 overflow-hidden">
                                         <span className="font-mono text-xs bg-muted p-1 rounded max-w-[180px] truncate">{selectedDeposit?.txId || 'N/A'}</span>
-                                        {selectedDeposit?.txId && <Button size="icon" variant="ghost" className="h-6 w-6" onClick={() => copyToClipboard(selectedDeposit!.txId!)}>
-                                            <Copy className="h-3 w-3" />
-                                        </Button>}
+                                        {selectedDeposit?.txId ? (
+                                            <Button size="icon" variant="ghost" className="h-6 w-6" onClick={() => copyToClipboard(selectedDeposit!.txId!)}>
+                                                <Copy className="h-3 w-3" />
+                                            </Button>
+                                        ) : null}
                                     </div>
                                 </div>
                             </div>
@@ -482,16 +484,64 @@ export default function AdminDepositsPage() {
                     </DialogHeader>
                     {selectedDeposit && (
                         <div className="space-y-4 py-4 text-sm">
-                            <div className="flex justify-between items-center"><span className="text-muted-foreground">Deposit ID</span><div className="flex items-center gap-2"><span className="font-mono text-xs">{selectedDeposit.id}</span><Button size="icon" variant="ghost" className="h-6 w-6" onClick={() => copyToClipboard(selectedDeposit.id)}><Copy className="h-3 w-3" /></Button></div></div>
-                            <div className="flex justify-between items-center"><span className="text-muted-foreground">User</span><span className="font-medium">{selectedDeposit.userDisplayName}</span></div>
-                            <div className="flex justify-between items-center"><span className="text-muted-foreground">Status</span><Badge variant="outline" className={cn("capitalize", statusColors[selectedDeposit.status])}>{depositStatusText[selectedDeposit.status] || selectedDeposit.status}</Badge></div>
-                            <div className="flex justify-between items-center"><span className="text-muted-foreground">Requested Amount</span><span className="font-medium">{selectedDeposit.amount} {selectedDeposit.crypto}</span></div>
-                            {selectedDeposit.finalAmount && <div className="flex justify-between items-center"><span className="text-muted-foreground">Approved Amount</span><span className="font-medium">{selectedDeposit.finalAmount} {selectedDeposit.crypto}</span></div>}
-                            <div className="flex justify-between items-center"><span className="text-muted-foreground">Chain</span><span className="font-medium">{selectedDeposit.chain}</span></div>
-                            <div className="flex justify-between items-start gap-4"><span className="text-muted-foreground flex-shrink-0">TxID</span><div className="flex items-center gap-2"><span className="font-mono text-xs break-all text-right">{selectedDeposit.txId || 'N/A'}</span>{selectedDeposit.txId && <Button size="icon" variant="ghost" className="h-6 w-6" onClick={() => copyToClipboard(selectedDeposit.txId)}><Copy className="h-3 w-3" /></Button></div></div>
-                            <div className="flex justify-between items-center"><span className="text-muted-foreground">Date Requested</span><span className="font-medium">{toDate(selectedDeposit.createdAt)?.toLocaleString()}</span></div>
-                            <div className="flex justify-between items-center"><span className="text-muted-foreground">Expires</span><span className="font-medium">{toDate(selectedDeposit.timerEnd)?.toLocaleString()}</span></div>
-                            {selectedDeposit.adminId && <div className="flex justify-between items-center"><span className="text-muted-foreground">Processed by Admin</span><span className="font-mono text-xs">{selectedDeposit.adminId}</span></div>}
+                            <div className="flex justify-between items-center">
+                                <span className="text-muted-foreground">Deposit ID</span>
+                                <div className="flex items-center gap-2">
+                                    <span className="font-mono text-xs">{selectedDeposit.id}</span>
+                                    <Button size="icon" variant="ghost" className="h-6 w-6" onClick={() => copyToClipboard(selectedDeposit.id)}>
+                                        <Copy className="h-3 w-3" />
+                                    </Button>
+                                </div>
+                            </div>
+                            <div className="flex justify-between items-center">
+                                <span className="text-muted-foreground">User</span>
+                                <span className="font-medium">{selectedDeposit.userDisplayName}</span>
+                            </div>
+                            <div className="flex justify-between items-center">
+                                <span className="text-muted-foreground">Status</span>
+                                <Badge variant="outline" className={cn("capitalize", statusColors[selectedDeposit.status])}>
+                                    {depositStatusText[selectedDeposit.status] || selectedDeposit.status}
+                                </Badge>
+                            </div>
+                            <div className="flex justify-between items-center">
+                                <span className="text-muted-foreground">Requested Amount</span>
+                                <span className="font-medium">{selectedDeposit.amount} {selectedDeposit.crypto}</span>
+                            </div>
+                            {selectedDeposit.finalAmount ? (
+                                <div className="flex justify-between items-center">
+                                    <span className="text-muted-foreground">Approved Amount</span>
+                                    <span className="font-medium">{selectedDeposit.finalAmount} {selectedDeposit.crypto}</span>
+                                </div>
+                            ) : null}
+                            <div className="flex justify-between items-center">
+                                <span className="text-muted-foreground">Chain</span>
+                                <span className="font-medium">{selectedDeposit.chain}</span>
+                            </div>
+                            <div className="flex justify-between items-start gap-4">
+                                <span className="text-muted-foreground flex-shrink-0">TxID</span>
+                                <div className="flex items-center gap-2">
+                                    <span className="font-mono text-xs break-all text-right">{selectedDeposit.txId || 'N/A'}</span>
+                                    {selectedDeposit.txId ? (
+                                        <Button size="icon" variant="ghost" className="h-6 w-6" onClick={() => copyToClipboard(selectedDeposit.txId!)}>
+                                            <Copy className="h-3 w-3" />
+                                        </Button>
+                                    ) : null}
+                                </div>
+                            </div>
+                            <div className="flex justify-between items-center">
+                                <span className="text-muted-foreground">Date Requested</span>
+                                <span className="font-medium">{toDate(selectedDeposit.createdAt)?.toLocaleString()}</span>
+                            </div>
+                            <div className="flex justify-between items-center">
+                                <span className="text-muted-foreground">Expires</span>
+                                <span className="font-medium">{toDate(selectedDeposit.timerEnd)?.toLocaleString()}</span>
+                            </div>
+                            {selectedDeposit.adminId ? (
+                                <div className="flex justify-between items-center">
+                                    <span className="text-muted-foreground">Processed by Admin</span>
+                                    <span className="font-mono text-xs">{selectedDeposit.adminId}</span>
+                                </div>
+                            ) : null}
                             
                              <div className="flex flex-col items-center gap-2 pt-4">
                                 <div className="p-2 bg-white rounded-lg">

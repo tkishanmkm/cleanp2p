@@ -25,16 +25,13 @@ import {
 import { Input } from "@/components/ui/input";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Logo } from "@/components/logo";
-import { useFirebase } from "@/firebase";
 import { useToast } from "@/hooks/use-toast";
 import { useState, Suspense } from "react";
 import { Loader2 } from "lucide-react";
-import { signInWithEmailAndPassword, setPersistence, browserLocalPersistence, UserCredential } from "firebase/auth";
-import { doc, getDoc } from "firebase/firestore";
-import { createUserSession } from "@/lib/users";
+import { signInWithIdentifier, getUserProfile } from "@/lib/auth";
 
 const formSchema = z.object({
-  userId: z.string().min(1, { message: "User ID is required." }),
+  identifier: z.string().min(1, { message: "Email or Username is required." }),
   password: z.string().min(1, { message: "Password is required." }),
   captcha: z.boolean().refine((val) => val === true, {
     message: "Please confirm you are not a robot.",
@@ -44,7 +41,6 @@ const formSchema = z.object({
 function LoginFormComponent() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const { auth, firestore } = useFirebase();
   const { toast } = useToast();
   const [isLoading, setIsLoading] = useState(false);
   const redirectUrl = searchParams.get('redirect');
@@ -52,83 +48,53 @@ function LoginFormComponent() {
   const form = useForm<z.infer<typeof formSchema>>({
     resolver: zodResolver(formSchema),
     defaultValues: {
-      userId: "",
+      identifier: "",
       password: "",
       captcha: false,
     },
   });
 
   async function onSubmit(values: z.infer<typeof formSchema>) {
-    if (!auth || !firestore) {
-      toast({ variant: "destructive", title: "Error", description: "Authentication service not ready."});
-      return;
-    }
     setIsLoading(true);
 
-    const domainsToTry = [
-      "email.com",
-      "paxones.app",
-      "tradenance.app",
-      "tradenaire.app",
-      "tradeflow.app"
-    ];
-    let userCredential: UserCredential | null = null;
-    let lastError: any = null;
-
     try {
-      await setPersistence(auth, browserLocalPersistence);
+      const { data, error } = await signInWithIdentifier(values.identifier, values.password);
 
-      for (const domain of domainsToTry) {
-        try {
-          const email = `${values.userId}@${domain}`;
-          userCredential = await signInWithEmailAndPassword(auth, email, values.password);
-          if (userCredential) break; // Success, exit loop
-        } catch (error: any) {
-          lastError = error; // Store the error and continue to the next domain
-        }
+      if (error) {
+        toast({
+          variant: "destructive",
+          title: "Login Failed",
+          description: error.message || "Invalid credentials. Please check your email/username and password.",
+        });
+        return;
       }
-      
-      if (userCredential) {
-        // --- SUCCESS ---
-        const { user } = userCredential;
-        const sessionId = await createUserSession(firestore, user);
-        if (sessionId) {
-          sessionStorage.setItem('sessionId', sessionId);
-        }
 
-        const adminDocRef = doc(firestore, "admins", user.uid);
-        const adminDocSnap = await getDoc(adminDocRef);
+      if (data?.user) {
+        const profile = await getUserProfile(data.user.id);
 
-        if (adminDocSnap.exists() && adminDocSnap.data().role === 'admin') {
-          toast({ title: "Admin Login Successful", description: "Redirecting to admin dashboard..." });
+        if (profile?.is_admin || profile?.role === 'admin') {
+          toast({
+            title: "Admin Login Successful",
+            description: "Redirecting to admin dashboard...",
+          });
           router.push('/adminnarayan/dashboard');
         } else {
-          const userDocRef = doc(firestore, "users", user.uid);
-          const userDocSnap = await getDoc(userDocRef);
-
-          if (userDocSnap.exists()) {
-              toast({ title: "Logging In...", description: "Please wait while we log you in." });
-              router.push(redirectUrl || '/buy');
-          } else {
-              await auth.signOut();
-              throw new Error("User profile not found. Please contact support.");
-          }
+          toast({
+            title: "Login Successful",
+            description: `Welcome back${profile?.display_name ? `, ${profile.display_name}` : ''}!`,
+          });
+          router.push(redirectUrl || '/wallets');
         }
-      } else {
-        // If userCredential is still null after all attempts, throw the last recorded error.
-        throw lastError || new Error("Login failed. Please check your credentials.");
       }
-
-    } catch (error: any) {
-      let description = "An unknown error occurred. Please try again.";
-      if (error.code === 'auth/invalid-credential' || error.code === 'auth/user-not-found' || error.code === 'auth/wrong-password') {
-          description = "The User ID or password you entered is incorrect.";
-      } else if (error.message) {
-          description = error.message;
-      }
-      toast({ variant: "destructive", title: "Login Failed", description });
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : "An unexpected error occurred.";
+      toast({
+        variant: "destructive",
+        title: "Login Failed",
+        description: message,
+      });
     } finally {
-        setIsLoading(false);
+      setIsLoading(false);
     }
   }
 
@@ -137,7 +103,7 @@ function LoginFormComponent() {
       <Card className="w-full max-w-md">
         <CardHeader className="text-center">
           <Link href="/" className="flex justify-center mb-4">
-             <Logo />
+            <Logo />
           </Link>
           <CardTitle className="text-2xl">Welcome Back</CardTitle>
           <CardDescription>
@@ -149,12 +115,16 @@ function LoginFormComponent() {
             <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-6">
               <FormField
                 control={form.control}
-                name="userId"
+                name="identifier"
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel>User ID</FormLabel>
+                    <FormLabel>Email or Username</FormLabel>
                     <FormControl>
-                      <Input placeholder="YourUniqueUserID" {...field} />
+                      <Input
+                        placeholder="you@example.com or your_username"
+                        autoComplete="username"
+                        {...field}
+                      />
                     </FormControl>
                     <FormMessage />
                   </FormItem>
@@ -166,13 +136,18 @@ function LoginFormComponent() {
                 render={({ field }) => (
                   <FormItem>
                     <div className="flex justify-between items-center">
-                        <FormLabel>Password</FormLabel>
-                        <Button asChild variant="link" className="p-0 h-auto text-sm">
-                           <Link href="/forgot-password">Forgot password?</Link>
-                        </Button>
+                      <FormLabel>Password</FormLabel>
+                      <Button asChild variant="link" className="p-0 h-auto text-sm">
+                        <Link href="/forgot-password">Forgot password?</Link>
+                      </Button>
                     </div>
                     <FormControl>
-                      <Input type="password" placeholder="••••••••" {...field} />
+                      <Input
+                        type="password"
+                        placeholder="••••••••"
+                        autoComplete="current-password"
+                        {...field}
+                      />
                     </FormControl>
                     <FormMessage />
                   </FormItem>
@@ -194,7 +169,7 @@ function LoginFormComponent() {
                         I am not a robot
                       </FormLabel>
                     </div>
-                     <FormMessage className="absolute"/>
+                    <FormMessage className="absolute" />
                   </FormItem>
                 )}
               />
@@ -205,7 +180,7 @@ function LoginFormComponent() {
             </form>
           </Form>
           <div className="mt-6 text-center text-sm">
-            Don't have an account?{" "}
+            Don&apos;t have an account?{" "}
             <Link href="/signup" className="font-medium text-primary hover:underline">
               Join us
             </Link>
@@ -217,9 +192,9 @@ function LoginFormComponent() {
 }
 
 export default function LoginPage() {
-    return (
-        <Suspense fallback={<div className="flex min-h-screen items-center justify-center"><Loader2 className="h-8 w-8 animate-spin" /></div>}>
-            <LoginFormComponent />
-        </Suspense>
-    )
+  return (
+    <Suspense fallback={<div className="flex min-h-screen items-center justify-center"><Loader2 className="h-8 w-8 animate-spin" /></div>}>
+      <LoginFormComponent />
+    </Suspense>
+  );
 }

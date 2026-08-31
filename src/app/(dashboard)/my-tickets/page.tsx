@@ -1,6 +1,7 @@
 
 'use client';
 
+import { useAuth } from '@/components/providers/auth-provider';
 import { useFirebase, useCollection, useMemoFirebase } from '@/firebase';
 import { collection, query, where, orderBy } from 'firebase/firestore';
 import type { SupportTicket } from '@/lib/types';
@@ -15,7 +16,8 @@ import { useEffect } from 'react';
 import { formatDistanceToNow } from 'date-fns';
 
 export default function MyTicketsPage() {
-    const { user: authUser, isUserLoading, firestore } = useFirebase();
+    const { user: authUser, isUserLoading } = useAuth();
+    const { firestore } = useFirebase();
     const router = useRouter();
 
     useEffect(() => {

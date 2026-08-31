@@ -1,12 +1,12 @@
 
 
 'use client';
-import React, { useState, useRef, useEffect, useMemo } from 'react';
+import React, { useState, useRef, useEffect, useMemo, useCallback } from 'react';
 import Image from 'next/image';
 import Link from 'next/link';
 
-import { useCollection, useFirebase, useMemoFirebase } from '@/firebase';
-import { doc, collection, addDoc, query, orderBy } from 'firebase/firestore';
+import { useFirebase } from '@/firebase';
+import { collection, addDoc, getDocs, query, orderBy } from 'firebase/firestore';
 import { useToast } from '@/hooks/use-toast';
 import { useAdminStatus } from '@/hooks/use-admin-status';
 import { useStopwatch } from '@/hooks/use-stopwatch';
@@ -14,6 +14,7 @@ import { useStopwatch } from '@/hooks/use-stopwatch';
 import { addReceiptToTrade } from '@/lib/wallet';
 import { cn, toDate } from '@/lib/utils';
 import type { Trade, User, TradeChatMessage } from '@/lib/types';
+import { sendTradeMessage, getTradeMessages, subscribeToTradeMessages, type TradeMessageRecord } from '@/lib/supabase/chat';
 
 import { Card, CardContent, CardHeader, CardFooter } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -27,7 +28,7 @@ import { Logo } from '@/components/logo';
 import { FlagIcon } from '@/components/ui/flag-icon';
 import { Alert, AlertTitle, AlertDescription } from '@/components/ui/alert';
 import { Shield, Clock, Send, Plus, Info as InfoIcon, Loader2, ThumbsUp, ThumbsDown, XCircle, CheckCircle, AlertTriangle } from 'lucide-react';
-import { claimFundsForTrade } from '@/lib/wallet';
+import { claimFundsForTrade, completeEscrow } from '@/lib/wallet';
 import { formatDistanceToNow } from 'date-fns';
 
 // --- Sub-component: TradeInstructions ---
@@ -110,13 +111,87 @@ export function TradeChat({ currentUserId, trade, opponent, isAdmin, sellerTerms
   const { firestore, user } = useFirebase();
   const { toast } = useToast();
   const scrollAreaRef = useRef<HTMLDivElement>(null);
-  const messagesQuery = useMemoFirebase(() => (firestore ? query(collection(firestore, 'trades', trade.id, 'messages'), orderBy('createdAt', 'asc')) : null), [firestore, trade.id]);
-  const { data: messages, isLoading: areMessagesLoading } = useCollection<TradeChatMessage>(messagesQuery);
+  
+  const [messages, setMessages] = useState<TradeChatMessage[]>([]);
+  const [areMessagesLoading, setAreMessagesLoading] = useState(true);
   const [newMessage, setNewMessage] = useState('');
   const [isUploading, setIsUploading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const isTradeStopped = ['released', 'cancelled', 'expired'].includes(trade.status);
   const stopwatch = useStopwatch(trade.createdAt, isTradeStopped);
+
+  // Helper to map Supabase record to TradeChatMessage
+  const mapSupabaseToChatMessage = useCallback((rec: TradeMessageRecord): TradeChatMessage => {
+    const isCurrentUser = rec.sender_id === currentUserId;
+    return {
+      id: rec.id,
+      tradeId: rec.trade_id,
+      senderId: rec.sender_id,
+      senderUsername: isCurrentUser ? (user?.displayName || 'You') : (opponent?.userId || 'User'),
+      message: rec.message,
+      mediaUrl: rec.attachment_url || undefined,
+      mediaType: rec.attachment_url ? 'image' : 'none',
+      isModerator: false,
+      createdAt: rec.created_at,
+    };
+  }, [currentUserId, user?.displayName, opponent?.userId]);
+
+  // Load chat history & subscribe to Realtime messages
+  useEffect(() => {
+    let isMounted = true;
+    setAreMessagesLoading(true);
+
+    const loadMessages = async () => {
+      try {
+        // 1. Fetch from Supabase
+        const { data: sbMessages } = await getTradeMessages(trade.id);
+        
+        if (isMounted && sbMessages && sbMessages.length > 0) {
+          const mapped = sbMessages.map(mapSupabaseToChatMessage);
+          setMessages(mapped);
+          setAreMessagesLoading(false);
+          return;
+        }
+
+        // 2. Fallback to Firestore if no Supabase records yet
+        if (firestore) {
+          const messagesQuery = query(
+            collection(firestore, 'trades', trade.id, 'messages'),
+            orderBy('createdAt', 'asc')
+          );
+          const snap = await getDocs(messagesQuery);
+          if (isMounted) {
+            const fsMsgs = snap.docs.map(docSnap => ({
+              id: docSnap.id,
+              ...docSnap.data()
+            } as TradeChatMessage));
+            setMessages(fsMsgs);
+          }
+        }
+      } catch (err) {
+        console.error('Error fetching trade messages:', err);
+      } finally {
+        if (isMounted) setAreMessagesLoading(false);
+      }
+    };
+
+    loadMessages();
+
+    // Subscribe to Realtime INSERT changes on trade_messages
+    const unsubscribe = subscribeToTradeMessages(trade.id, (newRecord) => {
+      if (!isMounted) return;
+      setMessages((prev) => {
+        if (prev.some((m) => m.id === newRecord.id)) return prev;
+        const newMsg = mapSupabaseToChatMessage(newRecord);
+        return [...prev, newMsg];
+      });
+    });
+
+    return () => {
+      isMounted = false;
+      unsubscribe();
+    };
+  }, [trade.id, firestore, mapSupabaseToChatMessage]);
 
   const displayMessages = useMemo(() => {
     if (!messages) return [];
@@ -136,7 +211,7 @@ export function TradeChat({ currentUserId, trade, opponent, isAdmin, sellerTerms
     if (trade.status === 'released' && !trade.claimedByBuyer && currentUserId === trade.buyerId && firestore) {
         const claim = async () => {
             try {
-                await claimFundsForTrade(firestore, trade, currentUserId);
+                await completeEscrow(trade.id, firestore, trade, currentUserId, trade.fiatAmountInUSD || 0);
                 toast({ title: 'Funds Claimed', description: `The ${trade.crypto} has been added to your wallet.` });
             } catch (error: any) {
                 console.error("Auto-claiming funds failed:", error);
@@ -149,7 +224,7 @@ export function TradeChat({ currentUserId, trade, opponent, isAdmin, sellerTerms
 
   const handleSendMessage = async (e: React.FormEvent, mediaUrl?: string, mediaType?: 'image' | 'video' | 'audio') => {
     e.preventDefault();
-    if ((!newMessage.trim() && !mediaUrl) || !firestore || !user) return;
+    if ((!newMessage.trim() && !mediaUrl) || !user) return;
     const blockedWords = ['telegram', 'whatsapp', 'phone', 'contact'];
     if (blockedWords.some(word => newMessage.toLowerCase().includes(word))) {
       toast({ variant: 'destructive', title: 'Message Blocked', description: 'Please do not share contact information.' });
@@ -158,12 +233,42 @@ export function TradeChat({ currentUserId, trade, opponent, isAdmin, sellerTerms
     const messageToSend = newMessage;
     setNewMessage('');
     try {
-      await addDoc(collection(firestore, 'trades', trade.id, 'messages'), { tradeId: trade.id, senderId: currentUserId, senderUsername: user.displayName || 'User', message: messageToSend, isModerator: isAdmin, createdAt: new Date().toISOString(), mediaUrl: mediaUrl || null, mediaType: mediaType || 'none' });
-      if (mediaUrl && trade.status === 'active') {
-        await addReceiptToTrade(firestore, trade.id, mediaUrl);
-        toast({ title: 'Receipt Uploaded', description: 'The seller has been notified.' });
+      // 1. Send via Supabase Realtime
+      const { data: sbRecord, error: sbError } = await sendTradeMessage(
+        trade.id,
+        currentUserId,
+        messageToSend,
+        mediaUrl || null
+      );
+
+      if (sbRecord) {
+        setMessages((prev) => {
+          if (prev.some((m) => m.id === sbRecord.id)) return prev;
+          const newChatMsg = mapSupabaseToChatMessage(sbRecord);
+          return [...prev, newChatMsg];
+        });
       }
-    } catch (error: any) { toast({ variant: 'destructive', title: 'Send Failed', description: error.message }); }
+
+      // 2. Dual-write to Firestore for backwards compatibility
+      if (firestore) {
+        await addDoc(collection(firestore, 'trades', trade.id, 'messages'), {
+          tradeId: trade.id,
+          senderId: currentUserId,
+          senderUsername: user.displayName || 'User',
+          message: messageToSend,
+          isModerator: isAdmin,
+          createdAt: new Date().toISOString(),
+          mediaUrl: mediaUrl || null,
+          mediaType: mediaType || 'none'
+        });
+        if (mediaUrl && trade.status === 'active') {
+          await addReceiptToTrade(firestore, trade.id, mediaUrl);
+          toast({ title: 'Receipt Uploaded', description: 'The seller has been notified.' });
+        }
+      }
+    } catch (error: any) {
+      toast({ variant: 'destructive', title: 'Send Failed', description: error.message || 'Could not send message.' });
+    }
   };
   
    const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {

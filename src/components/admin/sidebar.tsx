@@ -72,6 +72,7 @@ export function AdminSidebar() {
   const menuItems = [
     { href: "/adminnarayan/dashboard", label: "Dashboard", icon: LayoutDashboard },
     { href: "/adminnarayan/users", label: "Users", icon: Users },
+    { href: "/adminnarayan/wallets", label: "Wallets & Custody", icon: Wallet },
     { href: "/adminnarayan/trades", label: "Trades", icon: ArrowLeftRight },
     { href: "/adminnarayan/transfers", label: "Transfers", icon: Send },
     { href: "/adminnarayan/deposits", label: "Deposits", icon: ArrowDownToLine, badge: pendingDeposits?.length || 0 },

@@ -4,6 +4,7 @@ import { useMemo, useEffect, useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import * as z from 'zod';
+import { useAuth } from '@/components/providers/auth-provider';
 import { useFirebase, useDoc, useMemoFirebase } from '@/firebase';
 import { query, collection, where, limit, getDocs, doc } from 'firebase/firestore';
 import { useToast } from '@/hooks/use-toast';
@@ -62,7 +63,8 @@ const transferSchema = z.object({
 type TransferFormValues = z.infer<typeof transferSchema>;
 
 export default function TransferPage() {
-  const { firestore, user: authUser, isUserLoading: isAuthLoading, auth } = useFirebase();
+  const { user: authUser, isUserLoading: isAuthLoading } = useAuth();
+  const { firestore, auth } = useFirebase();
   const router = useRouter();
   const { toast } = useToast();
   

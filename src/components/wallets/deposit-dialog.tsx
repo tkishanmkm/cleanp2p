@@ -1,195 +1,340 @@
 'use client';
 
-import { useState, useMemo, useEffect } from 'react';
-import { useForm } from 'react-hook-form';
-import { zodResolver } from "@hookform/resolvers/zod";
-import * as z from "zod";
+import { useState, useMemo, useEffect, useCallback } from 'react';
 import QRCode from "qrcode.react";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
 import { useToast } from "@/hooks/use-toast";
-import { Copy, AlertTriangle, Loader2, Clock, AlertCircle } from "lucide-react";
+import { Copy, Loader2, ShieldCheck, CheckCircle2, AlertCircle, RefreshCw } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "../ui/alert";
-import { useFirebase, useDoc, useMemoFirebase } from '@/firebase';
-import type { Deposit, CryptoCurrency, DepositAddressSet } from '@/lib/types';
-import { createDepositRequest, confirmDepositWithTxId } from '@/lib/wallet';
+import { useAuth } from '@/components/providers/auth-provider';
+import { supabase } from '@/lib/supabase/client';
+import type { CryptoCurrency, UserWallet } from '@/lib/types';
+import { getActiveDepositAddress } from '@/lib/supabase/db';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select';
-import { useCountdown } from '@/hooks/use-countdown';
-import { Skeleton } from '../ui/skeleton';
-import { doc, updateDoc } from 'firebase/firestore';
 import { SUPPORTED_CRYPTOS } from '@/lib/constants';
-import { isPast } from 'date-fns';
-import { toDate } from '@/lib/utils';
 import { BtcLogo, EthLogo, LtcLogo, UsdtLogo } from '@/components/icons';
-import { ScrollArea } from '../ui/scroll-area';
-
-const amountSchema = z.object({
-  amount: z.coerce.number().positive("Amount must be a positive number."),
-  chain: z.string().min(1, "Please select a network."),
-});
-type AmountFormValues = z.infer<typeof amountSchema>;
-
-const txIdSchema = z.object({
-  txId: z.string().min(10, "Please enter a valid transaction hash."),
-});
-type TxIdFormValues = z.infer<typeof txIdSchema>;
+import { Badge } from '../ui/badge';
 
 interface DepositDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  asset: CryptoCurrency | null;
-  walletIndex: number | undefined;
-  initialDeposit?: Deposit | null;
+  asset?: CryptoCurrency | null;
+  wallet?: UserWallet | null;
+  walletIndex?: number;
+  initialDeposit?: unknown;
 }
 
-const CryptoLogo = ({ crypto, className }: { crypto: CryptoCurrency, className?: string }) => {
-    switch (crypto) {
-        case 'BTC': return <BtcLogo className={className} />;
-        case 'ETH': return <EthLogo className={className} />;
-        case 'LTC': return <LtcLogo className={className} />;
-        case 'USDT': return <UsdtLogo className={className} />;
-        default: return null;
-    }
-}
+const NETWORK_SPECS: Record<string, { minDeposit: string; confirmations: number }> = {
+  'BTC': { minDeposit: '0.0002 BTC', confirmations: 2 },
+  'ETH': { minDeposit: '0.005 ETH', confirmations: 12 },
+  'LTC': { minDeposit: '0.02 LTC', confirmations: 6 },
+  'ERC20': { minDeposit: '20.00 USDT', confirmations: 12 },
+  'TRC20': { minDeposit: '5.00 USDT', confirmations: 15 },
+  'BEP20': { minDeposit: '5.00 USDT', confirmations: 15 },
+  'EVM': { minDeposit: '5.00 USDT', confirmations: 15 },
+  'TRON': { minDeposit: '5.00 USDT', confirmations: 15 },
+};
 
-export function DepositDialog({ open, onOpenChange, asset, walletIndex, initialDeposit }: DepositDialogProps) {
-  const { toast } = useToast();
-  const { firestore, user } = useFirebase();
-  const [isLoading, setIsLoading] = useState(false);
-  const [step, setStep] = useState(1);
-  const [createdDeposit, setCreatedDeposit] = useState<Deposit | null>(null);
-  const countdown = useCountdown(createdDeposit?.timerEnd || 0);
+const CryptoLogo = ({ crypto, className }: { crypto: CryptoCurrency; className?: string }) => {
+  switch (crypto) {
+    case 'BTC': return <BtcLogo className={className} />;
+    case 'ETH': return <EthLogo className={className} />;
+    case 'LTC': return <LtcLogo className={className} />;
+    case 'USDT': return <UsdtLogo className={className} />;
+    default: return null;
+  }
+};
 
-  const addressSetRef = useMemoFirebase(() => (firestore && walletIndex) ? doc(firestore, "crypto_deposit_addresses", String(walletIndex)) : null, [firestore, walletIndex]);
-  const { data: addressSetData, isLoading: isAddressSetLoading } = useDoc<DepositAddressSet>(addressSetRef);
+/**
+ * Maps asset and selected network to the standard backend provisioning chain identifier
+ * BNB / ETH / ERC20 / BEP20 -> "EVM"
+ * BTC -> "BTC"
+ * LTC -> "LTC"
+ * TRX / USDT-TRC20 -> "TRON"
+ */
+function mapChainForProvisioning(assetCode: string, chainCode: string): 'EVM' | 'BTC' | 'LTC' | 'TRON' {
+  const normChain = (chainCode || '').toUpperCase().trim();
+  const normAsset = (assetCode || '').toUpperCase().trim();
 
-  useEffect(() => {
-    if (initialDeposit && open) {
-        setCreatedDeposit(initialDeposit);
-        setStep(2);
-    }
-  }, [initialDeposit, open]);
-
-  const availableChains = useMemo(() => {
-    if (!asset) return [];
-    const supported = SUPPORTED_CRYPTOS.find(c => c.name === asset);
-    return supported?.chains || [];
-  }, [asset]);
-
-  const amountForm = useForm<AmountFormValues>({
-    resolver: zodResolver(amountSchema),
-    defaultValues: { chain: availableChains.length === 1 ? availableChains[0] : "" }
-  });
-
-  const txIdForm = useForm<TxIdFormValues>({
-    resolver: zodResolver(txIdSchema),
-  });
-
-  useEffect(() => {
-    if (open && availableChains.length === 1) {
-        amountForm.setValue('chain', availableChains[0]);
-    }
-  }, [availableChains, amountForm, open]);
-
-  const handleCreateRequest = async (values: AmountFormValues) => {
-    if (!asset || !user || !user.displayName || walletIndex === undefined) return;
-    setIsLoading(true);
-    try {
-      const newDeposit = await createDepositRequest(firestore, user.uid, user.displayName, walletIndex, asset, values.chain, values.amount);
-      setCreatedDeposit(newDeposit);
-      setStep(2);
-    } catch (error: any) {
-      toast({ variant: 'destructive', title: 'Failed', description: error.message });
-    } finally {
-      setIsLoading(false);
-    }
-  };
-  
-  async function handleTxIdSubmit(values: TxIdFormValues) {
-    if (!createdDeposit) return;
-    setIsLoading(true);
-    try {
-      await confirmDepositWithTxId(firestore, createdDeposit.id, values.txId);
-      toast({ title: 'Submitted', description: 'Awaiting admin confirmation.' });
-      handleOpenChange(false);
-    } catch (error: any) {
-      toast({ variant: 'destructive', title: 'Failed', description: error.message });
-    } finally {
-      setIsLoading(false);
-    }
+  // 1. Bitcoin
+  if (normChain === 'BTC' || normAsset === 'BTC') {
+    return 'BTC';
   }
 
-  const handleOpenChange = (isOpen: boolean) => {
-    if (!isOpen) {
-      setTimeout(() => { setStep(1); setCreatedDeposit(null); amountForm.reset(); txIdForm.reset(); }, 300);
+  // 2. Litecoin
+  if (normChain === 'LTC' || normAsset === 'LTC') {
+    return 'LTC';
+  }
+
+  // 3. Tron (TRX, TRC20, USDT-TRC20)
+  if (
+    normChain === 'TRC20' ||
+    normChain === 'TRON' ||
+    normChain === 'TRX' ||
+    normChain === 'USDT-TRC20' ||
+    normChain === 'USDT_TRC20' ||
+    normAsset === 'TRX'
+  ) {
+    return 'TRON';
+  }
+
+  // 4. EVM Default (BNB, ETH, ERC20, BEP20, BSC, Polygon, Arbitrum, EVM)
+  return 'EVM';
+}
+
+export function DepositDialog({ open, onOpenChange, asset, wallet }: DepositDialogProps) {
+  const { toast } = useToast();
+  const { user } = useAuth();
+
+  const effectiveAsset = useMemo<CryptoCurrency>(() => {
+    if (asset) return asset;
+    if (wallet?.crypto) return wallet.crypto;
+    return 'USDT';
+  }, [asset, wallet]);
+
+  const [selectedChain, setSelectedChain] = useState<string>('');
+  const [depositAddress, setDepositAddress] = useState<string>('');
+  const [isLoading, setIsLoading] = useState(false);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
+
+  const availableChains = useMemo(() => {
+    if (wallet?.chain && !asset) {
+      return [wallet.chain];
     }
-    onOpenChange(isOpen);
+    const supported = SUPPORTED_CRYPTOS.find(c => c.name === effectiveAsset);
+    return supported?.chains || [effectiveAsset];
+  }, [effectiveAsset, wallet, asset]);
+
+  useEffect(() => {
+    if (availableChains.length > 0) {
+      if (wallet?.chain && availableChains.includes(wallet.chain)) {
+        setSelectedChain(wallet.chain);
+      } else {
+        setSelectedChain(availableChains[0]);
+      }
+    } else {
+      setSelectedChain('');
+    }
+  }, [availableChains, wallet, open]);
+
+  const fetchAddress = useCallback(async (chainToUse: string) => {
+    if (!effectiveAsset || !chainToUse) return;
+    setIsLoading(true);
+    setErrorMessage(null);
+
+    const mappedChain = mapChainForProvisioning(effectiveAsset, chainToUse);
+
+    try {
+      // Get current session access token directly from Supabase client
+      const { data: sessionData } = await supabase.auth.getSession();
+      const token = sessionData?.session?.access_token;
+
+      const headers: Record<string, string> = {
+        'Content-Type': 'application/json',
+      };
+
+      if (token) {
+        headers['Authorization'] = `Bearer ${token}`;
+      }
+
+      // 1. Primary: POST /api/wallets/provision-address with credentials and auth header
+      const provisionRes = await fetch('/api/wallets/provision-address', {
+        method: 'POST',
+        headers,
+        credentials: 'same-origin',
+        body: JSON.stringify({
+          chain: mappedChain,
+          asset: effectiveAsset,
+          network: chainToUse,
+        }),
+      });
+
+      const data = await provisionRes.json();
+
+      if (provisionRes.ok && data?.success && data?.address) {
+        setDepositAddress(data.address);
+        setIsLoading(false);
+        return;
+      }
+
+      // 2. Secondary: Fallback to /api/wallets/deposit-address
+      const legacyRes = await fetch(
+        `/api/wallets/deposit-address?asset=${encodeURIComponent(effectiveAsset)}&network=${encodeURIComponent(chainToUse)}`,
+        {
+          headers,
+          credentials: 'same-origin',
+        }
+      );
+      if (legacyRes.ok) {
+        const legacyData = await legacyRes.json();
+        if (legacyData?.address) {
+          setDepositAddress(legacyData.address);
+          setIsLoading(false);
+          return;
+        }
+      }
+
+      // 3. Tertiary: Check Supabase public.deposit_addresses if user is loaded
+      if (user?.uid) {
+        const { data: dbRecord, error: dbError } = await getActiveDepositAddress(user.uid, effectiveAsset, chainToUse);
+        if (!dbError && dbRecord?.address) {
+          setDepositAddress(dbRecord.address);
+          setIsLoading(false);
+          return;
+        }
+      }
+
+      throw new Error(data?.error || 'Could not retrieve a deposit address for this network. Please try again.');
+    } catch (err: any) {
+      console.error("Deposit address retrieval failed:", err);
+      setErrorMessage(err?.message || "Failed to generate deposit address.");
+      setDepositAddress('');
+    } finally {
+      setIsLoading(false);
+    }
+  }, [effectiveAsset, user]);
+
+  useEffect(() => {
+    if (open && selectedChain) {
+      fetchAddress(selectedChain);
+    } else if (!open) {
+      setDepositAddress('');
+      setErrorMessage(null);
+      setCopied(false);
+    }
+  }, [open, selectedChain, fetchAddress]);
+
+  const handleCopy = () => {
+    if (!depositAddress) return;
+    navigator.clipboard.writeText(depositAddress);
+    setCopied(true);
+    toast({ title: "Address Copied", description: "Deposit address copied to clipboard." });
+    setTimeout(() => setCopied(false), 2500);
   };
 
-  const isRequestExpired = createdDeposit?.status === 'expired' || (createdDeposit && isPast(toDate(createdDeposit.timerEnd)!));
+  const currentSpec = selectedChain ? NETWORK_SPECS[selectedChain] || NETWORK_SPECS[effectiveAsset] : null;
 
   return (
-    <Dialog open={open} onOpenChange={handleOpenChange}>
+    <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-md">
-        {step === 1 ? (
-            <>
-            <DialogHeader><DialogTitle>Deposit {asset}</DialogTitle></DialogHeader>
-            <Form {...amountForm}>
-                <form onSubmit={amountForm.handleSubmit(handleCreateRequest)} className="space-y-4">
-                    <FormField control={amountForm.control} name="chain" render={({ field }) => (
-                        <FormItem>
-                            <FormLabel>Network</FormLabel>
-                            <Select onValueChange={field.onChange} value={field.value}>
-                                <FormControl><SelectTrigger><SelectValue placeholder="Select network" /></SelectTrigger></FormControl>
-                                <SelectContent>{availableChains.map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}</SelectContent>
-                            </Select>
-                            <FormMessage />
-                        </FormItem>
-                    )} />
-                    <FormField control={amountForm.control} name="amount" render={({ field }) => (
-                        <FormItem>
-                            <FormLabel>Amount</FormLabel>
-                            <FormControl><Input type="number" step="any" placeholder="0.00" {...field} /></FormControl>
-                            <FormMessage />
-                        </FormItem>
-                    )} />
-                    <Button type="submit" disabled={isLoading} className="w-full">
-                        {isLoading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                        Get Deposit Address
-                    </Button>
-                </form>
-            </Form>
-            </>
-        ) : (
-            <>
-                <DialogHeader><DialogTitle>Send {createdDeposit?.crypto}</DialogTitle></DialogHeader>
-                {isRequestExpired ? <Alert variant="destructive"><AlertTitle>Expired</AlertTitle><AlertDescription>This request is no longer active.</AlertDescription></Alert> : (
-                    <div className="space-y-4">
-                        <div className="flex flex-col items-center gap-4">
-                            <div className="p-2 bg-white rounded-lg border"><QRCode value={createdDeposit?.walletAddress || ''} size={160} /></div>
-                            <div className="text-center">
-                                <p className="text-sm font-mono break-all">{createdDeposit?.walletAddress}</p>
-                                <Button variant="link" size="sm" onClick={() => { navigator.clipboard.writeText(createdDeposit?.walletAddress || ''); toast({title:'Copied'}); }}>Copy Address</Button>
-                            </div>
-                        </div>
-                        <Form {...txIdForm}>
-                            <form onSubmit={txIdForm.handleSubmit(handleTxIdSubmit)} className="space-y-4 border-t pt-4">
-                                <FormField control={txIdForm.control} name="txId" render={({ field }) => (
-                                    <FormItem>
-                                        <FormLabel>Transaction ID (TxID)</FormLabel>
-                                        <FormControl><Input placeholder="Paste TxID here" {...field} /></FormControl>
-                                        <FormMessage />
-                                    </FormItem>
-                                )} />
-                                <Button type="submit" disabled={isLoading} className="w-full">Confirm Sent</Button>
-                            </form>
-                        </Form>
-                    </div>
-                )}
-            </>
-        )}
+        <DialogHeader>
+          <div className="flex items-center gap-3">
+            <CryptoLogo crypto={effectiveAsset} className="h-7 w-7" />
+            <div>
+              <DialogTitle>Deposit {effectiveAsset}</DialogTitle>
+              <DialogDescription>
+                Send only {effectiveAsset} to this personal deposit address.
+              </DialogDescription>
+            </div>
+          </div>
+        </DialogHeader>
+
+        <div className="space-y-4 py-1">
+          {availableChains.length > 1 && (
+            <div className="space-y-1.5">
+              <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+                Select Network
+              </label>
+              <Select value={selectedChain} onValueChange={(val) => setSelectedChain(val)}>
+                <SelectTrigger className="w-full">
+                  <SelectValue placeholder="Select network" />
+                </SelectTrigger>
+                <SelectContent>
+                  {availableChains.map((c) => (
+                    <SelectItem key={c} value={c}>
+                      {c} Network
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          )}
+
+          {isLoading ? (
+            <div className="flex flex-col items-center justify-center py-10 gap-3">
+              <Loader2 className="h-8 w-8 animate-spin text-primary" />
+              <p className="text-sm font-medium text-foreground">Generating unique deposit address...</p>
+              <p className="text-xs text-muted-foreground">Deriving secure address on {selectedChain || effectiveAsset} network</p>
+            </div>
+          ) : depositAddress ? (
+            <div className="space-y-4">
+              {/* QR Code */}
+              <div className="flex justify-center">
+                <div className="p-3 bg-white rounded-xl border shadow-sm">
+                  <QRCode value={depositAddress} size={168} renderAs="svg" />
+                </div>
+              </div>
+
+              {/* Address Box */}
+              <div className="space-y-1.5">
+                <div className="flex items-center justify-between text-xs text-muted-foreground">
+                  <span>Deposit Address ({selectedChain})</span>
+                  <Badge variant="outline" className="text-[10px] uppercase font-mono">
+                    {selectedChain}
+                  </Badge>
+                </div>
+                <div className="flex items-center gap-2 p-2.5 rounded-lg bg-muted/60 border">
+                  <span className="font-mono text-xs break-all select-all flex-1 text-foreground">
+                    {depositAddress}
+                  </span>
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    className="shrink-0 h-8 px-2.5"
+                    onClick={handleCopy}
+                  >
+                    {copied ? <CheckCircle2 className="h-4 w-4 text-emerald-600" /> : <Copy className="h-4 w-4" />}
+                    <span className="ml-1.5 text-xs">{copied ? "Copied" : "Copy"}</span>
+                  </Button>
+                </div>
+              </div>
+
+              {/* Network Details & Limits */}
+              <div className="grid grid-cols-2 gap-2 text-xs p-3 rounded-lg bg-muted/40 border">
+                <div>
+                  <span className="text-muted-foreground block">Minimum Deposit</span>
+                  <span className="font-semibold text-foreground">
+                    {currentSpec?.minDeposit || 'No minimum'}
+                  </span>
+                </div>
+                <div>
+                  <span className="text-muted-foreground block">Confirmations</span>
+                  <span className="font-semibold text-foreground">
+                    {currentSpec?.confirmations ? `${currentSpec.confirmations} Blocks` : 'Network Default'}
+                  </span>
+                </div>
+              </div>
+
+              {/* Automatic Crediting Notice */}
+              <div className="flex items-start gap-2.5 p-3 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-emerald-800 dark:text-emerald-300 text-xs">
+                <ShieldCheck className="h-4 w-4 shrink-0 mt-0.5" />
+                <span>
+                  Deposits are detected and credited automatically once the required blockchain confirmations are reached.
+                </span>
+              </div>
+            </div>
+          ) : (
+            <div className="space-y-4 py-2">
+              <Alert variant="destructive">
+                <AlertCircle className="h-4 w-4" />
+                <AlertTitle>Address Unavailable</AlertTitle>
+                <AlertDescription>
+                  {errorMessage || "Unable to retrieve deposit address for this network. Please check your connection."}
+                </AlertDescription>
+              </Alert>
+              <Button
+                variant="outline"
+                className="w-full gap-2"
+                onClick={() => fetchAddress(selectedChain)}
+              >
+                <RefreshCw className="h-4 w-4" />
+                Retry Generation
+              </Button>
+            </div>
+          )}
+        </div>
       </DialogContent>
     </Dialog>
   );

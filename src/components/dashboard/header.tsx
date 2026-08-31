@@ -37,6 +37,8 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { Sheet, SheetContent, SheetTrigger } from '@/components/ui/sheet';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
+import { useNotifications } from '@/components/notifications-provider';
+import { useAuth } from '@/components/providers/auth-provider';
 import { useFirebase, useCollection, useMemoFirebase, useDoc } from '@/firebase';
 import { Logo } from '@/components/logo';
 import { ModeToggle } from '@/components/mode-toggle';
@@ -47,7 +49,6 @@ import type { UserWallet, Notification, User as AppUser, Language, Trade, Crypto
 import { Skeleton } from '../ui/skeleton';
 import { cn, toDate } from '@/lib/utils';
 import { usePrices } from '@/context/price-context';
-import { signOut } from 'firebase/auth';
 import { useToast } from '@/hooks/use-toast';
 import { LANGUAGES } from '@/lib/constants';
 import { FlagIcon } from '../ui/flag-icon';
@@ -89,7 +90,8 @@ const CryptoLogo = ({ crypto, className }: { crypto: CryptoCurrency; className?:
 }
 
 export function DashboardHeader() {
-  const { user: authUser, isUserLoading, firestore, auth } = useFirebase();
+  const { user: authUser, profile, isUserLoading, signOut } = useAuth();
+  const { firestore } = useFirebase();
   const pathname = usePathname();
   const router = useRouter();
   const { toast } = useToast();
@@ -99,32 +101,27 @@ export function DashboardHeader() {
   const [showAllNotifications, setShowAllNotifications] = useState(false);
 
 
-  const userDocRef = useMemoFirebase(() => (authUser ? doc(firestore, 'users', authUser.uid) : null), [
+  const userDocRef = useMemoFirebase(() => (authUser?.uid && firestore ? doc(firestore, 'users', authUser.uid) : null), [
     firestore,
-    authUser,
+    authUser?.uid,
   ]);
   const { data: userData } = useDoc<AppUser>(userDocRef);
 
   const walletsRef = useMemoFirebase(
-    () => (authUser ? collection(firestore, 'users', authUser.uid, 'wallets') : null),
-    [firestore, authUser]
+    () => (authUser?.uid && firestore ? collection(firestore, 'users', authUser.uid, 'wallets') : null),
+    [firestore, authUser?.uid]
   );
   const { data: wallets } = useCollection<UserWallet>(walletsRef);
 
-  const notificationsRef = useMemoFirebase(
-    () => (authUser ? collection(firestore, 'users', authUser.uid, 'notifications') : null),
-    [firestore, authUser]
-  );
-  const notificationsQuery = useMemoFirebase(
-    () => (notificationsRef ? query(notificationsRef, orderBy('createdAt', 'desc')) : null),
-    [notificationsRef]
-  );
-  const { data: notifications } = useCollection<Notification>(notificationsQuery);
-  const unreadCount = notifications?.filter((n) => !n.isRead).length || 0;
+  const {
+    notifications,
+    unreadCount,
+    markAsRead: handleMarkAsRead,
+  } = useNotifications();
   const visibleNotifications = showAllNotifications ? notifications : notifications?.slice(0, 3);
 
-  const tradesAsBuyerQuery = useMemoFirebase(() => authUser ? query(collection(firestore, 'trades'), where('buyerId', '==', authUser.uid)) : null, [firestore, authUser]);
-  const tradesAsSellerQuery = useMemoFirebase(() => authUser ? query(collection(firestore, 'trades'), where('sellerId', '==', authUser.uid)) : null, [firestore, authUser]);
+  const tradesAsBuyerQuery = useMemoFirebase(() => authUser?.uid && firestore ? query(collection(firestore, 'trades'), where('buyerId', '==', authUser.uid)) : null, [firestore, authUser?.uid]);
+  const tradesAsSellerQuery = useMemoFirebase(() => authUser?.uid && firestore ? query(collection(firestore, 'trades'), where('sellerId', '==', authUser.uid)) : null, [firestore, authUser?.uid]);
 
   const { data: buyerTrades } = useCollection<Trade>(tradesAsBuyerQuery);
   const { data: sellerTrades } = useCollection<Trade>(tradesAsSellerQuery);
@@ -149,16 +146,9 @@ export function DashboardHeader() {
   const exchangeRate = fiatRates[preferredCurrency] || 1;
   const totalWalletValueConverted = totalWalletValueUSD * exchangeRate;
 
-  const handleMarkAsRead = async (notificationId: string) => {
-    if (!firestore || !authUser) return;
-    const notifRef = doc(firestore, 'users', authUser.uid, 'notifications', notificationId);
-    await updateDoc(notifRef, { isRead: true });
-  };
-
   const handleLogout = async () => {
-    if (!auth) return;
     try {
-      await signOut(auth);
+      await signOut();
       toast({ title: "Logged Out", description: "You have been successfully logged out." });
       router.push('/login');
     } catch (error) {

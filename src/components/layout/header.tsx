@@ -24,9 +24,8 @@ import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription, SheetTr
 import { ModeToggle } from "../mode-toggle";
 import { useI18n } from "@/context/i18n-context";
 import type { Language } from "@/lib/types";
-import { useFirebase } from '@/firebase';
+import { useAuth } from '@/components/providers/auth-provider';
 import { useRouter } from 'next/navigation';
-import { signOut } from 'firebase/auth';
 import { useToast } from '@/hooks/use-toast';
 import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar';
 import { DefaultAvatar } from '@/components/icons';
@@ -42,7 +41,7 @@ const mobileNavLinks = [
 
 export function Header() {
   const { language, setLanguage } = useI18n();
-  const { user, isUserLoading, auth } = useFirebase();
+  const { user, isUserLoading, signOut } = useAuth();
   const router = useRouter();
   const { toast } = useToast();
   const selectedLanguage = LANGUAGES.flatMap(l => l.dialects || l).find(l => l.code === language) || LANGUAGES[0];
@@ -53,9 +52,8 @@ export function Header() {
   };
   
   const handleLogout = async () => {
-    if (!auth) return;
     try {
-      await signOut(auth);
+      await signOut();
       toast({ title: "Logged Out", description: "You have been successfully logged out." });
       router.push('/login');
     } catch (error) {

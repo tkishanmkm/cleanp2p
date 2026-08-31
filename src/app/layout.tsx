@@ -1,9 +1,9 @@
-
-import type {Metadata} from 'next';
+import type { Metadata } from 'next';
 import './globals.css';
 import { Toaster } from "@/components/ui/toaster";
-import { FirebaseClientProvider } from '@/firebase';
 import { ThemeProvider } from '@/components/theme-provider';
+import { AuthProvider } from '@/components/providers/auth-provider';
+import { NotificationsProvider } from '@/components/notifications-provider';
 import { PriceProvider } from '@/context/price-context';
 import { BrandingProvider } from '@/context/branding-context';
 import { I18nProvider } from '@/context/i18n-context';
@@ -33,15 +33,17 @@ export default function RootLayout({
           enableSystem
           disableTransitionOnChange
         >
-          <FirebaseClientProvider>
-            <PriceProvider>
+          <AuthProvider>
+            <NotificationsProvider>
+              <PriceProvider>
                 <I18nProvider>
                   <BrandingProvider>
                     {children}
                   </BrandingProvider>
                 </I18nProvider>
-            </PriceProvider>
-          </FirebaseClientProvider>
+              </PriceProvider>
+            </NotificationsProvider>
+          </AuthProvider>
           <Toaster />
         </ThemeProvider>
       </body>
