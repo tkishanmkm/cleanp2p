@@ -1,44 +1,26 @@
-
 'use client';
-import {
-  Firestore,
-  doc,
-  runTransaction,
-  collection,
-  addDoc,
-  getDoc,
-  writeBatch,
-} from 'firebase/firestore';
 import type { Trade, Dispute } from './types';
+import { supabase } from '@/lib/supabase/client';
 
 export async function openDispute(
-  db: Firestore,
+  _db: any,
   trade: Trade,
   openerId: string,
   openerUsername: string,
   reason: string,
   explanation: string
 ): Promise<void> {
-  const tradeRef = doc(db, 'trades', trade.id);
-  const disputeCollectionRef = collection(db, 'trades', trade.id, 'disputes');
-  const messagesCollectionRef = collection(db, 'trades', trade.id, 'messages');
+  // 1. Update trade status
+  const { error: tradeError } = await supabase
+    .from('trades')
+    .update({ status: 'disputed' })
+    .eq('id', trade.id);
 
-  const batch = writeBatch(db);
-
-  const tradeDoc = await getDoc(tradeRef);
-  const currentTradeData = tradeDoc.data() as Trade;
-  
-  if (currentTradeData.status === 'disputed') {
-    throw new Error('A dispute is already open for this trade.');
-  }
-  if (currentTradeData.status !== 'paid' && currentTradeData.status !== 'active') {
-    throw new Error('Disputes can only be opened on active or paid trades.');
+  if (tradeError) {
+    console.error('Error updating trade to disputed:', tradeError);
   }
 
-  // 1. Update the trade status to 'disputed'
-  batch.update(tradeRef, { status: 'disputed' });
-
-  // 2. Create the new dispute document
+  // 2. Insert dispute record
   const newDispute: Omit<Dispute, 'id' | 'createdAt'> = {
     tradeId: trade.id,
     openedBy: openerId,
@@ -46,40 +28,47 @@ export async function openDispute(
     explanation: explanation,
     status: 'open',
   };
-  batch.set(doc(disputeCollectionRef), { ...newDispute, createdAt: new Date().toISOString() });
 
-  // 3. Add a system message to the chat
+  await supabase.from('disputes').insert([
+    {
+      trade_id: trade.id,
+      opened_by: openerId,
+      reason: reason,
+      explanation: explanation,
+      status: 'open',
+      created_at: new Date().toISOString(),
+    },
+  ]);
+
+  // 3. Add system message in trade chat
   const systemMessage = {
-    tradeId: trade.id,
-    senderId: 'system',
-    senderUsername: 'System',
-    message: `This trade has been marked as disputed. Please do not release any crypto or make any further payment until the moderator reviews the case. A Paxones moderator will join the chat shortly to investigate and provide instructions. Kindly cooperate and share any required proof or details in the chat.\n\nReason from ${openerUsername}: ${reason}\n${explanation}`,
-    isModerator: true, // Use this flag to style it as a system/moderator message
-    createdAt: new Date().toISOString(),
+    trade_id: trade.id,
+    sender_id: 'system',
+    sender_username: 'System',
+    message: `This trade has been marked as disputed. Please do not release any crypto or make any further payment until the moderator reviews the case. Reason from ${openerUsername}: ${reason}\n${explanation}`,
+    is_moderator: true,
+    created_at: new Date().toISOString(),
   };
-  batch.set(doc(messagesCollectionRef), systemMessage);
-  
-  // 4. Create notifications for both users
+  await supabase.from('trade_messages').insert([systemMessage]);
+
+  // 4. Create notifications for both parties
   const opponentId = openerId === trade.buyerId ? trade.sellerId : trade.buyerId;
-  const opponentUsername = openerId === trade.buyerId ? trade.seller.userId : trade.buyer.userId;
-
-  const openerNotificationRef = doc(collection(db, 'users', openerId, 'notifications'));
-  batch.set(openerNotificationRef, {
-      userId: openerId,
-      message: `You have successfully opened a dispute for trade ${trade.tradeId}.`,
+  const notifications = [
+    {
+      user_id: openerId,
+      message: `You have successfully opened a dispute for trade ${trade.tradeId || trade.id}.`,
       link: `/trade/${trade.id}`,
-      isRead: false,
-      createdAt: new Date().toISOString(),
-  });
-
-  const opponentNotificationRef = doc(collection(db, 'users', opponentId, 'notifications'));
-  batch.set(opponentNotificationRef, {
-      userId: opponentId,
-      message: `${openerUsername} has opened a dispute on trade ${trade.tradeId}. A moderator will join shortly.`,
+      is_read: false,
+      created_at: new Date().toISOString(),
+    },
+    {
+      user_id: opponentId,
+      message: `${openerUsername} has opened a dispute on trade ${trade.tradeId || trade.id}. A moderator will join shortly.`,
       link: `/trade/${trade.id}`,
-      isRead: false,
-      createdAt: new Date().toISOString(),
-  });
-  
-  await batch.commit();
+      is_read: false,
+      created_at: new Date().toISOString(),
+    },
+  ];
+
+  await supabase.from('notifications').insert(notifications);
 }

@@ -1,9 +1,7 @@
-
 'use client';
 
 import { useAuth } from '@/components/providers/auth-provider';
-import { useFirebase, useCollection, useMemoFirebase } from '@/firebase';
-import { collection, query, where, orderBy } from 'firebase/firestore';
+import { supabase } from '@/lib/supabase/client';
 import type { SupportTicket } from '@/lib/types';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion';
@@ -12,13 +10,15 @@ import { MailQuestion, CheckCircle, Hourglass, Loader2 } from 'lucide-react';
 import { toDate } from '@/lib/utils';
 import { Badge } from '@/components/ui/badge';
 import { useRouter } from 'next/navigation';
-import { useEffect } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { formatDistanceToNow } from 'date-fns';
 
 export default function MyTicketsPage() {
-    const { user: authUser, isUserLoading } = useAuth();
-    const { firestore } = useFirebase();
+    const { user: authUser, profile, isUserLoading } = useAuth();
     const router = useRouter();
+
+    const [tickets, setTickets] = useState<SupportTicket[]>([]);
+    const [areTicketsLoading, setAreTicketsLoading] = useState(true);
 
     useEffect(() => {
         if (!isUserLoading && !authUser) {
@@ -26,11 +26,41 @@ export default function MyTicketsPage() {
         }
     }, [isUserLoading, authUser, router]);
 
-    const ticketsQuery = useMemoFirebase(
-        () => (authUser?.displayName && firestore ? query(collection(firestore, "support_tickets"), where("userId", "==", authUser.displayName), orderBy("createdAt", "desc")) : null),
-        [authUser?.displayName, firestore]
-    );
-    const { data: tickets, isLoading: areTicketsLoading } = useCollection<SupportTicket>(ticketsQuery);
+    const fetchTickets = useCallback(async () => {
+        if (!authUser?.uid) return;
+        setAreTicketsLoading(true);
+        try {
+            const username = profile?.username || authUser.displayName || '';
+            const { data, error } = await supabase
+                .from('support_tickets')
+                .select('*')
+                .or(`user_id.eq.${authUser.uid},userId.eq.${authUser.uid},userId.eq.${username}`)
+                .order('created_at', { ascending: false });
+
+            if (error) throw error;
+
+            const mapped: SupportTicket[] = (data || []).map((t: any) => ({
+                id: t.id,
+                userId: t.user_id || t.userId,
+                category: t.category,
+                subject: t.subject,
+                message: t.message,
+                status: t.status || 'Open',
+                resolutionNote: t.resolution_note || t.resolutionNote,
+                createdAt: t.created_at || t.createdAt,
+            }));
+
+            setTickets(mapped);
+        } catch (err) {
+            console.error('Error fetching support tickets:', err);
+        } finally {
+            setAreTicketsLoading(false);
+        }
+    }, [authUser?.uid, authUser?.displayName, profile?.username]);
+
+    useEffect(() => {
+        fetchTickets();
+    }, [fetchTickets]);
     
     const isLoading = isUserLoading || areTicketsLoading;
 
@@ -41,7 +71,7 @@ export default function MyTicketsPage() {
             case 'Closed': return <CheckCircle className="h-5 w-5 text-green-500" />;
             default: return <MailQuestion className="h-5 w-5" />;
         }
-    }
+    };
 
     if (isLoading) {
         return (
@@ -61,7 +91,7 @@ export default function MyTicketsPage() {
                     </CardContent>
                 </Card>
             </div>
-        )
+        );
     }
 
     return (

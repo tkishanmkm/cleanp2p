@@ -5,10 +5,11 @@ import { getSupabaseAdminClient } from '@/lib/supabase/server';
 
 export async function PATCH(
   req: NextRequest,
-  { params }: { params: Promise<{ id: string }> }
+  context: { params: { id: string } | Promise<{ id: string }> }
 ) {
   try {
-    const { id: orderId } = await params;
+    const rawParams = await Promise.resolve(context.params);
+    const orderId = rawParams.id;
     const body = await req.json();
     const { status } = body;
 

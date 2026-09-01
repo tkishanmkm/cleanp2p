@@ -1,13 +1,10 @@
-
-
 'use client';
 
 import { useParams } from 'next/navigation';
-import Image from 'next/image';
-import { useFirebase, useCollection, useMemoFirebase, useDoc } from '@/firebase';
-import { collection, query, where, limit, doc, orderBy } from 'firebase/firestore';
-import type { User, P2PAd, Feedback } from '@/lib/types';
-import { format, formatDistanceToNow } from 'date-fns';
+import { useAuth } from '@/components/providers/auth-provider';
+import { supabase } from '@/lib/supabase/client';
+import type { User, P2PAd, Feedback, CryptoCurrency } from '@/lib/types';
+import { formatDistanceToNow } from 'date-fns';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -20,8 +17,8 @@ import { toDate, cn } from '@/lib/utils';
 import { blockUser, unblockUser } from '@/lib/users';
 import { useToast } from '@/hooks/use-toast';
 import { FlagIcon } from '@/components/ui/flag-icon';
-import { countries } from '@/lib/countries';
 import { FeedbackCard } from '@/components/p2p/feedback-card';
+import { useState, useEffect, useCallback } from 'react';
 
 function UserStats({ user }: { user: User }) {
   const lastTradeDate = toDate(user.lastTradeAt);
@@ -85,43 +82,159 @@ function UserStats({ user }: { user: User }) {
   );
 }
 
-
 export default function PublicProfilePage() {
   const params = useParams();
-  const { firestore, user: authUser } = useFirebase();
+  const { user: authUser, profile: authProfile } = useAuth();
   const { toast } = useToast();
   const username = Array.isArray(params.username) ? params.username[0] : params.username;
 
-  const currentUserRef = useMemoFirebase(() => authUser ? doc(firestore, 'users', authUser.uid) : null, [firestore, authUser]);
-  const { data: currentUserData } = useDoc<User>(currentUserRef);
+  const [user, setUser] = useState<User | null>(null);
+  const [isUserLoading, setIsUserLoading] = useState(true);
+  const [ads, setAds] = useState<P2PAd[]>([]);
+  const [areAdsLoading, setAreAdsLoading] = useState(true);
+  const [feedbacks, setFeedbacks] = useState<Feedback[]>([]);
+  const [areFeedbackLoading, setAreFeedbackLoading] = useState(true);
 
-  const userQuery = useMemoFirebase(
-    () => (firestore && username ? query(collection(firestore, 'users'), where('userId', '==', username), limit(1)) : null),
-    [firestore, username]
-  );
-  const { data: users, isLoading: isUserLoading } = useCollection<User>(userQuery);
-  const user = users?.[0];
-  
-  const adsQuery = useMemoFirebase(
-      () => (firestore && user ? query(collection(firestore, "p2p_ads"), where("userId", "==", user.id), where("active", "==", true)) : null),
-      [firestore, user]
-  );
-  const { data: ads, isLoading: areAdsLoading } = useCollection<P2PAd>(adsQuery);
+  const fetchProfile = useCallback(async () => {
+    if (!username) return;
+    setIsUserLoading(true);
+    try {
+      const { data, error } = await supabase
+        .from('profiles')
+        .select('*')
+        .or(`username.eq.${username},id.eq.${username}`)
+        .maybeSingle();
 
-  const feedbackQuery = useMemoFirebase(
-    () => (firestore && user ? query(collection(firestore, 'users', user.id, 'feedback'), orderBy('createdAt', 'desc')) : null),
-    [firestore, user]
-  );
-  const { data: feedbacks, isLoading: areFeedbackLoading } = useCollection<Feedback>(feedbackQuery);
+      if (error) throw error;
 
-  const isBlockedByCurrentUser = currentUserData?.blockedUsers?.includes(user?.id || '');
-  const isCurrentUserBlocked = user?.blockedUsers?.includes(currentUserData?.id || '');
+      if (data) {
+        const mapped: User = {
+          id: data.id,
+          userId: data.username || username,
+          fullName: data.full_name || data.username || username,
+          email: data.email || '',
+          photoURL: data.photo_url || data.avatar_url || null,
+          isBanned: data.is_banned ?? false,
+          isOnHold: data.is_on_hold ?? false,
+          tradeVolume: data.trade_volume ?? 0,
+          completedTrades: data.completed_trades ?? 0,
+          positiveFeedback: data.positive_feedback ?? 0,
+          negativeFeedback: data.negative_feedback ?? 0,
+          feedbackScore: data.feedback_score ?? 100,
+          avgPaymentTime: data.avg_payment_time ?? 0,
+          avgReleaseTime: data.avg_release_time ?? 0,
+          lastTradeAt: data.last_trade_at || null,
+          lastActive: data.last_active || data.updated_at || new Date().toISOString(),
+          createdAt: data.created_at || new Date().toISOString(),
+          country: data.country || 'US',
+          badges: Array.isArray(data.badges) ? data.badges : ['Verified Trader'],
+          blockedUsers: Array.isArray(data.blocked_users) ? data.blocked_users : [],
+        };
+        setUser(mapped);
+      } else {
+        setUser(null);
+      }
+    } catch (err) {
+      console.error('Error fetching public profile:', err);
+    } finally {
+      setIsUserLoading(false);
+    }
+  }, [username]);
+
+  const fetchAds = useCallback(async (userId: string) => {
+    setAreAdsLoading(true);
+    try {
+      const { data, error } = await supabase
+        .from('p2p_ads')
+        .select('*')
+        .or(`user_id.eq.${userId},userId.eq.${userId}`)
+        .eq('active', true)
+        .order('created_at', { ascending: false });
+
+      if (error) throw error;
+
+      const mapped: P2PAd[] = (data || []).map((raw: any) => ({
+        id: raw.id,
+        userId: raw.user_id || raw.userId,
+        publicAdId: raw.public_ad_id || raw.publicAdId || raw.id,
+        adType: (raw.ad_type || raw.adType || 'sell') as 'buy' | 'sell',
+        crypto: raw.crypto as CryptoCurrency,
+        fiatCurrency: raw.fiat_currency || raw.fiatCurrency || 'USD',
+        rateType: raw.rate_type || raw.rateType || 'market',
+        fixedRate: raw.fixed_rate ?? raw.fixedRate,
+        ratePercent: raw.rate_percent ?? raw.ratePercent ?? 0,
+        minAmount: Number(raw.min_amount ?? raw.minAmount ?? 0),
+        maxAmount: Number(raw.max_amount ?? raw.maxAmount ?? 0),
+        paymentMethods: Array.isArray(raw.payment_methods)
+          ? raw.payment_methods
+          : Array.isArray(raw.paymentMethods)
+          ? raw.paymentMethods
+          : typeof raw.payment_methods === 'string'
+          ? JSON.parse(raw.payment_methods)
+          : [],
+        terms: raw.terms || '',
+        active: raw.active !== false,
+        createdAt: raw.created_at || raw.createdAt,
+      }));
+
+      setAds(mapped);
+    } catch (err) {
+      console.error('Error fetching user ads:', err);
+    } finally {
+      setAreAdsLoading(false);
+    }
+  }, []);
+
+  const fetchFeedback = useCallback(async (userId: string) => {
+    setAreFeedbackLoading(true);
+    try {
+      const { data } = await supabase
+        .from('feedbacks')
+        .select('*')
+        .eq('to_user', userId)
+        .order('created_at', { ascending: false });
+
+      if (data && data.length > 0) {
+        const mapped: Feedback[] = data.map((f: any) => ({
+          id: f.id,
+          tradeId: f.trade_id || f.tradeId,
+          fromUser: f.from_user || f.fromUser,
+          fromUsername: f.from_username || f.fromUsername || 'Trader',
+          toUser: f.to_user || f.toUser,
+          rating: f.rating || 'positive',
+          comment: f.comment || '',
+          createdAt: f.created_at || f.createdAt,
+        }));
+        setFeedbacks(mapped);
+      } else {
+        setFeedbacks([]);
+      }
+    } catch (err) {
+      console.error('Error fetching feedback:', err);
+    } finally {
+      setAreFeedbackLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchProfile();
+  }, [fetchProfile]);
+
+  useEffect(() => {
+    if (user?.id) {
+      fetchAds(user.id);
+      fetchFeedback(user.id);
+    }
+  }, [user?.id, fetchAds, fetchFeedback]);
+
+  const isBlockedByCurrentUser = authProfile?.blocked_users?.includes(user?.id || '');
+  const isCurrentUserBlocked = user?.blockedUsers?.includes(authUser?.uid || '');
   const isInteractionBlocked = !isUserLoading && (isBlockedByCurrentUser || isCurrentUserBlocked);
 
   const handleBlock = async () => {
-    if (!firestore || !authUser || !user) return;
+    if (!authUser || !user) return;
     try {
-      await blockUser(firestore, authUser.uid, user.userId);
+      await blockUser(null, authUser.uid, user.userId);
       toast({ title: "User Blocked", description: `You have blocked ${user.userId}.` });
     } catch (e: any) {
       toast({ variant: 'destructive', title: "Error", description: e.message });
@@ -129,9 +242,9 @@ export default function PublicProfilePage() {
   };
 
   const handleUnblock = async () => {
-    if (!firestore || !authUser || !user) return;
+    if (!authUser || !user) return;
     try {
-      await unblockUser(firestore, authUser.uid, user.id);
+      await unblockUser(null, authUser.uid, user.id);
       toast({ title: "User Unblocked", description: `You have unblocked ${user.userId}.` });
     } catch (e: any) {
       toast({ variant: 'destructive', title: "Error", description: e.message });
@@ -255,12 +368,10 @@ export default function PublicProfilePage() {
                     {areAdsLoading && <Skeleton className="h-32 w-full" />}
                     {!areAdsLoading && ads && ads.length > 0 ? (
                         ads.map(ad => {
-                            // Enrich the ad's user object with live data from the profile
                             const enrichedAd = {
                                 ...ad,
                                 user: {
-                                    ...ad.user, // Start with the ad's denormalized data
-                                    // Overwrite with live data from the fetched user profile
+                                    id: user.id,
                                     username: user.userId,
                                     feedbackScore: user.feedbackScore,
                                     positiveFeedback: user.positiveFeedback,

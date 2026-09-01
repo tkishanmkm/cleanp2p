@@ -1,17 +1,12 @@
+'use client';
 
-"use client";
-
-import Link from "next/link";
 import {
-  Bell,
   Menu,
   LogOut,
-  User,
   Settings,
-  Search,
-  LifeBuoy
-} from "lucide-react";
-import { Button } from "@/components/ui/button";
+  LifeBuoy,
+} from 'lucide-react';
+import { Button } from '@/components/ui/button';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -19,30 +14,26 @@ import {
   DropdownMenuLabel,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
-import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
-import { useFirebase } from "@/firebase";
-import { AdminSidebar } from "@/components/admin/sidebar";
-import { signOut } from "firebase/auth";
-import { useToast } from "@/hooks/use-toast";
-import { useRouter } from "next/navigation";
-import { Input } from "@/components/ui/input";
-import { DefaultAvatar } from "../icons";
+} from '@/components/ui/dropdown-menu';
+import { Sheet, SheetContent, SheetTrigger } from '@/components/ui/sheet';
+import { Avatar, AvatarFallback } from '@/components/ui/avatar';
+import { useAuth } from '@/components/providers/auth-provider';
+import { AdminSidebar } from '@/components/admin/sidebar';
+import { useToast } from '@/hooks/use-toast';
+import { useRouter } from 'next/navigation';
 
 export function AdminHeader() {
-  const { auth, user } = useFirebase();
+  const { signOut } = useAuth();
   const router = useRouter();
   const { toast } = useToast();
 
   const handleLogout = async () => {
-    if (!auth) return;
     try {
-      await signOut(auth);
-      toast({ title: "Logged Out", description: "You have been successfully logged out." });
+      await signOut();
+      toast({ title: 'Logged Out', description: 'You have been successfully logged out.' });
       router.push('/adminnarayan/login');
-    } catch (error) {
-      toast({ variant: "destructive", title: "Logout Failed", description: "An error occurred during logout." });
+    } catch {
+      toast({ variant: 'destructive', title: 'Logout Failed', description: 'An error occurred during logout.' });
     }
   };
 
@@ -64,9 +55,7 @@ export function AdminHeader() {
         </SheetContent>
       </Sheet>
 
-      <div className="w-full flex-1">
-        {/* Search can go here if needed */}
-      </div>
+      <div className="w-full flex-1" />
 
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
@@ -85,7 +74,7 @@ export function AdminHeader() {
             <span>Settings</span>
           </DropdownMenuItem>
           <DropdownMenuItem onClick={() => router.push('/support')}>
-             <LifeBuoy className="mr-2 h-4 w-4" />
+            <LifeBuoy className="mr-2 h-4 w-4" />
             <span>Support</span>
           </DropdownMenuItem>
           <DropdownMenuSeparator />

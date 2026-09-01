@@ -91,34 +91,50 @@ export default function PostAdPage() {
     setLoading(true);
 
     try {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) {
-        setError('You must be logged in to post an advertisement.');
+      // 1. Get current active session
+      const { data: { session }, error: sessionError } = await supabase.auth.getSession();
+
+      if (sessionError || !session?.user) {
+        console.error("Auth session error:", sessionError);
+        alert(`Auth Error: No active session found. ${sessionError?.message || ''}`);
+        setError(`Auth Error: No active session found. ${sessionError?.message || ''}`);
         setLoading(false);
         return;
       }
 
-      const { error: insertErr } = await supabase.from('p2p_ads').insert({
-        user_id: user.id,
-        type,
-        coin,
-        fiat,
-        price_type: pricingType,
-        price_margin: parseFloat(priceMargin) || 100,
-        price: calculatedPrice,
-        payment_methods: selectedPayments,
-        min_amount: min,
-        max_amount: max,
-        payment_window: parseInt(paymentWindow, 10),
-        status: 'ACTIVE',
-      });
+      // 2. Perform Insert with explicit user_id and detailed error logging
+      const { data, error: insertErr } = await supabase
+        .from('p2p_ads')
+        .insert([
+          {
+            user_id: session.user.id, // Explicitly attach authenticated user ID
+            type,
+            coin,
+            fiat,
+            price_type: pricingType,
+            price_margin: parseFloat(priceMargin) || 100,
+            price: calculatedPrice,
+            payment_methods: selectedPayments,
+            min_amount: min,
+            max_amount: max,
+            payment_window: parseInt(paymentWindow, 10),
+            status: 'ACTIVE',
+          }
+        ])
+        .select();
 
       if (insertErr) {
-        setError(insertErr.message);
+        // THIS WILL PRINT THE REAL ERROR IN CONSOLE AND ALERT
+        console.error("Database error creating ad:", insertErr);
+        alert(`Real Database Error [${insertErr.code}]: ${insertErr.message} - ${insertErr.details || insertErr.hint || ''}`);
+        setError(`Real Database Error [${insertErr.code}]: ${insertErr.message} - ${insertErr.details || insertErr.hint || ''}`);
       } else {
+        alert("Ad created successfully!");
         router.push('/p2p');
       }
     } catch (err: any) {
+      console.error("Database error creating ad:", err);
+      alert(`Unexpected error: ${err?.message || String(err)}`);
       setError(err.message || 'An unexpected error occurred.');
     } finally {
       setLoading(false);

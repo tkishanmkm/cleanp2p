@@ -45,9 +45,9 @@ import {
   giftCardPaymentMethods,
 } from "@/lib/payment-methods";
 import { useToast } from "@/hooks/use-toast";
-import { useFirebase, useDoc, useCollection, useMemoFirebase } from "@/firebase";
-import { doc, collection } from "firebase/firestore";
-import type { User, P2PAd, CryptoCurrency, UserWallet } from "@/lib/types";
+import { useAuth } from "@/components/providers/auth-provider";
+import { getUserWalletBalances } from "@/lib/wallet";
+import type { User, P2PAd, CryptoCurrency } from "@/lib/types";
 import { createP2PAd, updateAd } from "@/lib/ads";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
@@ -206,7 +206,7 @@ const PaymentMethodSheet = ({ open, onOpenChange, title, description, methods, f
 export function CreateAdForm({ ad }: CreateAdFormProps) {
   const { toast } = useToast();
   const router = useRouter();
-  const { firestore, user } = useFirebase();
+  const { user, profile } = useAuth();
   const { prices, fiatRates, isLoading: arePricesLoading } = usePrices();
   const [balanceError, setBalanceError] = useState<string | null>(null);
   const [customPaymentMethod, setCustomPaymentMethod] = useState('');
@@ -215,6 +215,7 @@ export function CreateAdForm({ ad }: CreateAdFormProps) {
   const [isCurrencySheetOpen, setIsCurrencySheetOpen] = useState(false);
   const [isTargetCountrySheetOpen, setIsTargetCountrySheetOpen] = useState(false);
   const [isBlockedCountrySheetOpen, setIsBlockedCountrySheetOpen] = useState(false);
+  const [userBalances, setUserBalances] = useState<{ [key in CryptoCurrency]?: { balance: number; lockedBalance: number } }>({});
 
   const [paymentSheetState, setPaymentSheetState] = useState({
     bank: false,
@@ -226,11 +227,22 @@ export function CreateAdForm({ ad }: CreateAdFormProps) {
 
   const adCreatorId = ad?.userId || user?.uid;
 
-  const userRef = adCreatorId ? doc(firestore, "users", adCreatorId) : null;
-  const { data: userData } = useDoc<User>(userRef);
-
-  const walletsRef = useMemoFirebase(() => adCreatorId ? collection(firestore, 'users', adCreatorId, 'wallets') : null, [adCreatorId, firestore]);
-  const { data: wallets } = useCollection<UserWallet>(walletsRef);
+  useEffect(() => {
+    if (!adCreatorId) return;
+    let isMounted = true;
+    async function loadBalances() {
+      try {
+        const balances = await getUserWalletBalances(adCreatorId);
+        if (isMounted && balances) {
+          setUserBalances(balances);
+        }
+      } catch (err) {
+        console.error("Failed to load balances:", err);
+      }
+    }
+    loadBalances();
+    return () => { isMounted = false; };
+  }, [adCreatorId]);
 
   const form = useForm<AdFormValues>({
     resolver: zodResolver(adFormSchema),
@@ -302,12 +314,11 @@ export function CreateAdForm({ ad }: CreateAdFormProps) {
 
   useEffect(() => {
     setBalanceError(null);
-    if (watchedAdType !== 'sell' || !watchedMaxAmount || !wallets || !watchedCrypto || arePricesLoading) {
+    if (watchedAdType !== 'sell' || !watchedMaxAmount || !watchedCrypto || arePricesLoading) {
       return;
     }
 
-    const selectedWallet = wallets.find(w => w.crypto === watchedCrypto);
-    const userBalance = selectedWallet?.balance ?? 0;
+    const userBalance = userBalances[watchedCrypto as CryptoCurrency]?.balance ?? 0;
 
     const price = watchedRateType === 'fixed'
       ? watchedFixedRate ?? 0
@@ -321,7 +332,7 @@ export function CreateAdForm({ ad }: CreateAdFormProps) {
       setBalanceError(`Insufficient ${watchedCrypto} balance. You need at least ${requiredCryptoForMaxAmount.toFixed(6)} ${watchedCrypto} to cover the maximum amount, but you only have ${userBalance.toFixed(6)} available.`);
     }
 
-  }, [watchedAdType, watchedMaxAmount, watchedCrypto, watchedRateType, watchedFixedRate, watchedRatePercent, wallets, arePricesLoading, currentMarketPriceInFiat]);
+  }, [watchedAdType, watchedMaxAmount, watchedCrypto, watchedRateType, watchedFixedRate, watchedRatePercent, userBalances, arePricesLoading, currentMarketPriceInFiat]);
 
 
   const cryptoOptions = SUPPORTED_CRYPTOS.map((c) => ({ value: c.name, label: c.name }));
@@ -336,7 +347,7 @@ export function CreateAdForm({ ad }: CreateAdFormProps) {
   );
 
   async function onSubmit(data: AdFormValues) {
-    if (!firestore || !user || !userData) {
+    if (!user || !profile) {
       toast({ variant: "destructive", title: "Error", description: "You must be logged in." });
       return;
     }
@@ -365,7 +376,7 @@ export function CreateAdForm({ ad }: CreateAdFormProps) {
       minCompletedTrades: data.minCompletedTrades,
     };
     
-    // Remove undefined keys to prevent Firestore errors
+    // Remove undefined keys
     Object.keys(adPayload).forEach(key => {
       if (adPayload[key] === undefined) {
         delete adPayload[key];
@@ -374,24 +385,23 @@ export function CreateAdForm({ ad }: CreateAdFormProps) {
 
     const adData = adPayload as Omit<P2PAd, 'id' | 'createdAt' | 'user' | 'userId' | 'publicAdId'>;
 
-
     try {
       if (ad) { // Editing existing ad
-        await updateAd(firestore, ad.id, adData);
+        await updateAd(null, ad.id, adData);
         toast({ title: "Ad Updated", description: "Your ad has been successfully updated." });
         router.push('/my-ads');
       } else { // Creating new ad
-        await createP2PAd(firestore, adData, {
+        await createP2PAd(null, adData, {
           id: user.uid,
-          username: userData.userId,
-          country: userData.country,
-          feedbackScore: userData.feedbackScore ?? 100,
-          positiveFeedback: userData.positiveFeedback ?? 0,
-          negativeFeedback: userData.negativeFeedback ?? 0,
-          completedTrades: userData.completedTrades ?? 0,
-          photoURL: userData.photoURL,
-          badges: userData.badges,
-          lastActive: userData.lastActive,
+          username: profile.username || 'User',
+          country: profile.country,
+          feedbackScore: profile.feedbackScore ?? 100,
+          positiveFeedback: profile.positiveFeedback ?? 0,
+          negativeFeedback: profile.negativeFeedback ?? 0,
+          completedTrades: profile.completedTrades ?? 0,
+          photoURL: profile.photoURL,
+          badges: profile.badges,
+          lastActive: profile.lastActive,
         });
         toast({ title: "Ad Created", description: "Your ad has been successfully posted." });
         router.push(data.adType === 'sell' ? '/buy' : '/sell');

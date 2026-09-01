@@ -1,9 +1,8 @@
 "use client";
 
 import { useAuth } from "@/components/providers/auth-provider";
-import { useFirebase, useCollection, useMemoFirebase } from "@/firebase";
-import { collection, query, where, doc, updateDoc } from "firebase/firestore";
-import type { P2PAd } from "@/lib/types";
+import { supabase } from "@/lib/supabase/client";
+import type { P2PAd, CryptoCurrency } from "@/lib/types";
 import {
   Card,
   CardContent,
@@ -37,15 +36,16 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
-import { useEffect } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { useRouter } from "next/navigation";
-
 
 export default function MyAdsPage() {
   const { user, isUserLoading } = useAuth();
-  const { firestore } = useFirebase();
   const router = useRouter();
   const { toast } = useToast();
+
+  const [ads, setAds] = useState<P2PAd[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
     if (!isUserLoading && !user) {
@@ -53,19 +53,60 @@ export default function MyAdsPage() {
     }
   }, [user, isUserLoading, router]);
 
-  const myAdsQuery = useMemoFirebase(
-    () =>
-      user
-        ? query(collection(firestore, "p2p_ads"), where("userId", "==", user.uid))
-        : null,
-    [user, firestore]
-  );
-  const { data: ads, isLoading } = useCollection<P2PAd>(myAdsQuery);
+  const fetchMyAds = useCallback(async () => {
+    if (!user?.uid) return;
+    setIsLoading(true);
+    try {
+      const { data, error } = await supabase
+        .from('p2p_ads')
+        .select('*')
+        .or(`user_id.eq.${user.uid},userId.eq.${user.uid}`)
+        .order('created_at', { ascending: false });
+
+      if (error) throw error;
+
+      const mapped: P2PAd[] = (data || []).map((raw: any) => ({
+        id: raw.id,
+        userId: raw.user_id || raw.userId,
+        publicAdId: raw.public_ad_id || raw.publicAdId || raw.id,
+        adType: (raw.ad_type || raw.adType || 'sell') as 'buy' | 'sell',
+        crypto: raw.crypto as CryptoCurrency,
+        fiatCurrency: raw.fiat_currency || raw.fiatCurrency || 'USD',
+        rateType: raw.rate_type || raw.rateType || 'market',
+        fixedRate: raw.fixed_rate ?? raw.fixedRate,
+        ratePercent: raw.rate_percent ?? raw.ratePercent ?? 0,
+        minAmount: Number(raw.min_amount ?? raw.minAmount ?? 0),
+        maxAmount: Number(raw.max_amount ?? raw.maxAmount ?? 0),
+        paymentMethods: Array.isArray(raw.payment_methods)
+          ? raw.payment_methods
+          : Array.isArray(raw.paymentMethods)
+          ? raw.paymentMethods
+          : typeof raw.payment_methods === 'string'
+          ? JSON.parse(raw.payment_methods)
+          : [],
+        terms: raw.terms || '',
+        active: raw.active !== false,
+        createdAt: raw.created_at || raw.createdAt,
+      }));
+
+      setAds(mapped);
+    } catch (err: any) {
+      console.error('Error fetching my ads:', err);
+    } finally {
+      setIsLoading(false);
+    }
+  }, [user?.uid]);
+
+  useEffect(() => {
+    fetchMyAds();
+  }, [fetchMyAds]);
 
   const handleStatusToggle = async (adId: string, currentStatus: boolean) => {
-    if (!firestore) return;
     try {
-      await updateAdStatus(firestore, adId, !currentStatus);
+      await updateAdStatus(null, adId, !currentStatus);
+      setAds((prev) =>
+        prev.map((a) => (a.id === adId ? { ...a, active: !currentStatus } : a))
+      );
       toast({
         title: "Ad Updated",
         description: `Your ad has been ${!currentStatus ? "activated" : "deactivated"}.`,
@@ -76,9 +117,9 @@ export default function MyAdsPage() {
   };
 
   const handleDelete = async (adId: string) => {
-    if (!firestore) return;
     try {
-      await softDeleteAd(firestore, adId);
+      await softDeleteAd(null, adId);
+      setAds((prev) => prev.filter((a) => a.id !== adId));
       toast({
         title: "Ad Deleted",
         description: "Your ad has been removed from public listings.",
@@ -127,57 +168,69 @@ export default function MyAdsPage() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {isLoading && <TableRow><TableCell colSpan={6}>Loading ads...</TableCell></TableRow>}
-              {!isLoading && ads?.map((ad) => (
-                <TableRow key={ad.id}>
-                  <TableCell className="font-mono text-xs">{ad.publicAdId}</TableCell>
-                  <TableCell className="capitalize">{ad.adType}</TableCell>
-                  <TableCell>{ad.crypto}/{ad.fiatCurrency}</TableCell>
-                  <TableCell>
-                    {ad.rateType === "fixed" ? `${ad.fixedRate} ${ad.fiatCurrency}` : `Market ${ad.ratePercent}%`}
-                  </TableCell>
-                  <TableCell>
-                    <Badge variant={ad.active ? "default" : "outline"}>
-                      {ad.active ? "Active" : "Inactive"}
-                    </Badge>
-                  </TableCell>
-                  <TableCell className="text-right">
-                    <div className="flex items-center justify-end gap-2">
-                      <Switch
-                        checked={ad.active}
-                        onCheckedChange={() => handleStatusToggle(ad.id, ad.active)}
-                        aria-label="Toggle ad status"
-                      />
-                      <Button asChild variant="ghost" size="icon">
-                        <Link href={`/ads/edit/${ad.id}`}>
-                          <Edit className="h-4 w-4" />
-                        </Link>
-                      </Button>
-                      <AlertDialog>
-                        <AlertDialogTrigger asChild>
-                           <Button variant="ghost" size="icon" className="text-destructive">
-                                <Trash2 className="h-4 w-4" />
+              {isLoading && (
+                <TableRow>
+                  <TableCell colSpan={6}>Loading ads...</TableCell>
+                </TableRow>
+              )}
+              {!isLoading &&
+                ads?.map((ad) => (
+                  <TableRow key={ad.id}>
+                    <TableCell className="font-mono text-xs">{ad.publicAdId}</TableCell>
+                    <TableCell className="capitalize">{ad.adType}</TableCell>
+                    <TableCell>
+                      {ad.crypto}/{ad.fiatCurrency}
+                    </TableCell>
+                    <TableCell>
+                      {ad.rateType === "fixed"
+                        ? `${ad.fixedRate} ${ad.fiatCurrency}`
+                        : `Market ${ad.ratePercent}%`}
+                    </TableCell>
+                    <TableCell>
+                      <Badge variant={ad.active ? "default" : "outline"}>
+                        {ad.active ? "Active" : "Inactive"}
+                      </Badge>
+                    </TableCell>
+                    <TableCell className="text-right">
+                      <div className="flex items-center justify-end gap-2">
+                        <Switch
+                          checked={ad.active}
+                          onCheckedChange={() => handleStatusToggle(ad.id, !!ad.active)}
+                          aria-label="Toggle ad status"
+                        />
+                        <Button asChild variant="ghost" size="icon">
+                          <Link href={`/ads/edit/${ad.id}`}>
+                            <Edit className="h-4 w-4" />
+                          </Link>
+                        </Button>
+                        <AlertDialog>
+                          <AlertDialogTrigger asChild>
+                            <Button variant="ghost" size="icon" className="text-destructive">
+                              <Trash2 className="h-4 w-4" />
                             </Button>
-                        </AlertDialogTrigger>
-                        <AlertDialogContent>
+                          </AlertDialogTrigger>
+                          <AlertDialogContent>
                             <AlertDialogHeader>
-                                <AlertDialogTitle>Are you sure?</AlertDialogTitle>
-                                <AlertDialogDescription>
-                                This will permanently delete your ad. This action cannot be undone.
-                                </AlertDialogDescription>
+                              <AlertDialogTitle>Are you sure?</AlertDialogTitle>
+                              <AlertDialogDescription>
+                                This will permanently deactivate your ad.
+                              </AlertDialogDescription>
                             </AlertDialogHeader>
                             <AlertDialogFooter>
-                                <AlertDialogCancel>Cancel</AlertDialogCancel>
-                                <AlertDialogAction onClick={() => handleDelete(ad.id)} className="bg-destructive hover:bg-destructive/90">
-                                    Delete
-                                </AlertDialogAction>
+                              <AlertDialogCancel>Cancel</AlertDialogCancel>
+                              <AlertDialogAction
+                                onClick={() => handleDelete(ad.id)}
+                                className="bg-destructive hover:bg-destructive/90"
+                              >
+                                Delete
+                              </AlertDialogAction>
                             </AlertDialogFooter>
-                        </AlertDialogContent>
-                      </AlertDialog>
-                    </div>
-                  </TableCell>
-                </TableRow>
-              ))}
+                          </AlertDialogContent>
+                        </AlertDialog>
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                ))}
               {!isLoading && !ads?.length && (
                 <TableRow>
                   <TableCell colSpan={6} className="text-center h-24">

@@ -1,473 +1,1141 @@
 'use client';
 
-import { useState, useEffect } from 'react';
-import { useRouter } from 'next/navigation';
-import { createClient } from '@/lib/supabase';
+import React, { useState } from 'react';
+import { createClient } from '@/utils/supabase/client';
+import { toast } from 'sonner';
+import { 
+  Check, 
+  Search, 
+  X, 
+  Globe, 
+  Building2, 
+  Wallet, 
+  Smartphone, 
+  Banknote, 
+  Gift, 
+  Plus,
+  ChevronDown 
+} from 'lucide-react';
 
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { useToast } from "@/hooks/use-toast";
-import { usePrices } from "@/context/price-context";
-import { ALL_FIATS, SUPPORTED_CRYPTOS, CryptoLogo, FiatLogo } from "@/components/p2p/create-ad-utils";
-import { Loader2, Lock, Percent, ArrowLeftRight, X } from "lucide-react";
-
-const PAYMENT_CATEGORIES = {
-  'Bank Transfers': ['Bank Transfer', 'Wire Transfer', 'SEPA', 'ACH', 'IMPS'],
-  'Online Wallets': ['PayPal', 'Skrill', 'Neteller', 'Revolut', 'Wise'],
-  'Mobile Money': ['UPI', 'M-Pesa', 'Venmo', 'Cash App', 'Paytm'],
-  'Cash Payments': ['Cash in Person', 'Cash Deposit to Bank'],
-  'Gift Cards': ['Amazon Gift Card', 'Apple Gift Card', 'Steam Gift Card'],
-};
-
-const AVAILABLE_TAGS = [
-  'No third party',
-  'No receipt required',
-  'No verification',
-  'Invoice accepted',
-  'Fast release',
+const ALL_COUNTRIES = [
+  { name: 'Afghanistan', code: 'af' },
+  { name: 'Albania', code: 'al' },
+  { name: 'Algeria', code: 'dz' },
+  { name: 'Andorra', code: 'ad' },
+  { name: 'Angola', code: 'ao' },
+  { name: 'Antigua and Barbuda', code: 'ag' },
+  { name: 'Argentina', code: 'ar' },
+  { name: 'Armenia', code: 'am' },
+  { name: 'Australia', code: 'au' },
+  { name: 'Austria', code: 'at' },
+  { name: 'Azerbaijan', code: 'az' },
+  { name: 'Bahamas', code: 'bs' },
+  { name: 'Bahrain', code: 'bh' },
+  { name: 'Bangladesh', code: 'bd' },
+  { name: 'Barbados', code: 'bb' },
+  { name: 'Belarus', code: 'by' },
+  { name: 'Belgium', code: 'be' },
+  { name: 'Belize', code: 'bz' },
+  { name: 'Benin', code: 'bj' },
+  { name: 'Bhutan', code: 'bt' },
+  { name: 'Bolivia', code: 'bo' },
+  { name: 'Bosnia and Herzegovina', code: 'ba' },
+  { name: 'Botswana', code: 'bw' },
+  { name: 'Brazil', code: 'br' },
+  { name: 'Brunei', code: 'bn' },
+  { name: 'Bulgaria', code: 'bg' },
+  { name: 'Burkina Faso', code: 'bf' },
+  { name: 'Burundi', code: 'bi' },
+  { name: 'Cabo Verde', code: 'cv' },
+  { name: 'Cambodia', code: 'kh' },
+  { name: 'Cameroon', code: 'cm' },
+  { name: 'Canada', code: 'ca' },
+  { name: 'Central African Republic', code: 'cf' },
+  { name: 'Chad', code: 'td' },
+  { name: 'Chile', code: 'cl' },
+  { name: 'China', code: 'cn' },
+  { name: 'Colombia', code: 'co' },
+  { name: 'Comoros', code: 'km' },
+  { name: 'Congo (Brazzaville)', code: 'cg' },
+  { name: 'Congo (Kinshasa)', code: 'cd' },
+  { name: 'Costa Rica', code: 'cr' },
+  { name: 'Croatia', code: 'hr' },
+  { name: 'Cuba', code: 'cu' },
+  { name: 'Cyprus', code: 'cy' },
+  { name: 'Czech Republic', code: 'cz' },
+  { name: 'Denmark', code: 'dk' },
+  { name: 'Djibouti', code: 'dj' },
+  { name: 'Dominica', code: 'dm' },
+  { name: 'Dominican Republic', code: 'do' },
+  { name: 'Ecuador', code: 'ec' },
+  { name: 'Egypt', code: 'eg' },
+  { name: 'El Salvador', code: 'sv' },
+  { name: 'Equatorial Guinea', code: 'gq' },
+  { name: 'Eritrea', code: 'er' },
+  { name: 'Estonia', code: 'ee' },
+  { name: 'Eswatini', code: 'sz' },
+  { name: 'Ethiopia', code: 'et' },
+  { name: 'Fiji', code: 'fj' },
+  { name: 'Finland', code: 'fi' },
+  { name: 'France', code: 'fr' },
+  { name: 'Gabon', code: 'ga' },
+  { name: 'Gambia', code: 'gm' },
+  { name: 'Georgia', code: 'ge' },
+  { name: 'Germany', code: 'de' },
+  { name: 'Ghana', code: 'gh' },
+  { name: 'Greece', code: 'gr' },
+  { name: 'Grenada', code: 'gd' },
+  { name: 'Guatemala', code: 'gt' },
+  { name: 'Guinea', code: 'gn' },
+  { name: 'Guinea-Bissau', code: 'gw' },
+  { name: 'Guyana', code: 'gy' },
+  { name: 'Haiti', code: 'ht' },
+  { name: 'Honduras', code: 'hn' },
+  { name: 'Hungary', code: 'hu' },
+  { name: 'Iceland', code: 'is' },
+  { name: 'India', code: 'in' },
+  { name: 'Indonesia', code: 'id' },
+  { name: 'Iran', code: 'ir' },
+  { name: 'Iraq', code: 'iq' },
+  { name: 'Ireland', code: 'ie' },
+  { name: 'Israel', code: 'il' },
+  { name: 'Italy', code: 'it' },
+  { name: 'Ivory Coast', code: 'ci' },
+  { name: 'Jamaica', code: 'jm' },
+  { name: 'Japan', code: 'jp' },
+  { name: 'Jordan', code: 'jo' },
+  { name: 'Kazakhstan', code: 'kz' },
+  { name: 'Kenya', code: 'ke' },
+  { name: 'Kiribati', code: 'ki' },
+  { name: 'Kuwait', code: 'kw' },
+  { name: 'Kyrgyzstan', code: 'kg' },
+  { name: 'Laos', code: 'la' },
+  { name: 'Latvia', code: 'lv' },
+  { name: 'Lebanon', code: 'lb' },
+  { name: 'Lesotho', code: 'ls' },
+  { name: 'Liberia', code: 'lr' },
+  { name: 'Libya', code: 'ly' },
+  { name: 'Liechtenstein', code: 'li' },
+  { name: 'Lithuania', code: 'lt' },
+  { name: 'Luxembourg', code: 'lu' },
+  { name: 'Madagascar', code: 'mg' },
+  { name: 'Malawi', code: 'mw' },
+  { name: 'Malaysia', code: 'my' },
+  { name: 'Maldives', code: 'mv' },
+  { name: 'Mali', code: 'ml' },
+  { name: 'Malta', code: 'mt' },
+  { name: 'Marshall Islands', code: 'mh' },
+  { name: 'Mauritania', code: 'mr' },
+  { name: 'Mauritius', code: 'mu' },
+  { name: 'Mexico', code: 'mx' },
+  { name: 'Micronesia', code: 'fm' },
+  { name: 'Moldova', code: 'md' },
+  { name: 'Monaco', code: 'mc' },
+  { name: 'Mongolia', code: 'mn' },
+  { name: 'Montenegro', code: 'me' },
+  { name: 'Morocco', code: 'ma' },
+  { name: 'Mozambique', code: 'mz' },
+  { name: 'Myanmar', code: 'mm' },
+  { name: 'Namibia', code: 'na' },
+  { name: 'Nauru', code: 'nr' },
+  { name: 'Nepal', code: 'np' },
+  { name: 'Netherlands', code: 'nl' },
+  { name: 'New Zealand', code: 'nz' },
+  { name: 'Nicaragua', code: 'ni' },
+  { name: 'Niger', code: 'ne' },
+  { name: 'Nigeria', code: 'ng' },
+  { name: 'North Korea', code: 'kp' },
+  { name: 'North Macedonia', code: 'mk' },
+  { name: 'Norway', code: 'no' },
+  { name: 'Oman', code: 'om' },
+  { name: 'Pakistan', code: 'pk' },
+  { name: 'Palau', code: 'pw' },
+  { name: 'Palestine', code: 'ps' },
+  { name: 'Panama', code: 'pa' },
+  { name: 'Papua New Guinea', code: 'pg' },
+  { name: 'Paraguay', code: 'py' },
+  { name: 'Peru', code: 'pe' },
+  { name: 'Philippines', code: 'ph' },
+  { name: 'Poland', code: 'pl' },
+  { name: 'Portugal', code: 'pt' },
+  { name: 'Qatar', code: 'qa' },
+  { name: 'Romania', code: 'ro' },
+  { name: 'Russia', code: 'ru' },
+  { name: 'Rwanda', code: 'rw' },
+  { name: 'Saint Kitts and Nevis', code: 'kn' },
+  { name: 'Saint Lucia', code: 'lc' },
+  { name: 'Saint Vincent and the Grenadines', code: 'vc' },
+  { name: 'Samoa', code: 'ws' },
+  { name: 'San Marino', code: 'sm' },
+  { name: 'Sao Tome and Principe', code: 'st' },
+  { name: 'Saudi Arabia', code: 'sa' },
+  { name: 'Senegal', code: 'sn' },
+  { name: 'Serbia', code: 'rs' },
+  { name: 'Seychelles', code: 'sc' },
+  { name: 'Sierra Leone', code: 'sl' },
+  { name: 'Singapore', code: 'sg' },
+  { name: 'Slovakia', code: 'sk' },
+  { name: 'Slovenia', code: 'si' },
+  { name: 'Solomon Islands', code: 'sb' },
+  { name: 'Somalia', code: 'so' },
+  { name: 'South Africa', code: 'za' },
+  { name: 'South Korea', code: 'kr' },
+  { name: 'South Sudan', code: 'ss' },
+  { name: 'Spain', code: 'es' },
+  { name: 'Sri Lanka', code: 'lk' },
+  { name: 'Sudan', code: 'sd' },
+  { name: 'Suriname', code: 'sr' },
+  { name: 'Sweden', code: 'se' },
+  { name: 'Switzerland', code: 'ch' },
+  { name: 'Syria', code: 'sy' },
+  { name: 'Taiwan', code: 'tw' },
+  { name: 'Tajikistan', code: 'tj' },
+  { name: 'Tanzania', code: 'tz' },
+  { name: 'Thailand', code: 'th' },
+  { name: 'Timor-Leste', code: 'tl' },
+  { name: 'Togo', code: 'tg' },
+  { name: 'Tonga', code: 'to' },
+  { name: 'Trinidad and Tobago', code: 'tt' },
+  { name: 'Tunisia', code: 'tn' },
+  { name: 'Turkey', code: 'tr' },
+  { name: 'Turkmenistan', code: 'tm' },
+  { name: 'Tuvalu', code: 'tv' },
+  { name: 'Uganda', code: 'ug' },
+  { name: 'Ukraine', code: 'ua' },
+  { name: 'United Arab Emirates', code: 'ae' },
+  { name: 'United Kingdom', code: 'gb' },
+  { name: 'United States', code: 'us' },
+  { name: 'Uruguay', code: 'uy' },
+  { name: 'Uzbekistan', code: 'uz' },
+  { name: 'Vanuatu', code: 'vu' },
+  { name: 'Vatican City', code: 'va' },
+  { name: 'Venezuela', code: 've' },
+  { name: 'Vietnam', code: 'vn' },
+  { name: 'Yemen', code: 'ye' },
+  { name: 'Zambia', code: 'zm' },
+  { name: 'Zimbabwe', code: 'zw' }
 ];
 
-export default function CreateAdPage() {
-  const router = useRouter();
-  const { toast } = useToast();
-  const { prices, fiatRates } = usePrices();
+const CRYPTO_OPTIONS = [
+  { code: 'BTC', name: 'Bitcoin', logo: 'https://cryptologos.cc/logos/bitcoin-btc-logo.svg?v=035' },
+  { code: 'USDT', name: 'Tether', logo: 'https://cryptologos.cc/logos/tether-usdt-logo.svg?v=035' },
+  { code: 'ETH', name: 'Ethereum', logo: 'https://cryptologos.cc/logos/ethereum-eth-logo.svg?v=035' },
+  { code: 'LTC', name: 'Litecoin', logo: 'https://cryptologos.cc/logos/litecoin-ltc-logo.svg?v=035' },
+];
+
+const FIAT_CURRENCIES = [
+  { name: 'United States Dollar', code: 'USD', flag: 'us' },
+  { name: 'Euro', code: 'EUR', flag: 'eu' },
+  { name: 'Japanese Yen', code: 'JPY', flag: 'jp' },
+  { name: 'Pound Sterling', code: 'GBP', flag: 'gb' },
+  { name: 'Australian Dollar', code: 'AUD', flag: 'au' },
+  { name: 'Canadian Dollar', code: 'CAD', flag: 'ca' },
+  { name: 'Swiss Franc', code: 'CHF', flag: 'ch' },
+  { name: 'Chinese Yuan', code: 'CNY', flag: 'cn' },
+  { name: 'Hong Kong Dollar', code: 'HKD', flag: 'hk' },
+  { name: 'New Zealand Dollar', code: 'NZD', flag: 'nz' },
+  { name: 'Swedish Krona', code: 'SEK', flag: 'se' },
+  { name: 'South Korean Won', code: 'KRW', flag: 'kr' },
+  { name: 'Singapore Dollar', code: 'SGD', flag: 'sg' },
+  { name: 'Norwegian Krone', code: 'NOK', flag: 'no' },
+  { name: 'Mexican Peso', code: 'MXN', flag: 'mx' },
+  { name: 'Indian Rupee', code: 'INR', flag: 'in' },
+  { name: 'Russian Ruble', code: 'RUB', flag: 'ru' },
+  { name: 'South African Rand', code: 'ZAR', flag: 'za' },
+  { name: 'Turkish Lira', code: 'TRY', flag: 'tr' },
+  { name: 'Brazilian Real', code: 'BRL', flag: 'br' },
+  { name: 'United Arab Emirates Dirham', code: 'AED', flag: 'ae' },
+  { name: 'Pakistani Rupee', code: 'PKR', flag: 'pk' },
+  { name: 'Bangladeshi Taka', code: 'BDT', flag: 'bd' },
+  { name: 'Nigerian Naira', code: 'NGN', flag: 'ng' },
+  { name: 'Philippine Peso', code: 'PHP', flag: 'ph' },
+  { name: 'Indonesian Rupiah', code: 'IDR', flag: 'id' },
+  { name: 'Vietnamese Dong', code: 'VND', flag: 'vn' },
+];
+
+const PAYMENT_CATEGORIES = [
+  {
+    id: 'bank',
+    title: 'Bank Transfers',
+    icon: Building2,
+    subtitle: 'Select bank transfer methods.',
+    options: [
+      'Bank Transfer', 'SEPA Transfer', 'SWIFT', 'UPI (Unified Payments Interface)', 
+      'IMPS (Immediate Payment Service)', 'NEFT (National Electronic Funds Transfer)', 
+      'RTGS (Real-Time Gross Settlement)', 'Interac e-Transfer', 'PayID', 'Osko', 
+      'Pix (Brazil)', 'SPEI (Mexico)', 'CoDi (Mexico)', 'PSE (Colombia)', 
+      'Transfiya (Colombia)', 'FPS (Faster Payment System)', 'Domestic wire transfer', 
+      'International wire transfer', 'ACH transfer', 'EFT (Electronic Funds Transfer)', 
+      'Direct debit', 'iDEAL', 'Bancontact', 'Giropay', 'EPS', 'Sofort', 'PesaLink', 
+      'BLIK', 'Przelewy24', 'MB WAY', 'Bizum', 'Swish', 'TWINT', 'Paylib'
+    ]
+  },
+  {
+    id: 'wallets',
+    title: 'Online Wallets',
+    icon: Wallet,
+    subtitle: 'Select online wallet methods.',
+    options: [
+      'Wise (formerly TransferWise)', 'Revolut', 'PayPal', 'Skrill', 'Neteller', 
+      'Payoneer', 'Zelle', 'Venmo', 'Cash App', 'Google Pay', 'Apple Pay', 'Alipay'
+    ]
+  },
+  {
+    id: 'mobile',
+    title: 'Mobile Money',
+    icon: Smartphone,
+    subtitle: 'Select mobile money methods.',
+    options: [
+      'M-Pesa', 'Airtel Money', 'MTN Mobile Money', 'Orange Money', 'Vodafone Cash', 
+      'Tigo Money', 'MoMo', 'ZaloPay', 'ViettelPay', 'Paytm', 'PhonePe', 'GCash'
+    ]
+  },
+  {
+    id: 'cash',
+    title: 'Cash Payments',
+    icon: Banknote,
+    subtitle: 'Select in-person or cash-based methods.',
+    options: [
+      'Cash deposit to bank', 'Cash in person', 'Western Union', 'MoneyGram', 
+      'Ria Money Transfer', 'Cash by mail', 'Postal order', 'Bank draft', 'Cashier\'s check'
+    ]
+  },
+  {
+    id: 'giftcards',
+    title: 'Gift Cards',
+    icon: Gift,
+    subtitle: 'Select gift card methods.',
+    options: [
+      'Amazon Gift Card', 'iTunes Gift Card', 'Google Play Gift Card', 'Steam Gift Card', 
+      'PlayStation Network Gift Card', 'Xbox Gift Card', 'Nintendo eShop Gift Card', 
+      'eBay Gift Card', 'Walmart Gift Card', 'Target Gift Card', 'Best Buy Gift Card', 
+      'Sephora Gift Card', 'Starbucks Gift Card', 'Netflix Gift Card', 'Spotify Gift Card', 
+      'Uber Gift Card', 'Lyft Gift Card', 'Airbnb Gift Card', 'Hotels.com Gift Card', 
+      'Delta Air Lines Gift Card', 'Southwest Airlines Gift Card', 'American Airlines Gift Card', 
+      'Vanilla Visa/Mastercard Gift Card', 'Razer Gold Gift Card', 'Roblox Gift Card', 
+      'Fortnite V-Bucks Gift Card', 'Apple Gift Card'
+    ]
+  }
+];
+
+export default function CreateP2PAdPage() {
   const supabase = createClient();
-
-  // Auth User state
-  const [currentUser, setCurrentUser] = useState<any>(null);
-
-  // Core Ad Configuration
-  const [adType, setAdType] = useState<'buy' | 'sell'>('sell');
-  const [crypto, setCrypto] = useState('BTC');
-  const [fiatCurrency, setFiatCurrency] = useState('USD');
-  
-  // Rate Configuration
-  const [rateType, setRateType] = useState<'fixed' | 'float'>('float');
-  const [ratePercent, setRatePercent] = useState('0');
-  const [fixedRate, setFixedRate] = useState('');
-
-  // Limits & Payment
-  const [minAmount, setMinAmount] = useState('');
-  const [maxAmount, setMaxAmount] = useState('');
-  const [paymentWindow, setPaymentWindow] = useState('30');
-  const [selectedMethods, setSelectedMethods] = useState<string[]>(['Bank Transfer']);
-  const [activeCategory, setActiveCategory] = useState<keyof typeof PAYMENT_CATEGORIES>('Bank Transfers');
-
-  // Terms & Labels
-  const [offerLabel, setOfferLabel] = useState('');
-  const [terms, setTerms] = useState('');
-  const [selectedTags, setSelectedTags] = useState<string[]>([]);
-  const [minCompletedTrades, setMinCompletedTrades] = useState('0');
-
-  // Targeting & Status
-  const [targetedCountries, setTargetedCountries] = useState<string[]>([]);
-  const [blockedCountries, setBlockedCountries] = useState<string[]>([]);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  useEffect(() => {
-    // 1. Fetch current session immediately
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      if (session?.user) {
-        setCurrentUser(session.user);
-      }
-    });
-
-    // 2. Listen for auth state updates (token refresh, sign in, sign out)
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      (_event, session) => {
-        if (session?.user) {
-          setCurrentUser(session.user);
-        } else {
-          setCurrentUser(null);
-        }
-      }
-    );
-
-    return () => {
-      subscription.unsubscribe();
-    };
-  }, [supabase]);
-
-  const selectedFiat = ALL_FIATS.find((f) => f.code === fiatCurrency) || ALL_FIATS[0];
-
-  const marketPriceUsd = prices[crypto as keyof typeof prices] || 0;
-  const exchangeRate = fiatRates[fiatCurrency] || 1;
-  const marketPriceInFiat = marketPriceUsd * exchangeRate;
+  // --- Form State ---
+  const [adType, setAdType] = useState<'buy' | 'sell'>('buy');
+  const [crypto, setCrypto] = useState('BTC');
+  const [fiat, setFiat] = useState({ name: 'United States Dollar', code: 'USD', flag: 'us' });
   
-  const estimatedAdPrice = rateType === 'fixed'
-    ? parseFloat(fixedRate || '0')
-    : marketPriceInFiat * (1 + parseFloat(ratePercent || '0') / 100);
+  // Payment state
+  const [selectedCategory, setSelectedCategory] = useState('bank');
+  const [selectedPaymentMethods, setSelectedPaymentMethods] = useState<string[]>([]);
+  const [customMethod, setCustomMethod] = useState('');
 
-  function togglePaymentMethod(method: string) {
-    if (selectedMethods.includes(method)) {
-      setSelectedMethods(selectedMethods.filter((m) => m !== method));
+  // Pricing state
+  const [rateType, setRateType] = useState<'market' | 'fixed'>('market');
+  const [ratePercent, setRatePercent] = useState('1.5');
+  const [fixedPrice, setFixedPrice] = useState('77805.00');
+  const [minAmount, setMinAmount] = useState('100');
+  const [maxAmount, setMaxAmount] = useState('5000');
+  const [paymentWindow, setPaymentWindow] = useState('30');
+
+  // Country & Metadata
+  const [targetedCountries, setTargetedCountries] = useState<string[]>([]);
+  const [blockedCountries, setBlockedCountries] = useState<string[]>([]);
+  const [terms, setTerms] = useState('');
+  const [offerLabel, setOfferLabel] = useState('');
+  const [selectedTags, setSelectedTags] = useState<string[]>([]);
+  const [minTrades, setMinTrades] = useState('0');
+
+  // Modals UI
+  const [isFiatModalOpen, setIsFiatModalOpen] = useState(false);
+  const [isTargetedModalOpen, setIsTargetedModalOpen] = useState(false);
+  const [isBlockedModalOpen, setIsBlockedModalOpen] = useState(false);
+  const [fiatSearch, setFiatSearch] = useState('');
+  const [countrySearch, setCountrySearch] = useState('');
+
+  const togglePaymentMethod = (method: string) => {
+    if (selectedPaymentMethods.includes(method)) {
+      setSelectedPaymentMethods(selectedPaymentMethods.filter((m) => m !== method));
     } else {
-      if (selectedMethods.length >= 5) {
-        toast({ variant: "destructive", title: "Limit reached", description: "You can select up to 5 payment methods." });
+      if (selectedPaymentMethods.length >= 5) {
+        toast.error('You can select a maximum of 5 payment methods.');
         return;
       }
-      setSelectedMethods([...selectedMethods, method]);
+      setSelectedPaymentMethods([...selectedPaymentMethods, method]);
     }
-  }
+  };
 
-  function toggleTag(tag: string) {
-    setSelectedTags((prev) =>
-      prev.includes(tag) ? prev.filter((t) => t !== tag) : [...prev, tag]
-    );
-  }
+  const addCustomPaymentMethod = () => {
+    if (!customMethod.trim()) return;
+    if (selectedPaymentMethods.length >= 5) {
+      toast.error('You can select a maximum of 5 payment methods.');
+      return;
+    }
+    if (!selectedPaymentMethods.includes(customMethod.trim())) {
+      setSelectedPaymentMethods([...selectedPaymentMethods, customMethod.trim()]);
+      setCustomMethod('');
+    }
+  };
 
-  async function handleCreateAd(e: React.FormEvent) {
-    e.preventDefault();
+  const toggleTag = (tag: string) => {
+    if (selectedTags.includes(tag)) {
+      setSelectedTags(selectedTags.filter((t) => t !== tag));
+    } else {
+      setSelectedTags([...selectedTags, tag]);
+    }
+  };
 
-    if (!currentUser) {
-      toast({ variant: "destructive", title: "Authentication required", description: "Please log in to create an ad." });
-      router.push(`/login?redirect=/ads/create`);
+  // --- SUBMIT HANDLER ---
+  const handleSubmit = async (e?: React.FormEvent) => {
+    if (e) {
+      e.preventDefault();
+      e.stopPropagation();
+    }
+
+    if (isSubmitting) return;
+
+    // Direct Validation Checks
+    if (!selectedPaymentMethods || selectedPaymentMethods.length === 0) {
+      toast.error('Please select at least 1 payment method.');
       return;
     }
 
-    if (!minAmount || !maxAmount || parseFloat(minAmount) >= parseFloat(maxAmount)) {
-      toast({ variant: "destructive", title: "Invalid Limits", description: "Minimum trade amount must be less than maximum trade amount." });
+    if (rateType === 'fixed' && (!fixedPrice || parseFloat(fixedPrice) <= 0)) {
+      toast.error('Please enter a valid fixed price.');
       return;
     }
 
-    if (selectedMethods.length === 0) {
-      toast({ variant: "destructive", title: "Payment Method Required", description: "Please select at least one payment method." });
+    if (!minAmount || !maxAmount || parseFloat(minAmount) > parseFloat(maxAmount)) {
+      toast.error('Invalid trade limits: Minimum amount must be less than maximum amount.');
       return;
     }
 
     setIsSubmitting(true);
+    const toastId = toast.loading('Publishing your advertisement...');
 
     try {
-      // 1. Get current authenticated user
-      const { data: { user }, error: userError } = await supabase.auth.getUser();
+      // 1. Get current active session
+      const { data: { session }, error: sessionError } = await supabase.auth.getSession();
 
-      if (userError || !user) {
-        throw new Error("You must be logged in to create an ad.");
+      if (sessionError || !session?.user) {
+        console.error("Auth session error:", sessionError);
+        alert(`Auth Error: No active session found. ${sessionError?.message || ''}`);
+        toast.error(`Auth Error: No active session found. ${sessionError?.message || ''}`, { id: toastId });
+        setIsSubmitting(false);
+        return;
       }
 
-      // 2. Insert ad into p2p_ads with user_id attached
+      const userId = session.user.id;
+      const displayName =
+        session.user.user_metadata?.display_name ||
+        session.user.email?.split('@')[0] ||
+        'Trader';
+
+      const adPayload = {
+        user_id: userId, // Explicitly attach authenticated user ID
+        user_display_name: displayName,
+        ad_type: adType,
+        crypto: crypto,
+        crypto_currency: crypto,
+        fiat: fiat.code,
+        fiat_currency: fiat.code,
+        rate_type: rateType,
+        pricing_type: rateType,
+        price_type: rateType,
+        fixed_rate: rateType === 'fixed',
+        is_fixed: rateType === 'fixed',
+        rate_percent: rateType === 'market' ? (parseFloat(ratePercent) || 0) : 0,
+        rate_adjustment: rateType === 'market' ? (parseFloat(ratePercent) || 0) : 0,
+        margin: rateType === 'market' ? (parseFloat(ratePercent) || 0) : 0,
+        price: rateType === 'fixed' ? (parseFloat(fixedPrice) || 0) : null,
+        min_amount: parseFloat(minAmount) || 0,
+        max_amount: parseFloat(maxAmount) || 0,
+        payment_methods: selectedPaymentMethods,
+        payment_window: parseInt(paymentWindow, 10) || 30,
+        targeted_countries: targetedCountries || [],
+        blocked_countries: blockedCountries || [],
+        terms: terms || '',
+        offer_label: offerLabel || '',
+        tags: selectedTags || [],
+        ad_tags: selectedTags || [],
+        min_completed_trades: parseInt(minTrades, 10) || 0,
+      };
+
+      // 2. Perform Insert with explicit user_id and detailed error logging
       const { data, error } = await supabase
         .from('p2p_ads')
-        .insert({
-          user_id: user.id,
-          user_display_name: user.user_metadata?.full_name || user.email?.split('@')[0] || 'Trader',
-          ad_type: adType,
-          crypto,
-          fiat_currency: fiatCurrency,
-          rate_type: rateType,
-          rate_percent: rateType === 'float' ? parseFloat(ratePercent) : null,
-          fixed_rate: rateType === 'fixed' ? parseFloat(fixedRate) : null,
-          min_amount: parseFloat(minAmount),
-          max_amount: parseFloat(maxAmount),
-          payment_window: parseInt(paymentWindow, 10),
-          payment_methods: selectedMethods,
-          offer_label: offerLabel || null,
-          terms: terms || '',
-          tags: selectedTags,
-          min_completed_trades: parseInt(minCompletedTrades, 10),
-          targeted_countries: targetedCountries,
-          blocked_countries: blockedCountries,
-          status: 'active',
-        })
-        .select()
-        .single();
+        .insert([adPayload])
+        .select();
 
       if (error) {
-        throw error;
+        // THIS WILL PRINT THE REAL ERROR IN CONSOLE AND ALERT
+        console.error("Database error creating ad:", error);
+        alert(`Real Database Error [${error.code}]: ${error.message} - ${error.details || error.hint || ''}`);
+        toast.error(`Real Database Error [${error.code}]: ${error.message} - ${error.details || error.hint || ''}`, { id: toastId, duration: 6000 });
+        setIsSubmitting(false);
+        return;
       }
 
-      toast({ title: "Ad Created!", description: "Your P2P advertisement is now live." });
-      router.push(`/ad/${data.id}`);
+      alert("Ad created successfully!");
+      toast.success('P2P Advertisement created successfully!', { id: toastId });
     } catch (err: any) {
-      toast({ 
-        variant: "destructive", 
-        title: "Failed to create ad", 
-        description: err.message || "An error occurred while creating your advertisement." 
-      });
+      console.error('Runtime error:', err);
+      alert(`Unexpected error: ${err?.message || String(err)}`);
+      toast.error(`Unexpected error: ${err?.message || String(err)}`, { id: toastId });
     } finally {
       setIsSubmitting(false);
     }
-  }
+  };
+
+  const filteredFiats = FIAT_CURRENCIES.filter(
+    (f) =>
+      f.name.toLowerCase().includes(fiatSearch.toLowerCase()) ||
+      f.code.toLowerCase().includes(fiatSearch.toLowerCase())
+  );
 
   return (
-    <div className="max-w-3xl mx-auto p-4 md:p-6">
-      <Card className="border-border shadow-lg bg-card text-card-foreground rounded-2xl">
-        <CardHeader className="space-y-1">
-          <CardTitle className="text-2xl font-bold flex items-center gap-2">
-            <ArrowLeftRight className="h-6 w-6 text-primary" />
+    <div className="min-h-screen bg-[#fafafa] dark:bg-[#0f0f12] text-gray-900 dark:text-gray-100 px-4 py-8 md:py-12 flex justify-center transition-colors">
+      <div className="w-full max-w-3xl space-y-8">
+        
+        <div>
+          <h1 className="text-2xl md:text-3xl font-semibold text-gray-900 dark:text-white tracking-tight">
             Create a P2P Advertisement
-          </CardTitle>
-          <CardDescription>
-            Set up your offer to buy or sell crypto with custom payment methods and rates.
-          </CardDescription>
-        </CardHeader>
+          </h1>
+          <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
+            Set up your ad to buy or sell coins. It will be visible to other users.
+          </p>
+        </div>
 
-        <CardContent>
-          <form onSubmit={handleCreateAd} className="space-y-6">
-            {/* Buy / Sell Toggle */}
-            <div className="grid grid-cols-2 gap-2 p-1.5 bg-muted rounded-xl">
-              <Button
+        <form onSubmit={handleSubmit} className="space-y-8">
+          
+          {/* STEP 1: Type & Crypto Selection */}
+          <div className="bg-white dark:bg-[#18181c] p-5 md:p-6 rounded-xl border border-gray-200 dark:border-gray-800 shadow-sm space-y-6 transition-colors">
+            
+            <div className="grid grid-cols-2 gap-3">
+              <button
                 type="button"
-                variant={adType === 'buy' ? 'default' : 'ghost'}
-                className={`h-11 font-semibold rounded-lg text-base ${
-                  adType === 'buy' ? 'bg-emerald-600 hover:bg-emerald-500 text-white shadow' : 'text-muted-foreground'
-                }`}
                 onClick={() => setAdType('buy')}
+                className={`py-3 px-4 rounded-lg font-medium text-sm transition-all border ${
+                  adType === 'buy'
+                    ? 'bg-emerald-600 text-white border-emerald-600 shadow-sm'
+                    : 'bg-white dark:bg-[#202026] text-gray-700 dark:text-gray-300 border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-800'
+                }`}
               >
                 I want to Buy
-              </Button>
-              <Button
+              </button>
+              <button
                 type="button"
-                variant={adType === 'sell' ? 'default' : 'ghost'}
-                className={`h-11 font-semibold rounded-lg text-base ${
-                  adType === 'sell' ? 'bg-indigo-600 hover:bg-indigo-500 text-white shadow' : 'text-muted-foreground'
-                }`}
                 onClick={() => setAdType('sell')}
+                className={`py-3 px-4 rounded-lg font-medium text-sm transition-all border ${
+                  adType === 'sell'
+                    ? 'bg-rose-600 text-white border-rose-600 shadow-sm'
+                    : 'bg-white dark:bg-[#202026] text-gray-700 dark:text-gray-300 border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-800'
+                }`}
               >
                 I want to Sell
-              </Button>
+              </button>
             </div>
 
-            {/* Asset & Fiat Pickers */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label className="text-xs uppercase tracking-wider text-muted-foreground font-semibold">Coin</Label>
-                <div className="grid grid-cols-4 gap-2">
-                  {SUPPORTED_CRYPTOS.map((item) => (
-                    <Button
-                      key={item.symbol}
-                      type="button"
-                      variant={crypto === item.symbol ? "default" : "outline"}
-                      className={`h-12 flex flex-col items-center justify-center p-1 rounded-xl transition-all ${
-                        crypto === item.symbol ? 'border-2 border-primary bg-primary/10 text-primary font-bold' : ''
-                      }`}
-                      onClick={() => setCrypto(item.symbol)}
-                    >
-                      <CryptoLogo crypto={item.symbol} className="h-5 w-5 mb-0.5" />
-                      <span className="text-xs">{item.symbol}</span>
-                    </Button>
-                  ))}
-                </div>
-              </div>
-
-              <div className="space-y-2">
-                <Label className="text-xs uppercase tracking-wider text-muted-foreground font-semibold">With Fiat</Label>
-                <Select value={fiatCurrency} onValueChange={setFiatCurrency}>
-                  <SelectTrigger className="h-12 text-base rounded-xl">
-                    <SelectValue>
-                      <div className="flex items-center gap-2">
-                        <FiatLogo countryCode={selectedFiat.country} />
-                        <span className="font-semibold">{selectedFiat.code}</span>
-                        <span className="text-xs text-muted-foreground">({selectedFiat.name})</span>
-                      </div>
-                    </SelectValue>
-                  </SelectTrigger>
-                  <SelectContent>
-                    {ALL_FIATS.map((fiat) => (
-                      <SelectItem key={fiat.code} value={fiat.code}>
-                        <div className="flex items-center gap-2">
-                          <FiatLogo countryCode={fiat.country} />
-                          <span className="font-medium">{fiat.code}</span>
-                          <span className="text-xs text-muted-foreground">- {fiat.name}</span>
-                        </div>
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-            </div>
-
-            {/* Payment Method Selector */}
-            <div className="space-y-3 p-4 bg-muted/40 rounded-xl border border-border">
-              <div>
-                <Label className="text-sm font-semibold">Payment Methods</Label>
-                <p className="text-xs text-muted-foreground">Select up to 5 methods.</p>
-              </div>
-
-              <div className="flex flex-wrap gap-2 min-h-[32px]">
-                {selectedMethods.map((method) => (
-                  <Badge key={method} variant="secondary" className="px-3 py-1 text-xs gap-1 rounded-full">
-                    {method}
-                    <X className="h-3 w-3 cursor-pointer hover:text-destructive" onClick={() => togglePaymentMethod(method)} />
-                  </Badge>
-                ))}
-              </div>
-
-              <div className="flex gap-2 overflow-x-auto pb-1 border-b border-border text-xs">
-                {Object.keys(PAYMENT_CATEGORIES).map((cat) => (
-                  <button
-                    key={cat}
-                    type="button"
-                    onClick={() => setActiveCategory(cat as any)}
-                    className={`pb-1 font-medium whitespace-nowrap transition-colors ${
-                      activeCategory === cat ? 'border-b-2 border-primary text-primary font-bold' : 'text-muted-foreground'
-                    }`}
-                  >
-                    {cat}
-                  </button>
-                ))}
-              </div>
-
-              <div className="flex flex-wrap gap-2 pt-1">
-                {PAYMENT_CATEGORIES[activeCategory].map((method) => {
-                  const isSelected = selectedMethods.includes(method);
+            <div>
+              <label className="block text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400 mb-2">
+                Coin
+              </label>
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+                {CRYPTO_OPTIONS.map((c) => {
+                  const isSelected = crypto === c.code;
                   return (
-                    <Button
-                      key={method}
+                    <button
+                      key={c.code}
                       type="button"
-                      variant={isSelected ? "default" : "outline"}
-                      size="sm"
-                      className="h-8 text-xs rounded-lg"
-                      onClick={() => togglePaymentMethod(method)}
+                      onClick={() => setCrypto(c.code)}
+                      className={`flex items-center justify-center gap-2 py-2.5 px-3 rounded-lg border text-sm font-medium transition-all ${
+                        isSelected
+                          ? 'border-[#6366f1] bg-[#6366f1] text-white shadow-md shadow-indigo-500/20'
+                          : 'border-gray-200 dark:border-gray-700 bg-white dark:bg-[#202026] text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800'
+                      }`}
                     >
-                      {isSelected ? '✓ ' : '+ '} {method}
-                    </Button>
+                      <img src={c.logo} alt={c.code} className="w-5 h-5 rounded-full object-contain" />
+                      <span>{c.code}</span>
+                    </button>
                   );
                 })}
               </div>
             </div>
 
-            {/* Price Config */}
-            <div className="p-4 bg-muted/40 rounded-xl border border-border space-y-4">
-              <Label className="text-sm font-semibold">Pricing Strategy</Label>
-              <div className="flex gap-6">
-                <label className="flex items-center gap-2 text-sm font-medium cursor-pointer">
-                  <input
-                    type="radio"
-                    name="rateType"
-                    checked={rateType === 'float'}
-                    onChange={() => setRateType('float')}
-                    className="accent-primary"
+            <div>
+              <label className="block text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400 mb-2">
+                With Fiat
+              </label>
+              <div className="flex items-center justify-between p-3.5 bg-gray-50 dark:bg-[#202026] border border-gray-200 dark:border-gray-700 rounded-lg">
+                <div className="flex items-center gap-3">
+                  <img 
+                    src={`https://flagcdn.com/w40/${fiat.flag}.png`} 
+                    alt={fiat.code} 
+                    className="w-6 h-4 object-cover rounded-[2px]" 
                   />
-                  Market Rate (Floating)
-                </label>
-                <label className="flex items-center gap-2 text-sm font-medium cursor-pointer">
-                  <input
-                    type="radio"
-                    name="rateType"
-                    checked={rateType === 'fixed'}
-                    onChange={() => setRateType('fixed')}
-                    className="accent-primary"
-                  />
-                  Fixed Rate
-                </label>
-              </div>
-
-              {rateType === 'float' ? (
-                <div className="space-y-2">
-                  <Label className="text-xs text-muted-foreground">Market Rate Adjustment (%)</Label>
-                  <div className="relative">
-                    <Input
-                      type="number"
-                      step="0.1"
-                      value={ratePercent}
-                      onChange={(e) => setRatePercent(e.target.value)}
-                      className="h-10 pr-8 font-mono text-sm"
-                    />
-                    <Percent className="absolute right-3 top-3 h-4 w-4 text-muted-foreground" />
+                  <div>
+                    <div className="text-sm font-medium text-gray-900 dark:text-white">{fiat.name}</div>
+                    <div className="text-xs text-gray-500 dark:text-gray-400">{fiat.code}</div>
                   </div>
-                  <p className="text-xs text-muted-foreground">
-                    Current price: <span className="font-bold text-foreground">{estimatedAdPrice.toLocaleString(undefined, { style: 'currency', currency: fiatCurrency })}</span>
-                  </p>
                 </div>
-              ) : (
-                <div className="space-y-2">
-                  <Label className="text-xs text-muted-foreground">Fixed Rate ({fiatCurrency})</Label>
-                  <Input
-                    type="number"
-                    step="0.01"
-                    value={fixedRate}
-                    onChange={(e) => setFixedRate(e.target.value)}
-                    placeholder="79000.00"
-                    className="h-10 font-mono text-sm"
-                  />
-                </div>
-              )}
+                <button
+                  type="button"
+                  onClick={() => setIsFiatModalOpen(true)}
+                  className="flex items-center gap-1.5 text-xs font-medium bg-white dark:bg-[#18181c] text-gray-800 dark:text-gray-200 px-3 py-1.5 rounded border border-gray-200 dark:border-gray-700 hover:bg-gray-100 dark:hover:bg-gray-800 transition"
+                >
+                  <Globe className="w-3.5 h-3.5 text-gray-500 dark:text-gray-400" />
+                  Change
+                </button>
+              </div>
             </div>
 
-            {/* Trade Limits */}
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              <div className="space-y-1">
-                <Label className="text-xs font-semibold text-muted-foreground uppercase">Min Trade Limit</Label>
-                <Input
+          </div>
+
+          {/* STEP 2: Payment Methods */}
+          <div className="bg-white dark:bg-[#18181c] p-5 md:p-6 rounded-xl border border-gray-200 dark:border-gray-800 shadow-sm space-y-5 transition-colors">
+            <div>
+              <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Payment Methods</h2>
+              <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+                Select up to 5 methods. Add a custom method if yours isn't listed under a category.
+              </p>
+            </div>
+
+            {selectedPaymentMethods.length > 0 && (
+              <div className="flex flex-wrap gap-2 pt-1">
+                {selectedPaymentMethods.map((method) => (
+                  <span
+                    key={method}
+                    className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium bg-indigo-50 dark:bg-indigo-950/40 text-[#6366f1] dark:text-indigo-400 border border-indigo-200 dark:border-indigo-800/60"
+                  >
+                    {method}
+                    <button
+                      type="button"
+                      onClick={() => togglePaymentMethod(method)}
+                      className="hover:text-rose-600"
+                    >
+                      <X className="w-3 h-3" />
+                    </button>
+                  </span>
+                ))}
+              </div>
+            )}
+
+            <div className="flex gap-2 overflow-x-auto pb-2 border-b border-gray-100 dark:border-gray-800">
+              {PAYMENT_CATEGORIES.map((cat) => {
+                const Icon = cat.icon;
+                const active = selectedCategory === cat.id;
+                return (
+                  <button
+                    key={cat.id}
+                    type="button"
+                    onClick={() => setSelectedCategory(cat.id)}
+                    className={`flex items-center gap-2 px-3.5 py-2 rounded-lg text-xs font-medium whitespace-nowrap transition-all ${
+                      active
+                        ? 'bg-[#6366f1] text-white shadow-sm'
+                        : 'bg-gray-50 dark:bg-[#202026] text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800'
+                    }`}
+                  >
+                    <Icon className="w-3.5 h-3.5" />
+                    {cat.title}
+                  </button>
+                );
+              })}
+            </div>
+
+            {PAYMENT_CATEGORIES.filter((c) => c.id === selectedCategory).map((cat) => (
+              <div key={cat.id} className="space-y-3 pt-1">
+                <p className="text-xs text-gray-500 dark:text-gray-400">{cat.subtitle}</p>
+                <div className="max-h-56 overflow-y-auto pr-1 space-y-1">
+                  {cat.options.map((option) => {
+                    const isSelected = selectedPaymentMethods.includes(option);
+                    return (
+                      <button
+                        key={option}
+                        type="button"
+                        onClick={() => togglePaymentMethod(option)}
+                        className={`w-full flex items-center justify-between px-3 py-2.5 rounded-lg text-left text-xs transition ${
+                          isSelected
+                            ? 'bg-indigo-50 dark:bg-indigo-950/30 text-[#6366f1] dark:text-indigo-400 font-medium'
+                            : 'hover:bg-gray-50 dark:hover:bg-gray-800/60 text-gray-700 dark:text-gray-300'
+                        }`}
+                      >
+                        <span>{option}</span>
+                        {isSelected && <Check className="w-4 h-4 text-[#6366f1]" />}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            ))}
+
+            <div className="pt-2 border-t border-gray-100 dark:border-gray-800">
+              <label className="block text-xs text-gray-500 dark:text-gray-400 mb-1.5">Add Custom Payment Method</label>
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  placeholder="e.g. Local Bank Transfer"
+                  value={customMethod}
+                  onChange={(e) => setCustomMethod(e.target.value)}
+                  className="flex-1 px-3 py-2 text-xs border border-gray-200 dark:border-gray-700 bg-white dark:bg-[#202026] text-gray-900 dark:text-white rounded-lg focus:outline-none focus:ring-1 focus:ring-[#6366f1]"
+                />
+                <button
+                  type="button"
+                  onClick={addCustomPaymentMethod}
+                  className="px-3 py-2 bg-gray-100 dark:bg-gray-800 text-gray-800 dark:text-gray-200 rounded-lg text-xs font-medium hover:bg-gray-200 dark:hover:bg-gray-700 transition flex items-center gap-1"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  Add
+                </button>
+              </div>
+            </div>
+          </div>
+
+          {/* STEP 3: Pricing & Limits */}
+          <div className="bg-white dark:bg-[#18181c] p-5 md:p-6 rounded-xl border border-gray-200 dark:border-gray-800 shadow-sm space-y-5 transition-colors">
+            <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Pricing</h2>
+
+            <div className="grid grid-cols-2 gap-3">
+              <button
+                type="button"
+                onClick={() => setRateType('market')}
+                className={`py-2.5 px-4 rounded-lg text-xs font-medium border transition ${
+                  rateType === 'market'
+                    ? 'bg-[#6366f1] text-white border-[#6366f1] shadow-sm'
+                    : 'bg-white dark:bg-[#202026] text-gray-700 dark:text-gray-300 border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-800'
+                }`}
+              >
+                Market Rate
+              </button>
+              <button
+                type="button"
+                onClick={() => setRateType('fixed')}
+                className={`py-2.5 px-4 rounded-lg text-xs font-medium border transition ${
+                  rateType === 'fixed'
+                    ? 'bg-[#6366f1] text-white border-[#6366f1] shadow-sm'
+                    : 'bg-white dark:bg-[#202026] text-gray-700 dark:text-gray-300 border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-800'
+                }`}
+              >
+                Fixed Rate
+              </button>
+            </div>
+
+            {rateType === 'market' ? (
+              <div className="space-y-2">
+                <label className="block text-xs font-medium text-gray-700 dark:text-gray-300">
+                  Market Rate Adjustment
+                </label>
+                <div className="relative">
+                  <input
+                    type="number"
+                    step="0.1"
+                    value={ratePercent}
+                    onChange={(e) => setRatePercent(e.target.value)}
+                    className="w-full pl-3 pr-8 py-2.5 border border-gray-200 dark:border-gray-700 bg-white dark:bg-[#202026] text-gray-900 dark:text-white rounded-lg text-sm focus:outline-none focus:ring-1 focus:ring-[#6366f1]"
+                  />
+                  <span className="absolute right-3 top-3 text-xs text-gray-400">%</span>
+                </div>
+                <p className="text-xs text-gray-500 dark:text-gray-400 leading-relaxed">
+                  Your price will float with the market. Current price is approx. $77,871.00.
+                  <br />
+                  Set your adjustment percentage (from -50% to 50%). E.g., '1.5' for 1.5% above market.
+                </p>
+              </div>
+            ) : (
+              <div className="space-y-2">
+                <label className="block text-xs font-medium text-gray-700 dark:text-gray-300">Fixed Price</label>
+                <div className="relative">
+                  <input
+                    type="number"
+                    step="0.01"
+                    value={fixedPrice}
+                    onChange={(e) => setFixedPrice(e.target.value)}
+                    className="w-full pl-3 pr-12 py-2.5 border border-gray-200 dark:border-gray-700 bg-white dark:bg-[#202026] text-gray-900 dark:text-white rounded-lg text-sm focus:outline-none focus:ring-1 focus:ring-[#6366f1]"
+                  />
+                  <span className="absolute right-3 top-3 text-xs text-gray-400">
+                    {fiat.code}
+                  </span>
+                </div>
+              </div>
+            )}
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-2">
+              <div>
+                <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">
+                  Minimum Trade Amount
+                </label>
+                <input
                   type="number"
                   value={minAmount}
                   onChange={(e) => setMinAmount(e.target.value)}
-                  placeholder="100"
-                  className="h-11 font-mono"
-                  required
+                  className="w-full px-3 py-2.5 border border-gray-200 dark:border-gray-700 bg-white dark:bg-[#202026] text-gray-900 dark:text-white rounded-lg text-sm focus:outline-none focus:ring-1 focus:ring-[#6366f1]"
                 />
+                <span className="text-[11px] text-gray-400 mt-1 block">
+                  In your selected fiat currency.
+                </span>
               </div>
 
-              <div className="space-y-1">
-                <Label className="text-xs font-semibold text-muted-foreground uppercase">Max Trade Limit</Label>
-                <Input
+              <div>
+                <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">
+                  Maximum Trade Amount
+                </label>
+                <input
                   type="number"
                   value={maxAmount}
                   onChange={(e) => setMaxAmount(e.target.value)}
-                  placeholder="5000"
-                  className="h-11 font-mono"
-                  required
+                  className="w-full px-3 py-2.5 border border-gray-200 dark:border-gray-700 bg-white dark:bg-[#202026] text-gray-900 dark:text-white rounded-lg text-sm focus:outline-none focus:ring-1 focus:ring-[#6366f1]"
                 />
-              </div>
-
-              <div className="space-y-1">
-                <Label className="text-xs font-semibold text-muted-foreground uppercase">Payment Window</Label>
-                <Select value={paymentWindow} onValueChange={setPaymentWindow}>
-                  <SelectTrigger className="h-11">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="15">15 minutes</SelectItem>
-                    <SelectItem value="30">30 minutes</SelectItem>
-                    <SelectItem value="60">60 minutes</SelectItem>
-                  </SelectContent>
-                </Select>
+                <span className="text-[11px] text-gray-400 mt-1 block">
+                  In your selected fiat currency.
+                </span>
               </div>
             </div>
 
-            {/* Terms */}
-            <div className="space-y-4">
-              <div className="space-y-1">
-                <Label className="text-xs font-semibold uppercase text-muted-foreground">Terms & Conditions</Label>
-                <Textarea
-                  rows={3}
-                  value={terms}
-                  onChange={(e) => setTerms(e.target.value)}
-                  placeholder="Write clear trading terms..."
-                  className="resize-none"
+            <div>
+              <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">
+                Payment Window
+              </label>
+              <div className="relative">
+                <select
+                  value={paymentWindow}
+                  onChange={(e) => setPaymentWindow(e.target.value)}
+                  className="w-full appearance-none px-3 py-2.5 border border-gray-200 dark:border-gray-700 rounded-lg text-sm bg-white dark:bg-[#202026] text-gray-900 dark:text-white focus:outline-none focus:ring-1 focus:ring-[#6366f1] pr-8"
+                >
+                  <option value="30">30 minutes</option>
+                  <option value="60">60 minutes</option>
+                  <option value="90">90 minutes</option>
+                  <option value="120">120 minutes</option>
+                </select>
+                <ChevronDown className="w-4 h-4 text-gray-400 absolute right-3 top-3.5 pointer-events-none" />
+              </div>
+              <span className="text-[11px] text-gray-400 mt-1 block">
+                Time buyer has to pay.
+              </span>
+            </div>
+          </div>
+
+          {/* STEP 4: Targeted & Blocked Countries */}
+          <div className="bg-white dark:bg-[#18181c] p-5 md:p-6 rounded-xl border border-gray-200 dark:border-gray-800 shadow-sm space-y-5 transition-colors">
+            <div>
+              <label className="block text-sm font-medium text-gray-900 dark:text-white">
+                Targeted Countries (Optional)
+              </label>
+              <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+                Only show this ad to users from these countries.
+              </p>
+              <button
+                type="button"
+                onClick={() => {
+                  setCountrySearch('');
+                  setIsTargetedModalOpen(true);
+                }}
+                className="mt-3 w-full py-2.5 px-4 border border-gray-200 dark:border-gray-700 rounded-lg text-xs font-medium text-gray-700 dark:text-gray-300 bg-white dark:bg-[#202026] hover:bg-gray-50 dark:hover:bg-gray-800 flex items-center justify-between"
+              >
+                <div className="flex items-center gap-2">
+                  <Globe className="w-3.5 h-3.5 text-gray-500 dark:text-gray-400" />
+                  <span>
+                    {targetedCountries.length > 0
+                      ? `${targetedCountries.length} Countries Selected`
+                      : 'Select Targeted Countries'}
+                  </span>
+                </div>
+                {targetedCountries.length > 0 && (
+                  <span className="bg-[#6366f1] text-white px-2 py-0.5 rounded-full text-[10px] font-semibold">
+                    {targetedCountries.length}
+                  </span>
+                )}
+              </button>
+            </div>
+
+            <div className="pt-2 border-t border-gray-100 dark:border-gray-800">
+              <label className="block text-sm font-medium text-gray-900 dark:text-white">
+                Blocked Countries (Optional)
+              </label>
+              <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+                Hide this ad from users in these countries.
+              </p>
+              <button
+                type="button"
+                onClick={() => {
+                  setCountrySearch('');
+                  setIsBlockedModalOpen(true);
+                }}
+                className="mt-3 w-full py-2.5 px-4 border border-gray-200 dark:border-gray-700 rounded-lg text-xs font-medium text-gray-700 dark:text-gray-300 bg-white dark:bg-[#202026] hover:bg-gray-50 dark:hover:bg-gray-800 flex items-center justify-between"
+              >
+                <div className="flex items-center gap-2">
+                  <Globe className="w-3.5 h-3.5 text-gray-500 dark:text-gray-400" />
+                  <span>
+                    {blockedCountries.length > 0
+                      ? `${blockedCountries.length} Countries Blocked`
+                      : 'Select Blocked Countries'}
+                  </span>
+                </div>
+                {blockedCountries.length > 0 && (
+                  <span className="bg-rose-500 text-white px-2 py-0.5 rounded-full text-[10px] font-semibold">
+                    {blockedCountries.length}
+                  </span>
+                )}
+              </button>
+            </div>
+          </div>
+
+          {/* STEP 5: Terms, Labels, Tags & Requirements */}
+          <div className="bg-white dark:bg-[#18181c] p-5 md:p-6 rounded-xl border border-gray-200 dark:border-gray-800 shadow-sm space-y-5 transition-colors">
+            <div>
+              <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">
+                Terms & Conditions
+              </label>
+              <textarea
+                rows={3}
+                value={terms}
+                onChange={(e) => setTerms(e.target.value)}
+                placeholder="e.g., Payment must be made from an account with your name. No third-party payments..."
+                className="w-full px-3 py-2 border border-gray-200 dark:border-gray-700 bg-white dark:bg-[#202026] text-gray-900 dark:text-white rounded-lg text-xs focus:outline-none focus:ring-1 focus:ring-[#6366f1] resize-none"
+              />
+            </div>
+
+            <div>
+              <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">
+                Offer Label (Optional)
+              </label>
+              <input
+                type="text"
+                maxLength={30}
+                value={offerLabel}
+                onChange={(e) => setOfferLabel(e.target.value)}
+                placeholder="e.g., Best rate on the market!"
+                className="w-full px-3 py-2 border border-gray-200 dark:border-gray-700 bg-white dark:bg-[#202026] text-gray-900 dark:text-white rounded-lg text-xs focus:outline-none focus:ring-1 focus:ring-[#6366f1]"
+              />
+              <span className="text-[11px] text-gray-400 mt-1 block">
+                A short, eye-catching label for your ad (max 30 characters).
+              </span>
+            </div>
+
+            <div>
+              <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">
+                Ad Tags
+              </label>
+              <p className="text-[11px] text-gray-400 mb-2">Select tags that apply to your ad.</p>
+              <div className="grid grid-cols-2 gap-2">
+                {[
+                  'No third party',
+                  'No receipt required',
+                  'No verification',
+                  'Invoice accepted',
+                ].map((tag) => {
+                  const isChecked = selectedTags.includes(tag);
+                  return (
+                    <label
+                      key={tag}
+                      onClick={() => toggleTag(tag)}
+                      className={`flex items-center gap-2 p-2 border rounded-lg cursor-pointer transition text-xs ${
+                        isChecked
+                          ? 'border-[#6366f1] bg-indigo-50/50 dark:bg-indigo-950/20 text-[#6366f1] dark:text-indigo-400 font-medium'
+                          : 'border-gray-200 dark:border-gray-700 bg-white dark:bg-[#202026] text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800'
+                      }`}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={isChecked}
+                        readOnly
+                        className="rounded border-gray-300 text-[#6366f1] focus:ring-[#6366f1]"
+                      />
+                      <span>{tag}</span>
+                    </label>
+                  );
+                })}
+              </div>
+            </div>
+
+            <div className="pt-2 border-t border-gray-100 dark:border-gray-800">
+              <h3 className="text-sm font-medium text-gray-900 dark:text-white mb-2">Trader Requirements</h3>
+              <label className="block text-xs text-gray-600 dark:text-gray-400 mb-1">
+                Minimum Completed Trades
+              </label>
+              <div className="relative">
+                <select
+                  value={minTrades}
+                  onChange={(e) => setMinTrades(e.target.value)}
+                  className="w-full appearance-none px-3 py-2.5 border border-gray-200 dark:border-gray-700 rounded-lg text-xs bg-white dark:bg-[#202026] text-gray-900 dark:text-white focus:outline-none focus:ring-1 focus:ring-[#6366f1] pr-8"
+                >
+                  <option value="0">No requirement</option>
+                  <option value="1">1 completed trade</option>
+                  <option value="2">2 completed trades</option>
+                  <option value="3">3 completed trades</option>
+                  <option value="4">4 completed trades</option>
+                  <option value="5">5 completed trades</option>
+                </select>
+                <ChevronDown className="w-4 h-4 text-gray-400 absolute right-3 top-3 pointer-events-none" />
+              </div>
+              <span className="text-[11px] text-gray-400 mt-1 block">
+                Set a minimum number of trades a user must have completed to start a trade with you.
+              </span>
+            </div>
+          </div>
+
+          {/* Create Ad Submit Button */}
+          <button
+            type="submit"
+            onClick={() => handleSubmit()}
+            disabled={isSubmitting}
+            className="w-full py-3.5 bg-[#6366f1] text-white rounded-xl font-medium text-sm hover:bg-indigo-600 transition shadow-md shadow-indigo-500/20 disabled:opacity-50 cursor-pointer active:scale-[0.99]"
+          >
+            {isSubmitting ? 'Creating Ad...' : 'Create Ad'}
+          </button>
+        </form>
+
+      </div>
+
+      {/* --- MODAL: Change Fiat --- */}
+      {isFiatModalOpen && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white dark:bg-[#18181c] rounded-xl max-w-md w-full max-h-[80vh] flex flex-col shadow-2xl border border-gray-200 dark:border-gray-800">
+            <div className="p-4 border-b border-gray-100 dark:border-gray-800 flex items-center justify-between">
+              <h3 className="font-semibold text-gray-900 dark:text-white text-sm">Change Fiat Currency</h3>
+              <button type="button" onClick={() => setIsFiatModalOpen(false)}>
+                <X className="w-4 h-4 text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200" />
+              </button>
+            </div>
+            <div className="p-3 border-b border-gray-100 dark:border-gray-800">
+              <div className="relative">
+                <Search className="w-4 h-4 absolute left-3 top-2.5 text-gray-400" />
+                <input
+                  type="text"
+                  placeholder="Search currency name or code..."
+                  value={fiatSearch}
+                  onChange={(e) => setFiatSearch(e.target.value)}
+                  className="w-full pl-9 pr-8 py-1.5 border border-gray-200 dark:border-gray-700 bg-white dark:bg-[#202026] text-gray-900 dark:text-white rounded-lg text-xs focus:outline-none focus:ring-1 focus:ring-[#6366f1]"
                 />
+                {fiatSearch && (
+                  <button type="button" onClick={() => setFiatSearch('')} className="absolute right-2.5 top-2 text-gray-400 hover:text-gray-600">
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                )}
               </div>
             </div>
-
-            <Button
-              type="submit"
-              size="lg"
-              disabled={isSubmitting}
-              className="w-full h-12 text-base font-bold shadow-lg"
-            >
-              {isSubmitting ? (
-                <>
-                  <Loader2 className="mr-2 h-5 w-5 animate-spin" />
-                  Publishing your advertisement...
-                </>
-              ) : (
-                'Create Ad'
-              )}
-            </Button>
-            
-            <div className="text-center text-xs text-muted-foreground flex items-center justify-center gap-1.5">
-              <Lock className="h-3 w-3" />
-              Protected by secure escrow & multi-layer account verification.
+            <div className="overflow-y-auto p-2 divide-y divide-gray-50 dark:divide-gray-800/40">
+              {filteredFiats.map((item) => (
+                <button
+                  key={item.code}
+                  type="button"
+                  onClick={() => {
+                    setFiat(item);
+                    setIsFiatModalOpen(false);
+                  }}
+                  className="w-full flex items-center justify-between p-2.5 text-left text-xs hover:bg-gray-50 dark:hover:bg-gray-800/60 rounded-lg transition"
+                >
+                  <div className="flex items-center gap-3">
+                    <img 
+                      src={`https://flagcdn.com/w40/${item.flag}.png`} 
+                      alt={item.code} 
+                      className="w-5 h-3.5 object-cover rounded-[2px]" 
+                    />
+                    <div>
+                      <div className="font-medium text-gray-800 dark:text-gray-200">{item.name}</div>
+                      <div className="text-[11px] text-gray-400">{item.code}</div>
+                    </div>
+                  </div>
+                  {fiat.code === item.code && <Check className="w-4 h-4 text-[#6366f1]" />}
+                </button>
+              ))}
             </div>
-          </form>
-        </CardContent>
-      </Card>
+          </div>
+        </div>
+      )}
+
+      {/* --- MODAL: Targeted / Blocked Countries --- */}
+      {(isTargetedModalOpen || isBlockedModalOpen) && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white dark:bg-[#18181c] rounded-xl max-w-md w-full max-h-[80vh] flex flex-col shadow-2xl border border-gray-200 dark:border-gray-800">
+            <div className="p-4 border-b border-gray-100 dark:border-gray-800 flex items-center justify-between">
+              <h3 className="font-semibold text-gray-900 dark:text-white text-sm">
+                {isTargetedModalOpen ? 'Select Targeted Countries' : 'Select Blocked Countries'}
+              </h3>
+              <button
+                type="button"
+                onClick={() => {
+                  setIsTargetedModalOpen(false);
+                  setIsBlockedModalOpen(false);
+                }}
+              >
+                <X className="w-4 h-4 text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200" />
+              </button>
+            </div>
+            <div className="p-3 border-b border-gray-100 dark:border-gray-800 flex gap-2">
+              <div className="relative flex-1">
+                <Search className="w-4 h-4 absolute left-3 top-2.5 text-gray-400" />
+                <input
+                  type="text"
+                  placeholder="Search countries..."
+                  value={countrySearch}
+                  onChange={(e) => setCountrySearch(e.target.value)}
+                  className="w-full pl-9 pr-8 py-1.5 border border-gray-200 dark:border-gray-700 bg-white dark:bg-[#202026] text-gray-900 dark:text-white rounded-lg text-xs focus:outline-none focus:ring-1 focus:ring-[#6366f1]"
+                />
+                {countrySearch && (
+                  <button type="button" onClick={() => setCountrySearch('')} className="absolute right-2.5 top-2 text-gray-400 hover:text-gray-600">
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                )}
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  if (isTargetedModalOpen) setTargetedCountries([]);
+                  else setBlockedCountries([]);
+                }}
+                className="px-3 py-1.5 border border-gray-200 dark:border-gray-700 rounded-lg text-[11px] text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-800"
+              >
+                Clear All
+              </button>
+            </div>
+            <div className="overflow-y-auto p-2 divide-y divide-gray-50 dark:divide-gray-800/40 max-h-[50vh]">
+              {ALL_COUNTRIES.filter((c) =>
+                c.name.toLowerCase().includes(countrySearch.toLowerCase())
+              ).map((country) => {
+                const list = isTargetedModalOpen ? targetedCountries : blockedCountries;
+                const isSelected = list.includes(country.name);
+
+                const handleToggle = () => {
+                  if (isTargetedModalOpen) {
+                    setTargetedCountries(
+                      isSelected
+                        ? targetedCountries.filter((c) => c !== country.name)
+                        : [...targetedCountries, country.name]
+                    );
+                  } else {
+                    setBlockedCountries(
+                      isSelected
+                        ? blockedCountries.filter((c) => c !== country.name)
+                        : [...blockedCountries, country.name]
+                    );
+                  }
+                };
+
+                return (
+                  <button
+                    key={country.name}
+                    type="button"
+                    onClick={handleToggle}
+                    className="w-full flex items-center justify-between p-2.5 text-left text-xs hover:bg-gray-50 dark:hover:bg-gray-800/60 rounded-lg transition"
+                  >
+                    <div className="flex items-center gap-3">
+                      <img 
+                        src={`https://flagcdn.com/w40/${country.code}.png`} 
+                        alt={country.name} 
+                        className="w-5 h-3.5 object-cover rounded-[2px]" 
+                      />
+                      <span className="text-gray-800 dark:text-gray-200">{country.name}</span>
+                    </div>
+                    {isSelected && <Check className="w-4 h-4 text-[#6366f1]" />}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      )}
+
     </div>
   );
 }

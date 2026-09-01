@@ -1,23 +1,22 @@
-
-
 'use client';
-import { Firestore, collection, addDoc, doc, updateDoc } from 'firebase/firestore';
-import type { P2PAd, CryptoCurrency } from './types';
-import { errorEmitter } from '@/firebase/error-emitter';
-import { FirestorePermissionError } from '@/firebase/errors';
+import type { P2PAd } from './types';
+import { supabase } from '@/lib/supabase/client';
 import { createClient } from '@/lib/supabase';
 
 function generatePublicAdId() {
-  const prefix = "AD-";
-  const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
-  let result = "";
+  const prefix = 'AD-';
+  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+  let result = '';
   for (let i = 0; i < 8; i++) {
     result += chars.charAt(Math.floor(Math.random() * chars.length));
   }
   return prefix + result;
 }
 
-export async function createP2PAd(db: Firestore, adData: Omit<P2PAd, 'id' | 'createdAt' | 'user' | 'userId' | 'publicAdId'>, user: {
+export async function createP2PAd(
+  _db: any,
+  adData: Omit<P2PAd, 'id' | 'createdAt' | 'user' | 'userId' | 'publicAdId'>,
+  user: {
     id: string;
     username: string;
     country?: string;
@@ -28,87 +27,111 @@ export async function createP2PAd(db: Firestore, adData: Omit<P2PAd, 'id' | 'cre
     photoURL?: string;
     badges?: string[];
     lastActive?: string;
-}) {
-  const adsCollection = collection(db, 'p2p_ads');
-  
-  const userPayload = {
-      username: user.username,
-      ...(user.country && { country: user.country }),
-      feedbackScore: user.feedbackScore,
-      positiveFeedback: user.positiveFeedback,
-      negativeFeedback: user.negativeFeedback,
-      completedTrades: user.completedTrades,
-      photoURL: user.photoURL || "",
-      badges: user.badges || [],
-      lastActive: user.lastActive || new Date().toISOString(),
+  }
+) {
+  // 1. Get current active session
+  const { data: { session }, error: sessionError } = await supabase.auth.getSession();
+
+  if (sessionError || !session?.user) {
+    console.error("Auth session error:", sessionError);
+    alert(`Auth Error: No active session found. ${sessionError?.message || ''}`);
+    throw new Error(`Auth Error: No active session found. ${sessionError?.message || ''}`);
   }
 
-  const dataToCreate = {
-    ...adData,
-    publicAdId: generatePublicAdId(),
-    userId: user.id,
-    user: userPayload,
-    createdAt: new Date().toISOString()
-  };
+  const publicAdId = generatePublicAdId();
 
-  try {
-    const docRef = await addDoc(adsCollection, dataToCreate);
-    return docRef;
-  } catch (error) {
-    console.error("Error creating P2P Ad: ", error);
-    
-    errorEmitter.emit(
-        'permission-error',
-        new FirestorePermissionError({
-          path: adsCollection.path,
-          operation: 'create',
-          requestResourceData: dataToCreate,
-        })
-      )
-    throw error;
-  }
-}
-
-export async function updateAd(db: Firestore, adId: string, adData: Partial<Omit<P2PAd, 'id' | 'createdAt' | 'user' | 'userId' | 'publicAdId'>>) {
-    const adRef = doc(db, 'p2p_ads', adId);
-    await updateDoc(adRef, adData);
-}
-
-export async function updateAdStatus(db: Firestore, adId: string, active: boolean) {
-    const adRef = doc(db, 'p2p_ads', adId);
-    await updateDoc(adRef, { active });
-}
-
-// Soft delete by marking as inactive
-export async function softDeleteAd(db: Firestore, adId: string) {
-    const adRef = doc(db, 'p2p_ads', adId);
-    await updateDoc(adRef, { active: false, deletedAt: new Date().toISOString() });
-}
-
-export async function createAd(formData: any) {
-  const supabase = createClient();
-  
-  // 1. Get current authenticated user
-  const { data: { user }, error: userError } = await supabase.auth.getUser();
-
-  if (userError || !user) {
-    throw new Error("You must be logged in to create an ad.");
-  }
-
-  // 2. Insert ad into p2p_ads with user_id attached
+  // 2. Perform Insert with explicit user_id and detailed error logging
   const { data, error } = await supabase
     .from('p2p_ads')
     .insert([
       {
-        ...formData,
-        user_id: user.id, // Must match auth.uid() in RLS policy
-      }
+        ...adData,
+        public_ad_id: publicAdId,
+        user_id: session.user.id, // Explicitly attach authenticated user ID
+        user_display_name: user.username,
+        created_at: new Date().toISOString(),
+      },
     ])
+    .select();
+
+  if (error) {
+    // THIS WILL PRINT THE REAL ERROR IN CONSOLE AND ALERT
+    console.error("Database error creating ad:", error);
+    alert(`Real Database Error [${error.code}]: ${error.message} - ${error.details || error.hint || ''}`);
+    throw error;
+  }
+
+  alert("Ad created successfully!");
+  return data?.[0] || data;
+}
+
+export async function updateAd(_db: any, adId: string, adData: Partial<Omit<P2PAd, 'id' | 'createdAt' | 'user' | 'userId' | 'publicAdId'>>) {
+  const { data, error } = await supabase
+    .from('p2p_ads')
+    .update(adData)
+    .eq('id', adId)
     .select();
 
   if (error) {
     throw new Error(error.message);
   }
+  return data;
+}
 
+export async function updateAdStatus(_db: any, adId: string, active: boolean) {
+  const { data, error } = await supabase
+    .from('p2p_ads')
+    .update({ active })
+    .eq('id', adId)
+    .select();
+
+  if (error) {
+    throw new Error(error.message);
+  }
+  return data;
+}
+
+export async function softDeleteAd(_db: any, adId: string) {
+  const { data, error } = await supabase
+    .from('p2p_ads')
+    .update({ active: false, deleted_at: new Date().toISOString() })
+    .eq('id', adId)
+    .select();
+
+  if (error) {
+    throw new Error(error.message);
+  }
+  return data;
+}
+
+export async function createAd(formData: any) {
+  // 1. Get current active session
+  const { data: { session }, error: sessionError } = await supabase.auth.getSession();
+
+  if (sessionError || !session?.user) {
+    console.error("Auth session error:", sessionError);
+    alert(`Auth Error: No active session found. ${sessionError?.message || ''}`);
+    throw new Error(`Auth Error: No active session found. ${sessionError?.message || ''}`);
+  }
+
+  // 2. Perform Insert with explicit user_id and detailed error logging
+  const { data, error } = await supabase
+    .from('p2p_ads')
+    .insert([
+      {
+        ...formData,
+        user_id: session.user.id, // Explicitly attach authenticated user ID
+      }
+    ])
+    .select();
+
+  if (error) {
+    // THIS WILL PRINT THE REAL ERROR IN CONSOLE AND ALERT
+    console.error("Database error creating ad:", error);
+    alert(`Real Database Error [${error.code}]: ${error.message} - ${error.details || error.hint || ''}`);
+    throw error;
+  }
+
+  alert("Ad created successfully!");
   return data;
 }

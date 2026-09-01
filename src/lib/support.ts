@@ -1,16 +1,18 @@
 'use client';
-import { Firestore, collection, addDoc } from 'firebase/firestore';
 import { SupportTicket } from './types';
+import { supabase } from '@/lib/supabase/client';
 
 export async function createSupportTicket(
-  db: Firestore,
+  _db: any,
   ticketData: Omit<SupportTicket, 'id' | 'createdAt' | 'status'>
 ): Promise<void> {
-  const ticketsCollection = collection(db, 'support_tickets');
-  const newTicket: Omit<SupportTicket, 'id'> = {
+  const newTicket = {
     ...ticketData,
     status: 'Open',
-    createdAt: new Date().toISOString(),
+    created_at: new Date().toISOString(),
   };
-  await addDoc(ticketsCollection, newTicket);
+  const { error } = await supabase.from('support_tickets').insert([newTicket]);
+  if (error) {
+    throw new Error(error.message);
+  }
 }

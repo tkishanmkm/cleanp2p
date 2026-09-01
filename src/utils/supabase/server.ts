@@ -5,7 +5,8 @@ import { createClient as createSupabaseClient, type SupabaseClient } from '@supa
 let serverAdminClient: SupabaseClient | null = null;
 
 export async function createClient() {
-  const cookieStore = await cookies();
+  const cookieHeader = cookies();
+  const cookieStore = typeof (cookieHeader as any)?.then === 'function' ? await cookieHeader : cookieHeader;
 
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL || 'https://placeholder.supabase.co';
   const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'placeholder-key';

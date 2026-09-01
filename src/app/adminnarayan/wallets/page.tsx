@@ -7,26 +7,22 @@ import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { useFirebase } from '@/firebase';
 import { useAdminStatus } from '@/hooks/use-admin-status';
-import { collection, getDocs, query } from 'firebase/firestore';
-import { getAdminWalletOverview, type AdminWalletMetrics, type PlatformWalletRecord } from '@/lib/supabase/db';
-import { checkSupabaseConfig } from '@/lib/supabase/client';
-import { 
-  Wallet, 
-  Coins, 
-  Layers, 
-  ShieldCheck, 
-  RefreshCw, 
-  Search, 
-  CheckCircle2, 
-  Clock, 
-  AlertCircle, 
-  Loader2, 
-  Copy, 
-  ExternalLink,
-  ArrowUpRight,
-  Shield
+import { getAdminWalletOverview, type AdminWalletMetrics } from '@/lib/supabase/db';
+import { checkSupabaseConfig, supabase } from '@/lib/supabase/client';
+import {
+  Wallet,
+  Coins,
+  Layers,
+  ShieldCheck,
+  RefreshCw,
+  Search,
+  CheckCircle2,
+  Clock,
+  AlertCircle,
+  Loader2,
+  Copy,
+  Shield,
 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { BtcLogo, EthLogo, LtcLogo, UsdtLogo } from '@/components/icons';
@@ -47,7 +43,6 @@ function CryptoIconBadge({ name, className = 'h-5 w-5' }: { name: string; classN
 }
 
 export default function AdminWalletsPage() {
-  const { firestore } = useFirebase();
   const { isAdmin, isLoading: isAdminLoading } = useAdminStatus();
   const { toast } = useToast();
 
@@ -78,37 +73,37 @@ export default function AdminWalletsPage() {
   const fetchMetrics = async () => {
     try {
       const { data, error } = await getAdminWalletOverview();
-      if (data) {
+      if (data && data.totalWallets > 0) {
         setMetrics(data);
       } else {
-        // Fallback calculation from Firestore if Supabase not seeded
-        if (firestore) {
-          const usersSnap = await getDocs(query(collection(firestore, 'users')));
-          const totalUsers = usersSnap.docs.filter(d => !d.data().isAdminAccount).length;
-          
-          let totalBTC = 0, totalETH = 0, totalLTC = 0, totalUSDT = 0;
-          let totalLockedBTC = 0, totalLockedETH = 0, totalLockedLTC = 0, totalLockedUSDT = 0;
+        const { data: usersData } = await supabase
+          .from('profiles')
+          .select('id, username, is_admin, role, btc_balance, eth_balance, ltc_balance, usdt_balance');
 
-          usersSnap.docs.forEach(docSnap => {
-            const u = docSnap.data();
-            totalBTC += Number(u.btcBalance || 0);
-            totalETH += Number(u.ethBalance || 0);
-            totalLTC += Number(u.ltcBalance || 0);
-            totalUSDT += Number(u.usdtBalance || 0);
-            totalLockedBTC += Number(u.lockedBtcBalance || 0);
-            totalLockedETH += Number(u.lockedEthBalance || 0);
-            totalLockedLTC += Number(u.lockedLtcBalance || 0);
-            totalLockedUSDT += Number(u.lockedUsdtBalance || 0);
+        if (usersData) {
+          const regularUsers = usersData.filter((u: any) => !u.is_admin && u.role !== 'admin');
+          const totalUsers = regularUsers.length;
+
+          let totalBTC = 0,
+            totalETH = 0,
+            totalLTC = 0,
+            totalUSDT = 0;
+
+          regularUsers.forEach((u: any) => {
+            totalBTC += Number(u.btc_balance || 0);
+            totalETH += Number(u.eth_balance || 0);
+            totalLTC += Number(u.ltc_balance || 0);
+            totalUSDT += Number(u.usdt_balance || 0);
           });
 
-          setMetrics(prev => ({
+          setMetrics((prev) => ({
             ...prev,
             totalWallets: totalUsers,
             totalBalances: {
-              BTC: { available: totalBTC, locked_escrow: totalLockedBTC, locked_withdrawal: 0 },
-              ETH: { available: totalETH, locked_escrow: totalLockedETH, locked_withdrawal: 0 },
-              LTC: { available: totalLTC, locked_escrow: totalLockedLTC, locked_withdrawal: 0 },
-              USDT: { available: totalUSDT, locked_escrow: totalLockedUSDT, locked_withdrawal: 0 },
+              BTC: { available: totalBTC, locked_escrow: 0, locked_withdrawal: 0 },
+              ETH: { available: totalETH, locked_escrow: 0, locked_withdrawal: 0 },
+              LTC: { available: totalLTC, locked_escrow: 0, locked_withdrawal: 0 },
+              USDT: { available: totalUSDT, locked_escrow: 0, locked_withdrawal: 0 },
             },
             provisioningQueue: {
               queued: 0,
@@ -117,7 +112,7 @@ export default function AdminWalletsPage() {
               failed: 0,
               total_users: totalUsers,
               provisioned_wallets: totalUsers,
-            }
+            },
           }));
         }
       }
@@ -133,7 +128,7 @@ export default function AdminWalletsPage() {
     if (!isAdminLoading && isAdmin) {
       fetchMetrics();
     }
-  }, [isAdmin, isAdminLoading, firestore]);
+  }, [isAdmin, isAdminLoading]);
 
   const handleRefresh = async () => {
     setRefreshing(true);
@@ -146,11 +141,12 @@ export default function AdminWalletsPage() {
     toast({ title: 'Copied', description: 'Address copied to clipboard' });
   };
 
-  const filteredPlatformWallets = metrics.platformWallets.filter(pw => 
-    pw.asset_code.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    pw.network_code.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    pw.public_address.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    pw.wallet_type.toLowerCase().includes(searchQuery.toLowerCase())
+  const filteredPlatformWallets = metrics.platformWallets.filter(
+    (pw) =>
+      pw.asset_code.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      pw.network_code.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      pw.public_address.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      pw.wallet_type.toLowerCase().includes(searchQuery.toLowerCase())
   );
 
   const supabaseConfig = checkSupabaseConfig();
@@ -182,9 +178,7 @@ export default function AdminWalletsPage() {
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold">{loading ? '...' : metrics.totalWallets}</div>
-            <p className="text-xs text-muted-foreground mt-1">
-              Active ledger accounts registered
-            </p>
+            <p className="text-xs text-muted-foreground mt-1">Active ledger accounts registered</p>
           </CardContent>
         </Card>
 
@@ -195,10 +189,14 @@ export default function AdminWalletsPage() {
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold text-emerald-500">
-              {loading ? '...' : `${metrics.provisioningQueue.completed} / ${metrics.provisioningQueue.total_users || metrics.totalWallets}`}
+              {loading
+                ? '...'
+                : `${metrics.provisioningQueue.completed} / ${
+                    metrics.provisioningQueue.total_users || metrics.totalWallets
+                  }`}
             </div>
             <p className="text-xs text-muted-foreground mt-1">
-              {metrics.provisioningQueue.queued > 0 
+              {metrics.provisioningQueue.queued > 0
                 ? `${metrics.provisioningQueue.queued} queued for generation`
                 : '100% deposit addresses provisioned'}
             </p>
@@ -212,9 +210,7 @@ export default function AdminWalletsPage() {
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold">{loading ? '...' : metrics.platformWallets.length}</div>
-            <p className="text-xs text-muted-foreground mt-1">
-              Active Hot / Cold operational vaults
-            </p>
+            <p className="text-xs text-muted-foreground mt-1">Active Hot / Cold operational vaults</p>
           </CardContent>
         </Card>
 
@@ -225,14 +221,16 @@ export default function AdminWalletsPage() {
           </CardHeader>
           <CardContent>
             <div className="flex items-center gap-2">
-              <span className={`h-2.5 w-2.5 rounded-full ${supabaseConfig.isConfigured ? 'bg-emerald-500' : 'bg-amber-500'}`} />
+              <span
+                className={`h-2.5 w-2.5 rounded-full ${
+                  supabaseConfig.isConfigured ? 'bg-emerald-500' : 'bg-amber-500'
+                }`}
+              />
               <div className="text-sm font-semibold">
                 {supabaseConfig.isConfigured ? 'Atomic RPC Active' : 'Hybrid Engine'}
               </div>
             </div>
-            <p className="text-xs text-muted-foreground mt-1">
-              Double-entry ledger & escrow RPCs
-            </p>
+            <p className="text-xs text-muted-foreground mt-1">Double-entry ledger & escrow RPCs</p>
           </CardContent>
         </Card>
       </div>
@@ -261,8 +259,12 @@ export default function AdminWalletsPage() {
                 </div>
               ) : (
                 <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-                  {(['BTC', 'ETH', 'USDT', 'LTC'] as const).map(asset => {
-                    const bal = metrics.totalBalances[asset] || { available: 0, locked_escrow: 0, locked_withdrawal: 0 };
+                  {(['BTC', 'ETH', 'USDT', 'LTC'] as const).map((asset) => {
+                    const bal = metrics.totalBalances[asset] || {
+                      available: 0,
+                      locked_escrow: 0,
+                      locked_withdrawal: 0,
+                    };
                     return (
                       <div key={asset} className="flex flex-col p-4 border rounded-xl bg-card">
                         <div className="flex items-center justify-between mb-3">
@@ -275,19 +277,29 @@ export default function AdminWalletsPage() {
                         <div className="space-y-1.5 text-sm">
                           <div className="flex justify-between">
                             <span className="text-muted-foreground">Available:</span>
-                            <span className="font-mono font-medium">{bal.available.toFixed(asset === 'USDT' ? 2 : 6)}</span>
+                            <span className="font-mono font-medium">
+                              {bal.available.toFixed(asset === 'USDT' ? 2 : 6)}
+                            </span>
                           </div>
                           <div className="flex justify-between">
                             <span className="text-muted-foreground">In Escrow:</span>
-                            <span className="font-mono font-medium text-amber-500">{bal.locked_escrow.toFixed(asset === 'USDT' ? 2 : 6)}</span>
+                            <span className="font-mono font-medium text-amber-500">
+                              {bal.locked_escrow.toFixed(asset === 'USDT' ? 2 : 6)}
+                            </span>
                           </div>
                           <div className="flex justify-between">
                             <span className="text-muted-foreground">In Withdrawal:</span>
-                            <span className="font-mono font-medium text-blue-500">{bal.locked_withdrawal.toFixed(asset === 'USDT' ? 2 : 6)}</span>
+                            <span className="font-mono font-medium text-blue-500">
+                              {bal.locked_withdrawal.toFixed(asset === 'USDT' ? 2 : 6)}
+                            </span>
                           </div>
                           <div className="pt-2 border-t flex justify-between font-semibold">
                             <span>Total:</span>
-                            <span className="font-mono">{(bal.available + bal.locked_escrow + bal.locked_withdrawal).toFixed(asset === 'USDT' ? 2 : 6)}</span>
+                            <span className="font-mono">
+                              {(bal.available + bal.locked_escrow + bal.locked_withdrawal).toFixed(
+                                asset === 'USDT' ? 2 : 6
+                              )}
+                            </span>
                           </div>
                         </div>
                       </div>
@@ -324,7 +336,9 @@ export default function AdminWalletsPage() {
                     <Clock className="h-4 w-4" />
                     <span>Queued / Processing</span>
                   </div>
-                  <div className="text-2xl font-bold">{metrics.provisioningQueue.queued + metrics.provisioningQueue.processing}</div>
+                  <div className="text-2xl font-bold">
+                    {metrics.provisioningQueue.queued + metrics.provisioningQueue.processing}
+                  </div>
                   <p className="text-xs text-muted-foreground">Pending background derivation</p>
                 </div>
 
@@ -341,7 +355,9 @@ export default function AdminWalletsPage() {
               <div className="p-4 bg-muted/40 rounded-lg border text-sm space-y-2">
                 <div className="font-semibold">Custody Provisioning Architecture</div>
                 <p className="text-muted-foreground">
-                  Each platform account is provisioned with unique, segregated blockchain deposit addresses for BTC, ETH (ERC20), USDT (ERC20/TRC20), and LTC. Deposits are detected automatically by blockchain listeners and credited via single-transaction Postgres ledger executions.
+                  Each platform account is provisioned with unique, segregated blockchain deposit addresses for BTC,
+                  ETH (ERC20), USDT (ERC20/TRC20), and LTC. Deposits are detected automatically by blockchain listeners
+                  and credited via single-transaction Postgres ledger executions.
                 </p>
               </div>
             </CardContent>
@@ -390,7 +406,7 @@ export default function AdminWalletsPage() {
                         </TableCell>
                       </TableRow>
                     ) : (
-                      filteredPlatformWallets.map(pw => (
+                      filteredPlatformWallets.map((pw) => (
                         <TableRow key={pw.id}>
                           <TableCell className="font-medium">
                             <div className="flex items-center gap-2">
@@ -418,7 +434,12 @@ export default function AdminWalletsPage() {
                             </Badge>
                           </TableCell>
                           <TableCell className="text-right">
-                            <Button variant="ghost" size="icon" onClick={() => copyAddress(pw.public_address)} title="Copy address">
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              onClick={() => copyAddress(pw.public_address)}
+                              title="Copy address"
+                            >
                               <Copy className="h-4 w-4" />
                             </Button>
                           </TableCell>

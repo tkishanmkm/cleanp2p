@@ -1,11 +1,8 @@
-
 'use client';
 
-import React, { Suspense, useMemo, useState, useEffect } from 'react';
+import React, { Suspense, useMemo, useState, useEffect, useCallback } from 'react';
 import { useParams } from 'next/navigation';
 import { useAuth } from '@/components/providers/auth-provider';
-import { useFirebase, useDoc, useMemoFirebase } from '@/firebase';
-import { doc, collection, query, where, getDocs } from 'firebase/firestore';
 import type { P2PAd, Trade, User } from '@/lib/types';
 import { Loader2, Info, MessageSquare } from 'lucide-react';
 import { TradeDetails } from '@/components/trade/trade-details';
@@ -15,11 +12,12 @@ import { Button } from '@/components/ui/button';
 import { useAdminStatus } from '@/hooks/use-admin-status';
 import { usePrices } from '@/context/price-context';
 import { useToast } from '@/hooks/use-toast';
+import { completeEscrow } from '@/lib/wallet';
+import { supabase } from '@/lib/supabase/client';
 
 function TradePageContent() {
   const params = useParams();
   const { user: authUser, isUserLoading } = useAuth();
-  const { firestore } = useFirebase();
   const { isAdmin } = useAdminStatus();
   const { fiatRates } = usePrices();
   const { toast } = useToast();
@@ -29,81 +27,212 @@ function TradePageContent() {
   const [isInfoPanelOpen, setIsInfoPanelOpen] = useState(false);
   const [completedTradesWithUser, setCompletedTradesWithUser] = useState(0);
 
-  const tradeRef = useMemoFirebase(
-    () => (tradeId && firestore ? doc(firestore, 'trades', tradeId as string) : null),
-    [tradeId, firestore]
-  );
-  const { data: trade, isLoading: isTradeLoading } = useDoc<Trade>(tradeRef);
+  const [trade, setTrade] = useState<Trade | null>(null);
+  const [isTradeLoading, setIsTradeLoading] = useState(true);
+
+  const [opponent, setOpponent] = useState<User | null>(null);
+  const [isOpponentLoading, setIsOpponentLoading] = useState(false);
+
+  const [ad, setAd] = useState<P2PAd | null>(null);
+  const [isAdLoading, setIsAdLoading] = useState(false);
+
+  const mapTradeRecord = (raw: any): Trade => ({
+    id: raw.id,
+    tradeId: raw.trade_id || raw.id,
+    adId: raw.ad_id,
+    buyerId: raw.buyer_id,
+    sellerId: raw.seller_id,
+    crypto: raw.crypto,
+    amount: Number(raw.amount || 0),
+    fiatCurrency: raw.fiat_currency,
+    fiatAmount: Number(raw.fiat_amount || 0),
+    fiatAmountInUSD: Number(raw.fiat_amount_in_usd || 0),
+    price: Number(raw.price || 0),
+    status: raw.status || 'active',
+    paymentMethod: raw.payment_method || '',
+    escrowFee: Number(raw.escrow_fee || 0),
+    createdAt: raw.created_at,
+    expiresAt: raw.expires_at,
+    paidAt: raw.paid_at,
+    releasedAt: raw.released_at,
+    claimedByBuyer: raw.claimed_by_buyer ?? false,
+    buyer: raw.buyer || { id: raw.buyer_id, username: raw.buyer_username || 'Buyer' },
+    seller: raw.seller || { id: raw.seller_id, username: raw.seller_username || 'Seller' },
+  });
+
+  const fetchTrade = useCallback(async () => {
+    if (!tradeId) return;
+    try {
+      const { data, error } = await supabase
+        .from('trades')
+        .select('*')
+        .or(`id.eq.${tradeId},trade_id.eq.${tradeId}`)
+        .single();
+
+      if (error) throw error;
+      if (data) {
+        const mapped = mapTradeRecord(data);
+        setTrade(mapped);
+      }
+    } catch (err) {
+      console.error('Error fetching trade:', err);
+    } finally {
+      setIsTradeLoading(false);
+    }
+  }, [tradeId]);
+
+  useEffect(() => {
+    fetchTrade();
+
+    // Subscribe to realtime updates on this trade
+    const channel = supabase
+      .channel(`trade-${tradeId}`)
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'trades', filter: `id=eq.${tradeId}` },
+        (payload: any) => {
+          if (payload.new) {
+            setTrade(mapTradeRecord(payload.new));
+          }
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [tradeId, fetchTrade]);
 
   const opponentId = useMemo(() => {
     if (!trade || !authUser) return null;
     return authUser.uid === trade.buyerId ? trade.sellerId : trade.buyerId;
   }, [trade, authUser]);
 
-  const opponentRef = useMemoFirebase(
-    () => (opponentId && firestore ? doc(firestore, 'users', opponentId) : null),
-    [opponentId, firestore]
-  );
-  const { data: opponent, isLoading: isOpponentLoading } = useDoc<User>(opponentRef);
-  
   useEffect(() => {
-    if (!firestore || !authUser || !opponent) return;
+    if (!opponentId) return;
+    setIsOpponentLoading(true);
+
+    const fetchOpponent = async () => {
+      try {
+        const { data, error } = await supabase
+          .from('profiles')
+          .select('*')
+          .eq('id', opponentId)
+          .single();
+
+        if (!error && data) {
+          setOpponent({
+            id: data.id,
+            userId: data.username || data.id,
+            username: data.username,
+            email: data.email,
+            photoURL: data.photo_url,
+            country: data.country,
+            preferredCurrency: data.preferred_currency,
+            isAdminAccount: data.is_admin_account,
+            isSuspended: data.is_suspended,
+            createdAt: data.created_at,
+            feedbackScore: data.feedback_score,
+            completedTrades: data.completed_trades,
+          });
+        }
+      } catch (err) {
+        console.error('Error fetching opponent:', err);
+      } finally {
+        setIsOpponentLoading(false);
+      }
+    };
+
+    fetchOpponent();
+  }, [opponentId]);
+
+  useEffect(() => {
+    if (!trade?.adId) return;
+    setIsAdLoading(true);
+
+    const fetchAd = async () => {
+      try {
+        const { data, error } = await supabase
+          .from('p2p_ads')
+          .select('*')
+          .eq('id', trade.adId)
+          .single();
+
+        if (!error && data) {
+          setAd({
+            id: data.id,
+            publicAdId: data.public_ad_id,
+            userId: data.user_id,
+            type: data.type,
+            crypto: data.crypto,
+            fiatCurrency: data.fiat_currency,
+            paymentMethod: data.payment_method,
+            pricingType: data.pricing_type,
+            margin: data.margin,
+            fixedPrice: data.fixed_price,
+            minLimit: data.min_limit,
+            maxLimit: data.max_limit,
+            terms: data.terms,
+            offerLabel: data.offer_label,
+            tags: data.tags || [],
+            paymentTimeLimit: data.payment_time_limit,
+            status: data.status,
+            createdAt: data.created_at,
+          } as P2PAd);
+        }
+      } catch (err) {
+        console.error('Error fetching ad:', err);
+      } finally {
+        setIsAdLoading(false);
+      }
+    };
+
+    fetchAd();
+  }, [trade?.adId]);
+
+  useEffect(() => {
+    if (!authUser?.uid || !opponentId) return;
 
     const fetchTradeCount = async () => {
-        const q1 = query(
-            collection(firestore, 'trades'),
-            where('buyerId', '==', authUser.uid),
-            where('sellerId', '==', opponent.id),
-            where('status', '==', 'released')
-        );
-        const q2 = query(
-            collection(firestore, 'trades'),
-            where('buyerId', '==', opponent.id),
-            where('sellerId', '==', authUser.uid),
-            where('status', '==', 'released')
-        );
+      try {
+        const { count, error } = await supabase
+          .from('trades')
+          .select('*', { count: 'exact', head: true })
+          .or(
+            `and(buyer_id.eq.${authUser.uid},seller_id.eq.${opponentId}),and(buyer_id.eq.${opponentId},seller_id.eq.${authUser.uid})`
+          )
+          .eq('status', 'released');
 
-        try {
-            const [snapshot1, snapshot2] = await Promise.all([getDocs(q1), getDocs(q2)]);
-            const total = snapshot1.size + snapshot2.size;
-            setCompletedTradesWithUser(total);
-        } catch (error) {
-            console.error("Failed to fetch trade count with user:", error);
+        if (!error && count !== null) {
+          setCompletedTradesWithUser(count);
         }
+      } catch (error) {
+        console.error('Failed to fetch trade count with user:', error);
+      }
     };
 
     fetchTradeCount();
-  }, [firestore, authUser, opponent]);
-  
-  useEffect(() => {
-    if (trade && trade.status === 'released' && !trade.claimedByBuyer && authUser?.uid === trade.buyerId && firestore) {
-        const claim = async () => {
-            try {
-                let usdAmount = trade.fiatAmountInUSD;
-                if (!usdAmount || isNaN(usdAmount)) {
-                    const exchangeRate = fiatRates[trade.fiatCurrency] || 1;
-                    usdAmount = trade.fiatAmount / exchangeRate;
-                }
-                await completeEscrow(trade.id, firestore, trade, trade.buyerId, usdAmount);
-                toast({ title: 'Funds Claimed', description: `The ${trade.crypto} has been added to your wallet.` });
-            } catch (error: any) {
-                console.error("Auto-claiming funds failed:", error);
-                toast({ variant: 'destructive', title: 'Claim Failed', description: error.message });
-            }
-        };
-        claim();
-    }
-  }, [trade, authUser, firestore, fiatRates, toast]);
+  }, [authUser?.uid, opponentId]);
 
+  useEffect(() => {
+    if (trade && trade.status === 'released' && !trade.claimedByBuyer && authUser?.uid === trade.buyerId) {
+      const claim = async () => {
+        try {
+          await completeEscrow(trade.id);
+          toast({ title: 'Funds Claimed', description: `The ${trade.crypto} has been added to your wallet.` });
+        } catch (error: any) {
+          console.error('Auto-claiming funds failed:', error);
+          toast({ variant: 'destructive', title: 'Claim Failed', description: error.message });
+        }
+      };
+      claim();
+    }
+  }, [trade, authUser?.uid, toast]);
 
   const currentUserRole = useMemo(() => {
-    if(!trade || !authUser) return 'sell';
+    if (!trade || !authUser) return 'sell';
     return authUser.uid === trade.buyerId ? 'buy' : 'sell';
-  }, [trade, authUser])
-  
-  const adDocRef = useMemoFirebase(() => (trade ? doc(firestore, 'p2p_ads', trade.adId) : null), [trade, firestore]);
-  const { data: ad, isLoading: isAdLoading } = useDoc<P2PAd>(adDocRef);
-
+  }, [trade, authUser]);
 
   if (isUserLoading || isTradeLoading || isOpponentLoading || isAdLoading) {
     return (
@@ -122,22 +251,22 @@ function TradePageContent() {
   }
 
   if (!authUser) {
-      return (
-          <div className="flex flex-1 items-center justify-center h-full">
-            <p>Please log in to view this trade.</p>
-          </div>
-      )
+    return (
+      <div className="flex flex-1 items-center justify-center h-full">
+        <p>Please log in to view this trade.</p>
+      </div>
+    );
   }
 
   return (
     <div className="h-full flex flex-col">
-      <CounterpartyInfoPanel 
-        user={opponent} 
-        open={isInfoPanelOpen} 
-        onOpenChange={setIsInfoPanelOpen} 
+      <CounterpartyInfoPanel
+        user={opponent}
+        open={isInfoPanelOpen}
+        onOpenChange={setIsInfoPanelOpen}
         completedTradesWithUser={completedTradesWithUser}
       />
-      
+
       {/* Desktop Layout */}
       <div className="hidden md:flex gap-0 flex-1 min-h-0">
         <div className="w-[450px] shrink-0 border-r">
@@ -158,9 +287,9 @@ function TradePageContent() {
           </div>
         </div>
       </div>
-      
+
       {/* Mobile Layout */}
-       <div className="md:hidden flex flex-col h-full bg-background">
+      <div className="md:hidden flex flex-col h-full bg-background">
         <div className="flex-1 min-h-0">
           {activeView === 'details' && (
             <div className="h-full overflow-y-auto">
@@ -197,7 +326,13 @@ function TradePageContent() {
 
 export default function TradePage() {
   return (
-    <Suspense fallback={<div className="flex flex-1 items-center justify-center h-full"><Loader2 className="h-8 w-8 animate-spin text-primary" /></div>}>
+    <Suspense
+      fallback={
+        <div className="flex flex-1 items-center justify-center h-full">
+          <Loader2 className="h-8 w-8 animate-spin text-primary" />
+        </div>
+      }
+    >
       <TradePageContent />
     </Suspense>
   );

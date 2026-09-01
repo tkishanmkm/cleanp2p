@@ -5,10 +5,11 @@ export const dynamic = 'force-dynamic';
 
 export async function GET(
   request: NextRequest,
-  { params }: { params: Promise<{ adId: string }> }
+  context: { params: { adId: string } | Promise<{ adId: string }> }
 ) {
   try {
-    const { adId } = await params;
+    const rawParams = await Promise.resolve(context.params);
+    const adId = rawParams.adId;
     const supabase = await createClient();
 
     // Query Supabase p2p_ads table

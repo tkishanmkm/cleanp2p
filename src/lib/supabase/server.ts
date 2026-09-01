@@ -8,7 +8,8 @@ let serverAdminClient: SupabaseClient | null = null;
  * Creates a server-side Supabase client with cookie context (App Router).
  */
 export async function createClient(): Promise<SupabaseClient> {
-  const cookieStore = await cookies();
+  const cookieHeader = cookies();
+  const cookieStore = typeof (cookieHeader as any)?.then === 'function' ? await cookieHeader : cookieHeader;
 
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL || 'https://placeholder.supabase.co';
   const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'placeholder-key';

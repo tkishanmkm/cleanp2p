@@ -1,12 +1,10 @@
-"use client";
+'use client';
 
-import { useForm } from "react-hook-form";
-import { zodResolver } from "@hookform/resolvers/zod";
-import * as z from "zod";
-import { useFirebase } from "@/firebase";
-import { useToast } from "@/hooks/use-toast";
-
-import { Button } from "@/components/ui/button";
+import { useForm } from 'react-hook-form';
+import { zodResolver } from '@hookform/resolvers/zod';
+import * as z from 'zod';
+import { useToast } from '@/hooks/use-toast';
+import { Button } from '@/components/ui/button';
 import {
   Card,
   CardContent,
@@ -14,7 +12,7 @@ import {
   CardFooter,
   CardHeader,
   CardTitle,
-} from "@/components/ui/card";
+} from '@/components/ui/card';
 import {
   Form,
   FormControl,
@@ -22,66 +20,77 @@ import {
   FormItem,
   FormLabel,
   FormMessage,
-} from "@/components/ui/form";
-import { Input } from "@/components/ui/input";
-import { Loader2 } from "lucide-react";
-import { updatePassword, EmailAuthProvider, reauthenticateWithCredential } from "firebase/auth";
+} from '@/components/ui/form';
+import { Input } from '@/components/ui/input';
+import { Loader2 } from 'lucide-react';
+import { supabase } from '@/lib/supabase/client';
+import { useAuth } from '@/components/providers/auth-provider';
 
-const passwordSchema = z.object({
-  currentPassword: z.string().min(1, "Current password is required."),
-  newPassword: z.string().min(8, "New password must be at least 8 characters."),
-}).refine(data => data.currentPassword !== data.newPassword, {
-  message: "New password must be different from the current password.",
-  path: ["newPassword"],
-});
+const passwordSchema = z
+  .object({
+    currentPassword: z.string().min(1, 'Current password is required.'),
+    newPassword: z.string().min(8, 'New password must be at least 8 characters.'),
+  })
+  .refine((data) => data.currentPassword !== data.newPassword, {
+    message: 'New password must be different from the current password.',
+    path: ['newPassword'],
+  });
 
 export function ChangePasswordForm() {
-  const { auth, user } = useFirebase();
+  const { user } = useAuth();
   const { toast } = useToast();
 
   const form = useForm<z.infer<typeof passwordSchema>>({
     resolver: zodResolver(passwordSchema),
     defaultValues: {
-      currentPassword: "",
-      newPassword: ""
-    }
+      currentPassword: '',
+      newPassword: '',
+    },
   });
 
   const { isSubmitting } = form.formState;
 
   const handlePasswordChange = async (values: z.infer<typeof passwordSchema>) => {
-    if (!auth || !user || !user.email) {
-      toast({ variant: "destructive", title: "Error", description: "User not authenticated properly." });
+    if (!user || !user.email) {
+      toast({ variant: 'destructive', title: 'Error', description: 'User not authenticated properly.' });
       return;
     }
-    
+
     try {
-      // Step 1: Re-authenticate the user
-      const credential = EmailAuthProvider.credential(user.email, values.currentPassword);
-      await reauthenticateWithCredential(user, credential);
-
-      // Step 2: Update the password
-      await updatePassword(user, values.newPassword);
-      
-      toast({
-        title: "Password Changed",
-        description: "Your password has been successfully updated.",
+      // Re-authenticate by signing in with current password to verify
+      const { error: signInError } = await supabase.auth.signInWithPassword({
+        email: user.email,
+        password: values.currentPassword,
       });
-      form.reset({currentPassword: "", newPassword: ""});
 
+      if (signInError) {
+        form.setError('currentPassword', { type: 'manual', message: 'Incorrect current password.' });
+        toast({
+          variant: 'destructive',
+          title: 'Failed to Change Password',
+          description: 'The current password you entered is incorrect.',
+        });
+        return;
+      }
+
+      // Update password
+      const { error: updateError } = await supabase.auth.updateUser({
+        password: values.newPassword,
+      });
+
+      if (updateError) throw updateError;
+
+      toast({
+        title: 'Password Changed',
+        description: 'Your password has been successfully updated.',
+      });
+      form.reset({ currentPassword: '', newPassword: '' });
     } catch (error: any) {
       console.error(error);
-      let description = "An unknown error occurred.";
-      if (error.code === 'auth/wrong-password') {
-        description = "The current password you entered is incorrect.";
-        form.setError("currentPassword", { type: "manual", message: "Incorrect password." });
-      } else if (error.code === 'auth/too-many-requests') {
-          description = "Too many attempts. Please try again later.";
-      }
       toast({
-        variant: "destructive",
-        title: "Failed to Change Password",
-        description: description,
+        variant: 'destructive',
+        title: 'Failed to Change Password',
+        description: error.message || 'An error occurred while updating password.',
       });
     }
   };
@@ -108,7 +117,7 @@ export function ChangePasswordForm() {
                 </FormItem>
               )}
             />
-             <FormField
+            <FormField
               control={form.control}
               name="newPassword"
               render={({ field }) => (

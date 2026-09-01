@@ -1,7 +1,7 @@
 
 'use client';
 import React, { createContext, useContext, useState, useEffect, ReactNode, useCallback } from 'react';
-import { useFirebase } from '@/firebase';
+import { useAuth } from '@/components/providers/auth-provider';
 import { LANGUAGES } from '@/lib/constants';
 
 // Import all locale data
@@ -64,7 +64,7 @@ const getNestedValue = (obj: any, key: string) => {
 
 
 export function I18nProvider({ children }: { children: ReactNode }) {
-  const { user } = useFirebase();
+  const { user } = useAuth();
   const [language, setLanguageState] = useState('en');
   const [messages, setMessages] = useState(translations.en);
 

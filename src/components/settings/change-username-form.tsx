@@ -1,14 +1,11 @@
-"use client";
+'use client';
 
-import { useForm } from "react-hook-form";
-import { zodResolver } from "@hookform/resolvers/zod";
-import * as z from "zod";
-import { useFirebase } from "@/firebase";
-import { doc, runTransaction, collection, query, where, getDocs } from "firebase/firestore";
-import type { User } from "@/lib/types";
-import { useToast } from "@/hooks/use-toast";
-
-import { Button } from "@/components/ui/button";
+import { useForm } from 'react-hook-form';
+import { zodResolver } from '@hookform/resolvers/zod';
+import * as z from 'zod';
+import type { User } from '@/lib/types';
+import { useToast } from '@/hooks/use-toast';
+import { Button } from '@/components/ui/button';
 import {
   Card,
   CardContent,
@@ -16,7 +13,7 @@ import {
   CardFooter,
   CardHeader,
   CardTitle,
-} from "@/components/ui/card";
+} from '@/components/ui/card';
 import {
   Form,
   FormControl,
@@ -25,83 +22,89 @@ import {
   FormItem,
   FormLabel,
   FormMessage,
-} from "@/components/ui/form";
-import { Input } from "@/components/ui/input";
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { Loader2, Info } from "lucide-react";
-import { updateProfile } from "firebase/auth";
+} from '@/components/ui/form';
+import { Input } from '@/components/ui/input';
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
+import { Loader2, Info } from 'lucide-react';
+import { supabase } from '@/lib/supabase/client';
+import { useAuth } from '@/components/providers/auth-provider';
 
 const usernameSchema = z.object({
-  newUsername: z.string().min(3, "Username must be at least 3 characters.").regex(/^[a-zA-Z0-9_]+$/, "Username can only contain letters, numbers, and underscores."),
+  newUsername: z
+    .string()
+    .min(3, 'Username must be at least 3 characters.')
+    .regex(/^[a-zA-Z0-9_]+$/, 'Username can only contain letters, numbers, and underscores.'),
 });
 
 export function ChangeUsernameForm({ user: userData }: { user: User }) {
-  const { firestore, auth, user } = useFirebase();
+  const { user } = useAuth();
   const { toast } = useToast();
 
   const form = useForm<z.infer<typeof usernameSchema>>({
     resolver: zodResolver(usernameSchema),
+    defaultValues: {
+      newUsername: '',
+    },
   });
 
   const { isSubmitting } = form.formState;
 
   const handleUsernameChange = async (values: z.infer<typeof usernameSchema>) => {
-    if (!firestore || !user || !userData || !auth) return;
-    
-    if (values.newUsername === userData.userId) {
-      form.setError("newUsername", { type: "manual", message: "This is already your username." });
-      return;
-    }
+    if (!user || !userData) return;
 
-    // Check if username is already taken before starting the transaction
-    const usersRef = collection(firestore, "users");
-    const q = query(usersRef, where("userId", "==", values.newUsername));
-    const querySnapshot = await getDocs(q);
-
-    if (!querySnapshot.empty) {
-      form.setError("newUsername", {
-        type: "manual",
-        message: "This username is already taken. Please choose another one.",
-      });
+    if (values.newUsername === (userData.userId || userData.username)) {
+      form.setError('newUsername', { type: 'manual', message: 'This is already your username.' });
       return;
     }
 
     try {
-      const userRef = doc(firestore, "users", user.uid);
-      await runTransaction(firestore, async (transaction) => {
-        const userDoc = await transaction.get(userRef);
-        if (!userDoc.exists()) throw new Error("User document not found.");
-        
-        const currentData = userDoc.data() as User;
-        if (currentData.usernameChanged) throw new Error("Username has already been changed once.");
+      // Check if username is taken
+      const { data: existingUsers, error: checkError } = await supabase
+        .from('profiles')
+        .select('id')
+        .eq('username', values.newUsername);
 
-        transaction.update(userRef, {
-          oldUserId: currentData.userId,
-          userId: values.newUsername,
-          usernameChanged: true,
+      if (checkError) throw checkError;
+
+      if (existingUsers && existingUsers.length > 0) {
+        form.setError('newUsername', {
+          type: 'manual',
+          message: 'This username is already taken. Please choose another one.',
         });
-      });
-      
-      // Also update the display name in Firebase Auth
-      if(auth.currentUser) {
-        await updateProfile(auth.currentUser, { displayName: values.newUsername });
+        return;
       }
 
+      // Update username in profiles
+      const { error: updateError } = await supabase
+        .from('profiles')
+        .update({
+          username: values.newUsername,
+          username_changed: true,
+          old_username: userData.userId || userData.username,
+        })
+        .eq('id', user.uid);
+
+      if (updateError) throw updateError;
+
+      // Update Supabase auth user metadata
+      await supabase.auth.updateUser({
+        data: { username: values.newUsername },
+      });
+
       toast({
-        title: "Username Changed",
+        title: 'Username Changed',
         description: `Your new username is ${values.newUsername}.`,
       });
-      form.reset({ newUsername: "" }); // Reset form on success
-
+      form.reset({ newUsername: '' });
     } catch (error: any) {
       toast({
-        variant: "destructive",
-        title: "Failed to Change Username",
+        variant: 'destructive',
+        title: 'Failed to Change Username',
         description: error.message,
       });
     }
   };
-  
+
   if (userData?.usernameChanged) {
     return (
       <Card>
@@ -113,7 +116,8 @@ export function ChangeUsernameForm({ user: userData }: { user: User }) {
             <Info className="h-4 w-4" />
             <AlertTitle>Username Already Changed</AlertTitle>
             <AlertDescription>
-              You can only change your username once. Your current username is <span className="font-bold">{userData.userId}</span>.
+              You can only change your username once. Your current username is{' '}
+              <span className="font-bold">{userData.userId || userData.username}</span>.
             </AlertDescription>
           </Alert>
         </CardContent>
@@ -139,9 +143,7 @@ export function ChangeUsernameForm({ user: userData }: { user: User }) {
                   <FormControl>
                     <Input placeholder="Enter your new unique username" {...field} />
                   </FormControl>
-                  <FormDescription>
-                    This will be your new public identity on the platform.
-                  </FormDescription>
+                  <FormDescription>This will be your new public identity on the platform.</FormDescription>
                   <FormMessage />
                 </FormItem>
               )}

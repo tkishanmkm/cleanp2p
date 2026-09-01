@@ -1,9 +1,7 @@
-
-
 "use client";
 
-import { useFirebase, useCollection, useMemoFirebase, useDoc } from "@/firebase";
-import { collection, query, where, doc, getDocs, documentId } from "firebase/firestore";
+import { useAuth } from "@/components/providers/auth-provider";
+import { supabase } from "@/lib/supabase/client";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { AdCard } from "@/components/p2p/ad-card";
@@ -14,17 +12,17 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Wallet, Landmark, CreditCard, Smartphone, Car, Search, Loader2, ArrowDown, ArrowUp, PlusCircle, SlidersHorizontal, RefreshCw, BookOpen, HelpCircle, BarChart, X, Globe, ChevronRight, Info, ChevronDown } from "lucide-react";
+import { Wallet, Landmark, CreditCard, Smartphone, Car, Search, Loader2, ArrowDown, ArrowUp, PlusCircle, SlidersHorizontal, RefreshCw, BookOpen, HelpCircle, X, Globe, ChevronRight, ChevronDown } from "lucide-react";
 import { SUPPORTED_CRYPTOS, AD_TAGS } from "@/lib/constants";
 import { currencies } from "@/lib/currencies";
 import { countries } from "@/lib/countries";
 import { Skeleton } from "@/components/ui/skeleton";
-import type { P2PAd, CryptoCurrency, User } from "@/lib/types";
-import { useState, useMemo, Suspense, useEffect } from "react";
+import type { P2PAd, CryptoCurrency } from "@/lib/types";
+import { useState, useMemo, Suspense, useEffect, useCallback } from "react";
 import { useSearchParams, useRouter, usePathname } from "next/navigation";
 import Link from 'next/link';
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetFooter, SheetTrigger } from "@/components/ui/sheet";
+import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetFooter } from "@/components/ui/sheet";
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
 import { BtcLogo, EthLogo, LtcLogo, UsdtLogo } from '@/components/icons';
 import {
@@ -40,10 +38,8 @@ import { usePrices } from "@/context/price-context";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Checkbox } from "@/components/ui/checkbox";
-import { FormItem, FormControl, FormLabel } from "@/components/ui/form";
 import { Card } from "@/components/ui/card";
 import { ActiveTradesList } from "@/components/p2p/active-trades-list";
-
 
 const CryptoLogo = ({ crypto, className }: { crypto: CryptoCurrency, className?: string }) => {
     switch (crypto) {
@@ -55,15 +51,58 @@ const CryptoLogo = ({ crypto, className }: { crypto: CryptoCurrency, className?:
     }
 }
 
+function normalizeAd(raw: any): P2PAd {
+  return {
+    id: raw.id,
+    userId: raw.user_id || raw.userId,
+    publicAdId: raw.public_ad_id || raw.publicAdId || raw.id,
+    adType: (raw.ad_type || raw.adType || 'buy') as 'buy' | 'sell',
+    crypto: raw.crypto as CryptoCurrency,
+    fiatCurrency: raw.fiat_currency || raw.fiatCurrency || 'USD',
+    rateType: raw.rate_type || raw.rateType || 'market',
+    fixedRate: raw.fixed_rate ?? raw.fixedRate,
+    ratePercent: raw.rate_percent ?? raw.ratePercent ?? 0,
+    minAmount: Number(raw.min_amount ?? raw.minAmount ?? 0),
+    maxAmount: Number(raw.max_amount ?? raw.maxAmount ?? 0),
+    paymentMethods: Array.isArray(raw.payment_methods)
+      ? raw.payment_methods
+      : Array.isArray(raw.paymentMethods)
+      ? raw.paymentMethods
+      : typeof raw.payment_methods === 'string'
+      ? JSON.parse(raw.payment_methods)
+      : [],
+    offerLabel: raw.offer_label || raw.offerLabel,
+    tags: Array.isArray(raw.tags) ? raw.tags : [],
+    terms: raw.terms || '',
+    paymentTimeLimit: Number(raw.payment_time_limit ?? raw.paymentTimeLimit ?? 30),
+    active: raw.active !== false,
+    targetedCountries: raw.targeted_countries || raw.targetedCountries || [],
+    blockedCountries: raw.blocked_countries || raw.blockedCountries || [],
+    minCompletedTrades: Number(raw.min_completed_trades ?? raw.minCompletedTrades ?? 0),
+    createdAt: raw.created_at || raw.createdAt,
+    user: raw.user || {
+      username: raw.user_display_name || raw.username || 'Trader',
+      country: raw.country,
+      feedbackScore: raw.feedback_score ?? 100,
+      positiveFeedback: raw.positive_feedback ?? 0,
+      negativeFeedback: raw.negative_feedback ?? 0,
+      completedTrades: raw.completed_trades ?? 0,
+      photoURL: raw.photo_url || raw.photoURL,
+      badges: raw.badges || [],
+      lastActive: raw.last_active || raw.lastActive,
+    },
+  };
+}
+
 function SellPageContent() {
-  const { firestore, user: authUser } = useFirebase();
+  const { user: authUser, profile: currentUserData } = useAuth();
   const searchParams = useSearchParams();
   const router = useRouter();
   const pathname = usePathname();
 
-  const userRef = useMemoFirebase(() => (authUser ? doc(firestore, "users", authUser.uid) : null), [firestore, authUser]);
-  const { data: currentUserData } = useDoc<User>(userRef);
-  const [adCreators, setAdCreators] = useState<Record<string, User>>({});
+  const [buyAds, setBuyAds] = useState<P2PAd[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [adCreators, setAdCreators] = useState<Record<string, any>>({});
 
   const [amount, setAmount] = useState(searchParams.get('amount') || "");
   const [paymentMethod, setPaymentMethod] = useState(searchParams.get('paymentMethod') || "");
@@ -122,41 +161,58 @@ function SellPageContent() {
     { category: 'Gift Cards', methods: giftCardPaymentMethods, icon: CreditCard },
   ], []);
 
-  const buyAdsQuery = useMemoFirebase(() =>
-    firestore
-      ? query(collection(firestore, "p2p_ads"), where("adType", "==", "buy"), where("active", "==", true))
-      : null,
-    [firestore]
-  );
-  const { data: buyAds, isLoading } = useCollection<P2PAd>(buyAdsQuery);
+  const fetchAds = useCallback(async () => {
+    setIsLoading(true);
+    try {
+      const { data, error } = await supabase
+        .from('p2p_ads')
+        .select('*')
+        .or('ad_type.eq.buy,adType.eq.buy')
+        .eq('active', true)
+        .order('created_at', { ascending: false });
+
+      if (error) throw error;
+
+      const normalized = (data || []).map(normalizeAd);
+      setBuyAds(normalized);
+
+      // Fetch creator profiles
+      const creatorIds = Array.from(new Set(normalized.map((a) => a.userId).filter(Boolean)));
+      if (creatorIds.length > 0) {
+        const { data: profiles } = await supabase
+          .from('profiles')
+          .select('*')
+          .in('id', creatorIds);
+
+        if (profiles) {
+          const map: Record<string, any> = {};
+          profiles.forEach((p) => {
+            map[p.id] = {
+              username: p.username,
+              country: p.country,
+              feedbackScore: p.feedback_score ?? 100,
+              positiveFeedback: p.positive_feedback ?? 0,
+              negativeFeedback: p.negative_feedback ?? 0,
+              completedTrades: p.completed_trades ?? 0,
+              photoURL: p.photo_url,
+              badges: p.badges || [],
+              lastActive: p.last_active,
+              blockedUsers: p.blocked_users || [],
+            };
+          });
+          setAdCreators(map);
+        }
+      }
+    } catch (err) {
+      console.error('Error fetching sell ads:', err);
+    } finally {
+      setIsLoading(false);
+    }
+  }, []);
 
   useEffect(() => {
-    if (!buyAds || !firestore) return;
-
-    const creatorIds = [...new Set(buyAds.map(ad => ad.userId))];
-
-    const fetchCreators = async () => {
-      if (creatorIds.length === 0) return;
-      const usersRef = collection(firestore, 'users');
-      const chunks = [];
-      for (let i = 0; i < creatorIds.length; i += 30) {
-          chunks.push(creatorIds.slice(i, i + 30));
-      }
-      
-      const newCreators: Record<string, User> = {};
-      for (const chunk of chunks) {
-        if (chunk.length === 0) continue;
-        const q = query(usersRef, where(documentId(), 'in', chunk));
-        const snapshot = await getDocs(q);
-        snapshot.forEach(doc => {
-            newCreators[doc.id] = { id: doc.id, ...doc.data() } as User;
-        });
-      }
-      setAdCreators(prev => ({...prev, ...newCreators}));
-    };
-
-    fetchCreators();
-  }, [buyAds, firestore]);
+    fetchAds();
+  }, [fetchAds]);
 
   const filteredFiats = useMemo(() => {
     return currencies.filter(c => 
@@ -187,17 +243,15 @@ function SellPageContent() {
 
     let ads = updatedAds.filter(ad => {
       if (currentUserData) {
-        // Hide if I have blocked the ad creator
         if (currentUserData.blockedUsers?.includes(ad.userId)) {
           return false;
         }
-        // Hide if the ad creator has blocked me
         const adCreator = adCreators[ad.userId];
         if (adCreator?.blockedUsers?.includes(currentUserData.id)) {
           return false;
         }
       }
-
+      
       const amountNum = parseFloat(amount);
       if (amount && !isNaN(amountNum)) {
         if (amountNum < ad.minAmount || amountNum > ad.maxAmount) {
@@ -214,11 +268,11 @@ function SellPageContent() {
       if (selectedFiat && ad.fiatCurrency !== selectedFiat) {
         return false;
       }
-      if (selectedCountry && ad.user.country !== selectedCountry) {
+      if (selectedCountry && ad.user?.country !== selectedCountry) {
         return false;
       }
       if (showTopRated) {
-        if (!ad.user.badges?.includes('power')) return false;
+        if (!ad.user?.badges?.includes('power')) return false;
       }
       if (selectedTags.length > 0) {
           if (!ad.tags || !selectedTags.every(tag => ad.tags!.includes(tag))) {
@@ -237,13 +291,12 @@ function SellPageContent() {
       }
       return true;
     });
-
-    // Sort ads: prioritize active users, then apply user's selected sort
+    
     const recentlyActiveAds: P2PAd[] = [];
     const otherAds: P2PAd[] = [];
 
     for (const ad of ads) {
-      const lastActiveDate = ad.user.lastActive ? toDate(ad.user.lastActive) : null;
+      const lastActiveDate = ad.user?.lastActive ? toDate(ad.user.lastActive) : null;
       const isRecent = lastActiveDate && (new Date().getTime() - lastActiveDate.getTime()) < 30 * 60 * 1000;
       if (isRecent) {
         recentlyActiveAds.push(ad);
@@ -258,27 +311,27 @@ function SellPageContent() {
             const marketPriceB = (prices[b.crypto] || 0) * exchangeRate;
             const priceA = a.rateType === 'fixed' ? a.fixedRate! : marketPriceA * (1 + (a.ratePercent || 0) / 100);
             const priceB = b.rateType === 'fixed' ? b.fixedRate! : marketPriceB * (1 + (b.ratePercent || 0) / 100);
-            return priceB - priceA; // Higher price is better for seller
+            return priceB - priceA; // For sell page, higher price is better for seller
         }
         if (sortBy === 'rating') {
-            return (b.user.feedbackScore || 0) - (a.user.feedbackScore || 0);
+            return (b.user?.feedbackScore || 0) - (a.user?.feedbackScore || 0);
         }
         if (sortBy === 'popular') {
-            return (b.user.completedTrades || 0) - (a.user.completedTrades || 0);
+            return (b.user?.completedTrades || 0) - (a.user?.completedTrades || 0);
         }
         return 0;
     };
-
+    
     recentlyActiveAds.sort(sortFunction);
     otherAds.sort(sortFunction);
-
+    
     return [...recentlyActiveAds, ...otherAds];
 
   }, [buyAds, amount, paymentMethod, selectedCoin, selectedFiat, selectedCountry, showTopRated, showAcceptable, selectedTags, currentUserData, sortBy, prices, fiatRates, adCreators]);
   
   const handleToggle = (page: 'buy' | 'sell') => {
     router.push(`/${page}`);
-  }
+  };
 
   const coinFullName = selectedCoin === 'BTC' ? 'Bitcoin' : selectedCoin === 'ETH' ? 'Ethereum' : selectedCoin === 'LTC' ? 'Litecoin' : 'Tether';
   const marketPriceInFiat = (prices[selectedCoin] || 0) * (fiatRates[selectedFiat] || 1);
@@ -292,23 +345,23 @@ function SellPageContent() {
   return (
     <>
       <div className="bg-primary text-primary-foreground -mx-2 sm:-mx-4 lg:-mx-6 -mt-2 sm:-mt-4 lg:-mt-6 mb-6 shadow-lg">
-          <div className="container mx-auto p-4 sm:p-6 lg:p-8">
+        <div className="container mx-auto p-4 sm:p-6 lg:p-8">
             {/* Desktop Title & Header */}
             <div className="hidden md:flex justify-between items-center">
-              <div>
-                  <h1 className="text-2xl font-bold md:text-3xl text-primary-foreground">Sell {coinFullName} - Find Offers from Buyers</h1>
-                  <p className="text-sm text-primary-foreground/80">{marketPriceText}</p>
-              </div>
-              <div className="flex items-center gap-4">
-                  <Button variant="link" asChild className="text-primary-foreground/90 hover:text-primary-foreground hover:no-underline">
-                      <Link href="/academy"><BookOpen className="mr-2 h-4 w-4" /> Academy</Link>
-                  </Button>
-                  <Button variant="link" asChild className="text-primary-foreground/90 hover:text-primary-foreground hover:no-underline">
-                      <Link href="/guides"><HelpCircle className="mr-2 h-4 w-4" /> Take Tour</Link>
-                  </Button>
-              </div>
+                <div>
+                    <h1 className="text-2xl font-bold md:text-3xl text-primary-foreground">Sell {coinFullName} - Find Offers from Buyers</h1>
+                    <p className="text-sm text-primary-foreground/80">{marketPriceText}</p>
+                </div>
+                <div className="flex items-center gap-4">
+                    <Button variant="link" asChild className="text-primary-foreground/90 hover:text-primary-foreground hover:no-underline">
+                        <Link href="/academy"><BookOpen className="mr-2 h-4 w-4" /> Academy</Link>
+                    </Button>
+                    <Button variant="link" asChild className="text-primary-foreground/90 hover:text-primary-foreground hover:no-underline">
+                        <Link href="/guides"><HelpCircle className="mr-2 h-4 w-4" /> Take Tour</Link>
+                    </Button>
+                </div>
             </div>
-          
+
             {/* Desktop Filter Bar */}
             <div className="hidden md:block mt-6">
               <Card>
@@ -367,7 +420,7 @@ function SellPageContent() {
                         <Button variant="outline" size="icon" onClick={() => setIsFiltersSheetOpen(true)}>
                             <SlidersHorizontal className="h-4 w-4" />
                         </Button>
-                        <Button variant="outline" size="icon" onClick={() => window.location.reload()}>
+                        <Button variant="outline" size="icon" onClick={() => fetchAds()}>
                             <RefreshCw className="h-4 w-4" />
                         </Button>
                     </div>
@@ -443,7 +496,7 @@ function SellPageContent() {
             </div>
         </div>
       </div>
-
+      
       <ActiveTradesList />
 
       <div className="bg-card text-card-foreground rounded-lg p-4 sm:p-6">
@@ -456,12 +509,12 @@ function SellPageContent() {
                 <Button variant="outline" size="icon" onClick={() => setIsFiltersSheetOpen(true)}>
                     <SlidersHorizontal className="h-4 w-4" />
                 </Button>
-                <Button variant="outline" size="icon" onClick={() => window.location.reload()}>
+                <Button variant="outline" size="icon" onClick={() => fetchAds()}>
                     <RefreshCw className="h-4 w-4" />
                 </Button>
             </div>
         </div>
-      
+        
         <div className="space-y-1">
             {isLoading && (
                 <div className="space-y-1">
@@ -669,7 +722,6 @@ function SellPageContent() {
     </>
   );
 }
-
 
 export default function SellPage() {
     return (

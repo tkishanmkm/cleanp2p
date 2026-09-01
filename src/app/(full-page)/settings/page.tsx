@@ -1,36 +1,29 @@
 'use client';
 
-import { ProfileSettings } from "@/components/settings/profile-settings";
-import { ChangeUsernameForm } from "@/components/settings/change-username-form";
-import { ChangePasswordForm } from "@/components/settings/change-password-form";
-import { ChangeCurrencyForm } from "@/components/settings/change-currency-form";
-import { ChangeCountryForm } from "@/components/settings/change-country-form";
-import { SessionManagement } from "@/components/settings/session-management";
-import { BlockedUsersManagement } from "@/components/settings/blocked-users-management";
-import { useFirebase, useDoc, useMemoFirebase } from "@/firebase";
-import { useRouter } from "next/navigation";
-import { useEffect } from "react";
-import { Loader2 } from "lucide-react";
-import { doc } from "firebase/firestore";
-import type { User } from "@/lib/types";
-import { Skeleton } from "@/components/ui/skeleton";
+import { ProfileSettings } from '@/components/settings/profile-settings';
+import { ChangeUsernameForm } from '@/components/settings/change-username-form';
+import { ChangePasswordForm } from '@/components/settings/change-password-form';
+import { ChangeCurrencyForm } from '@/components/settings/change-currency-form';
+import { ChangeCountryForm } from '@/components/settings/change-country-form';
+import { SessionManagement } from '@/components/settings/session-management';
+import { BlockedUsersManagement } from '@/components/settings/blocked-users-management';
+import { useAuth } from '@/components/providers/auth-provider';
+import { useRouter } from 'next/navigation';
+import { useEffect } from 'react';
+import type { User } from '@/lib/types';
+import { Skeleton } from '@/components/ui/skeleton';
 
 export default function SettingsPage() {
-  const { user: authUser, isUserLoading: isAuthLoading, firestore } = useFirebase();
+  const { user: authUser, profile, isUserLoading } = useAuth();
   const router = useRouter();
 
   useEffect(() => {
-    if (!isAuthLoading && !authUser) {
+    if (!isUserLoading && !authUser) {
       router.push('/login');
     }
-  }, [authUser, isAuthLoading, router]);
+  }, [authUser, isUserLoading, router]);
 
-  const userRef = useMemoFirebase(() => (authUser ? doc(firestore, "users", authUser.uid) : null), [firestore, authUser]);
-  const { data: userData, isLoading: isUserDocLoading } = useDoc<User>(userRef);
-
-  const isLoading = isAuthLoading || isUserDocLoading;
-
-  if (isLoading || !authUser || !userData) {
+  if (isUserLoading || !authUser || !profile) {
     return (
       <>
         <div className="flex items-center mb-6">
@@ -47,6 +40,23 @@ export default function SettingsPage() {
       </>
     );
   }
+
+  const userData: User = {
+    id: profile.id,
+    userId: profile.username || profile.id,
+    username: profile.username,
+    email: profile.email,
+    photoURL: profile.photoURL,
+    country: profile.country,
+    preferredCurrency: profile.preferredCurrency,
+    isAdminAccount: profile.isAdminAccount,
+    isSuspended: profile.isSuspended,
+    usernameChanged: profile.usernameChanged,
+    blockedUsers: profile.blockedUsers || [],
+    feedbackScore: profile.feedbackScore || 100,
+    completedTrades: profile.completedTrades || 0,
+    createdAt: profile.createdAt || new Date().toISOString(),
+  };
 
   return (
     <>

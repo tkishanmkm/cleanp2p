@@ -1,14 +1,12 @@
-"use client";
+'use client';
 
-import { useForm } from "react-hook-form";
-import { zodResolver } from "@hookform/resolvers/zod";
-import * as z from "zod";
-import { useFirebase } from "@/firebase";
-import { doc, updateDoc } from "firebase/firestore";
-import type { User } from "@/lib/types";
-import { useToast } from "@/hooks/use-toast";
-import { currencies } from "@/lib/currencies";
-import { Button } from "@/components/ui/button";
+import { useForm } from 'react-hook-form';
+import { zodResolver } from '@hookform/resolvers/zod';
+import * as z from 'zod';
+import type { User } from '@/lib/types';
+import { useToast } from '@/hooks/use-toast';
+import { currencies } from '@/lib/currencies';
+import { Button } from '@/components/ui/button';
 import {
   Card,
   CardContent,
@@ -16,7 +14,7 @@ import {
   CardFooter,
   CardHeader,
   CardTitle,
-} from "@/components/ui/card";
+} from '@/components/ui/card';
 import {
   Form,
   FormControl,
@@ -24,58 +22,62 @@ import {
   FormItem,
   FormLabel,
   FormMessage,
-} from "@/components/ui/form";
+} from '@/components/ui/form';
 import {
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from "@/components/ui/select";
-import { Loader2 } from "lucide-react";
-import { useEffect } from "react";
+} from '@/components/ui/select';
+import { Loader2 } from 'lucide-react';
+import { useEffect } from 'react';
+import { supabase } from '@/lib/supabase/client';
+import { useAuth } from '@/components/providers/auth-provider';
 
 const currencySchema = z.object({
-  currency: z.string().min(1, "Please select a currency."),
+  currency: z.string().min(1, 'Please select a currency.'),
 });
 
 export function ChangeCurrencyForm({ user: userData }: { user: User }) {
-  const { firestore, user } = useFirebase();
+  const { user } = useAuth();
   const { toast } = useToast();
 
   const form = useForm<z.infer<typeof currencySchema>>({
     resolver: zodResolver(currencySchema),
     defaultValues: {
-      currency: userData?.preferredCurrency || "USD",
-    }
+      currency: userData?.preferredCurrency || 'USD',
+    },
   });
 
   useEffect(() => {
-    if (userData) {
-      form.setValue("currency", userData.preferredCurrency || "USD");
+    if (userData?.preferredCurrency) {
+      form.setValue('currency', userData.preferredCurrency);
     }
   }, [userData, form]);
 
   const { isSubmitting } = form.formState;
 
   const handleCurrencyChange = async (values: z.infer<typeof currencySchema>) => {
-    if (!firestore || !user) return;
-    
-    const userRef = doc(firestore, "users", user.uid);
+    if (!user) return;
 
     try {
-      await updateDoc(userRef, {
-        preferredCurrency: values.currency,
-      });
+      const { error } = await supabase
+        .from('profiles')
+        .update({ preferred_currency: values.currency })
+        .eq('id', user.uid);
+
+      if (error) throw error;
+
       toast({
-        title: "Currency Updated",
-        description: `Your preferred currency has been saved.`,
+        title: 'Currency Updated',
+        description: 'Your preferred currency has been saved.',
       });
     } catch (error: any) {
       toast({
-        variant: "destructive",
-        title: "Update Failed",
-        description: "Could not update your preferred currency.",
+        variant: 'destructive',
+        title: 'Update Failed',
+        description: error.message || 'Could not update your preferred currency.',
       });
     }
   };
@@ -86,7 +88,9 @@ export function ChangeCurrencyForm({ user: userData }: { user: User }) {
         <form onSubmit={form.handleSubmit(handleCurrencyChange)}>
           <CardHeader>
             <CardTitle>Preferred Currency</CardTitle>
-            <CardDescription>Select the currency used to display wallet values and estimates across the platform.</CardDescription>
+            <CardDescription>
+              Select the currency used to display wallet values and estimates across the platform.
+            </CardDescription>
           </CardHeader>
           <CardContent>
             <FormField
@@ -95,14 +99,18 @@ export function ChangeCurrencyForm({ user: userData }: { user: User }) {
               render={({ field }) => (
                 <FormItem>
                   <FormLabel>Currency</FormLabel>
-                   <Select onValueChange={field.onChange} value={field.value}>
+                  <Select onValueChange={field.onChange} value={field.value}>
                     <FormControl>
                       <SelectTrigger>
                         <SelectValue placeholder="Select a currency" />
                       </SelectTrigger>
                     </FormControl>
                     <SelectContent>
-                      {currencies.map(c => <SelectItem key={c.code} value={c.code}>{c.name} ({c.code})</SelectItem>)}
+                      {currencies.map((c) => (
+                        <SelectItem key={c.code} value={c.code}>
+                          {c.name} ({c.code})
+                        </SelectItem>
+                      ))}
                     </SelectContent>
                   </Select>
                   <FormMessage />

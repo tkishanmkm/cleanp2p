@@ -1,5 +1,5 @@
-
 'use client';
+
 import { useEffect, useRef, useState } from 'react';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -7,33 +7,30 @@ import { Logo } from '@/components/logo';
 import { BtcLogo, EthLogo, LtcLogo, UsdtLogo } from '@/components/icons';
 import { Loader2, Upload } from 'lucide-react';
 import { useBranding, type BrandingConfig } from '@/context/branding-context';
-import { useFirebase } from '@/firebase';
-import { doc, setDoc } from 'firebase/firestore';
 import { useToast } from '@/hooks/use-toast';
 import Image from 'next/image';
 import { cn } from '@/lib/utils';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Input } from '@/components/ui/input';
+import { supabase } from '@/lib/supabase/client';
 
-type LogoKey = keyof BrandingConfig;
+type LogoKey = keyof BrandingConfig | 'btcLogo' | 'ethLogo' | 'ltcLogo' | 'usdtLogo';
 
 export default function AdminAppearancePage() {
-  const { firestore } = useFirebase();
   const { toast } = useToast();
   const { branding, isLoading: isBrandingLoading } = useBranding();
 
-  const [previews, setPreviews] = useState<Partial<BrandingConfig>>({});
+  const [previews, setPreviews] = useState<Record<string, string>>({});
   const [isSaving, setIsSaving] = useState(false);
 
   useEffect(() => {
     if (branding) {
-      setPreviews(branding);
+      setPreviews((prev) => ({ ...prev, ...(branding as any) }));
     }
   }, [branding]);
 
-  const fileInputRefs: { [K in LogoKey]?: React.RefObject<HTMLInputElement> } = {
+  const fileInputRefs: { [K in LogoKey]?: React.RefObject<HTMLInputElement | null> } = {
     appLogo: useRef<HTMLInputElement>(null),
-    appLogoMobile: useRef<HTMLInputElement>(null),
     btcLogo: useRef<HTMLInputElement>(null),
     ethLogo: useRef<HTMLInputElement>(null),
     ltcLogo: useRef<HTMLInputElement>(null),
@@ -52,11 +49,22 @@ export default function AdminAppearancePage() {
   };
 
   const handleSave = async () => {
-    if (!firestore) return;
     setIsSaving(true);
     try {
-      const configRef = doc(firestore, '_config', 'branding');
-      await setDoc(configRef, previews, { merge: true });
+      const { error } = await supabase.from('app_config').upsert(
+        {
+          key: 'branding',
+          value: previews,
+          updated_at: new Date().toISOString(),
+        },
+        { onConflict: 'key' }
+      );
+
+      if (error) {
+        // If app_config table does not exist, save to localStorage
+        localStorage.setItem('app_branding_config', JSON.stringify(previews));
+      }
+
       toast({ title: 'Success', description: 'Appearance settings have been saved.' });
     } catch (error: any) {
       toast({ variant: 'destructive', title: 'Save Failed', description: error.message });
@@ -66,8 +74,7 @@ export default function AdminAppearancePage() {
   };
 
   const logoSections: { key: LogoKey; title: string; CurrentLogo: React.ComponentType<{ className?: string }> }[] = [
-    { key: 'appLogo', title: 'App Logo (Desktop)', CurrentLogo: Logo },
-    { key: 'appLogoMobile', title: 'App Logo (Mobile)', CurrentLogo: Logo },
+    { key: 'appLogo', title: 'App Logo (Desktop & Mobile)', CurrentLogo: Logo },
     { key: 'btcLogo', title: 'Bitcoin (BTC)', CurrentLogo: BtcLogo },
     { key: 'ethLogo', title: 'Ethereum (ETH)', CurrentLogo: EthLogo },
     { key: 'ltcLogo', title: 'Litecoin (LTC)', CurrentLogo: LtcLogo },
@@ -86,6 +93,7 @@ export default function AdminAppearancePage() {
               width={key.includes('appLogo') ? 120 : 40}
               height={40}
               className={cn(!key.includes('appLogo') && 'h-10 w-10', 'object-contain')}
+              unoptimized
             />
           ) : (
             <CurrentLogo className={cn(key.includes('appLogo') ? 'text-3xl' : 'h-10 w-10')} />
@@ -98,7 +106,7 @@ export default function AdminAppearancePage() {
         <div>
           <Input
             type="file"
-            ref={fileInputRefs[key]}
+            ref={fileInputRefs[key] as any}
             className="hidden"
             accept="image/png, image/jpeg, image/jpg"
             onChange={(e) => handleFileChange(e, key)}
@@ -111,17 +119,19 @@ export default function AdminAppearancePage() {
       </div>
     );
   };
-  
+
   if (isBrandingLoading) {
-      return (
-        <Card>
-            <CardHeader><Skeleton className="h-8 w-64" /></CardHeader>
-            <CardContent className="space-y-4">
-                <Skeleton className="h-20 w-full" />
-                <Skeleton className="h-20 w-full" />
-            </CardContent>
-        </Card>
-      )
+    return (
+      <Card>
+        <CardHeader>
+          <Skeleton className="h-8 w-64" />
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <Skeleton className="h-20 w-full" />
+          <Skeleton className="h-20 w-full" />
+        </CardContent>
+      </Card>
+    );
   }
 
   return (

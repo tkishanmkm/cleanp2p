@@ -1,6 +1,7 @@
 import type { Metadata } from 'next';
 import './globals.css';
-import { Toaster } from "@/components/ui/toaster";
+import { Toaster as RadixToaster } from "@/components/ui/toaster";
+import { Toaster as SonnerToaster } from 'sonner';
 import { ThemeProvider } from '@/components/theme-provider';
 import { AuthProvider } from '@/components/providers/auth-provider';
 import { NotificationsProvider } from '@/components/notifications-provider';
@@ -44,7 +45,8 @@ export default function RootLayout({
               </PriceProvider>
             </NotificationsProvider>
           </AuthProvider>
-          <Toaster />
+          <RadixToaster />
+          <SonnerToaster position="top-right" richColors />
         </ThemeProvider>
       </body>
     </html>

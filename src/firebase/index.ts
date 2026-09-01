@@ -14,8 +14,9 @@ export function useFirebase() {
   return React.useContext(FirebaseContext);
 }
 
+const EMPTY_COLLECTION: any[] = [];
 export function useCollection(query: any) {
-  return { data: [], loading: false, error: null };
+  return { data: EMPTY_COLLECTION, loading: false, error: null };
 }
 
 export function useDoc(ref: any) {

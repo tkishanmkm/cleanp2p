@@ -1,10 +1,12 @@
 'use client';
 
-import { useState, useEffect, use } from 'react';
+import { useState, useEffect } from 'react';
+import { useParams } from 'next/navigation';
 import { createBrowserClient } from '@supabase/ssr';
 
-export default function TradePage({ params }: { params: Promise<{ id: string }> }) {
-  const { id: orderId } = use(params);
+export default function TradePage() {
+  const params = useParams();
+  const orderId = Array.isArray(params.id) ? params.id[0] : (params.id as string);
   const [supabase] = useState(() => {
     const url = process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://placeholder.supabase.co';
     const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'placeholder-key';
