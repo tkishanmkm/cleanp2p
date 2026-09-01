@@ -1,4 +1,4 @@
-import { supabase } from './supabase/client';
+import { supabase, checkSupabaseConfig } from './supabase/client';
 import type { User, Session } from '@supabase/supabase-js';
 
 export interface UserProfile {
@@ -24,23 +24,67 @@ export interface AuthActionResult<T = any> {
   error: Error | null;
 }
 
+function handleAuthError(err: unknown): Error {
+  if (!err) return new Error('An unknown authentication error occurred.');
+  const msg = err instanceof Error ? err.message : String(err);
+
+  if (
+    msg.toLowerCase().includes('failed to fetch') ||
+    msg.toLowerCase().includes('networkerror') ||
+    msg.toLowerCase().includes('fetch failed') ||
+    msg.toLowerCase().includes('enotfound')
+  ) {
+    const config = checkSupabaseConfig();
+    if (!config.isConfigured) {
+      return new Error(
+        'Supabase is not yet configured. Please set NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY in Settings > Secrets.'
+      );
+    }
+    return new Error(
+      'Unable to connect to Supabase (Failed to fetch). Please check your internet connection and ensure your Supabase project is active and URL is valid.'
+    );
+  }
+
+  if (
+    msg.toLowerCase().includes('invalid login credentials') ||
+    msg.toLowerCase().includes('invalid credentials') ||
+    msg.toLowerCase().includes('invalid email or password')
+  ) {
+    return new Error('Invalid email or password. Please check your credentials and try again.');
+  }
+
+  if (msg.toLowerCase().includes('email not confirmed')) {
+    return new Error('Your email address has not been confirmed yet. Please verify your email inbox.');
+  }
+
+  return new Error(msg);
+}
+
 /**
  * Sign in a user with email and password via Supabase Auth.
  */
 export async function signInWithEmail(email: string, password: string): Promise<AuthActionResult<{ user: User | null; session: Session | null }>> {
   try {
+    const { isConfigured } = checkSupabaseConfig();
+    if (!isConfigured) {
+      return {
+        data: null,
+        error: new Error('Supabase is not configured yet. Please configure NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY in Settings.'),
+      };
+    }
+
     const { data, error } = await supabase.auth.signInWithPassword({
       email: email.trim().toLowerCase(),
       password,
     });
 
     if (error) {
-      return { data: null, error: new Error(error.message) };
+      return { data: null, error: handleAuthError(error) };
     }
 
     return { data, error: null };
   } catch (err: unknown) {
-    return { data: null, error: err instanceof Error ? err : new Error(String(err)) };
+    return { data: null, error: handleAuthError(err) };
   }
 }
 
@@ -58,24 +102,39 @@ export async function signInWithIdentifier(
       return { data: null, error: new Error('Please enter your email or username.') };
     }
 
+    const { isConfigured } = checkSupabaseConfig();
+    if (!isConfigured) {
+      return {
+        data: null,
+        error: new Error('Supabase is not configured yet. Please configure NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY in Settings.'),
+      };
+    }
+
     let targetEmail = trimmed;
 
     // If identifier is not an email (does not contain '@'), resolve via profiles table
     if (!trimmed.includes('@')) {
-      const { data: profile, error: profileError } = await supabase
-        .from('profiles')
-        .select('email')
-        .ilike('username', trimmed)
-        .maybeSingle();
+      try {
+        const { data: profile, error: profileError } = await supabase
+          .from('profiles')
+          .select('email')
+          .ilike('username', trimmed)
+          .maybeSingle();
 
-      if (profileError || !profile?.email) {
+        if (profileError || !profile?.email) {
+          return {
+            data: null,
+            error: new Error('No account found with this username. Please check your username or use your email address.'),
+          };
+        }
+
+        targetEmail = profile.email;
+      } catch (profileErr) {
         return {
           data: null,
-          error: new Error('No account found with this username. Please check your username or use your email address.'),
+          error: handleAuthError(profileErr),
         };
       }
-
-      targetEmail = profile.email;
     }
 
     const { data, error } = await supabase.auth.signInWithPassword({
@@ -84,12 +143,12 @@ export async function signInWithIdentifier(
     });
 
     if (error) {
-      return { data: null, error: new Error(error.message) };
+      return { data: null, error: handleAuthError(error) };
     }
 
     return { data, error: null };
   } catch (err: unknown) {
-    return { data: null, error: err instanceof Error ? err : new Error(String(err)) };
+    return { data: null, error: handleAuthError(err) };
   }
 }
 
@@ -102,8 +161,16 @@ export async function signUpWithEmail(
   metadata?: { username?: string; displayName?: string }
 ): Promise<AuthActionResult<{ user: User | null; session: Session | null }>> {
   try {
+    const { isConfigured } = checkSupabaseConfig();
+    if (!isConfigured) {
+      return {
+        data: null,
+        error: new Error('Supabase is not configured yet. Please configure NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY in Settings.'),
+      };
+    }
+
     const { data, error } = await supabase.auth.signUp({
-      email,
+      email: email.trim().toLowerCase(),
       password,
       options: {
         data: {
@@ -114,26 +181,30 @@ export async function signUpWithEmail(
     });
 
     if (error) {
-      return { data: null, error: new Error(error.message) };
+      return { data: null, error: handleAuthError(error) };
     }
 
     // Ensure profile row exists in profiles table
     if (data.user) {
-      await supabase.from('profiles').upsert({
-        id: data.user.id,
-        email: data.user.email,
-        username: metadata?.username || email.split('@')[0],
-        display_name: metadata?.displayName || metadata?.username || email.split('@')[0],
-        role: 'user',
-        is_admin: false,
-        status: 'active',
-        updated_at: new Date().toISOString(),
-      });
+      try {
+        await supabase.from('profiles').upsert({
+          id: data.user.id,
+          email: data.user.email,
+          username: metadata?.username || email.split('@')[0],
+          display_name: metadata?.displayName || metadata?.username || email.split('@')[0],
+          role: 'user',
+          is_admin: false,
+          status: 'active',
+          updated_at: new Date().toISOString(),
+        });
+      } catch (upsertErr) {
+        console.warn('Non-blocking profile upsert notice:', upsertErr);
+      }
     }
 
     return { data, error: null };
   } catch (err: unknown) {
-    return { data: null, error: err instanceof Error ? err : new Error(String(err)) };
+    return { data: null, error: handleAuthError(err) };
   }
 }
 
@@ -144,11 +215,11 @@ export async function signOut(): Promise<AuthActionResult<void>> {
   try {
     const { error } = await supabase.auth.signOut();
     if (error) {
-      return { data: null, error: new Error(error.message) };
+      return { data: null, error: handleAuthError(error) };
     }
     return { data: null, error: null };
   } catch (err: unknown) {
-    return { data: null, error: err instanceof Error ? err : new Error(String(err)) };
+    return { data: null, error: handleAuthError(err) };
   }
 }
 
@@ -157,6 +228,8 @@ export async function signOut(): Promise<AuthActionResult<void>> {
  */
 export async function getCurrentUser(): Promise<User | null> {
   try {
+    const { isConfigured } = checkSupabaseConfig();
+    if (!isConfigured) return null;
     const { data: { user } } = await supabase.auth.getUser();
     return user;
   } catch (err) {
@@ -170,6 +243,8 @@ export async function getCurrentUser(): Promise<User | null> {
  */
 export async function getCurrentSession(): Promise<Session | null> {
   try {
+    const { isConfigured } = checkSupabaseConfig();
+    if (!isConfigured) return null;
     const { data: { session } } = await supabase.auth.getSession();
     return session;
   } catch (err) {
@@ -183,6 +258,9 @@ export async function getCurrentSession(): Promise<Session | null> {
  */
 export async function getUserProfile(userId: string): Promise<UserProfile | null> {
   try {
+    const { isConfigured } = checkSupabaseConfig();
+    if (!isConfigured) return null;
+
     const { data, error } = await supabase
       .from('profiles')
       .select('*')
@@ -224,6 +302,14 @@ export async function updateUserProfile(
   updates: Partial<UserProfile>
 ): Promise<AuthActionResult<UserProfile>> {
   try {
+    const { isConfigured } = checkSupabaseConfig();
+    if (!isConfigured) {
+      return {
+        data: null,
+        error: new Error('Supabase is not configured yet.'),
+      };
+    }
+
     const { data, error } = await supabase
       .from('profiles')
       .update({
@@ -235,12 +321,12 @@ export async function updateUserProfile(
       .single();
 
     if (error) {
-      return { data: null, error: new Error(error.message) };
+      return { data: null, error: handleAuthError(error) };
     }
 
     return { data, error: null };
   } catch (err: unknown) {
-    return { data: null, error: err instanceof Error ? err : new Error(String(err)) };
+    return { data: null, error: handleAuthError(err) };
   }
 }
 
@@ -249,16 +335,24 @@ export async function updateUserProfile(
  */
 export async function resetPasswordForEmail(email: string, redirectTo?: string): Promise<AuthActionResult<void>> {
   try {
+    const { isConfigured } = checkSupabaseConfig();
+    if (!isConfigured) {
+      return {
+        data: null,
+        error: new Error('Supabase is not configured yet.'),
+      };
+    }
+
     const { error } = await supabase.auth.resetPasswordForEmail(email, {
-      redirectTo: redirectTo || `${window.location.origin}/login`,
+      redirectTo: redirectTo || (typeof window !== 'undefined' ? `${window.location.origin}/login` : undefined),
     });
 
     if (error) {
-      return { data: null, error: new Error(error.message) };
+      return { data: null, error: handleAuthError(error) };
     }
 
-    return { data: null, error: null };
+    return { data, error: null };
   } catch (err: unknown) {
-    return { data: null, error: err instanceof Error ? err : new Error(String(err)) };
+    return { data: null, error: handleAuthError(err) };
   }
 }

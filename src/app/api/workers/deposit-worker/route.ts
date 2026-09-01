@@ -1,12 +1,7 @@
 import { NextResponse } from 'next/server';
-import { createClient } from '@supabase/supabase-js';
+import { getSupabaseAdminClient } from '@/lib/supabase/server';
 import { createPublicClient, http, parseAbiItem } from 'viem';
 import { mainnet, sepolia } from 'viem/chains';
-
-const supabaseAdmin = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
-);
 
 const WORKER_SECRET = process.env.DEPOSIT_WORKER_SECRET;
 
@@ -22,6 +17,8 @@ export async function POST(req: Request) {
     if (WORKER_SECRET && authHeader !== `Bearer ${WORKER_SECRET}`) {
       return NextResponse.json({ error: 'Unauthorized worker invocation' }, { status: 401 });
     }
+
+    const supabaseAdmin = getSupabaseAdminClient();
 
     // 1. Fetch active deposit addresses from Supabase
     const { data: depositAddresses, error: dbError } = await supabaseAdmin

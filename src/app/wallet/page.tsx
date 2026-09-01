@@ -1,17 +1,12 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { createClient } from '@supabase/supabase-js';
+import { supabase } from '@/lib/supabase/client';
 import { WalletBalanceCard } from '@/components/wallet/WalletBalanceCard';
 import { WithdrawalDialog } from '@/components/wallet/WithdrawalDialog';
 import { TransactionHistory } from '@/components/wallet/TransactionHistory';
 import { DepositDialog } from '@/components/wallets/deposit-dialog';
 import { AdminWorkerPanel } from '@/components/wallet/AdminWorkerPanel';
-
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-);
 
 export default function WalletPage() {
   const [isDepositOpen, setIsDepositOpen] = useState(false);

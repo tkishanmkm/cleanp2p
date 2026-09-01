@@ -1,25 +1,87 @@
-
 'use client';
 
-export type CryptoCurrency = "BTC" | "ETH" | "USDT" | "LTC" | "BNB" | "MATIC" | "TRX";
+export type CryptoCurrency = 'BTC' | 'ETH' | 'LTC' | 'USDT' | 'BNB' | 'MATIC' | 'TRX';
+
+export interface CurrencyConfig {
+  code: string;
+  name: string;
+  symbol: string;
+  flagCode?: string;
+}
+
+export interface UserProfile {
+  id: string;
+  username: string;
+  country?: string;
+  feedbackScore: number;
+  avgReleaseTime: number; // in minutes
+  completedTrades: number;
+  lastActive: string | Date;
+  badges?: string[];
+}
+
+export interface P2PAd {
+  id: string;
+  userId: string;
+  publicAdId?: string;
+  user?: {
+    username: string;
+    country?: string;
+    feedbackScore: number;
+    positiveFeedback?: number;
+    negativeFeedback?: number;
+    completedTrades: number;
+    photoURL?: string;
+    badges?: string[];
+    lastActive?: string;
+  };
+  adType: 'buy' | 'sell';
+  crypto: CryptoCurrency;
+  fiatCurrency: string;
+  rateType: 'fixed' | 'floating' | 'market';
+  fixedRate?: number;
+  ratePercent?: number;
+  minAmount: number;
+  maxAmount: number;
+  paymentMethods: string[];
+  offerLabel?: string;
+  tags?: string[];
+  terms: string;
+  paymentTimeLimit?: number;
+  payment_window?: number;
+  active?: boolean;
+  status?: string;
+  targetedCountries?: string[];
+  blockedCountries?: string[];
+  minCompletedTrades?: number;
+  createdAt?: string;
+}
+
+export interface InitiateTradePayload {
+  adId: string;
+  cryptoAmount: number;
+  fiatAmount: number;
+  fiatAmountInUSD: number;
+  paymentMethod: string;
+}
 
 export type SupportedCrypto = {
   name: CryptoCurrency;
   chains: string[];
-}
+};
 
 export type Language = {
   code: string;
   name: string;
   nativeName: string;
   dialects?: Language[];
-}
+};
 
 export type DepositAddressSet = {
-  id: string; // "1", "2", ... "20"
-  setName: string; // e.g., "Set 1"
+  id: string;
+  setName: string;
   addresses: {
-    [key: string]: string; // e.g., "BTC-Bitcoin": "...", "USDT-ERC20": "..."
+    [key: string]: string;
   };
 };
 
@@ -30,17 +92,16 @@ export type Deposit = {
   crypto: CryptoCurrency;
   chain: string;
   amount: number;
-  txId?: string; // Optional at first, provided by user
-  walletAddress: string; // The address the user must send to
-  qrCodeUrl?: string; // The QR for that address
-  status: 'pending' | 'awaiting_confirmation' | 'approved' | 'declined' | 'expired'; // More specific statuses
-  finalAmount?: number; // Admin can correct the amount
+  txId?: string;
+  walletAddress: string;
+  qrCodeUrl?: string;
+  status: 'pending' | 'awaiting_confirmation' | 'approved' | 'declined' | 'expired';
+  finalAmount?: number;
   adminId?: string;
-  createdAt: string; // Use ISO string
-  timerEnd: string; // When the pending request expires
+  createdAt: string;
+  timerEnd: string;
   walletIndex?: number;
 };
-
 
 export type Withdrawal = {
   id: string;
@@ -50,13 +111,12 @@ export type Withdrawal = {
   chain: string;
   address: string;
   amount: number;
-  fee?: number; // Total transaction fee
+  fee?: number;
   status: 'pending' | 'approved' | 'declined' | 'cancelled';
   txHash?: string;
   adminId?: string;
   createdAt: string;
 };
-
 
 export type User = {
   id: string;
@@ -71,7 +131,7 @@ export type User = {
     [key in CryptoCurrency]?: {
       balance: number;
       lockedBalance: number;
-    }
+    };
   };
   isBanned: boolean;
   isOnHold: boolean;
@@ -95,43 +155,7 @@ export type User = {
   securityAnswer?: string;
 };
 
-export type P2PAd = {
-  id: string;
-  publicAdId: string;
-  userId: string;
-  user: {
-      username: string;
-      country?: string;
-      feedbackScore: number;
-      positiveFeedback: number;
-      negativeFeedback: number;
-      completedTrades: number;
-      photoURL?: string;
-      badges?: string[];
-      lastActive?: string;
-  }
-  adType: "buy" | "sell";
-  crypto: CryptoCurrency;
-  fiatCurrency: string;
-  paymentMethods: string[];
-  rateType: "market" | "fixed";
-  ratePercent?: number;
-  fixedRate?: number;
-  minAmount: number;
-  maxAmount: number;
-  paymentTimeLimit: number;
-  terms: string;
-  offerLabel?: string;
-  tags?: string[];
-  active: boolean;
-  deletedAt?: string;
-  createdAt: string;
-  targetedCountries?: string[];
-  blockedCountries?: string[];
-  minCompletedTrades?: number;
-};
-
-export type TradeStatus = "active" | "paid" | "released" | "disputed" | "cancelled" | "expired";
+export type TradeStatus = 'active' | 'paid' | 'released' | 'disputed' | 'cancelled' | 'expired';
 
 export type Trade = {
   id: string;
@@ -160,29 +184,29 @@ export type Trade = {
 };
 
 export type TradeChatMessage = {
-    id: string;
-    tradeId: string;
-    senderId: string;
-    senderUsername: string;
-    message: string;
-    mediaUrl?: string;
-    mediaType?: 'image' | 'video' | 'audio' | 'none';
-    isModerator: boolean;
-    createdAt: string;
-}
+  id: string;
+  tradeId: string;
+  senderId: string;
+  senderUsername: string;
+  message: string;
+  mediaUrl?: string;
+  mediaType?: 'image' | 'video' | 'audio' | 'none';
+  isModerator: boolean;
+  createdAt: string;
+};
 
 export type Dispute = {
-    id: string;
-    tradeId: string;
-    openedBy: string;
-    reason: string;
-    explanation: string;
-    status: 'open' | 'resolved' | 'cancelled';
-    resolvedBy?: string; // Admin UID
-    winnerId?: string; // User UID of winner
-    resolutionNote?: string;
-    createdAt: string;
-}
+  id: string;
+  tradeId: string;
+  openedBy: string;
+  reason: string;
+  explanation: string;
+  status: 'open' | 'resolved' | 'cancelled';
+  resolvedBy?: string;
+  winnerId?: string;
+  resolutionNote?: string;
+  createdAt: string;
+};
 
 export type Feedback = {
   id: string;
@@ -196,50 +220,50 @@ export type Feedback = {
 };
 
 export type AdminLog = {
-    id: string;
-    adminId: string;
-    action: string;
-    targetId: string; // Can be userId, tradeId, etc.
-    createdAt: string;
+  id: string;
+  adminId: string;
+  action: string;
+  targetId: string;
+  createdAt: string;
 };
 
 export type PaymentMethod = {
-    id: string;
-    name: string;
-    country: string;
-}
+  id: string;
+  name: string;
+  country: string;
+};
 
 export type SupportTicket = {
-    id: string;
-    email: string;
-    userId?: string;
-    message: string;
-    status: 'Open' | 'In Progress' | 'Closed';
-    resolutionNote?: string;
-    createdAt: string;
+  id: string;
+  email: string;
+  userId?: string;
+  message: string;
+  status: 'Open' | 'In Progress' | 'Closed';
+  resolutionNote?: string;
+  createdAt: string;
 };
 
 export type AdminRole = {
-    role: 'admin';
-    createdAt: string;
-}
+  role: 'admin';
+  createdAt: string;
+};
 
 export type EscrowLedger = {
-    id: string;
-    tradeId: string;
-    feeAmount: number;
-    crypto: CryptoCurrency;
-    createdAt: string;
-}
+  id: string;
+  tradeId: string;
+  feeAmount: number;
+  crypto: CryptoCurrency;
+  createdAt: string;
+};
 
 export type Session = {
-    id: string;
-    userId: string;
-    userAgent: string;
-    ipAddress: string;
-    lastLogin: string;
-    isActive: boolean;
-}
+  id: string;
+  userId: string;
+  userAgent: string;
+  ipAddress: string;
+  lastLogin: string;
+  isActive: boolean;
+};
 
 export type CoinTransfer = {
   id: string;
@@ -251,15 +275,13 @@ export type CoinTransfer = {
   crypto: CryptoCurrency;
   amount: number;
   createdAt: string;
-}
+};
 
 export type Notification = {
-    id: string;
-    userId: string;
-    message: string;
-    link?: string;
-    isRead: boolean;
-    createdAt: string;
-}
-
-    
+  id: string;
+  userId: string;
+  message: string;
+  link?: string;
+  isRead: boolean;
+  createdAt: string;
+};

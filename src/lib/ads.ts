@@ -5,6 +5,7 @@ import { Firestore, collection, addDoc, doc, updateDoc } from 'firebase/firestor
 import type { P2PAd, CryptoCurrency } from './types';
 import { errorEmitter } from '@/firebase/error-emitter';
 import { FirestorePermissionError } from '@/firebase/errors';
+import { createClient } from '@/lib/supabase';
 
 function generatePublicAdId() {
   const prefix = "AD-";
@@ -82,4 +83,32 @@ export async function updateAdStatus(db: Firestore, adId: string, active: boolea
 export async function softDeleteAd(db: Firestore, adId: string) {
     const adRef = doc(db, 'p2p_ads', adId);
     await updateDoc(adRef, { active: false, deletedAt: new Date().toISOString() });
+}
+
+export async function createAd(formData: any) {
+  const supabase = createClient();
+  
+  // 1. Get current authenticated user
+  const { data: { user }, error: userError } = await supabase.auth.getUser();
+
+  if (userError || !user) {
+    throw new Error("You must be logged in to create an ad.");
+  }
+
+  // 2. Insert ad into p2p_ads with user_id attached
+  const { data, error } = await supabase
+    .from('p2p_ads')
+    .insert([
+      {
+        ...formData,
+        user_id: user.id, // Must match auth.uid() in RLS policy
+      }
+    ])
+    .select();
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  return data;
 }

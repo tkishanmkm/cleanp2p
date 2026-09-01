@@ -1,4 +1,3 @@
-
 "use client";
 
 import Link from "next/link";
@@ -26,9 +25,10 @@ import { Input } from "@/components/ui/input";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Logo } from "@/components/logo";
 import { useToast } from "@/hooks/use-toast";
-import { useState, Suspense } from "react";
-import { Loader2 } from "lucide-react";
+import { useState, Suspense, useEffect } from "react";
+import { Loader2, AlertCircle } from "lucide-react";
 import { signInWithIdentifier, getUserProfile } from "@/lib/auth";
+import { checkSupabaseConfig } from "@/lib/supabase/client";
 
 const formSchema = z.object({
   identifier: z.string().min(1, { message: "Email or Username is required." }),
@@ -43,7 +43,13 @@ function LoginFormComponent() {
   const searchParams = useSearchParams();
   const { toast } = useToast();
   const [isLoading, setIsLoading] = useState(false);
+  const [isConfigured, setIsConfigured] = useState(true);
   const redirectUrl = searchParams.get('redirect');
+
+  useEffect(() => {
+    const config = checkSupabaseConfig();
+    setIsConfigured(config.isConfigured);
+  }, []);
 
   const form = useForm<z.infer<typeof formSchema>>({
     resolver: zodResolver(formSchema),
@@ -110,7 +116,19 @@ function LoginFormComponent() {
             Enter your credentials to access your account.
           </CardDescription>
         </CardHeader>
-        <CardContent>
+        <CardContent className="space-y-4">
+          {!isConfigured && (
+            <div className="p-3.5 rounded-lg border border-amber-500/30 bg-amber-500/10 text-amber-900 dark:text-amber-200 text-xs flex gap-2.5 items-start">
+              <AlertCircle className="h-4 w-4 shrink-0 mt-0.5 text-amber-600 dark:text-amber-400" />
+              <div className="space-y-1 leading-relaxed">
+                <p className="font-semibold">Supabase Configuration Required</p>
+                <p>
+                  To enable authentication, please provide your <span className="font-mono font-semibold">NEXT_PUBLIC_SUPABASE_URL</span> and <span className="font-mono font-semibold">NEXT_PUBLIC_SUPABASE_ANON_KEY</span> in the <strong>Settings &gt; Secrets / Environment Variables</strong> menu.
+                </p>
+              </div>
+            </div>
+          )}
+
           <Form {...form}>
             <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-6">
               <FormField

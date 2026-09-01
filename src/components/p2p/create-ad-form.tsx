@@ -276,21 +276,28 @@ export function CreateAdForm({ ad }: CreateAdFormProps) {
     return marketPriceUsd * exchangeRate;
   }, [watchedCrypto, watchedFiat, prices, fiatRates]);
 
+  const hasPositiveMarketPrice = currentMarketPriceInFiat > 0;
+
+  // Pre-fill defaults only when rateType actively switches or initially empty
   useEffect(() => {
-    if (!currentMarketPriceInFiat || arePricesLoading) return;
+    if (!hasPositiveMarketPrice || arePricesLoading) return;
 
     if (watchedRateType === "market") {
-      // Always reset to a default percentage when switching to market rate
-      form.setValue("ratePercent", 5);
+      const currentVal = form.getValues("ratePercent");
+      if (currentVal === undefined || currentVal === null || isNaN(currentVal)) {
+        form.setValue("ratePercent", 5);
+      }
       form.setValue("fixedRate", undefined, { shouldValidate: false });
     }
 
     if (watchedRateType === "fixed") {
-      // Always pre-fill with the current market price as a default when switching to fixed rate
-      form.setValue("fixedRate", Number(currentMarketPriceInFiat.toFixed(2)));
+      const currentFixed = form.getValues("fixedRate");
+      if (!currentFixed || isNaN(currentFixed)) {
+        form.setValue("fixedRate", Number(currentMarketPriceInFiat.toFixed(2)));
+      }
       form.setValue("ratePercent", undefined, { shouldValidate: false });
     }
-  }, [watchedRateType, currentMarketPriceInFiat, arePricesLoading, form]);
+  }, [watchedRateType, hasPositiveMarketPrice, arePricesLoading, currentMarketPriceInFiat, form]);
 
 
   useEffect(() => {

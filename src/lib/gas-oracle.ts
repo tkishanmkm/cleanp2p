@@ -1,5 +1,5 @@
-import { getSupabaseAdminClient } from '@/lib/supabase/server';
 import { supabase } from '@/lib/supabase/client';
+import { createClient as createSupabaseClient } from '@supabase/supabase-js';
 
 export interface NetworkGasFee {
   id?: string;
@@ -247,12 +247,14 @@ export async function fetchAndCacheNetworkGasFees(): Promise<NetworkGasFee[]> {
     }
   }
 
-  // Upsert to Supabase Admin Client
+  // Upsert to Supabase Client
   try {
-    const supabaseAdmin = getSupabaseAdminClient();
+    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://placeholder.supabase.co';
+    const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'placeholder-key';
+    const clientToUse = process.env.SUPABASE_SERVICE_ROLE_KEY ? createSupabaseClient(supabaseUrl, supabaseKey) : supabase;
     for (const record of results) {
       const id = `${record.crypto.toLowerCase()}_${record.network.toLowerCase()}`;
-      await supabaseAdmin.from('network_gas_fees').upsert(
+      await clientToUse.from('network_gas_fees').upsert(
         {
           id,
           crypto: record.crypto,

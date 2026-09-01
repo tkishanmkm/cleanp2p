@@ -64,6 +64,15 @@ function TradeForm({ ad, adPrice, isForBuyingPage }: { ad: P2PAd, adPrice: numbe
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [selectedPaymentMethod, setSelectedPaymentMethod] = useState<string>(ad.paymentMethods[0] || '');
     
+    // Automatically recompute crypto or fiat conversion if adPrice updates dynamically
+    useEffect(() => {
+        if (fiatAmount && adPrice > 0 && isForBuyingPage) {
+            setCryptoAmount((parseFloat(fiatAmount) / adPrice).toFixed(8));
+        } else if (cryptoAmount && adPrice > 0 && !isForBuyingPage) {
+            setFiatAmount((parseFloat(cryptoAmount) * adPrice).toFixed(2));
+        }
+    }, [adPrice, isForBuyingPage, fiatAmount, cryptoAmount]);
+
     const onFiatChange = (value: string) => {
         setFiatAmount(value);
         if (value && adPrice > 0) {

@@ -284,7 +284,12 @@ function BuyPageContent() {
 
   const coinFullName = selectedCoin === 'BTC' ? 'Bitcoin' : selectedCoin === 'ETH' ? 'Ethereum' : selectedCoin === 'LTC' ? 'Litecoin' : 'Tether';
   const marketPriceInFiat = (prices[selectedCoin] || 0) * (fiatRates[selectedFiat] || 1);
-  const marketPriceText = `1 ${selectedCoin} ≈ ${marketPriceInFiat.toLocaleString('en-US', { style: 'currency', currency: selectedFiat || 'USD', minimumFractionDigits: 2 })}`;
+  const isPriceLoading = !prices || !prices[selectedCoin];
+  const marketPriceText = isPriceLoading
+    ? `1 ${selectedCoin} ≈ Loading live market price...`
+    : marketPriceInFiat > 0
+    ? `1 ${selectedCoin} ≈ ${marketPriceInFiat.toLocaleString('en-US', { style: 'currency', currency: selectedFiat || 'USD', minimumFractionDigits: 2 })}`
+    : `1 ${selectedCoin} ≈ Price unavailable`;
 
   return (
     <>

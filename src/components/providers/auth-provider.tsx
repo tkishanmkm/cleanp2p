@@ -2,7 +2,7 @@
 
 import React, { createContext, useContext, useState, useEffect, useMemo, ReactNode } from 'react';
 import type { User as SupabaseUser, Session } from '@supabase/supabase-js';
-import { supabase } from '@/lib/supabase/client';
+import { supabase, checkSupabaseConfig } from '@/lib/supabase/client';
 import {
   getUserProfile,
   signInWithEmail,
@@ -70,6 +70,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     // 1. Initial session retrieval
     const initializeAuth = async () => {
+      const { isConfigured } = checkSupabaseConfig();
+      if (!isConfigured) {
+        if (mounted) {
+          setIsLoading(false);
+        }
+        return;
+      }
+
       try {
         const { data, error } = await supabase.auth.getSession();
         if (!mounted) return;

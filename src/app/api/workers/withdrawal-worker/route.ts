@@ -1,13 +1,8 @@
 import { NextResponse } from 'next/server';
-import { createClient } from '@supabase/supabase-js';
+import { getSupabaseAdminClient } from '@/lib/supabase/server';
 import { createWalletClient, http, parseEther } from 'viem';
 import { privateKeyToAccount } from 'viem/accounts';
 import { sepolia } from 'viem/chains';
-
-const supabaseAdmin = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
-);
 
 const WORKER_SECRET = process.env.WITHDRAWAL_WORKER_SECRET;
 
@@ -20,6 +15,8 @@ export async function POST(req: Request) {
     if (WORKER_SECRET && authHeader !== `Bearer ${WORKER_SECRET}`) {
       return NextResponse.json({ error: 'Unauthorized worker invocation' }, { status: 401 });
     }
+
+    const supabaseAdmin = getSupabaseAdminClient();
 
     // 1. Claim pending withdrawals using atomic row-level DB locks
     const { data: pendingItems, error: claimError } = await supabaseAdmin.rpc(

@@ -2,21 +2,18 @@
 
 import React, { createContext, useContext, useState, useEffect, ReactNode, useCallback } from 'react';
 import type { CryptoCurrency } from '@/lib/types';
-import { useFirebase } from '@/firebase';
-import { doc, onSnapshot, setDoc } from 'firebase/firestore';
-import { SUPPORTED_CRYPTOS } from '@/lib/constants';
 
 interface PriceContextType {
   prices: Record<CryptoCurrency, number>;
   fiatRates: Record<string, number>;
   isLoading: boolean;
+  loadingPrice: boolean;
+  refreshPrices: () => Promise<void>;
 }
 
 const PriceContext = createContext<PriceContextType | undefined>(undefined);
 
 export function PriceProvider({ children }: { children: ReactNode }) {
-  const { firestore } = useFirebase();
-
   const [prices, setPrices] = useState<Record<CryptoCurrency, number>>({
     BTC: 0,
     ETH: 0,
@@ -27,101 +24,79 @@ export function PriceProvider({ children }: { children: ReactNode }) {
   const [fiatRates, setFiatRates] = useState<Record<string, number>>({ USD: 1 });
   const [isLoading, setIsLoading] = useState(true);
 
-  // This effect listens for real-time updates from Firestore, which acts as our cache.
-  // This provides "Instant Price Loading" and "Real-time Synchronization".
-  useEffect(() => {
-    if (!firestore) {
-      // If firestore is not ready, we are technically still loading.
-      return;
-    }
+  const fetchPrices = useCallback(async () => {
+    try {
+      const [marketRes, fiatRes] = await Promise.all([
+        fetch('/api/p2p/market-prices?fiat=USD', { cache: 'no-store' }),
+        fetch('https://open.er-api.com/v6/latest/USD', { cache: 'no-store' }).catch(() => null),
+      ]);
 
-    const marketDataRef = doc(firestore, '_config', 'market_data');
-    
-    const unsubscribe = onSnapshot(marketDataRef, (doc) => {
-      if (doc.exists()) {
-        const data = doc.data();
-        if (data.prices) setPrices(prev => ({...prev, ...data.prices}));
-        if (data.fiatRates) setFiatRates(data.fiatRates);
-      }
-      // We set loading to false after the first read from cache.
-      if (isLoading) {
-          setIsLoading(false);
-      }
-    }, (error) => {
-      console.error("Error with price listener:", error);
-      setIsLoading(false);
-    });
+      const newPrices: Partial<Record<CryptoCurrency, number>> = {};
 
-    return () => unsubscribe();
-  }, [firestore, isLoading]);
-
-
-  // This effect runs in the background to fetch new data and update the cache ("Database Sync").
-  useEffect(() => {
-    const fetchAndCachePrices = async () => {
-        if (!firestore) return;
-
-        const coingeckoIds: Record<CryptoCurrency, string> = {
-            BTC: 'bitcoin',
-            ETH: 'ethereum',
-            LTC: 'litecoin',
-            USDT: 'tether',
-        };
-        const ids = SUPPORTED_CRYPTOS.map(c => coingeckoIds[c.name]).join(',');
-
-        try {
-            const [cryptoRes, fiatRes] = await Promise.all([
-                fetch(`https://api.coingecko.com/api/v3/simple/price?ids=${ids}&vs_currencies=usd`),
-                fetch('https://open.er-api.com/v6/latest/USD')
-            ]);
-            
-            const marketDataRef = doc(firestore, '_config', 'market_data');
-            const updateData: any = {};
-
-            if (cryptoRes.ok) {
-                const cryptoData = await cryptoRes.json();
-                const newPrices: Partial<Record<CryptoCurrency, number>> = {};
-                for (const crypto of SUPPORTED_CRYPTOS) {
-                    const coingeckoId = coingeckoIds[crypto.name];
-                    if (cryptoData[coingeckoId] && cryptoData[coingeckoId].usd) {
-                        newPrices[crypto.name] = cryptoData[coingeckoId].usd;
-                    }
-                }
-                newPrices.USDT = 1.00;
-                updateData.prices = newPrices;
-            }
-            
-            if (fiatRes.ok) {
-                const fiatData = await fiatRes.json();
-                if (fiatData.result === 'success') {
-                    updateData.fiatRates = { USD: 1, ...fiatData.rates };
-                }
-            }
-
-            if (Object.keys(updateData).length > 0) {
-                 // Non-blocking update to firestore
-                 setDoc(marketDataRef, updateData, { merge: true }).catch(err => {
-                     console.error("Failed to update price cache:", err);
-                 });
-            }
-
-        } catch (error) {
-            console.error("Error fetching and caching price data:", error);
+      if (marketRes.ok) {
+        const marketData = await marketRes.json();
+        if (marketData.prices && Array.isArray(marketData.prices)) {
+          marketData.prices.forEach((item: { asset_symbol: string; price_in_fiat: number }) => {
+            newPrices[item.asset_symbol as CryptoCurrency] = item.price_in_fiat;
+          });
         }
+      }
+
+      let newFiatRates: Record<string, number> | null = null;
+      if (fiatRes && fiatRes.ok) {
+        const fiatData = await fiatRes.json();
+        if (fiatData?.result === 'success' && fiatData.rates) {
+          newFiatRates = { USD: 1, ...fiatData.rates };
+        }
+      }
+
+      if (Object.keys(newPrices).length > 0) {
+        setPrices((prev) => ({
+          ...prev,
+          ...newPrices,
+          USDT: newPrices.USDT || 1.0,
+        }));
+      }
+
+      if (newFiatRates) {
+        setFiatRates(newFiatRates);
+      }
+    } catch (err) {
+      console.error('Error in PriceProvider fetching market prices:', err);
+    } finally {
+      setIsLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    let isCancelled = false;
+
+    // Initial fetch
+    fetchPrices();
+
+    // 30-second polling interval
+    const interval = setInterval(() => {
+      if (!isCancelled) {
+        fetchPrices();
+      }
+    }, 30000);
+
+    return () => {
+      isCancelled = true;
+      clearInterval(interval);
     };
-    
-    // Fetch immediately on mount
-    fetchAndCachePrices();
-
-    // Then fetch every 30 seconds ("Background Updates")
-    const interval = setInterval(fetchAndCachePrices, 30000); 
-
-    return () => clearInterval(interval);
-  }, [firestore]);
-
+  }, [fetchPrices]);
 
   return (
-    <PriceContext.Provider value={{ prices, fiatRates, isLoading }}>
+    <PriceContext.Provider
+      value={{
+        prices,
+        fiatRates,
+        isLoading,
+        loadingPrice: isLoading,
+        refreshPrices: fetchPrices,
+      }}
+    >
       {children}
     </PriceContext.Provider>
   );
