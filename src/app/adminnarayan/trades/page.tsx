@@ -1,184 +1,96 @@
-'use client';
+import { createAdminClient } from "@/lib/supabase/admin";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { TradeActionButtons } from "./trade-action-buttons";
+import { ArrowLeftRight, ShieldAlert, CheckCircle2, Clock } from "lucide-react";
 
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from '@/components/ui/card';
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@/components/ui/table';
-import { Badge } from '@/components/ui/badge';
-import type { Trade } from '@/lib/types';
-import { cn, toDate } from '@/lib/utils';
-import Link from 'next/link';
-import { Button } from '@/components/ui/button';
-import { useAdminStatus } from '@/hooks/use-admin-status';
-import { Skeleton } from '@/components/ui/skeleton';
-import { useState, useEffect, useMemo } from 'react';
-import { Input } from '@/components/ui/input';
-import { Search } from 'lucide-react';
-import { useRouter } from 'next/navigation';
-import { statusColors } from '@/lib/status-colors';
-import { supabase } from '@/lib/supabase/client';
+export const dynamic = "force-dynamic";
 
-export default function AdminTradesPage() {
-  const router = useRouter();
-  const { isAdmin, isLoading: isAdminLoading } = useAdminStatus();
-  const [trades, setTrades] = useState<Trade[] | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
-  const [searchTerm, setSearchTerm] = useState('');
+export default async function AdminTradesPage() {
+  const adminSupabase = createAdminClient();
 
-  useEffect(() => {
-    if (isAdminLoading) {
-      setIsLoading(true);
-      return;
-    }
-    if (!isAdmin) {
-      setIsLoading(false);
-      return;
-    }
-
-    const fetchTrades = async () => {
-      setIsLoading(true);
-      try {
-        const { data, error } = await supabase
-          .from('trades')
-          .select('*')
-          .order('created_at', { ascending: false });
-
-        if (error) throw error;
-
-        const mapped: Trade[] = (data || []).map((t: any) => ({
-          id: t.id,
-          tradeId: t.trade_id || t.id,
-          buyerId: t.buyer_id,
-          sellerId: t.seller_id,
-          adId: t.ad_id,
-          fiatAmount: Number(t.fiat_amount || 0),
-          fiatCurrency: t.fiat_currency || 'USD',
-          crypto: t.crypto || 'USDT',
-          amount: Number(t.amount || 0),
-          price: Number(t.price || 0),
-          status: t.status || 'created',
-          createdAt: t.created_at || new Date().toISOString(),
-          paymentMethod: t.payment_method || 'Bank Transfer',
-          buyer: {
-            id: t.buyer_id,
-            username: t.buyer_username || 'Buyer',
-            feedbackScore: 100,
-            completedTrades: 0,
-          },
-          seller: {
-            id: t.seller_id,
-            username: t.seller_username || 'Seller',
-            feedbackScore: 100,
-            completedTrades: 0,
-          },
-        }));
-
-        setTrades(mapped);
-      } catch (error) {
-        console.error('Error fetching trades:', error);
-        setTrades([]);
-      } finally {
-        setIsLoading(false);
-      }
-    };
-
-    fetchTrades();
-  }, [isAdmin, isAdminLoading]);
-
-  const filteredTrades = useMemo(() => {
-    if (!trades) return null;
-    if (!searchTerm.trim()) return trades;
-    const lower = searchTerm.toLowerCase();
-    return trades.filter(
-      (t) =>
-        t.tradeId.toLowerCase().includes(lower) ||
-        t.buyer.username.toLowerCase().includes(lower) ||
-        t.seller.username.toLowerCase().includes(lower) ||
-        t.crypto.toLowerCase().includes(lower)
-    );
-  }, [trades, searchTerm]);
+  const { data: trades, error } = await adminSupabase
+    .from("trades")
+    .select(`
+      *,
+      buyer:profiles!buyer_id(full_name, user_id),
+      seller:profiles!seller_id(full_name, user_id)
+    `)
+    .order("created_at", { ascending: false });
 
   return (
-    <>
-      <div className="flex items-center justify-between">
-        <h1 className="text-lg font-semibold md:text-2xl">Trade History</h1>
+    <div className="space-y-6">
+      <div>
+        <h1 className="text-3xl font-bold tracking-tight text-white flex items-center gap-2">
+          <ArrowLeftRight className="w-7 h-7 text-purple-400" />
+          Trades & Escrow Oversight
+        </h1>
+        <p className="text-slate-400">
+          Monitor marketplace transactions, resolve customer disputes, and manage locked escrows.
+        </p>
       </div>
-      <Card>
+
+      <Card className="bg-slate-900 border-slate-800">
         <CardHeader>
-          <CardTitle>All Trades</CardTitle>
-          <CardDescription>A log of all trades that have occurred on the platform.</CardDescription>
-          <div className="relative mt-4">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-            <Input
-              placeholder="Search by Trade ID, buyer, seller, or asset..."
-              className="pl-10"
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-            />
-          </div>
+          <CardTitle className="text-white">Active & Historical Trades ({trades?.length || 0})</CardTitle>
         </CardHeader>
         <CardContent>
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Trade ID</TableHead>
-                <TableHead>Buyer</TableHead>
-                <TableHead>Seller</TableHead>
-                <TableHead>Amount</TableHead>
-                <TableHead>Status</TableHead>
-                <TableHead>Date</TableHead>
-                <TableHead className="text-right">Action</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {isLoading && (
-                <TableRow>
-                  <TableCell colSpan={7} className="text-center">
-                    <Skeleton className="h-4 w-1/4 mx-auto" />
-                  </TableCell>
-                </TableRow>
-              )}
-              {!isLoading &&
-                filteredTrades?.map((trade) => (
-                  <TableRow
-                    key={trade.id}
-                    onClick={() => router.push(`/trade/${trade.id}`)}
-                    className="cursor-pointer"
-                  >
-                    <TableCell className="font-mono text-xs">{trade.tradeId}</TableCell>
-                    <TableCell>{trade.buyer.username}</TableCell>
-                    <TableCell>{trade.seller.username}</TableCell>
-                    <TableCell>
-                      {trade.amount.toFixed(6)} {trade.crypto}
-                    </TableCell>
-                    <TableCell>
-                      <Badge variant="outline" className={cn('capitalize', statusColors[trade.status])}>
-                        {trade.status}
-                      </Badge>
-                    </TableCell>
-                    <TableCell>{toDate(trade.createdAt)?.toLocaleDateString() ?? 'N/A'}</TableCell>
-                    <TableCell className="text-right">
-                      <Button variant="outline" size="sm" asChild onClick={(e) => e.stopPropagation()}>
-                        <Link href={`/trade/${trade.id}`}>View</Link>
-                      </Button>
-                    </TableCell>
-                  </TableRow>
-                ))}
-            </TableBody>
-          </Table>
+          {error ? (
+            <p className="text-sm text-red-400">Failed to load trades: {error.message}</p>
+          ) : !trades || trades.length === 0 ? (
+            <p className="text-sm text-slate-400 py-4 text-center">No trades recorded yet.</p>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-sm text-slate-300">
+                <thead className="border-b border-slate-800 text-slate-400 uppercase text-xs">
+                  <tr>
+                    <th className="pb-3 px-2">Trade ID</th>
+                    <th className="pb-3 px-2">Buyer / Seller</th>
+                    <th className="pb-3 px-2">Amount</th>
+                    <th className="pb-3 px-2">Status</th>
+                    <th className="pb-3 px-2 text-right">Escrow Action</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-800/60">
+                  {trades.map((trade) => (
+                    <tr key={trade.id} className="hover:bg-slate-800/30">
+                      <td className="py-3 px-2 font-mono text-xs text-slate-400">
+                        {trade.id.slice(0, 8)}...
+                      </td>
+                      <td className="py-3 px-2">
+                        <div className="text-xs">
+                          <span className="text-slate-400">B: </span>
+                          <span className="text-white font-medium">{trade.buyer?.full_name || "Unknown"}</span>
+                        </div>
+                        <div className="text-xs">
+                          <span className="text-slate-400">S: </span>
+                          <span className="text-white font-medium">{trade.seller?.full_name || "Unknown"}</span>
+                        </div>
+                      </td>
+                      <td className="py-3 px-2 font-semibold text-emerald-400">
+                        ${Number(trade.amount).toFixed(2)}
+                      </td>
+                      <td className="py-3 px-2">
+                        <span className={`inline-flex items-center gap-1 px-2 py-0.5 text-xs font-semibold rounded-full ${
+                          trade.status === 'completed'
+                            ? 'bg-emerald-950 text-emerald-300 border border-emerald-800'
+                            : trade.status === 'disputed'
+                            ? 'bg-red-950 text-red-300 border border-red-800'
+                            : 'bg-amber-950 text-amber-300 border border-amber-800'
+                        }`}>
+                          {trade.status}
+                        </span>
+                      </td>
+                      <td className="py-3 px-2 text-right">
+                        <TradeActionButtons tradeId={trade.id} status={trade.status} />
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
         </CardContent>
       </Card>
-    </>
+    </div>
   );
 }

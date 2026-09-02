@@ -1,7 +1,9 @@
 "use client";
 
 import { useState } from "react";
-import { toggleUserBanStatus, updateUserBalance } from "./actions";
+import { updateUserBalance } from "./actions";
+import { UserRoleToggle } from "./user-role-toggle";
+import { UserSuspendToggle } from "./user-suspend-toggle";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -17,17 +19,6 @@ export function UserTableClient({ initialProfiles }: { initialProfiles: any[] })
       p.user_id?.toLowerCase().includes(search.toLowerCase()) ||
       p.id?.toLowerCase().includes(search.toLowerCase())
   );
-
-  const handleBanToggle = async (id: string, currentBanStatus: boolean) => {
-    setLoadingId(id);
-    try {
-      await toggleUserBanStatus(id, !currentBanStatus);
-    } catch (err: any) {
-      alert(`Error updating status: ${err.message}`);
-    } finally {
-      setLoadingId(null);
-    }
-  };
 
   const handleBalanceUpdate = async (id: string, currentBalance: number) => {
     const input = prompt("Enter new wallet balance:", currentBalance.toString());
@@ -73,16 +64,22 @@ export function UserTableClient({ initialProfiles }: { initialProfiles: any[] })
                   <div className="text-xs text-muted-foreground font-mono">{user.id}</div>
                 </TableCell>
                 <TableCell>
-                  <Badge variant={user.role === "admin" ? "default" : "outline"}>
-                    {user.role}
-                  </Badge>
+                  <div className="flex items-center gap-2">
+                    <Badge variant={user.role === "admin" ? "default" : "outline"}>
+                      {user.role || "user"}
+                    </Badge>
+                    <UserRoleToggle userId={user.id} currentRole={user.role || "user"} />
+                  </div>
                 </TableCell>
                 <TableCell>
-                  {user.is_banned ? (
-                    <Badge variant="destructive">Banned</Badge>
-                  ) : (
-                    <Badge variant="secondary">Active</Badge>
-                  )}
+                  <div className="flex items-center gap-2">
+                    {user.is_banned ? (
+                      <Badge variant="destructive">Suspended</Badge>
+                    ) : (
+                      <Badge variant="secondary">Active</Badge>
+                    )}
+                    <UserSuspendToggle userId={user.id} isSuspended={!!user.is_banned} />
+                  </div>
                 </TableCell>
                 <TableCell className="font-mono">
                   ${user.wallet_balance?.toFixed(2) || "0.00"}
@@ -95,14 +92,6 @@ export function UserTableClient({ initialProfiles }: { initialProfiles: any[] })
                     onClick={() => handleBalanceUpdate(user.id, user.wallet_balance || 0)}
                   >
                     Adjust Balance
-                  </Button>
-                  <Button
-                    size="sm"
-                    variant={user.is_banned ? "secondary" : "destructive"}
-                    disabled={loadingId === user.id}
-                    onClick={() => handleBanToggle(user.id, !!user.is_banned)}
-                  >
-                    {user.is_banned ? "Unban" : "Ban"}
                   </Button>
                 </TableCell>
               </TableRow>

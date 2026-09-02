@@ -1,5 +1,5 @@
-import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
+import { createServerClient } from "@supabase/ssr";
 
 export async function middleware(request: NextRequest) {
   let response = NextResponse.next({
@@ -17,12 +17,8 @@ export async function middleware(request: NextRequest) {
           return request.cookies.getAll();
         },
         setAll(cookiesToSet) {
-          cookiesToSet.forEach(({ name, value }) =>
-            request.cookies.set(name, value)
-          );
-          response = NextResponse.next({
-            request,
-          });
+          cookiesToSet.forEach(({ name, value }) => request.cookies.set(name, value));
+          response = NextResponse.next({ request });
           cookiesToSet.forEach(({ name, value, options }) =>
             response.cookies.set(name, value, options)
           );
@@ -31,29 +27,49 @@ export async function middleware(request: NextRequest) {
     }
   );
 
-  // Read and validate auth token from request cookies
-  const { data: { user }, error: userError } = await supabase.auth.getUser();
+  const pathname = request.nextUrl.pathname;
+  const isAdminRoute = pathname.startsWith("/adminnarayan");
 
-  const isLoginPage = request.nextUrl.pathname === "/adminnarayan/login";
-  const isAdminRoute = request.nextUrl.pathname.startsWith("/adminnarayan");
+  if (isAdminRoute) {
+    // Allow public access to admin login page
+    if (pathname === "/adminnarayan/login") {
+      return response;
+    }
 
-  // Protect admin routes
-  if (isAdminRoute && !isLoginPage && !user) {
-    console.log(`[MIDDLEWARE REDIRECT] No active session on ${request.nextUrl.pathname}. Redirecting to login.`);
-    return NextResponse.redirect(new URL("/adminnarayan/login", request.url));
-  }
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
 
-  // Prevent logged-in admin from returning to login page
-  if (isLoginPage && user) {
-    console.log(`[MIDDLEWARE REDIRECT] Active user ${user.email} accessed login page. Redirecting to dashboard.`);
-    return NextResponse.redirect(new URL("/adminnarayan/dashboard", request.url));
+    if (!user) {
+      const url = request.nextUrl.clone();
+      url.pathname = "/adminnarayan/login";
+      url.searchParams.set("redirectTo", pathname);
+      return NextResponse.redirect(url);
+    }
+
+    // Robust fetch using primary id matching
+    const { data: profile, error } = await supabase
+      .from("profiles")
+      .select("role, is_suspended")
+      .or(`id.eq.${user.id},user_id.eq.${user.id}`)
+      .limit(1)
+      .maybeSingle();
+
+    // Debug check or fail safe: if role is admin (case-insensitive check) and not suspended, let them through
+    const userRole = profile?.role ? String(profile.role).trim().toLowerCase() : "";
+    const isSuspended = Boolean(profile?.is_suspended);
+
+    if (error || !profile || userRole !== "admin" || isSuspended) {
+      // Redirect home if check fails
+      const url = request.nextUrl.clone();
+      url.pathname = "/";
+      return NextResponse.redirect(url);
+    }
   }
 
   return response;
 }
 
 export const config = {
-  matcher: [
-    "/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)",
-  ],
+  matcher: ["/adminnarayan/:path*"],
 };

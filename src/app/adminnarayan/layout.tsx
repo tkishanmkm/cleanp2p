@@ -1,13 +1,56 @@
 import { ReactNode } from "react";
+import { createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
+import { AdminShell } from "./admin-shell";
 
 export const dynamic = "force-dynamic";
 
-export default function AdminLayout({ children }: { children: ReactNode }) {
-  return (
-    <div className="min-h-screen bg-slate-100 dark:bg-slate-900 text-slate-900 dark:text-slate-100">
-      <main className="w-full min-h-screen">
+export default async function AdminLayout({ children }: { children: ReactNode }) {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+
+  // If no user is logged in, simply render children (e.g. login screen)
+  if (!user) {
+    return (
+      <div className="min-h-screen bg-slate-950 text-slate-100">
         {children}
-      </main>
-    </div>
+      </div>
+    );
+  }
+
+  // Fetch admin profile details & quick counters
+  const adminSupabase = createAdminClient();
+  let adminName: string | undefined;
+  const counts: { disputes?: number; deposits?: number; withdrawals?: number; tickets?: number } = {};
+
+  try {
+    const [profileRes, disputesRes, depositsRes, withdrawalsRes, ticketsRes] = await Promise.allSettled([
+      adminSupabase
+        .from("profiles")
+        .select("full_name, role")
+        .or(`id.eq.${user.id},user_id.eq.${user.id}`)
+        .maybeSingle(),
+      adminSupabase.from("disputes").select("*", { count: "exact", head: true }).eq("status", "open"),
+      adminSupabase.from("deposits").select("*", { count: "exact", head: true }).eq("status", "awaiting_confirmation"),
+      adminSupabase.from("withdrawals").select("*", { count: "exact", head: true }).eq("status", "pending"),
+      adminSupabase.from("support_tickets").select("*", { count: "exact", head: true }).eq("status", "Open"),
+    ]);
+
+    if (profileRes.status === "fulfilled" && profileRes.value.data) {
+      adminName = profileRes.value.data.full_name;
+    }
+
+    if (disputesRes.status === "fulfilled") counts.disputes = disputesRes.value.count ?? 0;
+    if (depositsRes.status === "fulfilled") counts.deposits = depositsRes.value.count ?? 0;
+    if (withdrawalsRes.status === "fulfilled") counts.withdrawals = withdrawalsRes.value.count ?? 0;
+    if (ticketsRes.status === "fulfilled") counts.tickets = ticketsRes.value.count ?? 0;
+  } catch (err) {
+    console.error("[ADMIN LAYOUT STATS FETCH ERROR]:", err);
+  }
+
+  return (
+    <AdminShell adminEmail={user.email} adminName={adminName} counts={counts}>
+      {children}
+    </AdminShell>
   );
 }

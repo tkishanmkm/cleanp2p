@@ -17,7 +17,7 @@ interface BrandingContextType {
 
 const defaultBranding: BrandingConfig = {
   appName: 'P2P Exchange',
-  appLogo: '/logo.png',
+  appLogo: '',
 };
 
 const BrandingContext = createContext<BrandingContextType>({

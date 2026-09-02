@@ -1,12 +1,10 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   /* config options here */
-  experimental: {
-    allowedDevOrigins: [
-      "ais-dev-cmc5ino2azq4y6q6rjzyre-524631324282.asia-southeast1.run.app",
-      "ais-pre-cmc5ino2azq4y6q6rjzyre-524631324282.asia-southeast1.run.app",
-    ],
-  },
+  allowedDevOrigins: [
+    "ais-dev-cmc5ino2azq4y6q6rjzyre-524631324282.asia-southeast1.run.app",
+    "ais-pre-cmc5ino2azq4y6q6rjzyre-524631324282.asia-southeast1.run.app",
+  ],
   typescript: {
     ignoreBuildErrors: true,
   },

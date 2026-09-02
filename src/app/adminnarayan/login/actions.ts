@@ -54,24 +54,14 @@ export async function loginAdminAction(formData: FormData) {
   const adminSupabase = createAdminClient();
   const { data: profile, error: profileError } = await adminSupabase
     .from("profiles")
-    .select("role, user_id, full_name")
-    .or(`id.eq.${authData.user.id},user_id.eq.adam_dam,user_id.eq.${authData.user.id}`)
+    .select("role, is_suspended")
+    .eq("id", authData.user.id)
     .maybeSingle();
 
-  if (profileError) {
-    return { error: `[Profile DB Error]: ${profileError.message}` };
-  }
-
-  if (!profile) {
-    return { 
-      error: `[Access Denied]: No profile record found in public.profiles matching User ID '${authData.user.id}' or 'adam_dam'.` 
-    };
-  }
-
-  if (profile.role !== "admin") {
+  if (profileError || !profile || String(profile.role).trim().toLowerCase() !== "admin" || profile.is_suspended) {
     await supabase.auth.signOut();
     return { 
-      error: `[Role Denied]: User role is '${profile.role}'. Required: 'admin'.` 
+      error: `Access denied: Insufficient privileges or account suspended.` 
     };
   }
 
