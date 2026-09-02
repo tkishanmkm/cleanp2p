@@ -125,9 +125,9 @@ export function AdminSidebar() {
               <Link href={item.href}>
                 <SidebarMenuButton
                   isActive={pathname === item.href}
-                  icon={<item.icon />}
                   tooltip={item.label}
                 >
+                  <item.icon className="mr-2 h-4 w-4 shrink-0" />
                   <span className="flex-grow">{item.label}</span>
                   {item.badge != null && item.badge > 0 && (
                     <Badge variant="destructive" className="ml-auto">
@@ -150,9 +150,9 @@ export function AdminSidebar() {
                 <Link href={item.href}>
                   <SidebarMenuButton
                     isActive={pathname === item.href}
-                    icon={<item.icon />}
                     tooltip={item.label}
                   >
+                    <item.icon className="mr-2 h-4 w-4 shrink-0" />
                     <span className="flex-grow">{item.label}</span>
                   </SidebarMenuButton>
                 </Link>
@@ -174,8 +174,9 @@ export function AdminSidebar() {
         </div>
         <SidebarMenu>
           <SidebarMenuItem>
-            <SidebarMenuButton icon={<LogOut />} tooltip="Logout" onClick={handleLogout}>
-              Logout
+            <SidebarMenuButton tooltip="Logout" onClick={handleLogout}>
+              <LogOut className="mr-2 h-4 w-4 shrink-0" />
+              <span>Logout</span>
             </SidebarMenuButton>
           </SidebarMenuItem>
         </SidebarMenu>

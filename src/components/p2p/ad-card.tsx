@@ -12,6 +12,7 @@ import { cn, toDate } from '@/lib/utils';
 import { BtcLogo, EthLogo, LtcLogo, UsdtLogo, DefaultAvatar } from '@/components/icons';
 import { FlagIcon } from '../ui/flag-icon';
 import { formatDistanceToNow } from 'date-fns';
+import { UserStatusIndicator } from '@/components/user-status';
 import {
   Dialog,
   DialogContent,
@@ -122,11 +123,8 @@ export function AdCard({ ad }: AdCardProps) {
                   <ThumbsDown className="h-3 w-3 text-red-500" /> {adCreator.negativeFeedback || 0}
                 </div>
               </div>
-              <div className="flex items-center gap-2 mt-1">
-                  <div className={cn('h-2 w-2 rounded-full', activity.dotClass)} />
-                  <p className={cn("text-xs", activity.textClass)}>
-                      {activity.text}
-                  </p>
+              <div className="mt-1">
+                <UserStatusIndicator lastActive={adCreator.lastActive} />
               </div>
             </div>
           </div>

@@ -1,7 +1,7 @@
 'use client';
 
-import React, { useState } from 'react';
-import { createClient } from '@/utils/supabase/client';
+import React, { useState, useEffect } from 'react';
+import { supabase } from '@/lib/supabaseClient';
 import { toast } from 'sonner';
 import { 
   Check, 
@@ -319,8 +319,32 @@ const PAYMENT_CATEGORIES = [
 ];
 
 export default function CreateP2PAdPage() {
-  const supabase = createClient();
+  const [user, setUser] = useState<any>(null);
+  const [authLoading, setAuthLoading] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  // 1. Fetch user and subscribe to auth state changes on mount
+  useEffect(() => {
+    const checkUser = async () => {
+      try {
+        const { data: { user: currentUser } } = await supabase.auth.getUser();
+        setUser(currentUser);
+      } catch (err) {
+        console.error('Error fetching auth user:', err);
+      } finally {
+        setAuthLoading(false);
+      }
+    };
+
+    checkUser();
+
+    // Listen for session changes (e.g. token refresh)
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      setUser(session?.user ?? null);
+    });
+
+    return () => subscription.unsubscribe();
+  }, []);
 
   // --- Form State ---
   const [adType, setAdType] = useState<'buy' | 'sell'>('buy');
@@ -333,12 +357,46 @@ export default function CreateP2PAdPage() {
   const [customMethod, setCustomMethod] = useState('');
 
   // Pricing state
+  const [currentMarketPrice, setCurrentMarketPrice] = useState<number>(0);
   const [rateType, setRateType] = useState<'market' | 'fixed'>('market');
   const [ratePercent, setRatePercent] = useState('1.5');
   const [fixedPrice, setFixedPrice] = useState('77805.00');
   const [minAmount, setMinAmount] = useState('100');
   const [maxAmount, setMaxAmount] = useState('5000');
   const [paymentWindow, setPaymentWindow] = useState('30');
+
+  // Fetch Live Market Price on Mount / change
+  useEffect(() => {
+    const fetchMarketPrice = async () => {
+      try {
+        const { data, error } = await supabase
+          .from('crypto_market_prices')
+          .select('price')
+          .eq('coin', crypto || 'USDT')
+          .eq('fiat', fiat.code || 'INR')
+          .single();
+
+        if (data && typeof data.price === 'number') {
+          setCurrentMarketPrice(data.price);
+        } else {
+          // Fallback base values
+          const fallbackBasePrices: Record<string, number> = {
+            BTC: 77800,
+            USDT: 1.0,
+            ETH: 2500,
+            LTC: 85,
+          };
+          const base = fallbackBasePrices[crypto] || 1.0;
+          const fiatMultiplier = fiat.code === 'INR' ? 86.5 : fiat.code === 'EUR' ? 0.92 : fiat.code === 'GBP' ? 0.79 : 1.0;
+          setCurrentMarketPrice(base * fiatMultiplier);
+        }
+      } catch (err) {
+        console.warn('Could not fetch market price from DB:', err);
+      }
+    };
+
+    fetchMarketPrice();
+  }, [crypto, fiat.code]);
 
   // Country & Metadata
   const [targetedCountries, setTargetedCountries] = useState<string[]>([]);
@@ -416,43 +474,61 @@ export default function CreateP2PAdPage() {
     const toastId = toast.loading('Publishing your advertisement...');
 
     try {
-      // 1. Get current active session
-      const { data: { session }, error: sessionError } = await supabase.auth.getSession();
+      // 2. Immediate check against state + fallback re-fetch
+      let activeUser = user;
+      if (!activeUser) {
+        const { data: { user: recheckedUser } } = await supabase.auth.getUser();
+        activeUser = recheckedUser;
+      }
 
-      if (sessionError || !session?.user) {
-        console.error("Auth session error:", sessionError);
-        alert(`Auth Error: No active session found. ${sessionError?.message || ''}`);
-        toast.error(`Auth Error: No active session found. ${sessionError?.message || ''}`, { id: toastId });
+      if (!activeUser) {
+        alert("No active session found! Please refresh or log in again.");
+        toast.error("No active session found! Please refresh or log in again.", { id: toastId });
         setIsSubmitting(false);
         return;
       }
 
-      const userId = session.user.id;
+      const userId = activeUser.id;
       const displayName =
-        session.user.user_metadata?.display_name ||
-        session.user.email?.split('@')[0] ||
+        activeUser.user_metadata?.display_name ||
+        activeUser.email?.split('@')[0] ||
         'Trader';
 
+      // Safe fallback for market price & dynamic pricing
+      const pricingType = rateType === 'fixed' ? 'FIXED' : 'FLOAT';
+      const marketPrice = currentMarketPrice || Number(fixedPrice) || 1.0;
+      const marginPercentage = Number(ratePercent || 0);
+
+      const calculatedPrice = pricingType === 'FLOAT'
+        ? marketPrice * (1 + (marginPercentage / 100))
+        : Number(fixedPrice);
+
       const adPayload = {
-        user_id: userId, // Explicitly attach authenticated user ID
+        user_id: activeUser.id,
+        type: adType.toUpperCase(), // 'BUY' or 'SELL'
+        coin: crypto || 'USDT',
+        fiat: fiat.code || 'INR',
+        payment_methods: Array.isArray(selectedPaymentMethods) && selectedPaymentMethods.length > 0
+          ? selectedPaymentMethods
+          : ['Bank Transfer'], // Must be an Array []
+        pricing_type: pricingType,
+        price: calculatedPrice,
+        min_amount: Number(minAmount),
+        max_amount: Number(maxAmount),
+        status: 'active',
         user_display_name: displayName,
         ad_type: adType,
         crypto: crypto,
         crypto_currency: crypto,
-        fiat: fiat.code,
         fiat_currency: fiat.code,
         rate_type: rateType,
-        pricing_type: rateType,
         price_type: rateType,
         fixed_rate: rateType === 'fixed',
         is_fixed: rateType === 'fixed',
-        rate_percent: rateType === 'market' ? (parseFloat(ratePercent) || 0) : 0,
-        rate_adjustment: rateType === 'market' ? (parseFloat(ratePercent) || 0) : 0,
-        margin: rateType === 'market' ? (parseFloat(ratePercent) || 0) : 0,
-        price: rateType === 'fixed' ? (parseFloat(fixedPrice) || 0) : null,
-        min_amount: parseFloat(minAmount) || 0,
-        max_amount: parseFloat(maxAmount) || 0,
-        payment_methods: selectedPaymentMethods,
+        rate_percent: rateType === 'market' ? marginPercentage : 0,
+        rate_adjustment: rateType === 'market' ? marginPercentage : 0,
+        margin: rateType === 'market' ? marginPercentage : 0,
+        margin_percentage: marginPercentage,
         payment_window: parseInt(paymentWindow, 10) || 30,
         targeted_countries: targetedCountries || [],
         blocked_countries: blockedCountries || [],
@@ -463,7 +539,7 @@ export default function CreateP2PAdPage() {
         min_completed_trades: parseInt(minTrades, 10) || 0,
       };
 
-      // 2. Perform Insert with explicit user_id and detailed error logging
+      // 3. Perform Insert with explicit user_id and detailed error logging
       const { data, error } = await supabase
         .from('p2p_ads')
         .insert([adPayload])
@@ -471,9 +547,9 @@ export default function CreateP2PAdPage() {
 
       if (error) {
         // THIS WILL PRINT THE REAL ERROR IN CONSOLE AND ALERT
-        console.error("Database error creating ad:", error);
-        alert(`Real Database Error [${error.code}]: ${error.message} - ${error.details || error.hint || ''}`);
-        toast.error(`Real Database Error [${error.code}]: ${error.message} - ${error.details || error.hint || ''}`, { id: toastId, duration: 6000 });
+        console.error("Database Insert Error:", error);
+        alert(`[DB Error ${error.code}]: ${error.message} - ${error.details || error.hint || ''}`);
+        toast.error(`[DB Error ${error.code}]: ${error.message}`, { id: toastId, duration: 6000 });
         setIsSubmitting(false);
         return;
       }
@@ -737,7 +813,15 @@ export default function CreateP2PAdPage() {
                   <span className="absolute right-3 top-3 text-xs text-gray-400">%</span>
                 </div>
                 <p className="text-xs text-gray-500 dark:text-gray-400 leading-relaxed">
-                  Your price will float with the market. Current price is approx. $77,871.00.
+                  Your price will float with the market. Current market price is approx.{' '}
+                  <span className="font-semibold text-gray-800 dark:text-gray-200">
+                    {fiat.code} {currentMarketPrice ? currentMarketPrice.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '1.00'}
+                  </span>
+                  . Calculated offer price:{' '}
+                  <span className="font-semibold text-[#6366f1] dark:text-indigo-400">
+                    {fiat.code} {((currentMarketPrice || 1.0) * (1 + (parseFloat(ratePercent) || 0) / 100)).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  </span>
+                  .
                   <br />
                   Set your adjustment percentage (from -50% to 50%). E.g., '1.5' for 1.5% above market.
                 </p>

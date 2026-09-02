@@ -1,4 +1,5 @@
 import type { Metadata } from 'next';
+import { Inter, Source_Code_Pro } from 'next/font/google';
 import './globals.css';
 import { Toaster as RadixToaster } from "@/components/ui/toaster";
 import { Toaster as SonnerToaster } from 'sonner';
@@ -8,6 +9,18 @@ import { NotificationsProvider } from '@/components/notifications-provider';
 import { PriceProvider } from '@/context/price-context';
 import { BrandingProvider } from '@/context/branding-context';
 import { I18nProvider } from '@/context/i18n-context';
+
+const inter = Inter({
+  subsets: ['latin'],
+  display: 'swap',
+  variable: '--font-inter',
+});
+
+const sourceCodePro = Source_Code_Pro({
+  subsets: ['latin'],
+  display: 'swap',
+  variable: '--font-mono',
+});
 
 export const metadata: Metadata = {
   title: 'Paxones - Secure P2P Coin Trading',
@@ -20,14 +33,8 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en" suppressHydrationWarning>
-      <head>
-        <link rel="preconnect" href="https://fonts.googleapis.com" />
-        <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
-        <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
-        <link href="https://fonts.googleapis.com/css2?family=Source+Code+Pro&display=swap" rel="stylesheet" />
-      </head>
-      <body className="font-body antialiased">
+    <html lang="en" className={`${inter.variable} ${sourceCodePro.variable}`} suppressHydrationWarning>
+      <body className={`font-body antialiased ${inter.className}`} suppressHydrationWarning>
         <ThemeProvider
           attribute="class"
           defaultTheme="system"

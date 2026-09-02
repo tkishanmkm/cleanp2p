@@ -1,135 +1,179 @@
 "use client";
 
+import React, { useEffect, useState } from "react";
+import { supabase } from "@/lib/supabase/client";
+import { UserStatusIndicator } from "@/components/user-status";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Loader2 } from "lucide-react";
 import { useAuth } from "@/components/providers/auth-provider";
-import { format, formatDistanceToNow } from 'date-fns';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
-import { Badge } from "@/components/ui/badge";
-import { DefaultAvatar } from "@/components/icons";
-import { User as UserIcon, Calendar, CheckCircle, Clock, DollarSign, UserCheck, ThumbsUp, ThumbsDown, Loader2 } from "lucide-react";
-import { toDate } from "@/lib/utils";
-import { useEffect } from "react";
 import { useRouter } from "next/navigation";
 
-function DetailItem({ icon, label, value }: { icon: React.ReactNode, label: string, value: string | number | undefined}) {
-    if (!value && value !== 0) return null;
-    return (
-        <div className="flex items-start gap-4">
-            <div className="text-primary mt-1">{icon}</div>
-            <div>
-                <p className="text-sm text-muted-foreground">{label}</p>
-                <p className="font-medium">{value}</p>
-            </div>
-        </div>
-    );
-}
+export default function PrivateProfilePage() {
+  const { user: authUser, profile: contextProfile, isUserLoading: isAuthLoading } = useAuth();
+  const router = useRouter();
+  const [profileData, setProfileData] = useState<any>(null);
+  const [loading, setLoading] = useState(true);
 
-export default function ProfilePage() {
-    const { user: authUser, profile, isUserLoading: isAuthLoading } = useAuth();
-    const router = useRouter();
+  useEffect(() => {
+    async function loadCurrentProfile() {
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
 
-    useEffect(() => {
-        if (!isAuthLoading && !authUser) {
-          router.push('/login');
+      const targetUser = user || authUser;
+
+      if (!targetUser) {
+        if (!isAuthLoading) {
+          setLoading(false);
         }
-    }, [authUser, isAuthLoading, router]);
+        return;
+      }
 
-    if (isAuthLoading || (!authUser && typeof window !== 'undefined')) {
-        return (
-             <div className="flex flex-1 items-center justify-center min-h-[300px]">
-                <Loader2 className="h-8 w-8 animate-spin text-primary" />
-             </div>
-        );
+      try {
+        let { data, error } = await supabase
+          .from("user_account_stats")
+          .select("*")
+          .eq("user_id", targetUser.id || targetUser.uid)
+          .maybeSingle();
+
+        if (error || !data) {
+          const { data: profData } = await supabase
+            .from("profiles")
+            .select("*")
+            .eq("id", targetUser.id || targetUser.uid)
+            .maybeSingle();
+
+          if (profData) {
+            data = {
+              user_id: profData.id,
+              username: profData.username || contextProfile?.username || targetUser.email?.split("@")[0] || "User",
+              full_name: profData.full_name || contextProfile?.full_name || "N/A",
+              date_of_birth: profData.dob || profData.date_of_birth || "N/A",
+              member_since: profData.created_at,
+              preferred_currency: profData.preferred_currency || "USD",
+              total_trade_volume: profData.trade_volume || "0.00",
+              completed_trades: profData.completed_trades || 0,
+              positive_feedback: profData.positive_feedback || 0,
+              negative_feedback: profData.negative_feedback || 0,
+              last_active: profData.last_active,
+            };
+          }
+        }
+
+        if (data) {
+          setProfileData(data);
+        } else if (contextProfile) {
+          setProfileData({
+            user_id: authUser?.uid,
+            username: contextProfile.username || "User",
+            full_name: contextProfile.full_name || "N/A",
+            date_of_birth: contextProfile.dob || "N/A",
+            member_since: contextProfile.created_at,
+            preferred_currency: contextProfile.preferred_currency || "USD",
+            total_trade_volume: contextProfile.trade_volume || "0.00",
+            completed_trades: contextProfile.completed_trades || 0,
+            positive_feedback: contextProfile.positive_feedback || 0,
+            negative_feedback: contextProfile.negative_feedback || 0,
+            last_active: contextProfile.last_active,
+          });
+        }
+      } catch (err) {
+        console.error("Error loading profile:", err);
+      } finally {
+        setLoading(false);
+      }
     }
 
-    if (!authUser) {
-        return null;
+    if (!isAuthLoading) {
+      if (!authUser) {
+        router.push("/login");
+      } else {
+        loadCurrentProfile();
+      }
     }
+  }, [authUser, isAuthLoading, contextProfile, router]);
 
-    const user = {
-        id: authUser.uid,
-        userId: profile?.username || authUser.displayName || 'User',
-        fullName: profile?.full_name || profile?.username || authUser.displayName || 'User',
-        email: authUser.email,
-        photoURL: profile?.photo_url || profile?.avatar_url || authUser.photoURL || null,
-        isBanned: profile?.is_banned || false,
-        isOnHold: profile?.is_on_hold || false,
-        tradeVolume: profile?.trade_volume || 0,
-        completedTrades: profile?.completed_trades || 0,
-        positiveFeedback: profile?.positive_feedback || 0,
-        negativeFeedback: profile?.negative_feedback || 0,
-        avgPaymentTime: profile?.avg_payment_time || 0,
-        avgReleaseTime: profile?.avg_release_time || 0,
-        lastTradeAt: profile?.last_trade_at || null,
-        dob: profile?.dob || null,
-        createdAt: profile?.created_at || new Date().toISOString(),
-        preferredCurrency: profile?.preferred_currency || profile?.preferredCurrency || 'USD',
-        oldUserId: profile?.old_username || null,
-    };
-
-    const lastTradeDate = toDate(user.lastTradeAt);
-    const dobDate = toDate(user.dob);
-    const createdDate = toDate(user.createdAt);
-
+  if (loading || isAuthLoading) {
     return (
-        <>
-            <div className="flex items-center mb-6">
-                <h1 className="text-lg font-semibold md:text-2xl">My Profile</h1>
-            </div>
-            <div className="grid gap-6 lg:grid-cols-3">
-                <div className="lg:col-span-1 space-y-6">
-                    <Card>
-                        <CardContent className="pt-6 flex flex-col items-center text-center">
-                            <Avatar className="h-32 w-32 mb-4 border-4 border-secondary shadow-lg">
-                                {user.photoURL ? (
-                                    <AvatarImage src={user.photoURL} alt={user.userId} className="object-cover"/>
-                                ) : (
-                                    <AvatarFallback className="bg-transparent">
-                                        <DefaultAvatar />
-                                    </AvatarFallback>
-                                )}
-                            </Avatar>
-                            <h2 className="text-2xl font-bold">{user.userId}</h2>
-                            <p className="text-muted-foreground">{user.fullName}</p>
-                            <div className="flex gap-2 mt-4">
-                                {user.isBanned && <Badge variant="destructive">Banned</Badge>}
-                                {user.isOnHold && <Badge variant="secondary" className="bg-yellow-500 text-white">On Hold</Badge>}
-                                {!user.isBanned && !user.isOnHold && <Badge className="bg-green-500">Active</Badge>}
-                            </div>
-                        </CardContent>
-                    </Card>
-                     <Card>
-                        <CardHeader>
-                            <CardTitle>Account Stats</CardTitle>
-                        </CardHeader>
-                        <CardContent className="space-y-4">
-                             <DetailItem icon={<DollarSign size={20} />} label="Total Trade Volume" value={`$${(user.tradeVolume || 0).toLocaleString()}`} />
-                             <DetailItem icon={<CheckCircle size={20} />} label="Completed Trades" value={user.completedTrades} />
-                             <DetailItem icon={<ThumbsUp size={20} />} label="Positive Feedback" value={user.positiveFeedback || 0} />
-                             <DetailItem icon={<ThumbsDown size={20} />} label="Negative Feedback" value={user.negativeFeedback || 0} />
-                             <DetailItem icon={<Clock size={20} />} label="Avg. Payment Time" value={`${(user.avgPaymentTime || 0).toFixed(1)} min`} />
-                             <DetailItem icon={<Clock size={20} />} label="Avg. Release Time" value={`${(user.avgReleaseTime || 0).toFixed(1)} min`} />
-                             <DetailItem icon={<Clock size={20} />} label="Last Trade" value={lastTradeDate ? format(lastTradeDate, "PPpp") : 'No trades yet'} />
-                        </CardContent>
-                    </Card>
-                </div>
-                <div className="lg:col-span-2">
-                    <Card>
-                        <CardHeader>
-                            <CardTitle>User Information</CardTitle>
-                            <CardDescription>This information is private and not shared with other traders.</CardDescription>
-                        </CardHeader>
-                        <CardContent className="space-y-6">
-                           <DetailItem icon={<UserIcon size={20} />} label="Full Name" value={user.fullName} />
-                           <DetailItem icon={<UserCheck size={20} />} label="User ID" value={user.userId} />
-                           {user.oldUserId && <DetailItem icon={<UserIcon size={20} />} label="Previous User ID" value={user.oldUserId} />}
-                           <DetailItem icon={<Calendar size={20} />} label="Date of Birth" value={dobDate ? format(dobDate, "LLLL d, yyyy") : 'N/A'} />
-                           <DetailItem icon={<Clock size={20} />} label="Member Since" value={createdDate ? `${format(createdDate, "PP")} (${formatDistanceToNow(createdDate)} ago)` : 'N/A'} />
-                           <DetailItem icon={<DollarSign size={20} />} label="Preferred Currency" value={user.preferredCurrency || 'USD'} />
-                        </CardContent>
-                    </Card>
-                </div>
-            </div>
-        </>
+      <div className="flex justify-center items-center min-h-[60vh]">
+        <Loader2 className="h-8 w-8 animate-spin text-[#5D45F9]" />
+      </div>
     );
+  }
+
+  return (
+    <div className="max-w-4xl mx-auto p-4 sm:p-6 space-y-6">
+      {/* Account Stats */}
+      <Card className="border shadow-sm">
+        <CardHeader className="border-b pb-3">
+          <div className="flex items-center justify-between">
+            <CardTitle className="text-lg font-bold">Account Stats</CardTitle>
+            <UserStatusIndicator lastActive={profileData?.last_active} />
+          </div>
+        </CardHeader>
+        <CardContent className="pt-4 grid grid-cols-2 md:grid-cols-4 gap-4">
+          <div>
+            <span className="text-xs text-muted-foreground">Total Trade Volume</span>
+            <p className="text-lg font-bold">${profileData?.total_trade_volume || "0"}</p>
+          </div>
+          <div>
+            <span className="text-xs text-muted-foreground">Completed Trades</span>
+            <p className="text-lg font-bold">{profileData?.completed_trades || 0}</p>
+          </div>
+          <div>
+            <span className="text-xs text-muted-foreground">Positive Feedback</span>
+            <p className="text-lg font-bold text-emerald-600 dark:text-emerald-400">
+              {profileData?.positive_feedback || 0}
+            </p>
+          </div>
+          <div>
+            <span className="text-xs text-muted-foreground">Negative Feedback</span>
+            <p className="text-lg font-bold text-rose-600 dark:text-rose-400">
+              {profileData?.negative_feedback || 0}
+            </p>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* User Information */}
+      <Card className="border shadow-sm">
+        <CardHeader className="border-b pb-3">
+          <CardTitle className="text-lg font-bold">User Information</CardTitle>
+          <p className="text-xs text-muted-foreground">
+            This information is private and not shared with other traders.
+          </p>
+        </CardHeader>
+        <CardContent className="pt-4 space-y-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <span className="text-xs text-muted-foreground font-medium">Full Name</span>
+              <p className="text-sm font-semibold">{profileData?.full_name || "N/A"}</p>
+            </div>
+            <div>
+              <span className="text-xs text-muted-foreground font-medium">User ID</span>
+              <p className="text-sm font-mono font-bold text-[#5D45F9]">
+                @{profileData?.username || "N/A"}
+              </p>
+            </div>
+            <div>
+              <span className="text-xs text-muted-foreground font-medium">Date of Birth</span>
+              <p className="text-sm font-semibold">{profileData?.date_of_birth || "N/A"}</p>
+            </div>
+            <div>
+              <span className="text-xs text-muted-foreground font-medium">Member Since</span>
+              <p className="text-sm font-semibold">
+                {profileData?.member_since
+                  ? new Date(profileData.member_since).toLocaleDateString()
+                  : "N/A"}
+              </p>
+            </div>
+            <div>
+              <span className="text-xs text-muted-foreground font-medium">Preferred Currency</span>
+              <p className="text-sm font-semibold">{profileData?.preferred_currency || "USD"} </p>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+    </div>
+  );
 }

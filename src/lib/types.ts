@@ -34,6 +34,8 @@ export interface P2PAd {
     photoURL?: string;
     badges?: string[];
     lastActive?: string;
+    isVerified?: boolean;
+    is_verified?: boolean;
   };
   adType: 'buy' | 'sell';
   crypto: CryptoCurrency;

@@ -29,11 +29,14 @@ import { Loader2, Info } from 'lucide-react';
 import { supabase } from '@/lib/supabase/client';
 import { useAuth } from '@/components/providers/auth-provider';
 
+import { USERNAME_REGEX, sanitizeUsername } from '@/lib/utils';
+
 const usernameSchema = z.object({
   newUsername: z
     .string()
-    .min(3, 'Username must be at least 3 characters.')
-    .regex(/^[a-zA-Z0-9_]+$/, 'Username can only contain letters, numbers, and underscores.'),
+    .min(1, 'Username must be at least 1 character.')
+    .max(25, 'Username cannot exceed 25 characters.')
+    .regex(USERNAME_REGEX, 'Username can only contain lowercase letters, numbers, dots (.), and underscores (_).'),
 });
 
 export function ChangeUsernameForm({ user: userData }: { user: User }) {

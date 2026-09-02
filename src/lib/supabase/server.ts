@@ -1,35 +1,32 @@
-import { createServerClient, type CookieOptions } from '@supabase/ssr';
-import { cookies } from 'next/headers';
+import { createServerClient } from "@supabase/ssr";
+import { cookies } from "next/headers";
 import { createClient as createSupabaseClient, type SupabaseClient } from '@supabase/supabase-js';
 
 let serverAdminClient: SupabaseClient | null = null;
 
-/**
- * Creates a server-side Supabase client with cookie context (App Router).
- */
-export async function createClient(): Promise<SupabaseClient> {
-  const cookieHeader = cookies();
-  const cookieStore = typeof (cookieHeader as any)?.then === 'function' ? await cookieHeader : cookieHeader;
+export async function createClient() {
+  const cookieStore = await cookies();
 
-  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL || 'https://placeholder.supabase.co';
-  const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'placeholder-key';
-
-  return createServerClient(supabaseUrl, supabaseAnonKey, {
-    cookies: {
-      getAll() {
-        return cookieStore.getAll();
+  return createServerClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    {
+      cookies: {
+        getAll() {
+          return cookieStore.getAll();
+        },
+        setAll(cookiesToSet) {
+          try {
+            cookiesToSet.forEach(({ name, value, options }) =>
+              cookieStore.set(name, value, options)
+            );
+          } catch {
+            // Set from a Server Component; safe to ignore if middleware handles session updates.
+          }
+        },
       },
-      setAll(cookiesToSet) {
-        try {
-          cookiesToSet.forEach(({ name, value, options }) =>
-            cookieStore.set(name, value, options as CookieOptions)
-          );
-        } catch {
-          // Ignore if called in a context where cookies cannot be mutated
-        }
-      },
-    },
-  });
+    }
+  );
 }
 
 /**

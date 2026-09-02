@@ -26,14 +26,26 @@ export async function POST(req: NextRequest) {
 
     const callerId = userData.user.id;
 
-    // 2. Verify admin role in app_admins table
-    const { data: adminRecord, error: adminError } = await supabaseAdmin
+    // 2. Verify admin role in app_admins table or profiles table
+    const { data: adminRecord } = await supabaseAdmin
       .from('app_admins')
-      .select('role')
+      .select('user_id')
       .eq('user_id', callerId)
       .maybeSingle();
 
-    if (adminError || !adminRecord) {
+    const { data: profileRecord } = await supabaseAdmin
+      .from('profiles')
+      .select('role, is_admin')
+      .eq('id', callerId)
+      .maybeSingle();
+
+    const isAuthorizedAdmin = Boolean(
+      adminRecord ||
+      profileRecord?.role === 'admin' ||
+      profileRecord?.is_admin
+    );
+
+    if (!isAuthorizedAdmin) {
       return NextResponse.json(
         { error: 'Forbidden: Caller is not an authorized administrator.' },
         { status: 403 }

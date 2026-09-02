@@ -1,6 +1,8 @@
 import { supabase, checkSupabaseConfig } from './supabase/client';
 import type { User, Session } from '@supabase/supabase-js';
 
+import { sanitizeUsername } from './utils';
+
 export interface UserProfile {
   id: string;
   username?: string | null;
@@ -169,13 +171,16 @@ export async function signUpWithEmail(
       };
     }
 
+    const resolvedUsername = sanitizeUsername(metadata?.username || email.split('@')[0]);
+    const resolvedDisplayName = metadata?.displayName || metadata?.username || resolvedUsername;
+
     const { data, error } = await supabase.auth.signUp({
       email: email.trim().toLowerCase(),
       password,
       options: {
         data: {
-          username: metadata?.username || email.split('@')[0],
-          display_name: metadata?.displayName || metadata?.username || email.split('@')[0],
+          username: resolvedUsername,
+          display_name: resolvedDisplayName,
         },
       },
     });
@@ -190,8 +195,8 @@ export async function signUpWithEmail(
         await supabase.from('profiles').upsert({
           id: data.user.id,
           email: data.user.email,
-          username: metadata?.username || email.split('@')[0],
-          display_name: metadata?.displayName || metadata?.username || email.split('@')[0],
+          username: resolvedUsername,
+          display_name: resolvedDisplayName,
           role: 'user',
           is_admin: false,
           status: 'active',
@@ -261,18 +266,30 @@ export async function getUserProfile(userId: string): Promise<UserProfile | null
     const { isConfigured } = checkSupabaseConfig();
     if (!isConfigured) return null;
 
-    const { data, error } = await supabase
+    let { data, error } = await supabase
       .from('profiles')
       .select('*')
-      .eq('id', userId)
+      .eq('user_id', userId)
       .maybeSingle();
+
+    if (!data) {
+      const fallback = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('id', userId)
+        .maybeSingle();
+      if (fallback.data) {
+        data = fallback.data;
+        error = null;
+      }
+    }
 
     if (error || !data) {
       return null;
     }
 
     return {
-      id: data.id,
+      id: data.id || data.user_id,
       username: data.username,
       email: data.email,
       display_name: data.display_name || data.username,

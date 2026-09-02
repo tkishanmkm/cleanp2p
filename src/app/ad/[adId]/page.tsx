@@ -1,373 +1,149 @@
-'use client';
-
-import { useParams, useRouter } from "next/navigation";
-import { useAuth } from "@/components/providers/auth-provider";
+import React from "react";
+import { notFound } from "next/navigation";
 import { supabase } from "@/lib/supabase/client";
-import type { P2PAd, User, CryptoCurrency } from "@/lib/types";
-import { useState, useEffect } from "react";
-import { Skeleton } from "@/components/ui/skeleton";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { useToast } from "@/hooks/use-toast";
-import { usePrices } from "@/context/price-context";
-import { initiateTrade } from "@/lib/wallet-api";
-import { cn, toDate } from "@/lib/utils";
-import { formatDistanceToNow } from "date-fns";
-import { Clock, ThumbsUp, X, Loader2, Lock, Award, ArrowLeftRight } from "lucide-react";
-import { BtcLogo, EthLogo, LtcLogo, UsdtLogo } from "@/components/icons";
-import { FlagIcon } from "@/components/ui/flag-icon";
-import { Tooltip, TooltipProvider, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { Label } from "@/components/ui/label";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { UserStatusIndicator } from "@/components/user-status";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { AdDetailTradeAction } from "@/components/p2p/ad-detail-trade-action";
+import Link from "next/link";
+import { ArrowLeft } from "lucide-react";
 
-const CryptoLogo = ({ crypto, className }: { crypto: string; className?: string }) => {
-    switch (crypto) {
-        case 'BTC': return <BtcLogo className={className} />;
-        case 'ETH': return <EthLogo className={className} />;
-        case 'LTC': return <LtcLogo className={className} />;
-        case 'USDT': return <UsdtLogo className={className} />;
-        default: return null;
-    }
-};
+export default async function AdDetailPage({ params }: { params: { adId: string } }) {
+  const { adId } = params;
 
-function StatItem({ icon, value, label }: { icon: React.ReactNode; value: string; label: string }) {
-    return (
-        <div className="flex items-center gap-1.5">
-            {icon}
-            <span className="font-medium">{value}</span>
-            <span className="text-muted-foreground">{label}</span>
-        </div>
-    );
-}
+  if (!adId) {
+    notFound();
+  }
 
-function TradeForm({ ad, adPrice, isForBuyingPage }: { ad: P2PAd; adPrice: number; isForBuyingPage: boolean }) {
-    const { user: authUser } = useAuth();
-    const router = useRouter();
-    const { toast } = useToast();
-    const { fiatRates, isLoading: arePricesLoading } = usePrices();
-    
-    const [fiatAmount, setFiatAmount] = useState('');
-    const [cryptoAmount, setCryptoAmount] = useState('');
-    const [isSubmitting, setIsSubmitting] = useState(false);
-    const [selectedPaymentMethod, setSelectedPaymentMethod] = useState<string>(ad.paymentMethods?.[0] || 'Bank Transfer');
-    
-    useEffect(() => {
-        if (fiatAmount && adPrice > 0 && isForBuyingPage) {
-            setCryptoAmount((parseFloat(fiatAmount) / adPrice).toFixed(8));
-        } else if (cryptoAmount && adPrice > 0 && !isForBuyingPage) {
-            setFiatAmount((parseFloat(cryptoAmount) * adPrice).toFixed(2));
-        }
-    }, [adPrice, isForBuyingPage, fiatAmount, cryptoAmount]);
+  // 1. Try fetching from ads table
+  let { data: ad, error } = await supabase
+    .from("ads")
+    .select(`
+      *,
+      profiles (
+        id,
+        username,
+        full_name,
+        last_active
+      )
+    `)
+    .eq("id", adId)
+    .maybeSingle();
 
-    const onFiatChange = (value: string) => {
-        setFiatAmount(value);
-        if (value && adPrice > 0) {
-            setCryptoAmount((parseFloat(value) / adPrice).toFixed(8));
-        } else {
-            setCryptoAmount('');
-        }
-    };
+  // 2. Fallback to p2p_ads table if not in ads table
+  if (!ad || error) {
+    const { data: p2pAd, error: p2pError } = await supabase
+      .from("p2p_ads")
+      .select("*")
+      .or(`id.eq.${adId},public_ad_id.eq.${adId}`)
+      .maybeSingle();
 
-    const onCryptoChange = (value: string) => {
-        setCryptoAmount(value);
-        if (value && adPrice > 0) {
-            setFiatAmount((parseFloat(value) * adPrice).toFixed(2));
-        } else {
-            setFiatAmount('');
-        }
-    };
-    
-    const handleSubmit = async (e: React.FormEvent) => {
-        e.preventDefault();
-        if (!authUser) {
-             router.push(`/login?redirect=/ad/${ad.id}`);
-             return;
-        }
-        if (!fiatAmount || !cryptoAmount || !ad) return;
-        
-        setIsSubmitting(true);
-        const fiatAmountNum = parseFloat(fiatAmount);
-        const exchangeRate = fiatRates[ad.fiatCurrency] || 1;
-        const fiatAmountInUSD = fiatAmountNum / exchangeRate;
-
-        try {
-            const tradeId = await initiateTrade({
-                adId: ad.id,
-                cryptoAmount: parseFloat(cryptoAmount),
-                fiatAmount: fiatAmountNum,
-                fiatAmountInUSD,
-                paymentMethod: selectedPaymentMethod,
-            });
-            toast({ title: "Trade Initiated!", description: "You are being redirected to the trade room." });
-            router.push(`/trade/${tradeId}`);
-        } catch (error: any) {
-            toast({ variant: 'destructive', title: "Trade Failed", description: error.message || "Could not initiate trade" });
-        } finally {
-            setIsSubmitting(false);
-        }
-    };
-
-    return (
-        <form onSubmit={handleSubmit}>
-            <div className="space-y-4">
-                 <div className="space-y-4">
-                    <div className="space-y-1">
-                        <Label htmlFor="pay-amount" className="text-sm text-muted-foreground">{isForBuyingPage ? 'You pay' : 'You sell'}</Label>
-                        <div className="relative">
-                            <Input 
-                                id="pay-amount"
-                                value={isForBuyingPage ? fiatAmount : cryptoAmount} 
-                                onChange={(e) => isForBuyingPage ? onFiatChange(e.target.value) : onCryptoChange(e.target.value)}
-                                placeholder="0.00" 
-                                className="h-12 pr-24 text-lg" 
-                            />
-                            <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-2">
-                                <Badge variant="secondary">{isForBuyingPage ? ad.fiatCurrency : ad.crypto}</Badge>
-                            </div>
-                        </div>
-                    </div>
-                    <div className="space-y-1">
-                        <Label htmlFor="receive-amount" className="text-sm text-muted-foreground">{isForBuyingPage ? 'You receive' : 'You receive'}</Label>
-                         <div className="relative">
-                            <Input 
-                                id="receive-amount"
-                                value={isForBuyingPage ? cryptoAmount : fiatAmount} 
-                                onChange={(e) => isForBuyingPage ? onCryptoChange(e.target.value) : onFiatChange(e.target.value)}
-                                placeholder="0.00" 
-                                className="h-12 pr-24 text-lg" 
-                            />
-                             <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-2">
-                                <Button type="button" variant="ghost" size="sm" onClick={() => onFiatChange(ad.maxAmount.toString())}>MAX</Button>
-                                <Badge variant="secondary">{isForBuyingPage ? ad.crypto : ad.fiatCurrency}</Badge>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-                <p className="text-xs text-muted-foreground">Range: {ad.minAmount.toLocaleString()} - {ad.maxAmount.toLocaleString()} {ad.fiatCurrency}</p>
-
-                <div className="space-y-1">
-                  <Label>Payment Method</Label>
-                  {ad.paymentMethods?.length > 1 ? (
-                    <Select value={selectedPaymentMethod} onValueChange={setSelectedPaymentMethod}>
-                      <SelectTrigger className="h-12 text-base">
-                        <SelectValue placeholder="Select a payment method" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {ad.paymentMethods.map(pm => (
-                          <SelectItem key={pm} value={pm}>{pm}</SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  ) : (
-                    <div className="flex items-center p-3 text-sm font-medium bg-muted rounded-md h-12">
-                      {ad.paymentMethods?.[0] || 'Bank Transfer'}
-                    </div>
-                  )}
-                </div>
-
-                {ad.offerLabel && <div className="space-y-1 rounded-lg bg-muted/50 p-4">
-                    <p className="text-sm text-muted-foreground">Offer label</p>
-                    <p className="text-sm font-medium">{ad.offerLabel}</p>
-                </div>}
-                
-                {ad.tags && ad.tags.length > 0 && (
-                  <div className="space-y-1 rounded-lg bg-muted/50 p-4">
-                    <p className="text-sm text-muted-foreground">Offer Tags</p>
-                     <div className="flex flex-wrap gap-2">
-                      {ad.tags.map(tag => (
-                        <Badge key={tag} variant="secondary">{tag}</Badge>
-                      ))}
-                    </div>
-                  </div>
-                )}
-
-                <div className="space-y-1 rounded-lg bg-muted/50 p-4">
-                    <p className="text-sm text-muted-foreground">Offer terms</p>
-                    <p className="text-sm font-medium whitespace-pre-wrap">{ad.terms}</p>
-                </div>
-            </div>
-
-            <div className="mt-6 space-y-4">
-                <Button type="submit" size="lg" className="w-full h-12 text-lg" disabled={isSubmitting || arePricesLoading || !fiatAmount || parseFloat(fiatAmount) < ad.minAmount || parseFloat(fiatAmount) > ad.maxAmount}>
-                     {(isSubmitting || arePricesLoading) && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                     {arePricesLoading ? 'Updating rates...' : authUser ? (isForBuyingPage ? 'Buy' : 'Sell') : 'Join & Trade'}
-                </Button>
-                <div className="text-xs text-muted-foreground flex items-center justify-center gap-2">
-                    <Lock className="h-3 w-3" />
-                    Your funds are protected by escrow for a secure trade.
-                </div>
-            </div>
-        </form>
-    );
-}
-
-export default function AdDetailPage() {
-    const params = useParams();
-    const router = useRouter();
-    const { prices, fiatRates, isLoading: arePricesLoading } = usePrices();
-    const adId = Array.isArray(params.adId) ? params.adId[0] : params.adId;
-
-    const [ad, setAd] = useState<P2PAd | null>(null);
-    const [user, setUser] = useState<User | null>(null);
-    const [isLoading, setIsLoading] = useState(true);
-
-    useEffect(() => {
-        async function fetchAdAndUser() {
-            if (!adId) return;
-            setIsLoading(true);
-            try {
-                const { data: adData, error: adError } = await supabase
-                    .from('p2p_ads')
-                    .select('*')
-                    .or(`id.eq.${adId},public_ad_id.eq.${adId}`)
-                    .single();
-
-                if (adError || !adData) {
-                    setIsLoading(false);
-                    return;
-                }
-
-                const mappedAd: P2PAd = {
-                    id: adData.id,
-                    userId: adData.user_id || adData.userId,
-                    publicAdId: adData.public_ad_id || adData.publicAdId || adData.id,
-                    adType: (adData.ad_type || adData.adType || 'sell') as 'buy' | 'sell',
-                    crypto: adData.crypto as CryptoCurrency,
-                    fiatCurrency: adData.fiat_currency || adData.fiatCurrency || 'USD',
-                    rateType: adData.rate_type || adData.rateType || 'market',
-                    fixedRate: adData.fixed_rate ?? adData.fixedRate,
-                    ratePercent: adData.rate_percent ?? adData.ratePercent ?? 0,
-                    minAmount: Number(adData.min_amount ?? adData.minAmount ?? 0),
-                    maxAmount: Number(adData.max_amount ?? adData.maxAmount ?? 0),
-                    paymentMethods: Array.isArray(adData.payment_methods)
-                      ? adData.payment_methods
-                      : Array.isArray(adData.paymentMethods)
-                      ? adData.paymentMethods
-                      : typeof adData.payment_methods === 'string'
-                      ? JSON.parse(adData.payment_methods)
-                      : [],
-                    offerLabel: adData.offer_label || adData.offerLabel,
-                    tags: Array.isArray(adData.tags) ? adData.tags : [],
-                    terms: adData.terms || '',
-                    paymentTimeLimit: Number(adData.payment_time_limit ?? adData.paymentTimeLimit ?? 30),
-                    active: adData.active !== false,
-                    targetedCountries: adData.targeted_countries || adData.targetedCountries || [],
-                    blockedCountries: adData.blocked_countries || adData.blockedCountries || [],
-                    minCompletedTrades: Number(adData.min_completed_trades ?? adData.minCompletedTrades ?? 0),
-                    createdAt: adData.created_at || adData.createdAt,
-                };
-                setAd(mappedAd);
-
-                // Fetch owner profile
-                const targetUserId = mappedAd.userId;
-                const { data: profileData } = await supabase
-                    .from('profiles')
-                    .select('*')
-                    .or(`id.eq.${targetUserId},username.eq.${targetUserId}`)
-                    .maybeSingle();
-
-                const mappedUser: User = {
-                    id: profileData?.id || targetUserId,
-                    userId: profileData?.username || targetUserId,
-                    feedbackScore: profileData?.feedback_score ?? 100,
-                    positiveFeedback: profileData?.positive_feedback ?? 0,
-                    negativeFeedback: profileData?.negative_feedback ?? 0,
-                    completedTrades: profileData?.completed_trades ?? 0,
-                    tradeVolume: profileData?.trade_volume ?? 0,
-                    avgPaymentTime: profileData?.avg_payment_time ?? 0,
-                    avgReleaseTime: profileData?.avg_release_time ?? 0,
-                    lastActive: profileData?.last_active || profileData?.updated_at || new Date().toISOString(),
-                    badges: Array.isArray(profileData?.badges) ? profileData.badges : ['Verified Trader'],
-                    country: profileData?.country || 'US',
-                    isBanned: profileData?.is_banned ?? false,
-                    isOnHold: profileData?.is_on_hold ?? false,
-                };
-                setUser(mappedUser);
-            } catch (err) {
-                console.error('Error fetching ad detail:', err);
-            } finally {
-                setIsLoading(false);
-            }
-        }
-
-        fetchAdAndUser();
-    }, [adId]);
-
-    if (isLoading || arePricesLoading) {
-        return <div className="bg-card p-8 rounded-lg shadow-lg max-w-md w-full"><Skeleton className="h-[500px] w-full" /></div>;
+    if (p2pError || !p2pAd) {
+      notFound();
     }
 
-    if (!ad || !user) {
-        return (
-            <div className="bg-card p-8 rounded-lg shadow-lg max-w-md w-full">
-                <h1 className="text-xl font-bold">Ad Not Found</h1>
-                <p className="text-muted-foreground mt-2">This ad may have been removed or is no longer available.</p>
-                <Button onClick={() => router.back()} className="mt-4">Go Back</Button>
+    const { data: profile } = await supabase
+      .from("profiles")
+      .select("id, username, full_name, last_active")
+      .or(`id.eq.${p2pAd.user_id},username.eq.${p2pAd.user_id}`)
+      .maybeSingle();
+
+    ad = {
+      id: p2pAd.id,
+      user_id: p2pAd.user_id,
+      type: (p2pAd.ad_type || 'SELL').toUpperCase(),
+      asset_symbol: p2pAd.crypto,
+      fiat_symbol: p2pAd.fiat_currency,
+      price: p2pAd.fixed_rate ?? p2pAd.price,
+      total_amount: p2pAd.total_amount ?? p2pAd.max_amount,
+      min_limit: p2pAd.min_amount,
+      max_limit: p2pAd.max_amount,
+      payment_methods: Array.isArray(p2pAd.payment_methods)
+        ? p2pAd.payment_methods
+        : typeof p2pAd.payment_methods === 'string'
+        ? JSON.parse(p2pAd.payment_methods)
+        : [],
+      profiles: profile,
+    };
+  }
+
+  const sellerProfile = Array.isArray(ad.profiles) ? ad.profiles[0] : ad.profiles;
+  const paymentMethodsList = Array.isArray(ad.payment_methods)
+    ? ad.payment_methods.join(", ")
+    : typeof ad.payment_methods === "string"
+    ? ad.payment_methods
+    : "None specified";
+
+  return (
+    <div className="max-w-3xl mx-auto p-4 sm:p-6 space-y-6">
+      <Link
+        href="/buy"
+        className="inline-flex items-center text-sm font-medium text-muted-foreground hover:text-foreground transition-colors"
+      >
+        <ArrowLeft className="w-4 h-4 mr-1.5" />
+        Back to Marketplace
+      </Link>
+
+      <Card>
+        <CardHeader className="border-b pb-4">
+          <div className="flex items-center justify-between">
+            <div>
+              <CardTitle className="text-xl font-bold">
+                {ad.type} {ad.asset_symbol} with {ad.fiat_symbol}
+              </CardTitle>
+              <p className="text-xs text-muted-foreground mt-1">Ad ID: {ad.id}</p>
             </div>
-        );
-    }
-    
-    const marketPriceUsd = prices[ad.crypto] || 0;
-    const exchangeRate = fiatRates[ad.fiatCurrency] || 1;
-    const marketPriceInFiat = marketPriceUsd * exchangeRate;
-    
-    const adPrice = ad.rateType === 'fixed' 
-        ? (ad.fixedRate || marketPriceInFiat)
-        : marketPriceInFiat * (1 + (ad.ratePercent || 0) / 100);
-
-    const pricePremium = marketPriceInFiat > 0 ? (adPrice - marketPriceInFiat) / marketPriceInFiat : 0;
-    const isForBuyingPage = ad.adType === 'sell';
-
-    const priceBadgeClass = isForBuyingPage 
-    ? (pricePremium >= 0 ? 'bg-red-100 text-red-700 dark:bg-red-950 dark:text-red-300' : 'bg-green-100 text-green-700 dark:bg-green-950 dark:text-green-300') 
-    : (pricePremium >= 0 ? 'bg-green-100 text-green-700 dark:bg-green-950 dark:text-green-300' : 'bg-red-100 text-red-700 dark:bg-red-950 dark:text-red-300');
-
-    const lastActiveDate = toDate(user.lastActive);
-    const userBadges = (user.badges || []);
-    const displayedBadges = userBadges.slice(0, 4);
-    const hiddenBadgesCount = userBadges.length - displayedBadges.length;
-    
-    return (
-        <div className="bg-card text-card-foreground p-6 rounded-2xl shadow-lg max-w-md w-full relative">
-            <Button variant="ghost" size="icon" className="absolute top-4 right-4 rounded-full h-8 w-8" onClick={() => router.back()}>
-                <X className="h-5 w-5" />
-            </Button>
-            <div className="space-y-4">
-                <div className="flex items-center gap-2">
-                    {user.country && <FlagIcon countryCode={user.country} className="w-6 h-auto" />}
-                    <h1 className="text-xl font-bold">{user.userId}</h1>
-                    <div className="flex items-center gap-1">
-                        {displayedBadges.map((badge, i) => (
-                           <TooltipProvider key={i}><Tooltip><TooltipTrigger>
-                           <Badge variant="outline" className="p-1">
-                               <Award className="h-3 w-3 text-amber-500" />
-                           </Badge>
-                           </TooltipTrigger><TooltipContent>{badge}</TooltipContent></Tooltip></TooltipProvider>
-                        ))}
-                        {hiddenBadgesCount > 0 && <Badge variant="secondary">+{hiddenBadgesCount} more</Badge>}
-                    </div>
-                </div>
-                <div className="flex items-center gap-4 text-xs flex-wrap">
-                    <StatItem icon={<ThumbsUp className="h-4 w-4 text-green-500"/>} value={`${user.feedbackScore || 100}%`} label="" />
-                    <StatItem icon={<Clock />} value={`${(user.avgReleaseTime || 0).toFixed(1)}m`} label="" />
-                    <StatItem icon={<ArrowLeftRight />} value={(user.completedTrades || 0).toLocaleString()} label="Trades" />
-                    {lastActiveDate && <StatItem icon={<div className="h-2 w-2 rounded-full bg-green-500" />} value={`Seen ${formatDistanceToNow(lastActiveDate)} ago`} label="" />}
-                </div>
-
-                <div className="text-right">
-                    <span className="text-sm text-muted-foreground">Rate: </span>
-                    <CryptoLogo crypto={ad.crypto} className="h-4 w-4 inline-block mx-1" />
-                    <span className="font-bold">{adPrice.toLocaleString(undefined, {style: 'currency', currency: ad.fiatCurrency, minimumFractionDigits: 2})}</span>
-                    {marketPriceInFiat > 0 && (
-                        <Badge className={cn('ml-2 font-semibold', priceBadgeClass)}>
-                            {pricePremium >= 0 ? '+' : ''}{(pricePremium * 100).toFixed(2)}%
-                        </Badge>
-                    )}
-                </div>
-                
-                <TradeForm ad={ad} adPrice={adPrice} isForBuyingPage={isForBuyingPage} />
+            <span
+              className={`px-3 py-1 text-xs font-semibold rounded-full ${
+                ad.type === "BUY" ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300" : "bg-purple-100 text-purple-700 dark:bg-purple-950 dark:text-purple-300"
+              }`}
+            >
+              {ad.type} AD
+            </span>
+          </div>
+        </CardHeader>
+        <CardContent className="pt-6 space-y-6">
+          {/* Advertiser Profile Info */}
+          <div className="flex items-center justify-between p-4 bg-muted/40 rounded-lg">
+            <div>
+              <p className="font-semibold text-base">
+                {sellerProfile?.full_name || sellerProfile?.username || "Trader"}
+              </p>
+              <p className="text-xs text-muted-foreground">@{sellerProfile?.username || "trader"}</p>
             </div>
-        </div>
-    );
+            <UserStatusIndicator lastActive={sellerProfile?.last_active} />
+          </div>
+
+          {/* Ad Details Grid */}
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <span className="text-xs text-muted-foreground">Price</span>
+              <p className="text-lg font-bold text-foreground">
+                {ad.price} {ad.fiat_symbol}
+              </p>
+            </div>
+            <div>
+              <span className="text-xs text-muted-foreground">Total Available</span>
+              <p className="text-lg font-bold text-foreground">
+                {ad.total_amount || ad.max_limit} {ad.asset_symbol}
+              </p>
+            </div>
+            <div>
+              <span className="text-xs text-muted-foreground">Order Limits</span>
+              <p className="text-sm font-semibold text-foreground">
+                {ad.min_limit} - {ad.max_limit} {ad.fiat_symbol}
+              </p>
+            </div>
+            <div>
+              <span className="text-xs text-muted-foreground">Payment Methods</span>
+              <p className="text-sm font-semibold text-foreground">
+                {paymentMethodsList || "None specified"}
+              </p>
+            </div>
+          </div>
+
+          <AdDetailTradeAction ad={ad} />
+        </CardContent>
+      </Card>
+    </div>
+  );
 }
