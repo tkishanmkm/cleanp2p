@@ -2,9 +2,10 @@
 
 import React, { Suspense, useMemo, useState, useEffect, useCallback } from 'react';
 import { useParams } from 'next/navigation';
+import Link from 'next/link';
 import { useAuth } from '@/components/providers/auth-provider';
 import type { P2PAd, Trade, User } from '@/lib/types';
-import { Loader2, Info, MessageSquare } from 'lucide-react';
+import { Loader2, Info, MessageSquare, ShieldAlert } from 'lucide-react';
 import { TradeDetails } from '@/components/trade/trade-details';
 import { TradeChat } from '@/components/trade/trade-chat';
 import { CounterpartyInfoPanel } from '@/components/trade/counterparty-info-panel';
@@ -29,6 +30,7 @@ function TradePageContent() {
 
   const [trade, setTrade] = useState<Trade | null>(null);
   const [isTradeLoading, setIsTradeLoading] = useState(true);
+  const [accessError, setAccessError] = useState<{ message: string; code?: string } | null>(null);
 
   const [opponent, setOpponent] = useState<User | null>(null);
   const [isOpponentLoading, setIsOpponentLoading] = useState(false);
@@ -63,19 +65,23 @@ function TradePageContent() {
   const fetchTrade = useCallback(async () => {
     if (!tradeId) return;
     try {
-      const { data, error } = await supabase
-        .from('trades')
-        .select('*')
-        .or(`id.eq.${tradeId},trade_id.eq.${tradeId}`)
-        .single();
+      // 1. Fetch via backend security guard
+      const res = await fetch(`/api/trades/${encodeURIComponent(tradeId)}`);
+      const json = await res.json();
 
-      if (error) throw error;
-      if (data) {
-        const mapped = mapTradeRecord(data);
+      if (!res.ok) {
+        setAccessError({ message: json.error || 'Access denied', code: json.code });
+        setIsTradeLoading(false);
+        return;
+      }
+
+      if (json.trade) {
+        const mapped = mapTradeRecord(json.trade);
         setTrade(mapped);
+        setAccessError(null);
       }
     } catch (err) {
-      console.error('Error fetching trade:', err);
+      console.error('Error fetching trade via secure route:', err);
     } finally {
       setIsTradeLoading(false);
     }
@@ -244,6 +250,31 @@ function TradePageContent() {
     return (
       <div className="flex flex-1 items-center justify-center h-full">
         <Loader2 className="h-8 w-8 animate-spin text-primary" />
+      </div>
+    );
+  }
+
+  if (accessError) {
+    return (
+      <div className="flex flex-1 items-center justify-center p-6 h-full">
+        <div className="max-w-md w-full bg-card border rounded-2xl p-6 text-center space-y-4 shadow-sm">
+          <div className="w-12 h-12 rounded-full bg-destructive/10 text-destructive flex items-center justify-center mx-auto">
+            <ShieldAlert className="w-6 h-6" />
+          </div>
+          <div>
+            <h2 className="text-lg font-bold">Access Restricted</h2>
+            <p className="text-sm text-muted-foreground mt-1">{accessError.message}</p>
+          </div>
+          {accessError.code === 'UNAUTHENTICATED' ? (
+            <Button asChild className="w-full">
+              <Link href="/login">Sign In</Link>
+            </Button>
+          ) : (
+            <Button asChild variant="outline" className="w-full">
+              <Link href="/dashboard">Back to Dashboard</Link>
+            </Button>
+          )}
+        </div>
       </div>
     );
   }

@@ -23,6 +23,8 @@ import {
   Loader2,
   Copy,
   Shield,
+  ArrowDownToLine,
+  ArrowUpFromLine,
 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { BtcLogo, EthLogo, LtcLogo, UsdtLogo } from '@/components/icons';
@@ -72,49 +74,59 @@ export default function AdminWalletsPage() {
 
   const fetchMetrics = async () => {
     try {
-      const { data, error } = await getAdminWalletOverview();
+      // 1. Fetch from comprehensive admin wallets API
+      const res = await fetch("/api/admin/wallets");
+      const json = await res.json();
+      if (json.success && json.metrics) {
+        const m = json.metrics;
+        setMetrics({
+          totalWallets: m.walletsAndCustody?.totalUserWallets || 0,
+          totalBalances: {
+            BTC: {
+              available: m.systemBalances?.BTC?.user_available || 0,
+              locked_escrow: m.systemBalances?.BTC?.escrow_locked || 0,
+              locked_withdrawal: 0,
+            },
+            ETH: {
+              available: m.systemBalances?.ETH?.user_available || 0,
+              locked_escrow: m.systemBalances?.ETH?.escrow_locked || 0,
+              locked_withdrawal: 0,
+            },
+            LTC: {
+              available: m.systemBalances?.LTC?.user_available || 0,
+              locked_escrow: m.systemBalances?.LTC?.escrow_locked || 0,
+              locked_withdrawal: 0,
+            },
+            USDT: {
+              available: m.systemBalances?.USDT?.user_available || 0,
+              locked_escrow: m.systemBalances?.USDT?.escrow_locked || 0,
+              locked_withdrawal: 0,
+            },
+          },
+          provisioningQueue: {
+            queued: 0,
+            processing: 0,
+            completed: m.walletsAndCustody?.totalUserWallets || 0,
+            failed: 0,
+            total_users: m.walletsAndCustody?.totalUserWallets || 0,
+            provisioned_wallets: m.walletsAndCustody?.totalUserWallets || 0,
+          },
+          platformWallets: m.walletsAndCustody?.platformWallets || [],
+          // Attach full extended metrics
+          ...m,
+        } as any);
+        setLoading(false);
+        setRefreshing(false);
+        return;
+      }
+    } catch (apiErr) {
+      console.warn("API wallets fetch fallback:", apiErr);
+    }
+
+    try {
+      const { data } = await getAdminWalletOverview();
       if (data && data.totalWallets > 0) {
         setMetrics(data);
-      } else {
-        const { data: usersData } = await supabase
-          .from('profiles')
-          .select('id, username, is_admin, role, btc_balance, eth_balance, ltc_balance, usdt_balance');
-
-        if (usersData) {
-          const regularUsers = usersData.filter((u: any) => !u.is_admin && u.role !== 'admin');
-          const totalUsers = regularUsers.length;
-
-          let totalBTC = 0,
-            totalETH = 0,
-            totalLTC = 0,
-            totalUSDT = 0;
-
-          regularUsers.forEach((u: any) => {
-            totalBTC += Number(u.btc_balance || 0);
-            totalETH += Number(u.eth_balance || 0);
-            totalLTC += Number(u.ltc_balance || 0);
-            totalUSDT += Number(u.usdt_balance || 0);
-          });
-
-          setMetrics((prev) => ({
-            ...prev,
-            totalWallets: totalUsers,
-            totalBalances: {
-              BTC: { available: totalBTC, locked_escrow: 0, locked_withdrawal: 0 },
-              ETH: { available: totalETH, locked_escrow: 0, locked_withdrawal: 0 },
-              LTC: { available: totalLTC, locked_escrow: 0, locked_withdrawal: 0 },
-              USDT: { available: totalUSDT, locked_escrow: 0, locked_withdrawal: 0 },
-            },
-            provisioningQueue: {
-              queued: 0,
-              processing: 0,
-              completed: totalUsers,
-              failed: 0,
-              total_users: totalUsers,
-              provisioned_wallets: totalUsers,
-            },
-          }));
-        }
       }
     } catch (err) {
       console.error('Error fetching admin wallet metrics:', err);
@@ -239,6 +251,7 @@ export default function AdminWalletsPage() {
       <Tabs defaultValue="overview" value={activeTab} onValueChange={setActiveTab} className="space-y-4">
         <TabsList>
           <TabsTrigger value="overview">System Balances</TabsTrigger>
+          <TabsTrigger value="deposits-withdrawals">Total Deposits & Withdrawals</TabsTrigger>
           <TabsTrigger value="provisioning">Provisioning Queue</TabsTrigger>
           <TabsTrigger value="custody">Platform Custody Vaults</TabsTrigger>
         </TabsList>
@@ -247,9 +260,9 @@ export default function AdminWalletsPage() {
         <TabsContent value="overview" className="space-y-4">
           <Card>
             <CardHeader>
-              <CardTitle>Aggregated User Balances</CardTitle>
+              <CardTitle>Aggregated System & User Balances</CardTitle>
               <CardDescription>
-                Consolidated available and locked escrow balances across all platform users.
+                Consolidated available user funds, locked escrow balances, and platform custody across all cryptocurrencies.
               </CardDescription>
             </CardHeader>
             <CardContent>
@@ -258,13 +271,14 @@ export default function AdminWalletsPage() {
                   <Loader2 className="h-6 w-6 animate-spin text-primary" />
                 </div>
               ) : (
-                <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-                  {(['BTC', 'ETH', 'USDT', 'LTC'] as const).map((asset) => {
-                    const bal = metrics.totalBalances[asset] || {
+                <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
+                  {(['BTC', 'ETH', 'USDT', 'LTC', 'TRX'] as const).map((asset) => {
+                    const bal = (metrics.totalBalances as any)?.[asset] || {
                       available: 0,
                       locked_escrow: 0,
                       locked_withdrawal: 0,
                     };
+                    const isUsdtOrTrx = asset === 'USDT' || asset === 'TRX';
                     return (
                       <div key={asset} className="flex flex-col p-4 border rounded-xl bg-card">
                         <div className="flex items-center justify-between mb-3">
@@ -276,28 +290,28 @@ export default function AdminWalletsPage() {
                         </div>
                         <div className="space-y-1.5 text-sm">
                           <div className="flex justify-between">
-                            <span className="text-muted-foreground">Available:</span>
-                            <span className="font-mono font-medium">
-                              {bal.available.toFixed(asset === 'USDT' ? 2 : 6)}
+                            <span className="text-muted-foreground text-xs">Available:</span>
+                            <span className="font-mono font-medium text-xs">
+                              {Number(bal.available || 0).toFixed(isUsdtOrTrx ? 2 : 6)}
                             </span>
                           </div>
                           <div className="flex justify-between">
-                            <span className="text-muted-foreground">In Escrow:</span>
-                            <span className="font-mono font-medium text-amber-500">
-                              {bal.locked_escrow.toFixed(asset === 'USDT' ? 2 : 6)}
+                            <span className="text-muted-foreground text-xs">In Escrow:</span>
+                            <span className="font-mono font-medium text-amber-500 text-xs">
+                              {Number(bal.locked_escrow || 0).toFixed(isUsdtOrTrx ? 2 : 6)}
                             </span>
                           </div>
                           <div className="flex justify-between">
-                            <span className="text-muted-foreground">In Withdrawal:</span>
-                            <span className="font-mono font-medium text-blue-500">
-                              {bal.locked_withdrawal.toFixed(asset === 'USDT' ? 2 : 6)}
+                            <span className="text-muted-foreground text-xs">In Withdrawal:</span>
+                            <span className="font-mono font-medium text-blue-500 text-xs">
+                              {Number(bal.locked_withdrawal || 0).toFixed(isUsdtOrTrx ? 2 : 6)}
                             </span>
                           </div>
                           <div className="pt-2 border-t flex justify-between font-semibold">
-                            <span>Total:</span>
-                            <span className="font-mono">
-                              {(bal.available + bal.locked_escrow + bal.locked_withdrawal).toFixed(
-                                asset === 'USDT' ? 2 : 6
+                            <span className="text-xs">Total User:</span>
+                            <span className="font-mono text-xs text-emerald-400">
+                              {(Number(bal.available || 0) + Number(bal.locked_escrow || 0) + Number(bal.locked_withdrawal || 0)).toFixed(
+                                isUsdtOrTrx ? 2 : 6
                               )}
                             </span>
                           </div>
@@ -309,6 +323,97 @@ export default function AdminWalletsPage() {
               )}
             </CardContent>
           </Card>
+        </TabsContent>
+
+        {/* Tab: Total Deposits & Withdrawals */}
+        <TabsContent value="deposits-withdrawals" className="space-y-4">
+          <div className="grid gap-4 md:grid-cols-2">
+            {/* Total Deposits Card */}
+            <Card>
+              <CardHeader className="pb-3">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <CardTitle className="text-base flex items-center gap-2 text-emerald-400">
+                      <ArrowDownToLine className="w-5 h-5" />
+                      Total System Deposits
+                    </CardTitle>
+                    <CardDescription>
+                      Cumulative confirmed deposit counts and volumes
+                    </CardDescription>
+                  </div>
+                  <Badge className="bg-emerald-950 text-emerald-400 border border-emerald-800">
+                    {(metrics as any).totalDeposits?.totalCount || 0} Transactions
+                  </Badge>
+                </div>
+              </CardHeader>
+              <CardContent>
+                <div className="divide-y divide-border">
+                  {(['BTC', 'ETH', 'USDT', 'LTC', 'TRX'] as const).map((crypto) => {
+                    const cData = (metrics as any).totalDeposits?.byCurrency?.[crypto] || { count: 0, volume: 0 };
+                    return (
+                      <div key={crypto} className="py-2.5 flex items-center justify-between">
+                        <div className="flex items-center gap-2.5">
+                          <CryptoIconBadge name={crypto} className="h-5 w-5" />
+                          <div>
+                            <p className="font-semibold text-sm">{crypto}</p>
+                            <p className="text-[11px] text-muted-foreground">{cData.count} deposits recorded</p>
+                          </div>
+                        </div>
+                        <div className="text-right font-mono">
+                          <p className="font-bold text-emerald-400 text-sm">
+                            +{Number(cData.volume || 0).toFixed(crypto === 'USDT' || crypto === 'TRX' ? 2 : 6)} {crypto}
+                          </p>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </CardContent>
+            </Card>
+
+            {/* Total Withdrawals Card */}
+            <Card>
+              <CardHeader className="pb-3">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <CardTitle className="text-base flex items-center gap-2 text-purple-400">
+                      <ArrowUpFromLine className="w-5 h-5" />
+                      Total System Withdrawals
+                    </CardTitle>
+                    <CardDescription>
+                      Cumulative processed payout counts and volumes
+                    </CardDescription>
+                  </div>
+                  <Badge className="bg-purple-950 text-purple-400 border border-purple-800">
+                    {(metrics as any).totalWithdrawals?.totalCount || 0} Transactions
+                  </Badge>
+                </div>
+              </CardHeader>
+              <CardContent>
+                <div className="divide-y divide-border">
+                  {(['BTC', 'ETH', 'USDT', 'LTC', 'TRX'] as const).map((crypto) => {
+                    const wData = (metrics as any).totalWithdrawals?.byCurrency?.[crypto] || { count: 0, volume: 0 };
+                    return (
+                      <div key={crypto} className="py-2.5 flex items-center justify-between">
+                        <div className="flex items-center gap-2.5">
+                          <CryptoIconBadge name={crypto} className="h-5 w-5" />
+                          <div>
+                            <p className="font-semibold text-sm">{crypto}</p>
+                            <p className="text-[11px] text-muted-foreground">{wData.count} withdrawals processed</p>
+                          </div>
+                        </div>
+                        <div className="text-right font-mono">
+                          <p className="font-bold text-purple-400 text-sm">
+                            -{Number(wData.volume || 0).toFixed(crypto === 'USDT' || crypto === 'TRX' ? 2 : 6)} {crypto}
+                          </p>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </CardContent>
+            </Card>
+          </div>
         </TabsContent>
 
         {/* Tab 2: Provisioning Queue */}

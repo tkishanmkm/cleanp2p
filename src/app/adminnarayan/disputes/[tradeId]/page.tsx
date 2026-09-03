@@ -1,11 +1,24 @@
 "use client";
 
 import React, { useState, useEffect, use } from "react";
+import { useParams } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 
-export default function AdminDisputeModeratorPage({ params }: { params: Promise<{ tradeId: string }> }) {
-  const resolvedParams = use(params);
-  const tradeId = resolvedParams.tradeId;
+export default function AdminDisputeModeratorPage({ params }: { params?: Promise<{ tradeId: string }> | { tradeId: string } }) {
+  const routeParams = useParams();
+  let resolvedTradeId = "";
+
+  if (params) {
+    if (typeof (params as any)?.then === "function") {
+      try {
+        resolvedTradeId = (use(params as Promise<{ tradeId: string }>) as any)?.tradeId || "";
+      } catch {}
+    } else if (typeof params === "object") {
+      resolvedTradeId = (params as any)?.tradeId || "";
+    }
+  }
+
+  const tradeId = resolvedTradeId || (routeParams?.tradeId as string) || "";
 
   const supabase = createClient();
   const [trade, setTrade] = useState<any>(null);
@@ -51,6 +64,26 @@ export default function AdminDisputeModeratorPage({ params }: { params: Promise<
   }
 
   async function fetchTradeAndChat() {
+    if (!tradeId) return;
+
+    try {
+      const res = await fetch(`/api/admin/trades/${encodeURIComponent(tradeId)}`);
+      const data = await res.json();
+      if (data.success && data.trade) {
+        setTrade(data.trade);
+        setMessages(data.messages || []);
+        const alreadyJoined = (data.messages || []).some(
+          (m: any) =>
+            m.message?.includes("Paxones Moderator Joined") ||
+            (m.is_system_message && m.message?.includes("Moderator"))
+        );
+        if (alreadyJoined) setHasJoined(true);
+        return;
+      }
+    } catch (err) {
+      console.warn("API dispute fetch fallback:", err);
+    }
+
     // 1. Fetch trade details with buyer and seller info
     const { data: tradeData, error } = await supabase
       .from("trades")
@@ -109,25 +142,30 @@ export default function AdminDisputeModeratorPage({ params }: { params: Promise<
   async function handleJoinDispute() {
     if (!adminEmail) return alert("Admin email not found in active session.");
 
+    try {
+      const res = await fetch(`/api/admin/trades/${encodeURIComponent(tradeId)}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "join", adminEmail }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        setHasJoined(true);
+        fetchTradeAndChat();
+        return;
+      }
+    } catch (err) {
+      console.warn("API join fallback:", err);
+    }
+
     const { data: { session } } = await supabase.auth.getSession();
     const senderId = session?.user?.id || "00000000-0000-0000-0000-000000000000";
 
-    const { error } = await supabase.from("trade_chat_messages").insert({
+    await supabase.from("trade_chat_messages").insert({
       trade_id: tradeId,
       sender_id: senderId,
-      sender_email: adminEmail,
-      is_system_message: true,
-      message: "Paxones Moderator Joined the Dispute",
+      message: "Paxones Moderator joined the trade.",
     });
-
-    if (error) {
-      // Resilient fallback without optional schema fields
-      await supabase.from("trade_chat_messages").insert({
-        trade_id: tradeId,
-        sender_id: senderId,
-        message: "Paxones Moderator Joined the Dispute",
-      });
-    }
 
     setHasJoined(true);
     fetchTradeAndChat();
@@ -137,27 +175,30 @@ export default function AdminDisputeModeratorPage({ params }: { params: Promise<
     e.preventDefault();
     if (!newMessage.trim()) return;
 
+    try {
+      const res = await fetch(`/api/admin/trades/${encodeURIComponent(tradeId)}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "message", message: newMessage.trim(), adminEmail }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        setNewMessage("");
+        fetchTradeAndChat();
+        return;
+      }
+    } catch (err) {
+      console.warn("API message fallback:", err);
+    }
+
     const { data: { session } } = await supabase.auth.getSession();
     const senderId = session?.user?.id || "00000000-0000-0000-0000-000000000000";
 
-    const msgText = `[MODERATOR]: ${newMessage}`;
-
-    const { error } = await supabase.from("trade_chat_messages").insert({
+    await supabase.from("trade_chat_messages").insert({
       trade_id: tradeId,
       sender_id: senderId,
-      sender_email: adminEmail,
-      is_system_message: false,
-      message: msgText,
+      message: newMessage.trim(),
     });
-
-    if (error) {
-      // Resilient fallback without optional schema fields
-      await supabase.from("trade_chat_messages").insert({
-        trade_id: tradeId,
-        sender_id: senderId,
-        message: msgText,
-      });
-    }
 
     setNewMessage("");
     fetchTradeAndChat();

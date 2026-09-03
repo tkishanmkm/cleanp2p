@@ -57,6 +57,7 @@ import { usePrices } from "@/context/price-context";
 import { useEffect, useState, useMemo } from "react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Loader2, Wallet, Edit, Search, Globe, Landmark, CreditCard, Smartphone, Car } from "lucide-react";
+import { calculateMinimumFiatAmount, BASE_PLATFORM_USD_MINIMUM } from "@/lib/currency";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
 import { FlagIcon } from "../ui/flag-icon";
 import { Label } from "../ui/label";
@@ -288,6 +289,10 @@ export function CreateAdForm({ ad }: CreateAdFormProps) {
     return marketPriceUsd * exchangeRate;
   }, [watchedCrypto, watchedFiat, prices, fiatRates]);
 
+  const dynamicPlatformMin = useMemo(() => {
+    return calculateMinimumFiatAmount(BASE_PLATFORM_USD_MINIMUM, watchedFiat || 'USD', fiatRates as any);
+  }, [watchedFiat, fiatRates]);
+
   const hasPositiveMarketPrice = currentMarketPriceInFiat > 0;
 
   // Pre-fill defaults only when rateType actively switches or initially empty
@@ -353,6 +358,18 @@ export function CreateAdForm({ ad }: CreateAdFormProps) {
     }
     if (balanceError) {
       toast({ variant: "destructive", title: "Cannot Create Ad", description: "Please resolve the balance issue first." });
+      return;
+    }
+    if (data.minAmount < dynamicPlatformMin) {
+      form.setError('minAmount', {
+        type: 'manual',
+        message: `Minimum amount must be at least ${dynamicPlatformMin} ${data.fiatCurrency} (converted from $${BASE_PLATFORM_USD_MINIMUM} USD).`,
+      });
+      toast({
+        variant: "destructive",
+        title: "Minimum Amount Not Met",
+        description: `The minimum trade amount is ${dynamicPlatformMin} ${data.fiatCurrency} ($${BASE_PLATFORM_USD_MINIMUM} USD equivalent).`,
+      });
       return;
     }
 
@@ -683,8 +700,10 @@ export function CreateAdForm({ ad }: CreateAdFormProps) {
                 render={({ field }) => (
                   <FormItem>
                     <FormLabel>Minimum Trade Amount</FormLabel>
-                    <Input type="number" placeholder="100" {...field} />
-                    <FormDescription>In your selected fiat currency.</FormDescription>
+                    <Input type="number" placeholder={String(dynamicPlatformMin)} {...field} />
+                    <FormDescription>
+                      Minimum allowed: {dynamicPlatformMin} {watchedFiat || 'USD'} ($${BASE_PLATFORM_USD_MINIMUM} USD equivalent).
+                    </FormDescription>
                     <FormMessage />
                   </FormItem>
                 )}

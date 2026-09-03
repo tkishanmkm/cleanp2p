@@ -49,7 +49,19 @@ export default function AdminUsersPage() {
 
   const fetchUsers = useCallback(async () => {
     setLoading(true);
-    // 1. Fetch profiles
+    try {
+      const res = await fetch(`/api/admin/users?q=${encodeURIComponent(searchQuery)}`);
+      const data = await res.json();
+      if (data.success && data.users) {
+        setUsers(data.users);
+        setLoading(false);
+        return;
+      }
+    } catch (apiErr) {
+      console.warn("API users fetch fallback to client Supabase:", apiErr);
+    }
+
+    // Client fallback
     const { data: profs, error } = await supabase
       .from("profiles")
       .select("*")
@@ -61,7 +73,6 @@ export default function AdminUsersPage() {
       return;
     }
 
-    // 2. Fetch wallets separately to avoid schema relationship embed error
     const { data: wData } = await supabase.from("wallets").select("*");
 
     const walletMap = new Map<string, any[]>();
@@ -78,7 +89,7 @@ export default function AdminUsersPage() {
 
     setUsers(combined);
     setLoading(false);
-  }, [supabase]);
+  }, [searchQuery, supabase]);
 
   useEffect(() => {
     fetchAdminSession();
@@ -89,10 +100,6 @@ export default function AdminUsersPage() {
   async function handleAdjustBalance(e: React.FormEvent) {
     e.preventDefault();
     if (!selectedUser) return;
-    if (!adminEmail) {
-      alert("Admin session not found. Please re-login.");
-      return;
-    }
 
     const numAmount = parseFloat(amount);
     if (isNaN(numAmount) || numAmount <= 0) {
@@ -103,48 +110,25 @@ export default function AdminUsersPage() {
     setActionLoading(true);
 
     try {
-      // 1. Execute DB RPC
-      const { data, error } = await supabase.rpc("admin_adjust_balance", {
-        p_admin_email: adminEmail,
-        p_target_user_id: selectedUser.id,
-        p_currency: currency,
-        p_action: action,
-        p_amount: numAmount,
-      });
-
-      if (error) {
-        throw new Error(error.message);
-      }
-
-      // 2. Record transaction in wallet_transactions table
-      const finalBalance = data?.new_balance;
-      const note = balanceReason.trim() || `Admin manual ${action} by ${adminEmail}`;
-
-      await supabase.from("wallet_transactions").insert({
-        user_id: selectedUser.id,
-        tx_type: action === "add" ? "credit" : "debit",
-        asset_symbol: currency,
-        amount: numAmount,
-        status: "completed",
-        tx_hash: `ADMIN_ADJ:${action.toUpperCase()}:${note}`,
-      });
-
-      // 3. Update audit log details if needed
-      await supabase.from("admin_audit_logs").insert({
-        admin_email: adminEmail,
-        action: "ADJUST_BALANCE",
-        target_user_id: selectedUser.id,
-        details: {
+      const res = await fetch("/api/admin/adjust-balance", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          userId: selectedUser.id,
           currency,
           action,
           amount: numAmount,
-          reason: note,
-          new_balance: finalBalance,
-          date: new Date().toISOString(),
-        },
+          reason: balanceReason.trim(),
+          adminEmail,
+        }),
       });
 
-      alert(`Balance successfully adjusted! New ${currency} Balance: ${finalBalance ?? "Updated"}`);
+      const data = await res.json();
+      if (!data.success) {
+        throw new Error(data.error || "Adjustment failed.");
+      }
+
+      alert(`Balance successfully adjusted! New ${currency} Balance: ${data.new_balance ?? "Updated"}`);
       closeModal();
       fetchUsers();
     } catch (err: any) {
@@ -160,42 +144,21 @@ export default function AdminUsersPage() {
     setActionLoading(true);
 
     try {
-      const isBanned = newStatus === "Banned";
-      const isSuspended = newStatus === "Suspended";
-      const isRestricted = newStatus === "Restricted";
-
-      const updatePayload: any = {
-        status: newStatus,
-        is_banned: isBanned,
-        is_suspended: isSuspended,
-        ban_reason: (isBanned || isSuspended || isRestricted) ? reason : null,
-      };
-
-      if (isBanned) {
-        updatePayload.banned_at = new Date().toISOString();
-      } else {
-        updatePayload.banned_at = null;
-      }
-
-      const { error } = await supabase
-        .from("profiles")
-        .update(updatePayload)
-        .eq("id", selectedUser.id);
-
-      if (error) throw new Error(error.message);
-
-      // Audit log
-      await supabase.from("admin_audit_logs").insert({
-        admin_email: adminEmail,
-        action: `USER_STATUS_${newStatus.toUpperCase()}`,
-        target_user_id: selectedUser.id,
-        details: {
-          previous_status: selectedUser.status,
-          new_status: newStatus,
+      const res = await fetch(`/api/admin/users/${encodeURIComponent(selectedUser.id)}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "update_status",
+          status: newStatus,
           reason: reason || "Admin updated status",
-          date: new Date().toISOString(),
-        },
+          adminEmail,
+        }),
       });
+
+      const data = await res.json();
+      if (!data.success) {
+        throw new Error(data.error || "Failed to update user status.");
+      }
 
       alert(`User status successfully updated to ${newStatus}`);
       closeModal();
@@ -221,27 +184,20 @@ export default function AdminUsersPage() {
 
     setActionLoading(true);
     try {
-      const { error } = await supabase
-        .from("profiles")
-        .update({
+      const res = await fetch(`/api/admin/users/${encodeURIComponent(selectedUser.id)}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "update_role",
           role: newRole,
-          is_admin_account: newRole === "admin",
-        })
-        .eq("id", selectedUser.id);
-
-      if (error) throw new Error(error.message);
-
-      // Audit log
-      await supabase.from("admin_audit_logs").insert({
-        admin_email: adminEmail,
-        action: newRole === "admin" ? "MAKE_ADMIN" : "REMOVE_ADMIN",
-        target_user_id: selectedUser.id,
-        details: {
-          target_email: selectedUser.email,
-          new_role: newRole,
-          date: new Date().toISOString(),
-        },
+          adminEmail,
+        }),
       });
+
+      const data = await res.json();
+      if (!data.success) {
+        throw new Error(data.error || "Failed to update role.");
+      }
 
       alert(`Successfully updated role to ${newRole.toUpperCase()}`);
       closeModal();

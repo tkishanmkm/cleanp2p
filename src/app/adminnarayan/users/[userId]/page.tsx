@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect, use, useCallback } from "react";
 import Link from "next/link";
+import { useParams } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { 
   User, 
@@ -21,12 +22,28 @@ import {
   Activity,
   Calendar,
   Wallet,
-  FileSpreadsheet
+  FileSpreadsheet,
+  Copy,
+  ExternalLink,
+  Filter
 } from "lucide-react";
+import { formatUtcDateTime, formatCompactUtc } from "@/lib/date-utils";
 
-export default function AdminUserDetailsPage({ params }: { params: Promise<{ userId: string }> }) {
-  const resolvedParams = use(params);
-  const userId = resolvedParams.userId;
+export default function AdminUserDetailsPage({ params }: { params?: Promise<{ userId: string }> | { userId: string } }) {
+  const routeParams = useParams();
+  let resolvedUserId = "";
+
+  if (params) {
+    if (typeof (params as any)?.then === "function") {
+      try {
+        resolvedUserId = (use(params as Promise<{ userId: string }>) as any)?.userId || "";
+      } catch {}
+    } else if (typeof params === "object") {
+      resolvedUserId = (params as any)?.userId || "";
+    }
+  }
+
+  const userId = resolvedUserId || (routeParams?.userId as string) || "";
 
   const supabase = createClient();
   const [profile, setProfile] = useState<any>(null);
@@ -38,6 +55,7 @@ export default function AdminUserDetailsPage({ params }: { params: Promise<{ use
   const [transactions, setTransactions] = useState<any[]>([]);
   const [auditLogs, setAuditLogs] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [adminEmail, setAdminEmail] = useState("");
 
   // Modals
@@ -57,16 +75,56 @@ export default function AdminUserDetailsPage({ params }: { params: Promise<{ use
 
   // Tab
   const [activeTab, setActiveTab] = useState<"wallets" | "deposits" | "withdrawals" | "trades" | "ads" | "transactions" | "audit">("wallets");
+  const [depositFilter, setDepositFilter] = useState<"all" | "completed" | "pending" | "failed">("all");
+  const [copiedText, setCopiedText] = useState<string | null>(null);
+
+  const copyToClipboard = (text: string) => {
+    if (typeof navigator !== 'undefined' && navigator.clipboard) {
+      navigator.clipboard.writeText(text);
+      setCopiedText(text);
+      setTimeout(() => setCopiedText(null), 2000);
+    }
+  };
 
   const fetchUserData = useCallback(async () => {
-    setLoading(true);
+    if (!userId) {
+      setLoading(false);
+      setErrorMessage("No user ID provided.");
+      return;
+    }
 
-    // 1. Profile (by UUID or fallback by custom ID / username)
+    setLoading(true);
+    setErrorMessage(null);
+
+    // 1. Fetch via admin API route (bypasses RLS, joins all tables)
+    try {
+      const res = await fetch(`/api/admin/users/${encodeURIComponent(userId)}`);
+      const data = await res.json();
+      if (data.success && data.user) {
+        const u = data.user;
+        setProfile(u);
+        setWallets(u.wallets || []);
+        setDeposits(u.deposits || []);
+        setWithdrawals(u.withdrawals || []);
+        setTrades(u.trades || []);
+        setAds(u.ads || []);
+        setTransactions(u.transactions || []);
+        setAuditLogs(u.auditLogs || []);
+        setTargetStatus(u.status || "Active");
+        setStatusReason(u.ban_reason || "");
+        setLoading(false);
+        return;
+      }
+    } catch (apiErr) {
+      console.warn("API user fetch fallback to client DB:", apiErr);
+    }
+
+    // 2. Client fallback
     let prof: any = null;
     const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(userId);
 
     if (isUuid) {
-      const { data } = await supabase.from("profiles").select("*").eq("id", userId).single();
+      const { data } = await supabase.from("profiles").select("*").eq("id", userId).maybeSingle();
       prof = data;
     }
 
@@ -74,73 +132,47 @@ export default function AdminUserDetailsPage({ params }: { params: Promise<{ use
       const { data } = await supabase
         .from("profiles")
         .select("*")
-        .or(`user_custom_id.eq.${userId},username.eq.${userId},email.eq.${userId}`)
+        .or(`user_custom_id.eq.${userId},email.eq.${userId}`)
         .limit(1)
-        .single();
+        .maybeSingle();
       prof = data;
     }
 
-    const actualId = prof?.id || userId;
-
-    if (prof) {
-      setProfile(prof);
-      setTargetStatus(prof.status || (prof.is_banned ? "Banned" : prof.is_suspended ? "Suspended" : "Active"));
-      setStatusReason(prof.ban_reason || "");
+    if (!prof) {
+      setErrorMessage(`User "${userId}" not found in database.`);
+      setLoading(false);
+      return;
     }
 
-    // 2. Wallets
-    const { data: wData } = await supabase
-      .from("wallets")
-      .select("*")
-      .eq("user_id", actualId);
+    const actualId = prof.id;
+    setProfile(prof);
+    setTargetStatus(prof.status || (prof.is_banned ? "Banned" : prof.is_suspended ? "Suspended" : "Active"));
+    setStatusReason(prof.ban_reason || "");
+
+    const [
+      { data: wData },
+      { data: dData },
+      { data: wdData },
+      { data: tData },
+      { data: adData },
+      { data: txData },
+      { data: aData },
+    ] = await Promise.all([
+      supabase.from("wallets").select("*").eq("user_id", actualId),
+      supabase.from("deposits").select("*").eq("user_id", actualId).order("created_at", { ascending: false }),
+      supabase.from("withdrawals").select("*").eq("user_id", actualId).order("created_at", { ascending: false }),
+      supabase.from("trades").select("*").or(`buyer_id.eq.${actualId},seller_id.eq.${actualId}`).order("created_at", { ascending: false }),
+      supabase.from("advertisements").select("*").eq("user_id", actualId).order("created_at", { ascending: false }),
+      supabase.from("wallet_transactions").select("*").eq("user_id", actualId).order("created_at", { ascending: false }),
+      supabase.from("admin_audit_logs").select("*").eq("target_user_id", actualId).order("created_at", { ascending: false }),
+    ]);
+
     if (wData) setWallets(wData);
-
-    // 3. Deposits
-    const { data: dData } = await supabase
-      .from("deposits")
-      .select("*")
-      .eq("user_id", actualId)
-      .order("created_at", { ascending: false });
     if (dData) setDeposits(dData);
-
-    // 4. Withdrawals
-    const { data: wdData } = await supabase
-      .from("withdrawals")
-      .select("*")
-      .eq("user_id", actualId)
-      .order("created_at", { ascending: false });
     if (wdData) setWithdrawals(wdData);
-
-    // 5. Trades
-    const { data: tData } = await supabase
-      .from("trades")
-      .select("*")
-      .or(`buyer_id.eq.${actualId},seller_id.eq.${actualId}`)
-      .order("created_at", { ascending: false });
     if (tData) setTrades(tData);
-
-    // 6. Ads
-    const { data: adsData } = await supabase
-      .from("ads")
-      .select("*")
-      .eq("user_id", actualId)
-      .order("created_at", { ascending: false });
-    if (adsData) setAds(adsData);
-
-    // 7. Wallet Transactions
-    const { data: txData } = await supabase
-      .from("wallet_transactions")
-      .select("*")
-      .eq("user_id", actualId)
-      .order("created_at", { ascending: false });
+    if (adData) setAds(adData);
     if (txData) setTransactions(txData);
-
-    // 8. Audit Logs
-    const { data: aData } = await supabase
-      .from("admin_audit_logs")
-      .select("*")
-      .eq("target_user_id", userId)
-      .order("created_at", { ascending: false });
     if (aData) setAuditLogs(aData);
 
     setLoading(false);
@@ -158,50 +190,30 @@ export default function AdminUserDetailsPage({ params }: { params: Promise<{ use
 
   async function handleAdjustBalance(e: React.FormEvent) {
     e.preventDefault();
-    if (!adminEmail) return alert("Admin session missing. Please re-authenticate.");
     const numAmount = parseFloat(amount);
     if (isNaN(numAmount) || numAmount <= 0) return alert("Invalid positive amount.");
 
     setActionLoading(true);
     try {
-      const { data, error } = await supabase.rpc("admin_adjust_balance", {
-        p_admin_email: adminEmail,
-        p_target_user_id: userId,
-        p_currency: currency,
-        p_action: action,
-        p_amount: numAmount,
-      });
-
-      if (error) throw new Error(error.message);
-
-      const note = balanceReason.trim() || `Admin manual ${action} by ${adminEmail}`;
-
-      // Insert ledger transaction
-      await supabase.from("wallet_transactions").insert({
-        user_id: userId,
-        tx_type: action === "add" ? "credit" : "debit",
-        asset_symbol: currency,
-        amount: numAmount,
-        status: "completed",
-        tx_hash: `ADMIN_ADJ:${action.toUpperCase()}:${note}`,
-      });
-
-      // Insert audit log
-      await supabase.from("admin_audit_logs").insert({
-        admin_email: adminEmail,
-        action: "ADJUST_BALANCE",
-        target_user_id: userId,
-        details: {
+      const res = await fetch("/api/admin/adjust-balance", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          userId: profile?.id || userId,
           currency,
           action,
           amount: numAmount,
-          reason: note,
-          new_balance: data?.new_balance,
-          date: new Date().toISOString(),
-        },
+          reason: balanceReason.trim(),
+          adminEmail,
+        }),
       });
 
-      alert(`Balance adjusted! New ${currency} Balance: ${data?.new_balance ?? "Updated"}`);
+      const data = await res.json();
+      if (!data.success) {
+        throw new Error(data.error || "Adjustment failed.");
+      }
+
+      alert(`Balance adjusted! New ${currency} Balance: ${data.new_balance ?? "Updated"}`);
       setShowAdjustModal(false);
       setAmount("");
       setBalanceReason("");
@@ -216,39 +228,21 @@ export default function AdminUserDetailsPage({ params }: { params: Promise<{ use
   async function handleUpdateStatus(newStatus: "Active" | "Restricted" | "Suspended" | "Banned", reason: string) {
     setActionLoading(true);
     try {
-      const isBanned = newStatus === "Banned";
-      const isSuspended = newStatus === "Suspended";
-      const isRestricted = newStatus === "Restricted";
-
-      const updatePayload: any = {
-        status: newStatus,
-        is_banned: isBanned,
-        is_suspended: isSuspended,
-        ban_reason: (isBanned || isSuspended || isRestricted) ? reason : null,
-      };
-
-      if (isBanned) {
-        updatePayload.banned_at = new Date().toISOString();
-      }
-
-      const { error } = await supabase
-        .from("profiles")
-        .update(updatePayload)
-        .eq("id", userId);
-
-      if (error) throw new Error(error.message);
-
-      await supabase.from("admin_audit_logs").insert({
-        admin_email: adminEmail,
-        action: `USER_STATUS_${newStatus.toUpperCase()}`,
-        target_user_id: userId,
-        details: {
-          previous_status: profile?.status,
-          new_status: newStatus,
-          reason: reason || "Admin updated status",
-          date: new Date().toISOString(),
-        },
+      const res = await fetch(`/api/admin/users/${encodeURIComponent(profile?.id || userId)}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "update_status",
+          status: newStatus,
+          reason,
+          adminEmail,
+        }),
       });
+
+      const data = await res.json();
+      if (!data.success) {
+        throw new Error(data.error || "Failed to update user status.");
+      }
 
       alert(`User status updated to ${newStatus}`);
       setShowStatusModal(false);
@@ -269,24 +263,22 @@ export default function AdminUserDetailsPage({ params }: { params: Promise<{ use
 
     setActionLoading(true);
     try {
-      const { error } = await supabase
-        .from("profiles")
-        .update({
+      const res = await fetch(`/api/admin/users/${encodeURIComponent(profile?.id || userId)}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "update_role",
           role: newRole,
-          is_admin_account: newRole === "admin",
-        })
-        .eq("id", userId);
-
-      if (error) throw new Error(error.message);
-
-      await supabase.from("admin_audit_logs").insert({
-        admin_email: adminEmail,
-        action: newRole === "admin" ? "MAKE_ADMIN" : "REMOVE_ADMIN",
-        target_user_id: userId,
-        details: { target_email: profile.email, new_role: newRole, date: new Date().toISOString() },
+          adminEmail,
+        }),
       });
 
-      alert(`Role updated to ${newRole.toUpperCase()}`);
+      const data = await res.json();
+      if (!data.success) {
+        throw new Error(data.error || "Failed to update role.");
+      }
+
+      alert(`User role updated to ${newRole}`);
       fetchUserData();
     } catch (err: any) {
       alert(`Role update error: ${err.message}`);
@@ -402,8 +394,8 @@ export default function AdminUserDetailsPage({ params }: { params: Promise<{ use
           </p>
           <div className="text-xs space-y-1 text-slate-300">
             <p><strong>Online Status:</strong> {profile.is_online ? <span className="text-emerald-400 font-semibold">Online</span> : <span className="text-slate-500">Offline</span>}</p>
-            <p><strong>Last Seen:</strong> {profile.last_seen ? new Date(profile.last_seen).toLocaleString() : "Recently active"}</p>
-            <p><strong>Registered:</strong> {new Date(profile.created_at).toLocaleDateString()}</p>
+            <p><strong>Last Seen:</strong> {profile.last_seen ? formatUtcDateTime(profile.last_seen) : "Recently active"}</p>
+            <p><strong>Registered:</strong> {formatUtcDateTime(profile.created_at)}</p>
           </div>
         </div>
 
@@ -436,7 +428,7 @@ export default function AdminUserDetailsPage({ params }: { params: Promise<{ use
               <p className="text-emerald-400">Account in good standing with zero active restrictions.</p>
             )}
             {profile.banned_at && (
-              <p className="text-slate-400 text-[11px]">Banned since: {new Date(profile.banned_at).toLocaleString()}</p>
+              <p className="text-slate-400 text-[11px]">Banned since: {formatUtcDateTime(profile.banned_at)}</p>
             )}
           </div>
         </div>
@@ -559,74 +551,265 @@ export default function AdminUserDetailsPage({ params }: { params: Promise<{ use
       {/* Tab Contents */}
       <div className="bg-slate-900/90 border border-slate-800 rounded-xl p-4">
         {activeTab === "wallets" && (
-          <div className="overflow-x-auto">
-            <table className="w-full text-left text-xs text-slate-300">
-              <thead className="bg-slate-950 text-slate-400 uppercase border-b border-slate-800">
-                <tr>
-                  <th className="p-3">Currency</th>
-                  <th className="p-3">Balance</th>
-                  <th className="p-3">Deposit Address</th>
-                  <th className="p-3">Updated At</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-800">
-                {wallets.length === 0 ? (
+          <div className="space-y-4">
+            <div className="flex items-center justify-between">
+              <h3 className="text-sm font-semibold text-slate-200">Wallet Accounts & Balances</h3>
+              <span className="text-xs text-slate-400">Times displayed in UTC</span>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-xs text-slate-300">
+                <thead className="bg-slate-950 text-slate-400 uppercase border-b border-slate-800">
                   <tr>
-                    <td colSpan={4} className="p-6 text-center text-slate-500">No wallet records found.</td>
+                    <th className="p-3">Asset</th>
+                    <th className="p-3">Available Balance</th>
+                    <th className="p-3">Escrow / Reserved</th>
+                    <th className="p-3">Total Balance</th>
+                    <th className="p-3">Deposit Address & Network</th>
+                    <th className="p-3">Last Activity (UTC)</th>
                   </tr>
-                ) : (
-                  wallets.map((w) => (
-                    <tr key={w.id} className="hover:bg-slate-800/40">
-                      <td className="p-3 font-bold uppercase text-white">{w.currency}</td>
-                      <td className="p-3 font-mono font-bold text-emerald-400">{w.balance}</td>
-                      <td className="p-3 font-mono text-[11px] text-slate-400">{w.address || "On-demand"}</td>
-                      <td className="p-3 text-slate-400">{new Date(w.updated_at || w.created_at).toLocaleString()}</td>
+                </thead>
+                <tbody className="divide-y divide-slate-800">
+                  {wallets.length === 0 ? (
+                    <tr>
+                      <td colSpan={6} className="p-6 text-center text-slate-500">No wallet records found for this user.</td>
                     </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
+                  ) : (
+                    wallets.map((w) => {
+                      const curr = (w.currency || "USDT").toUpperCase();
+                      const balance = parseFloat(w.balance) || 0;
+                      const reserved = parseFloat(w.reserved_balance) || 0;
+                      const available = Math.max(0, balance - reserved);
+                      const addr = w.deposit_address || w.address || "On-demand";
+
+                      return (
+                        <tr key={w.id || curr} className="hover:bg-slate-800/40">
+                          <td className="p-3">
+                            <div className="flex items-center gap-2">
+                              <span className="font-bold uppercase text-white">{curr}</span>
+                              {w.network && (
+                                <span className="text-[10px] px-1.5 py-0.5 rounded bg-slate-800 text-slate-400">
+                                  {w.network}
+                                </span>
+                              )}
+                            </div>
+                          </td>
+                          <td className="p-3 font-mono font-bold text-emerald-400">
+                            {available.toFixed(curr === 'BTC' ? 8 : 4)}
+                          </td>
+                          <td className="p-3 font-mono text-amber-400">
+                            {reserved > 0 ? reserved.toFixed(curr === 'BTC' ? 8 : 4) : '0.00'}
+                          </td>
+                          <td className="p-3 font-mono font-bold text-slate-200">
+                            {balance.toFixed(curr === 'BTC' ? 8 : 4)}
+                          </td>
+                          <td className="p-3 font-mono text-[11px] text-slate-400">
+                            {addr !== "On-demand" ? (
+                              <div className="flex items-center gap-1.5">
+                                <span className="truncate max-w-[200px]" title={addr}>{addr}</span>
+                                <button
+                                  onClick={() => copyToClipboard(addr)}
+                                  className="text-slate-400 hover:text-white p-1"
+                                  title="Copy address"
+                                >
+                                  <Copy className="w-3 h-3" />
+                                </button>
+                                {copiedText === addr && (
+                                  <span className="text-[10px] text-emerald-400">Copied</span>
+                                )}
+                              </div>
+                            ) : (
+                              <span className="italic text-slate-500">Generated on-demand</span>
+                            )}
+                          </td>
+                          <td className="p-3 text-slate-400">
+                            {formatUtcDateTime(w.updated_at || w.created_at)}
+                          </td>
+                        </tr>
+                      );
+                    })
+                  )}
+                </tbody>
+              </table>
+            </div>
           </div>
         )}
 
         {activeTab === "deposits" && (
-          <div className="overflow-x-auto">
-            <table className="w-full text-left text-xs text-slate-300">
-              <thead className="bg-slate-950 text-slate-400 uppercase border-b border-slate-800">
-                <tr>
-                  <th className="p-3">Deposit ID</th>
-                  <th className="p-3">Currency</th>
-                  <th className="p-3">Amount</th>
-                  <th className="p-3">Status</th>
-                  <th className="p-3">Created</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-800">
-                {deposits.length === 0 ? (
+          <div className="space-y-4">
+            {/* Deposit Attempts Summary Banner */}
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <div className="bg-slate-950 border border-slate-800 rounded-lg p-3">
+                <p className="text-[11px] uppercase tracking-wider text-slate-400">Credited Deposits</p>
+                <p className="text-xl font-bold text-emerald-400 mt-1">
+                  {deposits.filter(d => ['completed', 'credited', 'confirmed'].includes((d.status || '').toLowerCase())).length}
+                </p>
+                <p className="text-[11px] text-slate-500 mt-0.5">Fully confirmed & credited</p>
+              </div>
+              <div className="bg-slate-950 border border-slate-800 rounded-lg p-3">
+                <p className="text-[11px] uppercase tracking-wider text-slate-400">Pending / Awaiting</p>
+                <p className="text-xl font-bold text-amber-400 mt-1">
+                  {deposits.filter(d => ['pending', 'awaiting_confirmation', 'detecting'].includes((d.status || '').toLowerCase())).length}
+                </p>
+                <p className="text-[11px] text-slate-500 mt-0.5">Awaiting blockchain blocks</p>
+              </div>
+              <div className="bg-slate-950 border border-slate-800 rounded-lg p-3">
+                <p className="text-[11px] uppercase tracking-wider text-slate-400">Failed / Rejected</p>
+                <p className="text-xl font-bold text-rose-400 mt-1">
+                  {deposits.filter(d => ['failed', 'rejected', 'cancelled', 'expired'].includes((d.status || '').toLowerCase())).length}
+                </p>
+                <p className="text-[11px] text-slate-500 mt-0.5">Unconfirmed / rejected attempts</p>
+              </div>
+            </div>
+
+            {/* Status Filter Chips */}
+            <div className="flex items-center gap-2 pt-1">
+              <span className="text-xs text-slate-400 flex items-center gap-1 mr-1">
+                <Filter className="w-3.5 h-3.5" /> Filter:
+              </span>
+              <button
+                onClick={() => setDepositFilter("all")}
+                className={`px-2.5 py-1 rounded text-xs font-medium transition-colors ${
+                  depositFilter === "all"
+                    ? "bg-blue-600 text-white"
+                    : "bg-slate-800 text-slate-400 hover:text-white"
+                }`}
+              >
+                All Attempts ({deposits.length})
+              </button>
+              <button
+                onClick={() => setDepositFilter("completed")}
+                className={`px-2.5 py-1 rounded text-xs font-medium transition-colors ${
+                  depositFilter === "completed"
+                    ? "bg-emerald-600 text-white"
+                    : "bg-slate-800 text-slate-400 hover:text-white"
+                }`}
+              >
+                Credited / Completed
+              </button>
+              <button
+                onClick={() => setDepositFilter("pending")}
+                className={`px-2.5 py-1 rounded text-xs font-medium transition-colors ${
+                  depositFilter === "pending"
+                    ? "bg-amber-600 text-white"
+                    : "bg-slate-800 text-slate-400 hover:text-white"
+                }`}
+              >
+                Pending
+              </button>
+              <button
+                onClick={() => setDepositFilter("failed")}
+                className={`px-2.5 py-1 rounded text-xs font-medium transition-colors ${
+                  depositFilter === "failed"
+                    ? "bg-rose-600 text-white"
+                    : "bg-slate-800 text-slate-400 hover:text-white"
+                }`}
+              >
+                Failed / Rejected
+              </button>
+            </div>
+
+            {/* Deposits Table */}
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-xs text-slate-300">
+                <thead className="bg-slate-950 text-slate-400 uppercase border-b border-slate-800">
                   <tr>
-                    <td colSpan={5} className="p-6 text-center text-slate-500">No deposits recorded for this user.</td>
+                    <th className="p-3">Deposit ID</th>
+                    <th className="p-3">Asset & Network</th>
+                    <th className="p-3">Amount</th>
+                    <th className="p-3">Status</th>
+                    <th className="p-3">Tx Hash / Explorer</th>
+                    <th className="p-3">Receiving Address</th>
+                    <th className="p-3">Confirmations</th>
+                    <th className="p-3">Timestamp (UTC)</th>
                   </tr>
-                ) : (
-                  deposits.map((d) => (
-                    <tr key={d.id} className="hover:bg-slate-800/40">
-                      <td className="p-3 font-mono text-slate-400">{d.id.slice(0, 8)}...</td>
-                      <td className="p-3 uppercase font-bold text-white">{d.currency}</td>
-                      <td className="p-3 font-mono font-semibold text-emerald-400">{d.amount}</td>
-                      <td className="p-3">
-                        <span className={`px-2 py-0.5 rounded text-[10px] font-semibold ${
-                          d.status === "completed" || d.status === "credited"
-                            ? "bg-emerald-950 text-emerald-300 border border-emerald-800"
-                            : "bg-amber-950 text-amber-300 border border-amber-800"
-                        }`}>
-                          {d.status}
-                        </span>
+                </thead>
+                <tbody className="divide-y divide-slate-800">
+                  {deposits.filter((d) => {
+                    const st = (d.status || '').toLowerCase();
+                    if (depositFilter === "completed") return ['completed', 'credited', 'confirmed'].includes(st);
+                    if (depositFilter === "pending") return ['pending', 'awaiting_confirmation', 'detecting'].includes(st);
+                    if (depositFilter === "failed") return ['failed', 'rejected', 'cancelled', 'expired'].includes(st);
+                    return true;
+                  }).length === 0 ? (
+                    <tr>
+                      <td colSpan={8} className="p-6 text-center text-slate-500">
+                        No deposits match the selected filter.
                       </td>
-                      <td className="p-3 text-slate-400">{new Date(d.created_at).toLocaleString()}</td>
                     </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
+                  ) : (
+                    deposits
+                      .filter((d) => {
+                        const st = (d.status || '').toLowerCase();
+                        if (depositFilter === "completed") return ['completed', 'credited', 'confirmed'].includes(st);
+                        if (depositFilter === "pending") return ['pending', 'awaiting_confirmation', 'detecting'].includes(st);
+                        if (depositFilter === "failed") return ['failed', 'rejected', 'cancelled', 'expired'].includes(st);
+                        return true;
+                      })
+                      .map((d) => {
+                        const st = (d.status || '').toLowerCase();
+                        const isCredited = ['completed', 'credited', 'confirmed'].includes(st);
+                        const isFailed = ['failed', 'rejected', 'cancelled', 'expired'].includes(st);
+                        const txHash = d.tx_hash || d.tx_id || d.hash;
+
+                        return (
+                          <tr key={d.id} className="hover:bg-slate-800/40">
+                            <td className="p-3 font-mono text-slate-400">{d.id.slice(0, 8)}...</td>
+                            <td className="p-3">
+                              <span className="uppercase font-bold text-white">{d.currency || d.crypto || 'USDT'}</span>
+                              {d.network && (
+                                <span className="ml-1 text-[10px] text-slate-400">({d.network})</span>
+                              )}
+                            </td>
+                            <td className="p-3 font-mono font-semibold text-emerald-400">
+                              {parseFloat(d.amount).toFixed(d.currency === 'BTC' ? 8 : 4)}
+                            </td>
+                            <td className="p-3">
+                              <span className={`px-2 py-0.5 rounded text-[10px] font-semibold ${
+                                isCredited
+                                  ? "bg-emerald-950 text-emerald-300 border border-emerald-800"
+                                  : isFailed
+                                  ? "bg-rose-950 text-rose-300 border border-rose-800"
+                                  : "bg-amber-950 text-amber-300 border border-amber-800"
+                              }`}>
+                                {d.status || 'pending'}
+                              </span>
+                            </td>
+                            <td className="p-3 font-mono text-[11px] text-slate-400">
+                              {txHash ? (
+                                <div className="flex items-center gap-1.5">
+                                  <span className="truncate max-w-[140px]" title={txHash}>{txHash}</span>
+                                  <button
+                                    onClick={() => copyToClipboard(txHash)}
+                                    className="text-slate-400 hover:text-white p-0.5"
+                                    title="Copy transaction hash"
+                                  >
+                                    <Copy className="w-3 h-3" />
+                                  </button>
+                                </div>
+                              ) : (
+                                <span className="italic text-slate-500">Pending broadcast</span>
+                              )}
+                            </td>
+                            <td className="p-3 font-mono text-[11px] text-slate-400 truncate max-w-[140px]" title={d.address}>
+                              {d.address || '—'}
+                            </td>
+                            <td className="p-3 font-mono text-[11px] text-slate-300">
+                              {d.confirmations !== undefined
+                                ? `${d.confirmations} / ${d.required_confirmations || 1}`
+                                : isCredited
+                                ? 'Confirmed'
+                                : '0 / 1'}
+                            </td>
+                            <td className="p-3 text-slate-400 whitespace-nowrap">
+                              {formatUtcDateTime(d.created_at)}
+                            </td>
+                          </tr>
+                        );
+                      })
+                  )}
+                </tbody>
+              </table>
+            </div>
           </div>
         )}
 
@@ -666,7 +849,7 @@ export default function AdminUserDetailsPage({ params }: { params: Promise<{ use
                           {wd.status}
                         </span>
                       </td>
-                      <td className="p-3 text-slate-400">{new Date(wd.created_at).toLocaleString()}</td>
+                      <td className="p-3 text-slate-400">{formatUtcDateTime(wd.created_at)}</td>
                     </tr>
                   ))
                 )}
@@ -685,7 +868,7 @@ export default function AdminUserDetailsPage({ params }: { params: Promise<{ use
                   <th className="p-3">Amount</th>
                   <th className="p-3">Fiat Value</th>
                   <th className="p-3">Status</th>
-                  <th className="p-3">Date</th>
+                  <th className="p-3">Date (UTC)</th>
                   <th className="p-3 text-right">Inspect</th>
                 </tr>
               </thead>
@@ -718,7 +901,7 @@ export default function AdminUserDetailsPage({ params }: { params: Promise<{ use
                           {t.status}
                         </span>
                       </td>
-                      <td className="p-3 text-slate-400">{new Date(t.created_at).toLocaleString()}</td>
+                      <td className="p-3 text-slate-400">{formatUtcDateTime(t.created_at)}</td>
                       <td className="p-3 text-right">
                         <Link
                           href={`/adminnarayan/trades/${t.id}`}
@@ -779,7 +962,7 @@ export default function AdminUserDetailsPage({ params }: { params: Promise<{ use
             <table className="w-full text-left text-xs text-slate-300">
               <thead className="bg-slate-950 text-slate-400 uppercase border-b border-slate-800">
                 <tr>
-                  <th className="p-3">Date</th>
+                  <th className="p-3">Date (UTC)</th>
                   <th className="p-3">Type</th>
                   <th className="p-3">Asset</th>
                   <th className="p-3">Amount</th>
@@ -794,7 +977,7 @@ export default function AdminUserDetailsPage({ params }: { params: Promise<{ use
                 ) : (
                   transactions.map((tx) => (
                     <tr key={tx.id} className="hover:bg-slate-800/40">
-                      <td className="p-3 text-slate-400">{new Date(tx.created_at).toLocaleString()}</td>
+                      <td className="p-3 text-slate-400">{formatUtcDateTime(tx.created_at)}</td>
                       <td className="p-3 uppercase font-bold text-white">{tx.tx_type}</td>
                       <td className="p-3 uppercase font-bold">{tx.asset_symbol}</td>
                       <td className="p-3 font-mono font-bold text-emerald-400">{tx.amount}</td>
@@ -812,7 +995,7 @@ export default function AdminUserDetailsPage({ params }: { params: Promise<{ use
             <table className="w-full text-left text-xs text-slate-300">
               <thead className="bg-slate-950 text-slate-400 uppercase border-b border-slate-800">
                 <tr>
-                  <th className="p-3">Timestamp</th>
+                  <th className="p-3">Timestamp (UTC)</th>
                   <th className="p-3">Admin Email</th>
                   <th className="p-3">Action</th>
                   <th className="p-3">Details</th>
@@ -826,7 +1009,7 @@ export default function AdminUserDetailsPage({ params }: { params: Promise<{ use
                 ) : (
                   auditLogs.map((log) => (
                     <tr key={log.id} className="hover:bg-slate-800/40">
-                      <td className="p-3 text-slate-400">{new Date(log.created_at).toLocaleString()}</td>
+                      <td className="p-3 text-slate-400">{formatUtcDateTime(log.created_at)}</td>
                       <td className="p-3 font-mono text-blue-400">{log.admin_email || log.admin_id}</td>
                       <td className="p-3 font-bold uppercase text-white">{log.action}</td>
                       <td className="p-3 font-mono text-[11px] text-slate-300">{JSON.stringify(log.details)}</td>

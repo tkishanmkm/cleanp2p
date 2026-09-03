@@ -28,6 +28,7 @@ import { statusColors } from '@/lib/status-colors';
 import { useRouter } from 'next/navigation';
 import { FlagIcon } from '@/components/ui/flag-icon';
 import { supabase } from '@/lib/supabase/client';
+import { formatCompactUtc } from '@/lib/date-utils';
 
 function DashboardCardSkeleton() {
   return (
@@ -269,11 +270,8 @@ export default function MyTradesPage() {
                           {trade.status}
                         </Badge>
                       </TableCell>
-                      <TableCell>
-                        {toDate(trade.createdAt)?.toLocaleString('default', {
-                          dateStyle: 'short',
-                          timeStyle: 'short',
-                        }) ?? 'N/A'}
+                      <TableCell className="text-xs text-muted-foreground whitespace-nowrap">
+                        {trade.createdAt ? formatCompactUtc(trade.createdAt) : 'N/A'}
                       </TableCell>
                       <TableCell className="text-right">
                         <Button variant="outline" size="sm" asChild>

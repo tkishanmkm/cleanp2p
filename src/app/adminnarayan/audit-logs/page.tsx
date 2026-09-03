@@ -3,6 +3,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { ClipboardList, User } from "lucide-react";
 import { ExportLogsButton } from "./ExportLogsButton";
 import { AuditLogFilters } from "./AuditLogFilters";
+import { formatUtcDateTime } from "@/lib/date-utils";
 
 export const dynamic = "force-dynamic";
 
@@ -89,7 +90,7 @@ export default async function AdminAuditLogsPage({ searchParams }: PageProps) {
               <table className="w-full text-left text-sm text-slate-300">
                 <thead className="border-b border-slate-800 text-slate-400 uppercase text-xs">
                   <tr>
-                    <th className="pb-3 px-2">Timestamp</th>
+                    <th className="pb-3 px-2">Timestamp (UTC)</th>
                     <th className="pb-3 px-2">Admin User</th>
                     <th className="pb-3 px-2">Action</th>
                     <th className="pb-3 px-2">Target ID</th>
@@ -100,7 +101,7 @@ export default async function AdminAuditLogsPage({ searchParams }: PageProps) {
                   {logs.map((log) => (
                     <tr key={log.id} className="hover:bg-slate-800/30">
                       <td className="py-3 px-2 text-xs text-slate-400 whitespace-nowrap">
-                        {new Date(log.created_at).toLocaleString()}
+                        {formatUtcDateTime(log.created_at)}
                       </td>
                       <td className="py-3 px-2">
                         <div className="flex items-center gap-1.5 text-xs text-white">

@@ -1,6 +1,7 @@
 import { createClient, getSupabaseAdminClient } from '@/utils/supabase/server';
 import { NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
+import { calculateMinimumFiatAmount, BASE_PLATFORM_USD_MINIMUM } from '@/lib/currency';
 
 export const dynamic = 'force-dynamic';
 
@@ -115,6 +116,15 @@ export async function POST(request: Request) {
     if (!orderType || !assetSymbol || !price || !min || !max) {
       return NextResponse.json(
         { success: false, error: 'Missing required order fields (orderType, assetSymbol, pricePerUnit, minLimit, maxLimit)' },
+        { status: 400 }
+      );
+    }
+
+    const fiat = fiatCurrency ? String(fiatCurrency).toUpperCase() : 'USD';
+    const dynamicMin = calculateMinimumFiatAmount(BASE_PLATFORM_USD_MINIMUM, fiat);
+    if (min < dynamicMin) {
+      return NextResponse.json(
+        { success: false, error: `Minimum limit cannot be less than ${dynamicMin} ${fiat} (equivalent to $${BASE_PLATFORM_USD_MINIMUM} USD)` },
         { status: 400 }
       );
     }

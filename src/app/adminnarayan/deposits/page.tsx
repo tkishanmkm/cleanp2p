@@ -13,6 +13,7 @@ import {
   CheckCircle2,
   AlertCircle
 } from "lucide-react";
+import { formatUtcDateTime } from "@/lib/date-utils";
 
 export default function AdminDepositsPage() {
   const supabase = createClient();
@@ -22,6 +23,9 @@ export default function AdminDepositsPage() {
 
   // Adjust Balance Modal
   const [showAdjustModal, setShowAdjustModal] = useState(false);
+  const [userSearchQuery, setUserSearchQuery] = useState("");
+  const [userSearchResults, setUserSearchResults] = useState<any[]>([]);
+  const [searchingUsers, setSearchingUsers] = useState(false);
   const [targetUserId, setTargetUserId] = useState("");
   const [targetUserInfo, setTargetUserInfo] = useState<any>(null);
   const [currency, setCurrency] = useState("BTC");
@@ -30,6 +34,39 @@ export default function AdminDepositsPage() {
   const [reason, setReason] = useState("");
   const [adminEmail, setAdminEmail] = useState("");
   const [actionLoading, setActionLoading] = useState(false);
+
+  const searchUsers = useCallback(async (query: string) => {
+    if (!query.trim()) {
+      setUserSearchResults([]);
+      return;
+    }
+    setSearchingUsers(true);
+    try {
+      const res = await fetch(`/api/admin/users?q=${encodeURIComponent(query.trim())}`);
+      const data = await res.json();
+      if (data.success && data.users) {
+        setUserSearchResults(data.users.slice(0, 5));
+      }
+    } catch (err) {
+      console.warn("User search error:", err);
+    } finally {
+      setSearchingUsers(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      if (userSearchQuery) searchUsers(userSearchQuery);
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [userSearchQuery, searchUsers]);
+
+  function selectUserForAdjustment(u: any) {
+    setTargetUserId(u.id);
+    setTargetUserInfo(u);
+    setUserSearchQuery("");
+    setUserSearchResults([]);
+  }
 
   const fetchAdminSession = useCallback(async () => {
     const { data: { session } } = await supabase.auth.getSession();
@@ -98,53 +135,31 @@ export default function AdminDepositsPage() {
 
   async function handleAdjustBalance(e: React.FormEvent) {
     e.preventDefault();
-    if (!adminEmail) return alert("Admin session not found. Please log in.");
+    if (!targetUserId) return alert("Please select or specify a target user.");
     const numAmount = parseFloat(amount);
     if (isNaN(numAmount) || numAmount <= 0) return alert("Please enter a valid positive amount.");
 
     setActionLoading(true);
     try {
-      const { data, error } = await supabase.rpc("admin_adjust_balance", {
-        p_admin_email: adminEmail,
-        p_target_user_id: targetUserId,
-        p_currency: currency,
-        p_action: action,
-        p_amount: numAmount,
-      });
-
-      if (error) {
-        throw new Error(error.message);
-      }
-
-      const note = reason.trim() || `Manual deposit reconciliation by ${adminEmail}`;
-
-      // Insert transaction ledger record
-      await supabase.from("wallet_transactions").insert({
-        user_id: targetUserId,
-        tx_type: action === "add" ? "credit" : "debit",
-        asset_symbol: currency,
-        amount: numAmount,
-        status: "completed",
-        tx_hash: `ADMIN_ADJ:${action.toUpperCase()}:${note}`,
-      });
-
-      // Insert audit log
-      await supabase.from("admin_audit_logs").insert({
-        admin_email: adminEmail,
-        action: "ADJUST_BALANCE",
-        target_user_id: targetUserId,
-        details: {
+      const res = await fetch("/api/admin/adjust-balance", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          userId: targetUserId,
           currency,
           action,
           amount: numAmount,
-          reason: note,
-          new_balance: data?.new_balance,
-          source: "deposits_page",
-          date: new Date().toISOString(),
-        },
+          reason: reason.trim() || `Manual deposit reconciliation by ${adminEmail}`,
+          adminEmail,
+        }),
       });
 
-      alert(`Successfully adjusted balance! New ${currency} Balance: ${data?.new_balance ?? "Updated"}`);
+      const data = await res.json();
+      if (!data.success) {
+        throw new Error(data.error || "Adjustment failed.");
+      }
+
+      alert(`Successfully adjusted balance! New ${currency} Balance: ${data.new_balance ?? "Updated"}`);
       setShowAdjustModal(false);
       setAmount("");
       setReason("");
@@ -253,7 +268,7 @@ export default function AdminDepositsPage() {
               <th className="p-3.5">Currency</th>
               <th className="p-3.5">Amount</th>
               <th className="p-3.5">Status</th>
-              <th className="p-3.5">Date</th>
+              <th className="p-3.5">Date (UTC)</th>
               <th className="p-3.5 text-right">Actions</th>
             </tr>
           </thead>
@@ -332,7 +347,7 @@ export default function AdminDepositsPage() {
 
                   {/* Date */}
                   <td className="p-3.5 text-xs text-slate-400 whitespace-nowrap">
-                    {new Date(d.created_at).toLocaleString()}
+                    {formatUtcDateTime(d.created_at)}
                   </td>
 
                   {/* Actions */}
@@ -369,11 +384,9 @@ export default function AdminDepositsPage() {
                   <Coins className="w-5 h-5 text-blue-400" />
                   Adjust User Balance
                 </h2>
-                {targetUserInfo && (
-                  <p className="text-xs text-slate-400 font-mono mt-0.5">
-                    Target: {targetUserInfo.email} ({targetUserInfo.user_custom_id})
-                  </p>
-                )}
+                <p className="text-xs text-slate-400 mt-0.5">
+                  Execute atomic ledger credit/debit with real-time balance update.
+                </p>
               </div>
               <button onClick={() => setShowAdjustModal(false)} className="text-slate-400 hover:text-white text-sm">
                 ✕
@@ -381,16 +394,95 @@ export default function AdminDepositsPage() {
             </div>
 
             <form onSubmit={handleAdjustBalance} className="space-y-4">
+              {/* Target User Selector / Search */}
               <div>
-                <label className="text-xs font-semibold text-slate-300">Target User UUID</label>
-                <input
-                  type="text"
-                  required
-                  value={targetUserId}
-                  onChange={(e) => setTargetUserId(e.target.value)}
-                  placeholder="e.g. c91f50ad-aa6a-46ca-961f-91ffd54e6ea7"
-                  className="w-full p-2.5 bg-slate-950 border border-slate-800 rounded-lg mt-1 font-mono text-xs text-white focus:ring-2 focus:ring-blue-500"
-                />
+                <label className="text-xs font-semibold text-slate-300">Target User</label>
+                {targetUserInfo ? (
+                  <div className="mt-1 p-3 bg-slate-950 border border-blue-500/40 rounded-lg space-y-2">
+                    <div className="flex justify-between items-start">
+                      <div>
+                        <p className="text-sm font-bold text-white">{targetUserInfo.full_name || "User Account"}</p>
+                        <p className="text-xs text-slate-300">{targetUserInfo.email}</p>
+                        <p className="text-xs text-slate-400 font-mono">
+                          Custom ID: <span className="text-blue-400">{targetUserInfo.user_custom_id || "None"}</span> | UUID: {targetUserInfo.id}
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setTargetUserId("");
+                          setTargetUserInfo(null);
+                        }}
+                        className="text-xs text-slate-400 hover:text-rose-400 underline"
+                      >
+                        Change
+                      </button>
+                    </div>
+
+                    {/* Current Balances Display */}
+                    {targetUserInfo.wallets && targetUserInfo.wallets.length > 0 && (
+                      <div className="pt-2 border-t border-slate-800/80">
+                        <p className="text-[11px] font-semibold text-slate-400 mb-1">Current Wallet Balances:</p>
+                        <div className="grid grid-cols-2 gap-1.5 text-xs font-mono">
+                          {targetUserInfo.wallets.map((w: any) => (
+                            <div key={w.id || w.currency} className="bg-slate-900 px-2 py-1 rounded border border-slate-800 flex justify-between">
+                              <span className="text-slate-400 font-semibold">{w.currency}:</span>
+                              <span className="text-emerald-400 font-bold">{parseFloat(w.balance || "0").toFixed(6)}</span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <div className="space-y-2 mt-1">
+                    <div className="relative">
+                      <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                      <input
+                        type="text"
+                        value={userSearchQuery}
+                        onChange={(e) => setUserSearchQuery(e.target.value)}
+                        placeholder="Search user by email, name, custom ID, UUID, trade ID..."
+                        className="w-full pl-9 pr-3 py-2 bg-slate-950 border border-slate-800 rounded-lg text-xs text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      />
+                    </div>
+
+                    {searchingUsers && (
+                      <p className="text-xs text-slate-400 animate-pulse">Searching users...</p>
+                    )}
+
+                    {userSearchResults.length > 0 && (
+                      <div className="border border-slate-800 rounded-lg bg-slate-950 overflow-hidden divide-y divide-slate-800/60 max-h-48 overflow-y-auto">
+                        {userSearchResults.map((u) => (
+                          <div
+                            key={u.id}
+                            onClick={() => selectUserForAdjustment(u)}
+                            className="p-2 hover:bg-slate-900 cursor-pointer flex justify-between items-center text-xs"
+                          >
+                            <div>
+                              <p className="font-semibold text-white">{u.full_name || u.email}</p>
+                              <p className="text-slate-400 font-mono text-[11px]">{u.email} • ID: {u.user_custom_id || u.id.slice(0, 8)}</p>
+                            </div>
+                            <span className="text-blue-400 font-semibold text-[11px] bg-blue-950/60 px-2 py-0.5 rounded border border-blue-800">
+                              Select
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
+                    <div>
+                      <p className="text-[11px] text-slate-500">Or enter UUID directly:</p>
+                      <input
+                        type="text"
+                        value={targetUserId}
+                        onChange={(e) => setTargetUserId(e.target.value)}
+                        placeholder="e.g. c91f50ad-aa6a-46ca-961f-91ffd54e6ea7"
+                        className="w-full p-2 bg-slate-950 border border-slate-800 rounded-lg mt-1 font-mono text-xs text-white focus:ring-2 focus:ring-blue-500"
+                      />
+                    </div>
+                  </div>
+                )}
               </div>
 
               <div>
@@ -403,6 +495,7 @@ export default function AdminDepositsPage() {
                   <option value="BTC">BTC — Bitcoin</option>
                   <option value="ETH">ETH — Ethereum</option>
                   <option value="USDT">USDT — Tether</option>
+                  <option value="LTC">LTC — Litecoin</option>
                   <option value="TRX">TRX — Tron</option>
                 </select>
               </div>

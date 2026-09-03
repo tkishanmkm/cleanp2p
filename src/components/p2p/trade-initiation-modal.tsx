@@ -14,6 +14,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/input";
 import { UserStatusIndicator } from "@/components/user-status";
 import { Loader2, ArrowRightLeft, ShieldCheck } from "lucide-react";
+import { calculateMinimumFiatAmount, BASE_PLATFORM_USD_MINIMUM } from "@/lib/currency";
 
 export interface AdData {
   id: string;
@@ -97,8 +98,11 @@ export function TradeInitiationModal({ ad, isOpen, onClose }: TradeInitiationMod
       return;
     }
 
-    if (numericFiat < ad.min_limit || numericFiat > ad.max_limit) {
-      setErrorMsg(`Amount must be between ${ad.min_limit} and ${ad.max_limit} ${ad.fiat_symbol}.`);
+    const dynamicMin = calculateMinimumFiatAmount(BASE_PLATFORM_USD_MINIMUM, ad.fiat_symbol);
+    const effectiveMin = Math.max(ad.min_limit, dynamicMin);
+
+    if (numericFiat < effectiveMin || numericFiat > ad.max_limit) {
+      setErrorMsg(`Amount must be between ${effectiveMin} and ${ad.max_limit} ${ad.fiat_symbol} (minimum $${BASE_PLATFORM_USD_MINIMUM} USD equivalent).`);
       return;
     }
 

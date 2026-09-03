@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect, use, useCallback } from "react";
 import Link from "next/link";
+import { useParams } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { 
   ArrowLeft, 
@@ -18,15 +19,29 @@ import {
   Lock,
   DollarSign
 } from "lucide-react";
+import { formatUtcDateTime } from "@/lib/date-utils";
 
-export default function AdminTradeModeratorPage({ params }: { params: Promise<{ tradeId: string }> }) {
-  const resolvedParams = use(params);
-  const tradeId = resolvedParams.tradeId;
+export default function AdminTradeModeratorPage({ params }: { params?: Promise<{ tradeId: string }> | { tradeId: string } }) {
+  const routeParams = useParams();
+  let resolvedTradeId = "";
+
+  if (params) {
+    if (typeof (params as any)?.then === "function") {
+      try {
+        resolvedTradeId = (use(params as Promise<{ tradeId: string }>) as any)?.tradeId || "";
+      } catch {}
+    } else if (typeof params === "object") {
+      resolvedTradeId = (params as any)?.tradeId || "";
+    }
+  }
+
+  const tradeId = resolvedTradeId || (routeParams?.tradeId as string) || "";
 
   const supabase = createClient();
   const [trade, setTrade] = useState<any>(null);
   const [messages, setMessages] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [adminEmail, setAdminEmail] = useState("");
   const [hasJoined, setHasJoined] = useState(false);
   const [newMessage, setNewMessage] = useState("");
@@ -46,50 +61,65 @@ export default function AdminTradeModeratorPage({ params }: { params: Promise<{ 
   }, [supabase]);
 
   const fetchTradeAndChat = useCallback(async () => {
-    setLoading(true);
-
-    // 1. Fetch trade with buyer and seller joins
-    const { data: tradeData, error } = await supabase
-      .from("trades")
-      .select(`
-        *,
-        buyer:profiles!trades_buyer_id_fkey(id, email, full_name, user_custom_id),
-        seller:profiles!trades_seller_id_fkey(id, email, full_name, user_custom_id)
-      `)
-      .eq("id", tradeId)
-      .single();
-
-    if (!error && tradeData) {
-      setTrade(tradeData);
-    } else {
-      // Fallback if schema foreign keys differ
-      const { data: simpleTrade } = await supabase
-        .from("trades")
-        .select("*")
-        .eq("id", tradeId)
-        .single();
-
-      if (simpleTrade) {
-        const ids = [simpleTrade.buyer_id, simpleTrade.seller_id].filter(Boolean);
-        if (ids.length > 0) {
-          const { data: profs } = await supabase
-            .from("profiles")
-            .select("id, email, full_name, user_custom_id")
-            .in("id", ids);
-
-          const pMap = new Map((profs || []).map((p: any) => [p.id, p]));
-          simpleTrade.buyer = pMap.get(simpleTrade.buyer_id) || null;
-          simpleTrade.seller = pMap.get(simpleTrade.seller_id) || null;
-        }
-        setTrade(simpleTrade);
-      }
+    if (!tradeId) {
+      setLoading(false);
+      setErrorMessage("No trade ID provided in route URL.");
+      return;
     }
 
-    // 2. Fetch trade chat messages
+    setLoading(true);
+    setErrorMessage(null);
+
+    try {
+      // 1. Fetch via admin API route (handles UUID or trade_id string, joins buyer/seller, bypasses RLS)
+      const res = await fetch(`/api/admin/trades/${encodeURIComponent(tradeId)}`);
+      const data = await res.json();
+
+      if (data.success && data.trade) {
+        setTrade(data.trade);
+        setMessages(data.messages || []);
+        const joinedBefore = (data.messages || []).some((m: any) =>
+          m.message?.includes("Paxones Moderator Joined") ||
+          (m.is_system_message && m.message?.toLowerCase().includes("moderator joined"))
+        );
+        if (joinedBefore) setHasJoined(true);
+        setLoading(false);
+        return;
+      }
+    } catch (apiErr) {
+      console.warn("[TRADE MODERATOR] API fetch fallback to client DB:", apiErr);
+    }
+
+    // 2. Client fallback
+    const { data: simpleTrade, error: fetchErr } = await supabase
+      .from("trades")
+      .select("*")
+      .or(`id.eq.${tradeId},trade_id.eq.${tradeId}`)
+      .maybeSingle();
+
+    if (fetchErr || !simpleTrade) {
+      setErrorMessage(fetchErr?.message || `Trade ID "${tradeId}" not found in database.`);
+      setLoading(false);
+      return;
+    }
+
+    const ids = [simpleTrade.buyer_id, simpleTrade.seller_id].filter(Boolean);
+    if (ids.length > 0) {
+      const { data: profs } = await supabase
+        .from("profiles")
+        .select("id, email, full_name, user_custom_id")
+        .in("id", ids);
+
+      const pMap = new Map((profs || []).map((p: any) => [p.id, p]));
+      simpleTrade.buyer = pMap.get(simpleTrade.buyer_id) || null;
+      simpleTrade.seller = pMap.get(simpleTrade.seller_id) || null;
+    }
+    setTrade(simpleTrade);
+
     const { data: msgData } = await supabase
       .from("trade_chat_messages")
       .select("*")
-      .eq("trade_id", tradeId)
+      .eq("trade_id", simpleTrade.id)
       .order("created_at", { ascending: true });
 
     if (msgData) {
@@ -139,38 +169,30 @@ export default function AdminTradeModeratorPage({ params }: { params: Promise<{ 
   async function handleJoinAsModerator() {
     if (!adminEmail) return alert("Admin email session not identified.");
 
-    const { data: { session } } = await supabase.auth.getSession();
-    const senderId = session?.user?.id || "00000000-0000-0000-0000-000000000000";
-
-    const systemMsg = "Paxones Moderator Joined";
-
-    // Attempt with optional columns first
-    const { error } = await supabase.from("trade_chat_messages").insert({
-      trade_id: tradeId,
-      sender_id: senderId,
-      sender_email: adminEmail,
-      is_system_message: true,
-      message: systemMsg,
-    });
-
-    if (error) {
-      // Resilient fallback with only core schema columns
-      await supabase.from("trade_chat_messages").insert({
-        trade_id: tradeId,
-        sender_id: senderId,
-        message: systemMsg,
+    try {
+      const res = await fetch(`/api/admin/trades/${encodeURIComponent(tradeId)}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "join", adminEmail }),
       });
+      const data = await res.json();
+      if (data.success) {
+        setHasJoined(true);
+        fetchTradeAndChat();
+        return;
+      }
+    } catch (apiErr) {
+      console.warn("API join fallback to client DB:", apiErr);
     }
 
-    // Log admin moderator join in audit logs
-    await supabase.from("admin_audit_logs").insert({
-      admin_email: adminEmail,
-      action: "MODERATOR_JOINED_TRADE",
-      target_id: tradeId,
-      details: {
-        trade_id: tradeId,
-        timestamp: new Date().toISOString(),
-      },
+    const { data: { session } } = await supabase.auth.getSession();
+    const senderId = session?.user?.id || "00000000-0000-0000-0000-000000000000";
+    const systemMsg = "Paxones Moderator Joined";
+
+    await supabase.from("trade_chat_messages").insert({
+      trade_id: trade?.id || tradeId,
+      sender_id: senderId,
+      message: systemMsg,
     });
 
     setHasJoined(true);
@@ -183,26 +205,32 @@ export default function AdminTradeModeratorPage({ params }: { params: Promise<{ 
     if (!newMessage.trim()) return;
 
     setSendLoading(true);
+    try {
+      const res = await fetch(`/api/admin/trades/${encodeURIComponent(tradeId)}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "message", message: newMessage.trim(), adminEmail }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        setNewMessage("");
+        setSendLoading(false);
+        fetchTradeAndChat();
+        return;
+      }
+    } catch (apiErr) {
+      console.warn("API message send fallback to client DB:", apiErr);
+    }
+
     const { data: { session } } = await supabase.auth.getSession();
     const senderId = session?.user?.id || "00000000-0000-0000-0000-000000000000";
-
     const formattedMsg = `[MODERATOR]: ${newMessage.trim()}`;
 
-    const { error } = await supabase.from("trade_chat_messages").insert({
-      trade_id: tradeId,
+    await supabase.from("trade_chat_messages").insert({
+      trade_id: trade?.id || tradeId,
       sender_id: senderId,
-      sender_email: adminEmail,
-      is_system_message: false,
       message: formattedMsg,
     });
-
-    if (error) {
-      await supabase.from("trade_chat_messages").insert({
-        trade_id: tradeId,
-        sender_id: senderId,
-        message: formattedMsg,
-      });
-    }
 
     setNewMessage("");
     setSendLoading(false);
@@ -218,71 +246,24 @@ export default function AdminTradeModeratorPage({ params }: { params: Promise<{ 
 
     setInterveneLoading(true);
 
-    const targetRecipientId = interveneAction === "release" ? trade.buyer_id : trade.seller_id;
-    const cryptoCurrency = trade.crypto || trade.crypto_currency || "USDT";
-    const cryptoAmount = parseFloat(trade.amount);
-
     try {
-      // 1. Credit recipient's wallet balance
-      if (!isNaN(cryptoAmount) && cryptoAmount > 0) {
-        const { error: adjErr } = await supabase.rpc("admin_adjust_balance", {
-          p_admin_email: adminEmail,
-          p_target_user_id: targetRecipientId,
-          p_currency: cryptoCurrency,
-          p_action: "add",
-          p_amount: cryptoAmount,
-        });
+      const res = await fetch(`/api/admin/trades/${encodeURIComponent(tradeId)}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "intervene",
+          interveneAction,
+          reason: interveneReason.trim(),
+          adminEmail,
+        }),
+      });
 
-        if (adjErr) {
-          console.warn("RPC balance adjust notice:", adjErr.message);
-        }
+      const data = await res.json();
+      if (!data.success) {
+        throw new Error(data.error || "Intervention failed.");
       }
 
-      // 2. Update trade status
-      const nextStatus = interveneAction === "release" ? "completed" : "cancelled";
-      const { error: tradeErr } = await supabase
-        .from("trades")
-        .update({
-          status: nextStatus,
-          updated_at: new Date().toISOString(),
-        })
-        .eq("id", tradeId);
-
-      if (tradeErr) throw new Error(tradeErr.message);
-
-      // 3. Log into admin_audit_logs with all mandatory details:
-      // Admin email/ID, Trade ID, Action taken, Amount, Cryptocurrency, Reason, Date/time
-      await supabase.from("admin_audit_logs").insert({
-        admin_email: adminEmail,
-        action: interveneAction === "release" ? "ESCROW_RELEASE" : "ESCROW_REFUND",
-        target_id: tradeId,
-        target_user_id: targetRecipientId,
-        details: {
-          admin_email: adminEmail,
-          trade_id: tradeId,
-          action_taken: interveneAction,
-          amount: cryptoAmount,
-          cryptocurrency: cryptoCurrency,
-          reason: interveneReason.trim(),
-          recipient_user_id: targetRecipientId,
-          recipient_role: interveneAction === "release" ? "buyer" : "seller",
-          date: new Date().toISOString(),
-        },
-      });
-
-      // 4. Post System Notification in Chat
-      const systemAnnouncement = `Paxones Moderator ${interveneAction === "release" ? "Released Escrow to Buyer" : "Refunded Escrow to Seller"}: ${interveneReason.trim()}`;
-      
-      const { data: { session } } = await supabase.auth.getSession();
-      const senderId = session?.user?.id || "00000000-0000-0000-0000-000000000000";
-
-      await supabase.from("trade_chat_messages").insert({
-        trade_id: tradeId,
-        sender_id: senderId,
-        message: systemAnnouncement,
-      });
-
-      alert(`Escrow intervention completed! Trade marked as ${nextStatus}.`);
+      alert(data.message || `Escrow ${interveneAction} completed successfully.`);
       setShowInterveneModal(false);
       setInterveneReason("");
       fetchTradeAndChat();
@@ -301,10 +282,10 @@ export default function AdminTradeModeratorPage({ params }: { params: Promise<{ 
     );
   }
 
-  if (!trade) {
+  if (!trade || errorMessage) {
     return (
       <div className="p-8 text-center text-rose-500 space-y-4">
-        <p>Trade ID {tradeId} not found in the platform database.</p>
+        <p>{errorMessage || `Trade ID "${tradeId}" not found in the platform database.`}</p>
         <Link href="/adminnarayan/trades" className="underline text-sm text-slate-400">
           Return to Trades
         </Link>
@@ -343,7 +324,7 @@ export default function AdminTradeModeratorPage({ params }: { params: Promise<{ 
               </span>
             </div>
             <p className="text-xs text-slate-400 font-mono mt-0.5">
-              Trade UUID: {trade.id} | Created: {new Date(trade.created_at).toLocaleString()}
+              Trade UUID: {trade.id} | Created: {formatUtcDateTime(trade.created_at)}
             </p>
           </div>
         </div>

@@ -38,6 +38,7 @@ import type { Withdrawal } from '@/lib/types';
 import { useToast } from '@/hooks/use-toast';
 import { approveWithdrawal, declineWithdrawal } from '@/lib/admin';
 import { supabase } from '@/lib/supabase/client';
+import { formatUtcDateTime } from '@/lib/date-utils';
 import { useAuth } from '@/components/providers/auth-provider';
 import {
   AlertDialog,
@@ -104,8 +105,8 @@ function WithdrawalsTable({
                   <TableCell>{w.crypto}</TableCell>
                   <TableCell>{w.amount.toFixed(8)}</TableCell>
                   <TableCell className="font-mono text-xs max-w-[150px] truncate">{w.address}</TableCell>
-                  <TableCell>
-                    {toDate(w.createdAt)?.toLocaleString('default', { dateStyle: 'short', timeStyle: 'short' })}
+                  <TableCell className="text-xs text-muted-foreground whitespace-nowrap">
+                    {formatUtcDateTime(w.createdAt)}
                   </TableCell>
                   <TableCell>
                     <Badge variant="outline" className={cn('capitalize', statusColors[w.status])}>
@@ -157,7 +158,7 @@ function WithdrawalsTable({
                   <div>
                     <CardTitle className="text-base">{w.userDisplayName}</CardTitle>
                     <CardDescription>
-                      {toDate(w.createdAt)?.toLocaleString('default', { dateStyle: 'short', timeStyle: 'short' })}
+                      {formatUtcDateTime(w.createdAt)}
                     </CardDescription>
                   </div>
                   <Badge variant="outline" className={cn('capitalize', statusColors[w.status])}>
@@ -265,7 +266,7 @@ export default function AdminWithdrawalsPage() {
         w.id.toLowerCase().includes(lowercasedFilter) ||
         w.address.toLowerCase().includes(lowercasedFilter) ||
         w.amount.toString().includes(lowercasedFilter) ||
-        (toDate(w.createdAt)?.toLocaleString() ?? '').toLowerCase().includes(lowercasedFilter)
+        formatUtcDateTime(w.createdAt).toLowerCase().includes(lowercasedFilter)
       );
     });
   }, [allWithdrawals, searchTerm]);
@@ -500,12 +501,9 @@ export default function AdminWithdrawalsPage() {
                 </div>
               </div>
               <div className="flex justify-between items-center">
-                <span className="text-muted-foreground">Date Requested</span>
+                <span className="text-muted-foreground">Date Requested (UTC)</span>
                 <span className="font-medium">
-                  {toDate(selectedWithdrawal.createdAt)?.toLocaleString('default', {
-                    dateStyle: 'short',
-                    timeStyle: 'short',
-                  })}
+                  {formatUtcDateTime(selectedWithdrawal.createdAt)}
                 </span>
               </div>
               {selectedWithdrawal.adminId && (

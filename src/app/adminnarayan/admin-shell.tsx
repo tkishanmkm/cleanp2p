@@ -29,6 +29,7 @@ import { Logo } from "@/components/logo";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import { AdminGlobalSearch } from "@/components/admin/global-search";
 
 interface AdminShellProps {
   children: ReactNode;
@@ -271,21 +272,26 @@ export function AdminShell({
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col md:flex-row">
       {/* Mobile Header */}
-      <header className="md:hidden flex items-center justify-between px-4 py-3 border-b border-slate-800 bg-slate-900/90 backdrop-blur sticky top-0 z-40">
-        <div className="flex items-center gap-2">
-          <Logo />
-          <Badge variant="destructive" className="text-[10px] px-1.5 py-0.5 uppercase tracking-wider font-semibold">
-            Admin
-          </Badge>
+      <header className="md:hidden flex flex-col px-4 py-2.5 border-b border-slate-800 bg-slate-900/95 backdrop-blur sticky top-0 z-40 gap-2">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <Logo />
+            <Badge variant="destructive" className="text-[10px] px-1.5 py-0.5 uppercase tracking-wider font-semibold">
+              Admin
+            </Badge>
+          </div>
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
+            className="text-slate-300 hover:text-white"
+          >
+            {mobileMenuOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
+          </Button>
         </div>
-        <Button
-          variant="ghost"
-          size="icon"
-          onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
-          className="text-slate-300 hover:text-white"
-        >
-          {mobileMenuOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
-        </Button>
+        <div className="w-full">
+          <AdminGlobalSearch />
+        </div>
       </header>
 
       {/* Sidebar Navigation */}
@@ -391,9 +397,24 @@ export function AdminShell({
       </aside>
 
       {/* Main View Area */}
-      <main className="flex-1 min-w-0 p-6 md:p-8 overflow-y-auto bg-slate-950">
-        <div className="max-w-7xl mx-auto">{children}</div>
-      </main>
+      <div className="flex-1 min-w-0 flex flex-col min-h-screen overflow-hidden bg-slate-950">
+        {/* Desktop Top Header */}
+        <header className="hidden md:flex items-center justify-between px-8 py-3 border-b border-slate-800/80 bg-slate-900/60 backdrop-blur sticky top-0 z-30">
+          <div className="flex-1 max-w-md">
+            <AdminGlobalSearch />
+          </div>
+          <div className="flex items-center gap-3">
+            <div className="flex items-center gap-1.5 text-emerald-400 bg-emerald-950/40 px-2.5 py-1 rounded-full border border-emerald-800/60 font-mono text-[11px]">
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+              Live Ledger Connected
+            </div>
+          </div>
+        </header>
+
+        <main className="flex-1 p-6 md:p-8 overflow-y-auto">
+          <div className="max-w-7xl mx-auto">{children}</div>
+        </main>
+      </div>
 
       {/* Backdrop for mobile menu */}
       {mobileMenuOpen && (

@@ -26,10 +26,11 @@ import { DefaultAvatar } from '@/components/icons';
 import { Logo } from '@/components/logo';
 import { FlagIcon } from '@/components/ui/flag-icon';
 import { Alert, AlertTitle, AlertDescription } from '@/components/ui/alert';
-import { Clock, Send, Plus, Info as InfoIcon, Loader2, ThumbsUp, ThumbsDown } from 'lucide-react';
+import { Clock, Send, Plus, Info as InfoIcon, Loader2, ThumbsUp, ThumbsDown, ShieldAlert } from 'lucide-react';
 import { completeEscrow } from '@/lib/wallet';
 import { formatDistanceToNow } from 'date-fns';
 import { useAuth } from '@/components/providers/auth-provider';
+import { formatCompactUtc } from '@/lib/date-utils';
 
 // --- Sub-component: TradeInstructions ---
 function TradeInstructions({ trade, isBuyer }: { trade: Trade; isBuyer: boolean }) {
@@ -84,7 +85,7 @@ function SystemMessage({
   timestamp: string;
   variant?: 'default' | 'destructive' | 'success' | 'warning';
 }) {
-  const timeString = toDate(timestamp)?.toLocaleString('default', { dateStyle: 'short', timeStyle: 'short' }) || '';
+  const timeString = timestamp ? formatCompactUtc(timestamp) : '';
 
   const variants = {
     default:
@@ -151,15 +152,31 @@ export function TradeChat({
   const mapSupabaseToChatMessage = useCallback(
     (rec: TradeMessageRecord): TradeChatMessage => {
       const isCurrentUser = rec.sender_id === currentUserId;
+      const isModOrSystem =
+        rec.sender_id === '00000000-0000-0000-0000-000000000000' ||
+        rec.sender_id === 'system' ||
+        rec.message?.includes('Moderator') ||
+        rec.message?.startsWith('[MODERATOR]') ||
+        rec.message?.startsWith('🛡️') ||
+        rec.message?.startsWith('Paxones Moderator');
+
+      let cleanMessage = rec.message || '';
+      if (cleanMessage.includes('Moderator Joined') || cleanMessage.includes('joined the trade discussion')) {
+        cleanMessage = 'Paxones Moderator joined the trade.';
+      } else {
+        cleanMessage = cleanMessage.replace(/^\[MODERATOR\s*(?:-\s*[^\]]+)?\]:\s*/i, '');
+        cleanMessage = cleanMessage.replace(/[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+/gi, '[protected]');
+      }
+
       return {
         id: rec.id,
         tradeId: rec.trade_id,
-        senderId: rec.sender_id,
-        senderUsername: isCurrentUser ? user?.displayName || 'You' : opponent?.userId || 'User',
-        message: rec.message,
+        senderId: isModOrSystem ? '00000000-0000-0000-0000-000000000000' : rec.sender_id,
+        senderUsername: isModOrSystem ? 'Paxones Moderator' : (isCurrentUser ? user?.displayName || 'You' : opponent?.userId || 'User'),
+        message: cleanMessage,
         mediaUrl: rec.attachment_url || undefined,
         mediaType: rec.attachment_url ? 'image' : 'none',
-        isModerator: false,
+        isModerator: isModOrSystem,
         createdAt: rec.created_at,
       };
     },
@@ -456,13 +473,12 @@ export function TradeChat({
                   }
 
                   const isCurrentUser = msg.senderId === currentUserId;
-                  let senderName: string | React.ReactNode = isCurrentUser ? 'You' : opponent?.userId || 'Opponent';
-                  if (msg.isModerator) senderName = 'Moderator';
+                  const senderName = isCurrentUser ? 'You' : opponent?.userId || 'User';
 
                   const senderAvatar = isCurrentUser ? null : msg.isModerator ? (
-                    <Avatar className="h-8 w-8">
-                      <AvatarFallback className="bg-transparent">
-                        <Logo />
+                    <Avatar className="h-8 w-8 border border-blue-500/40">
+                      <AvatarFallback className="bg-blue-600 text-white flex items-center justify-center">
+                        <ShieldAlert className="w-4 h-4 text-white" />
                       </AvatarFallback>
                     </Avatar>
                   ) : (
@@ -484,11 +500,20 @@ export function TradeChat({
                           isCurrentUser && !msg.isModerator && 'bg-primary text-primary-foreground',
                           !isCurrentUser && !msg.isModerator && 'bg-muted',
                           msg.isModerator &&
-                            'bg-blue-100 border-blue-200 text-blue-900 dark:bg-blue-950/60 dark:border-blue-800/50 dark:text-blue-200'
+                            'bg-blue-50 border border-blue-200 text-blue-950 dark:bg-blue-950/70 dark:border-blue-800 dark:text-blue-100 shadow-sm'
                         )}
                       >
-                        <p className="font-bold text-xs">{senderName}</p>
-                        {msg.message && <p className="whitespace-pre-wrap">{msg.message}</p>}
+                        {msg.isModerator ? (
+                          <div className="flex items-center gap-1.5 font-bold text-xs text-blue-700 dark:text-blue-300 pb-0.5">
+                            <div className="w-4 h-4 rounded bg-blue-600 flex items-center justify-center shrink-0">
+                              <ShieldAlert className="w-2.5 h-2.5 text-white" />
+                            </div>
+                            <span>Paxones Moderator</span>
+                          </div>
+                        ) : (
+                          <p className="font-bold text-xs">{senderName}</p>
+                        )}
+                        {msg.message && <p className="whitespace-pre-wrap leading-relaxed">{msg.message}</p>}
                         {msg.mediaUrl && msg.mediaType === 'image' && (
                           <a href={msg.mediaUrl} target="_blank" rel="noopener noreferrer">
                             <Image
@@ -514,10 +539,7 @@ export function TradeChat({
                             </a>
                           )}
                         <p className="text-xs mt-1 opacity-70 text-right w-full">
-                          {toDate(msg.createdAt)?.toLocaleString('default', {
-                            dateStyle: 'short',
-                            timeStyle: 'short',
-                          }) ?? 'sending...'}
+                          {msg.createdAt ? formatCompactUtc(msg.createdAt) : 'sending...'}
                         </p>
                       </div>
                     </div>
