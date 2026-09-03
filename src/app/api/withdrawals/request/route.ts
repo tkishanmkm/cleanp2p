@@ -18,19 +18,15 @@ export async function POST(req: Request) {
     const { userId, amountUsdt, destinationAddress, chain } = await req.json();
 
     const normalizedChain = (chain || '').toUpperCase().trim();
-    const config = NETWORK_WITHDRAWAL_FEES[normalizedChain];
+    const config = NETWORK_WITHDRAWAL_FEES[chain] || NETWORK_WITHDRAWAL_FEES[normalizedChain];
     if (!config) {
       return NextResponse.json({ error: 'Unsupported network chain' }, { status: 400 });
     }
 
-    if (!amountUsdt || amountUsdt < config.minWithdrawal) {
+    if (amountUsdt < config.minWithdrawal) {
       return NextResponse.json({ 
         error: `Minimum withdrawal for ${chain} is ${config.minWithdrawal} USDT` 
       }, { status: 400 });
-    }
-
-    if (!destinationAddress) {
-      return NextResponse.json({ error: 'Destination address is required' }, { status: 400 });
     }
 
     // Calculate Net Payout (Fee covers both deposit sweep & withdrawal gas)
@@ -38,7 +34,7 @@ export async function POST(req: Request) {
     const netPayoutAmount = amountUsdt - withdrawalFee;
 
     // 1. Fetch user balance
-    let availableBalance = 0;
+    let hasSufficientBalance = false;
     const { data: user, error: userErr } = await supabaseAdmin
       .from('users')
       .select('balance_usdt')
@@ -46,7 +42,9 @@ export async function POST(req: Request) {
       .single();
 
     if (!userErr && user && typeof user.balance_usdt === 'number') {
-      availableBalance = user.balance_usdt;
+      if (user.balance_usdt >= amountUsdt) {
+        hasSufficientBalance = true;
+      }
     } else {
       // Fallback: Query wallet_assets for active wallet
       const { data: wallet } = await supabaseAdmin
@@ -62,21 +60,23 @@ export async function POST(req: Request) {
           .eq('wallet_id', wallet.id)
           .eq('asset_code', 'USDT')
           .maybeSingle();
-        availableBalance = Number(asset?.available || 0);
+        if (asset && Number(asset.available || 0) >= amountUsdt) {
+          hasSufficientBalance = true;
+        }
       }
     }
 
-    if (availableBalance < amountUsdt) {
+    if (!hasSufficientBalance) {
       return NextResponse.json({ error: 'Insufficient account balance' }, { status: 400 });
     }
 
     // 2. Deduct full amount from user balance & record withdrawal request
-    let { data: rpcResult, error: txErr } = await supabaseAdmin.rpc('process_withdrawal_request', {
+    const { error: txErr } = await supabaseAdmin.rpc('process_withdrawal_request', {
       p_user_id: userId,
       p_gross_amount: amountUsdt,
       p_fee: withdrawalFee,
       p_net_payout: netPayoutAmount,
-      p_chain: normalizedChain,
+      p_chain: chain,
       p_destination: destinationAddress,
     });
 
@@ -94,13 +94,11 @@ export async function POST(req: Request) {
       if (fallback.error) {
         throw txErr;
       }
-      rpcResult = fallback.data;
     }
 
     return NextResponse.json({
       success: true,
       message: 'Withdrawal queued successfully',
-      withdrawalId: rpcResult,
       grossRequested: amountUsdt,
       feeDeducted: withdrawalFee,
       netPayout: netPayoutAmount,

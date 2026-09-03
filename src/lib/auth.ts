@@ -155,13 +155,22 @@ export async function signInWithIdentifier(
 }
 
 /**
+ * Generates a random, unique username for newly registered users.
+ * Example: trader_48291
+ */
+export function generateUniqueUsername(): string {
+  const randomSuffix = Math.floor(10000 + Math.random() * 90000);
+  return `trader_${randomSuffix}`;
+}
+
+/**
  * Sign up a new user with email, password, and metadata via Supabase Auth.
  */
 export async function signUpWithEmail(
   email: string,
   password: string,
   metadata?: { username?: string; displayName?: string }
-): Promise<AuthActionResult<{ user: User | null; session: Session | null }>> {
+): Promise<AuthActionResult<{ user: User | null; session: Session | null; assignedUsername: string }>> {
   try {
     const { isConfigured } = checkSupabaseConfig();
     if (!isConfigured) {
@@ -171,7 +180,8 @@ export async function signUpWithEmail(
       };
     }
 
-    const resolvedUsername = sanitizeUsername(metadata?.username || email.split('@')[0]);
+    // Automatically generate a unique username if not provided
+    const resolvedUsername = metadata?.username ? sanitizeUsername(metadata.username) : generateUniqueUsername();
     const resolvedDisplayName = metadata?.displayName || metadata?.username || resolvedUsername;
 
     const { data, error } = await supabase.auth.signUp({
@@ -189,7 +199,7 @@ export async function signUpWithEmail(
       return { data: null, error: handleAuthError(error) };
     }
 
-    // Ensure profile row exists in profiles table
+    // Ensure profile row exists in profiles table with username_changed = false
     if (data.user) {
       try {
         await supabase.from('profiles').upsert({
@@ -200,6 +210,7 @@ export async function signUpWithEmail(
           role: 'user',
           is_admin: false,
           status: 'active',
+          username_changed: false,
           updated_at: new Date().toISOString(),
         });
       } catch (upsertErr) {
@@ -207,7 +218,14 @@ export async function signUpWithEmail(
       }
     }
 
-    return { data, error: null };
+    return { 
+      data: { 
+        user: data.user, 
+        session: data.session, 
+        assignedUsername: resolvedUsername 
+      }, 
+      error: null 
+    };
   } catch (err: unknown) {
     return { data: null, error: handleAuthError(err) };
   }

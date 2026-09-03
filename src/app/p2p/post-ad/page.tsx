@@ -102,33 +102,47 @@ export default function PostAdPage() {
         return;
       }
 
-      // 2. Perform Insert with explicit user_id and detailed error logging
-      const { data, error: insertErr } = await supabase
-        .from('p2p_ads')
-        .insert([
-          {
-            user_id: session.user.id, // Explicitly attach authenticated user ID
-            type,
-            coin,
-            fiat,
-            price_type: pricingType,
-            price_margin: parseFloat(priceMargin) || 100,
-            price: calculatedPrice,
-            payment_methods: selectedPayments,
-            min_amount: min,
-            max_amount: max,
-            payment_window: parseInt(paymentWindow, 10),
-            status: 'ACTIVE',
-          }
-        ])
-        .select();
+      // 2. Clean payload: Cast numeric columns and ensure booleans are boolean
+      const cleanPayload: Record<string, any> = {
+        type,
+        coin,
+        fiat,
+        price_type: pricingType,
+        margin: parseFloat(priceMargin) || 100,
+        price_margin: parseFloat(priceMargin) || 100,
+        price: calculatedPrice ? Number(calculatedPrice) : null,
+        payment_methods: selectedPayments,
+        min_amount: min ? Number(min) : null,
+        max_amount: max ? Number(max) : null,
+        payment_window: parseInt(paymentWindow, 10) || 30,
+        status: 'ACTIVE',
+        is_fixed: Boolean(pricingType === 'FIXED'),
+      };
 
-      if (insertErr) {
+      // 3. Call backend API route with credentials: 'include'
+      const headers: Record<string, string> = {
+        'Content-Type': 'application/json',
+      };
+      if (session?.access_token) {
+        headers['Authorization'] = `Bearer ${session.access_token}`;
+      }
+
+      const response = await fetch('/api/p2p/ads', {
+        method: 'POST',
+        headers,
+        credentials: 'include', // <--- CRITICAL: Sends browser cookies to Next.js API route
+        body: JSON.stringify(cleanPayload),
+      });
+
+      const result = await response.json();
+
+      if (!response.ok) {
         // THIS WILL PRINT THE REAL ERROR IN CONSOLE AND ALERT
-        console.error("Database error creating ad:", insertErr);
-        alert(`Real Database Error [${insertErr.code}]: ${insertErr.message} - ${insertErr.details || insertErr.hint || ''}`);
-        setError(`Real Database Error [${insertErr.code}]: ${insertErr.message} - ${insertErr.details || insertErr.hint || ''}`);
+        console.error("Error creating ad:", result.realError || result.error);
+        alert(`Failed: ${result.realError || result.error}`);
+        setError(`Failed: ${result.realError || result.error}`);
       } else {
+        console.log('Ad created successfully:', result.data);
         alert("Ad created successfully!");
         router.push('/p2p');
       }

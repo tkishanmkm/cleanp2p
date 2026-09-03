@@ -2,7 +2,7 @@
 "use client";
 
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
@@ -25,7 +25,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Logo } from "@/components/logo";
-import { Loader2, AlertCircle } from "lucide-react";
+import { Loader2, AlertCircle, CheckCircle2, Copy, Check, Sparkles, ArrowRight, ShieldCheck } from "lucide-react";
 import { useState, Suspense, useEffect } from "react";
 import { useToast } from "@/hooks/use-toast";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -69,9 +69,16 @@ type SignupFormValues = z.infer<typeof formSchema>;
 
 function SignupFormComponent() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const urlEmail = searchParams?.get("email") || searchParams?.get("userId") || "";
   const { toast } = useToast();
   const [isSigningUp, setIsSigningUp] = useState(false);
   const [isConfigured, setIsConfigured] = useState(true);
+  const [createdAccountInfo, setCreatedAccountInfo] = useState<{
+    email: string;
+    username: string;
+  } | null>(null);
+  const [copiedUsername, setCopiedUsername] = useState(false);
 
   useEffect(() => {
     const config = checkSupabaseConfig();
@@ -82,7 +89,7 @@ function SignupFormComponent() {
     resolver: zodResolver(formSchema),
     defaultValues: {
       fullName: "",
-      email: "",
+      email: urlEmail,
       password: "",
       confirmPassword: "",
       day: "",
@@ -94,6 +101,13 @@ function SignupFormComponent() {
       captcha: false,
     },
   });
+
+  // Keep form email synchronized if URL param loads later
+  useEffect(() => {
+    if (urlEmail && !form.getValues("email")) {
+      form.setValue("email", urlEmail);
+    }
+  }, [urlEmail, form]);
 
   async function onSubmit(values: SignupFormValues) {
     setIsSigningUp(true);
@@ -114,19 +128,24 @@ function SignupFormComponent() {
         return;
       }
 
+      const assignedUsername = data?.assignedUsername || (data?.user?.user_metadata?.username as string) || "trader_user";
+
       if (data?.user) {
         // 2. Update additional profile details if available
         const dob = new Date(parseInt(values.year), parseInt(values.month) - 1, parseInt(values.day));
         await updateUserProfile(data.user.id, {
           display_name: values.fullName,
-          // Custom profile extensions
         });
 
         toast({
           title: "Account Created Successfully",
-          description: "Welcome to Paxones! Your account is ready.",
+          description: `Assigned User ID: ${assignedUsername}`,
         });
-        router.push('/wallets');
+
+        setCreatedAccountInfo({
+          email: values.email,
+          username: assignedUsername,
+        });
       }
     } catch (error: unknown) {
       console.error("Error during sign up:", error);
@@ -135,6 +154,82 @@ function SignupFormComponent() {
     } finally {
       setIsSigningUp(false);
     }
+  }
+
+  if (createdAccountInfo) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-secondary/50 p-4">
+        <Card className="w-full max-w-md border border-[#5B4DF6]/30 shadow-2xl bg-white dark:bg-[#18181c] rounded-2xl overflow-hidden">
+          <div className="h-2 bg-gradient-to-r from-[#5B4DF6] via-[#6366F1] to-[#3B82F6]" />
+          <CardHeader className="text-center pt-8 pb-4">
+            <div className="w-16 h-16 rounded-2xl bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 flex items-center justify-center mx-auto mb-3 shadow-inner">
+              <CheckCircle2 className="h-9 w-9 stroke-[2.5]" />
+            </div>
+            <CardTitle className="text-2xl font-bold">Account Created Successfully!</CardTitle>
+            <CardDescription className="text-sm">
+              Welcome to Paxones. Your secure peer-to-peer trading account is now ready.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-5 px-6 pb-8">
+            <div className="rounded-xl border border-[#5B4DF6]/25 bg-[#5B4DF6]/5 dark:bg-[#5B4DF6]/10 p-4 space-y-2.5">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold text-[#5B4DF6] uppercase tracking-wider flex items-center gap-1.5">
+                  <Sparkles className="h-3.5 w-3.5" />
+                  Assigned User ID / Username
+                </span>
+                <span className="text-[11px] font-semibold text-muted-foreground bg-background/80 px-2 py-0.5 rounded-full border">
+                  Auto-assigned
+                </span>
+              </div>
+              <div className="flex items-center justify-between gap-3 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg p-3">
+                <span className="font-mono text-xl font-extrabold text-slate-900 dark:text-white tracking-wide">
+                  {createdAccountInfo.username}
+                </span>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => {
+                    navigator.clipboard.writeText(createdAccountInfo.username);
+                    setCopiedUsername(true);
+                    setTimeout(() => setCopiedUsername(false), 2000);
+                  }}
+                  className="h-8 px-2.5 text-xs text-muted-foreground hover:text-foreground"
+                >
+                  {copiedUsername ? (
+                    <span className="flex items-center gap-1 text-emerald-600 font-semibold">
+                      <Check className="h-3.5 w-3.5" /> Copied
+                    </span>
+                  ) : (
+                    <span className="flex items-center gap-1">
+                      <Copy className="h-3.5 w-3.5" /> Copy
+                    </span>
+                  )}
+                </Button>
+              </div>
+              <p className="text-[12px] leading-relaxed text-slate-600 dark:text-slate-400 pt-1">
+                <strong>One-time change notice:</strong> You did not choose a username during signup. You can change this generated User ID <strong>only once</strong> from your Account Settings.
+              </p>
+            </div>
+
+            <div className="space-y-2 text-xs text-muted-foreground border-t border-border pt-3">
+              <div className="flex items-center gap-2">
+                <ShieldCheck className="h-4 w-4 text-emerald-600 shrink-0" />
+                <span>Registered Email: <span className="font-semibold text-foreground">{createdAccountInfo.email}</span></span>
+              </div>
+            </div>
+
+            <Button
+              onClick={() => router.push("/wallets")}
+              className="w-full h-12 text-base font-bold rounded-xl bg-gradient-to-r from-[#5B4DF6] via-[#6366F1] to-[#3B82F6] hover:opacity-95 text-white shadow-lg shadow-indigo-500/25 cursor-pointer"
+            >
+              <span>Continue to Platform</span>
+              <ArrowRight className="ml-2 h-4 w-4" />
+            </Button>
+          </CardContent>
+        </Card>
+      </div>
+    );
   }
 
   const maxDate = new Date();

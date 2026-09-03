@@ -72,7 +72,7 @@ const navItems: NavItem[] = [
   { href: '/ads/create', label: 'Create Ad', icon: PlusCircle },
   { href: '/my-ads', label: 'My Ads', icon: FileText },
   { href: '/trades', label: 'My Trades', icon: ArrowLeftRight },
-  { href: '/contact', label: 'Support', icon: LifeBuoy },
+  { href: '/support', label: 'Support', icon: LifeBuoy },
 ];
 
 const CryptoLogo = ({ crypto, className }: { crypto: CryptoCurrency; className?: string }) => {
@@ -217,83 +217,93 @@ export function DashboardHeader() {
   return (
     <header className="sticky top-0 z-30 w-full border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
       <div className="flex h-16 items-center px-4 sm:px-6 lg:px-8">
-        {/* Mobile Header Left */}
-        <div className="flex items-center gap-1 md:hidden">
+        {/* Mobile Header Left Toggle & Logo */}
+        <div className="flex items-center gap-2 lg:hidden">
           <Sheet>
             <SheetTrigger asChild>
-              <Button variant="ghost" size="icon" className="shrink-0">
-                <Menu className="h-5 w-5" />
+              <Button variant="ghost" size="icon" className="h-9 w-9 rounded-lg shrink-0 hover:bg-slate-100 dark:hover:bg-slate-800">
+                <Menu className="h-5 w-5 text-foreground" />
                 <span className="sr-only">Toggle navigation menu</span>
               </Button>
             </SheetTrigger>
-            <SheetContent side="left" className="flex flex-col p-0">
-              <nav className="grid gap-6 text-lg font-medium mt-8 px-6">
-                <Link href="/dashboard" className="flex items-center gap-2 text-lg font-semibold">
+            <SheetContent side="left" className="flex flex-col p-0 w-[300px] sm:w-[340px] bg-background">
+              <div className="p-5 border-b border-border/60">
+                <Link href="/dashboard" className="flex items-center">
                   <Logo />
                 </Link>
-                {navItems.map((item) =>
-                  item.isDropdown ? (
-                    <div key={item.label} className="grid gap-4">
-                      <p className="flex items-center gap-4 text-base text-muted-foreground">
-                        <item.icon className="h-5 w-5" />
-                        {item.label}
-                      </p>
-                      <div className="grid gap-4 pl-9">
-                        {item.items?.map((subItem) => (
-                          <Link
-                            key={subItem.href}
-                            href={subItem.href}
-                            className={`flex items-center gap-4 text-base transition-colors ${
-                              pathname.startsWith(subItem.href)
-                                ? 'text-foreground font-semibold'
-                                : 'text-muted-foreground hover:text-foreground'
-                            }`}
-                          >
-                            {subItem.label}
-                          </Link>
-                        ))}
-                      </div>
-                    </div>
-                  ) : (
-                    <Link
-                      key={item.href}
-                      href={item.href!}
-                      className={`flex items-center gap-4 text-base transition-colors ${
-                        (pathname.startsWith(item.href!) && item.href !== '/dashboard') || pathname === item.href
-                          ? 'text-foreground font-semibold'
-                          : 'text-muted-foreground hover:text-foreground'
-                      }`}
-                    >
-                      <item.icon className="h-5 w-5" />
-                      {item.label}
-                    </Link>
-                  )
-                )}
-              </nav>
-              <div className="mt-auto p-6">
+                {/* User Quick Balance Summary in Drawer */}
+                <div className="mt-4 p-3 rounded-xl bg-gradient-to-r from-[#5B4DF6]/10 to-[#3B82F6]/10 border border-[#5B4DF6]/20">
+                  <span className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">Estimated Total Balance</span>
+                  <div className="text-lg font-bold text-foreground mt-0.5">
+                    {totalWalletValueConverted.toLocaleString('en-US', {
+                      style: 'currency',
+                      currency: preferredCurrency,
+                      minimumFractionDigits: 2,
+                    })}
+                  </div>
+                </div>
+              </div>
+
+              <ScrollArea className="flex-1 px-4 py-3">
+                <div className="space-y-1">
+                  {navItems.map((item) => {
+                    const isActive =
+                      (pathname.startsWith(item.href!) && item.href !== '/dashboard') ||
+                      pathname === item.href ||
+                      (item.href === '/support' && pathname.startsWith('/contact'));
+                    const IconComponent = item.icon;
+
+                    return (
+                      <Link
+                        key={item.href}
+                        href={item.href!}
+                        className={cn(
+                          'flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-sm font-semibold tracking-tight transition-all duration-150',
+                          isActive
+                            ? 'bg-gradient-to-r from-[#5B4DF6] to-[#4F46E5] text-white shadow-sm shadow-indigo-500/25 font-bold'
+                            : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100/90 dark:hover:bg-slate-800/80 font-medium'
+                        )}
+                      >
+                        <IconComponent className={cn('h-4 w-4 shrink-0', isActive ? 'text-white stroke-[2.2]' : 'text-slate-500 dark:text-slate-400 stroke-[2]')} />
+                        <span className="flex-1">{item.label}</span>
+                        {item.href === '/ads/create' && (
+                          <span className={cn('text-[10px] font-bold px-2 py-0.5 rounded-md uppercase tracking-wider', isActive ? 'bg-white/20 text-white' : 'bg-[#5B4DF6]/10 text-[#5B4DF6] dark:bg-indigo-500/20 dark:text-indigo-300')}>
+                            Post
+                          </span>
+                        )}
+                      </Link>
+                    );
+                  })}
+                </div>
+              </ScrollArea>
+
+              <div className="p-4 border-t border-border/60 bg-muted/20 space-y-3">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs text-muted-foreground font-medium">Theme Mode</span>
+                  <ModeToggle />
+                </div>
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
-                    <Button variant="outline" className="w-full justify-start">
-                      <Globe className="mr-2 h-4 w-4" />
-                      <span>{selectedLanguage.nativeName}</span>
+                    <Button variant="outline" size="sm" className="w-full justify-between h-9 text-xs">
+                      <div className="flex items-center gap-2">
+                        <Globe className="h-3.5 w-3.5 text-muted-foreground" />
+                        <span>{selectedLanguage.nativeName}</span>
+                      </div>
+                      <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />
                     </Button>
                   </DropdownMenuTrigger>
-                  <DropdownMenuContent>
+                  <DropdownMenuContent className="w-56" align="start">
                     {LANGUAGES.map((lang) =>
                       lang.dialects ? (
                         <DropdownMenuSub key={lang.code}>
                           <DropdownMenuSubTrigger>
-                            <div className="flex flex-col items-start">
-                              <span className="font-medium">{lang.nativeName}</span>
-                            </div>
+                            <span className="font-medium text-xs">{lang.nativeName}</span>
                           </DropdownMenuSubTrigger>
                           <DropdownMenuPortal>
                             <DropdownMenuSubContent>
                               {lang.dialects.map((dialect) => (
                                 <DropdownMenuItem key={dialect.code} onClick={() => handleLanguageSelect(dialect)}>
-                                  <div className="flex flex-col">
-                                    <span className="font-medium">{dialect.nativeName}</span>
-                                  </div>
+                                  <span className="font-medium text-xs">{dialect.nativeName}</span>
                                 </DropdownMenuItem>
                               ))}
                             </DropdownMenuSubContent>
@@ -301,9 +311,7 @@ export function DashboardHeader() {
                         </DropdownMenuSub>
                       ) : (
                         <DropdownMenuItem key={lang.code} onClick={() => handleLanguageSelect(lang)}>
-                          <div className="flex flex-col">
-                            <span className="font-medium">{lang.nativeName}</span>
-                          </div>
+                          <span className="font-medium text-xs">{lang.nativeName}</span>
                         </DropdownMenuItem>
                       )
                     )}
@@ -312,97 +320,88 @@ export function DashboardHeader() {
               </div>
             </SheetContent>
           </Sheet>
-          <Link href="/dashboard">
+          <Link href="/dashboard" className="flex items-center">
             <Logo />
           </Link>
         </div>
 
-        {/* Desktop Header Left */}
-        <div className="hidden md:flex items-center gap-6">
-          <Link href="/dashboard">
+        {/* Desktop Header Left & Modern Navigation */}
+        <div className="hidden lg:flex items-center gap-4 xl:gap-6 min-w-0">
+          <Link href="/dashboard" className="shrink-0 flex items-center">
             <Logo />
           </Link>
-          <nav className="hidden md:flex items-center gap-1">
-            {navItems.map((item) =>
-              item.isDropdown ? (
-                <DropdownMenu key={item.label}>
-                  <DropdownMenuTrigger asChild>
-                    <Button
-                      variant="ghost"
-                      className={cn(
-                        'h-auto px-3 py-2 text-sm font-medium transition-colors hover:bg-accent hover:text-accent-foreground flex items-center gap-2',
-                        item.items?.some((subItem) => pathname.startsWith(subItem.href))
-                          ? 'bg-primary text-primary-foreground hover:bg-primary/90'
-                          : 'text-muted-foreground'
-                      )}
-                    >
-                      <item.icon className="h-4 w-4" />
-                      {item.label}
-                    </Button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent>
-                    {item.items?.map((subItem) => (
-                      <DropdownMenuItem key={subItem.href} asChild>
-                        <Link href={subItem.href}>{subItem.label}</Link>
-                      </DropdownMenuItem>
-                    ))}
-                  </DropdownMenuContent>
-                </DropdownMenu>
-              ) : (
-                <Button
+
+          {/* Clean Modern Nav Items with High Quality Typography & SVG Icons */}
+          <nav className="flex items-center gap-1 xl:gap-1.5 overflow-x-auto scrollbar-none py-1">
+            {navItems.map((item) => {
+              const isActive =
+                (pathname.startsWith(item.href!) && item.href !== '/dashboard') ||
+                pathname === item.href ||
+                (item.href === '/support' && pathname.startsWith('/contact'));
+              const IconComponent = item.icon;
+
+              return (
+                <Link
                   key={item.href}
-                  asChild
-                  variant="ghost"
+                  href={item.href!}
                   className={cn(
-                    'h-auto px-3 py-2 text-sm font-medium transition-colors hover:bg-accent hover:text-accent-foreground',
-                    (pathname.startsWith(item.href!) && item.href !== '/dashboard') || pathname === item.href
-                      ? 'bg-primary text-primary-foreground hover:bg-primary/90'
-                      : 'text-muted-foreground'
+                    'group flex items-center gap-1.5 px-2.5 xl:px-3 py-1.5 rounded-xl text-xs xl:text-[13px] font-semibold tracking-tight transition-all duration-150 whitespace-nowrap select-none',
+                    isActive
+                      ? 'bg-gradient-to-r from-[#5B4DF6] to-[#4F46E5] text-white shadow-sm shadow-indigo-500/25'
+                      : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100/90 dark:hover:bg-slate-800/80 font-medium'
                   )}
                 >
-                  <Link href={item.href!} className="flex items-center gap-2">
-                    <item.icon className="h-4 w-4" />
-                    {item.label}
-                  </Link>
-                </Button>
-              )
-            )}
+                  <IconComponent
+                    className={cn(
+                      'h-4 w-4 shrink-0 transition-transform duration-150 group-hover:scale-105',
+                      isActive ? 'text-white stroke-[2.2]' : 'text-slate-500 dark:text-slate-400 group-hover:text-[#5B4DF6] stroke-[2]'
+                    )}
+                  />
+                  <span>{item.label}</span>
+                </Link>
+              );
+            })}
           </nav>
         </div>
 
         {/* Spacer */}
         <div className="flex-1" />
 
-        {/* Right side */}
-        <div className="flex items-center gap-2">
+        {/* Right side controls: Theme, Language (EN), Notifications, User Profile & Balance */}
+        <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
+          {/* Toggle theme */}
           <ModeToggle />
+
+          {/* Language Selector ("EN") */}
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button
                 variant="ghost"
-                className="hidden sm:inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
+                className="hidden sm:inline-flex items-center gap-1.5 h-9 px-2.5 rounded-xl border border-slate-200/80 dark:border-slate-800 bg-slate-100/70 dark:bg-slate-800/60 hover:bg-slate-200/80 dark:hover:bg-slate-700/80 text-slate-700 dark:text-slate-200 font-bold text-xs tracking-wider transition-all shadow-xs cursor-pointer"
+                title="Change language"
               >
-                <Globe className="h-4 w-4" />
-                <span>{selectedLanguage.code.toUpperCase()}</span>
+                <Globe className="h-3.5 w-3.5 text-[#5B4DF6] shrink-0 stroke-[2.2]" />
+                <span className="uppercase font-bold tracking-wider">{selectedLanguage.code}</span>
+                <ChevronDown className="h-3 w-3 text-muted-foreground/70 shrink-0" />
               </Button>
             </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="w-56">
+            <DropdownMenuContent align="end" className="w-56 rounded-xl p-1.5 shadow-xl border border-border">
               {LANGUAGES.map((lang) =>
                 lang.dialects ? (
                   <DropdownMenuSub key={lang.code}>
-                    <DropdownMenuSubTrigger>
+                    <DropdownMenuSubTrigger className="rounded-lg py-2 cursor-pointer">
                       <div className="flex flex-col items-start">
-                        <span className="font-medium">{lang.nativeName}</span>
-                        <span className="text-xs text-muted-foreground">{lang.name}</span>
+                        <span className="font-semibold text-xs">{lang.nativeName}</span>
+                        <span className="text-[11px] text-muted-foreground">{lang.name}</span>
                       </div>
                     </DropdownMenuSubTrigger>
                     <DropdownMenuPortal>
-                      <DropdownMenuSubContent>
+                      <DropdownMenuSubContent className="rounded-xl p-1 shadow-lg">
                         {lang.dialects.map((dialect) => (
-                          <DropdownMenuItem key={dialect.code} onClick={() => handleLanguageSelect(dialect)}>
+                          <DropdownMenuItem key={dialect.code} onClick={() => handleLanguageSelect(dialect)} className="rounded-lg py-2 cursor-pointer">
                             <div className="flex flex-col">
-                              <span className="font-medium">{dialect.nativeName}</span>
-                              <span className="text-xs text-muted-foreground">{dialect.name}</span>
+                              <span className="font-semibold text-xs">{dialect.nativeName}</span>
+                              <span className="text-[11px] text-muted-foreground">{dialect.name}</span>
                             </div>
                           </DropdownMenuItem>
                         ))}
@@ -410,10 +409,10 @@ export function DashboardHeader() {
                     </DropdownMenuPortal>
                   </DropdownMenuSub>
                 ) : (
-                  <DropdownMenuItem key={lang.code} onClick={() => handleLanguageSelect(lang)}>
+                  <DropdownMenuItem key={lang.code} onClick={() => handleLanguageSelect(lang)} className="rounded-lg py-2 cursor-pointer">
                     <div className="flex flex-col">
-                      <span className="font-medium">{lang.nativeName}</span>
-                      <span className="text-xs text-muted-foreground">{lang.name}</span>
+                      <span className="font-semibold text-xs">{lang.nativeName}</span>
+                      <span className="text-[11px] text-muted-foreground">{lang.name}</span>
                     </div>
                   </DropdownMenuItem>
                 )
@@ -421,14 +420,20 @@ export function DashboardHeader() {
             </DropdownMenuContent>
           </DropdownMenu>
 
+          {/* Toggle notifications */}
           <DropdownMenu onOpenChange={(open) => !open && setShowAllNotifications(false)}>
             <DropdownMenuTrigger asChild>
-              <Button variant="ghost" size="icon" className="rounded-full relative">
-                <Bell className="h-5 w-5" />
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-9 w-9 rounded-xl border border-slate-200/80 dark:border-slate-800 bg-slate-100/70 dark:bg-slate-800/60 hover:bg-slate-200/80 dark:hover:bg-slate-700/80 text-slate-700 dark:text-slate-200 transition-all shadow-xs relative flex items-center justify-center cursor-pointer"
+                title="Toggle notifications"
+              >
+                <Bell className="h-4 w-4 text-slate-700 dark:text-slate-300 stroke-[2]" />
                 {unreadCount > 0 && (
-                  <Badge variant="destructive" className="absolute -top-1 -right-1 h-5 w-5 justify-center p-0">
-                    {unreadCount}
-                  </Badge>
+                  <span className="absolute -top-1 -right-1 flex h-4 min-w-4 px-1 items-center justify-center text-[10px] font-extrabold text-white bg-rose-600 rounded-full shadow-xs ring-2 ring-background animate-in fade-in">
+                    {unreadCount > 9 ? '9+' : unreadCount}
+                  </span>
                 )}
                 <span className="sr-only">Toggle notifications</span>
               </Button>
@@ -535,79 +540,117 @@ export function DashboardHeader() {
 
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
-              <Button variant="ghost" className="flex shrink-0 items-center gap-1.5 md:gap-2 p-1 h-auto rounded-md">
-                {profile?.country && <FlagIcon countryCode={profile.country} className="w-5 h-auto rounded-sm" />}
-                <Avatar className="h-8 w-8 shrink-0">
-                  {profile?.photoURL ? (
-                    <AvatarImage src={profile.photoURL} alt={authUser.displayName || 'User Avatar'} />
-                  ) : (
-                    <AvatarFallback className="bg-transparent">
-                      <DefaultAvatar />
-                    </AvatarFallback>
-                  )}
-                </Avatar>
-                <div className="flex-shrink min-w-0 text-left">
+              <Button
+                variant="ghost"
+                className="h-10 pl-2 pr-2.5 py-1 rounded-xl border border-slate-200/80 dark:border-slate-800 bg-slate-50/90 dark:bg-slate-800/60 hover:bg-slate-100 dark:hover:bg-slate-800 text-foreground transition-all shadow-xs flex items-center gap-2 cursor-pointer select-none group"
+              >
+                <div className="relative shrink-0 flex items-center">
+                  <Avatar className="h-7 w-7 rounded-lg border border-slate-200 dark:border-slate-700">
+                    {profile?.photoURL ? (
+                      <AvatarImage src={profile.photoURL} alt={authUser.displayName || profile?.username || 'User Avatar'} />
+                    ) : (
+                      <AvatarFallback className="bg-gradient-to-br from-[#5B4DF6] to-[#3B82F6] text-white text-[11px] font-bold">
+                        {(authUser.displayName || profile?.username || 'User').substring(0, 2).toUpperCase()}
+                      </AvatarFallback>
+                    )}
+                  </Avatar>
+                  <span className="absolute -bottom-0.5 -right-0.5 h-2 w-2 rounded-full bg-emerald-500 ring-1.5 ring-white dark:ring-slate-900" />
+                </div>
+
+                {profile?.country && (
+                  <FlagIcon countryCode={profile.country} className="w-4 h-3 rounded-[2px] object-cover shadow-xs shrink-0" />
+                )}
+
+                <div className="flex flex-col text-left min-w-0 justify-center">
                   {authUser?.displayName || profile?.username ? (
-                    <p className="font-semibold text-sm leading-tight truncate">
+                    <span className="font-bold text-xs sm:text-[13px] text-slate-900 dark:text-white tracking-tight truncate max-w-[90px] sm:max-w-[120px] leading-tight">
                       {authUser.displayName || profile?.username}
-                    </p>
+                    </span>
                   ) : (
-                    <Skeleton className="h-4 w-16" />
+                    <Skeleton className="h-3.5 w-16 mb-0.5" />
                   )}
-                  <p className="text-xs leading-tight text-muted-foreground truncate">
+                  <div className="flex items-center gap-1 text-[11px] font-bold text-emerald-600 dark:text-emerald-400 font-mono leading-none mt-0.5">
+                    <Wallet className="h-2.5 w-2.5 text-emerald-500 shrink-0 stroke-[2.2]" />
+                    <span className="truncate">
+                      {totalWalletValueConverted.toLocaleString(undefined, {
+                        style: 'currency',
+                        currency: preferredCurrency,
+                        minimumFractionDigits: 2,
+                        maximumFractionDigits: 2,
+                      })}
+                    </span>
+                  </div>
+                </div>
+
+                <ChevronDown className="h-3.5 w-3.5 text-muted-foreground/70 shrink-0 group-hover:text-foreground transition-colors ml-0.5" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-56 rounded-xl p-1.5 shadow-xl border border-border">
+              <div className="px-3 py-2 border-b border-border/60 mb-1">
+                <div className="flex items-center justify-between">
+                  <p className="text-xs font-bold text-foreground truncate">
+                    {authUser?.displayName || profile?.username || 'My Account'}
+                  </p>
+                  {profile?.country && <FlagIcon countryCode={profile.country} className="w-4 h-3 rounded-[2px]" />}
+                </div>
+                <div className="flex items-center gap-1.5 mt-1 text-xs text-muted-foreground">
+                  <Wallet className="w-3 h-3 text-emerald-500 shrink-0 stroke-[2]" />
+                  <span className="font-mono font-bold text-emerald-600 dark:text-emerald-400 text-xs">
                     {totalWalletValueConverted.toLocaleString(undefined, {
                       style: 'currency',
                       currency: preferredCurrency,
                       minimumFractionDigits: 2,
                       maximumFractionDigits: 2,
                     })}
-                  </p>
+                  </span>
                 </div>
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end">
-              <DropdownMenuLabel>{authUser?.displayName || profile?.username || 'My Account'}</DropdownMenuLabel>
-              <DropdownMenuSeparator />
-              <DropdownMenuItem asChild>
-                <Link href="/dashboard">
-                  <LayoutDashboard className="mr-2 h-4 w-4" />
+              </div>
+              <DropdownMenuItem asChild className="rounded-lg py-2 cursor-pointer">
+                <Link href="/dashboard" className="flex items-center gap-2.5 text-xs font-medium">
+                  <LayoutDashboard className="h-4 w-4 text-[#5B4DF6] stroke-[2]" />
                   <span>Dashboard</span>
                 </Link>
               </DropdownMenuItem>
-              <DropdownMenuItem asChild>
-                <Link href="/profile">
-                  <User className="mr-2 h-4 w-4" />
+              <DropdownMenuItem asChild className="rounded-lg py-2 cursor-pointer">
+                <Link href="/profile" className="flex items-center gap-2.5 text-xs font-medium">
+                  <User className="h-4 w-4 text-blue-500 stroke-[2]" />
                   <span>Profile</span>
                 </Link>
               </DropdownMenuItem>
-              <DropdownMenuItem asChild>
-                <Link href="/my-ads">
-                  <FileText className="mr-2 h-4 w-4" />
+              <DropdownMenuItem asChild className="rounded-lg py-2 cursor-pointer">
+                <Link href="/wallets" className="flex items-center gap-2.5 text-xs font-medium">
+                  <Wallet className="h-4 w-4 text-emerald-500 stroke-[2]" />
+                  <span>Wallets</span>
+                </Link>
+              </DropdownMenuItem>
+              <DropdownMenuItem asChild className="rounded-lg py-2 cursor-pointer">
+                <Link href="/my-ads" className="flex items-center gap-2.5 text-xs font-medium">
+                  <FileText className="h-4 w-4 text-amber-500 stroke-[2]" />
                   <span>My Ads</span>
                 </Link>
               </DropdownMenuItem>
-              <DropdownMenuItem asChild>
-                <Link href="/trades">
-                  <ArrowLeftRight className="mr-2 h-4 w-4" />
+              <DropdownMenuItem asChild className="rounded-lg py-2 cursor-pointer">
+                <Link href="/trades" className="flex items-center gap-2.5 text-xs font-medium">
+                  <ArrowLeftRight className="h-4 w-4 text-purple-500 stroke-[2]" />
                   <span>My Trades</span>
                 </Link>
               </DropdownMenuItem>
-              <DropdownMenuItem asChild>
-                <Link href="/my-tickets">
-                  <LifeBuoy className="mr-2 h-4 w-4" />
+              <DropdownMenuItem asChild className="rounded-lg py-2 cursor-pointer">
+                <Link href="/my-tickets" className="flex items-center gap-2.5 text-xs font-medium">
+                  <LifeBuoy className="h-4 w-4 text-sky-500 stroke-[2]" />
                   <span>My Tickets</span>
                 </Link>
               </DropdownMenuItem>
-              <DropdownMenuItem asChild>
-                <Link href="/settings">
-                  <Settings className="mr-2 h-4 w-4" />
+              <DropdownMenuItem asChild className="rounded-lg py-2 cursor-pointer">
+                <Link href="/settings" className="flex items-center gap-2.5 text-xs font-medium">
+                  <Settings className="h-4 w-4 text-slate-500 stroke-[2]" />
                   <span>Settings</span>
                 </Link>
               </DropdownMenuItem>
-              <DropdownMenuSeparator />
-              <DropdownMenuItem onClick={handleLogout} className="text-destructive">
-                <LogOut className="mr-2 h-4 w-4" />
-                <span>Logout</span>
+              <DropdownMenuSeparator className="my-1" />
+              <DropdownMenuItem onClick={handleLogout} className="rounded-lg py-2 cursor-pointer text-destructive focus:text-destructive focus:bg-destructive/10">
+                <LogOut className="mr-2 h-4 w-4 stroke-[2]" />
+                <span className="font-semibold text-xs">Logout</span>
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>

@@ -539,21 +539,48 @@ export default function CreateP2PAdPage() {
         min_completed_trades: parseInt(minTrades, 10) || 0,
       };
 
-      // 3. Perform Insert with explicit user_id and detailed error logging
-      const { data, error } = await supabase
-        .from('p2p_ads')
-        .insert([adPayload])
-        .select();
+      // Clean payload: Cast numeric columns and ensure booleans are boolean
+      const cleanPayload: Record<string, any> = {
+        ...adPayload,
+        price: adPayload.price ? Number(adPayload.price) : null,
+        margin: adPayload.margin ? Number(adPayload.margin) : null,
+        min_amount: adPayload.min_amount ? Number(adPayload.min_amount) : null,
+        max_amount: adPayload.max_amount ? Number(adPayload.max_amount) : null,
+        // Ensure boolean flags are strictly boolean
+        is_fixed: Boolean(rateType === 'fixed'),
+      };
 
-      if (error) {
+      // Remove fixed_rate boolean to avoid PostgreSQL 22P02 error on numeric column
+      delete cleanPayload.fixed_rate;
+
+      // 3. Call backend API route with credentials: 'include'
+      const { data: { session } } = await supabase.auth.getSession();
+      const headers: Record<string, string> = {
+        'Content-Type': 'application/json',
+      };
+      if (session?.access_token) {
+        headers['Authorization'] = `Bearer ${session.access_token}`;
+      }
+
+      const response = await fetch('/api/p2p/ads', {
+        method: 'POST',
+        headers,
+        credentials: 'include', // <--- CRITICAL: Sends browser cookies to Next.js API route
+        body: JSON.stringify(cleanPayload),
+      });
+
+      const result = await response.json();
+
+      if (!response.ok) {
         // THIS WILL PRINT THE REAL ERROR IN CONSOLE AND ALERT
-        console.error("Database Insert Error:", error);
-        alert(`[DB Error ${error.code}]: ${error.message} - ${error.details || error.hint || ''}`);
-        toast.error(`[DB Error ${error.code}]: ${error.message}`, { id: toastId, duration: 6000 });
+        console.error("Error creating ad:", result.realError || result.error);
+        alert(`Failed: ${result.realError || result.error}`);
+        toast.error(`Failed: ${result.realError || result.error}`, { id: toastId, duration: 6000 });
         setIsSubmitting(false);
         return;
       }
 
+      console.log('Ad created successfully:', result.data);
       alert("Ad created successfully!");
       toast.success('P2P Advertisement created successfully!', { id: toastId });
     } catch (err: any) {
@@ -575,12 +602,18 @@ export default function CreateP2PAdPage() {
     <div className="min-h-screen bg-[#fafafa] dark:bg-[#0f0f12] text-gray-900 dark:text-gray-100 px-4 py-8 md:py-12 flex justify-center transition-colors">
       <div className="w-full max-w-3xl space-y-8">
         
-        <div>
-          <h1 className="text-2xl md:text-3xl font-semibold text-gray-900 dark:text-white tracking-tight">
+        {/* Theme Styled Header banner matching Buy, Sell, and My Ads */}
+        <div className="bg-gradient-to-r from-[#5B4DF6] via-[#5244E8] to-[#3B82F6] text-white py-8 px-6 sm:px-8 rounded-2xl shadow-lg border border-indigo-400/20">
+          <div className="flex items-center gap-2 mb-1">
+            <span className="text-xs font-semibold uppercase tracking-wider text-indigo-200 bg-white/10 px-2.5 py-0.5 rounded-full border border-white/15">
+              P2P Trading Hub
+            </span>
+          </div>
+          <h1 className="text-2xl md:text-3xl font-extrabold text-white tracking-tight">
             Create a P2P Advertisement
           </h1>
-          <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-            Set up your ad to buy or sell coins. It will be visible to other users.
+          <p className="text-sm text-indigo-100/90 mt-1">
+            Set up your custom advertisement to buy or sell crypto with zero platform escrow fees.
           </p>
         </div>
 

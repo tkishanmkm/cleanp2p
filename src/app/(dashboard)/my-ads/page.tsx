@@ -65,18 +65,41 @@ export default function MyAdsPage() {
         return;
       }
 
-      const { data, error } = await supabase
-        .from('p2p_ads')
-        .select('*')
-        .eq('user_id', currentUser.id)
-        .order('created_at', { ascending: false });
-
-      if (error) {
-        console.error("My Ads fetch error:", error.message);
-        throw error;
+      // Fetch user's ads via API route
+      let rawAds: any[] = [];
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        const headers: Record<string, string> = {};
+        if (session?.access_token) {
+          headers['Authorization'] = `Bearer ${session.access_token}`;
+        }
+        const apiRes = await fetch('/api/p2p/my-ads', {
+          headers,
+          credentials: 'include',
+        });
+        if (apiRes.ok) {
+          const json = await apiRes.json();
+          if (Array.isArray(json.ads)) rawAds = json.ads;
+        }
+      } catch (apiErr) {
+        console.warn("API /api/p2p/my-ads error, fallback to direct query:", apiErr);
       }
 
-      const mapped: P2PAd[] = (data || []).map((raw: any) => {
+      if (rawAds.length === 0) {
+        const { data, error } = await supabase
+          .from('p2p_ads')
+          .select('*')
+          .eq('user_id', currentUser.id)
+          .order('created_at', { ascending: false });
+
+        if (error) {
+          console.error("My Ads fetch error:", error.message);
+          throw error;
+        }
+        rawAds = data || [];
+      }
+
+      const mapped: P2PAd[] = rawAds.map((raw: any) => {
         const rawType = (raw.type || raw.ad_type || raw.adType || 'sell').toLowerCase();
         const isMarket = raw.pricing_type === 'FLOAT' || raw.rate_type === 'market';
         const priceVal = raw.price != null ? Number(raw.price) : (raw.fixed_rate ?? raw.fixedRate);
@@ -158,19 +181,24 @@ export default function MyAdsPage() {
   return (
     <div className="space-y-6">
       {/* Theme Styled Header matching /buy & /sell page banner */}
-      <div className="bg-[#5D45F9] text-white py-8 px-6 rounded-2xl shadow-sm">
+      <div className="bg-gradient-to-r from-[#5B4DF6] via-[#5244E8] to-[#3B82F6] text-white py-8 px-6 sm:px-8 rounded-2xl shadow-lg border border-indigo-400/20">
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div>
+            <div className="flex items-center gap-2 mb-1">
+              <span className="text-xs font-semibold uppercase tracking-wider text-indigo-200 bg-white/10 px-2.5 py-0.5 rounded-full border border-white/15">
+                Peer-to-Peer Market
+              </span>
+            </div>
             <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight">
               My Posted Ads
             </h1>
-            <p className="text-white/80 text-sm mt-1">
+            <p className="text-indigo-100/90 text-sm mt-1">
               Manage your active P2P buy and sell offers, set limits, and adjust pricing.
             </p>
           </div>
           <Link
             href="/ads/create"
-            className="inline-flex items-center justify-center gap-2 px-5 py-2.5 bg-white text-[#5D45F9] font-semibold text-sm rounded-lg hover:bg-white/90 transition-colors shadow-sm"
+            className="inline-flex items-center justify-center gap-2 px-5 py-2.5 bg-white text-[#5B4DF6] hover:bg-slate-50 font-bold text-sm rounded-xl shadow-md transition-all active:scale-[0.98]"
           >
             <Plus className="w-4 h-4" />
             <span>Create New Ad</span>
