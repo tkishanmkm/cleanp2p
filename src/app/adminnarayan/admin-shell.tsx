@@ -24,6 +24,7 @@ import {
   Shield,
   Loader2,
   Search,
+  Gauge,
 } from "lucide-react";
 import { Logo } from "@/components/logo";
 import { Badge } from "@/components/ui/badge";
@@ -233,6 +234,7 @@ export function AdminShell({
       badgeVariant: "destructive" as const,
     },
     { href: "/adminnarayan/wallets", label: "Wallets & Custody", icon: Wallet },
+    { href: "/adminnarayan/operations", label: "Operations & Solvency", icon: Gauge },
     { href: "/adminnarayan/wallet", label: "Main Wallet Queue", icon: Wallet },
     {
       href: "/adminnarayan/deposits",

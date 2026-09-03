@@ -1,0 +1,16 @@
+{
+  "crons": [
+    {
+      "path": "/api/cron/sweeper",
+      "schedule": "*/2 * * * *"
+    },
+    {
+      "path": "/api/cron/withdrawals/dispatch",
+      "schedule": "*/1 * * * *"
+    },
+    {
+      "path": "/api/cron/reconcile",
+      "schedule": "*/15 * * * *"
+    }
+  ]
+}

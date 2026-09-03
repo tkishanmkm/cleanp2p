@@ -72,3 +72,46 @@ export const AD_TAGS = [
   "No verification",
   "Invoice accepted",
 ];
+
+export interface TokenConfig {
+  contractAddress: string;
+  decimals: number;
+}
+
+export const USDT_CONFIGS: Record<string, TokenConfig> = {
+  TRC20: {
+    contractAddress: process.env.USDT_CONTRACT_TRC20 || 'TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t',
+    decimals: 6,
+  },
+  ERC20: {
+    contractAddress: process.env.USDT_CONTRACT_ERC20 || '0xdAC17F958D2ee523a2206206994597C13D831ec7',
+    decimals: 6,
+  },
+  BEP20: {
+    contractAddress: process.env.USDT_CONTRACT_BEP20 || '0x55d398326f99059fF775485246999027B3197955',
+    decimals: 18,
+  },
+  POLYGON: {
+    contractAddress: process.env.USDT_CONTRACT_POLYGON || '0xc2132D05D31c914a87C6611C10748AEb04B58e8F',
+    decimals: 6,
+  },
+};
+
+export function getUsdtConfig(network: string): TokenConfig {
+  const norm = network.toUpperCase().trim();
+  const aliasMap: Record<string, string> = {
+    ETH: 'ERC20',
+    ETHEREUM: 'ERC20',
+    BSC: 'BEP20',
+    BINANCE: 'BEP20',
+    TRON: 'TRC20',
+    MATIC: 'POLYGON',
+  };
+  const resolvedKey = aliasMap[norm] || norm;
+  const config = USDT_CONFIGS[resolvedKey];
+  if (!config) {
+    throw new Error(`Unsupported network for USDT: ${network}`);
+  }
+  return config;
+}
+
