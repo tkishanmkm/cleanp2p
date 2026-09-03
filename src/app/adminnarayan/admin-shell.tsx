@@ -1,9 +1,10 @@
 "use client";
 
-import { ReactNode, useState, useTransition } from "react";
+import { ReactNode, useState, useEffect, useTransition } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { adminSignOut } from "./actions";
+import { createClient } from "@/lib/supabase/client";
 import {
   LayoutDashboard,
   Users,
@@ -22,6 +23,7 @@ import {
   X,
   Shield,
   Loader2,
+  Search,
 } from "lucide-react";
 import { Logo } from "@/components/logo";
 import { Badge } from "@/components/ui/badge";
@@ -50,13 +52,176 @@ export function AdminShell({
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [isLoggingOut, startLogout] = useTransition();
 
+  const [authStatus, setAuthStatus] = useState<"checking" | "authorized" | "unauthorized" | "unauthenticated">(
+    adminEmail ? "authorized" : "checking"
+  );
+  const [currentUserEmail, setCurrentUserEmail] = useState<string | undefined>(adminEmail);
+  const [currentUserName, setCurrentUserName] = useState<string | undefined>(adminName);
+
   // If we are on the login page, render children directly without admin shell chrome
-  if (pathname === "/adminnarayan/login") {
+  const isLoginPage = pathname === "/adminnarayan/login";
+
+  useEffect(() => {
+    if (isLoginPage) return;
+    if (adminEmail) {
+      setAuthStatus("authorized");
+      return;
+    }
+
+    let isMounted = true;
+    async function verifyClientAdmin() {
+      try {
+        const supabase = createClient();
+        const { data: { session } } = await supabase.auth.getSession();
+        if (!session?.user) {
+          if (isMounted) setAuthStatus("unauthenticated");
+          return;
+        }
+
+        const user = session.user;
+        const { data: verificationResult, error: rpcError } = await supabase.rpc(
+          "verify_admin_login",
+          { user_uuid: user.id }
+        );
+
+        if (!rpcError && verificationResult?.[0]?.is_valid === true) {
+          if (isMounted) {
+            setCurrentUserEmail(user.email);
+            setCurrentUserName(
+              (user.user_metadata?.full_name as string) ||
+              user.email?.split("@")[0] ||
+              "Administrator"
+            );
+            setAuthStatus("authorized");
+          }
+          return;
+        }
+
+        // Secondary check
+        const { data: checkRes } = await supabase.rpc("check_is_admin", { user_uuid: user.id });
+        if (checkRes === true || checkRes?.[0]?.is_valid === true) {
+          if (isMounted) {
+            setCurrentUserEmail(user.email);
+            setAuthStatus("authorized");
+          }
+          return;
+        }
+
+        if (isMounted) setAuthStatus("unauthorized");
+      } catch {
+        if (isMounted) setAuthStatus("unauthenticated");
+      }
+    }
+
+    verifyClientAdmin();
+    return () => {
+      isMounted = false;
+    };
+  }, [adminEmail, isLoginPage]);
+
+  if (isLoginPage) {
     return <>{children}</>;
+  }
+
+  const handleSignOut = () => {
+    startLogout(async () => {
+      try {
+        const supabase = createClient();
+        await supabase.auth.signOut();
+      } catch {}
+      await adminSignOut();
+      window.location.href = "/adminnarayan/login";
+    });
+  };
+
+  if (authStatus === "checking") {
+    return (
+      <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center p-4 text-slate-300">
+        <Loader2 className="w-8 h-8 animate-spin text-blue-500 mb-3" />
+        <p className="text-sm text-slate-400">Verifying administrative access...</p>
+      </div>
+    );
+  }
+
+  if (authStatus === "unauthenticated") {
+    return (
+      <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center p-4 text-slate-300">
+        <div className="w-full max-w-md p-6 bg-slate-900 border border-slate-800 rounded-xl text-center space-y-4 shadow-xl">
+          <div className="w-12 h-12 rounded-full bg-blue-500/10 text-blue-400 flex items-center justify-center mx-auto">
+            <ShieldAlert className="w-6 h-6" />
+          </div>
+          <div className="space-y-1">
+            <h2 className="text-xl font-bold text-white">Administrator Access Required</h2>
+            <p className="text-sm text-slate-400">
+              Please sign in with your administrator credentials to access the management portal.
+            </p>
+          </div>
+          <div className="pt-2 flex flex-col gap-2">
+            <Button
+              id="admin-shell-login-btn"
+              onClick={() => {
+                window.location.href = `/adminnarayan/login?redirectTo=${encodeURIComponent(pathname)}`;
+              }}
+              className="w-full bg-blue-600 hover:bg-blue-500 text-white"
+            >
+              Sign In to Admin Portal
+            </Button>
+            <Button
+              id="admin-shell-home-btn"
+              variant="ghost"
+              onClick={() => {
+                window.location.href = "/";
+              }}
+              className="w-full text-slate-400 hover:text-white"
+            >
+              Return to Marketplace
+            </Button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (authStatus === "unauthorized") {
+    return (
+      <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center p-4 text-slate-300">
+        <div className="w-full max-w-md p-6 bg-slate-900 border border-red-900/50 rounded-xl text-center space-y-4 shadow-xl">
+          <div className="w-12 h-12 rounded-full bg-red-500/10 text-red-400 flex items-center justify-center mx-auto">
+            <Shield className="w-6 h-6" />
+          </div>
+          <div className="space-y-1">
+            <h2 className="text-xl font-bold text-white">Access Denied</h2>
+            <p className="text-sm text-slate-400">
+              The currently logged-in account does not possess administrator privileges.
+            </p>
+          </div>
+          <div className="pt-2 flex flex-col gap-2">
+            <Button
+              id="admin-shell-switch-account-btn"
+              onClick={handleSignOut}
+              className="w-full bg-red-600 hover:bg-red-500 text-white"
+            >
+              Sign Out & Switch Account
+            </Button>
+            <Button
+              id="admin-shell-unauth-home-btn"
+              variant="ghost"
+              onClick={() => {
+                window.location.href = "/";
+              }}
+              className="w-full text-slate-400 hover:text-white"
+            >
+              Return to Marketplace
+            </Button>
+          </div>
+        </div>
+      </div>
+    );
   }
 
   const navItems = [
     { href: "/adminnarayan/dashboard", label: "Dashboard", icon: LayoutDashboard },
+    { href: "/adminnarayan/search", label: "Global Search", icon: Search },
     { href: "/adminnarayan/users", label: "Users", icon: Users },
     { href: "/adminnarayan/trades", label: "Trades", icon: ArrowLeftRight },
     {
@@ -67,6 +232,7 @@ export function AdminShell({
       badgeVariant: "destructive" as const,
     },
     { href: "/adminnarayan/wallets", label: "Wallets & Custody", icon: Wallet },
+    { href: "/adminnarayan/wallet", label: "Main Wallet Queue", icon: Wallet },
     {
       href: "/adminnarayan/deposits",
       label: "Deposits",
@@ -94,13 +260,7 @@ export function AdminShell({
     { href: "/adminnarayan/appearance", label: "Appearance", icon: Brush },
   ];
 
-  const handleSignOut = () => {
-    startLogout(async () => {
-      await adminSignOut();
-    });
-  };
-
-  const displayName = adminName || adminEmail?.split("@")[0] || "Administrator";
+  const displayName = currentUserName || currentUserEmail?.split("@")[0] || "Administrator";
   const initials = displayName
     .split(" ")
     .map((n) => n[0])
@@ -208,11 +368,12 @@ export function AdminShell({
             </Avatar>
             <div className="min-w-0 flex-1">
               <p className="text-xs font-medium text-slate-200 truncate">{displayName}</p>
-              <p className="text-[10px] text-slate-400 truncate">{adminEmail || "Super Administrator"}</p>
+              <p className="text-[10px] text-slate-400 truncate">{currentUserEmail || "Super Administrator"}</p>
             </div>
           </div>
 
           <Button
+            id="admin-sidebar-signout-btn"
             variant="outline"
             size="sm"
             onClick={handleSignOut}

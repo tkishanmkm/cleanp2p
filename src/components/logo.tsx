@@ -10,29 +10,34 @@ export function Logo({ className }: { className?: string }) {
   const { branding } = useBranding();
   const isMobile = useIsMobile();
 
-  const hasMobileLogo = Boolean(branding?.appLogoMobile && branding.appLogoMobile !== '/logo.png');
-  const hasDesktopLogo = Boolean(branding?.appLogo && branding.appLogo !== '/logo.png');
+  const mobileLogoSrc = branding?.appLogoMobile;
+  const desktopLogoSrc = branding?.appLogoDesktop || branding?.appLogo;
 
-  if (isMobile && hasMobileLogo && branding?.appLogoMobile) {
+  const hasMobileLogo = Boolean(mobileLogoSrc && mobileLogoSrc !== '/logo.png');
+  const hasDesktopLogo = Boolean(desktopLogoSrc && desktopLogoSrc !== '/logo.png');
+
+  if (isMobile && hasMobileLogo && mobileLogoSrc) {
     return (
       <Image
-        src={branding.appLogoMobile}
+        src={mobileLogoSrc}
         alt={APP_NAME}
-        width={30}
-        height={30}
-        className={cn("object-contain h-[30px] w-auto", className)}
+        width={36}
+        height={36}
+        className={cn("object-contain h-[32px] w-auto", className)}
+        unoptimized
       />
     );
   }
 
-  if (hasDesktopLogo && branding?.appLogo) {
+  if (hasDesktopLogo && desktopLogoSrc) {
     return (
       <Image
-        src={branding.appLogo}
+        src={desktopLogoSrc}
         alt={APP_NAME}
-        width={120}
-        height={30}
-        className={cn("object-contain h-[30px] w-auto", className)}
+        width={130}
+        height={36}
+        className={cn("object-contain h-[32px] w-auto", className)}
+        unoptimized
       />
     );
   }

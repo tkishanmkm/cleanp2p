@@ -84,13 +84,19 @@ function TradePageContent() {
   useEffect(() => {
     fetchTrade();
 
-    // Subscribe to realtime updates on this trade
-    const channel = supabase
-      .channel(`trade-${tradeId}`)
+    // Listen to live status changes on trades
+    const tradeChannel = supabase
+      .channel('trade-status-updates')
       .on(
         'postgres_changes',
-        { event: '*', schema: 'public', table: 'trades', filter: `id=eq.${tradeId}` },
+        {
+          event: 'UPDATE',
+          schema: 'public',
+          table: 'trades',
+          filter: `id=eq.${tradeId}`,
+        },
         (payload: any) => {
+          console.log('Trade status changed:', payload.new);
           if (payload.new) {
             setTrade(mapTradeRecord(payload.new));
           }
@@ -99,7 +105,7 @@ function TradePageContent() {
       .subscribe();
 
     return () => {
-      supabase.removeChannel(channel);
+      supabase.removeChannel(tradeChannel);
     };
   }, [tradeId, fetchTrade]);
 

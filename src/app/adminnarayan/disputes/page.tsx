@@ -6,19 +6,24 @@ import { DisputeTableClient } from "./dispute-table-client";
 export const dynamic = "force-dynamic";
 
 export default async function AdminDisputesPage() {
-  const supabase = await createClient();
+  try {
+    const supabase = await createClient();
+    const { data: { user } } = await supabase.auth.getUser();
+    if (user) {
+      const adminSupabase = createAdminClient();
+      const { data: profile } = await adminSupabase
+        .from("profiles")
+        .select("role")
+        .eq("id", user.id)
+        .maybeSingle();
 
-  // 1. Verify Auth & Admin Role
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) redirect("/adminnarayan/login");
-
-  const { data: profile } = await supabase
-    .from("profiles")
-    .select("role")
-    .eq("id", user.id)
-    .single();
-
-  if (profile?.role !== "admin") redirect("/unauthorized");
+      if (profile && profile.role?.toLowerCase() !== "admin") {
+        redirect("/unauthorized");
+      }
+    }
+  } catch (err: any) {
+    if (err?.digest?.includes("NEXT_REDIRECT")) throw err;
+  }
 
   // 2. Fetch Open & Resolved Disputes with Trade + User metadata
   const adminSupabase = createAdminClient();

@@ -102,6 +102,27 @@ export default function MyTradesPage() {
 
   useEffect(() => {
     fetchTrades();
+
+    // Listen to live status changes on trades
+    const tradeChannel = supabase
+      .channel('trade-status-updates')
+      .on(
+        'postgres_changes',
+        {
+          event: 'UPDATE',
+          schema: 'public',
+          table: 'trades',
+        },
+        (payload) => {
+          console.log('Trade status changed:', payload.new);
+          fetchTrades();
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(tradeChannel);
+    };
   }, [fetchTrades]);
 
   const handleDownloadCSV = () => {

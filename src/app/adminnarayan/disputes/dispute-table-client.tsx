@@ -88,13 +88,27 @@ export function DisputeTableClient({ initialDisputes }: { initialDisputes: any[]
                     </Badge>
                   </TableCell>
                   <TableCell className="text-right">
-                    {dispute.status === "open" ? (
-                      <Button size="sm" onClick={() => setSelectedDispute(dispute)}>
-                        Review & Resolve
+                    <div className="flex items-center justify-end gap-2">
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => {
+                          const tId = dispute.trade_id || dispute.trade?.id;
+                          if (tId) {
+                            window.location.href = `/adminnarayan/disputes/${tId}`;
+                          }
+                        }}
+                      >
+                        Moderator Room
                       </Button>
-                    ) : (
-                      <span className="text-xs text-muted-foreground font-mono">Resolved</span>
-                    )}
+                      {dispute.status === "open" ? (
+                        <Button size="sm" onClick={() => setSelectedDispute(dispute)}>
+                          Review & Resolve
+                        </Button>
+                      ) : (
+                        <span className="text-xs text-muted-foreground font-mono">Resolved</span>
+                      )}
+                    </div>
                   </TableCell>
                 </TableRow>
               ))

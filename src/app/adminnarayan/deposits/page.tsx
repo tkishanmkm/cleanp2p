@@ -1,669 +1,486 @@
-'use client';
+"use client";
 
-import { useState, useEffect, useMemo } from 'react';
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-  CardFooter,
-} from '@/components/ui/card';
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@/components/ui/table';
-import { Badge } from '@/components/ui/badge';
-import { Button } from '@/components/ui/button';
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu';
-import { MoreHorizontal, Check, X, Copy, Search, Eye } from 'lucide-react';
-import type { Deposit } from '@/lib/types';
-import { useToast } from '@/hooks/use-toast';
-import { approveDeposit, declineDeposit } from '@/lib/admin';
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from '@/components/ui/alert-dialog';
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog';
-import { cn, toDate } from '@/lib/utils';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { useAdminStatus } from '@/hooks/use-admin-status';
-import { Label } from '@/components/ui/label';
-import { Input } from '@/components/ui/input';
-import { QRCodeSVG } from 'qrcode.react';
-import { useAuth } from '@/components/providers/auth-provider';
-import { supabase } from '@/lib/supabase/client';
-
-const statusColors: Record<string, string> = {
-  pending: 'border-gray-500/50 text-gray-600 bg-gray-50',
-  awaiting_confirmation: 'border-yellow-500/50 text-yellow-600 bg-yellow-50',
-  approved: 'border-green-500/50 text-green-600 bg-green-50',
-  declined: 'border-red-500/50 text-red-600 bg-red-50',
-  expired: 'border-orange-500/50 text-orange-600 bg-orange-50',
-};
-
-const depositStatusText: Record<string, string> = {
-  pending: 'Pending User Action',
-  awaiting_confirmation: 'Waiting for Approval',
-  approved: 'Approved',
-  declined: 'Cancelled by Admin',
-  expired: 'Expired',
-};
-
-interface DepositsTableProps {
-  status?: Deposit['status'];
-  searchTerm: string;
-  onRowClick: (deposit: Deposit) => void;
-  onApproveClick: (deposit: Deposit) => void;
-  onDeclineClick: (deposit: Deposit) => void;
-}
-
-function DepositsTable({
-  status,
-  searchTerm,
-  onRowClick,
-  onApproveClick,
-  onDeclineClick,
-}: DepositsTableProps) {
-  const { isAdmin, isLoading: isAdminLoading } = useAdminStatus();
-  const { toast } = useToast();
-
-  const [deposits, setDeposits] = useState<Deposit[] | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
-
-  useEffect(() => {
-    if (isAdminLoading) {
-      setIsLoading(true);
-      return;
-    }
-
-    if (!isAdmin) {
-      setIsLoading(false);
-      setDeposits([]);
-      return;
-    }
-
-    const fetchDeposits = async () => {
-      setIsLoading(true);
-      try {
-        let query = supabase.from('deposits').select('*');
-        if (status) {
-          query = query.eq('status', status);
-        }
-        const { data, error } = await query.order('created_at', { ascending: false });
-
-        if (error) throw error;
-
-        const depositsData: Deposit[] = (data || []).map((doc: any) => ({
-          id: doc.id,
-          userId: doc.user_id || doc.userId,
-          userDisplayName: doc.user_display_name || doc.userDisplayName || 'User',
-          crypto: doc.crypto || 'USDT',
-          amount: Number(doc.amount || 0),
-          finalAmount: doc.final_amount ? Number(doc.final_amount) : undefined,
-          chain: doc.chain || 'TRC20',
-          walletAddress: doc.wallet_address || doc.walletAddress || '',
-          walletIndex: doc.wallet_index ?? doc.walletIndex ?? 1,
-          status: doc.status || 'pending',
-          createdAt: doc.created_at || doc.createdAt || new Date().toISOString(),
-          timerEnd: doc.timer_end || doc.timerEnd || new Date().toISOString(),
-          txId: doc.tx_id || doc.txId,
-          adminId: doc.admin_id || doc.adminId,
-        }));
-
-        setDeposits(depositsData);
-      } catch (error) {
-        console.error('Failed to fetch deposits:', error);
-        toast({
-          variant: 'destructive',
-          title: 'Error fetching deposits',
-          description: (error as Error).message,
-        });
-        setDeposits([]);
-      } finally {
-        setIsLoading(false);
-      }
-    };
-
-    fetchDeposits();
-  }, [status, isAdmin, isAdminLoading, toast]);
-
-  const filteredDeposits = useMemo(() => {
-    if (!deposits) return null;
-    if (!searchTerm.trim()) return deposits;
-
-    const lowercasedFilter = searchTerm.toLowerCase();
-    return deposits.filter(
-      (d) =>
-        d.id.toLowerCase().includes(lowercasedFilter) ||
-        d.userDisplayName.toLowerCase().includes(lowercasedFilter) ||
-        d.txId?.toLowerCase().includes(lowercasedFilter) ||
-        d.amount.toString().includes(lowercasedFilter)
-    );
-  }, [deposits, searchTerm]);
-
-  return (
-    <div className="space-y-4">
-      <div className="hidden md:block">
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>Deposit ID</TableHead>
-              <TableHead>User</TableHead>
-              <TableHead>Amount</TableHead>
-              <TableHead>Status</TableHead>
-              <TableHead>TxID</TableHead>
-              <TableHead>Date</TableHead>
-              <TableHead className="text-right">Actions</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {isLoading && (
-              <TableRow>
-                <TableCell colSpan={7} className="text-center text-muted-foreground py-4">
-                  Loading...
-                </TableCell>
-              </TableRow>
-            )}
-            {!isLoading &&
-              filteredDeposits?.map((deposit) => (
-                <TableRow
-                  key={deposit.id}
-                  onClick={() => onRowClick(deposit)}
-                  className="cursor-pointer hover:bg-muted/50"
-                >
-                  <TableCell className="font-mono text-xs max-w-[100px] truncate">{deposit.id}</TableCell>
-                  <TableCell className="font-medium">{deposit.userDisplayName}</TableCell>
-                  <TableCell>
-                    {deposit.amount} {deposit.crypto}
-                  </TableCell>
-                  <TableCell>
-                    <Badge variant="outline" className={cn('capitalize', statusColors[deposit.status])}>
-                      {depositStatusText[deposit.status] || deposit.status}
-                    </Badge>
-                  </TableCell>
-                  <TableCell className="font-mono text-xs max-w-[120px] truncate">
-                    {deposit.txId || 'N/A'}
-                  </TableCell>
-                  <TableCell>
-                    {toDate(deposit.createdAt)?.toLocaleString('default', {
-                      dateStyle: 'short',
-                      timeStyle: 'short',
-                    })}
-                  </TableCell>
-                  <TableCell className="text-right">
-                    <div className="flex justify-end gap-1" onClick={(e) => e.stopPropagation()}>
-                      <Button variant="ghost" size="icon" onClick={() => onRowClick(deposit)}>
-                        <Eye className="h-4 w-4" />
-                      </Button>
-                      {deposit.status === 'awaiting_confirmation' && (
-                        <DropdownMenu>
-                          <DropdownMenuTrigger asChild>
-                            <Button variant="ghost" size="icon">
-                              <MoreHorizontal className="h-4 w-4" />
-                            </Button>
-                          </DropdownMenuTrigger>
-                          <DropdownMenuContent align="end">
-                            <DropdownMenuLabel>Actions</DropdownMenuLabel>
-                            <DropdownMenuItem onClick={() => onApproveClick(deposit)}>
-                              <Check className="mr-2 h-4 w-4" /> Approve
-                            </DropdownMenuItem>
-                            <DropdownMenuItem
-                              className="text-destructive"
-                              onClick={() => onDeclineClick(deposit)}
-                            >
-                              <X className="mr-2 h-4 w-4" /> Decline
-                            </DropdownMenuItem>
-                          </DropdownMenuContent>
-                        </DropdownMenu>
-                      )}
-                    </div>
-                  </TableCell>
-                </TableRow>
-              ))}
-            {!isLoading && !filteredDeposits?.length && (
-              <TableRow>
-                <TableCell colSpan={7} className="text-center h-24 text-muted-foreground">
-                  No deposits found.
-                </TableCell>
-              </TableRow>
-            )}
-          </TableBody>
-        </Table>
-      </div>
-      <div className="grid gap-4 md:hidden">
-        {isLoading && <p className="text-center py-4 text-muted-foreground">Loading...</p>}
-        {!isLoading &&
-          filteredDeposits?.map((deposit) => (
-            <Card key={deposit.id} onClick={() => onRowClick(deposit)}>
-              <CardHeader>
-                <CardTitle className="text-base">
-                  {deposit.amount} {deposit.crypto}
-                </CardTitle>
-                <CardDescription>{deposit.userDisplayName}</CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-2 text-sm">
-                <div className="flex justify-between">
-                  <span className="text-muted-foreground">Status</span>
-                  <Badge variant="outline" className={cn('capitalize', statusColors[deposit.status])}>
-                    {depositStatusText[deposit.status] || deposit.status}
-                  </Badge>
-                </div>
-              </CardContent>
-              {deposit.status === 'awaiting_confirmation' && (
-                <CardFooter className="gap-2">
-                  <Button
-                    size="sm"
-                    className="flex-1"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      onApproveClick(deposit);
-                    }}
-                  >
-                    <Check className="mr-2 h-4 w-4" /> Approve
-                  </Button>
-                  <Button
-                    size="sm"
-                    variant="destructive"
-                    className="flex-1"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      onDeclineClick(deposit);
-                    }}
-                  >
-                    <X className="mr-2 h-4 w-4" /> Decline
-                  </Button>
-                </CardFooter>
-              )}
-            </Card>
-          ))}
-        {!isLoading && !filteredDeposits?.length && (
-          <p className="text-center text-sm text-muted-foreground py-8">No deposits found.</p>
-        )}
-      </div>
-    </div>
-  );
-}
+import React, { useState, useEffect, useCallback } from "react";
+import Link from "next/link";
+import { createClient } from "@/lib/supabase/client";
+import { 
+  ArrowDownToLine, 
+  Search, 
+  Coins, 
+  ExternalLink, 
+  RefreshCw,
+  Clock,
+  CheckCircle2,
+  AlertCircle
+} from "lucide-react";
 
 export default function AdminDepositsPage() {
-  const { user: adminUser } = useAuth();
-  const { toast } = useToast();
-  const [searchTerm, setSearchTerm] = useState('');
-  const [selectedDeposit, setSelectedDeposit] = useState<Deposit | null>(null);
-  const [isApproveAlertOpen, setIsApproveAlertOpen] = useState(false);
-  const [isDeclineAlertOpen, setIsDeclineAlertOpen] = useState(false);
-  const [editableAmount, setEditableAmount] = useState('');
-  const [isDetailsOpen, setIsDetailsOpen] = useState(false);
+  const supabase = createClient();
+  const [deposits, setDeposits] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [searchQuery, setSearchQuery] = useState("");
 
-  const handleApproveClick = (deposit: Deposit) => {
-    setSelectedDeposit(deposit);
-    setEditableAmount(deposit.amount.toString());
-    setIsApproveAlertOpen(true);
-  };
+  // Adjust Balance Modal
+  const [showAdjustModal, setShowAdjustModal] = useState(false);
+  const [targetUserId, setTargetUserId] = useState("");
+  const [targetUserInfo, setTargetUserInfo] = useState<any>(null);
+  const [currency, setCurrency] = useState("BTC");
+  const [action, setAction] = useState<"add" | "subtract">("add");
+  const [amount, setAmount] = useState("");
+  const [reason, setReason] = useState("");
+  const [adminEmail, setAdminEmail] = useState("");
+  const [actionLoading, setActionLoading] = useState(false);
 
-  const handleDeclineClick = (deposit: Deposit) => {
-    setSelectedDeposit(deposit);
-    setIsDeclineAlertOpen(true);
-  };
+  const fetchAdminSession = useCallback(async () => {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (session?.user?.email) {
+      setAdminEmail(session.user.email);
+    }
+  }, [supabase]);
 
-  const handleRowClick = (deposit: Deposit) => {
-    setSelectedDeposit(deposit);
-    setIsDetailsOpen(true);
-  };
+  const fetchDeposits = useCallback(async () => {
+    setLoading(true);
 
-  const copyToClipboard = (text: string) => {
-    if (!text) return;
-    navigator.clipboard.writeText(text);
-    toast({ title: 'Copied to clipboard' });
-  };
+    let fetchedData: any[] | null = null;
 
-  const handleApprove = async () => {
-    if (!selectedDeposit || !adminUser) return;
+    // 1. Attempt join with profiles
+    const { data: joinedData, error: joinError } = await supabase
+      .from("deposits")
+      .select("*, profiles:profiles!deposits_user_id_fkey(id, email, user_custom_id, full_name)")
+      .order("created_at", { ascending: false });
 
-    const finalAmount = parseFloat(editableAmount);
-    if (isNaN(finalAmount) || finalAmount <= 0) {
-      toast({ variant: 'destructive', title: 'Invalid Amount', description: 'Please enter a valid positive number.' });
-      return;
+    if (!joinError && joinedData) {
+      fetchedData = joinedData;
+    } else {
+      // 2. Fallback: select deposits directly and load corresponding profiles
+      const { data: directData } = await supabase
+        .from("deposits")
+        .select("*")
+        .order("created_at", { ascending: false });
+
+      if (directData) {
+        fetchedData = directData;
+        const userIds = Array.from(new Set(directData.map((d: any) => d.user_id).filter(Boolean)));
+        if (userIds.length > 0) {
+          const { data: profs } = await supabase
+            .from("profiles")
+            .select("id, email, user_custom_id, full_name")
+            .in("id", userIds);
+
+          const profMap = new Map((profs || []).map((p: any) => [p.id, p]));
+          fetchedData.forEach((d: any) => {
+            d.profiles = profMap.get(d.user_id) || null;
+          });
+        }
+      }
     }
 
+    if (fetchedData) {
+      const normalized = fetchedData.map((d: any) => ({
+        ...d,
+        currency: d.currency || d.asset_code || "BTC",
+        profiles: d.profiles || {
+          id: d.user_id,
+          email: d.user_email || "unknown@user.com",
+          full_name: "Customer",
+          user_custom_id: d.user_id ? String(d.user_id).slice(0, 8) : "N/A",
+        },
+      }));
+      setDeposits(normalized);
+    }
+    setLoading(false);
+  }, [supabase]);
+
+  useEffect(() => {
+    fetchDeposits();
+    fetchAdminSession();
+  }, [fetchDeposits, fetchAdminSession]);
+
+  async function handleAdjustBalance(e: React.FormEvent) {
+    e.preventDefault();
+    if (!adminEmail) return alert("Admin session not found. Please log in.");
+    const numAmount = parseFloat(amount);
+    if (isNaN(numAmount) || numAmount <= 0) return alert("Please enter a valid positive amount.");
+
+    setActionLoading(true);
     try {
-      await approveDeposit(null, selectedDeposit, finalAmount, adminUser.uid);
-      toast({
-        title: 'Deposit Approved',
-        description: `User ${selectedDeposit.userDisplayName}'s balance has been updated.`,
+      const { data, error } = await supabase.rpc("admin_adjust_balance", {
+        p_admin_email: adminEmail,
+        p_target_user_id: targetUserId,
+        p_currency: currency,
+        p_action: action,
+        p_amount: numAmount,
       });
-    } catch (e: any) {
-      toast({ variant: 'destructive', title: 'Approval Failed', description: e.message });
-    }
-    setIsApproveAlertOpen(false);
-    setSelectedDeposit(null);
-  };
 
-  const handleDecline = async () => {
-    if (!selectedDeposit || !adminUser) return;
-    try {
-      await declineDeposit(null, selectedDeposit, adminUser.uid);
-      toast({ title: 'Deposit Declined' });
-    } catch (e: any) {
-      toast({ variant: 'destructive', title: 'Decline Failed', description: e.message });
-    }
-    setIsDeclineAlertOpen(false);
-    setSelectedDeposit(null);
-  };
+      if (error) {
+        throw new Error(error.message);
+      }
 
-  const qrCodeValue = selectedDeposit
-    ? selectedDeposit.crypto === 'BTC' || selectedDeposit.crypto === 'LTC'
-      ? `${selectedDeposit.crypto.toLowerCase()}:${selectedDeposit.walletAddress}?amount=${selectedDeposit.amount}`
-      : selectedDeposit.walletAddress
-    : '';
+      const note = reason.trim() || `Manual deposit reconciliation by ${adminEmail}`;
+
+      // Insert transaction ledger record
+      await supabase.from("wallet_transactions").insert({
+        user_id: targetUserId,
+        tx_type: action === "add" ? "credit" : "debit",
+        asset_symbol: currency,
+        amount: numAmount,
+        status: "completed",
+        tx_hash: `ADMIN_ADJ:${action.toUpperCase()}:${note}`,
+      });
+
+      // Insert audit log
+      await supabase.from("admin_audit_logs").insert({
+        admin_email: adminEmail,
+        action: "ADJUST_BALANCE",
+        target_user_id: targetUserId,
+        details: {
+          currency,
+          action,
+          amount: numAmount,
+          reason: note,
+          new_balance: data?.new_balance,
+          source: "deposits_page",
+          date: new Date().toISOString(),
+        },
+      });
+
+      alert(`Successfully adjusted balance! New ${currency} Balance: ${data?.new_balance ?? "Updated"}`);
+      setShowAdjustModal(false);
+      setAmount("");
+      setReason("");
+      fetchDeposits();
+    } catch (err: any) {
+      alert(`Adjustment error: ${err.message}`);
+    } finally {
+      setActionLoading(false);
+    }
+  }
+
+  function openAdjustModalForDeposit(d: any) {
+    setTargetUserId(d.user_id);
+    setTargetUserInfo(d.profiles);
+    setCurrency(d.currency || "BTC");
+    setAction("add");
+    setAmount("");
+    setReason(`Reconciliation for deposit ${d.id.slice(0, 8)}...`);
+    setShowAdjustModal(true);
+  }
+
+  // Powerful partial search filter across:
+  // User's full name, Username, Email address, User ID (UUID and custom user ID), Deposit ID, Currency, Amount
+  const filteredDeposits = deposits.filter((d) => {
+    const q = searchQuery.toLowerCase().trim();
+    if (!q) return true;
+
+    const fullName = d.profiles?.full_name?.toLowerCase() || "";
+    const email = d.profiles?.email?.toLowerCase() || "";
+    const customId = d.profiles?.user_custom_id?.toLowerCase() || "";
+    const userId = (d.user_id || "").toLowerCase();
+    const depositId = (d.id || "").toLowerCase();
+    const curr = (d.currency || "").toLowerCase();
+    const amt = String(d.amount || "");
+    const status = (d.status || "").toLowerCase();
+
+    return (
+      fullName.includes(q) ||
+      email.includes(q) ||
+      customId.includes(q) ||
+      userId.includes(q) ||
+      depositId.includes(q) ||
+      curr.includes(q) ||
+      amt.includes(q) ||
+      status.includes(q)
+    );
+  });
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <h1 className="text-lg font-semibold md:text-2xl">Deposit Requests</h1>
-      </div>
-      <Card>
-        <CardHeader>
-          <CardTitle>Filter & Search</CardTitle>
-          <div className="relative mt-2">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-            <Input
-              placeholder="Search by Deposit ID, User ID, TxID, or amount..."
-              className="pl-10"
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
+    <div className="p-6 space-y-6 max-w-7xl mx-auto text-slate-100">
+      {/* Header */}
+      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+        <div>
+          <h1 className="text-2xl font-bold text-white flex items-center gap-2">
+            <ArrowDownToLine className="w-6 h-6 text-emerald-500" />
+            User Deposits & Ledger Reconciliation
+          </h1>
+          <p className="text-xs text-slate-400 mt-1">
+            Search across user identities, verify blockchain deposits, and credit or adjust user balances on demand.
+          </p>
+        </div>
+
+        <div className="flex items-center gap-3 w-full md:w-auto">
+          {/* Powerful Search Bar */}
+          <div className="relative flex-1 md:w-96">
+            <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+            <input
+              type="text"
+              placeholder="Search by name, email, custom ID, UUID, deposit ID, amount..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="w-full pl-9 pr-3 py-2 bg-slate-900 border border-slate-800 rounded-lg text-sm text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-emerald-500"
             />
           </div>
-        </CardHeader>
-      </Card>
-      <Tabs defaultValue="awaiting_confirmation" className="w-full">
-        <TabsList className="grid w-full grid-cols-4">
-          <TabsTrigger value="awaiting_confirmation">Pending Approval</TabsTrigger>
-          <TabsTrigger value="pending">Pending User Action</TabsTrigger>
-          <TabsTrigger value="expired">Expired</TabsTrigger>
-          <TabsTrigger value="all">All Deposits</TabsTrigger>
-        </TabsList>
-        <TabsContent value="awaiting_confirmation">
-          <Card>
-            <CardHeader>
-              <CardTitle>Deposits Pending Approval</CardTitle>
-              <CardDescription>
-                Users have confirmed these transfers. Please verify and approve or decline.
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              <DepositsTable
-                status="awaiting_confirmation"
-                searchTerm={searchTerm}
-                onRowClick={handleRowClick}
-                onApproveClick={handleApproveClick}
-                onDeclineClick={handleDeclineClick}
-              />
-            </CardContent>
-          </Card>
-        </TabsContent>
-        <TabsContent value="pending">
-          <Card>
-            <CardHeader>
-              <CardTitle>Deposits Pending User Action</CardTitle>
-              <CardDescription>
-                Users have initiated these deposits but have not yet confirmed the transfer.
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              <DepositsTable
-                status="pending"
-                searchTerm={searchTerm}
-                onRowClick={handleRowClick}
-                onApproveClick={handleApproveClick}
-                onDeclineClick={handleDeclineClick}
-              />
-            </CardContent>
-          </Card>
-        </TabsContent>
-        <TabsContent value="expired">
-          <Card>
-            <CardHeader>
-              <CardTitle>Expired Deposit Requests</CardTitle>
-              <CardDescription>These requests were not completed by the user in time.</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <DepositsTable
-                status="expired"
-                searchTerm={searchTerm}
-                onRowClick={handleRowClick}
-                onApproveClick={handleApproveClick}
-                onDeclineClick={handleDeclineClick}
-              />
-            </CardContent>
-          </Card>
-        </TabsContent>
-        <TabsContent value="all">
-          <Card>
-            <CardHeader>
-              <CardTitle>All Deposits</CardTitle>
-              <CardDescription>A complete history of all deposit requests on the platform.</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <DepositsTable
-                searchTerm={searchTerm}
-                onRowClick={handleRowClick}
-                onApproveClick={handleApproveClick}
-                onDeclineClick={handleDeclineClick}
-              />
-            </CardContent>
-          </Card>
-        </TabsContent>
-      </Tabs>
 
-      <AlertDialog open={isApproveAlertOpen} onOpenChange={setIsApproveAlertOpen}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Approve Deposit?</AlertDialogTitle>
-            <div className="space-y-4 text-sm pt-2">
-              <p className="text-muted-foreground">
-                You are about to approve a deposit for user{' '}
-                <strong className="text-foreground">{selectedDeposit?.userDisplayName}</strong>. This will credit their
-                wallet. This action cannot be undone.
-              </p>
-              <div className="p-4 border rounded-md space-y-3 bg-secondary/50 text-foreground">
-                <div className="flex justify-between items-center">
-                  <span className="text-muted-foreground">User:</span>
-                  <span className="font-semibold">{selectedDeposit?.userDisplayName}</span>
-                </div>
-                <div className="flex justify-between items-center">
-                  <span className="text-muted-foreground">Requested Amount:</span>
-                  <span className="font-semibold">
-                    {selectedDeposit?.amount} {selectedDeposit?.crypto}
-                  </span>
-                </div>
-                <div className="flex justify-between items-center gap-2">
-                  <span className="text-muted-foreground">TxID:</span>
-                  <div className="flex items-center gap-2 overflow-hidden">
-                    <span className="font-mono text-xs bg-muted p-1 rounded max-w-[180px] truncate">
-                      {selectedDeposit?.txId || 'N/A'}
-                    </span>
-                    {selectedDeposit?.txId ? (
-                      <Button
-                        size="icon"
-                        variant="ghost"
-                        className="h-6 w-6"
-                        onClick={() => copyToClipboard(selectedDeposit!.txId!)}
-                      >
-                        <Copy className="h-3 w-3" />
-                      </Button>
-                    ) : null}
+          <button
+            onClick={() => {
+              setTargetUserId("");
+              setTargetUserInfo(null);
+              setCurrency("BTC");
+              setShowAdjustModal(true);
+            }}
+            className="bg-blue-600 hover:bg-blue-500 text-white px-3.5 py-2 rounded-lg text-xs font-semibold flex items-center gap-1.5 shadow-sm transition-colors whitespace-nowrap"
+          >
+            <Coins className="w-4 h-4" />
+            Adjust Balance
+          </button>
+
+          <button
+            onClick={() => fetchDeposits()}
+            className="p-2 bg-slate-900 border border-slate-800 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800"
+            title="Refresh"
+          >
+            <RefreshCw className={`w-4 h-4 ${loading ? "animate-spin" : ""}`} />
+          </button>
+        </div>
+      </div>
+
+      {/* Deposits Table */}
+      <div className="overflow-x-auto border border-slate-800 rounded-xl bg-slate-900/90 shadow-md">
+        <table className="w-full text-left text-sm text-slate-300">
+          <thead className="bg-slate-950 text-slate-400 uppercase text-xs border-b border-slate-800 font-semibold">
+            <tr>
+              <th className="p-3.5">Deposit ID</th>
+              <th className="p-3.5">User Details</th>
+              <th className="p-3.5">Currency</th>
+              <th className="p-3.5">Amount</th>
+              <th className="p-3.5">Status</th>
+              <th className="p-3.5">Date</th>
+              <th className="p-3.5 text-right">Actions</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-slate-800/80">
+            {loading ? (
+              <tr>
+                <td colSpan={7} className="p-8 text-center text-slate-400">
+                  <div className="flex justify-center items-center gap-2">
+                    <RefreshCw className="w-4 h-4 animate-spin text-emerald-500" />
+                    Loading deposit records...
                   </div>
+                </td>
+              </tr>
+            ) : filteredDeposits.length === 0 ? (
+              <tr>
+                <td colSpan={7} className="p-8 text-center text-slate-500">
+                  No deposits found matching "{searchQuery}".
+                </td>
+              </tr>
+            ) : (
+              filteredDeposits.map((d) => (
+                <tr key={d.id} className="hover:bg-slate-800/40 transition-colors">
+                  {/* Deposit ID */}
+                  <td className="p-3.5 font-mono text-xs text-slate-400">
+                    <span title={d.id}>{d.id.slice(0, 10)}...</span>
+                  </td>
+
+                  {/* User Details with direct link to profile */}
+                  <td className="p-3.5">
+                    <Link 
+                      href={`/adminnarayan/users/${d.user_id}`}
+                      className="font-semibold text-white hover:text-blue-400 transition-colors flex items-center gap-1.5"
+                    >
+                      {d.profiles?.full_name || "User"}
+                      <ExternalLink className="w-3 h-3 text-slate-500" />
+                    </Link>
+                    <p className="text-xs text-slate-400 font-mono">{d.profiles?.email}</p>
+                    <p className="text-[11px] text-slate-500 font-mono">
+                      CID: <span className="text-slate-300">{d.profiles?.user_custom_id || "N/A"}</span>
+                    </p>
+                  </td>
+
+                  {/* Currency */}
+                  <td className="p-3.5 font-bold uppercase text-white">
+                    {d.currency}
+                  </td>
+
+                  {/* Amount */}
+                  <td className="p-3.5 font-mono font-bold text-emerald-400">
+                    {d.amount}
+                  </td>
+
+                  {/* Status */}
+                  <td className="p-3.5">
+                    <span
+                      className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold ${
+                        d.status === "completed" || d.status === "credited" || d.status === "confirmed"
+                          ? "bg-emerald-950 text-emerald-300 border border-emerald-800"
+                          : d.status === "refunded_below_minimum"
+                          ? "bg-slate-800 text-slate-300 border border-slate-700"
+                          : "bg-amber-950 text-amber-300 border border-amber-800"
+                      }`}
+                    >
+                      {d.status === "completed" || d.status === "credited" ? (
+                        <CheckCircle2 className="w-3 h-3 text-emerald-400" />
+                      ) : (
+                        <Clock className="w-3 h-3 text-amber-400" />
+                      )}
+                      {d.status === "refunded_below_minimum"
+                        ? "Refunded (Below Min)"
+                        : d.status === "credited" || d.status === "completed"
+                        ? "Completed"
+                        : d.status}
+                    </span>
+                  </td>
+
+                  {/* Date */}
+                  <td className="p-3.5 text-xs text-slate-400 whitespace-nowrap">
+                    {new Date(d.created_at).toLocaleString()}
+                  </td>
+
+                  {/* Actions */}
+                  <td className="p-3.5 text-right whitespace-nowrap space-x-2">
+                    <button
+                      onClick={() => openAdjustModalForDeposit(d)}
+                      className="inline-flex items-center gap-1 bg-blue-600 hover:bg-blue-500 text-white font-semibold text-xs px-2.5 py-1.5 rounded-lg shadow-sm transition-colors"
+                      title="Adjust this user's balance"
+                    >
+                      <Coins className="w-3 h-3" />
+                      Adjust Balance
+                    </button>
+                    <Link
+                      href={`/adminnarayan/users/${d.user_id}`}
+                      className="inline-flex items-center gap-1 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white text-xs px-2.5 py-1.5 rounded-lg border border-slate-700 transition-colors"
+                    >
+                      Inspect User
+                    </Link>
+                  </td>
+                </tr>
+              ))
+            )}
+          </tbody>
+        </table>
+      </div>
+
+      {/* Adjust Balance Modal */}
+      {showAdjustModal && (
+        <div className="fixed inset-0 bg-black/75 flex items-center justify-center p-4 z-50 backdrop-blur-sm">
+          <div className="bg-slate-900 border border-slate-800 text-white p-6 rounded-2xl max-w-md w-full space-y-4 shadow-2xl">
+            <div className="flex justify-between items-start border-b border-slate-800 pb-3">
+              <div>
+                <h2 className="text-lg font-bold flex items-center gap-2">
+                  <Coins className="w-5 h-5 text-blue-400" />
+                  Adjust User Balance
+                </h2>
+                {targetUserInfo && (
+                  <p className="text-xs text-slate-400 font-mono mt-0.5">
+                    Target: {targetUserInfo.email} ({targetUserInfo.user_custom_id})
+                  </p>
+                )}
+              </div>
+              <button onClick={() => setShowAdjustModal(false)} className="text-slate-400 hover:text-white text-sm">
+                ✕
+              </button>
+            </div>
+
+            <form onSubmit={handleAdjustBalance} className="space-y-4">
+              <div>
+                <label className="text-xs font-semibold text-slate-300">Target User UUID</label>
+                <input
+                  type="text"
+                  required
+                  value={targetUserId}
+                  onChange={(e) => setTargetUserId(e.target.value)}
+                  placeholder="e.g. c91f50ad-aa6a-46ca-961f-91ffd54e6ea7"
+                  className="w-full p-2.5 bg-slate-950 border border-slate-800 rounded-lg mt-1 font-mono text-xs text-white focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
+
+              <div>
+                <label className="text-xs font-semibold text-slate-300">Cryptocurrency</label>
+                <select
+                  value={currency}
+                  onChange={(e) => setCurrency(e.target.value)}
+                  className="w-full p-2.5 bg-slate-950 border border-slate-800 rounded-lg mt-1 text-sm text-white focus:ring-2 focus:ring-blue-500"
+                >
+                  <option value="BTC">BTC — Bitcoin</option>
+                  <option value="ETH">ETH — Ethereum</option>
+                  <option value="USDT">USDT — Tether</option>
+                  <option value="TRX">TRX — Tron</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="text-xs font-semibold text-slate-300">Adjustment Action</label>
+                <div className="grid grid-cols-2 gap-2 mt-1">
+                  <button
+                    type="button"
+                    onClick={() => setAction("add")}
+                    className={`py-2 px-3 rounded-lg text-xs font-bold border transition-colors ${
+                      action === "add"
+                        ? "bg-emerald-600 text-white border-emerald-500 shadow-md"
+                        : "bg-slate-950 text-slate-400 border-slate-800 hover:text-white"
+                    }`}
+                  >
+                    + Add Funds (Credit)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setAction("subtract")}
+                    className={`py-2 px-3 rounded-lg text-xs font-bold border transition-colors ${
+                      action === "subtract"
+                        ? "bg-rose-600 text-white border-rose-500 shadow-md"
+                        : "bg-slate-950 text-slate-400 border-slate-800 hover:text-white"
+                    }`}
+                  >
+                    - Subtract Funds (Debit)
+                  </button>
                 </div>
               </div>
-              <div className="space-y-2">
-                <Label htmlFor="approved-amount">Approved Amount ({selectedDeposit?.crypto})</Label>
-                <Input
-                  id="approved-amount"
+
+              <div>
+                <label className="text-xs font-semibold text-slate-300">Crypto Amount</label>
+                <input
                   type="number"
                   step="any"
-                  value={editableAmount}
-                  onChange={(e) => setEditableAmount(e.target.value)}
-                  className="bg-background"
+                  min="0.00000001"
+                  required
+                  placeholder="0.00"
+                  value={amount}
+                  onChange={(e) => setAmount(e.target.value)}
+                  className="w-full p-2.5 bg-slate-950 border border-slate-800 rounded-lg mt-1 font-mono text-sm text-white focus:ring-2 focus:ring-blue-500"
                 />
-                <p className="text-xs text-muted-foreground">
-                  You can correct the amount here if the user sent a different amount than requested.
-                </p>
               </div>
-            </div>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel onClick={() => setSelectedDeposit(null)}>Cancel</AlertDialogCancel>
-            <AlertDialogAction onClick={handleApprove}>Confirm & Approve</AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-      <AlertDialog open={isDeclineAlertOpen} onOpenChange={setIsDeclineAlertOpen}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Decline Deposit?</AlertDialogTitle>
-            <AlertDialogDescription>
-              Are you sure you want to decline the deposit of{' '}
-              <span className="font-bold">
-                {selectedDeposit?.amount} {selectedDeposit?.crypto}
-              </span>{' '}
-              for user <span className="font-bold">{selectedDeposit?.userDisplayName}</span>? This action cannot be
-              undone.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel onClick={() => setSelectedDeposit(null)}>Cancel</AlertDialogCancel>
-            <AlertDialogAction onClick={handleDecline} className="bg-destructive hover:bg-destructive/90">
-              Confirm & Decline
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-      <Dialog open={isDetailsOpen} onOpenChange={setIsDetailsOpen}>
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle>Deposit Details</DialogTitle>
-            <DialogDescription>Full details for the deposit request.</DialogDescription>
-          </DialogHeader>
-          {selectedDeposit && (
-            <div className="space-y-4 py-4 text-sm">
-              <div className="flex justify-between items-center">
-                <span className="text-muted-foreground">Deposit ID</span>
-                <div className="flex items-center gap-2">
-                  <span className="font-mono text-xs">{selectedDeposit.id}</span>
-                  <Button
-                    size="icon"
-                    variant="ghost"
-                    className="h-6 w-6"
-                    onClick={() => copyToClipboard(selectedDeposit.id)}
-                  >
-                    <Copy className="h-3 w-3" />
-                  </Button>
-                </div>
-              </div>
-              <div className="flex justify-between items-center">
-                <span className="text-muted-foreground">User</span>
-                <span className="font-medium">{selectedDeposit.userDisplayName}</span>
-              </div>
-              <div className="flex justify-between items-center">
-                <span className="text-muted-foreground">Status</span>
-                <Badge variant="outline" className={cn('capitalize', statusColors[selectedDeposit.status])}>
-                  {depositStatusText[selectedDeposit.status] || selectedDeposit.status}
-                </Badge>
-              </div>
-              <div className="flex justify-between items-center">
-                <span className="text-muted-foreground">Requested Amount</span>
-                <span className="font-medium">
-                  {selectedDeposit.amount} {selectedDeposit.crypto}
-                </span>
-              </div>
-              {selectedDeposit.finalAmount ? (
-                <div className="flex justify-between items-center">
-                  <span className="text-muted-foreground">Approved Amount</span>
-                  <span className="font-medium">
-                    {selectedDeposit.finalAmount} {selectedDeposit.crypto}
-                  </span>
-                </div>
-              ) : null}
-              <div className="flex justify-between items-center">
-                <span className="text-muted-foreground">Chain</span>
-                <span className="font-medium">{selectedDeposit.chain}</span>
-              </div>
-              <div className="flex justify-between items-start gap-4">
-                <span className="text-muted-foreground flex-shrink-0">TxID</span>
-                <div className="flex items-center gap-2">
-                  <span className="font-mono text-xs break-all text-right">{selectedDeposit.txId || 'N/A'}</span>
-                  {selectedDeposit.txId ? (
-                    <Button
-                      size="icon"
-                      variant="ghost"
-                      className="h-6 w-6"
-                      onClick={() => copyToClipboard(selectedDeposit.txId!)}
-                    >
-                      <Copy className="h-3 w-3" />
-                    </Button>
-                  ) : null}
-                </div>
-              </div>
-              <div className="flex justify-between items-center">
-                <span className="text-muted-foreground">Date Requested</span>
-                <span className="font-medium">{toDate(selectedDeposit.createdAt)?.toLocaleString()}</span>
-              </div>
-              <div className="flex justify-between items-center">
-                <span className="text-muted-foreground">Expires</span>
-                <span className="font-medium">{toDate(selectedDeposit.timerEnd)?.toLocaleString()}</span>
-              </div>
-              {selectedDeposit.adminId ? (
-                <div className="flex justify-between items-center">
-                  <span className="text-muted-foreground">Processed by Admin</span>
-                  <span className="font-mono text-xs">{selectedDeposit.adminId}</span>
-                </div>
-              ) : null}
 
-              <div className="flex flex-col items-center gap-2 pt-4">
-                <div className="p-2 bg-white rounded-lg">
-                  <QRCodeSVG value={qrCodeValue} size={128} />
-                </div>
-                <div className="flex items-center gap-1 p-1 bg-muted rounded-md w-full">
-                  <p className="font-mono text-xs break-all text-center flex-grow">
-                    {selectedDeposit.walletAddress}
-                  </p>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="h-7 w-7"
-                    onClick={() => copyToClipboard(selectedDeposit.walletAddress)}
-                  >
-                    <Copy className="h-4 w-4" />
-                  </Button>
-                </div>
+              <div>
+                <label className="text-xs font-semibold text-slate-300">Audit Reason / Reconciliation Note</label>
+                <input
+                  type="text"
+                  required
+                  value={reason}
+                  onChange={(e) => setReason(e.target.value)}
+                  placeholder="Enter explicit reason for audit log..."
+                  className="w-full p-2.5 bg-slate-950 border border-slate-800 rounded-lg mt-1 text-sm text-white focus:ring-2 focus:ring-blue-500"
+                />
               </div>
-            </div>
-          )}
-        </DialogContent>
-      </Dialog>
+
+              <div className="flex justify-end space-x-2 pt-2 border-t border-slate-800">
+                <button
+                  type="button"
+                  onClick={() => setShowAdjustModal(false)}
+                  className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg text-xs"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={actionLoading}
+                  className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-xs font-semibold shadow-md transition-colors disabled:opacity-50"
+                >
+                  {actionLoading ? "Applying..." : "Apply Balance Adjustment"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

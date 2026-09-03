@@ -6,17 +6,12 @@ import { AdminShell } from "./admin-shell";
 export const dynamic = "force-dynamic";
 
 export default async function AdminLayout({ children }: { children: ReactNode }) {
-  const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
-
-  // If no user is logged in, simply render children (e.g. login screen)
-  if (!user) {
-    return (
-      <div className="min-h-screen bg-slate-950 text-slate-100">
-        {children}
-      </div>
-    );
-  }
+  let user = null;
+  try {
+    const supabase = await createClient();
+    const { data } = await supabase.auth.getUser();
+    user = data.user;
+  } catch {}
 
   // Fetch admin profile details & quick counters
   const adminSupabase = createAdminClient();
@@ -25,18 +20,14 @@ export default async function AdminLayout({ children }: { children: ReactNode })
 
   try {
     const [profileRes, disputesRes, depositsRes, withdrawalsRes, ticketsRes] = await Promise.allSettled([
-      adminSupabase
-        .from("profiles")
-        .select("full_name, role")
-        .or(`id.eq.${user.id},user_id.eq.${user.id}`)
-        .maybeSingle(),
+      user ? adminSupabase.from("profiles").select("full_name").eq("id", user.id).maybeSingle() : Promise.resolve({ data: null }),
       adminSupabase.from("disputes").select("*", { count: "exact", head: true }).eq("status", "open"),
       adminSupabase.from("deposits").select("*", { count: "exact", head: true }).eq("status", "awaiting_confirmation"),
       adminSupabase.from("withdrawals").select("*", { count: "exact", head: true }).eq("status", "pending"),
       adminSupabase.from("support_tickets").select("*", { count: "exact", head: true }).eq("status", "Open"),
     ]);
 
-    if (profileRes.status === "fulfilled" && profileRes.value.data) {
+    if (profileRes.status === "fulfilled" && profileRes.value?.data) {
       adminName = profileRes.value.data.full_name;
     }
 
@@ -49,7 +40,7 @@ export default async function AdminLayout({ children }: { children: ReactNode })
   }
 
   return (
-    <AdminShell adminEmail={user.email} adminName={adminName} counts={counts}>
+    <AdminShell adminEmail={user?.email} adminName={adminName} counts={counts}>
       {children}
     </AdminShell>
   );

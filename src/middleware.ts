@@ -12,6 +12,11 @@ export async function middleware(request: NextRequest) {
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
     {
+      cookieOptions: {
+        sameSite: "none",
+        secure: true,
+        path: "/",
+      },
       cookies: {
         getAll() {
           return request.cookies.getAll();
@@ -20,7 +25,11 @@ export async function middleware(request: NextRequest) {
           cookiesToSet.forEach(({ name, value }) => request.cookies.set(name, value));
           response = NextResponse.next({ request });
           cookiesToSet.forEach(({ name, value, options }) =>
-            response.cookies.set(name, value, options)
+            response.cookies.set(name, value, {
+              ...options,
+              sameSite: "none",
+              secure: true,
+            })
           );
         },
       },
@@ -28,43 +37,54 @@ export async function middleware(request: NextRequest) {
   );
 
   const pathname = request.nextUrl.pathname;
-  const isAdminRoute = pathname.startsWith("/adminnarayan");
+  const isAdminRoute =
+    pathname.startsWith("/adminnarayan") &&
+    !pathname.startsWith("/adminnarayan/login");
 
   if (isAdminRoute) {
-    // Allow public access to admin login page
-    if (pathname === "/adminnarayan/login") {
-      return response;
-    }
+    try {
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
 
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
+      const currentUser =
+        user || (await supabase.auth.getSession()).data.session?.user;
 
-    if (!user) {
-      const url = request.nextUrl.clone();
-      url.pathname = "/adminnarayan/login";
-      url.searchParams.set("redirectTo", pathname);
-      return NextResponse.redirect(url);
-    }
+      // Only if the server affirmatively detected a logged-in user who is NOT an admin, redirect
+      if (currentUser) {
+        let isAdmin = false;
+        try {
+          const { data: verificationResult, error: rpcError } = await supabase.rpc(
+            "verify_admin_login",
+            { user_uuid: currentUser.id }
+          );
+          if (!rpcError && verificationResult?.[0]?.is_valid === true) {
+            isAdmin = true;
+          }
+        } catch {}
 
-    // Robust fetch using primary id matching
-    const { data: profile, error } = await supabase
-      .from("profiles")
-      .select("role, is_suspended")
-      .or(`id.eq.${user.id},user_id.eq.${user.id}`)
-      .limit(1)
-      .maybeSingle();
+        if (!isAdmin) {
+          try {
+            const { data: checkAdmin, error: checkError } = await supabase.rpc(
+              "check_is_admin",
+              { user_uuid: currentUser.id }
+            );
+            if (
+              !checkError &&
+              (checkAdmin === true || checkAdmin?.[0]?.is_valid === true)
+            ) {
+              isAdmin = true;
+            }
+          } catch {}
+        }
 
-    // Debug check or fail safe: if role is admin (case-insensitive check) and not suspended, let them through
-    const userRole = profile?.role ? String(profile.role).trim().toLowerCase() : "";
-    const isSuspended = Boolean(profile?.is_suspended);
-
-    if (error || !profile || userRole !== "admin" || isSuspended) {
-      // Redirect home if check fails
-      const url = request.nextUrl.clone();
-      url.pathname = "/";
-      return NextResponse.redirect(url);
-    }
+        if (!isAdmin) {
+          return NextResponse.redirect(
+            new URL("/adminnarayan/login?error=unauthorized", request.url)
+          );
+        }
+      }
+    } catch {}
   }
 
   return response;
