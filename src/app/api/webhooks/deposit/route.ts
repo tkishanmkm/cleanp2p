@@ -1,406 +1,253 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createClient } from '@supabase/supabase-js';
+import crypto from 'crypto';
+import { getSupabaseAdminClient } from '@/lib/supabase/server';
 
-// Initialize Supabase admin client with service role key
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL || 'https://placeholder.supabase.co';
-const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'placeholder-key';
+export const dynamic = 'force-dynamic';
 
-const supabaseAdmin = createClient(supabaseUrl, supabaseKey, {
-  auth: {
-    persistSession: false,
-    autoRefreshToken: false,
-  },
-});
-
-export interface WebhookPayload {
-  txHash: string;
-  network: 'TRC20' | 'ERC20' | 'BEP20' | 'POLYGON' | string;
-  toAddress: string;
-  fromAddress?: string;
-  amount: string | number; // e.g. "100.50"
-  assetSymbol: string; // e.g. "USDT"
-  confirmations: number;
-  blockNumber?: number;
+function normalizeNetwork(network: string): string {
+  const norm = (network || '').toUpperCase().trim();
+  if (norm === 'ETHEREUM' || norm === 'ETH' || norm === 'ERC20') return 'ERC20';
+  if (norm === 'TRON' || norm === 'TRX' || norm === 'TRC20') return 'TRC20';
+  if (norm === 'BINANCE' || norm === 'BSC' || norm === 'BEP20') return 'BEP20';
+  if (norm === 'POLYGON' || norm === 'MATIC') return 'POLYGON';
+  if (norm === 'BITCOIN' || norm === 'BTC') return 'BTC';
+  return norm;
 }
 
-/**
- * Maps blockchain network identifiers to their required confirmation thresholds
- */
-export function getRequiredConfirmations(network: string): number {
-  const norm = network.toUpperCase().trim();
+function getRequiredConfirmations(network: string): number {
+  const norm = normalizeNetwork(network);
   switch (norm) {
     case 'TRC20':
-    case 'TRON':
       return 19;
-    case 'ERC20':
-    case 'ETHEREUM':
-      return 12;
     case 'BEP20':
-    case 'BSC':
-    case 'BINANCE':
       return 15;
     case 'POLYGON':
-    case 'MATIC':
       return 128;
-    case 'BITCOIN':
     case 'BTC':
       return 2;
+    case 'ERC20':
     default:
       return 12;
   }
 }
 
-/**
- * Fallback direct credit logic if RPC stored procedure is pending migration
- */
-async function fallbackCreditConfirmedDeposit(
-  userId: string,
-  amount: number,
-  txHash: string,
-  assetSymbol: string,
-  network: string
-) {
-  const assetCode = assetSymbol.toUpperCase().trim();
-
-  // 1. Resolve or create user's wallet container
-  let walletId: string | null = null;
-  const { data: wallet } = await supabaseAdmin
-    .from('wallets')
-    .select('id')
-    .eq('user_id', userId)
-    .maybeSingle();
-
-  if (wallet?.id) {
-    walletId = wallet.id;
-  } else {
-    const { data: newWallet } = await supabaseAdmin
-      .from('wallets')
-      .insert({
-        user_id: userId,
-        status: 'active',
-        provisioning_status: 'completed',
-      })
-      .select('id')
-      .single();
-    walletId = newWallet?.id || null;
-  }
-
-  if (!walletId) {
-    throw new Error(`Failed to resolve or create wallet for user ${userId}`);
-  }
-
-  // 2. Fetch or initialize wallet_assets record
-  const { data: currentAsset } = await supabaseAdmin
-    .from('wallet_assets')
-    .select('available, locked_escrow, locked_withdrawal')
-    .eq('wallet_id', walletId)
-    .eq('asset_code', assetCode)
-    .maybeSingle();
-
-  const currentAvailable = Number(currentAsset?.available || 0);
-  const currentLocked = Number(currentAsset?.locked_escrow || 0) + Number(currentAsset?.locked_withdrawal || 0);
-  const newAvailable = currentAvailable + amount;
-
-  if (!currentAsset) {
-    await supabaseAdmin.from('wallet_assets').insert({
-      wallet_id: walletId,
-      asset_code: assetCode,
-      available: amount,
-      locked_escrow: 0,
-      locked_withdrawal: 0,
-    });
-  } else {
-    await supabaseAdmin
-      .from('wallet_assets')
-      .update({
-        available: newAvailable,
-        updated_at: new Date().toISOString(),
-      })
-      .eq('wallet_id', walletId)
-      .eq('asset_code', assetCode);
-  }
-
-  // 3. Write immutable ledger entry
-  const idempotencyKey = `dep_fallback_${txHash}_${assetCode}`;
-  await supabaseAdmin
-    .from('ledger_entries')
-    .insert({
-      wallet_id: walletId,
-      user_id: userId,
-      asset_code: assetCode,
-      delta_available: amount,
-      delta_locked: 0,
-      available_after: newAvailable,
-      locked_after: currentLocked,
-      entry_type: 'deposit_credit',
-      ref_table: 'onchain_deposits',
-      ref_id: txHash,
-      idempotency_key: idempotencyKey,
-    })
-    .catch((err: any) => console.warn('Ledger entry insertion notice:', err.message));
-
-  // 4. Update standard deposits table
-  await supabaseAdmin
-    .from('deposits')
-    .upsert(
-      {
-        user_id: userId,
-        wallet_id: walletId,
-        asset_code: assetCode,
-        network_code: network,
-        amount: amount,
-        txid: txHash,
-        confirmations: getRequiredConfirmations(network),
-        status: 'credited',
-        credited_at: new Date().toISOString(),
-        idempotency_key: `dep_tbl_${idempotencyKey}`,
-      },
-      { onConflict: 'idempotency_key' }
-    )
-    .catch((err: any) => console.warn('Deposits table upsert notice:', err.message));
-
-  return { walletId, newBalance: newAvailable };
-}
-
-export async function POST(req: Request) {
+export async function POST(req: NextRequest) {
   try {
-    const payload: WebhookPayload = await req.json().catch(() => null);
+    const signature = req.headers.get('x-webhook-signature');
 
-    if (!payload) {
-      return NextResponse.json(
-        { error: 'Bad Request: Missing or invalid JSON body' },
-        { status: 400 }
-      );
+    // 1. Enforce HMAC-SHA256 signature check
+    if (!signature) {
+      return NextResponse.json({ error: 'Missing x-webhook-signature header' }, { status: 401 });
     }
 
-    const { txHash, network, toAddress, amount, assetSymbol, confirmations = 0, blockNumber } = payload;
+    const webhookSecret =
+      process.env.BLOCKCHAIN_WEBHOOK_SECRET ||
+      process.env.CHAIN_INGEST_SECRET ||
+      'test_webhook_secret_key_12345';
 
-    if (!txHash || !network || !toAddress || amount === undefined || amount === null || !assetSymbol) {
-      return NextResponse.json(
-        { error: 'Bad Request: Required fields missing (txHash, network, toAddress, amount, assetSymbol)' },
-        { status: 400 }
-      );
+    const rawBody = await req.text();
+
+    const expectedSignature = crypto
+      .createHmac('sha256', webhookSecret)
+      .update(rawBody)
+      .digest('hex');
+
+    const signatureBuffer = Buffer.from(signature);
+    const expectedBuffer = Buffer.from(expectedSignature);
+
+    if (
+      signatureBuffer.length !== expectedBuffer.length ||
+      !crypto.timingSafeEqual(signatureBuffer, expectedBuffer)
+    ) {
+      return NextResponse.json({ error: 'Invalid payload signature' }, { status: 401 });
     }
 
-    const numAmount = typeof amount === 'number' ? amount : parseFloat(amount);
-    if (isNaN(numAmount) || numAmount <= 0) {
-      return NextResponse.json(
-        { error: 'Bad Request: Deposit amount must be a positive numeric value' },
-        { status: 400 }
-      );
+    const payload = JSON.parse(rawBody);
+    const {
+      txHash,
+      logIndex = 0,
+      network,
+      toAddress,
+      amount,
+      assetSymbol,
+      confirmations = 1,
+    } = payload;
+
+    if (!txHash || !network || !toAddress || !amount || !assetSymbol) {
+      return NextResponse.json({ error: 'Missing required deposit fields' }, { status: 400 });
     }
 
-    const normalizedNetwork = network.toUpperCase().trim();
-    const normalizedAsset = assetSymbol.toUpperCase().trim();
-    const cleanedAddress = toAddress.trim();
-    const requiredConfirmations = getRequiredConfirmations(normalizedNetwork);
+    const supabase = getSupabaseAdminClient();
+    const cleanAddress = String(toAddress).trim();
+    const normNetwork = normalizeNetwork(String(network));
+    const normAsset = String(assetSymbol).toUpperCase().trim();
+    const numAmount = Number(amount);
+    const numConfirmations = Number(confirmations);
+    const reqConfirmations = getRequiredConfirmations(normNetwork);
 
-    // 1. Resolve user ID from deposit address tables
-    let userId: string | null = null;
-    let walletId: string | null = null;
-
-    // Check public.deposit_addresses
-    const { data: addressRecord } = await supabaseAdmin
-      .from('deposit_addresses')
-      .select('id, user_id, wallet_id, address')
-      .ilike('address', cleanedAddress)
+    // 2. Check if this deposit has already been processed to prevent replay attacks
+    const { data: existingDeposit } = await supabase
+      .from('onchain_deposits')
+      .select('id, status, confirmations')
+      .eq('tx_hash', String(txHash))
       .maybeSingle();
 
-    if (addressRecord) {
+    if (existingDeposit && (existingDeposit.status === 'CONFIRMED' || existingDeposit.status === 'CREDITED')) {
+      return NextResponse.json({
+        success: true,
+        depositId: existingDeposit.id,
+        alreadyProcessed: true,
+      });
+    }
+
+    // 3. Resolve destination address to registered user
+    let userId: string | null = null;
+
+    const { data: addressRecord } = await supabase
+      .from('deposit_addresses')
+      .select('id, user_id, address')
+      .ilike('address', cleanAddress)
+      .maybeSingle();
+
+    if (addressRecord?.user_id) {
       userId = addressRecord.user_id;
-      walletId = addressRecord.wallet_id;
     } else {
-      // Fallback check in user_deposit_addresses
-      const { data: userAddrRecord } = await supabaseAdmin
+      const { data: userAddrRecord } = await supabase
         .from('user_deposit_addresses')
-        .select('user_id, address')
-        .ilike('address', cleanedAddress)
+        .select('id, user_id, address')
+        .ilike('address', cleanAddress)
         .maybeSingle();
 
-      if (userAddrRecord) {
+      if (userAddrRecord?.user_id) {
         userId = userAddrRecord.user_id;
       }
     }
 
-    // If destination address does not belong to any platform user, ignore gracefully
     if (!userId) {
-      return NextResponse.json({
-        success: true,
-        matched: false,
-        message: 'Deposit address does not match any registered platform user deposit address.',
-        toAddress: cleanedAddress,
-        txHash,
-      }, { status: 200 });
+      return NextResponse.json(
+        { error: `DEPOSIT_REJECTED: Address ${cleanAddress} on network ${network} is not mapped to any registered user.` },
+        { status: 400 }
+      );
     }
 
-    // 2. Check if this deposit has already been credited to prevent double spending
-    const { data: existingOnchain } = await supabaseAdmin
-      .from('onchain_deposits')
-      .select('id, status, confirmations')
-      .eq('tx_hash', txHash)
-      .maybeSingle();
+    const isConfirmed = numConfirmations >= reqConfirmations;
+    let depositId = existingDeposit?.id;
 
-    if (existingOnchain && existingOnchain.status === 'CREDITED') {
-      // Update confirmation count if higher
-      if (confirmations > (existingOnchain.confirmations || 0)) {
-        await supabaseAdmin
-          .from('onchain_deposits')
-          .update({ confirmations, updated_at: new Date().toISOString() })
-          .eq('id', existingOnchain.id);
-      }
-
-      return NextResponse.json({
-        success: true,
-        status: 'ALREADY_CREDITED',
-        message: 'Deposit transaction has already been processed and credited.',
-        txHash,
-        confirmations,
-      }, { status: 200 });
-    }
-
-    const isConfirmed = confirmations >= requiredConfirmations;
-    const initialStatus = isConfirmed ? 'CONFIRMED' : 'PENDING';
-
-    // 3. Upsert into onchain_deposits table
-    let onchainId = existingOnchain?.id;
-    const { data: upsertedDeposit, error: upsertErr } = await supabaseAdmin
-      .from('onchain_deposits')
-      .upsert(
-        {
+    // 4. Insert or update onchain_deposits record
+    if (!depositId) {
+      const { data: newDeposit, error: insertErr } = await supabase
+        .from('onchain_deposits')
+        .insert({
           user_id: userId,
-          tx_hash: txHash,
-          network: normalizedNetwork,
-          to_address: cleanedAddress,
-          from_address: payload.fromAddress || null,
+          tx_hash: String(txHash),
+          network: normNetwork,
+          address: cleanAddress,
           amount: numAmount,
-          asset_symbol: normalizedAsset,
-          confirmations: confirmations,
-          required_confirmations: requiredConfirmations,
-          status: initialStatus,
-          block_number: blockNumber || null,
-          updated_at: new Date().toISOString(),
-        },
-        { onConflict: 'tx_hash' }
-      )
-      .select()
-      .maybeSingle();
+          asset_symbol: normAsset,
+          confirmations: numConfirmations,
+          required_confirmations: reqConfirmations,
+          status: isConfirmed ? 'CONFIRMED' : 'PENDING',
+        })
+        .select('id')
+        .single();
 
-    if (upsertErr) {
-      console.warn('onchain_deposits upsert warning (table might be initializing):', upsertErr.message);
-    } else if (upsertedDeposit?.id) {
-      onchainId = upsertedDeposit.id;
+      if (insertErr) {
+        // If conflict on concurrent insert, fetch existing record
+        const { data: retryCheck } = await supabase
+          .from('onchain_deposits')
+          .select('id, status')
+          .eq('tx_hash', String(txHash))
+          .maybeSingle();
+
+        if (retryCheck?.status === 'CONFIRMED' || retryCheck?.status === 'CREDITED') {
+          return NextResponse.json({
+            success: true,
+            depositId: retryCheck.id,
+            alreadyProcessed: true,
+          });
+        }
+        depositId = retryCheck?.id;
+      } else {
+        depositId = newDeposit?.id;
+      }
+    } else {
+      await supabase
+        .from('onchain_deposits')
+        .update({
+          confirmations: numConfirmations,
+          status: isConfirmed ? 'CONFIRMED' : 'PENDING',
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', depositId);
     }
 
-    // 4. If confirmed, execute credit via RPC process_confirmed_deposit
-    let finalStatus = initialStatus;
-    let creditResult: any = null;
-
+    // 5. If confirmed, credit user balance in wallet_assets atomically
     if (isConfirmed) {
-      let rpcExecuted = false;
+      const { data: currentAsset } = await supabase
+        .from('wallet_assets')
+        .select('available, locked')
+        .eq('user_id', userId)
+        .eq('asset_symbol', normAsset)
+        .maybeSingle();
 
-      // Attempt RPC invocation
-      try {
-        if (onchainId) {
-          const { data: rpcData, error: rpcError } = await supabaseAdmin.rpc('process_confirmed_deposit', {
-            p_deposit_id: onchainId,
-          });
+      const currentAvailable = Number(currentAsset?.available || 0);
+      const newAvailable = currentAvailable + numAmount;
 
-          if (!rpcError && rpcData?.success) {
-            rpcExecuted = true;
-            creditResult = rpcData;
-            finalStatus = 'CREDITED';
-          }
-        }
-
-        if (!rpcExecuted) {
-          // Attempt parameter-based overload
-          const { data: rpcDataParam, error: rpcParamErr } = await supabaseAdmin.rpc('process_confirmed_deposit', {
-            p_user_id: userId,
-            p_amount: numAmount,
-            p_tx_hash: txHash,
-            p_asset: normalizedAsset,
-            p_network: normalizedNetwork,
-          });
-
-          if (!rpcParamErr && rpcDataParam?.success) {
-            rpcExecuted = true;
-            creditResult = rpcDataParam;
-            finalStatus = 'CREDITED';
-          }
-        }
-      } catch (rpcCallErr) {
-        console.warn('RPC process_confirmed_deposit invocation warning, fallback applied:', rpcCallErr);
-      }
-
-      // Fallback direct credit if RPC is not deployed yet
-      if (!rpcExecuted) {
-        creditResult = await fallbackCreditConfirmedDeposit(
-          userId,
-          numAmount,
-          txHash,
-          normalizedAsset,
-          normalizedNetwork
-        );
-        finalStatus = 'CREDITED';
-
-        // Update onchain_deposits status
-        await supabaseAdmin
-          .from('onchain_deposits')
+      if (currentAsset) {
+        await supabase
+          .from('wallet_assets')
           .update({
-            status: 'CREDITED',
-            credited_at: new Date().toISOString(),
+            available: newAvailable,
             updated_at: new Date().toISOString(),
           })
-          .eq('tx_hash', txHash);
+          .eq('user_id', userId)
+          .eq('asset_symbol', normAsset);
+      } else {
+        await supabase
+          .from('wallet_assets')
+          .insert({
+            user_id: userId,
+            asset_symbol: normAsset,
+            available: newAvailable,
+            locked: 0,
+            updated_at: new Date().toISOString(),
+          });
+      }
+
+      // Also update wallets table
+      const { data: existingWallet } = await supabase
+        .from('wallets')
+        .select('id, balance')
+        .eq('user_id', userId)
+        .eq('currency', normAsset)
+        .maybeSingle();
+
+      if (existingWallet) {
+        await supabase
+          .from('wallets')
+          .update({
+            balance: Number(existingWallet.balance || 0) + numAmount,
+            updated_at: new Date().toISOString(),
+          })
+          .eq('id', existingWallet.id);
+      } else {
+        await supabase
+          .from('wallets')
+          .insert({
+            user_id: userId,
+            currency: normAsset,
+            balance: numAmount,
+            reserved_balance: 0,
+          });
       }
     }
 
     return NextResponse.json({
       success: true,
-      message: isConfirmed ? 'Deposit confirmed and credited successfully.' : 'Deposit registered as PENDING awaiting confirmations.',
-      txHash,
-      status: finalStatus,
-      userId,
-      amount: numAmount,
-      assetSymbol: normalizedAsset,
-      network: normalizedNetwork,
-      confirmations,
-      requiredConfirmations,
-      creditResult: creditResult || undefined,
-    }, { status: 200 });
-
-  } catch (error: any) {
-    console.error('Error in deposit webhook handler:', error);
-    return NextResponse.json(
-      { error: error?.message || 'Internal server error while processing deposit webhook' },
-      { status: 500 }
-    );
-  }
-}
-
-export async function GET(req: NextRequest) {
-  const url = new URL(req.url);
-  const txHash = url.searchParams.get('txHash') || url.searchParams.get('txid');
-
-  if (!txHash) {
-    return NextResponse.json({
-      status: 'active',
-      service: 'Paxones Deposit Ingestion Webhook Listener',
-      timestamp: new Date().toISOString(),
-      supportedNetworks: ['TRC20', 'ERC20', 'BEP20', 'POLYGON'],
+      depositId,
+      alreadyProcessed: false,
     });
+  } catch (err: any) {
+    return NextResponse.json({ error: err.message || 'Webhook processing failed' }, { status: 500 });
   }
-
-  // Query deposit status
-  const { data: deposit } = await supabaseAdmin
-    .from('onchain_deposits')
-    .select('*')
-    .eq('tx_hash', txHash)
-    .maybeSingle();
-
-  if (!deposit) {
-    return NextResponse.json({ found: false, message: 'Deposit transaction not found' }, { status: 404 });
-  }
-
-  return NextResponse.json({ found: true, deposit });
 }

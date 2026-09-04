@@ -9,19 +9,211 @@ import { formatMemberDuration, isUserOnline } from '@/lib/utils/formatters';
 import { supabase } from '@/lib/supabase/client';
 
 interface AdDetailsProps {
-  params: { adId: string };
+  params: Promise<{ adId: string }> | { adId: string };
+}
+
+export function TradeInitiateForm({ ad }: { ad: any }) {
+  const router = useRouter();
+  const [fiatAmount, setFiatAmount] = useState('500');
+  const [cryptoAmount, setCryptoAmount] = useState('0.005');
+  const [calcDirection, setCalcDirection] = useState<'FIAT_TO_COIN' | 'COIN_TO_FIAT'>('FIAT_TO_COIN');
+  const [loading, setLoading] = useState(false);
+  const [limitError, setLimitError] = useState<string | null>(null);
+  const [fundError, setFundError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (ad?.price) {
+      const initFiat = 500;
+      const calculated = initFiat / ad.price;
+      setFiatAmount(initFiat.toString());
+      setCryptoAmount(calculated.toFixed(6));
+      validateLimits(initFiat, ad.minLimit, ad.maxLimit);
+    }
+  }, [ad]);
+
+  const validateLimits = (fiat: number, min?: number, max?: number) => {
+    if (min !== undefined && fiat < min) {
+      setLimitError(`Minimum limit is $${min.toLocaleString()}`);
+    } else if (max !== undefined && fiat > max) {
+      setLimitError(`Maximum limit is $${max.toLocaleString()}`);
+    } else {
+      setLimitError(null);
+    }
+  };
+
+  const calculateCrypto = (fiat: string, price: number) => {
+    const val = parseFloat(fiat) || 0;
+    const calculated = price > 0 ? val / price : 0;
+    setCryptoAmount(calculated.toFixed(6));
+    validateLimits(val, ad?.minLimit, ad?.maxLimit);
+  };
+
+  const calculateFiat = (coin: string, price: number) => {
+    const val = parseFloat(coin) || 0;
+    const calculated = val * price;
+    setFiatAmount(calculated.toFixed(2));
+    validateLimits(calculated, ad?.minLimit, ad?.maxLimit);
+  };
+
+  const handleFiatChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const val = e.target.value;
+    setFiatAmount(val);
+    setFundError(null);
+    if (ad?.price) calculateCrypto(val, ad.price);
+  };
+
+  const handleCoinChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const val = e.target.value;
+    setCryptoAmount(val);
+    setFundError(null);
+    if (ad?.price) calculateFiat(val, ad.price);
+  };
+
+  const toggleDirection = () => {
+    setCalcDirection((prev) => (prev === 'FIAT_TO_COIN' ? 'COIN_TO_FIAT' : 'FIAT_TO_COIN'));
+  };
+
+  const handleTradeInitiate = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (limitError) return;
+
+    setLoading(true);
+    setFundError(null);
+
+    try {
+      const res = await fetch('/api/trades/initiate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          adId: ad.id,
+          fiatAmount: parseFloat(fiatAmount),
+          cryptoAmount: parseFloat(cryptoAmount),
+        }),
+      });
+
+      const result = await res.json();
+
+      if (!res.ok) {
+        if (result.code === 'INSUFFICIENT_FUNDS') {
+          setFundError(result.error);
+        } else {
+          alert(result.error || 'Failed to initiate trade.');
+        }
+        return;
+      }
+
+      // Redirect to trade chat / escrow page
+      router.push(`/trade/${result.tradeId}`);
+    } catch (err) {
+      alert('An error occurred. Please try again.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="bg-white dark:bg-gray-800 p-6 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm">
+      <div className="flex items-center justify-between mb-4">
+        <h3 className="text-lg font-bold text-gray-900 dark:text-white">Initiate Trade</h3>
+        <button
+          type="button"
+          onClick={toggleDirection}
+          className="text-xs bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 px-3 py-1 rounded-md text-gray-700 dark:text-gray-200 transition cursor-pointer"
+        >
+          ⇄ Switch Direction
+        </button>
+      </div>
+
+      <form onSubmit={handleTradeInitiate} className="space-y-4">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div>
+            <label className="text-xs text-gray-500 mb-1 block font-medium">
+              Pay ({ad.fiatCurrency || 'USD'})
+            </label>
+            <input
+              type="number"
+              step="any"
+              value={fiatAmount}
+              onChange={handleFiatChange}
+              disabled={calcDirection === 'COIN_TO_FIAT'}
+              className="w-full p-3 border rounded-lg bg-gray-50 dark:bg-gray-900 border-gray-300 dark:border-gray-600 text-gray-900 dark:text-white disabled:opacity-60 font-semibold focus:ring-2 focus:ring-blue-500 outline-none"
+            />
+          </div>
+
+          <div>
+            <label className="text-xs text-gray-500 mb-1 block font-medium">
+              Receive ({ad.cryptoCurrency || 'BTC'})
+            </label>
+            <input
+              type="number"
+              step="any"
+              value={cryptoAmount}
+              onChange={handleCoinChange}
+              disabled={calcDirection === 'FIAT_TO_COIN'}
+              className="w-full p-3 border rounded-lg bg-gray-50 dark:bg-gray-900 border-gray-300 dark:border-gray-600 text-gray-900 dark:text-white disabled:opacity-60 font-semibold focus:ring-2 focus:ring-blue-500 outline-none"
+            />
+          </div>
+        </div>
+
+        {/* Limit validation warning */}
+        {limitError && (
+          <p className="text-sm text-red-500 font-medium">{limitError}</p>
+        )}
+
+        {/* Admin Fee Breakdown */}
+        <div className="p-4 bg-gray-50 dark:bg-gray-900/60 rounded-lg border border-gray-100 dark:border-gray-700 space-y-2 text-xs">
+          <div className="flex justify-between text-gray-500 dark:text-gray-400">
+            <span>Platform Escrow Fee</span>
+            <span className="font-semibold text-green-600 dark:text-green-400">0.00% (No Buyer Fee)</span>
+          </div>
+          <div className="flex justify-between text-gray-500 dark:text-gray-400">
+            <span>Unit Price</span>
+            <span className="font-medium text-gray-700 dark:text-gray-300">
+              1 {ad.cryptoCurrency} = {Number(ad.price).toLocaleString()} {ad.fiatCurrency}
+            </span>
+          </div>
+          <div className="flex justify-between text-gray-500 dark:text-gray-400 pt-1 border-t border-gray-200 dark:border-gray-700">
+            <span>Locked in Escrow</span>
+            <span className="font-bold text-gray-900 dark:text-white">
+              {cryptoAmount} {ad.cryptoCurrency}
+            </span>
+          </div>
+        </div>
+
+        {/* Insufficient Funds Instruction Banner */}
+        {fundError && (
+          <div className="p-4 bg-amber-50 dark:bg-amber-950/40 border border-amber-300 dark:border-amber-700 rounded-lg text-amber-800 dark:text-amber-300 text-sm flex items-start gap-3">
+            <span className="text-lg">⚠️</span>
+            <div>
+              <p className="font-semibold mb-1">Trade Cannot Be Initiated</p>
+              <p>{fundError}</p>
+            </div>
+          </div>
+        )}
+
+        <button
+          type="submit"
+          disabled={loading || !!limitError}
+          className="w-full py-3.5 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-lg shadow disabled:opacity-50 transition cursor-pointer"
+        >
+          {loading ? 'Verifying Escrow Availability...' : 'Start Trade'}
+        </button>
+      </form>
+    </div>
+  );
 }
 
 export default function AdDetailsPage({ params }: AdDetailsProps) {
-  const router = useRouter();
+  const unwrappedParams = (params && typeof (params as any).then === 'function')
+    ? React.use(params as Promise<{ adId: string }>)
+    : (params as { adId: string });
+  const adId = unwrappedParams?.adId || '';
+
   const [ad, setAd] = useState<any>(null);
-  const [calcDirection, setCalcDirection] = useState<'FIAT_TO_COIN' | 'COIN_TO_FIAT'>('FIAT_TO_COIN');
-  const [fiatAmount, setFiatAmount] = useState<string>('500');
-  const [coinAmount, setCoinAmount] = useState<string>('0');
-  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     async function loadAd() {
+      if (!adId) return;
       let resolvedAd: any = null;
 
       try {
@@ -44,7 +236,7 @@ export default function AdDetailsPage({ params }: AdDetailsProps) {
               avg_release_minutes
             )
           `)
-          .eq('id', params.adId)
+          .eq('id', adId)
           .maybeSingle();
 
         if (realAd) {
@@ -87,7 +279,7 @@ export default function AdDetailsPage({ params }: AdDetailsProps) {
       if (!resolvedAd) {
         // Mock fallback as specified
         resolvedAd = {
-          id: params.adId,
+          id: adId,
           type: 'SELL',
           cryptoCurrency: 'BTC',
           fiatCurrency: 'USD',
@@ -113,67 +305,10 @@ export default function AdDetailsPage({ params }: AdDetailsProps) {
       }
 
       setAd(resolvedAd);
-      const val = 500;
-      const calculated = val / resolvedAd.price;
-      setCoinAmount(calculated.toFixed(6));
-      if (val < resolvedAd.minLimit) {
-        setError(`Minimum limit is $${resolvedAd.minLimit}`);
-      } else if (val > resolvedAd.maxLimit) {
-        setError(`Maximum limit is $${resolvedAd.maxLimit}`);
-      } else {
-        setError(null);
-      }
     }
 
     loadAd();
-  }, [params.adId]);
-
-  const calculateCrypto = (fiat: string, price: number) => {
-    const val = parseFloat(fiat) || 0;
-    const calculated = val / price;
-    setCoinAmount(calculated.toFixed(6));
-    validateLimits(val, ad?.minLimit, ad?.maxLimit);
-  };
-
-  const calculateFiat = (coin: string, price: number) => {
-    const val = parseFloat(coin) || 0;
-    const calculated = val * price;
-    setFiatAmount(calculated.toFixed(2));
-    validateLimits(calculated, ad?.minLimit, ad?.maxLimit);
-  };
-
-  const validateLimits = (fiat: number, min?: number, max?: number) => {
-    if (min !== undefined && fiat < min) {
-      setError(`Minimum limit is $${min}`);
-    } else if (max !== undefined && fiat > max) {
-      setError(`Maximum limit is $${max}`);
-    } else {
-      setError(null);
-    }
-  };
-
-  const handleFiatChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const val = e.target.value;
-    setFiatAmount(val);
-    if (ad) calculateCrypto(val, ad.price);
-  };
-
-  const handleCoinChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const val = e.target.value;
-    setCoinAmount(val);
-    if (ad) calculateFiat(val, ad.price);
-  };
-
-  const toggleDirection = () => {
-    setCalcDirection((prev) =>
-      prev === 'FIAT_TO_COIN' ? 'COIN_TO_FIAT' : 'FIAT_TO_COIN'
-    );
-  };
-
-  const handleInitiateTrade = () => {
-    if (error || !ad) return;
-    router.push(`/trade/initiate/${ad.id}?amount=${fiatAmount}`);
-  };
+  }, [adId]);
 
   if (!ad) return <div className="p-8 text-center text-gray-500">Loading ad details...</div>;
 
@@ -221,57 +356,31 @@ export default function AdDetailsPage({ params }: AdDetailsProps) {
               </div>
             </div>
 
-            {/* Calculator Section */}
-            <div className="mt-6 space-y-4">
-              <div className="flex items-center justify-between">
-                <label className="text-sm font-medium text-gray-700 dark:text-gray-300">
-                  Trade Amount Calculation ({calcDirection === 'FIAT_TO_COIN' ? `${ad.fiatCurrency} ➔ ${ad.cryptoCurrency}` : `${ad.cryptoCurrency} ➔ ${ad.fiatCurrency}`})
-                </label>
-                <button
-                  type="button"
-                  onClick={toggleDirection}
-                  className="text-xs bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 px-3 py-1 rounded-md text-gray-700 dark:text-gray-200 transition cursor-pointer"
-                >
-                  ⇄ Switch Direction
-                </button>
-              </div>
-
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                  <span className="text-xs text-gray-500 mb-1 block">Pay ({ad.fiatCurrency})</span>
-                  <input
-                    type="number"
-                    value={fiatAmount}
-                    onChange={handleFiatChange}
-                    disabled={calcDirection === 'COIN_TO_FIAT'}
-                    className="w-full p-3 border rounded-lg bg-gray-50 dark:bg-gray-900 border-gray-300 dark:border-gray-600 text-gray-900 dark:text-white disabled:opacity-60"
-                  />
-                </div>
-
-                <div>
-                  <span className="text-xs text-gray-500 mb-1 block">Receive ({ad.cryptoCurrency})</span>
-                  <input
-                    type="number"
-                    value={coinAmount}
-                    onChange={handleCoinChange}
-                    disabled={calcDirection === 'FIAT_TO_COIN'}
-                    className="w-full p-3 border rounded-lg bg-gray-50 dark:bg-gray-900 border-gray-300 dark:border-gray-600 text-gray-900 dark:text-white disabled:opacity-60"
-                  />
+            {/* Terms & Payment Methods */}
+            <div className="mt-4 pt-4 border-t border-gray-100 dark:border-gray-700 text-sm space-y-2">
+              <div>
+                <span className="text-gray-500 dark:text-gray-400 block mb-1 font-medium">Accepted Payment Methods:</span>
+                <div className="flex flex-wrap gap-2">
+                  {ad.paymentMethods?.map((pm: string, idx: number) => (
+                    <span key={idx} className="bg-gray-100 dark:bg-gray-700 text-gray-800 dark:text-gray-200 px-2.5 py-1 rounded text-xs font-medium">
+                      {pm}
+                    </span>
+                  ))}
                 </div>
               </div>
-
-              {error && <p className="text-sm text-red-500 font-medium">{error}</p>}
-
-              <button
-                type="button"
-                onClick={handleInitiateTrade}
-                disabled={!!error}
-                className="w-full py-3.5 bg-green-600 hover:bg-green-700 text-white font-bold rounded-lg shadow disabled:opacity-50 transition cursor-pointer"
-              >
-                Initiate Trade
-              </button>
+              {ad.terms && (
+                <div className="pt-2">
+                  <span className="text-gray-500 dark:text-gray-400 block mb-1 font-medium">Advertiser Terms:</span>
+                  <p className="text-xs text-gray-600 dark:text-gray-300 bg-gray-50 dark:bg-gray-900/50 p-3 rounded-lg border border-gray-100 dark:border-gray-700">
+                    {ad.terms}
+                  </p>
+                </div>
+              )}
             </div>
           </div>
+
+          {/* Real-time Trade Initiate Component */}
+          <TradeInitiateForm ad={ad} />
         </div>
 
         {/* Advertiser Card Component */}

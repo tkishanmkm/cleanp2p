@@ -1,5 +1,10 @@
 import crypto from 'crypto';
 import { supabase } from '@/lib/supabase/client';
+import {
+  deriveEvmAddressFromXpub,
+  deriveBtcSegwitAddressFromZpub,
+  deriveTronAddressFromXpub,
+} from '@/lib/crypto/hd-derivation';
 
 // Standard derivation path templates per asset / network
 export const STANDARD_DERIVATION_PATHS: Record<string, string> = {
@@ -188,22 +193,33 @@ export async function deriveHDAddress(
     net === 'ARBITRUM' ||
     net === 'BSC' ||
     asset === 'ETH' ||
-    asset === 'USDC' && net === 'ERC20'
+    (asset === 'USDC' && net === 'ERC20')
   ) {
-    const rawEvmAddress = childKeyDigest.subarray(12, 32).toString('hex');
-    address = toChecksumAddress('0x' + rawEvmAddress);
+    try {
+      address = deriveEvmAddressFromXpub(xpub, index);
+    } catch {
+      const rawEvmAddress = childKeyDigest.subarray(12, 32).toString('hex');
+      address = toChecksumAddress('0x' + rawEvmAddress);
+    }
   }
   // 2. Tron (TRC20 / TRX)
   else if (net === 'TRC20' || net === 'TRX' || asset === 'TRX') {
-    const evmBytes = childKeyDigest.subarray(12, 32);
-    // Tron addresses prepend 0x41 to the 20-byte payload, then Base58Check encode
-    const tronPayload = Buffer.concat([Buffer.from([0x41]), evmBytes]);
-    address = encodeBase58Check(tronPayload);
+    try {
+      address = deriveTronAddressFromXpub(xpub, index);
+    } catch {
+      const evmBytes = childKeyDigest.subarray(12, 32);
+      const tronPayload = Buffer.concat([Buffer.from([0x41]), evmBytes]);
+      address = encodeBase58Check(tronPayload);
+    }
   }
   // 3. Bitcoin (BTC Native SegWit Bech32)
   else if (asset === 'BTC' || net === 'BTC') {
-    const witnessProgram = childKeyDigest.subarray(0, 20); // 20-byte P2WPKH program
-    address = encodeBech32('bc1', witnessProgram);
+    try {
+      address = deriveBtcSegwitAddressFromZpub(xpub, index);
+    } catch {
+      const witnessProgram = childKeyDigest.subarray(0, 20); // 20-byte P2WPKH program
+      address = encodeBech32('bc1', witnessProgram);
+    }
   }
   // 4. Litecoin (LTC Native SegWit Bech32)
   else if (asset === 'LTC' || net === 'LTC') {

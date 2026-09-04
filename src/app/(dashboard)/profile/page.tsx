@@ -1,11 +1,11 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { createClientComponentClient } from '@supabase/auth-helpers-nextjs';
+import { createClient } from '@/utils/supabase/client';
 import { useAuth } from '@/components/providers/auth-provider';
 
 export default function PrivateProfilePage() {
-  const supabase = createClientComponentClient();
+  const supabase = createClient();
   const { user: authContextUser, profile: contextProfile } = useAuth();
   const [profile, setProfile] = useState<any>(null);
   const [stats, setStats] = useState<any>(null);

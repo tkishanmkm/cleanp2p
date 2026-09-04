@@ -34,6 +34,8 @@ export async function createClient() {
   );
 }
 
+export const createRouteHandlerClient = (_options?: any) => createClient();
+
 export function getSupabaseAdminClient(): SupabaseClient {
   if (!serverAdminClient) {
     const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL || 'https://placeholder.supabase.co';

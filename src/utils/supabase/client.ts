@@ -4,4 +4,6 @@ export function createClient() {
   return supabase;
 }
 
+export const createClientComponentClient = createClient;
+
 export { supabase };

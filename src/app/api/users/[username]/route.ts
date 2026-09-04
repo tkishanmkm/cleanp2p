@@ -5,41 +5,55 @@ export const dynamic = 'force-dynamic';
 
 export async function GET(
   req: Request,
-  { params }: { params: { username: string } }
+  context: { params: Promise<{ username: string }> | { username: string } }
 ) {
   try {
-    const { username } = params;
+    const rawParams = await Promise.resolve(context.params);
+    const { username } = rawParams;
     const cleanUsername = (username || '').replace(/^@/, '');
+
+    const isUuid = /^[0-9a-fA-F-]{32,36}$/.test(cleanUsername);
 
     // 1. Query sanitized public profile view
     let profile: any = null;
-    const { data: pubProfile, error } = await supabaseAdmin
-      .from('public_profiles')
-      .select('*')
-      .ilike('username', cleanUsername)
-      .maybeSingle();
+    let query = supabaseAdmin.from('public_profiles').select('*');
+    if (isUuid) {
+      query = query.or(`id.eq.${cleanUsername},username.ilike.${cleanUsername}`);
+    } else {
+      query = query.ilike('username', cleanUsername);
+    }
+    const { data: pubProfile, error } = await query.maybeSingle();
 
     if (pubProfile && !error) {
       profile = pubProfile;
     } else {
       // Fallback to querying sanitized public columns from profiles table
-      const { data: directProfile } = await supabaseAdmin
+      let fallbackQuery = supabaseAdmin
         .from('profiles')
-        .select('id, username, avatar_url, last_seen_at, last_active, created_at, completed_trades, total_trade_volume, avg_payment_minutes, avg_release_minutes')
-        .ilike('username', cleanUsername)
-        .maybeSingle();
+        .select('id, username, full_name, avatar_url, country, last_seen_at, last_active, updated_at, created_at, completed_trades, total_trade_volume, avg_payment_minutes, avg_release_minutes, feedback_score, badges');
+      
+      if (isUuid) {
+        fallbackQuery = fallbackQuery.or(`id.eq.${cleanUsername},username.ilike.${cleanUsername}`);
+      } else {
+        fallbackQuery = fallbackQuery.ilike('username', cleanUsername);
+      }
+
+      const { data: directProfile } = await fallbackQuery.maybeSingle();
 
       if (directProfile) {
         profile = {
           id: directProfile.id,
-          username: directProfile.username,
+          username: directProfile.username || directProfile.full_name,
           avatar_url: directProfile.avatar_url,
+          country: directProfile.country || 'US',
           last_seen_at: directProfile.last_seen_at || directProfile.last_active,
           joined_at: directProfile.created_at,
           completed_trades: directProfile.completed_trades || 0,
           total_trade_volume: directProfile.total_trade_volume || 0,
           avg_payment_minutes: directProfile.avg_payment_minutes || 0,
           avg_release_minutes: directProfile.avg_release_minutes || 0,
+          feedback_score: directProfile.feedback_score || 100,
+          badges: directProfile.badges || ['Verified Trader'],
         };
       }
     }

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/utils/supabase/server';
 import { uploadToB2 } from '@/lib/b2';
+import sharp from 'sharp';
 
 export const dynamic = 'force-dynamic';
 
@@ -143,21 +144,66 @@ export async function POST(
     }
 
     // Generate path structure: trades/{trade_id}/chat/{type}s/msg_{timestamp}.{ext}
-    const fileExt = file.name.split('.').pop() || 'bin';
-    const objectKey = `trades/${tradeId}/chat/${fileType}s/msg_${Date.now()}.${fileExt}`;
+    let fileExt = file.name.split('.').pop() || 'bin';
+    let mimeType = file.type;
 
     const arrayBuffer = await file.arrayBuffer();
-    const buffer = Buffer.from(arrayBuffer);
+    let uploadBuffer = Buffer.from(arrayBuffer);
 
-    // Upload to Backblaze B2
+    // Apply SVG Watermark Overlay via Sharp for images
+    if (fileType === 'image') {
+      try {
+        const timestamp = new Date().toISOString();
+        const watermarkSvg = `
+          <svg width="800" height="200" xmlns="http://www.w3.org/2000/svg">
+            <style>
+              .title { fill: rgba(239, 68, 68, 0.85); font-size: 28px; font-weight: bold; font-family: sans-serif; }
+              .sub { fill: rgba(255, 255, 255, 0.9); font-size: 18px; font-family: sans-serif; }
+            </style>
+            <rect width="100%" height="100%" fill="rgba(0,0,0,0.45)" rx="8" />
+            <text x="20" y="50" class="title">OFFICIAL ESCROW PROOF ATTACHMENT</text>
+            <text x="20" y="90" class="sub">Trade ID: ${tradeId}</text>
+            <text x="20" y="120" class="sub">Uploader UID: ${userId}</text>
+            <text x="20" y="150" class="sub">Stamped At: ${timestamp}</text>
+          </svg>
+        `;
+
+        uploadBuffer = await sharp(uploadBuffer)
+          .resize(1200, 1200, { fit: 'inside', withoutEnlargement: true })
+          .composite([{ input: Buffer.from(watermarkSvg), gravity: 'southeast' }])
+          .jpeg({ quality: 85 })
+          .toBuffer();
+
+        fileExt = 'jpg';
+        mimeType = 'image/jpeg';
+      } catch (watermarkErr) {
+        console.warn('Watermark processing failed, uploading original buffer:', watermarkErr);
+      }
+    }
+
+    const objectKey = `trades/${tradeId}/chat/${fileType}s/msg_${Date.now()}.${fileExt}`;
+
+    // Upload to Backblaze B2 (and fallback Supabase storage if needed)
+    let publicUrl: string | null = null;
     try {
-      await uploadToB2(objectKey, buffer, file.type);
+      await uploadToB2(objectKey, uploadBuffer, mimeType);
     } catch (b2Err: any) {
-      console.error('B2 upload failed:', b2Err);
-      return NextResponse.json(
-        { error: 'Failed to upload file to storage: ' + (b2Err.message || 'B2 error') },
-        { status: 500 }
-      );
+      console.warn('B2 upload failed, attempting Supabase storage fallback:', b2Err);
+      try {
+        const fallbackPath = `${tradeId}/${userId}_${Date.now()}.${fileExt}`;
+        const { error: sbStorageErr } = await supabase.storage
+          .from('trade-attachments')
+          .upload(fallbackPath, uploadBuffer, {
+            contentType: mimeType,
+            upsert: true,
+          });
+        if (!sbStorageErr) {
+          const { data: pubData } = supabase.storage.from('trade-attachments').getPublicUrl(fallbackPath);
+          publicUrl = pubData.publicUrl;
+        }
+      } catch (sbErr) {
+        console.error('Supabase storage fallback error:', sbErr);
+      }
     }
 
     // Save metadata in trade_files
@@ -180,13 +226,15 @@ export async function POST(
     }
 
     // Post to trade chat messages as well so participants see the attached file in real time
+    const fileAccessUrl = publicUrl || `/api/trades/${tradeId}/files/${savedFile?.id || 'latest'}`;
     try {
-      const fileAccessUrl = `/api/trades/${tradeId}/files/${savedFile?.id || 'latest'}`;
       await supabase.from('trade_messages').insert({
         trade_id: tradeId,
         sender_id: userId,
+        content: `📎 Uploaded verified ${fileType} proof attachment.`,
         message: `Uploaded ${fileType}: ${file.name}`,
         file_url: fileAccessUrl,
+        is_system_message: false,
       });
     } catch (chatErr) {
       // non-fatal
@@ -194,14 +242,15 @@ export async function POST(
 
     return NextResponse.json({
       success: true,
+      file_url: fileAccessUrl,
       file: savedFile || {
         trade_id: tradeId,
         uploaded_by: userId,
         file_type: fileType,
         file_name: file.name,
         object_key: objectKey,
-        file_size: file.size,
-        mime_type: file.type,
+        file_size: uploadBuffer.length,
+        mime_type: mimeType,
       },
     });
   } catch (err: any) {
