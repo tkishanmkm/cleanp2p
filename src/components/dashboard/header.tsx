@@ -4,23 +4,30 @@ import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import {
   Bell,
-  LayoutDashboard,
-  Wallet,
-  ArrowLeftRight,
-  PlusCircle,
-  LifeBuoy,
   Menu,
-  ArrowDownToLine,
-  ArrowUpFromLine,
-  Mail,
   FileText,
   LogOut,
   User,
   Settings,
-  Send,
   Globe,
   ChevronDown,
+  LayoutDashboard,
+  Wallet,
+  ArrowLeftRight,
+  LifeBuoy,
+  Mail,
 } from 'lucide-react';
+import {
+  HdDashboardIcon,
+  HdWalletsIcon,
+  HdBuyCoinIcon,
+  HdSellCoinIcon,
+  HdTransferIcon,
+  HdCreateAdIcon,
+  HdMyAdsIcon,
+  HdMyTradesIcon,
+  HdSupportIcon,
+} from '@/components/hd-nav-icons';
 import { Button } from '@/components/ui/button';
 import {
   DropdownMenu,
@@ -56,23 +63,23 @@ import { statusColors } from '@/lib/status-colors';
 import { supabase } from '@/lib/supabase/client';
 
 type NavItem = {
-  href?: string;
+  href: string;
   label: string;
-  icon: React.ElementType;
-  isDropdown?: boolean;
-  items?: { href: string; label: string }[];
+  shortDesc: string;
+  icon: React.ComponentType<{ className?: string }>;
+  badge?: string;
 };
 
 const navItems: NavItem[] = [
-  { href: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
-  { href: '/wallets', label: 'Wallets', icon: Wallet },
-  { href: '/buy', label: 'Buy Coin', icon: ArrowDownToLine },
-  { href: '/sell', label: 'Sell Coin', icon: ArrowUpFromLine },
-  { href: '/transfer', label: 'Transfer', icon: Send },
-  { href: '/ads/create', label: 'Create Ad', icon: PlusCircle },
-  { href: '/my-ads', label: 'My Ads', icon: FileText },
-  { href: '/trades', label: 'My Trades', icon: ArrowLeftRight },
-  { href: '/support', label: 'Support', icon: LifeBuoy },
+  { href: '/dashboard', label: 'Dashboard', shortDesc: 'Overview & metrics', icon: HdDashboardIcon },
+  { href: '/wallets', label: 'Wallets', shortDesc: 'Balances & deposits', icon: HdWalletsIcon },
+  { href: '/buy', label: 'Buy Coin', shortDesc: 'Instant P2P purchase', icon: HdBuyCoinIcon },
+  { href: '/sell', label: 'Sell Coin', shortDesc: 'Cash out crypto', icon: HdSellCoinIcon },
+  { href: '/transfer', label: 'Transfer', shortDesc: 'Internal instant send', icon: HdTransferIcon },
+  { href: '/ads/create', label: 'Create Ad', shortDesc: 'Post custom offers', icon: HdCreateAdIcon, badge: 'Post' },
+  { href: '/my-ads', label: 'My Ads', shortDesc: 'Manage your listings', icon: HdMyAdsIcon },
+  { href: '/trades', label: 'My Trades', shortDesc: 'Active escrow trades', icon: HdMyTradesIcon },
+  { href: '/support', label: 'Support', shortDesc: '24/7 help desk', icon: HdSupportIcon },
 ];
 
 const CryptoLogo = ({ crypto, className }: { crypto: CryptoCurrency; className?: string }) => {
@@ -98,6 +105,7 @@ export function DashboardHeader() {
   const { prices, fiatRates } = usePrices();
   const { language, setLanguage } = useI18n();
   const selectedLanguage = LANGUAGES.flatMap((l) => l.dialects || l).find((l) => l.code === language) || LANGUAGES[0];
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [showAllNotifications, setShowAllNotifications] = useState(false);
   const [allTrades, setAllTrades] = useState<Trade[]>([]);
 
@@ -200,7 +208,7 @@ export function DashboardHeader() {
   // Unauthenticated State
   if (!authUser) {
     return (
-      <header className="sticky top-0 z-50 w-full border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
+      <header className="sticky top-0 z-50 w-full border-b border-border bg-background shadow-xs">
         <div className="flex h-16 items-center justify-between px-4 sm:px-6 lg:px-8">
           <Link href="/">
             <Logo />
@@ -215,26 +223,28 @@ export function DashboardHeader() {
 
   // Authenticated State
   return (
-    <header className="sticky top-0 z-30 w-full border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
+    <header className="sticky top-0 z-30 w-full border-b border-border bg-background shadow-xs">
       <div className="flex h-16 items-center px-4 sm:px-6 lg:px-8">
         {/* Mobile Header Left Toggle & Logo */}
         <div className="flex items-center gap-2 lg:hidden">
-          <Sheet>
+          <Sheet open={mobileMenuOpen} onOpenChange={setMobileMenuOpen}>
             <SheetTrigger asChild>
               <Button variant="ghost" size="icon" className="h-9 w-9 rounded-lg shrink-0 hover:bg-slate-100 dark:hover:bg-slate-800">
                 <Menu className="h-5 w-5 text-foreground" />
                 <span className="sr-only">Toggle navigation menu</span>
               </Button>
             </SheetTrigger>
-            <SheetContent side="left" className="flex flex-col p-0 w-[300px] sm:w-[340px] bg-background">
-              <div className="p-5 border-b border-border/60">
-                <Link href="/dashboard" className="flex items-center">
-                  <Logo />
-                </Link>
+            <SheetContent side="left" className="flex flex-col p-0 w-[310px] sm:w-[350px] bg-background">
+              <div className="p-5 border-b border-border">
+                <div className="flex items-center justify-between">
+                  <Link href="/dashboard" onClick={() => setMobileMenuOpen(false)} className="flex items-center">
+                    <Logo />
+                  </Link>
+                </div>
                 {/* User Quick Balance Summary in Drawer */}
-                <div className="mt-4 p-3 rounded-xl bg-gradient-to-r from-[#5B4DF6]/10 to-[#3B82F6]/10 border border-[#5B4DF6]/20">
-                  <span className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">Estimated Total Balance</span>
-                  <div className="text-lg font-bold text-foreground mt-0.5">
+                <div className="mt-4 p-3 rounded-xl bg-slate-100 dark:bg-slate-900 border border-slate-200 dark:border-slate-800">
+                  <span className="text-[11px] font-bold text-muted-foreground uppercase tracking-wider">Estimated Total Balance</span>
+                  <div className="text-xl font-extrabold text-foreground mt-0.5 tracking-tight">
                     {totalWalletValueConverted.toLocaleString('en-US', {
                       style: 'currency',
                       currency: preferredCurrency,
@@ -244,11 +254,11 @@ export function DashboardHeader() {
                 </div>
               </div>
 
-              <ScrollArea className="flex-1 px-4 py-3">
+              <ScrollArea className="flex-1 px-3 py-3">
                 <div className="space-y-1">
                   {navItems.map((item) => {
                     const isActive =
-                      (pathname.startsWith(item.href!) && item.href !== '/dashboard') ||
+                      (pathname.startsWith(item.href) && item.href !== '/dashboard') ||
                       pathname === item.href ||
                       (item.href === '/support' && pathname.startsWith('/contact'));
                     const IconComponent = item.icon;
@@ -256,19 +266,41 @@ export function DashboardHeader() {
                     return (
                       <Link
                         key={item.href}
-                        href={item.href!}
+                        href={item.href}
+                        onClick={() => setMobileMenuOpen(false)}
                         className={cn(
-                          'flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-sm font-semibold tracking-tight transition-all duration-150',
+                          'group flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-semibold tracking-tight transition-all duration-150',
                           isActive
-                            ? 'bg-gradient-to-r from-[#5B4DF6] to-[#4F46E5] text-white shadow-sm shadow-indigo-500/25 font-bold'
-                            : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100/90 dark:hover:bg-slate-800/80 font-medium'
+                            ? 'bg-[#5B4DF6] text-white shadow-md shadow-indigo-500/20'
+                            : 'text-slate-700 dark:text-slate-200 hover:text-slate-950 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800/80 font-medium'
                         )}
                       >
-                        <IconComponent className={cn('h-4 w-4 shrink-0', isActive ? 'text-white stroke-[2.2]' : 'text-slate-500 dark:text-slate-400 stroke-[2]')} />
-                        <span className="flex-1">{item.label}</span>
-                        {item.href === '/ads/create' && (
-                          <span className={cn('text-[10px] font-bold px-2 py-0.5 rounded-md uppercase tracking-wider', isActive ? 'bg-white/20 text-white' : 'bg-[#5B4DF6]/10 text-[#5B4DF6] dark:bg-indigo-500/20 dark:text-indigo-300')}>
-                            Post
+                        <div
+                          className={cn(
+                            'w-9 h-9 rounded-xl flex items-center justify-center shrink-0 transition-colors',
+                            isActive
+                              ? 'bg-white/20 text-white'
+                              : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 group-hover:bg-[#5B4DF6]/10 group-hover:text-[#5B4DF6]'
+                          )}
+                        >
+                          <IconComponent className="h-5 w-5 shrink-0" />
+                        </div>
+                        <div className="flex-1 min-w-0 flex flex-col">
+                          <span className={cn('text-sm font-bold tracking-tight leading-tight', isActive ? 'text-white' : 'text-slate-900 dark:text-slate-100')}>
+                            {item.label}
+                          </span>
+                          <span className={cn('text-[11px] leading-tight mt-0.5', isActive ? 'text-indigo-100' : 'text-muted-foreground')}>
+                            {item.shortDesc}
+                          </span>
+                        </div>
+                        {item.badge && (
+                          <span
+                            className={cn(
+                              'text-[10px] font-bold px-2 py-0.5 rounded-md uppercase tracking-wider shrink-0',
+                              isActive ? 'bg-white/25 text-white' : 'bg-[#5B4DF6]/10 text-[#5B4DF6] dark:bg-indigo-500/20 dark:text-indigo-300'
+                            )}
+                          >
+                            {item.badge}
                           </span>
                         )}
                       </Link>
@@ -277,14 +309,14 @@ export function DashboardHeader() {
                 </div>
               </ScrollArea>
 
-              <div className="p-4 border-t border-border/60 bg-muted/20 space-y-3">
+              <div className="p-4 border-t border-border bg-slate-50/50 dark:bg-slate-900/50 space-y-3">
                 <div className="flex items-center justify-between">
-                  <span className="text-xs text-muted-foreground font-medium">Theme Mode</span>
+                  <span className="text-xs text-muted-foreground font-semibold">Theme Mode</span>
                   <ModeToggle />
                 </div>
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
-                    <Button variant="outline" size="sm" className="w-full justify-between h-9 text-xs">
+                    <Button variant="outline" size="sm" className="w-full justify-between h-9 text-xs font-semibold">
                       <div className="flex items-center gap-2">
                         <Globe className="h-3.5 w-3.5 text-muted-foreground" />
                         <span>{selectedLanguage.nativeName}</span>
@@ -326,8 +358,8 @@ export function DashboardHeader() {
         </div>
 
         {/* Desktop Header Left & Modern Navigation */}
-        <div className="hidden lg:flex items-center gap-4 xl:gap-6 min-w-0">
-          <Link href="/dashboard" className="shrink-0 flex items-center">
+        <div className="hidden lg:flex items-center gap-3 xl:gap-5 min-w-0">
+          <Link href="/dashboard" className="shrink-0 flex items-center pr-1">
             <Logo />
           </Link>
 
@@ -335,7 +367,7 @@ export function DashboardHeader() {
           <nav className="flex items-center gap-1 xl:gap-1.5 overflow-x-auto scrollbar-none py-1">
             {navItems.map((item) => {
               const isActive =
-                (pathname.startsWith(item.href!) && item.href !== '/dashboard') ||
+                (pathname.startsWith(item.href) && item.href !== '/dashboard') ||
                 pathname === item.href ||
                 (item.href === '/support' && pathname.startsWith('/contact'));
               const IconComponent = item.icon;
@@ -343,21 +375,31 @@ export function DashboardHeader() {
               return (
                 <Link
                   key={item.href}
-                  href={item.href!}
+                  href={item.href}
                   className={cn(
                     'group flex items-center gap-1.5 px-2.5 xl:px-3 py-1.5 rounded-xl text-xs xl:text-[13px] font-semibold tracking-tight transition-all duration-150 whitespace-nowrap select-none',
                     isActive
                       ? 'bg-gradient-to-r from-[#5B4DF6] to-[#4F46E5] text-white shadow-sm shadow-indigo-500/25'
-                      : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100/90 dark:hover:bg-slate-800/80 font-medium'
+                      : 'text-slate-700 dark:text-slate-300 hover:text-slate-950 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800/80 font-medium'
                   )}
                 >
                   <IconComponent
                     className={cn(
-                      'h-4 w-4 shrink-0 transition-transform duration-150 group-hover:scale-105',
-                      isActive ? 'text-white stroke-[2.2]' : 'text-slate-500 dark:text-slate-400 group-hover:text-[#5B4DF6] stroke-[2]'
+                      'h-4 w-4 shrink-0 transition-transform duration-150 group-hover:scale-110',
+                      isActive ? 'text-white' : 'text-slate-500 dark:text-slate-400 group-hover:text-[#5B4DF6]'
                     )}
                   />
-                  <span>{item.label}</span>
+                  <span className="leading-none">{item.label}</span>
+                  {item.badge && (
+                    <span
+                      className={cn(
+                        'text-[9px] font-bold px-1.5 py-0.5 rounded uppercase tracking-wider leading-none',
+                        isActive ? 'bg-white/25 text-white' : 'bg-[#5B4DF6]/10 text-[#5B4DF6] dark:bg-indigo-500/20 dark:text-indigo-300'
+                      )}
+                    >
+                      {item.badge}
+                    </span>
+                  )}
                 </Link>
               );
             })}

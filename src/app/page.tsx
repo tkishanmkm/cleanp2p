@@ -53,7 +53,7 @@ export default function Home() {
         </section>
 
         {/* Stats Section */}
-        <section className="py-16 bg-secondary/30">
+        <section className="py-16 bg-muted/40 border-y border-border/40">
             <div className="container mx-auto px-4 md:px-6">
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-8 text-center">
                     {stats.map(stat => (
@@ -76,7 +76,7 @@ export default function Home() {
                 </p>
             </div>
             <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-8 mt-12">
-              <Card>
+              <Card className="bg-card border-border shadow-xs">
                   <CardHeader>
                       <div className="flex items-center gap-4">
                           <div className="bg-primary/10 text-primary p-3 rounded-full">
@@ -91,7 +91,7 @@ export default function Home() {
                       </p>
                   </CardContent>
               </Card>
-              <Card>
+              <Card className="bg-card border-border shadow-xs">
                   <CardHeader>
                       <div className="flex items-center gap-4">
                           <div className="bg-primary/10 text-primary p-3 rounded-full">
@@ -106,7 +106,7 @@ export default function Home() {
                       </p>
                   </CardContent>
               </Card>
-              <Card>
+              <Card className="bg-card border-border shadow-xs">
                   <CardHeader>
                       <div className="flex items-center gap-4">
                           <div className="bg-primary/10 text-primary p-3 rounded-full">
@@ -121,7 +121,7 @@ export default function Home() {
                       </p>
                   </CardContent>
               </Card>
-              <Card>
+              <Card className="bg-card border-border shadow-xs">
                   <CardHeader>
                       <div className="flex items-center gap-4">
                           <div className="bg-primary/10 text-primary p-3 rounded-full">
@@ -141,7 +141,7 @@ export default function Home() {
         </section>
 
         {/* Why Tradenance Section */}
-        <section id="why-tradenance" className="py-16 md:py-24 lg:py-32 bg-secondary/30">
+        <section id="why-tradenance" className="py-16 md:py-24 lg:py-32 bg-muted/40 border-y border-border/40">
           <div className="container mx-auto px-4 md:px-6">
             <div className="text-center max-w-3xl mx-auto">
                 <h2 className="text-3xl md:text-4xl font-bold tracking-tight">{t('home.whyP2PTitle')}</h2>
@@ -150,7 +150,7 @@ export default function Home() {
                 </p>
             </div>
             <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-8 mt-12">
-                <Card>
+                <Card className="bg-card border-border shadow-xs">
                     <CardHeader>
                         <div className="bg-primary/10 text-primary p-3 rounded-full w-max">
                             <Users className="h-8 w-8" />
@@ -161,7 +161,7 @@ export default function Home() {
                         <p className="text-muted-foreground">{t('home.directTradingDesc')}</p>
                     </CardContent>
                 </Card>
-                <Card>
+                <Card className="bg-card border-border shadow-xs">
                     <CardHeader>
                         <div className="bg-primary/10 text-primary p-3 rounded-full w-max">
                             <Landmark className="h-8 w-8" />
@@ -172,7 +172,7 @@ export default function Home() {
                         <p className="text-muted-foreground">{t('home.globalPaymentsDesc')}</p>
                     </CardContent>
                 </Card>
-                <Card>
+                <Card className="bg-card border-border shadow-xs">
                     <CardHeader>
                         <div className="bg-primary/10 text-primary p-3 rounded-full w-max">
                             <Globe className="h-8 w-8" />
@@ -197,7 +197,7 @@ export default function Home() {
                 </p>
             </div>
             <div className="grid md:grid-cols-2 gap-8 mt-12 items-start">
-                <Card className="h-full">
+                <Card className="h-full bg-card border-border shadow-xs">
                     <CardHeader>
                         <div className="flex items-center gap-4">
                             <div className="bg-primary/10 text-primary p-3 rounded-full">
@@ -212,7 +212,7 @@ export default function Home() {
                         </p>
                     </CardContent>
                 </Card>
-                <Card className="h-full">
+                <Card className="h-full bg-card border-border shadow-xs">
                     <CardHeader>
                         <div className="flex items-center gap-4">
                             <div className="bg-primary/10 text-primary p-3 rounded-full">
@@ -232,7 +232,7 @@ export default function Home() {
         </section>
 
         {/* Supported Crypto Section */}
-        <section id="supported-crypto" className="py-16 md:py-24 lg:py-32 bg-secondary/30">
+        <section id="supported-crypto" className="py-16 md:py-24 lg:py-32 bg-muted/40 border-y border-border/40">
             <div className="container mx-auto px-4 md:px-6">
               <div className="text-center max-w-3xl mx-auto">
                   <h2 className="text-3xl md:text-4xl font-bold tracking-tight">{t('home.supportedCoinsTitle')}</h2>

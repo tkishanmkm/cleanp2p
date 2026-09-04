@@ -31,6 +31,7 @@ import { completeEscrow } from '@/lib/wallet';
 import { formatDistanceToNow } from 'date-fns';
 import { useAuth } from '@/components/providers/auth-provider';
 import { formatCompactUtc } from '@/lib/date-utils';
+import TradeChatFileUploader from '@/components/TradeChatFileUploader';
 
 // --- Sub-component: TradeInstructions ---
 function TradeInstructions({ trade, isBuyer }: { trade: Trade; isBuyer: boolean }) {
@@ -550,8 +551,14 @@ export function TradeChat({
           </div>
         </ScrollArea>
       </CardContent>
-      <CardFooter>
-        <form onSubmit={handleSendMessage} className="flex w-full items-center space-x-2">
+      <CardFooter className="flex flex-col items-stretch p-0">
+        <TradeChatFileUploader
+          tradeId={trade.id}
+          onFileSent={() => {
+            // New message appears automatically via Supabase subscription
+          }}
+        />
+        <form onSubmit={handleSendMessage} className="flex w-full items-center space-x-2 p-3 pt-2">
           <input
             type="file"
             ref={fileInputRef}

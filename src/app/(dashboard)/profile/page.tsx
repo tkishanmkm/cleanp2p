@@ -1,179 +1,151 @@
-"use client";
+'use client';
 
-import React, { useEffect, useState } from "react";
-import { supabase } from "@/lib/supabase/client";
-import { UserStatusIndicator } from "@/components/user-status";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Loader2 } from "lucide-react";
-import { useAuth } from "@/components/providers/auth-provider";
-import { useRouter } from "next/navigation";
+import React, { useState, useEffect } from 'react';
+import { createClientComponentClient } from '@supabase/auth-helpers-nextjs';
+import { useAuth } from '@/components/providers/auth-provider';
 
 export default function PrivateProfilePage() {
-  const { user: authUser, profile: contextProfile, isUserLoading: isAuthLoading } = useAuth();
-  const router = useRouter();
-  const [profileData, setProfileData] = useState<any>(null);
+  const supabase = createClientComponentClient();
+  const { user: authContextUser, profile: contextProfile } = useAuth();
+  const [profile, setProfile] = useState<any>(null);
+  const [stats, setStats] = useState<any>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    async function loadCurrentProfile() {
-      const {
-        data: { user },
-      } = await supabase.auth.getUser();
-
-      const targetUser = user || authUser;
-
-      if (!targetUser) {
-        if (!isAuthLoading) {
-          setLoading(false);
-        }
-        return;
-      }
-
+    async function loadPrivateProfile() {
       try {
-        let { data, error } = await supabase
-          .from("user_account_stats")
-          .select("*")
-          .eq("user_id", targetUser.id || targetUser.uid)
+        const { data: { user } } = await supabase.auth.getUser();
+        const activeUserId = user?.id || authContextUser?.id || authContextUser?.uid;
+
+        if (!activeUserId) {
+          // If no active auth user, check context profile
+          if (contextProfile) {
+            setProfile({
+              username: contextProfile.username || 'user',
+              full_name: contextProfile.full_name || 'Not provided',
+              date_of_birth: contextProfile.dob || contextProfile.date_of_birth || 'Not provided',
+              preferred_currency: contextProfile.preferred_currency || 'USD',
+            });
+            setStats({
+              total_trade_volume: contextProfile.trade_volume || 0,
+              completed_trades: contextProfile.completed_trades || 0,
+              avg_payment_seconds: 240,
+              avg_release_seconds: 120,
+            });
+          }
+          setLoading(false);
+          return;
+        }
+
+        // Fetch complete private profile
+        const { data: prof } = await supabase
+          .from('profiles')
+          .select('*')
+          .eq('id', activeUserId)
           .maybeSingle();
 
-        if (error || !data) {
-          const { data: profData } = await supabase
-            .from("profiles")
-            .select("*")
-            .eq("id", targetUser.id || targetUser.uid)
-            .maybeSingle();
+        // Fetch private stats
+        const { data: st } = await supabase
+          .from('user_trading_stats')
+          .select('*')
+          .eq('user_id', activeUserId)
+          .maybeSingle();
 
-          if (profData) {
-            data = {
-              user_id: profData.id,
-              username: profData.username || contextProfile?.username || targetUser.email?.split("@")[0] || "User",
-              full_name: profData.full_name || contextProfile?.full_name || "N/A",
-              date_of_birth: profData.dob || profData.date_of_birth || "N/A",
-              member_since: profData.created_at,
-              preferred_currency: profData.preferred_currency || "USD",
-              total_trade_volume: profData.trade_volume || "0.00",
-              completed_trades: profData.completed_trades || 0,
-              positive_feedback: profData.positive_feedback || 0,
-              negative_feedback: profData.negative_feedback || 0,
-              last_active: profData.last_active,
-            };
-          }
-        }
+        const resolvedProfile = prof || {
+          username: contextProfile?.username || user?.email?.split('@')[0] || 'user',
+          full_name: contextProfile?.full_name || 'Not provided',
+          date_of_birth: contextProfile?.dob || contextProfile?.date_of_birth || 'Not provided',
+          preferred_currency: contextProfile?.preferred_currency || 'USD',
+        };
 
-        if (data) {
-          setProfileData(data);
-        } else if (contextProfile) {
-          setProfileData({
-            user_id: authUser?.uid,
-            username: contextProfile.username || "User",
-            full_name: contextProfile.full_name || "N/A",
-            date_of_birth: contextProfile.dob || "N/A",
-            member_since: contextProfile.created_at,
-            preferred_currency: contextProfile.preferred_currency || "USD",
-            total_trade_volume: contextProfile.trade_volume || "0.00",
-            completed_trades: contextProfile.completed_trades || 0,
-            positive_feedback: contextProfile.positive_feedback || 0,
-            negative_feedback: contextProfile.negative_feedback || 0,
-            last_active: contextProfile.last_active,
-          });
-        }
+        const resolvedStats = st || {
+          total_trade_volume: resolvedProfile.total_trade_volume || resolvedProfile.trade_volume || 0,
+          completed_trades: resolvedProfile.completed_trades || 0,
+          avg_payment_seconds: (resolvedProfile.avg_payment_minutes || 4) * 60,
+          avg_release_seconds: (resolvedProfile.avg_release_minutes || 2) * 60,
+        };
+
+        setProfile(resolvedProfile);
+        setStats(resolvedStats);
       } catch (err) {
-        console.error("Error loading profile:", err);
+        console.warn('Error loading private profile:', err);
       } finally {
         setLoading(false);
       }
     }
 
-    if (!isAuthLoading) {
-      if (!authUser) {
-        router.push("/login");
-      } else {
-        loadCurrentProfile();
-      }
-    }
-  }, [authUser, isAuthLoading, contextProfile, router]);
+    loadPrivateProfile();
+  }, [supabase, authContextUser, contextProfile]);
 
-  if (loading || isAuthLoading) {
+  if (loading || !profile) {
     return (
-      <div className="flex justify-center items-center min-h-[60vh]">
-        <Loader2 className="h-8 w-8 animate-spin text-[#5D45F9]" />
+      <div className="p-8 text-center text-gray-500">
+        Loading profile...
       </div>
     );
   }
 
-  return (
-    <div className="max-w-4xl mx-auto p-4 sm:p-6 space-y-6">
-      {/* Account Stats */}
-      <Card className="border shadow-sm">
-        <CardHeader className="border-b pb-3">
-          <div className="flex items-center justify-between">
-            <CardTitle className="text-lg font-bold">Account Stats</CardTitle>
-            <UserStatusIndicator lastActive={profileData?.last_active} />
-          </div>
-        </CardHeader>
-        <CardContent className="pt-4 grid grid-cols-2 md:grid-cols-4 gap-4">
-          <div>
-            <span className="text-xs text-muted-foreground">Total Trade Volume</span>
-            <p className="text-lg font-bold">${profileData?.total_trade_volume || "0"}</p>
-          </div>
-          <div>
-            <span className="text-xs text-muted-foreground">Completed Trades</span>
-            <p className="text-lg font-bold">{profileData?.completed_trades || 0}</p>
-          </div>
-          <div>
-            <span className="text-xs text-muted-foreground">Positive Feedback</span>
-            <p className="text-lg font-bold text-emerald-600 dark:text-emerald-400">
-              {profileData?.positive_feedback || 0}
-            </p>
-          </div>
-          <div>
-            <span className="text-xs text-muted-foreground">Negative Feedback</span>
-            <p className="text-lg font-bold text-rose-600 dark:text-rose-400">
-              {profileData?.negative_feedback || 0}
-            </p>
-          </div>
-        </CardContent>
-      </Card>
+  const displayUsername = (profile.username || 'user').replace(/^@/, '');
+  const initial = displayUsername.charAt(0).toUpperCase() || 'U';
 
-      {/* User Information */}
-      <Card className="border shadow-sm">
-        <CardHeader className="border-b pb-3">
-          <CardTitle className="text-lg font-bold">User Information</CardTitle>
-          <p className="text-xs text-muted-foreground">
-            This information is private and not shared with other traders.
-          </p>
-        </CardHeader>
-        <CardContent className="pt-4 space-y-4">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div>
-              <span className="text-xs text-muted-foreground font-medium">Full Name</span>
-              <p className="text-sm font-semibold">{profileData?.full_name || "N/A"}</p>
-            </div>
-            <div>
-              <span className="text-xs text-muted-foreground font-medium">User ID</span>
-              <p className="text-sm font-mono font-bold text-[#5D45F9]">
-                @{profileData?.username || "N/A"}
-              </p>
-            </div>
-            <div>
-              <span className="text-xs text-muted-foreground font-medium">Date of Birth</span>
-              <p className="text-sm font-semibold">{profileData?.date_of_birth || "N/A"}</p>
-            </div>
-            <div>
-              <span className="text-xs text-muted-foreground font-medium">Member Since</span>
-              <p className="text-sm font-semibold">
-                {profileData?.member_since
-                  ? new Date(profileData.member_since).toLocaleDateString()
-                  : "N/A"}
-              </p>
-            </div>
-            <div>
-              <span className="text-xs text-muted-foreground font-medium">Preferred Currency</span>
-              <p className="text-sm font-semibold">{profileData?.preferred_currency || "USD"} </p>
-            </div>
+  return (
+    <div className="max-w-4xl mx-auto p-6 space-y-8">
+      {/* Header Info */}
+      <div className="bg-white dark:bg-gray-800 p-6 rounded-xl border border-gray-200 dark:border-gray-700 flex items-center space-x-6">
+        <div className="w-20 h-20 bg-blue-600 rounded-full flex items-center justify-center text-2xl font-bold text-white shadow-sm">
+          {initial}
+        </div>
+        <div>
+          <h1 className="text-2xl font-bold text-gray-900 dark:text-white">@{displayUsername}</h1>
+          <p className="text-sm text-gray-500 dark:text-gray-400">Account Owner (Private View)</p>
+        </div>
+      </div>
+
+      {/* Private Personal Credentials */}
+      <div className="bg-white dark:bg-gray-800 p-6 rounded-xl border border-gray-200 dark:border-gray-700 space-y-4">
+        <h2 className="text-lg font-bold text-gray-900 dark:text-white border-b pb-2 dark:border-gray-700">
+          Private User Information
+        </h2>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 text-sm">
+          <div>
+            <p className="text-gray-500 dark:text-gray-400">Full Legal Name</p>
+            <p className="font-medium text-gray-800 dark:text-gray-200">{profile.full_name || 'Not provided'}</p>
           </div>
-        </CardContent>
-      </Card>
+          <div>
+            <p className="text-gray-500 dark:text-gray-400">Date of Birth</p>
+            <p className="font-medium text-gray-800 dark:text-gray-200">{profile.date_of_birth || profile.dob || 'Not provided'}</p>
+          </div>
+          <div>
+            <p className="text-gray-500 dark:text-gray-400">Preferred Fiat Currency</p>
+            <p className="font-medium text-gray-800 dark:text-gray-200">{profile.preferred_currency || 'USD'}</p>
+          </div>
+        </div>
+      </div>
+
+      {/* Trade Statistics Summary */}
+      <div className="bg-white dark:bg-gray-800 p-6 rounded-xl border border-gray-200 dark:border-gray-700 space-y-4">
+        <h2 className="text-lg font-bold text-gray-900 dark:text-white border-b pb-2 dark:border-gray-700">
+          Trading Performance Summary
+        </h2>
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+          <div className="p-4 bg-gray-50 dark:bg-gray-900 rounded-lg">
+            <p className="text-gray-500 dark:text-gray-400">Total Volume</p>
+            <p className="text-xl font-bold text-gray-900 dark:text-white">${Number(stats?.total_trade_volume || 0).toLocaleString()}</p>
+          </div>
+          <div className="p-4 bg-gray-50 dark:bg-gray-900 rounded-lg">
+            <p className="text-gray-500 dark:text-gray-400">Completed Trades</p>
+            <p className="text-xl font-bold text-gray-900 dark:text-white">{stats?.completed_trades || 0}</p>
+          </div>
+          <div className="p-4 bg-gray-50 dark:bg-gray-900 rounded-lg">
+            <p className="text-gray-500 dark:text-gray-400">Avg. Payment Time</p>
+            <p className="text-xl font-bold text-gray-900 dark:text-white">{Math.round((stats?.avg_payment_seconds || 0) / 60)} min</p>
+          </div>
+          <div className="p-4 bg-gray-50 dark:bg-gray-900 rounded-lg">
+            <p className="text-gray-500 dark:text-gray-400">Avg. Release Time</p>
+            <p className="text-xl font-bold text-gray-900 dark:text-white">{Math.round((stats?.avg_release_seconds || 0) / 60)} min</p>
+          </div>
+        </div>
+      </div>
     </div>
   );
 }

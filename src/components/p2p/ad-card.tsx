@@ -13,6 +13,7 @@ import { BtcLogo, EthLogo, LtcLogo, UsdtLogo, DefaultAvatar } from '@/components
 import { FlagIcon } from '../ui/flag-icon';
 import { formatDistanceToNow } from 'date-fns';
 import { UserStatusIndicator } from '@/components/user-status';
+import TraderStatusBadge from '@/components/TraderStatusBadge';
 import {
   Dialog,
   DialogContent,
@@ -124,7 +125,7 @@ export function AdCard({ ad }: AdCardProps) {
                 </div>
               </div>
               <div className="mt-1">
-                <UserStatusIndicator lastActive={adCreator.lastActive} />
+                <TraderStatusBadge lastActive={adCreator.lastActive} />
               </div>
             </div>
           </div>
@@ -231,7 +232,7 @@ export function AdCard({ ad }: AdCardProps) {
             </Dialog>
 
             <Button asChild className={cn(buttonColorClass, "gap-2")}>
-              <Link href={`/ad/${ad.id}`}>
+              <Link href={`/trade/initiate/${ad.id}`}>
                 {buttonLabel} <CryptoLogo crypto={ad.crypto as CryptoCurrency} className="h-4 w-4" />
               </Link>
             </Button>

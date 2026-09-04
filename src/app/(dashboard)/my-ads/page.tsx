@@ -25,6 +25,7 @@ import { Edit, Plus, Trash2, Loader2, PlusCircle } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { softDeleteAd, updateAdStatus } from "@/lib/ads";
 import Link from "next/link";
+import ManageAds, { AdItem } from "@/components/ManageAds";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -178,27 +179,44 @@ export default function MyAdsPage() {
     );
   }
 
+  const formattedManageAds: AdItem[] = ads.map((ad) => ({
+    id: ad.id,
+    type: (ad.adType === 'buy' ? 'BUY' : 'SELL') as 'BUY' | 'SELL',
+    asset: ad.crypto,
+    fiat_currency: ad.fiatCurrency,
+    price: Number(ad.fixedRate || 0),
+    pricing_type: ad.rateType === 'fixed' ? 'FIXED' : 'FLOAT',
+    margin_percent: ad.ratePercent,
+    status: ad.active ? 'ACTIVE' : 'INACTIVE',
+    min_limit: ad.minAmount,
+    max_limit: ad.maxAmount,
+    available_amount: ad.maxAmount,
+    payment_methods: ad.paymentMethods,
+    terms_conditions: ad.terms,
+    created_at: typeof ad.createdAt === 'string' ? ad.createdAt : new Date().toISOString(),
+  }));
+
   return (
     <div className="space-y-6">
-      {/* Theme Styled Header matching /buy & /sell page banner */}
-      <div className="bg-gradient-to-r from-[#5B4DF6] via-[#5244E8] to-[#3B82F6] text-white py-8 px-6 sm:px-8 rounded-2xl shadow-lg border border-indigo-400/20">
+      {/* Clean Solid Header with Zero Glassmorphism */}
+      <div className="bg-card text-card-foreground border border-border py-6 px-6 sm:px-8 rounded-2xl shadow-xs">
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div>
-            <div className="flex items-center gap-2 mb-1">
-              <span className="text-xs font-semibold uppercase tracking-wider text-indigo-200 bg-white/10 px-2.5 py-0.5 rounded-full border border-white/15">
+            <div className="flex items-center gap-2 mb-1.5">
+              <span className="text-xs font-bold uppercase tracking-wider text-[#5B4DF6] bg-[#5B4DF6]/10 dark:bg-[#5B4DF6]/20 px-2.5 py-0.5 rounded-md">
                 Peer-to-Peer Market
               </span>
             </div>
-            <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight">
+            <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight text-foreground">
               My Posted Ads
             </h1>
-            <p className="text-indigo-100/90 text-sm mt-1">
+            <p className="text-muted-foreground text-sm mt-1">
               Manage your active P2P buy and sell offers, set limits, and adjust pricing.
             </p>
           </div>
           <Link
             href="/ads/create"
-            className="inline-flex items-center justify-center gap-2 px-5 py-2.5 bg-white text-[#5B4DF6] hover:bg-slate-50 font-bold text-sm rounded-xl shadow-md transition-all active:scale-[0.98]"
+            className="inline-flex items-center justify-center gap-2 px-5 py-2.5 bg-[#5B4DF6] hover:bg-[#4F46E5] text-white font-bold text-sm rounded-xl shadow-sm transition-all active:scale-[0.98]"
           >
             <Plus className="w-4 h-4" />
             <span>Create New Ad</span>
@@ -206,102 +224,14 @@ export default function MyAdsPage() {
         </div>
       </div>
 
-      <Card>
-        <CardHeader>
-          <CardTitle>Manage Your Ads</CardTitle>
-          <CardDescription>
-            Here you can view, activate, deactivate, and delete your ads.
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Ad ID</TableHead>
-                <TableHead>Type</TableHead>
-                <TableHead>Asset</TableHead>
-                <TableHead>Price</TableHead>
-                <TableHead>Status</TableHead>
-                <TableHead className="text-right">Actions</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {isLoading && (
-                <TableRow>
-                  <TableCell colSpan={6} className="text-center py-8">
-                    <Loader2 className="h-6 w-6 animate-spin mx-auto text-[#5D45F9]" />
-                  </TableCell>
-                </TableRow>
-              )}
-              {!isLoading &&
-                ads?.map((ad) => (
-                  <TableRow key={ad.id}>
-                    <TableCell className="font-mono text-xs font-semibold">{ad.publicAdId}</TableCell>
-                    <TableCell className="capitalize font-medium">{ad.adType}</TableCell>
-                    <TableCell>
-                      {ad.crypto}/{ad.fiatCurrency}
-                    </TableCell>
-                    <TableCell>
-                      {ad.rateType === "fixed"
-                        ? `${ad.fixedRate} ${ad.fiatCurrency}`
-                        : `Market ${ad.ratePercent}%`}
-                    </TableCell>
-                    <TableCell>
-                      <Badge variant={ad.active ? "default" : "outline"} className={ad.active ? "bg-emerald-600 hover:bg-emerald-700" : ""}>
-                        {ad.active ? "Active" : "Inactive"}
-                      </Badge>
-                    </TableCell>
-                    <TableCell className="text-right">
-                      <div className="flex items-center justify-end gap-2">
-                        <Switch
-                          checked={ad.active}
-                          onCheckedChange={() => handleStatusToggle(ad.id, !!ad.active)}
-                          aria-label="Toggle ad status"
-                        />
-                        <Button asChild variant="ghost" size="icon">
-                          <Link href={`/ads/edit/${ad.id}`}>
-                            <Edit className="h-4 w-4" />
-                          </Link>
-                        </Button>
-                        <AlertDialog>
-                          <AlertDialogTrigger asChild>
-                            <Button variant="ghost" size="icon" className="text-destructive">
-                              <Trash2 className="h-4 w-4" />
-                            </Button>
-                          </AlertDialogTrigger>
-                          <AlertDialogContent>
-                            <AlertDialogHeader>
-                              <AlertDialogTitle>Are you sure?</AlertDialogTitle>
-                              <AlertDialogDescription>
-                                This will permanently deactivate your ad.
-                              </AlertDialogDescription>
-                            </AlertDialogHeader>
-                            <AlertDialogFooter>
-                              <AlertDialogCancel>Cancel</AlertDialogCancel>
-                              <AlertDialogAction
-                                onClick={() => handleDelete(ad.id)}
-                                className="bg-destructive hover:bg-destructive/90"
-                              >
-                                Delete
-                              </AlertDialogAction>
-                            </AlertDialogFooter>
-                          </AlertDialogContent>
-                        </AlertDialog>
-                      </div>
-                    </TableCell>
-                  </TableRow>
-                ))}
-              {!isLoading && !ads?.length && (
-                <TableRow>
-                  <TableCell colSpan={6} className="text-center h-24 text-muted-foreground">
-                    You haven't created any ads yet.
-                  </TableCell>
-                </TableRow>
-              )}
-            </TableBody>
-          </Table>
-        </CardContent>
-      </Card>
+      {isLoading ? (
+        <div className="p-12 text-center rounded-2xl bg-slate-900 border border-slate-800">
+          <Loader2 className="h-8 w-8 animate-spin mx-auto text-[#5D45F9]" />
+          <p className="text-xs text-slate-400 mt-2">Loading your advertisements...</p>
+        </div>
+      ) : (
+        <ManageAds ads={formattedManageAds} />
+      )}
     </div>
   );
 }

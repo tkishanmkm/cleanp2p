@@ -70,7 +70,7 @@ const CryptoLogo = ({ crypto, className }: { crypto: CryptoCurrency; className?:
 export function BuySellForm() {
   const { t } = useI18n();
   return (
-    <Card className="bg-white/95 dark:bg-[#18181c]/95 border border-slate-200/80 dark:border-slate-800/80 shadow-2xl backdrop-blur-md rounded-2xl w-full max-w-md overflow-hidden transition-all">
+    <Card className="bg-card text-card-foreground border border-border shadow-xl rounded-2xl w-full max-w-md overflow-hidden transition-all">
       <CardContent className="p-4 sm:p-6">
         <Tabs defaultValue="buy" className="w-full">
           <TabsList className="grid w-full grid-cols-2 bg-slate-100 dark:bg-slate-800/80 p-1.5 h-auto rounded-xl">
