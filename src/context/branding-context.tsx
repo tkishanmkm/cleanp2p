@@ -23,10 +23,10 @@ interface BrandingContextType {
 }
 
 const defaultBranding: BrandingConfig = {
-  appName: 'P2P Exchange',
-  appLogo: '',
-  appLogoDesktop: '',
-  appLogoMobile: '',
+  appName: 'Paxones',
+  appLogo: '/logo-desktop.webp',
+  appLogoDesktop: '/logo-desktop.webp',
+  appLogoMobile: '/logo-mobile.webp',
 };
 
 const BrandingContext = createContext<BrandingContextType>({

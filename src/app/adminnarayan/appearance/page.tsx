@@ -35,8 +35,8 @@ export default function AdminAppearancePage() {
     if (branding) {
       setPreviews((prev) => ({
         ...prev,
-        appLogoDesktop: branding.appLogoDesktop || branding.appLogo || '',
-        appLogoMobile: branding.appLogoMobile || '',
+        appLogoDesktop: branding.appLogoDesktop || branding.appLogo || '/logo-desktop.webp',
+        appLogoMobile: branding.appLogoMobile || '/logo-mobile.webp',
         btcLogo: branding.btcLogo || '',
         ethLogo: branding.ethLogo || '',
         ltcLogo: branding.ltcLogo || '',

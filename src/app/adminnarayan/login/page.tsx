@@ -7,6 +7,8 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { AlertCircle, ShieldAlert, Loader2 } from "lucide-react";
+import { Logo } from "@/components/logo";
+import Link from "next/link";
 
 function AdminLoginForm() {
   const router = useRouter();
@@ -138,9 +140,14 @@ function AdminLoginForm() {
   return (
     <div className="min-h-screen flex items-center justify-center p-4 bg-slate-900 text-slate-100">
       <Card className="w-full max-w-md bg-slate-800 border-slate-700">
-        <CardHeader className="space-y-2">
-          <div className="w-10 h-10 rounded-lg bg-blue-600 flex items-center justify-center">
-            <ShieldAlert className="w-6 h-6 text-white" />
+        <CardHeader className="space-y-3">
+          <div className="flex items-center justify-between">
+            <Link href="/" title="Back to Marketplace">
+              <Logo variant="desktop" priority />
+            </Link>
+            <div className="w-9 h-9 rounded-lg bg-blue-600/20 border border-blue-500/30 flex items-center justify-center shrink-0">
+              <ShieldAlert className="w-5 h-5 text-blue-400" />
+            </div>
           </div>
           <div>
             <CardTitle className="text-2xl font-bold text-white">Admin Portal</CardTitle>

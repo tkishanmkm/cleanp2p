@@ -232,7 +232,7 @@ export function AdCard({ ad }: AdCardProps) {
             </Dialog>
 
             <Button asChild className={cn(buttonColorClass, "gap-2")}>
-              <Link href={`/trade/initiate/${ad.id}`}>
+              <Link href={`/ad/${ad.id}`}>
                 {buttonLabel} <CryptoLogo crypto={ad.crypto as CryptoCurrency} className="h-4 w-4" />
               </Link>
             </Button>

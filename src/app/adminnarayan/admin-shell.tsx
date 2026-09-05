@@ -304,19 +304,13 @@ export function AdminShell({
       >
         {/* Sidebar Header */}
         <div className="p-4 border-b border-slate-800 flex items-center justify-between">
-          <div className="flex items-center gap-2.5">
-            <div className="w-8 h-8 rounded-lg bg-blue-600 flex items-center justify-center shrink-0">
-              <ShieldAlert className="w-5 h-5 text-white" />
-            </div>
-            <div>
-              <div className="font-bold text-sm tracking-tight text-white flex items-center gap-1.5">
-                Admin Control
-                <Badge variant="destructive" className="text-[9px] px-1 py-0 h-4">
-                  PRO
-                </Badge>
-              </div>
-              <p className="text-[11px] text-slate-400">Paxones Core Management</p>
-            </div>
+          <div className="flex items-center gap-2">
+            <Link href="/" title="Back to Marketplace" className="shrink-0">
+              <Logo variant="desktop" priority />
+            </Link>
+            <Badge variant="destructive" className="text-[9px] px-1.5 py-0.5 h-4 uppercase font-semibold">
+              Admin
+            </Badge>
           </div>
           <Button
             variant="ghost"

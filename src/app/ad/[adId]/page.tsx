@@ -1,87 +1,121 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
-import Image from 'next/image';
-import Link from 'next/link';
-import { useRouter } from 'next/navigation';
-import { ArrowLeft } from 'lucide-react';
-import { formatMemberDuration, isUserOnline } from '@/lib/utils/formatters';
-import { supabase } from '@/lib/supabase/client';
+import { useState, useEffect } from 'react';
+import { useParams, useRouter } from 'next/navigation';
+import { createClient } from '@/utils/supabase/client';
+import { formatOnlineStatus, formatJoinedDate } from '@/utils/p2p-helpers';
+import { ThumbsUp, ThumbsDown, Clock, ShieldCheck, User, AlertCircle, RefreshCw } from 'lucide-react';
 
-interface AdDetailsProps {
-  params: Promise<{ adId: string }> | { adId: string };
+interface AdData {
+  id: string;
+  user_id: string;
+  type?: string;
+  ad_type?: string;
+  asset?: string;
+  crypto?: string;
+  coin?: string;
+  fiat?: string;
+  fiat_currency?: string;
+  price: number;
+  min_limit?: number;
+  min_amount?: number;
+  max_limit?: number;
+  max_amount?: number;
+  payment_window?: number;
+  payment_methods?: string[];
+  terms?: string;
+  tags?: string[];
+  user?: {
+    id?: string;
+    username?: string;
+    full_name?: string;
+    avatar_url?: string | null;
+    created_at?: string;
+    last_seen_at?: string | null;
+    completed_trades?: number;
+    positive_feedback?: number;
+    negative_feedback?: number;
+    avg_release_time?: string;
+  };
 }
 
-export function TradeInitiateForm({ ad }: { ad: any }) {
+export default function AdDetailPage() {
+  const params = useParams();
   const router = useRouter();
-  const [fiatAmount, setFiatAmount] = useState('500');
-  const [cryptoAmount, setCryptoAmount] = useState('0.005');
-  const [calcDirection, setCalcDirection] = useState<'FIAT_TO_COIN' | 'COIN_TO_FIAT'>('FIAT_TO_COIN');
-  const [loading, setLoading] = useState(false);
-  const [limitError, setLimitError] = useState<string | null>(null);
-  const [fundError, setFundError] = useState<string | null>(null);
+  const supabase = createClient();
+
+  const adId = typeof params?.adId === 'string' ? params.adId : Array.isArray(params?.adId) ? params.adId[0] : '';
+
+  const [ad, setAd] = useState<AdData | null>(null);
+  const [fiatAmount, setFiatAmount] = useState<string>('');
+  const [cryptoAmount, setCryptoAmount] = useState<string>('');
+  const [loading, setLoading] = useState(true);
+  const [submitting, setSubmitting] = useState(false);
+  const [errorText, setErrorText] = useState<string | null>(null);
 
   useEffect(() => {
-    if (ad?.price) {
-      const initFiat = 500;
-      const calculated = initFiat / ad.price;
-      setFiatAmount(initFiat.toString());
-      setCryptoAmount(calculated.toFixed(6));
-      validateLimits(initFiat, ad.minLimit, ad.maxLimit);
+    async function fetchAdDetails() {
+      if (!adId) {
+        setErrorText('No advertisement ID provided.');
+        setLoading(false);
+        return;
+      }
+
+      setLoading(true);
+
+      const { data, error } = await supabase
+        .from('p2p_ads')
+        .select('*, user:profiles(*)')
+        .eq('id', adId)
+        .maybeSingle();
+
+      if (error) {
+        // Direct fallback query if relational join fails
+        const directAd = await supabase.from('p2p_ads').select('*').eq('id', adId).maybeSingle();
+        if (directAd.data) {
+          const profile = await supabase.from('profiles').select('*').eq('id', directAd.data.user_id).maybeSingle();
+          const adObj = directAd.data as AdData;
+          if (profile.data) adObj.user = profile.data;
+          setAd(adObj);
+        } else {
+          setErrorText(error.message);
+        }
+      } else if (!data) {
+        setErrorText(`Advertisement "${adId}" was not found.`);
+      } else {
+        setAd(data as AdData);
+      }
+
+      setLoading(false);
     }
-  }, [ad]);
 
-  const validateLimits = (fiat: number, min?: number, max?: number) => {
-    if (min !== undefined && fiat < min) {
-      setLimitError(`Minimum limit is $${min.toLocaleString()}`);
-    } else if (max !== undefined && fiat > max) {
-      setLimitError(`Maximum limit is $${max.toLocaleString()}`);
-    } else {
-      setLimitError(null);
-    }
-  };
+    fetchAdDetails();
+  }, [adId]);
 
-  const calculateCrypto = (fiat: string, price: number) => {
-    const val = parseFloat(fiat) || 0;
-    const calculated = price > 0 ? val / price : 0;
-    setCryptoAmount(calculated.toFixed(6));
-    validateLimits(val, ad?.minLimit, ad?.maxLimit);
-  };
-
-  const calculateFiat = (coin: string, price: number) => {
-    const val = parseFloat(coin) || 0;
-    const calculated = val * price;
-    setFiatAmount(calculated.toFixed(2));
-    validateLimits(calculated, ad?.minLimit, ad?.maxLimit);
-  };
-
-  const handleFiatChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const val = e.target.value;
+  // Calculate using ad.price (User's specified fixed or margin price)
+  const handleFiatChange = (val: string) => {
     setFiatAmount(val);
-    setFundError(null);
-    if (ad?.price) calculateCrypto(val, ad.price);
+    if (!ad || !val || isNaN(Number(val)) || ad.price <= 0) {
+      setCryptoAmount('');
+      return;
+    }
+    setCryptoAmount((parseFloat(val) / ad.price).toFixed(8));
   };
 
-  const handleCoinChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const val = e.target.value;
+  const handleCryptoChange = (val: string) => {
     setCryptoAmount(val);
-    setFundError(null);
-    if (ad?.price) calculateFiat(val, ad.price);
+    if (!ad || !val || isNaN(Number(val))) {
+      setFiatAmount('');
+      return;
+    }
+    setFiatAmount((parseFloat(val) * ad.price).toFixed(2));
   };
 
-  const toggleDirection = () => {
-    setCalcDirection((prev) => (prev === 'FIAT_TO_COIN' ? 'COIN_TO_FIAT' : 'FIAT_TO_COIN'));
-  };
-
-  const handleTradeInitiate = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (limitError) return;
-
-    setLoading(true);
-    setFundError(null);
-
+  const handleInitiateTrade = async () => {
+    if (!ad) return;
+    setSubmitting(true);
     try {
-      const res = await fetch('/api/trades/initiate', {
+      const res = await fetch('/api/p2p/orders/create', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -91,349 +125,259 @@ export function TradeInitiateForm({ ad }: { ad: any }) {
         }),
       });
 
-      const result = await res.json();
-
-      if (!res.ok) {
-        if (result.code === 'INSUFFICIENT_FUNDS') {
-          setFundError(result.error);
-        } else {
-          alert(result.error || 'Failed to initiate trade.');
-        }
-        return;
+      const data = await res.json();
+      if (res.ok && data.tradeId) {
+        router.push(`/trade/${data.tradeId}`);
+      } else {
+        alert(data.error || 'Failed to initiate escrow.');
       }
-
-      // Redirect to trade chat / escrow page
-      router.push(`/trade/${result.tradeId}`);
-    } catch (err) {
-      alert('An error occurred. Please try again.');
     } finally {
-      setLoading(false);
+      setSubmitting(false);
     }
   };
 
-  return (
-    <div className="bg-white dark:bg-gray-800 p-6 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm">
-      <div className="flex items-center justify-between mb-4">
-        <h3 className="text-lg font-bold text-gray-900 dark:text-white">Initiate Trade</h3>
+  if (loading) {
+    return (
+      <div className="min-h-[60vh] flex items-center justify-center gap-2 text-gray-500 dark:text-gray-400 font-sans text-sm">
+        <RefreshCw className="w-5 h-5 animate-spin text-blue-500" />
+        <span>Loading offer details...</span>
+      </div>
+    );
+  }
+
+  if (errorText || !ad) {
+    return (
+      <div className="min-h-[60vh] flex flex-col items-center justify-center p-4 text-center">
+        <AlertCircle className="w-10 h-10 text-red-500 mb-2" />
+        <h1 className="text-lg font-bold text-gray-900 dark:text-gray-100">Advertisement unavailable</h1>
+        <p className="text-sm text-gray-500 dark:text-gray-400 max-w-md mt-1">{errorText}</p>
         <button
-          type="button"
-          onClick={toggleDirection}
-          className="text-xs bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 px-3 py-1 rounded-md text-gray-700 dark:text-gray-200 transition cursor-pointer"
+          onClick={() => router.push('/p2p')}
+          className="mt-4 px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-semibold hover:bg-blue-700"
         >
-          ⇄ Switch Direction
+          Return to P2P Marketplace
         </button>
       </div>
+    );
+  }
 
-      <form onSubmit={handleTradeInitiate} className="space-y-4">
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <div>
-            <label className="text-xs text-gray-500 mb-1 block font-medium">
-              Pay ({ad.fiatCurrency || 'USD'})
-            </label>
-            <input
-              type="number"
-              step="any"
-              value={fiatAmount}
-              onChange={handleFiatChange}
-              disabled={calcDirection === 'COIN_TO_FIAT'}
-              className="w-full p-3 border rounded-lg bg-gray-50 dark:bg-gray-900 border-gray-300 dark:border-gray-600 text-gray-900 dark:text-white disabled:opacity-60 font-semibold focus:ring-2 focus:ring-blue-500 outline-none"
-            />
-          </div>
+  const rawType = (ad.type || ad.ad_type || 'BUY').toUpperCase();
+  const assetSymbol = ad.crypto || ad.coin || ad.asset || 'BTC';
+  const fiatSymbol = ad.fiat || ad.fiat_currency || 'USD';
+  const minLimit = ad.min_limit ?? ad.min_amount ?? 100;
+  const maxLimit = ad.max_limit ?? ad.max_amount ?? 5000;
+  const paymentWindow = ad.payment_window ?? 30;
+  const paymentMethodStr = ad.payment_methods?.join(', ') || 'Bank Transfer';
 
-          <div>
-            <label className="text-xs text-gray-500 mb-1 block font-medium">
-              Receive ({ad.cryptoCurrency || 'BTC'})
-            </label>
-            <input
-              type="number"
-              step="any"
-              value={cryptoAmount}
-              onChange={handleCoinChange}
-              disabled={calcDirection === 'FIAT_TO_COIN'}
-              className="w-full p-3 border rounded-lg bg-gray-50 dark:bg-gray-900 border-gray-300 dark:border-gray-600 text-gray-900 dark:text-white disabled:opacity-60 font-semibold focus:ring-2 focus:ring-blue-500 outline-none"
-            />
-          </div>
-        </div>
+  // STRICT RULE: Force Username over full_name everywhere
+  const username = ad.user?.username || 'user';
+  
+  // GRAMMAR CORRECTION RULE:
+  // If ad_type is SELL -> User is selling to merchant -> "Sell BTC to username"
+  // If ad_type is BUY  -> User is buying from merchant -> "Buy BTC from username"
+  const grammarTitle = rawType === 'SELL' 
+    ? `Buy ${assetSymbol} from` 
+    : `Sell ${assetSymbol} to`;
 
-        {/* Limit validation warning */}
-        {limitError && (
-          <p className="text-sm text-red-500 font-medium">{limitError}</p>
-        )}
+  const statusInfo = formatOnlineStatus(ad.user?.last_seen_at);
+  const joinedText = formatJoinedDate(ad.user?.created_at);
 
-        {/* Admin Fee Breakdown */}
-        <div className="p-4 bg-gray-50 dark:bg-gray-900/60 rounded-lg border border-gray-100 dark:border-gray-700 space-y-2 text-xs">
-          <div className="flex justify-between text-gray-500 dark:text-gray-400">
-            <span>Platform Escrow Fee</span>
-            <span className="font-semibold text-green-600 dark:text-green-400">0.00% (No Buyer Fee)</span>
-          </div>
-          <div className="flex justify-between text-gray-500 dark:text-gray-400">
-            <span>Unit Price</span>
-            <span className="font-medium text-gray-700 dark:text-gray-300">
-              1 {ad.cryptoCurrency} = {Number(ad.price).toLocaleString()} {ad.fiatCurrency}
-            </span>
-          </div>
-          <div className="flex justify-between text-gray-500 dark:text-gray-400 pt-1 border-t border-gray-200 dark:border-gray-700">
-            <span>Locked in Escrow</span>
-            <span className="font-bold text-gray-900 dark:text-white">
-              {cryptoAmount} {ad.cryptoCurrency}
-            </span>
-          </div>
-        </div>
-
-        {/* Insufficient Funds Instruction Banner */}
-        {fundError && (
-          <div className="p-4 bg-amber-50 dark:bg-amber-950/40 border border-amber-300 dark:border-amber-700 rounded-lg text-amber-800 dark:text-amber-300 text-sm flex items-start gap-3">
-            <span className="text-lg">⚠️</span>
-            <div>
-              <p className="font-semibold mb-1">Trade Cannot Be Initiated</p>
-              <p>{fundError}</p>
-            </div>
-          </div>
-        )}
-
-        <button
-          type="submit"
-          disabled={loading || !!limitError}
-          className="w-full py-3.5 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-lg shadow disabled:opacity-50 transition cursor-pointer"
-        >
-          {loading ? 'Verifying Escrow Availability...' : 'Start Trade'}
-        </button>
-      </form>
-    </div>
-  );
-}
-
-export default function AdDetailsPage({ params }: AdDetailsProps) {
-  const unwrappedParams = (params && typeof (params as any).then === 'function')
-    ? React.use(params as Promise<{ adId: string }>)
-    : (params as { adId: string });
-  const adId = unwrappedParams?.adId || '';
-
-  const [ad, setAd] = useState<any>(null);
-
-  useEffect(() => {
-    async function loadAd() {
-      if (!adId) return;
-      let resolvedAd: any = null;
-
-      try {
-        // Try fetching real ad from Supabase
-        const { data: realAd } = await supabase
-          .from('ads')
-          .select(`
-            *,
-            profiles (
-              id,
-              username,
-              avatar_url,
-              created_at,
-              last_active,
-              last_seen_at,
-              completed_trades,
-              positive_feedback,
-              negative_feedback,
-              avg_payment_minutes,
-              avg_release_minutes
-            )
-          `)
-          .eq('id', adId)
-          .maybeSingle();
-
-        if (realAd) {
-          const profile = Array.isArray(realAd.profiles) ? realAd.profiles[0] : realAd.profiles;
-          const posCount = profile?.positive_feedback || 0;
-          const negCount = profile?.negative_feedback || 0;
-          const totalFb = posCount + negCount;
-          const posPct = totalFb > 0 ? ((posCount / totalFb) * 100).toFixed(1) + '%' : '100.0%';
-          const negPct = totalFb > 0 ? ((negCount / totalFb) * 100).toFixed(1) + '%' : '0.0%';
-
-          resolvedAd = {
-            id: realAd.id,
-            type: realAd.type || 'SELL',
-            cryptoCurrency: realAd.asset_symbol || realAd.crypto_currency || 'USDT',
-            fiatCurrency: realAd.fiat_symbol || realAd.fiat_currency || 'USD',
-            price: Number(realAd.price) || 1,
-            minLimit: Number(realAd.min_limit) || 10,
-            maxLimit: Number(realAd.max_limit) || 5000,
-            availableBalance: Number(realAd.total_amount || realAd.available_balance || 500),
-            paymentMethods: Array.isArray(realAd.payment_methods) ? realAd.payment_methods : ['Bank Transfer'],
-            terms: realAd.terms || 'Fast release.',
-            advertiser: {
-              id: profile?.id || 'usr_1',
-              username: `@${(profile?.username || 'trader').replace(/^@/, '')}`,
-              avatarUrl: profile?.avatar_url || '',
-              lastSeenAt: profile?.last_seen_at || profile?.last_active || new Date().toISOString(),
-              createdAt: profile?.created_at || '2025-01-01T00:00:00Z',
-              positiveFeedbackPct: posPct,
-              negativeFeedbackPct: negPct,
-              avgPaymentTime: `${profile?.avg_payment_minutes || 4} min`,
-              avgReleaseTime: `${profile?.avg_release_minutes || 2} min`,
-              completedTrades: profile?.completed_trades || 0,
-            },
-          };
-        }
-      } catch (err) {
-        console.warn('Could not query real ad, falling back to mock:', err);
-      }
-
-      if (!resolvedAd) {
-        // Mock fallback as specified
-        resolvedAd = {
-          id: adId,
-          type: 'SELL',
-          cryptoCurrency: 'BTC',
-          fiatCurrency: 'USD',
-          price: 100000, // 1 BTC = $100,000
-          minLimit: 50,
-          maxLimit: 5000,
-          availableBalance: 0.5,
-          paymentMethods: ['Zelle', 'Bank Transfer'],
-          terms: 'Fast release. Please provide receipt.',
-          advertiser: {
-            id: 'usr_123',
-            username: '@adamdam',
-            avatarUrl: '',
-            lastSeenAt: new Date().toISOString(),
-            createdAt: '2025-02-01T00:00:00Z',
-            positiveFeedbackPct: '98.5%',
-            negativeFeedbackPct: '1.5%',
-            avgPaymentTime: '4 min',
-            avgReleaseTime: '2 min',
-            completedTrades: 245,
-          },
-        };
-      }
-
-      setAd(resolvedAd);
-    }
-
-    loadAd();
-  }, [adId]);
-
-  if (!ad) return <div className="p-8 text-center text-gray-500">Loading ad details...</div>;
-
-  const online = isUserOnline(ad.advertiser.lastSeenAt);
+  const hasTerms = Boolean(ad.terms && ad.terms.trim().length > 0);
+  const hasTags = Boolean(ad.tags && ad.tags.length > 0);
 
   return (
-    <div className="max-w-6xl mx-auto p-4 md:p-8 space-y-6">
-      <Link
-        href="/buy"
-        className="inline-flex items-center text-sm font-medium text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white transition-colors"
-      >
-        <ArrowLeft className="w-4 h-4 mr-1.5" />
-        Back to Marketplace
-      </Link>
-
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-        {/* Ad Spec & Trade Calculator */}
-        <div className="lg:col-span-2 space-y-6">
-          <div className="bg-white dark:bg-gray-800 p-6 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm">
-            <div className="flex justify-between items-center mb-4">
-              <span className="text-sm font-semibold text-blue-600 bg-blue-50 dark:bg-blue-900/40 px-3 py-1 rounded-full">
-                {ad.type} {ad.cryptoCurrency}
-              </span>
-              <span className="text-sm text-gray-500 dark:text-gray-400">
-                Ad ID: {ad.id}
-              </span>
-            </div>
-
-            <h1 className="text-3xl font-extrabold text-gray-900 dark:text-white mb-2">
-              {ad.price.toLocaleString()} <span className="text-lg font-normal">{ad.fiatCurrency}/{ad.cryptoCurrency}</span>
-            </h1>
-
-            <div className="grid grid-cols-2 md:grid-cols-3 gap-4 py-4 border-y border-gray-100 dark:border-gray-700 text-sm">
-              <div>
-                <p className="text-gray-500 dark:text-gray-400">Available</p>
-                <p className="font-semibold text-gray-800 dark:text-gray-200">{ad.availableBalance} {ad.cryptoCurrency}</p>
-              </div>
-              <div>
-                <p className="text-gray-500 dark:text-gray-400">Limit</p>
-                <p className="font-semibold text-gray-800 dark:text-gray-200">${ad.minLimit} - ${ad.maxLimit}</p>
-              </div>
-              <div>
-                <p className="text-gray-500 dark:text-gray-400">Payment Window</p>
-                <p className="font-semibold text-gray-800 dark:text-gray-200">15 mins</p>
-              </div>
-            </div>
-
-            {/* Terms & Payment Methods */}
-            <div className="mt-4 pt-4 border-t border-gray-100 dark:border-gray-700 text-sm space-y-2">
-              <div>
-                <span className="text-gray-500 dark:text-gray-400 block mb-1 font-medium">Accepted Payment Methods:</span>
-                <div className="flex flex-wrap gap-2">
-                  {ad.paymentMethods?.map((pm: string, idx: number) => (
-                    <span key={idx} className="bg-gray-100 dark:bg-gray-700 text-gray-800 dark:text-gray-200 px-2.5 py-1 rounded text-xs font-medium">
-                      {pm}
-                    </span>
-                  ))}
-                </div>
-              </div>
-              {ad.terms && (
-                <div className="pt-2">
-                  <span className="text-gray-500 dark:text-gray-400 block mb-1 font-medium">Advertiser Terms:</span>
-                  <p className="text-xs text-gray-600 dark:text-gray-300 bg-gray-50 dark:bg-gray-900/50 p-3 rounded-lg border border-gray-100 dark:border-gray-700">
-                    {ad.terms}
-                  </p>
-                </div>
-              )}
-            </div>
-          </div>
-
-          {/* Real-time Trade Initiate Component */}
-          <TradeInitiateForm ad={ad} />
+    <div className="min-h-screen bg-gray-50 dark:bg-gray-900 text-gray-900 dark:text-gray-100 p-4 sm:p-6 lg:p-8">
+      <div className="max-w-5xl mx-auto space-y-6">
+        
+        {/* Correct Grammar Header */}
+        <div className="border-b border-gray-200 dark:border-gray-800 pb-4">
+          <h1 className="text-xl sm:text-2xl font-bold">
+            {grammarTitle} <span className="text-blue-600 dark:text-blue-400">{username}</span>
+          </h1>
         </div>
 
-        {/* Advertiser Card Component */}
-        <div className="bg-white dark:bg-gray-800 p-6 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm h-fit space-y-6">
-          <div className="flex items-center space-x-4">
-            <div className="relative w-12 h-12 rounded-full overflow-hidden bg-gray-200 dark:bg-gray-700 flex items-center justify-center">
-              {ad.advertiser.avatarUrl ? (
-                <Image
-                  src={ad.advertiser.avatarUrl}
-                  alt={ad.advertiser.username}
-                  fill
-                  className="object-cover"
-                  unoptimized
-                />
-              ) : (
-                <span className="flex h-full w-full items-center justify-center font-bold text-gray-600 dark:text-gray-300">
-                  {ad.advertiser.username.replace('@', '').charAt(0).toUpperCase() || 'U'}
-                </span>
-              )}
-            </div>
-            <div>
-              <h3 className="text-lg font-bold text-gray-900 dark:text-white">{ad.advertiser.username}</h3>
-              <div className="flex items-center space-x-2 text-xs">
-                <span className={`h-2.5 w-2.5 rounded-full ${online ? 'bg-green-500' : 'bg-gray-400'}`} />
-                <span className="text-gray-600 dark:text-gray-400">{online ? 'Online' : 'Offline'}</span>
-                <span className="text-gray-300 dark:text-gray-600">•</span>
-                <span className="text-gray-500 dark:text-gray-400">{formatMemberDuration(ad.advertiser.createdAt)}</span>
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          
+          {/* Left Column: Merchant Details */}
+          <div className="lg:col-span-2 space-y-6">
+            
+            {/* Merchant Info Box */}
+            <div className="bg-white dark:bg-gray-800 p-5 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm space-y-4">
+              <h2 className="text-xs uppercase font-bold text-gray-400 tracking-wider">Trader Info</h2>
+              
+              <div className="flex items-center gap-4">
+                <div className="relative">
+                  {ad.user?.avatar_url ? (
+                    <img src={ad.user.avatar_url} alt={username} className="w-12 h-12 rounded-full object-cover" />
+                  ) : (
+                    <div className="w-12 h-12 rounded-full bg-gray-100 dark:bg-gray-700 flex items-center justify-center text-gray-600 dark:text-gray-300 font-bold">
+                      <User className="w-6 h-6" />
+                    </div>
+                  )}
+                  <span
+                    className={`absolute bottom-0 right-0 w-3.5 h-3.5 rounded-full border-2 border-white dark:border-gray-800 ${
+                      statusInfo.isOnline ? 'bg-green-500' : 'bg-gray-400'
+                    }`}
+                  />
+                </div>
+
+                <div>
+                  <div className="flex items-center gap-2">
+                    <span className="font-bold text-lg">{username}</span>
+                    <ShieldCheck className="w-4 h-4 text-green-500" />
+                  </div>
+                  <div className="text-xs text-gray-500 dark:text-gray-400 flex items-center gap-2">
+                    <span className={statusInfo.isOnline ? 'text-green-600 dark:text-green-400 font-medium' : ''}>
+                      Trader status: {statusInfo.text}
+                    </span>
+                    <span>•</span>
+                    <span>{joinedText}</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Exact Real Metrics */}
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 pt-3 border-t border-gray-100 dark:border-gray-700 text-sm">
+                <div>
+                  <span className="text-xs text-gray-400 block">Trades</span>
+                  <span className="font-semibold">{ad.user?.completed_trades ?? 0}</span>
+                </div>
+                <div>
+                  <span className="text-xs text-gray-400 block">Positive</span>
+                  <span className="font-semibold text-green-600 dark:text-green-400 flex items-center gap-1">
+                    <ThumbsUp className="w-4 h-4" /> {ad.user?.positive_feedback ?? 0}
+                  </span>
+                </div>
+                <div>
+                  <span className="text-xs text-gray-400 block">Negative</span>
+                  <span className="font-semibold text-red-500 dark:text-red-400 flex items-center gap-1">
+                    <ThumbsDown className="w-4 h-4" /> {ad.user?.negative_feedback ?? 0}
+                  </span>
+                </div>
+                <div>
+                  <span className="text-xs text-gray-400 block">Avg Release</span>
+                  <span className="font-semibold">{ad.user?.avg_release_time || 'N/A'}</span>
+                </div>
               </div>
             </div>
+
+            {/* Ad Price and Settings (Using Exact Ad Price) */}
+            <div className="bg-white dark:bg-gray-800 p-5 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm space-y-4">
+              <h2 className="text-xs uppercase font-bold text-gray-400 tracking-wider">Ad Info</h2>
+              
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm">
+                <div>
+                  <span className="text-xs text-gray-400 block">Price</span>
+                  <span className="text-xl font-extrabold text-blue-600 dark:text-blue-400">
+                    {ad.price.toLocaleString()} {fiatSymbol} <span className="text-xs font-normal text-gray-500">/ {assetSymbol}</span>
+                  </span>
+                </div>
+                <div>
+                  <span className="text-xs text-gray-400 block">Limits</span>
+                  <span className="font-semibold">
+                    {minLimit.toLocaleString()} - {maxLimit.toLocaleString()} {fiatSymbol}
+                  </span>
+                </div>
+                <div>
+                  <span className="text-xs text-gray-400 block">Payment Window</span>
+                  <span className="font-semibold flex items-center gap-1">
+                    <Clock className="w-4 h-4 text-amber-500" /> {paymentWindow} minutes
+                  </span>
+                </div>
+                <div>
+                  <span className="text-xs text-gray-400 block">Payment Method</span>
+                  <span className="font-semibold bg-gray-100 dark:bg-gray-700 px-2.5 py-1 rounded-md inline-block mt-0.5">
+                    {paymentMethodStr}
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            {/* Conditional Tags */}
+            {hasTags && (
+              <div className="flex flex-wrap gap-2">
+                {ad.tags!.map((tag, idx) => (
+                  <span key={idx} className="bg-blue-50 text-blue-600 dark:bg-blue-950/40 dark:text-blue-300 border border-blue-200 dark:border-blue-800/50 text-xs px-3 py-1 rounded-full font-medium">
+                    {tag}
+                  </span>
+                ))}
+              </div>
+            )}
+
+            {/* Conditional Terms */}
+            {hasTerms && (
+              <div className="bg-white dark:bg-gray-800 p-5 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm space-y-2">
+                <h2 className="text-sm font-semibold flex items-center gap-2">
+                  <AlertCircle className="w-4 h-4 text-amber-500" /> Offer Terms & Conditions
+                </h2>
+                <p className="text-sm whitespace-pre-line text-gray-600 dark:text-gray-300 leading-relaxed">
+                  {ad.terms}
+                </p>
+              </div>
+            )}
+
           </div>
 
-          <div className="space-y-3 text-sm pt-4 border-t border-gray-100 dark:border-gray-700">
-            <div className="flex justify-between">
-              <span className="text-gray-500 dark:text-gray-400">Positive Feedback</span>
-              <span className="font-semibold text-green-600">{ad.advertiser.positiveFeedbackPct}</span>
+          {/* Right Column: Calculator tied directly to Ad Price */}
+          <div className="bg-white dark:bg-gray-800 p-5 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm h-fit space-y-5">
+            <h2 className="text-base font-bold">Enter Trade Amount</h2>
+
+            <div className="space-y-4">
+              <div>
+                <label className="text-xs font-semibold text-gray-500 dark:text-gray-400 block mb-1">
+                  I want to pay ({fiatSymbol})
+                </label>
+                <div className="relative">
+                  <input
+                    type="number"
+                    placeholder={`Limit: ${minLimit} - ${maxLimit}`}
+                    value={fiatAmount}
+                    onChange={(e) => handleFiatChange(e.target.value)}
+                    className="w-full px-3 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-transparent focus:ring-2 focus:ring-blue-500 outline-none text-sm pr-14"
+                  />
+                  <span className="absolute right-3 top-2.5 text-xs font-bold text-gray-400">
+                    {fiatSymbol}
+                  </span>
+                </div>
+              </div>
+
+              <div>
+                <label className="text-xs font-semibold text-gray-500 dark:text-gray-400 block mb-1">
+                  I will receive ({assetSymbol})
+                </label>
+                <div className="relative">
+                  <input
+                    type="number"
+                    placeholder="0.00"
+                    value={cryptoAmount}
+                    onChange={(e) => handleCryptoChange(e.target.value)}
+                    className="w-full px-3 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-transparent focus:ring-2 focus:ring-blue-500 outline-none text-sm pr-14"
+                  />
+                  <span className="absolute right-3 top-2.5 text-xs font-bold text-gray-400">
+                    {assetSymbol}
+                  </span>
+                </div>
+              </div>
             </div>
-            <div className="flex justify-between">
-              <span className="text-gray-500 dark:text-gray-400">Negative Feedback</span>
-              <span className="font-semibold text-red-500">{ad.advertiser.negativeFeedbackPct}</span>
-            </div>
-            <div className="flex justify-between">
-              <span className="text-gray-500 dark:text-gray-400">Avg. Payment Time</span>
-              <span className="font-semibold text-gray-800 dark:text-gray-200">{ad.advertiser.avgPaymentTime}</span>
-            </div>
-            <div className="flex justify-between">
-              <span className="text-gray-500 dark:text-gray-400">Avg. Release Time</span>
-              <span className="font-semibold text-gray-800 dark:text-gray-200">{ad.advertiser.avgReleaseTime}</span>
-            </div>
-            <div className="flex justify-between">
-              <span className="text-gray-500 dark:text-gray-400">Completed Trades</span>
-              <span className="font-semibold text-gray-800 dark:text-gray-200">{ad.advertiser.completedTrades}</span>
-            </div>
+
+            <button
+              onClick={handleInitiateTrade}
+              disabled={
+                submitting ||
+                !fiatAmount ||
+                Number(fiatAmount) < minLimit ||
+                Number(fiatAmount) > maxLimit
+              }
+              className={`w-full py-3 rounded-lg font-bold text-white transition-all ${
+                rawType === 'SELL'
+                  ? 'bg-red-600 hover:bg-red-700 disabled:bg-gray-300 dark:disabled:bg-gray-700'
+                  : 'bg-green-600 hover:bg-green-700 disabled:bg-gray-300 dark:disabled:bg-gray-700'
+              }`}
+            >
+              {submitting ? 'Initiating Trade...' : 'Initiate Trade'}
+            </button>
           </div>
+
         </div>
       </div>
     </div>

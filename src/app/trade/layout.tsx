@@ -1,14 +1,14 @@
-import { Header } from "@/components/layout/header";
+import { DashboardHeader } from "@/components/dashboard/header";
 
-export default function AdPageLayout({
+export default function TradeLayout({
   children,
 }: {
   children: React.ReactNode;
 }) {
   return (
     <div className="flex flex-col min-h-screen bg-background">
-      <Header />
-      <main className="flex-1 w-full">
+      <DashboardHeader />
+      <main className="flex-1">
         {children}
       </main>
     </div>

@@ -19,7 +19,7 @@ export function AdDetailTradeAction({ ad }: AdDetailTradeActionProps) {
         asChild
         className="w-full sm:w-auto px-6 py-2.5 font-semibold bg-[#5D45F9] hover:bg-[#4833D8] text-white rounded-xl transition-colors shadow-sm cursor-pointer"
       >
-        <Link href={`/trade/initiate/${ad.id}`}>
+        <Link href={`/ad/${ad.id}`}>
           {ad.type === "BUY" ? "Sell" : "Buy"} {ad.asset_symbol}
         </Link>
       </Button>
