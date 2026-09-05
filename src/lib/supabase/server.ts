@@ -1,10 +1,10 @@
 import { createServerClient } from "@supabase/ssr";
-import { cookies } from "next/headers";
 import { createClient as createSupabaseClient, type SupabaseClient } from '@supabase/supabase-js';
 
 let serverAdminClient: SupabaseClient | null = null;
 
 export async function createClient() {
+  const { cookies } = await import("next/headers");
   const cookieStore = await cookies();
 
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://placeholder.supabase.co';

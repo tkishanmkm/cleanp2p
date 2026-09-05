@@ -5,8 +5,23 @@ export const dynamic = 'force-dynamic';
 
 export async function POST(request: Request) {
   try {
-    const supabase = await createClient();
     const supabaseAdmin = getSupabaseAdminClient();
+
+    // 0. Check Global Emergency Kill-Switch in platform_settings
+    const { data: settings } = await supabaseAdmin
+      .from('platform_settings')
+      .select('global_kill_switch_active, withdrawals_enabled')
+      .eq('id', 1)
+      .maybeSingle();
+
+    if (settings && (settings.global_kill_switch_active || !settings.withdrawals_enabled)) {
+      return NextResponse.json(
+        { error: 'EMERGENCY_PAUSE: Withdrawals are temporarily disabled for system maintenance.' },
+        { status: 503 }
+      );
+    }
+
+    const supabase = await createClient();
 
     // 1. Check authenticated user session (via cookies or Bearer Authorization header)
     let user: any = null;
