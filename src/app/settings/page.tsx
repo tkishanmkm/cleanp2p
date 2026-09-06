@@ -30,7 +30,10 @@ import {
   Key,
   Smartphone,
   HelpCircle,
+  ArrowRight,
 } from 'lucide-react';
+import QRCode from 'qrcode.react';
+import { formatTradeDisplayName, getTradeNamePreview, NameVisibility } from '@/lib/name-utils';
 import {
   ALL_COUNTRIES,
   ALL_CURRENCIES,
@@ -205,6 +208,8 @@ export default function SettingsPage() {
   const [confirmPassword, setConfirmPassword] = useState('');
 
   const [is2faEnabled, setIs2faEnabled] = useState(false);
+  const [twoFaStep, setTwoFaStep] = useState<'setup' | 'otp'>('setup');
+  const [twoFactorSecret, setTwoFactorSecret] = useState('P2PX-SEC-7734-AUTH-9901');
   const [twoFaOtpCode, setTwoFaOtpCode] = useState('');
   const [verifying2fa, setVerifying2fa] = useState(false);
 
@@ -321,6 +326,7 @@ export default function SettingsPage() {
         // Preferences
         setCurrency(p.preferred_currency || 'USD');
         setIs2faEnabled(Boolean(p.is_2fa_enabled));
+        if (p.two_factor_secret) setTwoFactorSecret(p.two_factor_secret);
         if (p.security_question) setSecQuestion(p.security_question);
 
         // Read local storage preferences
@@ -649,12 +655,12 @@ export default function SettingsPage() {
     }
   };
 
-  // Verify 6-digit OTP to enable 2FA
+  // Verify 4-to-8 digit OTP to enable 2FA
   const handleVerifyAndEnable2fa = async (e: FormEvent) => {
     e.preventDefault();
     const cleanOtp = twoFaOtpCode.trim();
-    if (!cleanOtp || !/^\d{6}$/.test(cleanOtp)) {
-      notify('error', 'Please enter a valid 6-digit verification code from your authenticator app.');
+    if (!cleanOtp || !/^\d{4,8}$/.test(cleanOtp)) {
+      notify('error', 'Please enter a valid 4 to 8 digit verification code from your authenticator app.');
       return;
     }
 
@@ -673,6 +679,7 @@ export default function SettingsPage() {
 
       setIs2faEnabled(true);
       setTwoFaOtpCode('');
+      setTwoFaStep('setup');
       setProfile((prev: any) => ({ ...prev, is_2fa_enabled: true }));
       notify('success', 'Two-Factor Authentication verified and enabled successfully.');
     } catch (err: any) {
@@ -1364,27 +1371,33 @@ export default function SettingsPage() {
                     </div>
 
                     {/* Name Visibility: Show full name, Partial Name, or hide name */}
-                    <div className="sm:col-span-2 space-y-2 pt-2">
-                      <label className="block text-xs font-semibold text-foreground">
-                        Counterparty Name Privacy
-                      </label>
+                    <div className="sm:col-span-2 space-y-3 pt-2">
+                      <div>
+                        <label className="block text-xs font-semibold text-foreground">
+                          Trade Name Display Preference
+                        </label>
+                        <p className="text-[11px] text-muted-foreground mt-0.5">
+                          Select how your name appears to counterparties in the trade chat info (i) modal.
+                        </p>
+                      </div>
+
                       <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
                         <button
                           type="button"
                           id="vis-full-btn"
                           onClick={() => setNameVisibility('FULL')}
-                          className={`p-3 rounded-xl border text-left transition-all cursor-pointer ${
+                          className={`p-3.5 rounded-xl border text-left transition-all cursor-pointer ${
                             nameVisibility === 'FULL'
-                              ? 'border-primary bg-primary/10 text-primary font-bold shadow-xs'
+                              ? 'border-primary bg-primary/10 text-primary font-bold shadow-xs ring-1 ring-primary/30'
                               : 'border-border bg-card hover:bg-muted/50 text-foreground'
                           }`}
                         >
                           <div className="flex items-center justify-between mb-1">
-                            <span className="text-xs font-bold">Show Full Name</span>
+                            <span className="text-xs font-bold">Full Name</span>
                             {nameVisibility === 'FULL' && <Check className="w-3.5 h-3.5 text-primary" />}
                           </div>
                           <p className="text-[11px] text-muted-foreground font-normal">
-                            Display your complete legal name on verified ads.
+                            Display full name in trade chat.
                           </p>
                         </button>
 
@@ -1392,9 +1405,9 @@ export default function SettingsPage() {
                           type="button"
                           id="vis-partial-btn"
                           onClick={() => setNameVisibility('PARTIAL')}
-                          className={`p-3 rounded-xl border text-left transition-all cursor-pointer ${
+                          className={`p-3.5 rounded-xl border text-left transition-all cursor-pointer ${
                             nameVisibility === 'PARTIAL'
-                              ? 'border-primary bg-primary/10 text-primary font-bold shadow-xs'
+                              ? 'border-primary bg-primary/10 text-primary font-bold shadow-xs ring-1 ring-primary/30'
                               : 'border-border bg-card hover:bg-muted/50 text-foreground'
                           }`}
                         >
@@ -1403,7 +1416,7 @@ export default function SettingsPage() {
                             {nameVisibility === 'PARTIAL' && <Check className="w-3.5 h-3.5 text-primary" />}
                           </div>
                           <p className="text-[11px] text-muted-foreground font-normal">
-                            Show first name and initial only (e.g. John D.).
+                            Display initial and last name (e.g. &ldquo;a. dam&rdquo;).
                           </p>
                         </button>
 
@@ -1411,9 +1424,9 @@ export default function SettingsPage() {
                           type="button"
                           id="vis-hide-btn"
                           onClick={() => setNameVisibility('HIDE')}
-                          className={`p-3 rounded-xl border text-left transition-all cursor-pointer ${
+                          className={`p-3.5 rounded-xl border text-left transition-all cursor-pointer ${
                             nameVisibility === 'HIDE'
-                              ? 'border-primary bg-primary/10 text-primary font-bold shadow-xs'
+                              ? 'border-primary bg-primary/10 text-primary font-bold shadow-xs ring-1 ring-primary/30'
                               : 'border-border bg-card hover:bg-muted/50 text-foreground'
                           }`}
                         >
@@ -1422,9 +1435,52 @@ export default function SettingsPage() {
                             {nameVisibility === 'HIDE' && <Check className="w-3.5 h-3.5 text-primary" />}
                           </div>
                           <p className="text-[11px] text-muted-foreground font-normal">
-                            Display only your trading handle @{profile?.username || username || 'username'}.
+                            Hide name completely; show only @{profile?.username || username || 'username'}.
                           </p>
                         </button>
+                      </div>
+
+                      {/* Live Preview Box of what will be shown */}
+                      <div className="p-3.5 rounded-xl border border-border bg-secondary/40 space-y-2.5">
+                        <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
+                          <span className="font-semibold text-foreground flex items-center gap-1.5">
+                            <Info className="w-3.5 h-3.5 text-primary shrink-0" />
+                            Live Preview in Trade Chat (i) Icon:
+                          </span>
+                          <span className="font-mono text-xs font-bold text-primary px-2.5 py-0.5 rounded-full bg-primary/10 border border-primary/20">
+                            {nameVisibility === 'FULL' && (fullName?.trim() || 'Adam Dam')}
+                            {nameVisibility === 'PARTIAL' && (
+                              formatTradeDisplayName(fullName?.trim() || 'Adam Dam', 'PARTIAL').formattedName
+                            )}
+                            {nameVisibility === 'HIDE' && `@${profile?.username || username || 'username'} (Name is Hidden)`}
+                          </span>
+                        </div>
+
+                        <div className="text-[11px] text-muted-foreground">
+                          {nameVisibility === 'FULL' && (
+                            <p>
+                              Currently showing your <strong>Full Name</strong> ({fullName?.trim() || 'Adam Dam'}) inside the trade chat &lsquo;i&rsquo; info detail modal.
+                            </p>
+                          )}
+                          {nameVisibility === 'PARTIAL' && (
+                            <p>
+                              Currently showing your <strong>Partial Name</strong> (&ldquo;{formatTradeDisplayName(fullName?.trim() || 'Adam Dam', 'PARTIAL').formattedName}&rdquo; - initial and last name) inside the trade chat &lsquo;i&rsquo; info detail modal.
+                            </p>
+                          )}
+                          {nameVisibility === 'HIDE' && (
+                            <p>
+                              Currently set to <strong>Hide Name</strong>. Trade counterparties will only see your username (@{profile?.username || username || 'username'}).
+                            </p>
+                          )}
+                        </div>
+
+                        {/* Note about username everywhere else */}
+                        <div className="pt-2 border-t border-border/60 flex items-start gap-2 text-[11px] text-muted-foreground">
+                          <ShieldCheck className="w-3.5 h-3.5 text-emerald-500 shrink-0 mt-0.5" />
+                          <p>
+                            <strong className="text-foreground">Privacy Note:</strong> In all other pages (Buy/Sell ads, user profile, /users/username, search listings, etc.), <strong>only your @username is displayed</strong>. Full name and partial name are strictly restricted to the Trade Chat &lsquo;i&rsquo; detail modal.
+                          </p>
+                        </div>
                       </div>
                     </div>
                   </div>
@@ -1891,7 +1947,7 @@ export default function SettingsPage() {
                           </span>
                         </div>
                         <p className="text-xs text-muted-foreground">
-                          Authenticator app code verification (enables only upon 6-digit OTP verification)
+                          Use authenticator for login and security
                         </p>
                       </div>
                     </div>
@@ -1914,7 +1970,7 @@ export default function SettingsPage() {
                                 Two-Factor Authentication is Active
                               </p>
                               <p className="text-[11px] text-muted-foreground mt-0.5">
-                                Your account is protected. A 6-digit OTP passcode is required during login and high-value crypto withdrawals.
+                                Your account is protected. A 4 to 8 digit OTP passcode is required during login and high-value crypto withdrawals.
                               </p>
                             </div>
                           </div>
@@ -1931,78 +1987,145 @@ export default function SettingsPage() {
                           </button>
                         </div>
                       ) : (
-                        <div className="space-y-4 max-w-lg">
-                          <div className="space-y-1">
-                            <h4 className="text-xs font-bold uppercase tracking-wider text-foreground">
-                              Step 1: Link Authenticator App
-                            </h4>
-                            <p className="text-xs text-muted-foreground">
-                              Open Google Authenticator, Authy, or Microsoft Authenticator, and enter this secret key:
-                            </p>
-                          </div>
+                        <div className="space-y-5 max-w-lg">
+                          {/* SUB-SECTION STEP 1: SETUP KEY, QR CODE & INSTRUCTIONS */}
+                          {twoFaStep === 'setup' && (
+                            <div className="space-y-4">
+                              <div className="space-y-1">
+                                <h4 className="text-xs font-bold uppercase tracking-wider text-foreground flex items-center gap-2">
+                                  <span className="w-5 h-5 rounded-full bg-primary/10 text-primary flex items-center justify-center text-[11px] font-bold">1</span>
+                                  Authenticator Setup Key & QR Code
+                                </h4>
+                                <p className="text-xs text-muted-foreground">
+                                  Follow the instructions below to link your authenticator app for login and security:
+                                </p>
+                              </div>
 
-                          <div className="flex items-center gap-2 p-3 rounded-xl border border-border bg-secondary/60">
-                            <code className="text-xs font-mono font-bold text-primary flex-1 break-all">
-                              P2PX-SEC-7734-AUTH-9901
-                            </code>
-                            <button
-                              type="button"
-                              onClick={() => {
-                                navigator.clipboard?.writeText('P2PX-SEC-7734-AUTH-9901');
-                                notify('info', 'Secret key copied to clipboard.');
-                              }}
-                              className="p-1.5 rounded-lg hover:bg-background text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
-                              title="Copy Secret Key"
-                            >
-                              <Copy className="w-4 h-4" />
-                            </button>
-                          </div>
+                              {/* Instructions for Authenticator */}
+                              <div className="p-3.5 rounded-xl border border-border bg-secondary/40 space-y-2 text-xs text-foreground">
+                                <p className="font-semibold text-foreground">Instructions for Authenticator:</p>
+                                <ol className="list-decimal list-inside space-y-1 text-muted-foreground text-[11px]">
+                                  <li>Download and open <strong>Google Authenticator</strong>, <strong>Microsoft Authenticator</strong>, or <strong>Authy</strong> on your mobile device.</li>
+                                  <li>Scan the QR code below, or manually copy and paste the setup key into your authenticator app.</li>
+                                  <li>Once the account is added, click <strong>Continue</strong> to enter your OTP code.</li>
+                                </ol>
+                              </div>
 
-                          <form onSubmit={handleVerifyAndEnable2fa} className="space-y-3 pt-2">
-                            <div className="space-y-1">
-                              <h4 className="text-xs font-bold uppercase tracking-wider text-foreground">
-                                Step 2: Verify 6-Digit OTP Code <span className="text-rose-500">*</span>
-                              </h4>
-                              <p className="text-xs text-muted-foreground">
-                                Enter the 6-digit code displayed in your authenticator app to confirm and activate 2FA:
+                              {/* QR Code and Setup Key Display */}
+                              <div className="flex flex-col sm:flex-row items-center sm:items-start gap-4 p-4 rounded-xl border border-border bg-card">
+                                <div className="bg-white p-2.5 rounded-xl border border-gray-200 shadow-xs shrink-0">
+                                  <QRCode
+                                    value={`otpauth://totp/P2PExchange:${encodeURIComponent(username || email || 'User')}?secret=${twoFactorSecret}&issuer=P2PExchange`}
+                                    size={140}
+                                    level="M"
+                                  />
+                                </div>
+                                <div className="space-y-2 w-full min-w-0">
+                                  <label className="block text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+                                    Manual Setup Key
+                                  </label>
+                                  <div className="flex items-center gap-2 p-2.5 rounded-xl border border-border bg-secondary/60">
+                                    <code className="text-xs font-mono font-bold text-primary flex-1 break-all">
+                                      {twoFactorSecret}
+                                    </code>
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        navigator.clipboard?.writeText(twoFactorSecret);
+                                        notify('info', 'Setup key copied to clipboard.');
+                                      }}
+                                      className="p-1.5 rounded-lg hover:bg-background text-muted-foreground hover:text-foreground transition-colors cursor-pointer shrink-0"
+                                      title="Copy Setup Key"
+                                    >
+                                      <Copy className="w-4 h-4" />
+                                    </button>
+                                  </div>
+                                  <p className="text-[10px] text-muted-foreground">
+                                    If you cannot scan the QR code, manually type this secret key into your authenticator app.
+                                  </p>
+                                </div>
+                              </div>
+
+                              {/* Continue Button */}
+                              <div className="pt-2 flex justify-end">
+                                <button
+                                  type="button"
+                                  id="continue-to-otp-btn"
+                                  onClick={() => setTwoFaStep('otp')}
+                                  className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-xs font-bold bg-primary text-primary-foreground hover:bg-primary/90 transition-all shadow-xs cursor-pointer"
+                                >
+                                  <span>Continue</span>
+                                  <ArrowRight className="w-4 h-4" />
+                                </button>
+                              </div>
+                            </div>
+                          )}
+
+                          {/* SUB-SECTION STEP 2: OPTION TO ENTER 4 TO 8 DIGIT OTP */}
+                          {twoFaStep === 'otp' && (
+                            <form onSubmit={handleVerifyAndEnable2fa} className="space-y-4">
+                              <div className="space-y-1">
+                                <h4 className="text-xs font-bold uppercase tracking-wider text-foreground flex items-center gap-2">
+                                  <span className="w-5 h-5 rounded-full bg-primary/10 text-primary flex items-center justify-center text-[11px] font-bold">2</span>
+                                  Enter Authenticator OTP Code <span className="text-rose-500">*</span>
+                                </h4>
+                                <p className="text-xs text-muted-foreground">
+                                  Enter the 4 to 8 digit OTP code generated by your authenticator app. When entered correctly, 2FA will be enabled immediately.
+                                </p>
+                              </div>
+
+                              <div className="space-y-2 max-w-sm">
+                                <label className="block text-xs font-semibold text-foreground">
+                                  4 to 8 Digit OTP Code
+                                </label>
+                                <input
+                                  type="text"
+                                  inputMode="numeric"
+                                  pattern="[0-9]*"
+                                  maxLength={8}
+                                  id="input-2fa-otp"
+                                  autoFocus
+                                  value={twoFaOtpCode}
+                                  onChange={(e) => setTwoFaOtpCode(e.target.value.replace(/\D/g, '').slice(0, 8))}
+                                  placeholder="Enter 4-8 digit OTP"
+                                  className="w-full px-4 py-2.5 rounded-xl border border-input bg-background text-center text-lg font-mono font-bold tracking-widest focus:ring-2 focus:ring-primary focus:border-primary focus:outline-none"
+                                  required
+                                />
+                                <div className="flex items-center justify-between text-[11px] text-muted-foreground px-1">
+                                  <span>Digits: {twoFaOtpCode.length} / 8</span>
+                                  <span>{twoFaOtpCode.length >= 4 ? '✓ Ready to verify' : 'Minimum 4 digits required'}</span>
+                                </div>
+                              </div>
+
+                              <p className="text-[11px] text-muted-foreground">
+                                Note: Two-Factor Authentication will only be enabled after the correct 4 to 8 digit OTP code is verified.
                               </p>
-                            </div>
 
-                            <div className="max-w-xs">
-                              <input
-                                type="text"
-                                inputMode="numeric"
-                                pattern="[0-9]*"
-                                maxLength={6}
-                                id="input-2fa-otp"
-                                value={twoFaOtpCode}
-                                onChange={(e) => setTwoFaOtpCode(e.target.value.replace(/\D/g, ''))}
-                                placeholder="000000"
-                                className="w-full px-4 py-2.5 rounded-xl border border-input bg-background text-center text-lg font-mono font-bold tracking-widest focus:ring-2 focus:ring-primary focus:border-primary focus:outline-none"
-                                required
-                              />
-                            </div>
+                              <div className="pt-2 flex items-center gap-3">
+                                <button
+                                  type="button"
+                                  onClick={() => setTwoFaStep('setup')}
+                                  className="px-4 py-2.5 rounded-xl text-xs font-medium border border-border hover:bg-muted/50 text-foreground transition-colors cursor-pointer"
+                                >
+                                  Back to QR &amp; Key
+                                </button>
 
-                            <p className="text-[11px] text-muted-foreground">
-                              Two-Factor Authentication is ONLY enabled after successfully entering and verifying the correct 6-digit OTP.
-                            </p>
-
-                            <div className="pt-2">
-                              <button
-                                type="submit"
-                                id="verify-enable-2fa-btn"
-                                disabled={verifying2fa || twoFaOtpCode.trim().length !== 6}
-                                className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-xs font-bold bg-primary text-primary-foreground hover:bg-primary/90 transition-colors shadow-xs disabled:opacity-50 cursor-pointer"
-                              >
-                                {verifying2fa ? (
-                                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                                ) : (
-                                  <CheckCircle2 className="w-3.5 h-3.5" />
-                                )}
-                                <span>Verify OTP & Enable 2FA</span>
-                              </button>
-                            </div>
-                          </form>
+                                <button
+                                  type="submit"
+                                  id="verify-enable-2fa-btn"
+                                  disabled={verifying2fa || twoFaOtpCode.trim().length < 4 || twoFaOtpCode.trim().length > 8}
+                                  className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-xs font-bold bg-primary text-primary-foreground hover:bg-primary/90 transition-colors shadow-xs disabled:opacity-50 cursor-pointer"
+                                >
+                                  {verifying2fa ? (
+                                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                  ) : (
+                                    <CheckCircle2 className="w-3.5 h-3.5" />
+                                  )}
+                                  <span>Verify &amp; Enable 2FA</span>
+                                </button>
+                              </div>
+                            </form>
+                          )}
                         </div>
                       )}
                     </div>

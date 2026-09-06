@@ -193,7 +193,7 @@ export default function ManageAds({ ads: initialAds = [] }: { ads?: AdItem[] }) 
 
       {/* Ad Info Modal */}
       {selectedInfoAd && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm animate-in fade-in">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/85 animate-in fade-in">
           <div className="w-full max-w-md rounded-3xl bg-slate-900 border border-slate-800 p-6 shadow-2xl space-y-4">
             <div className="flex items-center justify-between border-b border-slate-800 pb-3">
               <h3 className="text-base font-extrabold text-white flex items-center gap-2">

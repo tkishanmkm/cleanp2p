@@ -405,6 +405,8 @@ export default function CreateP2PAdPage() {
   const [offerLabel, setOfferLabel] = useState('');
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
   const [minTrades, setMinTrades] = useState('0');
+  const [requireFullNameVerified, setRequireFullNameVerified] = useState(false);
+  const [requireVerifiedUsers, setRequireVerifiedUsers] = useState(false);
 
   // Modals UI
   const [isFiatModalOpen, setIsFiatModalOpen] = useState(false);
@@ -537,6 +539,8 @@ export default function CreateP2PAdPage() {
         tags: selectedTags || [],
         ad_tags: selectedTags || [],
         min_completed_trades: parseInt(minTrades, 10) || 0,
+        require_full_name_verified: requireFullNameVerified,
+        require_verified_users: requireVerifiedUsers,
       };
 
       // Clean payload: Cast numeric columns and ensure booleans are boolean
@@ -548,6 +552,8 @@ export default function CreateP2PAdPage() {
         max_amount: adPayload.max_amount ? Number(adPayload.max_amount) : null,
         // Ensure boolean flags are strictly boolean
         is_fixed: Boolean(rateType === 'fixed'),
+        require_full_name_verified: Boolean(requireFullNameVerified),
+        require_verified_users: Boolean(requireVerifiedUsers),
       };
 
       // Remove fixed_rate boolean to avoid PostgreSQL 22P02 error on numeric column
@@ -1065,29 +1071,71 @@ export default function CreateP2PAdPage() {
               </div>
             </div>
 
-            <div className="pt-2 border-t border-gray-100 dark:border-gray-800">
-              <h3 className="text-sm font-medium text-gray-900 dark:text-white mb-2">Trader Requirements</h3>
-              <label className="block text-xs text-gray-600 dark:text-gray-400 mb-1">
-                Minimum Completed Trades
-              </label>
-              <div className="relative">
-                <select
-                  value={minTrades}
-                  onChange={(e) => setMinTrades(e.target.value)}
-                  className="w-full appearance-none px-3 py-2.5 border border-gray-200 dark:border-gray-700 rounded-lg text-xs bg-white dark:bg-[#202026] text-gray-900 dark:text-white focus:outline-none focus:ring-1 focus:ring-[#6366f1] pr-8"
-                >
-                  <option value="0">No requirement</option>
-                  <option value="1">1 completed trade</option>
-                  <option value="2">2 completed trades</option>
-                  <option value="3">3 completed trades</option>
-                  <option value="4">4 completed trades</option>
-                  <option value="5">5 completed trades</option>
-                </select>
-                <ChevronDown className="w-4 h-4 text-gray-400 absolute right-3 top-3 pointer-events-none" />
+            <div className="pt-2 border-t border-gray-100 dark:border-gray-800 space-y-4">
+              <h3 className="text-sm font-medium text-gray-900 dark:text-white">Trader Requirements</h3>
+
+              {/* Requirement Checkboxes */}
+              <div className="space-y-2.5">
+                <label className="flex items-start gap-3 p-3 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-[#202026] hover:bg-gray-50 dark:hover:bg-gray-800/80 cursor-pointer transition">
+                  <input
+                    type="checkbox"
+                    id="checkbox-full-name-verified"
+                    checked={requireFullNameVerified}
+                    onChange={(e) => setRequireFullNameVerified(e.target.checked)}
+                    className="mt-0.5 h-4 w-4 rounded border-gray-300 dark:border-gray-600 text-[#6366f1] focus:ring-[#6366f1] cursor-pointer"
+                  />
+                  <div>
+                    <span className="text-xs font-semibold text-gray-900 dark:text-white block">
+                      Only full name verified take trade
+                    </span>
+                    <span className="text-[11px] text-gray-500 dark:text-gray-400 block mt-0.5">
+                      Counterparty must have completed full legal name identity verification before opening this trade.
+                    </span>
+                  </div>
+                </label>
+
+                <label className="flex items-start gap-3 p-3 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-[#202026] hover:bg-gray-50 dark:hover:bg-gray-800/80 cursor-pointer transition">
+                  <input
+                    type="checkbox"
+                    id="checkbox-verified-users-only"
+                    checked={requireVerifiedUsers}
+                    onChange={(e) => setRequireVerifiedUsers(e.target.checked)}
+                    className="mt-0.5 h-4 w-4 rounded border-gray-300 dark:border-gray-600 text-[#6366f1] focus:ring-[#6366f1] cursor-pointer"
+                  />
+                  <div>
+                    <span className="text-xs font-semibold text-gray-900 dark:text-white block">
+                      Verified users take trade
+                    </span>
+                    <span className="text-[11px] text-gray-500 dark:text-gray-400 block mt-0.5">
+                      Only allow verified accounts with confirmed KYC status to take this trade.
+                    </span>
+                  </div>
+                </label>
               </div>
-              <span className="text-[11px] text-gray-400 mt-1 block">
-                Set a minimum number of trades a user must have completed to start a trade with you.
-              </span>
+
+              <div>
+                <label className="block text-xs text-gray-600 dark:text-gray-400 mb-1">
+                  Minimum Completed Trades
+                </label>
+                <div className="relative">
+                  <select
+                    value={minTrades}
+                    onChange={(e) => setMinTrades(e.target.value)}
+                    className="w-full appearance-none px-3 py-2.5 border border-gray-200 dark:border-gray-700 rounded-lg text-xs bg-white dark:bg-[#202026] text-gray-900 dark:text-white focus:outline-none focus:ring-1 focus:ring-[#6366f1] pr-8 cursor-pointer"
+                  >
+                    <option value="0">No requirement</option>
+                    <option value="1">1 completed trade</option>
+                    <option value="2">2 completed trades</option>
+                    <option value="3">3 completed trades</option>
+                    <option value="4">4 completed trades</option>
+                    <option value="5">5 completed trades</option>
+                  </select>
+                  <ChevronDown className="w-4 h-4 text-gray-400 absolute right-3 top-3 pointer-events-none" />
+                </div>
+                <span className="text-[11px] text-gray-400 mt-1 block">
+                  Set a minimum number of trades a user must have completed to start a trade with you.
+                </span>
+              </div>
             </div>
           </div>
 
@@ -1106,7 +1154,7 @@ export default function CreateP2PAdPage() {
 
       {/* --- MODAL: Change Fiat --- */}
       {isFiatModalOpen && (
-        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+        <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4">
           <div className="bg-white dark:bg-[#18181c] rounded-xl max-w-md w-full max-h-[80vh] flex flex-col shadow-2xl border border-gray-200 dark:border-gray-800">
             <div className="p-4 border-b border-gray-100 dark:border-gray-800 flex items-center justify-between">
               <h3 className="font-semibold text-gray-900 dark:text-white text-sm">Change Fiat Currency</h3>
@@ -1163,7 +1211,7 @@ export default function CreateP2PAdPage() {
 
       {/* --- MODAL: Targeted / Blocked Countries --- */}
       {(isTargetedModalOpen || isBlockedModalOpen) && (
-        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+        <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4">
           <div className="bg-white dark:bg-[#18181c] rounded-xl max-w-md w-full max-h-[80vh] flex flex-col shadow-2xl border border-gray-200 dark:border-gray-800">
             <div className="p-4 border-b border-gray-100 dark:border-gray-800 flex items-center justify-between">
               <h3 className="font-semibold text-gray-900 dark:text-white text-sm">

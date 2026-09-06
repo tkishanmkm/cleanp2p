@@ -142,6 +142,8 @@ export async function POST(request: NextRequest) {
       max_amount: requestedMax,
       max_limit: requestedMax,
       is_fixed: Boolean(body.is_fixed ?? (typeof body.fixed_rate === 'boolean' ? body.fixed_rate : false)),
+      require_full_name_verified: Boolean(body.require_full_name_verified),
+      require_verified_users: Boolean(body.require_verified_users),
     };
 
     if (typeof cleanPayload.fixed_rate === 'boolean') {

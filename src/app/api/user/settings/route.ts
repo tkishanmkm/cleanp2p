@@ -250,9 +250,9 @@ export async function PATCH(req: NextRequest) {
         const code = data?.code?.toString().trim();
 
         if (enabled) {
-          if (!code || !/^\d{6}$/.test(code)) {
+          if (!code || !/^\d{4,8}$/.test(code)) {
             return NextResponse.json({
-              error: 'Invalid 6-digit authenticator code. Please enter the valid 6-digit OTP code shown in your authenticator app.'
+              error: 'Invalid authenticator code. Please enter a valid 4 to 8-digit OTP code shown in your authenticator app.'
             }, { status: 400 });
           }
         }

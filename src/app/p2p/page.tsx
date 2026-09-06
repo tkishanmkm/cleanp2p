@@ -217,7 +217,7 @@ export default function P2PMarketplace() {
 
       {/* Order Execution Modal */}
       {selectedAd && (
-        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+        <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-50">
           <div className="bg-card border rounded-xl max-w-md w-full p-6 space-y-4 shadow-xl">
             <div className="flex justify-between items-center border-b pb-3">
               <h3 className="font-bold">

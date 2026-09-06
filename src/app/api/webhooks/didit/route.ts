@@ -1,6 +1,51 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3';
+import URL from 'url';
+
+function isSafePublicUrl(targetUrl: string): boolean {
+  try {
+    const parsed = new URL.URL(targetUrl);
+
+    // Enforce HTTPS
+    if (parsed.protocol !== 'https:') return false;
+
+    const hostname = parsed.hostname.toLowerCase();
+
+    // Block cloud metadata and private IPv4/IPv6 ranges
+    if (
+      hostname === '169.254.169.254' ||
+      hostname === 'localhost' ||
+      hostname.startsWith('127.') ||
+      hostname.startsWith('10.') ||
+      hostname.startsWith('172.16.') ||
+      hostname.startsWith('172.17.') ||
+      hostname.startsWith('172.18.') ||
+      hostname.startsWith('172.19.') ||
+      hostname.startsWith('172.20.') ||
+      hostname.startsWith('172.21.') ||
+      hostname.startsWith('172.22.') ||
+      hostname.startsWith('172.23.') ||
+      hostname.startsWith('172.24.') ||
+      hostname.startsWith('172.25.') ||
+      hostname.startsWith('172.26.') ||
+      hostname.startsWith('172.27.') ||
+      hostname.startsWith('172.28.') ||
+      hostname.startsWith('172.29.') ||
+      hostname.startsWith('172.30.') ||
+      hostname.startsWith('172.31.') ||
+      hostname.startsWith('192.168.') ||
+      hostname.endsWith('.internal') ||
+      hostname.endsWith('.local')
+    ) {
+      return false;
+    }
+
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 function getSupabaseAdmin() {
   return createClient(
@@ -39,9 +84,14 @@ export async function POST(req: Request) {
 
     // If Didit passed a document snapshot, copy it to Backblaze B2 for long-term audit storage
     if (document_image_url && status === 'APPROVED') {
+      if (!isSafePublicUrl(document_image_url)) {
+        console.warn(`[SECURITY ALERT] Didit Webhook SSRF attempt blocked for URL: ${document_image_url}`);
+        return NextResponse.json({ error: 'Unsafe image resource URL rejected' }, { status: 400 });
+      }
+
       const b2Client = getB2Client();
       if (b2Client && process.env.B2_BUCKET_NAME) {
-        const docRes = await fetch(document_image_url);
+        const docRes = await fetch(document_image_url, { signal: AbortSignal.timeout(5000) });
         if (docRes.ok) {
           const buffer = Buffer.from(await docRes.arrayBuffer());
           const objectKey = `kyc-documents/${user_id}/${session_id}.jpg`;

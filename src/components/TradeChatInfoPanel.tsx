@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { Info, X, Star, ThumbsUp, ThumbsDown, Lock, Unlock, AlertTriangle } from 'lucide-react';
+import { formatTradeDisplayName } from '@/lib/name-utils';
 
 interface TradeChatInfoPanelProps {
   trade: {
@@ -33,9 +34,12 @@ export default function TradeChatInfoPanel({ trade, currentUserId, counterparty 
   const [loading, setLoading] = useState(false);
 
   const isBuyer = currentUserId === trade.buyer_id;
-  const displayName = isBuyer 
+  const rawDisplayName = isBuyer 
     ? trade.seller_display_name_snapshot 
     : trade.buyer_display_name_snapshot;
+
+  const visibility = (counterparty as any).name_visibility || (counterparty as any).nameVisibility || 'FULL';
+  const nameDisplay = formatTradeDisplayName(rawDisplayName, visibility);
 
   const isTradeActiveOrDisputed = ['ACTIVE', 'DISPUTED'].includes(trade.status?.toUpperCase() || '');
 
@@ -89,7 +93,7 @@ export default function TradeChatInfoPanel({ trade, currentUserId, counterparty 
       </button>
 
       {isOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm animate-in fade-in duration-200">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/85 animate-in fade-in duration-200">
           <div className="w-full max-w-md rounded-3xl bg-slate-900 border border-slate-800 p-6 shadow-2xl space-y-5">
             <div className="flex items-center justify-between border-b border-slate-800 pb-4">
               <h3 className="text-base font-bold text-white flex items-center gap-2">
@@ -117,10 +121,10 @@ export default function TradeChatInfoPanel({ trade, currentUserId, counterparty 
 
             <div className="space-y-3">
               <div className="p-4 rounded-2xl bg-slate-950 border border-slate-800 space-y-2">
-                {displayName && (
+                {!nameDisplay.isHidden && nameDisplay.formattedName && (
                   <div className="flex justify-between text-xs">
-                    <span className="text-slate-400">Name:</span>
-                    <span className="font-bold text-white">{displayName}</span>
+                    <span className="text-slate-400">{nameDisplay.type === 'PARTIAL' ? 'Name (Partial):' : 'Full Name:'}</span>
+                    <span className="font-bold text-white">{nameDisplay.formattedName}</span>
                   </div>
                 )}
                 <div className="flex justify-between text-xs">

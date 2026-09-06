@@ -9,6 +9,7 @@ import { toDate } from '@/lib/utils';
 import type { User } from '@/lib/types';
 import { countries } from '@/lib/countries';
 import { ScrollArea } from '@/components/ui/scroll-area';
+import { formatTradeDisplayName } from '@/lib/name-utils';
 
 function DetailItem({ icon, label, value }: { icon: React.ReactNode, label: string, value: string | number | undefined }) {
     if (value === undefined || value === null) return null;
@@ -23,13 +24,16 @@ export function CounterpartyInfoPanel({ user, open, onOpenChange, completedTrade
 
   const getCountryName = (code?: string) => code ? countries.find(c => c.code === code)?.name : 'N/A';
 
+  // Apply name privacy visibility rule (Full Name / Partial Name / Hide Name)
+  const nameVisibility = (user as any).nameVisibility || (user as any).name_visibility || 'FULL';
+  const nameDisplay = formatTradeDisplayName(user.fullName, nameVisibility);
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
         <SheetContent className="flex flex-col">
             <SheetHeader>
                 <SheetTitle>Trader Information</SheetTitle>
-                <SheetDescription>Details for {user.userId}</SheetDescription>
+                <SheetDescription>Details for @{user.userId}</SheetDescription>
             </SheetHeader>
             <ScrollArea className="flex-grow">
               <div className="py-4 space-y-6 pr-6">
@@ -38,10 +42,16 @@ export function CounterpartyInfoPanel({ user, open, onOpenChange, completedTrade
                           <AvatarImage src={user.photoURL} />
                           <AvatarFallback><DefaultAvatar /></AvatarFallback>
                       </Avatar>
-                      <h2 className="text-xl font-bold">{user.userId}</h2>
+                      <h2 className="text-xl font-bold">@{user.userId}</h2>
                   </div>
                   <div className="space-y-1">
-                      <DetailItem icon={<UserIcon size={16} />} label="Full Name" value={user.fullName} />
+                      {!nameDisplay.isHidden && nameDisplay.formattedName && (
+                        <DetailItem 
+                          icon={<UserIcon size={16} />} 
+                          label={nameDisplay.type === 'PARTIAL' ? 'Name (Partial)' : 'Full Name'} 
+                          value={nameDisplay.formattedName} 
+                        />
+                      )}
                       <DetailItem icon={<Calendar size={16} />} label="Date of Birth" value={dobDate ? format(dobDate, 'LLLL d, yyyy') : 'N/A'} />
                       <DetailItem icon={<ArrowLeftRight size={16} />} label="Trades With You" value={completedTradesWithUser} />
                       <DetailItem icon={<Calendar size={16} />} label="Joined" value={joinedAgo} />

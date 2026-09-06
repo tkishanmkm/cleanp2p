@@ -11,17 +11,11 @@ export function AdminWorkerPanel() {
     setOutputLog(null);
 
     const endpoint = `/api/workers/${type}-worker`;
-    const secret =
-      type === 'deposit'
-        ? process.env.NEXT_PUBLIC_DEPOSIT_WORKER_SECRET || '891c9ab82a71ee0dd6f2328f0cc999dcfb19c2b76a315f395c656396b3617d7f'
-        : process.env.NEXT_PUBLIC_WITHDRAWAL_WORKER_SECRET || 'd59b2a67e431ff99a0b129841029c193850021fa4298ab3c7104e1c20182c1ab';
-
     try {
       const res = await fetch(endpoint, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          Authorization: `Bearer ${secret}`,
         },
       });
 

@@ -662,7 +662,7 @@ export default function TradeChatRoom({ params }: TradeChatRoomProps) {
 
       {/* Raise Dispute Modal Overlay */}
       {showDisputeModal && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4 z-50">
+        <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-50">
           <div className="bg-white dark:bg-gray-800 p-6 rounded-xl max-w-md w-full border border-gray-200 dark:border-gray-700 shadow-xl space-y-4">
             <div className="flex items-center gap-2">
               <span className="text-xl">⚠️</span>
