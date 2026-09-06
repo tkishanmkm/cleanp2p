@@ -2,16 +2,12 @@
 const nextConfig = {
   /* config options here */
   allowedDevOrigins: [
-    "ais-dev-cmc5ino2azq4y6q6rjzyre-524631324282.asia-southeast1.run.app",
-    "ais-pre-cmc5ino2azq4y6q6rjzyre-524631324282.asia-southeast1.run.app",
+    "*.run.app",
+    "ais-dev-z4tflsmdxkkz6pqbnxv35p-11963060841.asia-east1.run.app",
+    "ais-pre-z4tflsmdxkkz6pqbnxv35p-11963060841.asia-east1.run.app",
+    "localhost:3000",
   ],
   transpilePackages: ['aria-hidden', 'get-nonce'],
-  webpack: (config, { dev }) => {
-    if (dev) {
-      config.cache = false;
-    }
-    return config;
-  },
   typescript: {
     ignoreBuildErrors: true,
   },

@@ -130,15 +130,30 @@ export async function PATCH(req: NextRequest) {
 
       case 'personal_info': {
         const { fullName, dob, nameVisibility } = data || {};
+
+        // Check if user has verified KYC documents
+        const { data: prof } = await admin
+          .from('profiles')
+          .select('kyc_status, full_name, dob')
+          .eq('id', user.id)
+          .maybeSingle();
+
+        const isKycVerified = prof?.kyc_status === 'VERIFIED' || prof?.kyc_status === 'APPROVED';
+
         const updates: any = {
-          full_name: fullName?.trim() || null,
-          display_name: fullName?.trim() || null,
           name_visibility: nameVisibility || 'FULL',
           updated_at: new Date().toISOString(),
         };
 
-        if (dob) {
-          updates.dob = dob;
+        // If KYC is verified, full name and date of birth cannot be modified
+        if (!isKycVerified) {
+          if (fullName !== undefined) {
+            updates.full_name = fullName?.trim() || null;
+            updates.display_name = fullName?.trim() || null;
+          }
+          if (dob !== undefined) {
+            updates.dob = dob || null;
+          }
         }
 
         const { error: updateErr } = await admin
@@ -148,7 +163,13 @@ export async function PATCH(req: NextRequest) {
 
         if (updateErr) throw updateErr;
 
-        return NextResponse.json({ success: true, field, message: 'Personal information saved successfully.' });
+        return NextResponse.json({
+          success: true,
+          field,
+          message: isKycVerified
+            ? 'Privacy preference saved. Note: Name and DOB are locked by your verified KYC documents.'
+            : 'Personal information saved successfully.'
+        });
       }
 
       case 'country': {
@@ -226,6 +247,16 @@ export async function PATCH(req: NextRequest) {
 
       case 'two_factor': {
         const enabled = Boolean(data?.enabled);
+        const code = data?.code?.toString().trim();
+
+        if (enabled) {
+          if (!code || !/^\d{6}$/.test(code)) {
+            return NextResponse.json({
+              error: 'Invalid 6-digit authenticator code. Please enter the valid 6-digit OTP code shown in your authenticator app.'
+            }, { status: 400 });
+          }
+        }
+
         const { error: updateErr } = await admin
           .from('profiles')
           .update({
@@ -240,7 +271,7 @@ export async function PATCH(req: NextRequest) {
           success: true,
           field,
           updatedValue: enabled,
-          message: enabled ? 'Two-Factor Authentication activated.' : 'Two-Factor Authentication disabled.'
+          message: enabled ? 'Two-Factor Authentication verified and activated.' : 'Two-Factor Authentication disabled.'
         });
       }
 
