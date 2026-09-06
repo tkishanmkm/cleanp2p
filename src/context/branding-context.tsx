@@ -38,9 +38,10 @@ const BrandingContext = createContext<BrandingContextType>({
 export function BrandingProvider({ children }: { children: ReactNode }) {
   const [branding, setBranding] = useState<BrandingConfig>(defaultBranding);
   const [isLoading, setIsLoading] = useState(true);
-  const supabase = createClient();
 
   useEffect(() => {
+    const supabase = createClient();
+
     // 1. Initial check from localStorage for fast local persistence
     try {
       const cached = localStorage.getItem('app_branding_config');
@@ -104,7 +105,7 @@ export function BrandingProvider({ children }: { children: ReactNode }) {
       window.removeEventListener('branding_updated', handleCustomBranding);
       supabase.removeChannel(channel);
     };
-  }, [supabase]);
+  }, []);
 
   const setBrandingConfig = (config: Partial<BrandingConfig>) => {
     setBranding((prev) => {

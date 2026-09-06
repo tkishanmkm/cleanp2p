@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createClient } from '@/utils/supabase/server';
+import { createClient, getSupabaseAdminClient } from '@/utils/supabase/server';
 import { uploadToB2 } from '@/lib/b2';
 
 export const dynamic = 'force-dynamic';
@@ -26,29 +26,52 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Only image files are allowed for avatar' }, { status: 400 });
     }
 
-    if (file.size > 10 * 1024 * 1024) {
-      return NextResponse.json({ error: 'Image exceeds 10MB limit' }, { status: 400 });
+    if (file.size > 5 * 1024 * 1024) {
+      return NextResponse.json({ error: 'Image exceeds 5MB limit' }, { status: 400 });
     }
 
     const fileExt = file.name.split('.').pop() || 'jpg';
-    const objectKey = `avatars/${user.id}_${Date.now()}.${fileExt}`;
+    const objectKey = `avatars/${user.id}.${fileExt}`;
 
     const arrayBuffer = await file.arrayBuffer();
     const buffer = Buffer.from(arrayBuffer);
 
-    // Upload to Backblaze B2
-    await uploadToB2(objectKey, buffer, file.type);
+    let avatarUrl = '';
+    const admin = getSupabaseAdminClient();
+
+    // Try Backblaze B2 if configured
+    try {
+      if (process.env.B2_ACCESS_KEY_ID || process.env.B2_KEY_ID) {
+        await uploadToB2(objectKey, buffer, file.type);
+        const endpoint = process.env.B2_ENDPOINT || 'https://s3.us-east-005.backblazeb2.com';
+        const bucket = process.env.B2_BUCKET_NAME || 'thepax';
+        avatarUrl = `${endpoint}/${bucket}/${objectKey}`;
+      }
+    } catch (b2Err) {
+      console.warn('B2 upload failed or unconfigured, falling back to data URI:', b2Err);
+    }
+
+    // Fallback: If not uploaded to B2, store data URI
+    if (!avatarUrl) {
+      const base64 = buffer.toString('base64');
+      avatarUrl = `data:${file.type};base64,${base64}`;
+    }
 
     // Update user profile
-    await supabase
+    await admin
       .from('profiles')
-      .update({ avatar_url: objectKey })
+      .update({
+        avatar_url: avatarUrl,
+        photo_url: avatarUrl,
+        updated_at: new Date().toISOString(),
+      })
       .eq('id', user.id);
 
     return NextResponse.json({
       success: true,
-      avatar_url: objectKey,
-      media_url: `/api/media/avatar/${user.id}`,
+      avatarUrl,
+      avatar_url: avatarUrl,
+      message: 'Profile picture updated successfully.'
     });
   } catch (err: any) {
     console.error('Error uploading avatar:', err);

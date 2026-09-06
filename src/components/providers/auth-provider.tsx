@@ -47,6 +47,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [isLoading, setIsLoading] = useState(true);
   const [userError, setUserError] = useState<Error | null>(null);
 
+  const supabaseUserRef = React.useRef<SupabaseUser | null>(null);
+  useEffect(() => {
+    supabaseUserRef.current = supabaseUser;
+  }, [supabaseUser]);
+
   const fetchProfile = async (uid: string) => {
     try {
       const p = await getUserProfile(uid);
@@ -156,27 +161,46 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
     }
 
+    // Global listener for instant profile updates across all components and pages
+    const handleProfileUpdated = (event?: any) => {
+      if (event?.detail) {
+        setProfile((prev) => (prev ? { ...prev, ...event.detail } : event.detail));
+      }
+      const currentUser = supabaseUserRef.current;
+      if (currentUser) {
+        fetchProfile(currentUser.id);
+      }
+    };
+
+    if (typeof window !== 'undefined') {
+      window.addEventListener('profile-updated', handleProfileUpdated);
+    }
+
     return () => {
       mounted = false;
       clearTimeout(fallbackTimer);
       if (authListener?.subscription) {
         authListener.subscription.unsubscribe();
       }
+      if (typeof window !== 'undefined') {
+        window.removeEventListener('profile-updated', handleProfileUpdated);
+      }
     };
   }, []);
 
-  const refreshProfile = async () => {
-    if (supabaseUser) {
-      await fetchProfile(supabaseUser.id);
+  const refreshProfile = React.useCallback(async () => {
+    const currentUser = supabaseUserRef.current;
+    if (currentUser) {
+      await fetchProfile(currentUser.id);
     }
-  };
+  }, []);
 
-  const handleSignOut = async () => {
+  const handleSignOut = React.useCallback(async () => {
     await authSignOut();
     setSession(null);
     setSupabaseUser(null);
     setProfile(null);
-  };
+  }, []);
 
   // Map user to normalized structure compatible with both standard and legacy consumers
   const authUser: AuthUser | null = useMemo(() => {
@@ -193,7 +217,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       id: supabaseUser.id,
       email: supabaseUser.email || null,
       displayName: profile?.display_name || profile?.username || supabaseUser.user_metadata?.display_name || supabaseUser.user_metadata?.username || (supabaseUser.email ? supabaseUser.email.split('@')[0] : 'User'),
-      photoURL: profile?.avatar_url || supabaseUser.user_metadata?.avatar_url || null,
+      photoURL: profile?.avatar_url || (profile as any)?.photo_url || supabaseUser.user_metadata?.avatar_url || null,
       role: (profile?.role || (isUserAdmin ? 'admin' : 'user')) as 'user' | 'admin' | 'moderator',
       isAdmin: isUserAdmin,
       rawUser: supabaseUser,
@@ -215,7 +239,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     signUp: signUpWithEmail,
     signOut: handleSignOut,
     refreshProfile,
-  }), [authUser, supabaseUser, profile, session, isAdmin, isLoading, userError]);
+  }), [authUser, supabaseUser, profile, session, isAdmin, isLoading, userError, handleSignOut, refreshProfile]);
 
   return (
     <AuthContext.Provider value={value}>

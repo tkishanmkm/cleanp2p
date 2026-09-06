@@ -5,6 +5,13 @@ const nextConfig = {
     "ais-dev-cmc5ino2azq4y6q6rjzyre-524631324282.asia-southeast1.run.app",
     "ais-pre-cmc5ino2azq4y6q6rjzyre-524631324282.asia-southeast1.run.app",
   ],
+  transpilePackages: ['aria-hidden', 'get-nonce'],
+  webpack: (config, { dev }) => {
+    if (dev) {
+      config.cache = false;
+    }
+    return config;
+  },
   typescript: {
     ignoreBuildErrors: true,
   },

@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase";
+import { createClient } from "@/utils/supabase/server";
 
 export const dynamic = "force-dynamic";
 
@@ -7,7 +8,20 @@ const WORKFLOW_ID = "b36ac1aa-29fc-4272-8939-c1d184d072fd";
 
 export async function POST(req: Request) {
   try {
-    const { userId } = await req.json().catch(() => ({ userId: undefined }));
+    const body = await req.json().catch(() => ({}));
+    let userId = body?.userId;
+
+    if (!userId) {
+      try {
+        const supabase = await createClient();
+        const { data: { user } } = await supabase.auth.getUser();
+        if (user?.id) {
+          userId = user.id;
+        }
+      } catch (authErr) {
+        console.warn("Could not retrieve user from session in /api/verify:", authErr);
+      }
+    }
 
     if (!userId) {
       return NextResponse.json({ error: "unauthorized" }, { status: 401 });

@@ -64,26 +64,32 @@ const getNestedValue = (obj: any, key: string) => {
 
 
 export function I18nProvider({ children }: { children: ReactNode }) {
-  const { user } = useAuth();
   const [language, setLanguageState] = useState('en');
   const [messages, setMessages] = useState(translations.en);
 
   useEffect(() => {
-    const savedLang = localStorage.getItem('tradeflow-lang');
-    if (savedLang && translations[savedLang]) {
-      setLanguageState(savedLang);
-    } else if (user?.ipBasedCountry && countryToLang[user.ipBasedCountry]) {
-      setLanguageState(countryToLang[user.ipBasedCountry]);
-    } else {
+    try {
+      const savedLang = localStorage.getItem('tradeflow-lang');
+      if (savedLang && translations[savedLang]) {
+        setLanguageState(savedLang);
+        return;
+      }
+
+      if (typeof navigator !== 'undefined') {
         const browserLang = navigator.language;
-        const supportedLang = LANGUAGES.find(l => l.code === browserLang || browserLang.startsWith(l.code.split('-')[0]));
+        const supportedLang = LANGUAGES.find(
+          (l) => l.code === browserLang || browserLang.startsWith(l.code.split('-')[0])
+        );
         if (supportedLang) {
-            setLanguageState(supportedLang.code);
-        } else {
-            setLanguageState('en');
+          setLanguageState(supportedLang.code);
+          return;
         }
+      }
+      setLanguageState('en');
+    } catch {
+      setLanguageState('en');
     }
-  }, [user]);
+  }, []);
 
   useEffect(() => {
     setMessages(translations[language] || translations.en);

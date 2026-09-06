@@ -38,15 +38,18 @@ export function BlockedUsersManagement({ user: currentUserData }: { user: User }
 
   const [searchResults, setSearchResults] = useState<User[]>([]);
   const [isSearching, setIsSearching] = useState(false);
-  const [debounceTimeout, setDebounceTimeout] = useState<NodeJS.Timeout | null>(null);
 
   const [blockedUsers, setBlockedUsers] = useState<User[]>([]);
   const [areBlockedUsersLoading, setAreBlockedUsersLoading] = useState(true);
 
-  const blockedUserIds = useMemo(() => currentUserData?.blockedUsers || [], [currentUserData]);
+  const blockedUserIdsKey = useMemo(() => {
+    const list = currentUserData?.blockedUsers || [];
+    return Array.isArray(list) ? list.join(',') : '';
+  }, [currentUserData?.blockedUsers]);
 
-  const fetchBlockedUsers = async () => {
-    if (!blockedUserIds || blockedUserIds.length === 0) {
+  const fetchBlockedUsers = useCallback(async () => {
+    const ids = blockedUserIdsKey ? blockedUserIdsKey.split(',').filter(Boolean) : [];
+    if (ids.length === 0) {
       setBlockedUsers([]);
       setAreBlockedUsersLoading(false);
       return;
@@ -56,7 +59,7 @@ export function BlockedUsersManagement({ user: currentUserData }: { user: User }
       const { data, error } = await supabase
         .from('profiles')
         .select('*')
-        .in('id', blockedUserIds);
+        .in('id', ids);
 
       if (error) throw error;
 
@@ -81,56 +84,56 @@ export function BlockedUsersManagement({ user: currentUserData }: { user: User }
     } finally {
       setAreBlockedUsersLoading(false);
     }
-  };
+  }, [blockedUserIdsKey]);
 
   useEffect(() => {
     fetchBlockedUsers();
-  }, [blockedUserIds]);
+  }, [fetchBlockedUsers]);
+
+  const authUserId = authUser?.uid;
 
   useEffect(() => {
-    if (debounceTimeout) {
-      clearTimeout(debounceTimeout);
-    }
-
-    if (usernameToBlock && usernameToBlock.length >= 2) {
-      setIsSearching(true);
-      const timeout = setTimeout(async () => {
-        if (!authUser) return;
-        try {
-          const { data, error } = await supabase
-            .from('profiles')
-            .select('*')
-            .ilike('username', `%${usernameToBlock}%`)
-            .limit(5);
-
-          if (!error && data) {
-            const blockedIds = currentUserData?.blockedUsers || [];
-            const users = data
-              .map(
-                (u: any) =>
-                  ({
-                    id: u.id,
-                    userId: u.username || u.id,
-                    username: u.username,
-                    photoURL: u.photo_url,
-                    isAdminAccount: u.is_admin_account,
-                  } as User)
-              )
-              .filter((u) => u.id !== authUser.uid && !u.isAdminAccount && !blockedIds.includes(u.id));
-
-            setSearchResults(users);
-          }
-        } catch (err) {
-          console.error(err);
-        } finally {
-          setIsSearching(false);
-        }
-      }, 500);
-      setDebounceTimeout(timeout as any);
-    } else {
+    if (!usernameToBlock || usernameToBlock.length < 2) {
       setSearchResults([]);
+      return;
     }
-  }, [usernameToBlock, authUser, currentUserData]);
+
+    setIsSearching(true);
+    const timeout = setTimeout(async () => {
+      if (!authUserId) return;
+      try {
+        const { data, error } = await supabase
+          .from('profiles')
+          .select('*')
+          .ilike('username', `%${usernameToBlock}%`)
+          .limit(5);
+
+        if (!error && data) {
+          const blockedIds = currentUserData?.blockedUsers || [];
+          const users = data
+            .map(
+              (u: any) =>
+                ({
+                  id: u.id,
+                  userId: u.username || u.id,
+                  username: u.username,
+                  photoURL: u.photo_url,
+                  isAdminAccount: u.is_admin_account,
+                } as User)
+            )
+            .filter((u) => u.id !== authUserId && !u.isAdminAccount && !blockedIds.includes(u.id));
+
+          setSearchResults(users);
+        }
+      } catch (err) {
+        console.error(err);
+      } finally {
+        setIsSearching(false);
+      }
+    }, 500);
+
+    return () => clearTimeout(timeout);
+  }, [usernameToBlock, authUserId, currentUserData?.blockedUsers]);
 
   const handleBlockUser = async () => {
     if (!authUser || !usernameToBlock) return;

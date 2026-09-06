@@ -588,11 +588,11 @@ export function DashboardHeader() {
               >
                 <div className="relative shrink-0 flex items-center">
                   <Avatar className="h-7 w-7 rounded-lg border border-slate-200 dark:border-slate-700">
-                    {profile?.photoURL ? (
-                      <AvatarImage src={profile.photoURL} alt={authUser.displayName || profile?.username || 'User Avatar'} />
+                    {(authUser?.photoURL || (profile as any)?.avatar_url || (profile as any)?.photo_url) ? (
+                      <AvatarImage src={authUser?.photoURL || (profile as any)?.avatar_url || (profile as any)?.photo_url} alt={authUser?.displayName || profile?.username || 'User Avatar'} />
                     ) : (
                       <AvatarFallback className="bg-gradient-to-br from-[#5B4DF6] to-[#3B82F6] text-white text-[11px] font-bold">
-                        {(authUser.displayName || profile?.username || 'User').substring(0, 2).toUpperCase()}
+                        {(authUser?.displayName || profile?.username || 'User').substring(0, 2).toUpperCase()}
                       </AvatarFallback>
                     )}
                   </Avatar>
