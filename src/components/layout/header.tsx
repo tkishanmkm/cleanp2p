@@ -3,7 +3,7 @@
 
 import Link from "next/link";
 import { useState } from "react";
-import { Globe, Menu, ChevronDown, ArrowDownToLine, ArrowUpFromLine, PlusCircle, BookOpen, FileText, Shield, HelpCircle, User, Settings, LayoutDashboard, LogOut } from "lucide-react";
+import { Globe, Menu, ChevronDown, ArrowDownToLine, ArrowUpFromLine, PlusCircle, BookOpen, FileText, Shield, HelpCircle, User, Settings, LayoutDashboard, LogOut, Wallet } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Logo } from "@/components/logo";
 import {
@@ -25,6 +25,7 @@ import { ModeToggle } from "../mode-toggle";
 import { useI18n } from "@/context/i18n-context";
 import type { Language } from "@/lib/types";
 import { useAuth } from '@/components/providers/auth-provider';
+import { useWallet } from '@/context/wallet-context';
 import { useRouter } from 'next/navigation';
 import { useToast } from '@/hooks/use-toast';
 import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar';
@@ -42,6 +43,7 @@ const mobileNavLinks = [
 export function Header() {
   const { language, setLanguage } = useI18n();
   const { user, isUserLoading, signOut } = useAuth();
+  const { totalConvertedValue, preferredCurrency } = useWallet();
   const router = useRouter();
   const { toast } = useToast();
   const selectedLanguage = LANGUAGES.flatMap(l => l.dialects || l).find(l => l.code === language) || LANGUAGES[0];
@@ -288,12 +290,35 @@ export function Header() {
                         ) : (
                           <Skeleton className="h-4 w-16" />
                         )}
+                        <div className="flex items-center gap-1 text-[11px] font-bold text-emerald-600 dark:text-emerald-400 font-mono leading-none mt-0.5">
+                          <Wallet className="h-2.5 w-2.5 text-emerald-500 shrink-0" />
+                          <span className="truncate">
+                            {totalConvertedValue.toLocaleString(undefined, {
+                              style: 'currency',
+                              currency: preferredCurrency,
+                              minimumFractionDigits: 2,
+                              maximumFractionDigits: 2,
+                            })}
+                          </span>
+                        </div>
                     </div>
                   </Button>
                 </DropdownMenuTrigger>
-                <DropdownMenuContent align="end">
-                  <DropdownMenuLabel>{user.displayName || 'My Account'}</DropdownMenuLabel>
-                  <DropdownMenuSeparator />
+                <DropdownMenuContent align="end" className="w-56">
+                  <div className="px-3 py-2 border-b border-border/60 mb-1">
+                    <p className="text-xs font-bold text-foreground truncate">{user.displayName || 'My Account'}</p>
+                    <div className="flex items-center gap-1.5 mt-1 text-xs">
+                      <Wallet className="w-3 h-3 text-emerald-500 shrink-0" />
+                      <span className="font-mono font-bold text-emerald-600 dark:text-emerald-400 text-xs">
+                        {totalConvertedValue.toLocaleString(undefined, {
+                          style: 'currency',
+                          currency: preferredCurrency,
+                          minimumFractionDigits: 2,
+                          maximumFractionDigits: 2,
+                        })}
+                      </span>
+                    </div>
+                  </div>
                   <DropdownMenuItem asChild>
                     <Link href="/dashboard"><LayoutDashboard className="mr-2 h-4 w-4" /><span>Dashboard</span></Link>
                   </DropdownMenuItem>

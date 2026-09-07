@@ -19,8 +19,10 @@ import { WithdrawDialog } from '@/components/wallets/withdraw-dialog';
 import { BtcLogo, EthLogo, LtcLogo, UsdtLogo } from '@/components/icons';
 import { cancelWithdrawalRequest, getUserWalletBalances } from '@/lib/wallet';
 import { getUserDeposits, getUserWithdrawals, type DepositRecord, type WithdrawalRecord } from '@/lib/supabase/db';
+import { supabase } from '@/lib/supabase/client';
 import { SUPPORTED_CRYPTOS } from '@/lib/constants';
 import { usePrices } from '@/context/price-context';
+import { useWallet } from '@/context/wallet-context';
 import { statusColors } from '@/lib/status-colors';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { TransferHistoryTable } from '@/components/wallets/transfer-history-table';
@@ -295,11 +297,48 @@ export default function WalletPage() {
 
   // Fetch real-time balances from Supabase
   const loadBalances = useCallback(async () => {
-    if (!user?.uid) return;
     try {
-      const balances = await getUserWalletBalances(user.uid);
-      if (balances && Object.keys(balances).length > 0) {
-        setSupabaseBalances(balances);
+      const { data: authData } = await supabase.auth.getUser();
+      const sessionRes = await supabase.auth.getSession();
+      const currentUserId = user?.uid || authData?.user?.id || sessionRes.data?.session?.user?.id;
+      if (!currentUserId) return;
+
+      // 1. Direct query from wallet_assets using confirmed schema columns
+      const { data: walletAssets, error } = await supabase
+        .from('wallet_assets')
+        .select('asset_symbol, available, locked, updated_at')
+        .eq('user_id', currentUserId);
+
+      if (!error && walletAssets && walletAssets.length > 0) {
+        const balanceMap: { [key in CryptoCurrency]?: { balance: number; lockedBalance: number } } = {
+          BTC: { balance: 0, lockedBalance: 0 },
+          ETH: { balance: 0, lockedBalance: 0 },
+          LTC: { balance: 0, lockedBalance: 0 },
+          USDT: { balance: 0, lockedBalance: 0 },
+        };
+
+        walletAssets.forEach((asset: any) => {
+          // Ensure property access matches database column output:
+          const spendable = Number(asset.available ?? 0); // 'available', not 'balance' or 'amount'
+          const symbol = String(asset.asset_symbol ?? '').toUpperCase() as CryptoCurrency; // 'asset_symbol', not 'symbol' or 'asset_code'
+          const locked = Number(asset.locked ?? 0);
+
+          if (symbol) {
+            balanceMap[symbol] = {
+              balance: spendable,
+              lockedBalance: locked,
+            };
+          }
+        });
+
+        setSupabaseBalances(balanceMap);
+        return;
+      }
+
+      // 2. Fallback to getUserWalletBalances helper
+      const fallbackBalances = await getUserWalletBalances(currentUserId);
+      if (fallbackBalances && Object.keys(fallbackBalances).length > 0) {
+        setSupabaseBalances(fallbackBalances);
       }
     } catch (err) {
       console.error('Could not load real-time wallet balances:', err);
@@ -308,34 +347,69 @@ export default function WalletPage() {
 
   useEffect(() => {
     loadBalances();
-  }, [loadBalances]);
 
-  // Aggregate summary from Supabase balances
+    const currentUserId = user?.uid;
+
+    // 1. Subscribe to changes on wallet_assets for this specific user
+    const channel = supabase
+      .channel(`realtime_wallet_assets_${currentUserId || 'all'}`)
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'wallet_assets',
+          ...(currentUserId ? { filter: `user_id=eq.${currentUserId}` } : {}),
+        },
+        (payload: any) => {
+          console.log('⚡ Realtime Balance Update Received:', payload.new || payload);
+
+          // 2. Reactively update state with new available/locked values
+          if (payload.new && payload.new.asset_symbol) {
+            const sym = String(payload.new.asset_symbol).toUpperCase() as CryptoCurrency;
+            const avail = Number(payload.new.available ?? 0);
+            const lock = Number(payload.new.locked ?? 0);
+
+            setSupabaseBalances((prev) => ({
+              ...prev,
+              [sym]: { balance: avail, lockedBalance: lock },
+            }));
+          } else {
+            loadBalances();
+          }
+        }
+      )
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'user_wallets' }, () => loadBalances())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'deposits' }, () => loadBalances())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'wallet_transactions' }, () => loadBalances())
+      .subscribe((status) => {
+        console.log('Realtime Channel Status:', status);
+      });
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [loadBalances, user?.uid]);
+
+  const { balances: reactiveBalances, totalConvertedValue, preferredCurrency: walletCurrency, refreshBalances } = useWallet();
+
+  // Aggregate summary from reactive wallet state
   const walletSummary = useMemo(() => {
-    const preferredCurrency = profile?.preferredCurrency || 'USD';
-    const exchangeRate = fiatRates[preferredCurrency] || 1;
-
     return SUPPORTED_CRYPTOS.map((crypto) => {
       const coin = crypto.name;
-      const walletData = supabaseBalances?.[coin] || { balance: 0, lockedBalance: 0 };
-      const priceInUsd = prices[coin] || 0;
-      const availableBalance = typeof walletData.balance === 'number' ? walletData.balance : 0;
-      const lockedBalance = typeof walletData.lockedBalance === 'number' ? walletData.lockedBalance : 0;
-      const fiatValue = availableBalance * priceInUsd * exchangeRate;
+      const walletData = reactiveBalances?.[coin] || { available: 0, inEscrow: 0, inWithdrawal: 0, fiatValue: 0 };
 
       return {
         coin,
-        availableBalance,
-        lockedBalance,
-        fiatValue,
+        availableBalance: walletData.available,
+        inEscrow: walletData.inEscrow,
+        inWithdrawal: walletData.inWithdrawal,
+        fiatValue: walletData.fiatValue,
       };
     }).sort((a, b) => b.fiatValue - a.fiatValue);
-  }, [supabaseBalances, profile, prices, fiatRates]);
+  }, [reactiveBalances]);
 
-  const totalAvailableValue = useMemo(
-    () => walletSummary.reduce((acc, w) => acc + (w?.fiatValue || 0), 0),
-    [walletSummary]
-  );
+  const totalAvailableValue = totalConvertedValue;
 
   const handleDepositClick = (coin: CryptoCurrency) => {
     setActiveDialogAsset(coin);
@@ -359,6 +433,7 @@ export default function WalletPage() {
       toast({ title: 'Withdrawal Cancelled' });
       setIsDetailsOpen(false);
       loadBalances();
+      refreshBalances();
     } catch (e: any) {
       toast({ variant: 'destructive', title: 'Cancellation Failed', description: e?.message || 'Failed to cancel' });
     }
@@ -393,9 +468,9 @@ export default function WalletPage() {
 
   // Convert balances into the format expected by WithdrawDialog
   const userWalletsFormatted: Record<string, { balance: number; address: string }> = {};
-  if (supabaseBalances) {
-    for (const [key, val] of Object.entries(supabaseBalances)) {
-      userWalletsFormatted[key] = { balance: val?.balance || 0, address: '' };
+  if (reactiveBalances) {
+    for (const [key, val] of Object.entries(reactiveBalances)) {
+      userWalletsFormatted[key] = { balance: val?.available || 0, address: '' };
     }
   }
 
@@ -450,9 +525,25 @@ export default function WalletPage() {
                   })}
                 </p>
               </div>
-              {data.lockedBalance > 0 && (
-                <p className="text-[10px] text-amber-600 font-medium">In Escrow: {data.lockedBalance.toFixed(6)}</p>
-              )}
+              <div className="space-y-1 pt-1 border-t border-border/40">
+                {data.inEscrow > 0 && (
+                  <p className="text-[11px] text-amber-500 font-medium font-mono flex items-center justify-between">
+                    <span>In P2P Escrow:</span>
+                    <span>{data.inEscrow.toFixed(6)}</span>
+                  </p>
+                )}
+                {data.inWithdrawal > 0 && (
+                  <p className="text-[11px] text-blue-400 font-medium font-mono flex items-center justify-between">
+                    <span>Pending Withdrawal:</span>
+                    <span>{data.inWithdrawal.toFixed(6)}</span>
+                  </p>
+                )}
+                {data.inEscrow === 0 && data.inWithdrawal === 0 && (
+                  <p className="text-[11px] text-muted-foreground font-mono">
+                    All funds spendable
+                  </p>
+                )}
+              </div>
             </CardContent>
             <CardFooter className="flex gap-2">
               <Button size="sm" className="flex-1" onClick={() => handleDepositClick(data.coin as CryptoCurrency)}>

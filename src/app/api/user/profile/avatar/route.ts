@@ -39,14 +39,11 @@ export async function POST(req: NextRequest) {
     let avatarUrl = '';
     const admin = getSupabaseAdminClient();
 
-    // Try Backblaze B2 if configured
+    // Upload to Backblaze B2
     try {
-      if (process.env.B2_ACCESS_KEY_ID || process.env.B2_KEY_ID) {
-        await uploadToB2(objectKey, buffer, file.type);
-        const endpoint = process.env.B2_ENDPOINT || 'https://s3.us-east-005.backblazeb2.com';
-        const bucket = process.env.B2_BUCKET_NAME || 'thepax';
-        avatarUrl = `${endpoint}/${bucket}/${objectKey}`;
-      }
+      await uploadToB2(objectKey, buffer, file.type);
+      // Use media proxy route which signs B2 URLs on the fly and caches cleanly
+      avatarUrl = `/api/media/avatar/${user.id}?v=${Date.now()}`;
     } catch (b2Err) {
       console.warn('B2 upload failed or unconfigured, falling back to data URI:', b2Err);
     }
@@ -57,7 +54,7 @@ export async function POST(req: NextRequest) {
       avatarUrl = `data:${file.type};base64,${base64}`;
     }
 
-    // Update user profile
+    // Update user profile in database
     await admin
       .from('profiles')
       .update({
@@ -66,6 +63,20 @@ export async function POST(req: NextRequest) {
         updated_at: new Date().toISOString(),
       })
       .eq('id', user.id);
+
+    // Update Supabase Auth user metadata so it implants everywhere immediately
+    try {
+      await admin.auth.admin.updateUserById(user.id, {
+        user_metadata: {
+          avatar_url: avatarUrl,
+          photo_url: avatarUrl,
+          picture: avatarUrl,
+          photoURL: avatarUrl,
+        },
+      });
+    } catch (authMetaErr) {
+      console.warn('Auth metadata update error (non-fatal):', authMetaErr);
+    }
 
     return NextResponse.json({
       success: true,

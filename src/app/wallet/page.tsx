@@ -1,7 +1,8 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
-import { supabase } from '@/lib/supabase/client';
+import React, { useState } from 'react';
+import { useWallet } from '@/context/wallet-context';
+import { TotalBalanceCard } from '@/components/wallet/TotalBalanceCard';
 import { WalletBalanceCard } from '@/components/wallet/WalletBalanceCard';
 import { WithdrawalDialog } from '@/components/wallet/WithdrawalDialog';
 import { TransactionHistory } from '@/components/wallet/TransactionHistory';
@@ -11,34 +12,15 @@ import { AdminWorkerPanel } from '@/components/wallet/AdminWorkerPanel';
 export default function WalletPage() {
   const [isDepositOpen, setIsDepositOpen] = useState(false);
   const [isWithdrawOpen, setIsWithdrawOpen] = useState(false);
-  const [availableBalance, setAvailableBalance] = useState(0);
+  const { totalAvailableUsdValue, balances, refreshBalances } = useWallet();
 
-  const fetchLiveBalance = async () => {
-    try {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!session) return;
-
-      const { data: balanceData } = await supabase
-        .from('balances')
-        .select('available_balance')
-        .eq('user_id', session.user.id)
-        .eq('asset_code', 'USDT')
-        .maybeSingle();
-
-      if (balanceData && typeof balanceData.available_balance === 'number') {
-        setAvailableBalance(balanceData.available_balance);
-      }
-    } catch (err) {
-      console.warn('Failed to load available balance in WalletPage:', err);
-    }
-  };
-
-  useEffect(() => {
-    fetchLiveBalance();
-  }, [isWithdrawOpen, isDepositOpen]);
+  const usdtAvailable = balances['USDT']?.available || 0;
 
   return (
     <div className="max-w-4xl mx-auto p-6 space-y-6">
+      {/* 0. Total Balance Overview */}
+      <TotalBalanceCard totalUsdValue={totalAvailableUsdValue} />
+
       {/* 1. Unified Portfolio Balance Header */}
       <WalletBalanceCard
         assetSymbol="USDT"
@@ -56,11 +38,11 @@ export default function WalletPage() {
       <WithdrawalDialog
         isOpen={isWithdrawOpen}
         onClose={() => setIsWithdrawOpen(false)}
-        availableBalance={availableBalance}
+        availableBalance={usdtAvailable}
         assetSymbol="USDT"
         chain="BEP20"
         onSuccess={() => {
-          fetchLiveBalance();
+          refreshBalances();
         }}
       />
 

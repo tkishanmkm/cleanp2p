@@ -26,8 +26,12 @@ export function toDate(timestamp: any): Date | null {
   return d;
 }
 
-// Username Regex Pattern: lowercase letters, numbers, periods, and underscores, max 25 chars
-export const USERNAME_REGEX = /^[a-z0-9._]{1,25}$/;
+// Username Regex Pattern: 5 to 25 characters, lowercase letters, numbers, periods (.), and underscores (_)
+export const USERNAME_REGEX = /^[a-z0-9._]{5,25}$/;
+
+export function isValidUsername(username: string): boolean {
+  return USERNAME_REGEX.test(username);
+}
 
 /**
  * Normalizes any string into a valid username format:

@@ -203,7 +203,7 @@ export default function MyAdsPage() {
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div>
             <div className="flex items-center gap-2 mb-1.5">
-              <span className="text-xs font-bold uppercase tracking-wider text-[#5B4DF6] bg-[#5B4DF6]/10 dark:bg-[#5B4DF6]/20 px-2.5 py-0.5 rounded-md">
+              <span className="text-xs font-bold uppercase tracking-wider text-[#9273FC] bg-[#9273FC]/10 dark:bg-[#9273FC]/20 px-2.5 py-0.5 rounded-md">
                 Peer-to-Peer Market
               </span>
             </div>
@@ -216,7 +216,7 @@ export default function MyAdsPage() {
           </div>
           <Link
             href="/ads/create"
-            className="inline-flex items-center justify-center gap-2 px-5 py-2.5 bg-[#5B4DF6] hover:bg-[#4F46E5] text-white font-bold text-sm rounded-xl shadow-sm transition-all active:scale-[0.98]"
+            className="inline-flex items-center justify-center gap-2 px-5 py-2.5 bg-[#9273FC] hover:bg-[#4F46E5] text-white font-bold text-sm rounded-xl shadow-sm transition-all active:scale-[0.98]"
           >
             <Plus className="w-4 h-4" />
             <span>Create New Ad</span>

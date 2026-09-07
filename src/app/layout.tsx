@@ -9,6 +9,7 @@ import { NotificationsProvider } from '@/components/notifications-provider';
 import { PriceProvider } from '@/context/price-context';
 import { BrandingProvider } from '@/context/branding-context';
 import { I18nProvider } from '@/context/i18n-context';
+import { WalletProvider } from '@/context/wallet-context';
 
 const inter = Inter({
   subsets: ['latin'],
@@ -46,7 +47,9 @@ export default function RootLayout({
               <PriceProvider>
                 <I18nProvider>
                   <BrandingProvider>
-                    {children}
+                    <WalletProvider>
+                      {children}
+                    </WalletProvider>
                   </BrandingProvider>
                 </I18nProvider>
               </PriceProvider>

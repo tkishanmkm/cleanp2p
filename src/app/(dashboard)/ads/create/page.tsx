@@ -609,7 +609,7 @@ export default function CreateP2PAdPage() {
       <div className="w-full max-w-3xl space-y-8">
         
         {/* Theme Styled Header banner matching Buy, Sell, and My Ads */}
-        <div className="bg-gradient-to-r from-[#5B4DF6] via-[#5244E8] to-[#3B82F6] text-white py-8 px-6 sm:px-8 rounded-2xl shadow-lg border border-indigo-400/20">
+        <div className="bg-gradient-to-r from-[#9273FC] via-[#5244E8] to-[#3B82F6] text-white py-8 px-6 sm:px-8 rounded-2xl shadow-lg border border-indigo-400/20">
           <div className="flex items-center gap-2 mb-1">
             <span className="text-xs font-semibold uppercase tracking-wider text-indigo-200 bg-white/10 px-2.5 py-0.5 rounded-full border border-white/15">
               P2P Trading Hub

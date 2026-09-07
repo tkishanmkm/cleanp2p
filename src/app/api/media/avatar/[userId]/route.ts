@@ -16,11 +16,13 @@ export async function GET(
 
     const { data: profile } = await supabase
       .from('profiles')
-      .select('avatar_url')
+      .select('avatar_url, photo_url')
       .eq('id', userId)
       .maybeSingle();
 
-    if (!profile || !profile.avatar_url) {
+    const avatarUrl = profile?.avatar_url || profile?.photo_url;
+
+    if (!profile || !avatarUrl) {
       // Fallback: return a clean default SVG avatar
       const fallbackSvg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="100" height="100">
         <rect width="100" height="100" fill="#1e293b"/>
@@ -35,7 +37,19 @@ export async function GET(
       });
     }
 
-    const avatarUrl = profile.avatar_url;
+    // Handle base64 data URIs
+    if (avatarUrl.startsWith('data:image/')) {
+      const parts = avatarUrl.split(';base64,');
+      const mimeType = parts[0].replace('data:', '');
+      const base64Data = parts[1];
+      const buffer = Buffer.from(base64Data, 'base64');
+      return new NextResponse(buffer, {
+        headers: {
+          'Content-Type': mimeType,
+          'Cache-Control': 'public, max-age=86400',
+        },
+      });
+    }
 
     // If it's already an external absolute URL (e.g. https://...)
     if (avatarUrl.startsWith('http://') || avatarUrl.startsWith('https://')) {

@@ -14,6 +14,7 @@ import { FlagIcon } from '../ui/flag-icon';
 import { formatDistanceToNow } from 'date-fns';
 import { UserStatusIndicator } from '@/components/user-status';
 import TraderStatusBadge from '@/components/TraderStatusBadge';
+import { formatJoinedDate } from '@/utils/p2p-helpers';
 import {
   Dialog,
   DialogContent,
@@ -196,14 +197,21 @@ export function AdCard({ ad }: AdCardProps) {
                               </Avatar>
                               <div>
                                   <p className="font-semibold">{adCreator.username}</p>
-                                  <p className="text-xs text-muted-foreground">Joined {adCreator.createdAt ? formatDistanceToNow(toDate(adCreator.createdAt)!) + ' ago' : 'N/A'}</p>
+                                  <p className="text-xs text-muted-foreground">{formatJoinedDate(adCreator.createdAt)}</p>
                               </div>
                           </div>
                           <div className="grid grid-cols-2 gap-y-2 gap-x-4 pt-2">
                             <div className="flex items-center gap-2"><CheckCircle className="h-4 w-4 text-muted-foreground" /> <span>{adCreator.completedTrades || 0} Trades</span></div>
                             <div className="flex items-center gap-2"><ThumbsUp className="h-4 w-4 text-green-500" /> <span>{adCreator.positiveFeedback || 0}</span></div>
                             <div className="flex items-center gap-2"><ThumbsDown className="h-4 w-4 text-red-500" /> <span>{adCreator.negativeFeedback || 0}</span></div>
-                            <div className="flex items-center gap-2"><Clock className="h-4 w-4 text-muted-foreground" /> <span>{(adCreator.avgReleaseTime || 0).toFixed(1)}m release</span></div>
+                            <div className="flex items-center gap-2">
+                              <Clock className="h-4 w-4 text-muted-foreground" />
+                              <span>
+                                {ad.adType === 'buy'
+                                  ? `${(adCreator.avgPayTime || adCreator.avgReleaseTime || 0).toFixed(1)}m pay`
+                                  : `${(adCreator.avgReleaseTime || 0).toFixed(1)}m release`}
+                              </span>
+                            </div>
                           </div>
                       </div>
                     </div>

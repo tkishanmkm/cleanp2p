@@ -12,8 +12,8 @@ export async function POST(req: Request) {
     const { username } = await req.json();
     const normalized = username?.trim().toLowerCase();
 
-    if (!normalized || !/^[a-z0-9._]{3,20}$/.test(normalized)) {
-      return NextResponse.json({ available: false, reason: 'Must be 3-20 chars (letters, numbers, dots, underscores).' });
+    if (!normalized || !/^[a-z0-9._]{5,25}$/.test(normalized)) {
+      return NextResponse.json({ available: false, reason: 'Must be 5-25 chars (lowercase letters, numbers, dots, underscores).' });
     }
 
     if (RESERVED_USERNAMES.includes(normalized)) {

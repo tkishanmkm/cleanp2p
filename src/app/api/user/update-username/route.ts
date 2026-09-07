@@ -34,15 +34,16 @@ export async function PATCH(request: NextRequest) {
     return NextResponse.json({ error: 'New username is required' }, { status: 400 });
   }
 
-  const cleanUsername = rawUsername.trim().replace(/[^a-zA-Z0-9_]/g, '');
+  const normalized = rawUsername.trim().toLowerCase();
+  const usernameRegex = /^[a-z0-9._]{5,25}$/;
 
-  if (cleanUsername.length < 3) {
-    return NextResponse.json({ error: 'Username must be at least 3 characters long.' }, { status: 400 });
+  if (!usernameRegex.test(normalized)) {
+    return NextResponse.json({
+      error: 'Username must be 5 to 25 characters and contain only lowercase letters, numbers, points (.), and underscores (_).'
+    }, { status: 400 });
   }
 
-  if (cleanUsername.length > 30) {
-    return NextResponse.json({ error: 'Username cannot exceed 30 characters.' }, { status: 400 });
-  }
+  const cleanUsername = normalized;
 
   // Fetch current user profile to verify one-time change condition
   const { data: profile, error: profileError } = await supabase

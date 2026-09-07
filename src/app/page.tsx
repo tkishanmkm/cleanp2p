@@ -53,7 +53,7 @@ export default function Home() {
         </section>
 
         {/* Stats Section */}
-        <section className="py-16 bg-muted/40 border-y border-border/40">
+        <section className="py-16 bg-muted border-y border-border">
             <div className="container mx-auto px-4 md:px-6">
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-8 text-center">
                     {stats.map(stat => (
@@ -141,7 +141,7 @@ export default function Home() {
         </section>
 
         {/* Why Tradenance Section */}
-        <section id="why-tradenance" className="py-16 md:py-24 lg:py-32 bg-muted/40 border-y border-border/40">
+        <section id="why-tradenance" className="py-16 md:py-24 lg:py-32 bg-muted border-y border-border">
           <div className="container mx-auto px-4 md:px-6">
             <div className="text-center max-w-3xl mx-auto">
                 <h2 className="text-3xl md:text-4xl font-bold tracking-tight">{t('home.whyP2PTitle')}</h2>
@@ -232,7 +232,7 @@ export default function Home() {
         </section>
 
         {/* Supported Crypto Section */}
-        <section id="supported-crypto" className="py-16 md:py-24 lg:py-32 bg-muted/40 border-y border-border/40">
+        <section id="supported-crypto" className="py-16 md:py-24 lg:py-32 bg-muted border-y border-border">
             <div className="container mx-auto px-4 md:px-6">
               <div className="text-center max-w-3xl mx-auto">
                   <h2 className="text-3xl md:text-4xl font-bold tracking-tight">{t('home.supportedCoinsTitle')}</h2>

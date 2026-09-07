@@ -41,7 +41,7 @@ export function Logo({
         >
           <defs>
             <linearGradient id="paxonesGrad" x1="0%" y1="0%" x2="100%" y2="100%">
-              <stop offset="0%" stopColor="#5B4DF6" />
+              <stop offset="0%" stopColor="#9273FC" />
               <stop offset="50%" stopColor="#6366F1" />
               <stop offset="100%" stopColor="#2563EB" />
             </linearGradient>

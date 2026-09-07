@@ -159,8 +159,8 @@ function SignupFormComponent() {
   if (createdAccountInfo) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-secondary/50 p-4">
-        <Card className="w-full max-w-md border border-[#5B4DF6]/30 shadow-2xl bg-white dark:bg-[#18181c] rounded-2xl overflow-hidden">
-          <div className="h-2 bg-gradient-to-r from-[#5B4DF6] via-[#6366F1] to-[#3B82F6]" />
+        <Card className="w-full max-w-md border border-[#9273FC]/30 shadow-2xl bg-white dark:bg-[#18181c] rounded-2xl overflow-hidden">
+          <div className="h-2 bg-gradient-to-r from-[#9273FC] via-[#6366F1] to-[#3B82F6]" />
           <CardHeader className="text-center pt-8 pb-4">
             <div className="w-16 h-16 rounded-2xl bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 flex items-center justify-center mx-auto mb-3 shadow-inner">
               <CheckCircle2 className="h-9 w-9 stroke-[2.5]" />
@@ -171,9 +171,9 @@ function SignupFormComponent() {
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-5 px-6 pb-8">
-            <div className="rounded-xl border border-[#5B4DF6]/25 bg-[#5B4DF6]/5 dark:bg-[#5B4DF6]/10 p-4 space-y-2.5">
+            <div className="rounded-xl border border-[#9273FC]/25 bg-[#9273FC]/5 dark:bg-[#9273FC]/10 p-4 space-y-2.5">
               <div className="flex items-center justify-between">
-                <span className="text-xs font-bold text-[#5B4DF6] uppercase tracking-wider flex items-center gap-1.5">
+                <span className="text-xs font-bold text-[#9273FC] uppercase tracking-wider flex items-center gap-1.5">
                   <Sparkles className="h-3.5 w-3.5" />
                   Assigned User ID / Username
                 </span>
@@ -221,7 +221,7 @@ function SignupFormComponent() {
 
             <Button
               onClick={() => router.push("/wallets")}
-              className="w-full h-12 text-base font-bold rounded-xl bg-gradient-to-r from-[#5B4DF6] via-[#6366F1] to-[#3B82F6] hover:opacity-95 text-white shadow-lg shadow-indigo-500/25 cursor-pointer"
+              className="w-full h-12 text-base font-bold rounded-xl bg-gradient-to-r from-[#9273FC] via-[#6366F1] to-[#3B82F6] hover:opacity-95 text-white shadow-lg shadow-indigo-500/25 cursor-pointer"
             >
               <span>Continue to Platform</span>
               <ArrowRight className="ml-2 h-4 w-4" />

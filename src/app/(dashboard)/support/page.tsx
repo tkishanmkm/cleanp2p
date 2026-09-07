@@ -117,7 +117,7 @@ function SupportContent() {
   return (
     <div className="space-y-6 max-w-4xl mx-auto py-4">
       {/* Header Banner */}
-      <div className="bg-gradient-to-r from-[#5B4DF6] via-[#6366F1] to-[#3B82F6] text-white p-6 sm:p-8 rounded-2xl shadow-md">
+      <div className="bg-gradient-to-r from-[#9273FC] via-[#6366F1] to-[#3B82F6] text-white p-6 sm:p-8 rounded-2xl shadow-md">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div>
             <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-white/15 text-xs font-medium text-white mb-2">

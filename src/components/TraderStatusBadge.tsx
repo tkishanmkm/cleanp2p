@@ -28,19 +28,19 @@ export default function TraderStatusBadge({ presence, lastActive }: { presence?:
       <span
         className={`h-2 w-2 rounded-full ${
           isOnline
-            ? 'bg-emerald-400 animate-pulse shadow-sm shadow-emerald-400/50'
+            ? 'bg-emerald-500 animate-pulse shadow-sm shadow-emerald-500/50'
             : isRecent
-            ? 'bg-amber-400'
-            : 'bg-slate-500'
+            ? 'bg-amber-500'
+            : 'bg-slate-400 dark:bg-slate-500'
         }`}
       />
       <span
         className={`${
           isOnline
-            ? 'text-emerald-400 font-bold'
+            ? 'text-emerald-600 dark:text-emerald-400 font-bold'
             : isRecent
-            ? 'text-amber-300'
-            : 'text-slate-400'
+            ? 'text-amber-600 dark:text-amber-400 font-medium'
+            : 'text-slate-500 dark:text-slate-400'
         }`}
       >
         {status}

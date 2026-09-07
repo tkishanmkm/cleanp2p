@@ -123,8 +123,19 @@ export default function PublicUserProfile() {
       {/* Profile Header Card */}
       <div className="p-6 sm:p-8 rounded-3xl bg-slate-900 border border-slate-800 shadow-2xl flex flex-col md:flex-row items-center justify-between gap-6">
         <div className="flex items-center gap-5">
-          <div className="h-20 w-20 rounded-2xl bg-gradient-to-tr from-indigo-600 to-violet-600 flex items-center justify-center font-bold text-white text-3xl shadow-lg shrink-0">
-            {(profile.username || 'U').charAt(0).toUpperCase()}
+          <div className="relative h-20 w-20 rounded-2xl overflow-hidden bg-gradient-to-tr from-indigo-600 to-violet-600 flex items-center justify-center font-bold text-white text-3xl shadow-lg shrink-0 border border-slate-700">
+            {profile.avatar_url || profile.photo_url ? (
+              <img
+                src={profile.avatar_url || profile.photo_url || `/api/media/avatar/${profile.id}`}
+                alt={profile.username}
+                className="w-full h-full object-cover"
+                onError={(e) => {
+                  (e.target as HTMLElement).style.display = 'none';
+                }}
+              />
+            ) : (
+              <span>{(profile.username || 'U').charAt(0).toUpperCase()}</span>
+            )}
           </div>
           <div className="space-y-1">
             <div className="flex items-center gap-3">

@@ -268,19 +268,52 @@ function P2PMarketplaceContent() {
           const map: Record<string, any> = {};
           profiles.forEach((p) => {
             map[p.id] = {
-              username: p.username,
+              username: p.username || 'Trader',
               country: p.country,
               feedbackScore: p.feedback_score ?? 100,
               positiveFeedback: p.positive_feedback ?? 0,
               negativeFeedback: p.negative_feedback ?? 0,
               completedTrades: p.completed_trades ?? 0,
-              photoURL: p.photo_url || p.avatar_url,
+              avgReleaseTime: p.avg_release_minutes || p.avg_release_time || 'N/A',
+              avgPayTime: p.avg_payment_minutes || p.avg_pay_time || 'N/A',
+              photoURL: p.avatar_url || p.photo_url || `/api/media/avatar/${p.id}`,
               badges: p.badges || [],
-              lastActive: p.last_active,
+              lastActive: p.last_seen_at || p.last_active || p.updated_at,
+              createdAt: p.created_at,
               blockedUsers: p.blocked_users || [],
-              isVerified: p.is_verified ?? false,
+              isVerified: p.is_verified ?? (p.kyc_status === 'VERIFIED') ?? false,
+              cryptoBalances: {
+                BTC: Number(p.btc_balance || 0),
+                ETH: Number(p.eth_balance || 0),
+                USDT: Number(p.usdt_balance || 0),
+                LTC: Number(p.ltc_balance || 0),
+              },
             };
           });
+
+          // Fetch user_wallets to get live available balances
+          try {
+            const { data: wallets } = await supabase
+              .from('user_wallets')
+              .select('user_id, asset_symbol, balance, locked_balance, available_balance')
+              .in('user_id', creatorIds);
+
+            if (wallets) {
+              wallets.forEach((w) => {
+                if (map[w.user_id]) {
+                  const coin = (w.asset_symbol || '').toUpperCase();
+                  const avail = Number(
+                    w.available_balance ?? (Number(w.balance || 0) - Number(w.locked_balance || 0))
+                  );
+                  if (!map[w.user_id].cryptoBalances) map[w.user_id].cryptoBalances = {};
+                  map[w.user_id].cryptoBalances[coin] = Math.max(0, avail);
+                }
+              });
+            }
+          } catch (wErr) {
+            console.warn('Wallet balance fetch warning in sell page:', wErr);
+          }
+
           setAdCreators(map);
         }
       }
@@ -312,13 +345,48 @@ function P2PMarketplaceContent() {
   const filteredAds = useMemo(() => {
     if (!ads) return [];
     
+    // Apply Live Creator Data and Strict Limit Balance Rule
     const updatedAds = ads.map(ad => {
       const liveCreatorData = adCreators[ad.userId];
-      if (liveCreatorData) {
-        return { ...ad, user: { ...ad.user, ...liveCreatorData } };
+      const mergedUser = liveCreatorData
+        ? { ...ad.user, ...liveCreatorData }
+        : ad.user;
+
+      const marketUsd = prices[ad.crypto] || 0;
+      const fRate = fiatRates[ad.fiatCurrency] || 1;
+      const unitPrice = ad.rateType === 'fixed' && ad.fixedRate
+        ? ad.fixedRate
+        : marketUsd * fRate * (1 + (ad.ratePercent || 0) / 100);
+
+      let adjustedMax = ad.maxAmount;
+      let isBalanceSufficient = true;
+
+      // Check balance rule for SELL ads (where creator sells crypto)
+      if (ad.adType === 'sell' && liveCreatorData?.cryptoBalances && ad.crypto) {
+        const coinSym = ad.crypto.toUpperCase();
+        if (liveCreatorData.cryptoBalances[coinSym] !== undefined) {
+          const availCrypto = Number(liveCreatorData.cryptoBalances[coinSym]);
+          const availFiat = availCrypto * (unitPrice > 0 ? unitPrice : 1);
+
+          // STRICT RULE:
+          // 1. If seller's balance is below min limit, hide ad from other users!
+          if (availFiat < ad.minAmount) {
+            isBalanceSufficient = false;
+          } else if (availFiat < ad.maxAmount) {
+            // 2. If seller has e.g. 530$, show limit 100 to 530$!
+            adjustedMax = Math.floor(availFiat * 100) / 100;
+          }
+          // 3. If balance >= maxAmount, show full 100 to 1000$!
+        }
       }
-      return ad;
-    });
+
+      return {
+        ...ad,
+        maxAmount: adjustedMax,
+        isBalanceSufficient,
+        user: mergedUser,
+      };
+    }).filter(ad => ad.isBalanceSufficient !== false);
 
     const activeFiat = selectedFiat || 'USD';
     const exchangeRate = fiatRates[activeFiat] || 1;

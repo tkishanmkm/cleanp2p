@@ -7,12 +7,12 @@ import * as z from "zod";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from '@/components/ui/input';
-import { Form, FormControl, FormDescription, FormField, FormItem, FormLabel, FormMessage } from '@/components/ui/form';
+import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from '@/components/ui/form';
 import { User, CryptoCurrency } from "@/lib/types";
 import { useToast } from '@/hooks/use-toast';
 import { Loader2, Fuel, AlertCircle } from 'lucide-react';
-import { requestWithdrawal } from '@/lib/wallet';
 import { usePrices } from '@/context/price-context';
+import { useWallet } from '@/context/wallet-context';
 import { FIXED_WITHDRAWAL_FEES_USD, SUPPORTED_CRYPTOS } from '@/lib/constants';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select';
 import { useAuth } from '@/components/providers/auth-provider';
@@ -30,16 +30,17 @@ interface WithdrawDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   asset: CryptoCurrency | null;
-  userWallets: User['wallets'] | undefined;
+  userWallets?: User['wallets'] | undefined;
 }
 
 export function WithdrawDialog({ open, onOpenChange, asset, userWallets }: WithdrawDialogProps) {
   const { user } = useAuth();
   const { toast } = useToast();
+  const { requestWithdrawal, refreshBalances, balances } = useWallet();
   const [isLoading, setIsLoading] = useState(false);
   const [isGasLoading, setIsGasLoading] = useState(false);
   const [gasFeeData, setGasFeeData] = useState<NetworkGasFee | null>(null);
-  const { prices, isLoading: arePricesLoading } = usePrices();
+  const { prices } = usePrices();
 
   const availableChains = useMemo(() => {
     if (!asset) return [];
@@ -50,13 +51,22 @@ export function WithdrawDialog({ open, onOpenChange, asset, userWallets }: Withd
     resolver: zodResolver(withdrawSchema),
     defaultValues: {
       address: '',
-      amount: undefined,
+      amount: '' as any,
       chain: '',
     },
   });
 
-  const watchedAmount = form.watch('amount') || 0;
+  const watchedAmount = form.watch('amount');
   const watchedChain = form.watch('chain');
+
+  const numericWatchedAmount = useMemo(() => {
+    if (typeof watchedAmount === 'number') return isNaN(watchedAmount) ? 0 : watchedAmount;
+    if (typeof watchedAmount === 'string') {
+      const parsed = parseFloat(watchedAmount);
+      return isNaN(parsed) ? 0 : parsed;
+    }
+    return 0;
+  }, [watchedAmount]);
 
   // Fetch dynamic live gas fees whenever asset or network changes
   const fetchGasEstimate = useCallback(async (cryptoCode: string, networkCode: string) => {
@@ -89,7 +99,7 @@ export function WithdrawDialog({ open, onOpenChange, asset, userWallets }: Withd
       const defaultChain = availableChains.length === 1 ? availableChains[0] : "";
       form.reset({
         address: '',
-        amount: undefined,
+        amount: '' as any,
         chain: defaultChain,
       });
       setGasFeeData(null);
@@ -106,9 +116,15 @@ export function WithdrawDialog({ open, onOpenChange, asset, userWallets }: Withd
   }, [asset, watchedChain, fetchGasEstimate]);
 
   const availableBalance = useMemo(() => {
-    if (!asset || !userWallets) return 0;
-    return userWallets[asset]?.balance || 0;
-  }, [asset, userWallets]);
+    if (!asset) return 0;
+    if (balances && balances[asset]) {
+      return balances[asset].available || 0;
+    }
+    if (userWallets && userWallets[asset]) {
+      return userWallets[asset]?.balance || 0;
+    }
+    return 0;
+  }, [asset, balances, userWallets]);
 
   // Compute estimated network gas fee
   const { feeInCrypto, feeInUsd } = useMemo(() => {
@@ -116,27 +132,27 @@ export function WithdrawDialog({ open, onOpenChange, asset, userWallets }: Withd
 
     // Prefer live gas oracle estimate
     if (gasFeeData?.estimated_fee_native) {
-      const nativeFee = gasFeeData.estimated_fee_native;
-      const usdFee = gasFeeData.estimated_fee_usd || (prices[asset] ? nativeFee * prices[asset] : 0);
+      const nativeFee = Number(gasFeeData.estimated_fee_native) || 0;
+      const usdFee = Number(gasFeeData.estimated_fee_usd) || (prices[asset] ? nativeFee * prices[asset] : 0);
       return { feeInCrypto: nativeFee, feeInUsd: usdFee };
     }
 
     // Fallback to static lookup
     const key = `${asset}-${watchedChain}`;
-    const usdFee = FIXED_WITHDRAWAL_FEES_USD[key] || FIXED_WITHDRAWAL_FEES_USD[asset] || 0;
-    const price = prices[asset] || 0;
+    const usdFee = Number(FIXED_WITHDRAWAL_FEES_USD[key] || FIXED_WITHDRAWAL_FEES_USD[asset] || 0);
+    const price = Number(prices[asset] || 0);
     const cryptoFee = price > 0 ? usdFee / price : 0;
     return { feeInCrypto: cryptoFee, feeInUsd: usdFee };
   }, [asset, watchedChain, gasFeeData, prices]);
 
   const totalDeducted = useMemo(() => {
-    return (watchedAmount || 0) + feeInCrypto;
-  }, [watchedAmount, feeInCrypto]);
+    return Number(numericWatchedAmount || 0) + Number(feeInCrypto || 0);
+  }, [numericWatchedAmount, feeInCrypto]);
 
   const isInsufficientBalance = useMemo(() => {
-    if (!watchedAmount) return false;
+    if (!numericWatchedAmount || numericWatchedAmount <= 0) return false;
     return totalDeducted > availableBalance;
-  }, [watchedAmount, totalDeducted, availableBalance]);
+  }, [numericWatchedAmount, totalDeducted, availableBalance]);
 
   // Set maximum withdrawable amount (Balance - Estimated Gas Fee)
   const handleSetMaxAmount = () => {
@@ -147,29 +163,31 @@ export function WithdrawDialog({ open, onOpenChange, asset, userWallets }: Withd
   async function onSubmit(values: WithdrawFormValues) {
     if (!user || !asset) return;
 
-    if (totalDeducted > availableBalance) {
+    const withdrawAmt = Number(values.amount);
+    const totalRequired = withdrawAmt + Number(feeInCrypto || 0);
+
+    if (totalRequired > availableBalance) {
       form.setError("amount", {
-        message: `Insufficient balance to cover withdrawal (${values.amount} ${asset}) + network gas fee (${feeInCrypto.toFixed(6)} ${asset}).`,
+        message: `Insufficient balance to cover withdrawal (${withdrawAmt} ${asset}) + network gas fee (${feeInCrypto.toFixed(6)} ${asset}).`,
       });
       return;
     }
 
     setIsLoading(true);
     try {
-      const appUser = { id: user.id || user.uid, displayName: user.displayName || "" };
       await requestWithdrawal(
-        appUser,
         asset,
         values.chain,
-        values.amount,
-        values.address,
+        values.address.trim(),
+        withdrawAmt,
         feeInCrypto
       );
 
       toast({
         title: "Withdrawal Requested",
-        description: `Your withdrawal of ${values.amount} ${asset} has been submitted for processing.`,
+        description: `Your withdrawal of ${withdrawAmt} ${asset} has been submitted for processing.`,
       });
+      await refreshBalances();
       onOpenChange(false);
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : "Failed to process withdrawal.";
@@ -185,22 +203,19 @@ export function WithdrawDialog({ open, onOpenChange, asset, userWallets }: Withd
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-md">
+      <DialogContent className="sm:max-w-[440px]">
         <DialogHeader>
-          <DialogTitle className="flex items-center gap-2">
-            <span>Withdraw {asset}</span>
-          </DialogTitle>
+          <DialogTitle className="text-xl font-bold">Withdraw {asset}</DialogTitle>
         </DialogHeader>
-
         <Form {...form}>
-          <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
+          <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4 pt-2">
             <FormField
               control={form.control}
               name="chain"
               render={({ field }) => (
                 <FormItem>
                   <FormLabel>Network</FormLabel>
-                  <Select onValueChange={field.onChange} value={field.value}>
+                  <Select onValueChange={field.onChange} value={field.value || ''}>
                     <FormControl>
                       <SelectTrigger>
                         <SelectValue placeholder="Select network" />
@@ -224,12 +239,12 @@ export function WithdrawDialog({ open, onOpenChange, asset, userWallets }: Withd
               name="address"
               render={({ field }) => (
                 <FormItem>
-                  <FormLabel>Recipient Address</FormLabel>
+                  <FormLabel>Destination Address</FormLabel>
                   <FormControl>
                     <Input
-                      placeholder={`Enter destination ${watchedChain || asset || ''} address`}
-                      className="font-mono text-sm"
+                      placeholder={`Enter ${watchedChain || asset || ''} address`}
                       {...field}
+                      value={field.value || ''}
                     />
                   </FormControl>
                   <FormMessage />
@@ -250,6 +265,8 @@ export function WithdrawDialog({ open, onOpenChange, asset, userWallets }: Withd
                         step="any"
                         placeholder="0.00"
                         {...field}
+                        value={field.value === undefined ? '' : field.value}
+                        onChange={(e) => field.onChange(e.target.value)}
                       />
                     </FormControl>
                     <Button
@@ -263,9 +280,9 @@ export function WithdrawDialog({ open, onOpenChange, asset, userWallets }: Withd
                     </Button>
                   </div>
                   <div className="flex justify-between items-center text-xs text-muted-foreground pt-1">
-                    <span>Available: {availableBalance.toFixed(8)} {asset}</span>
+                    <span>Available: {Number(availableBalance || 0).toFixed(8)} {asset}</span>
                     {prices[asset || ''] ? (
-                      <span>≈ ${(availableBalance * (prices[asset || ''] || 0)).toFixed(2)} USD</span>
+                      <span>≈ ${(Number(availableBalance || 0) * (prices[asset || ''] || 0)).toFixed(2)} USD</span>
                     ) : null}
                   </div>
                   <FormMessage />
@@ -285,9 +302,9 @@ export function WithdrawDialog({ open, onOpenChange, asset, userWallets }: Withd
                     <Loader2 className="h-3 w-3 animate-spin text-muted-foreground" />
                   ) : (
                     <>
-                      <span>{feeInCrypto > 0 ? feeInCrypto.toFixed(6) : '0.00'} {asset}</span>
+                      <span>{feeInCrypto > 0 ? Number(feeInCrypto).toFixed(6) : '0.00'} {asset}</span>
                       {feeInUsd > 0 && (
-                        <span className="text-[10px] text-muted-foreground">(${feeInUsd.toFixed(2)})</span>
+                        <span className="text-[10px] text-muted-foreground">(${Number(feeInUsd).toFixed(2)})</span>
                       )}
                     </>
                   )}
@@ -304,21 +321,21 @@ export function WithdrawDialog({ open, onOpenChange, asset, userWallets }: Withd
               {gasFeeData?.base_fee_gwei && (
                 <div className="flex justify-between text-[11px] text-muted-foreground/80 pl-5">
                   <span>EVM Gas Price:</span>
-                  <span>{(gasFeeData.base_fee_gwei + (gasFeeData.priority_fee_gwei || 0)).toFixed(1)} Gwei</span>
+                  <span>{(Number(gasFeeData.base_fee_gwei) + Number(gasFeeData.priority_fee_gwei || 0)).toFixed(1)} Gwei</span>
                 </div>
               )}
 
               <div className="border-t border-border/40 pt-2 flex justify-between items-center font-medium">
                 <span>Total Balance Deducted:</span>
                 <span className="font-mono text-foreground font-semibold">
-                  {totalDeducted > 0 ? totalDeducted.toFixed(6) : '0.00'} {asset}
+                  {totalDeducted > 0 ? Number(totalDeducted).toFixed(6) : '0.00'} {asset}
                 </span>
               </div>
 
               <div className="flex justify-between items-center text-muted-foreground">
                 <span>You Will Receive:</span>
                 <span className="font-mono font-semibold text-emerald-600 dark:text-emerald-400">
-                  {Math.max(0, watchedAmount).toFixed(6)} {asset}
+                  {Math.max(0, numericWatchedAmount).toFixed(6)} {asset}
                 </span>
               </div>
             </div>
@@ -327,14 +344,14 @@ export function WithdrawDialog({ open, onOpenChange, asset, userWallets }: Withd
               <div className="flex items-start gap-2 p-2.5 bg-destructive/10 border border-destructive/20 text-destructive rounded-md text-xs">
                 <AlertCircle className="h-4 w-4 shrink-0 mt-0.5" />
                 <span>
-                  Insufficient balance. Total deduction ({totalDeducted.toFixed(6)} {asset}) exceeds available balance ({availableBalance.toFixed(6)} {asset}).
+                  Insufficient balance. Total deduction ({Number(totalDeducted).toFixed(6)} {asset}) exceeds available balance ({Number(availableBalance).toFixed(6)} {asset}).
                 </span>
               </div>
             )}
 
             <Button
               type="submit"
-              disabled={isLoading || isInsufficientBalance || !watchedAmount || watchedAmount <= 0 || !watchedChain}
+              disabled={isLoading || isInsufficientBalance || !numericWatchedAmount || numericWatchedAmount <= 0 || !watchedChain}
               className="w-full"
             >
               {isLoading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
@@ -346,3 +363,5 @@ export function WithdrawDialog({ open, onOpenChange, asset, userWallets }: Withd
     </Dialog>
   );
 }
+
+export default WithdrawDialog;

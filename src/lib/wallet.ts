@@ -4,6 +4,7 @@ import type { CryptoCurrency, P2PAd, Trade, User as AppUser, Withdrawal, Deposit
 import { add, isPast } from 'date-fns';
 import { toDate } from '@/lib/utils';
 import { SUPPORTED_CRYPTOS, CHAINS } from './constants';
+import { supabase } from '@/lib/supabase/client';
 import {
   getUserWallets as getSupabaseUserWallets,
   requestWithdrawal as requestSupabaseWithdrawal,
@@ -23,28 +24,94 @@ function generateId(prefix: string, length: number) {
 
 /**
  * Retrieves user wallet balances directly via Supabase.
+ * Queries wallet_assets table using exact database columns (asset_symbol, available, locked, updated_at).
  */
 export async function getUserWalletBalances(
   userId: string
 ): Promise<{ [key in CryptoCurrency]?: { balance: number; lockedBalance: number } }> {
+  const balanceMap: { [key in CryptoCurrency]?: { balance: number; lockedBalance: number } } = {
+    BTC: { balance: 0, lockedBalance: 0 },
+    ETH: { balance: 0, lockedBalance: 0 },
+    LTC: { balance: 0, lockedBalance: 0 },
+    USDT: { balance: 0, lockedBalance: 0 },
+  };
+
   try {
-    const { data: userWallet, error } = await getSupabaseUserWallets(userId);
-    if (!error && userWallet && userWallet.balances && userWallet.balances.length > 0) {
-      const balanceMap: { [key in CryptoCurrency]?: { balance: number; lockedBalance: number } } = {};
-      userWallet.balances.forEach((asset: WalletAssetBalance) => {
-        const key = asset.asset_code as CryptoCurrency;
-        balanceMap[key] = {
-          balance: Number(asset.available || 0),
-          lockedBalance: Number(asset.locked_escrow || 0) + Number(asset.locked_withdrawal || 0),
-        };
+    // 1. Direct query from wallet_assets using confirmed schema columns
+    const { data: walletAssets, error: assetsError } = await supabase
+      .from('wallet_assets')
+      .select('asset_symbol, available, locked, updated_at')
+      .eq('user_id', userId);
+
+    if (!assetsError && walletAssets && walletAssets.length > 0) {
+      walletAssets.forEach((asset: any) => {
+        // Ensure property access matches database column output:
+        const spendable = Number(asset.available ?? 0); // 'available', not 'balance' or 'amount'
+        const symbol = String(asset.asset_symbol ?? '').toUpperCase() as CryptoCurrency; // 'asset_symbol', not 'symbol' or 'asset_code'
+        const lockedAmount = Number(asset.locked ?? 0);
+
+        if (symbol) {
+          balanceMap[symbol] = {
+            balance: spendable,
+            lockedBalance: lockedAmount,
+          };
+        }
       });
       return balanceMap;
     }
   } catch (err) {
-    console.error("Supabase getUserWalletBalances failed:", err);
+    console.warn("wallet_assets query error:", err);
   }
 
-  return {};
+  // 2. Query user_wallets table as secondary fallback
+  try {
+    const { data: userWallets, error: userWalletsError } = await supabase
+      .from('user_wallets')
+      .select('asset_symbol, balance, available_balance, locked_balance')
+      .eq('user_id', userId);
+
+    if (!userWalletsError && userWallets && userWallets.length > 0) {
+      userWallets.forEach((w: any) => {
+        const spendable = Number(w.available_balance ?? w.balance ?? 0);
+        const symbol = String(w.asset_symbol ?? '').toUpperCase() as CryptoCurrency;
+        const lockedAmount = Number(w.locked_balance ?? 0);
+
+        if (symbol) {
+          balanceMap[symbol] = {
+            balance: spendable,
+            lockedBalance: lockedAmount,
+          };
+        }
+      });
+      return balanceMap;
+    }
+  } catch (err) {
+    console.warn("user_wallets query error:", err);
+  }
+
+  // 3. Fallback: Check getSupabaseUserWallets
+  try {
+    const { data: userWallet } = await getSupabaseUserWallets(userId);
+    if (userWallet?.balances && userWallet.balances.length > 0) {
+      userWallet.balances.forEach((asset: any) => {
+        const spendable = Number(asset.available ?? asset.balance ?? 0);
+        const symbol = String(asset.asset_symbol ?? asset.asset_code ?? '').toUpperCase() as CryptoCurrency;
+        const lockedAmount = Number(asset.locked ?? asset.locked_escrow ?? 0) + Number(asset.locked_withdrawal ?? 0);
+
+        if (symbol) {
+          balanceMap[symbol] = {
+            balance: spendable,
+            lockedBalance: lockedAmount,
+          };
+        }
+      });
+      return balanceMap;
+    }
+  } catch (err) {
+    console.warn("getSupabaseUserWallets fallback error:", err);
+  }
+
+  return balanceMap;
 }
 
 /**

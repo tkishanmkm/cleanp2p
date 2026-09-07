@@ -24,6 +24,7 @@ import { BtcLogo, EthLogo, UsdtLogo, LtcLogo } from '@/components/icons';
 import type { CryptoCurrency, Trade } from '@/lib/types';
 import { Skeleton } from '@/components/ui/skeleton';
 import { usePrices } from '@/context/price-context';
+import { useWallet } from '@/context/wallet-context';
 import { useState, useEffect, useMemo, useCallback } from 'react';
 import { Badge } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
@@ -31,7 +32,6 @@ import { statusColors } from '@/lib/status-colors';
 import { useRouter } from 'next/navigation';
 import { FlagIcon } from '@/components/ui/flag-icon';
 import { SUPPORTED_CRYPTOS } from '@/lib/constants';
-import { getUserWalletBalances } from '@/lib/wallet';
 import { supabase } from '@/lib/supabase/client';
 
 const CryptoLogo = ({ crypto, className }: { crypto: CryptoCurrency; className?: string }) => {
@@ -52,9 +52,9 @@ const CryptoLogo = ({ crypto, className }: { crypto: CryptoCurrency; className?:
 export default function DashboardPage() {
   const { user: authUser, profile, isUserLoading: isAuthLoading } = useAuth();
   const router = useRouter();
-  const { prices, fiatRates } = usePrices();
+  const { prices } = usePrices();
+  const { balances: reactiveBalances, totalConvertedValue, preferredCurrency } = useWallet();
 
-  const [supabaseBalances, setSupabaseBalances] = useState<{ [key in CryptoCurrency]?: { balance: number; lockedBalance: number } } | null>(null);
   const [activeTrades, setActiveTrades] = useState<Trade[]>([]);
   const [isLoadingActiveTrades, setIsLoadingActiveTrades] = useState(true);
 
@@ -63,25 +63,6 @@ export default function DashboardPage() {
       router.push('/login');
     }
   }, [authUser, isAuthLoading, router]);
-
-  useEffect(() => {
-    let isMounted = true;
-    async function loadBalances() {
-      if (!authUser?.uid) return;
-      try {
-        const balances = await getUserWalletBalances(authUser.uid);
-        if (isMounted && balances && Object.keys(balances).length > 0) {
-          setSupabaseBalances(balances);
-        }
-      } catch (err) {
-        console.warn('Could not load wallet balances on dashboard:', err);
-      }
-    }
-    loadBalances();
-    return () => {
-      isMounted = false;
-    };
-  }, [authUser?.uid]);
 
   const fetchActiveTrades = useCallback(async () => {
     if (!authUser?.uid) {
@@ -129,37 +110,28 @@ export default function DashboardPage() {
     fetchActiveTrades();
   }, [fetchActiveTrades]);
 
-  // Unified balance list from Supabase
+  // Unified balance list from reactive state
   const unifiedWallets = useMemo(() => {
     return SUPPORTED_CRYPTOS.map((crypto) => {
       const coin = crypto.name;
-      const walletData = supabaseBalances?.[coin] || { balance: 0, lockedBalance: 0 };
+      const walletData = reactiveBalances?.[coin] || { available: 0, inEscrow: 0, inWithdrawal: 0, fiatValue: 0 };
       return {
         crypto: coin,
-        balance: typeof walletData.balance === 'number' ? walletData.balance : 0,
-        lockedBalance: typeof walletData.lockedBalance === 'number' ? walletData.lockedBalance : 0,
+        balance: typeof walletData.available === 'number' ? walletData.available : 0,
+        lockedBalance: typeof walletData.inEscrow === 'number' ? walletData.inEscrow : 0,
+        inWithdrawal: typeof walletData.inWithdrawal === 'number' ? walletData.inWithdrawal : 0,
+        fiatValue: typeof walletData.fiatValue === 'number' ? walletData.fiatValue : 0,
       };
     });
-  }, [supabaseBalances]);
+  }, [reactiveBalances]);
 
-  // For the dashboard table, only show wallets that have some activity, or all major ones
+  // For the dashboard table, show active wallets or all supported cryptos
   const walletsToShow = useMemo(() => {
-    const active = unifiedWallets.filter((w) => (w?.balance || 0) > 0 || (w?.lockedBalance || 0) > 0);
+    const active = unifiedWallets.filter((w) => (w?.balance || 0) > 0 || (w?.lockedBalance || 0) > 0 || (w?.inWithdrawal || 0) > 0);
     return active.length > 0 ? active : unifiedWallets;
   }, [unifiedWallets]);
 
-  const totalWalletValueUSD = useMemo(
-    () =>
-      unifiedWallets.reduce((acc, wallet) => {
-        const value = (wallet?.balance || 0) * (prices[wallet?.crypto] || 0);
-        return acc + value;
-      }, 0) || 0,
-    [unifiedWallets, prices]
-  );
-
-  const preferredCurrency = profile?.preferredCurrency || 'USD';
-  const exchangeRate = fiatRates[preferredCurrency] || 1;
-  const totalWalletValueConverted = totalWalletValueUSD * exchangeRate;
+  const totalWalletValueConverted = totalConvertedValue;
 
   if (isAuthLoading || (!authUser && typeof window !== 'undefined')) {
     return (

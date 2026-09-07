@@ -164,7 +164,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // Global listener for instant profile updates across all components and pages
     const handleProfileUpdated = (event?: any) => {
       if (event?.detail) {
-        setProfile((prev) => (prev ? { ...prev, ...event.detail } : event.detail));
+        const d = event.detail;
+        setProfile((prev) => (prev ? { ...prev, ...d } : d));
+        // Also update supabaseUser user_metadata in state immediately so components react without delay
+        setSupabaseUser((prev) => {
+          if (!prev) return prev;
+          return {
+            ...prev,
+            user_metadata: {
+              ...prev.user_metadata,
+              ...(d.username ? { username: d.username, display_name: d.username } : {}),
+              ...(d.avatar_url || d.photo_url ? { avatar_url: d.avatar_url || d.photo_url, photo_url: d.avatar_url || d.photo_url, photoURL: d.avatar_url || d.photo_url } : {}),
+            },
+          };
+        });
       }
       const currentUser = supabaseUserRef.current;
       if (currentUser) {
@@ -203,6 +216,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   // Map user to normalized structure compatible with both standard and legacy consumers
+  // STRICT RULE: Force Username over full_name everywhere
   const authUser: AuthUser | null = useMemo(() => {
     if (!supabaseUser) return null;
     const isUserAdmin = Boolean(
@@ -212,12 +226,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       supabaseUser.app_metadata?.role === 'admin'
     );
 
+    const effectiveUsername = profile?.username || supabaseUser.user_metadata?.username || (supabaseUser.email ? supabaseUser.email.split('@')[0] : 'User');
+    const effectivePhoto = profile?.avatar_url || (profile as any)?.photo_url || supabaseUser.user_metadata?.avatar_url || supabaseUser.user_metadata?.photo_url || null;
+
     return {
       uid: supabaseUser.id,
       id: supabaseUser.id,
       email: supabaseUser.email || null,
-      displayName: profile?.display_name || profile?.username || supabaseUser.user_metadata?.display_name || supabaseUser.user_metadata?.username || (supabaseUser.email ? supabaseUser.email.split('@')[0] : 'User'),
-      photoURL: profile?.avatar_url || (profile as any)?.photo_url || supabaseUser.user_metadata?.avatar_url || null,
+      displayName: effectiveUsername,
+      photoURL: effectivePhoto,
       role: (profile?.role || (isUserAdmin ? 'admin' : 'user')) as 'user' | 'admin' | 'moderator',
       isAdmin: isUserAdmin,
       rawUser: supabaseUser,

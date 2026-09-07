@@ -129,35 +129,66 @@ export async function completeTrade(
  */
 export async function getUserWallets(userId: string): Promise<RpcResponse<UserWallet | null>> {
   try {
+    // 1. Direct query from wallet_assets by user_id
+    const { data: directAssets } = await supabase
+      .from('wallet_assets')
+      .select('asset_symbol, available, locked, updated_at')
+      .eq('user_id', userId);
+
+    if (directAssets && directAssets.length > 0) {
+      return {
+        data: {
+          id: userId,
+          user_id: userId,
+          status: 'active',
+          provisioning_status: 'completed',
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+          balances: directAssets.map((a: any) => ({
+            wallet_id: userId,
+            asset_code: a.asset_symbol || '',
+            available: Number(a.available || 0),
+            locked_escrow: Number(a.locked || 0),
+            locked_withdrawal: 0,
+            updated_at: a.updated_at || new Date().toISOString(),
+          })),
+        },
+        error: null,
+      };
+    }
+
     const { data: walletData, error: walletError } = await supabase
       .from('wallets')
       .select('*')
       .eq('user_id', userId)
       .maybeSingle();
 
-    if (walletError) {
+    if (walletError && walletError.code !== 'PGRST116') {
       return { data: null, error: new Error(walletError.message) };
     }
 
-    if (!walletData) {
-      return { data: null, error: null };
+    if (walletData) {
+      const { data: balancesData } = await supabase
+        .from('wallet_assets')
+        .select('*')
+        .eq('wallet_id', walletData.id);
+
+      return {
+        data: {
+          ...walletData,
+          balances: (balancesData || []).map((b: any) => ({
+            ...b,
+            asset_code: b.asset_symbol || b.asset_code,
+            available: Number(b.available || b.balance || 0),
+            locked_escrow: Number(b.locked || b.locked_escrow || 0),
+            locked_withdrawal: Number(b.locked_withdrawal || 0),
+          })),
+        },
+        error: null,
+      };
     }
 
-    const { data: balancesData, error: balancesError } = await supabase
-      .from('wallet_assets')
-      .select('*')
-      .eq('wallet_id', walletData.id);
-
-    if (balancesError) {
-      return { data: null, error: new Error(balancesError.message) };
-    }
-
-    const wallet: UserWallet = {
-      ...walletData,
-      balances: balancesData || [],
-    };
-
-    return { data: wallet, error: null };
+    return { data: null, error: null };
   } catch (err: unknown) {
     return { data: null, error: err instanceof Error ? err : new Error(String(err)) };
   }

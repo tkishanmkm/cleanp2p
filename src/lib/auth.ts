@@ -9,6 +9,9 @@ export interface UserProfile {
   email?: string | null;
   display_name?: string | null;
   avatar_url?: string | null;
+  country?: string | null;
+  preferredCurrency?: string;
+  preferred_currency?: string;
   role: 'user' | 'admin' | 'moderator';
   is_admin: boolean;
   status: 'active' | 'suspended' | 'banned';
@@ -16,6 +19,11 @@ export interface UserProfile {
   eth_balance?: number;
   usdt_balance?: number;
   ltc_balance?: number;
+  btcBalance?: number;
+  ethBalance?: number;
+  usdtBalance?: number;
+  ltcBalance?: number;
+  wallets?: Record<string, { balance: number; lockedBalance?: number }>;
   last_active?: string | null;
   created_at: string;
   updated_at: string;
@@ -306,19 +314,32 @@ export async function getUserProfile(userId: string): Promise<UserProfile | null
       return null;
     }
 
+    const btcVal = Number(data.btc_balance ?? data.btcBalance ?? data.wallets?.BTC?.balance ?? 0);
+    const ethVal = Number(data.eth_balance ?? data.ethBalance ?? data.wallets?.ETH?.balance ?? 0);
+    const usdtVal = Number(data.usdt_balance ?? data.usdtBalance ?? data.wallets?.USDT?.balance ?? 0);
+    const ltcVal = Number(data.ltc_balance ?? data.ltcBalance ?? data.wallets?.LTC?.balance ?? 0);
+
     return {
       id: data.id || data.user_id,
       username: data.username,
       email: data.email,
       display_name: data.display_name || data.username,
       avatar_url: data.avatar_url,
+      country: data.country || data.ip_based_country || null,
+      preferredCurrency: data.preferred_currency || data.preferredCurrency || 'USD',
+      preferred_currency: data.preferred_currency || data.preferredCurrency || 'USD',
       role: data.role || (data.is_admin ? 'admin' : 'user'),
       is_admin: Boolean(data.is_admin || data.role === 'admin'),
       status: data.status || 'active',
-      btc_balance: Number(data.btc_balance || 0),
-      eth_balance: Number(data.eth_balance || 0),
-      usdt_balance: Number(data.usdt_balance || 0),
-      ltc_balance: Number(data.ltc_balance || 0),
+      btc_balance: btcVal,
+      eth_balance: ethVal,
+      usdt_balance: usdtVal,
+      ltc_balance: ltcVal,
+      btcBalance: btcVal,
+      ethBalance: ethVal,
+      usdtBalance: usdtVal,
+      ltcBalance: ltcVal,
+      wallets: data.wallets || undefined,
       last_active: data.last_active,
       created_at: data.created_at || new Date().toISOString(),
       updated_at: data.updated_at || new Date().toISOString(),

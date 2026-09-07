@@ -145,13 +145,13 @@ export function AdFeed({ type }: { type?: "BUY" | "SELL" }) {
           >
             <div className="space-y-1">
               <div className="flex items-center gap-2">
-                <span className="font-semibold text-base">
-                  {sellerProfile?.full_name || sellerProfile?.username || "Trader"}
+                <span className="font-semibold text-base font-mono">
+                  @{sellerProfile?.username || "trader"}
                 </span>
                 <UserStatusIndicator lastActive={sellerProfile?.last_active} />
               </div>
               <p className="text-xs text-muted-foreground">
-                @{sellerProfile?.username || "user"} • ID: <span className="font-mono">{ad.id}</span>
+                Ad #{ad.id}
               </p>
             </div>
 

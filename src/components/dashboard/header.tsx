@@ -53,6 +53,7 @@ import type { Language, Trade, CryptoCurrency } from '@/lib/types';
 import { Skeleton } from '../ui/skeleton';
 import { cn, toDate } from '@/lib/utils';
 import { usePrices } from '@/context/price-context';
+import { useWallet } from '@/context/wallet-context';
 import { useToast } from '@/hooks/use-toast';
 import { LANGUAGES } from '@/lib/constants';
 import { FlagIcon } from '../ui/flag-icon';
@@ -127,7 +128,13 @@ export function DashboardHeader() {
           .order('created_at', { ascending: false })
           .limit(10);
 
-        if (error) throw error;
+        if (error) {
+          // Gracefully suppress RLS recursion notices if policies are being updated
+          if (error.code !== '42P17') {
+            console.warn('Trades fetch notice:', error.message || error);
+          }
+          return;
+        }
 
         const mapped: Trade[] = (data || []).map((t: any) => ({
           id: t.id,
@@ -158,23 +165,20 @@ export function DashboardHeader() {
         }));
 
         setAllTrades(mapped);
-      } catch (err) {
-        console.error('Error fetching user trades for header:', err);
+      } catch (err: any) {
+        if (err?.code !== '42P17') {
+          console.warn('Notice fetching user trades for header:', err?.message || err);
+        }
       }
     };
 
     fetchUserTrades();
   }, [authUser?.uid]);
 
-  const btcVal = (profile?.btcBalance || 0) * (prices['BTC'] || 0);
-  const ethVal = (profile?.ethBalance || 0) * (prices['ETH'] || 0);
-  const ltcVal = (profile?.ltcBalance || 0) * (prices['LTC'] || 0);
-  const usdtVal = (profile?.usdtBalance || 0) * (prices['USDT'] || 1);
-  const totalWalletValueUSD = btcVal + ethVal + ltcVal + usdtVal;
+  const { totalAvailableUsdValue, totalConvertedValue, preferredCurrency: walletPreferredCurrency } = useWallet();
 
-  const preferredCurrency = profile?.preferredCurrency || 'USD';
-  const exchangeRate = fiatRates[preferredCurrency] || 1;
-  const totalWalletValueConverted = totalWalletValueUSD * exchangeRate;
+  const preferredCurrency = profile?.preferredCurrency || walletPreferredCurrency || 'USD';
+  const totalWalletValueConverted = totalConvertedValue;
 
   const handleLogout = async () => {
     try {
@@ -271,7 +275,7 @@ export function DashboardHeader() {
                         className={cn(
                           'group flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-semibold tracking-tight transition-all duration-150',
                           isActive
-                            ? 'bg-[#5B4DF6] text-white shadow-md shadow-indigo-500/20'
+                            ? 'bg-[#9273FC] text-white shadow-md shadow-indigo-500/20'
                             : 'text-slate-700 dark:text-slate-200 hover:text-slate-950 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800/80 font-medium'
                         )}
                       >
@@ -280,7 +284,7 @@ export function DashboardHeader() {
                             'w-9 h-9 rounded-xl flex items-center justify-center shrink-0 transition-colors',
                             isActive
                               ? 'bg-white/20 text-white'
-                              : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 group-hover:bg-[#5B4DF6]/10 group-hover:text-[#5B4DF6]'
+                              : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 group-hover:bg-[#9273FC]/10 group-hover:text-[#9273FC]'
                           )}
                         >
                           <IconComponent className="h-5 w-5 shrink-0" />
@@ -297,7 +301,7 @@ export function DashboardHeader() {
                           <span
                             className={cn(
                               'text-[10px] font-bold px-2 py-0.5 rounded-md uppercase tracking-wider shrink-0',
-                              isActive ? 'bg-white/25 text-white' : 'bg-[#5B4DF6]/10 text-[#5B4DF6] dark:bg-indigo-500/20 dark:text-indigo-300'
+                              isActive ? 'bg-white/25 text-white' : 'bg-[#9273FC]/10 text-[#9273FC] dark:bg-indigo-500/20 dark:text-indigo-300'
                             )}
                           >
                             {item.badge}
@@ -379,14 +383,14 @@ export function DashboardHeader() {
                   className={cn(
                     'group flex items-center gap-1.5 px-2.5 xl:px-3 py-1.5 rounded-xl text-xs xl:text-[13px] font-semibold tracking-tight transition-all duration-150 whitespace-nowrap select-none',
                     isActive
-                      ? 'bg-gradient-to-r from-[#5B4DF6] to-[#4F46E5] text-white shadow-sm shadow-indigo-500/25'
+                      ? 'bg-gradient-to-r from-[#9273FC] to-[#4F46E5] text-white shadow-sm shadow-indigo-500/25'
                       : 'text-slate-700 dark:text-slate-300 hover:text-slate-950 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800/80 font-medium'
                   )}
                 >
                   <IconComponent
                     className={cn(
                       'h-4 w-4 shrink-0 transition-transform duration-150 group-hover:scale-110',
-                      isActive ? 'text-white' : 'text-slate-500 dark:text-slate-400 group-hover:text-[#5B4DF6]'
+                      isActive ? 'text-white' : 'text-slate-500 dark:text-slate-400 group-hover:text-[#9273FC]'
                     )}
                   />
                   <span className="leading-none">{item.label}</span>
@@ -394,7 +398,7 @@ export function DashboardHeader() {
                     <span
                       className={cn(
                         'text-[9px] font-bold px-1.5 py-0.5 rounded uppercase tracking-wider leading-none',
-                        isActive ? 'bg-white/25 text-white' : 'bg-[#5B4DF6]/10 text-[#5B4DF6] dark:bg-indigo-500/20 dark:text-indigo-300'
+                        isActive ? 'bg-white/25 text-white' : 'bg-[#9273FC]/10 text-[#9273FC] dark:bg-indigo-500/20 dark:text-indigo-300'
                       )}
                     >
                       {item.badge}
@@ -422,7 +426,7 @@ export function DashboardHeader() {
                 className="hidden sm:inline-flex items-center gap-1.5 h-9 px-2.5 rounded-xl border border-slate-200/80 dark:border-slate-800 bg-slate-100/70 dark:bg-slate-800/60 hover:bg-slate-200/80 dark:hover:bg-slate-700/80 text-slate-700 dark:text-slate-200 font-bold text-xs tracking-wider transition-all shadow-xs cursor-pointer"
                 title="Change language"
               >
-                <Globe className="h-3.5 w-3.5 text-[#5B4DF6] shrink-0 stroke-[2.2]" />
+                <Globe className="h-3.5 w-3.5 text-[#9273FC] shrink-0 stroke-[2.2]" />
                 <span className="uppercase font-bold tracking-wider">{selectedLanguage.code}</span>
                 <ChevronDown className="h-3 w-3 text-muted-foreground/70 shrink-0" />
               </Button>
@@ -591,7 +595,7 @@ export function DashboardHeader() {
                     {(authUser?.photoURL || (profile as any)?.avatar_url || (profile as any)?.photo_url) ? (
                       <AvatarImage src={authUser?.photoURL || (profile as any)?.avatar_url || (profile as any)?.photo_url} alt={authUser?.displayName || profile?.username || 'User Avatar'} />
                     ) : (
-                      <AvatarFallback className="bg-gradient-to-br from-[#5B4DF6] to-[#3B82F6] text-white text-[11px] font-bold">
+                      <AvatarFallback className="bg-gradient-to-br from-[#9273FC] to-[#3B82F6] text-white text-[11px] font-bold">
                         {(authUser?.displayName || profile?.username || 'User').substring(0, 2).toUpperCase()}
                       </AvatarFallback>
                     )}
@@ -649,7 +653,7 @@ export function DashboardHeader() {
               </div>
               <DropdownMenuItem asChild className="rounded-lg py-2 cursor-pointer">
                 <Link href="/dashboard" className="flex items-center gap-2.5 text-xs font-medium">
-                  <LayoutDashboard className="h-4 w-4 text-[#5B4DF6] stroke-[2]" />
+                  <LayoutDashboard className="h-4 w-4 text-[#9273FC] stroke-[2]" />
                   <span>Dashboard</span>
                 </Link>
               </DropdownMenuItem>

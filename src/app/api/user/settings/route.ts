@@ -103,11 +103,32 @@ export async function PATCH(req: NextRequest) {
           .from('profiles')
           .update({
             username: rawUsername,
+            display_name: rawUsername,
             updated_at: new Date().toISOString(),
           })
           .eq('id', user.id);
 
         if (updateErr) throw updateErr;
+
+        // Implant new username into auth user metadata and P2P ads
+        try {
+          await admin.auth.admin.updateUserById(user.id, {
+            user_metadata: {
+              username: rawUsername,
+              display_name: rawUsername,
+            },
+          });
+        } catch (authErr) {
+          console.warn('Auth metadata update warning:', authErr);
+        }
+
+        try {
+          await admin.from('p2p_ads').update({
+            user_display_name: rawUsername,
+          }).eq('user_id', user.id);
+        } catch (adsErr) {
+          console.warn('P2P ads display_name update warning:', adsErr);
+        }
 
         return NextResponse.json({ success: true, field, updatedValue: rawUsername, message: 'Username updated successfully.' });
       }
@@ -124,6 +145,20 @@ export async function PATCH(req: NextRequest) {
           .eq('id', user.id);
 
         if (updateErr) throw updateErr;
+
+        // Implant new avatar into auth metadata
+        try {
+          await admin.auth.admin.updateUserById(user.id, {
+            user_metadata: {
+              avatar_url: avatarUrl,
+              photo_url: avatarUrl,
+              picture: avatarUrl,
+              photoURL: avatarUrl,
+            },
+          });
+        } catch (authErr) {
+          console.warn('Auth metadata avatar update warning:', authErr);
+        }
 
         return NextResponse.json({ success: true, field, updatedValue: avatarUrl, message: 'Profile picture updated successfully.' });
       }
@@ -146,10 +181,10 @@ export async function PATCH(req: NextRequest) {
         };
 
         // If KYC is verified, full name and date of birth cannot be modified
+        // STRICT: Never set display_name to full_name! display_name must always be username!
         if (!isKycVerified) {
           if (fullName !== undefined) {
             updates.full_name = fullName?.trim() || null;
-            updates.display_name = fullName?.trim() || null;
           }
           if (dob !== undefined) {
             updates.dob = dob || null;

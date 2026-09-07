@@ -1,7 +1,9 @@
 'use client';
 
 import React, { useState } from 'react';
-import { supabase } from '@/lib/supabase/client';
+import { useWallet } from '@/context/wallet-context';
+import type { CryptoCurrency } from '@/lib/types';
+import { useToast } from '@/hooks/use-toast';
 
 interface WithdrawalDialogProps {
   isOpen: boolean;
@@ -24,6 +26,8 @@ export function WithdrawalDialog({
   const [amount, setAmount] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const { requestWithdrawal, refreshBalances } = useWallet();
+  const { toast } = useToast();
 
   if (!isOpen) return null;
 
@@ -50,25 +54,15 @@ export function WithdrawalDialog({
     setIsSubmitting(true);
 
     try {
-      // Get current authenticated user session token
-      const { data: { session }, error: sessionError } = await supabase.auth.getSession();
-      if (sessionError || !session) {
-        throw new Error('User authentication required.');
-      }
+      const crypto = (assetSymbol.toUpperCase() as CryptoCurrency) || 'USDT';
+      await requestWithdrawal(crypto, chain, destinationAddress.trim(), numericAmount, 0);
 
-      // Submit withdrawal request to DB / API endpoint
-      const { error: dbError } = await supabase.from('withdrawals').insert({
-        user_id: session.user.id,
-        asset: assetSymbol,
-        chain: chain,
-        amount: numericAmount,
-        destination_address: destinationAddress,
-        status: 'pending',
+      toast({
+        title: 'Withdrawal Submitted',
+        description: `Successfully requested withdrawal of ${numericAmount} ${crypto}.`,
       });
 
-      if (dbError) throw new Error(dbError.message);
-
-      // Trigger successful callback
+      await refreshBalances();
       if (onSuccess) onSuccess();
       onClose();
     } catch (err: any) {
@@ -79,28 +73,33 @@ export function WithdrawalDialog({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-      <div className="w-full max-w-md rounded-lg bg-gray-900 p-6 text-white shadow-xl border border-gray-800">
-        <h2 className="text-xl font-bold mb-4">Withdraw {assetSymbol}</h2>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4">
+      <div className="w-full max-w-md rounded-xl bg-gray-900 p-6 text-white shadow-2xl border border-gray-800">
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-xl font-bold">Withdraw {assetSymbol}</h2>
+          <span className="text-xs px-2.5 py-0.5 rounded-full bg-blue-500/10 text-blue-400 font-mono border border-blue-500/20">
+            {chain} Network
+          </span>
+        </div>
 
         {errorMsg && (
-          <div className="mb-4 rounded bg-red-900/50 p-3 text-sm text-red-200 border border-red-700">
+          <div className="mb-4 rounded-lg bg-red-900/40 p-3 text-sm text-red-200 border border-red-700/60">
             {errorMsg}
           </div>
         )}
 
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
-            <label className="block text-sm font-medium text-gray-300 mb-1">
-              Available Balance
+            <label className="block text-xs font-semibold uppercase tracking-wider text-gray-400 mb-1">
+              Available to Spend
             </label>
-            <div className="text-lg font-semibold text-emerald-400">
-              {availableBalance} {assetSymbol}
+            <div className="text-lg font-bold font-mono text-emerald-400">
+              {availableBalance.toFixed(6)} {assetSymbol}
             </div>
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-gray-300 mb-1">
+            <label className="block text-xs font-semibold uppercase tracking-wider text-gray-400 mb-1">
               Destination Address ({chain})
             </label>
             <input
@@ -109,14 +108,23 @@ export function WithdrawalDialog({
               value={destinationAddress}
               onChange={(e) => setDestinationAddress(e.target.value)}
               placeholder={`Enter ${chain} destination address`}
-              className="w-full rounded bg-gray-800 px-3 py-2 text-sm text-white border border-gray-700 focus:outline-none focus:border-blue-500"
+              className="w-full rounded-lg bg-gray-800 px-3.5 py-2.5 text-sm text-white border border-gray-700 focus:outline-none focus:border-blue-500 font-mono placeholder:text-gray-500"
             />
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-gray-300 mb-1">
-              Amount
-            </label>
+            <div className="flex justify-between items-center mb-1">
+              <label className="block text-xs font-semibold uppercase tracking-wider text-gray-400">
+                Amount
+              </label>
+              <button
+                type="button"
+                onClick={() => setAmount(String(availableBalance))}
+                className="text-xs text-blue-400 hover:text-blue-300 font-medium cursor-pointer"
+              >
+                Max ({availableBalance.toFixed(4)})
+              </button>
+            </div>
             <input
               type="number"
               step="any"
@@ -124,22 +132,26 @@ export function WithdrawalDialog({
               value={amount}
               onChange={(e) => setAmount(e.target.value)}
               placeholder="0.00"
-              className="w-full rounded bg-gray-800 px-3 py-2 text-sm text-white border border-gray-700 focus:outline-none focus:border-blue-500"
+              className="w-full rounded-lg bg-gray-800 px-3.5 py-2.5 text-sm text-white border border-gray-700 focus:outline-none focus:border-blue-500 font-mono placeholder:text-gray-500"
             />
           </div>
 
-          <div className="flex justify-end space-x-3 pt-4">
+          <div className="rounded-lg bg-gray-800/50 p-3 text-xs text-gray-400 border border-gray-800">
+            Funds will be deducted immediately from your spendable balance. The transaction will be recorded with status <span className="text-blue-400 font-mono">PENDING</span> until on-chain broadcast completes.
+          </div>
+
+          <div className="flex justify-end space-x-3 pt-3">
             <button
               type="button"
               onClick={onClose}
-              className="rounded px-4 py-2 text-sm font-medium text-gray-400 hover:bg-gray-800"
+              className="rounded-lg px-4 py-2 text-sm font-medium text-gray-400 hover:bg-gray-800 cursor-pointer"
             >
               Cancel
             </button>
             <button
               type="submit"
               disabled={isSubmitting}
-              className="rounded bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-500 disabled:opacity-50"
+              className="rounded-lg bg-blue-600 px-5 py-2 text-sm font-semibold text-white hover:bg-blue-500 disabled:opacity-50 cursor-pointer shadow"
             >
               {isSubmitting ? 'Submitting...' : 'Confirm Withdrawal'}
             </button>
@@ -149,3 +161,5 @@ export function WithdrawalDialog({
     </div>
   );
 }
+
+export default WithdrawalDialog;
