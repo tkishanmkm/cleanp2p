@@ -26,14 +26,34 @@ export function ActiveTradesList() {
     }
     setIsLoading(true);
     try {
-      const { data, error } = await supabase
-        .from('trades')
-        .select('*')
-        .or(`buyer_id.eq.${authUser.uid},seller_id.eq.${authUser.uid}`)
-        .in('status', ['active', 'paid', 'disputed'])
-        .order('created_at', { ascending: false });
+      let data: any[] | null = null;
 
-      if (error) throw error;
+      // 1. Fetch from secure server endpoint
+      try {
+        const res = await fetch('/api/trades?status=active,paid,disputed');
+        if (res.ok) {
+          const json = await res.json();
+          if (json && Array.isArray(json.trades)) {
+            data = json.trades;
+          }
+        }
+      } catch (apiErr) {
+        // Continue to fallback
+      }
+
+      // 2. Client-side fallback if API not available
+      if (!data) {
+        const { data: clientData, error } = await supabase
+          .from('trades')
+          .select('*')
+          .or(`buyer_id.eq.${authUser.uid},seller_id.eq.${authUser.uid}`)
+          .in('status', ['active', 'paid', 'disputed'])
+          .order('created_at', { ascending: false });
+
+        if (!error && clientData) {
+          data = clientData;
+        }
+      }
 
       const mapped: Trade[] = (data || []).map((raw: any) => ({
         id: raw.id,

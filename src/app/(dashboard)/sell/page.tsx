@@ -83,16 +83,19 @@ const CryptoLogo = ({ crypto, className }: { crypto: ExtendedCoinOption, classNa
 };
 
 function normalizeAd(raw: any): P2PAd {
+  const rawSide = String(raw.type || raw.side || raw.ad_type || raw.adType || 'buy').toLowerCase();
+  const adType = rawSide.includes('buy') ? 'buy' : 'sell';
+
   return {
     id: raw.id,
     userId: raw.user_id || raw.userId,
     publicAdId: raw.public_ad_id || raw.publicAdId || raw.id,
-    adType: (raw.ad_type || raw.adType || raw.type || 'buy').toLowerCase() as 'buy' | 'sell',
-    crypto: (raw.crypto || raw.coin || 'BTC') as CryptoCurrency,
-    fiatCurrency: raw.fiat_currency || raw.fiatCurrency || raw.fiat || 'USD',
+    adType: adType,
+    crypto: ((raw.crypto || raw.coin || raw.asset || raw.crypto_currency || 'BTC') as string).toUpperCase() as CryptoCurrency,
+    fiatCurrency: ((raw.fiat_currency || raw.fiatCurrency || raw.fiat || 'USD') as string).toUpperCase(),
     rateType: raw.rate_type || raw.rateType || 'market',
-    fixedRate: raw.fixed_rate ?? raw.fixedRate ?? (raw.rate_type === 'fixed' ? Number(raw.price) : undefined),
-    ratePercent: raw.rate_percent ?? raw.ratePercent ?? (raw.rate_type === 'floating' || raw.rate_type === 'market' ? Number(raw.price_margin_percent ?? raw.margin ?? 0) : 0),
+    fixedRate: raw.fixed_rate ?? raw.fixedRate ?? (raw.rate_type === 'fixed' || raw.pricing_type === 'FIXED' ? Number(raw.price) : undefined),
+    ratePercent: raw.rate_percent ?? raw.ratePercent ?? (raw.rate_type === 'floating' || raw.rate_type === 'market' || raw.pricing_type === 'FLOAT' ? Number(raw.price_margin_percent ?? raw.margin ?? raw.margin_percent ?? 0) : 0),
     minAmount: Number(raw.min_amount ?? raw.minAmount ?? raw.min_limit ?? 0),
     maxAmount: Number(raw.max_amount ?? raw.maxAmount ?? raw.max_limit ?? 0),
     paymentMethods: Array.isArray(raw.payment_methods)
@@ -101,12 +104,12 @@ function normalizeAd(raw: any): P2PAd {
       ? raw.paymentMethods
       : typeof raw.payment_methods === 'string'
       ? (raw.payment_methods.startsWith('[') ? JSON.parse(raw.payment_methods) : [raw.payment_methods])
-      : [],
+      : ['Bank Transfer'],
     offerLabel: raw.offer_label || raw.offerLabel,
-    tags: Array.isArray(raw.tags) ? raw.tags : Array.isArray(raw.ad_tags) ? raw.ad_tags : [],
-    terms: raw.terms || '',
+    tags: Array.isArray(raw.tags) ? raw.tags : Array.isArray(raw.offer_tags) ? raw.offer_tags : Array.isArray(raw.ad_tags) ? raw.ad_tags : [],
+    terms: raw.terms_conditions || raw.terms || '',
     paymentTimeLimit: Number(raw.payment_time_limit ?? raw.paymentTimeLimit ?? raw.payment_window ?? 30),
-    active: raw.active !== false && raw.status !== 'inactive' && raw.status !== 'INACTIVE' && raw.status !== 'DELETED',
+    active: raw.active !== false && raw.status !== 'inactive' && raw.status !== 'INACTIVE' && raw.status !== 'DELETED' && raw.status !== 'draft' && raw.status !== 'DRAFT',
     targetedCountries: raw.targeted_countries || raw.targetedCountries || [],
     blockedCountries: raw.blocked_countries || raw.blockedCountries || [],
     minCompletedTrades: Number(raw.min_completed_trades ?? raw.minCompletedTrades ?? 0),
@@ -245,16 +248,19 @@ function P2PMarketplaceContent() {
   const fetchAds = useCallback(async () => {
     setIsLoading(true);
     try {
-      const { data, error } = await supabase
-        .from('p2p_ads')
-        .select('*')
-        .order('created_at', { ascending: false });
+      const [{ data: p2pData }, { data: adsData }] = await Promise.all([
+        supabase.from('p2p_ads').select('*').order('created_at', { ascending: false }),
+        supabase.from('ads').select('*').order('created_at', { ascending: false }),
+      ]);
 
-      if (error) throw error;
+      const mapById = new Map<string, any>();
+      (p2pData || []).forEach((row: any) => { if (row?.id) mapById.set(row.id, row); });
+      (adsData || []).forEach((row: any) => { if (row?.id && !mapById.has(row.id)) mapById.set(row.id, row); });
+      const allRows = Array.from(mapById.values());
 
-      const normalized = (data || [])
+      const normalized = (allRows || [])
         .map(normalizeAd)
-        .filter(ad => ad.adType === targetAdType && ad.active);
+        .filter(ad => ad.active !== false);
       setAds(normalized);
 
       const creatorIds = Array.from(new Set(normalized.map((a) => a.userId).filter(Boolean)));
@@ -322,7 +328,7 @@ function P2PMarketplaceContent() {
     } finally {
       setIsLoading(false);
     }
-  }, [targetAdType]);
+  }, []);
 
   useEffect(() => {
     fetchAds();
@@ -347,6 +353,7 @@ function P2PMarketplaceContent() {
     
     // Apply Live Creator Data and Strict Limit Balance Rule
     const updatedAds = ads.map(ad => {
+      const isOwnAd = Boolean(currentUserData?.id && (currentUserData.id === ad.userId || currentUserData.id === ad.user?.id));
       const liveCreatorData = adCreators[ad.userId];
       const mergedUser = liveCreatorData
         ? { ...ad.user, ...liveCreatorData }
@@ -368,15 +375,14 @@ function P2PMarketplaceContent() {
           const availCrypto = Number(liveCreatorData.cryptoBalances[coinSym]);
           const availFiat = availCrypto * (unitPrice > 0 ? unitPrice : 1);
 
-          // STRICT RULE:
-          // 1. If seller's balance is below min limit, hide ad from other users!
-          if (availFiat < ad.minAmount) {
+          // If the viewer is the creator themselves, NEVER hide their own ad
+          if (isOwnAd) {
+            isBalanceSufficient = true;
+          } else if (availFiat < ad.minAmount) {
             isBalanceSufficient = false;
           } else if (availFiat < ad.maxAmount) {
-            // 2. If seller has e.g. 530$, show limit 100 to 530$!
             adjustedMax = Math.floor(availFiat * 100) / 100;
           }
-          // 3. If balance >= maxAmount, show full 100 to 1000$!
         }
       }
 
@@ -384,15 +390,17 @@ function P2PMarketplaceContent() {
         ...ad,
         maxAmount: adjustedMax,
         isBalanceSufficient,
+        isOwnAd,
         user: mergedUser,
       };
-    }).filter(ad => ad.isBalanceSufficient !== false);
+    }).filter(ad => ad.isBalanceSufficient !== false || (ad as any).isOwnAd);
 
     const activeFiat = selectedFiat || 'USD';
     const exchangeRate = fiatRates[activeFiat] || 1;
 
     let result = updatedAds.filter(ad => {
-      if (currentUserData) {
+      const isOwn = (ad as any).isOwnAd;
+      if (currentUserData && !isOwn) {
         if (currentUserData.blockedUsers?.includes(ad.userId)) return false;
         const adCreator = adCreators[ad.userId];
         if (adCreator?.blockedUsers?.includes(currentUserData.id)) return false;
@@ -407,12 +415,12 @@ function P2PMarketplaceContent() {
           if (!hasMethod) return false;
       }
       if (selectedCoin !== 'ALL' && ad.crypto !== selectedCoin) return false;
-      if (selectedFiat && ad.fiatCurrency !== selectedFiat) return false;
-      if (selectedCountry && ad.user?.country !== selectedCountry) return false;
+      if (selectedFiat && selectedFiat !== 'ALL' && !isOwn && ad.fiatCurrency !== selectedFiat) return false;
+      if (selectedCountry && !isOwn && ad.user?.country !== selectedCountry) return false;
       if (showTopRated && !ad.user?.badges?.includes('power')) return false;
       if (showVerifiedOnly && !ad.user?.isVerified) return false;
       
-      if (showRecentlyActive) {
+      if (showRecentlyActive && !isOwn) {
         const lastActiveDate = ad.user?.lastActive ? toDate(ad.user.lastActive) : null;
         if (!lastActiveDate || (new Date().getTime() - lastActiveDate.getTime()) > 30 * 60 * 1000) {
           return false;

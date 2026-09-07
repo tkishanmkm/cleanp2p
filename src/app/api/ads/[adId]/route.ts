@@ -23,12 +23,28 @@ export async function GET(
     const adId = rawParams.adId;
     const supabase = await createClient();
 
+    const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(adId);
+
     // Query Supabase p2p_ads table
-    let { data: ad, error } = await supabase
-      .from('p2p_ads')
-      .select('*')
-      .or(`id.eq.${adId},public_ad_id.eq.${adId}`)
-      .maybeSingle();
+    let ad: any = null;
+
+    if (isUuid) {
+      const { data } = await supabase
+        .from('p2p_ads')
+        .select('*')
+        .eq('id', adId)
+        .maybeSingle();
+      ad = data;
+    }
+
+    if (!ad) {
+      const { data } = await supabase
+        .from('p2p_ads')
+        .select('*')
+        .or(`public_ad_id.eq.${adId},id.eq.${adId}`)
+        .maybeSingle();
+      ad = data;
+    }
 
     if (!ad) {
       const { data: fallbackAd } = await supabase
@@ -73,16 +89,20 @@ export async function GET(
       return NextResponse.json({ ...fallbackObj, ad: fallbackObj });
     }
 
-    // Fetch user profile for presence
+    // Fetch user profile for presence and trader info
     let presence = 'Online';
+    let profileData: any = null;
     if (ad.user_id) {
       const { data: profile } = await supabase
         .from('profiles')
-        .select('last_active')
+        .select('*')
         .eq('id', ad.user_id)
         .maybeSingle();
-      if (profile?.last_active) {
-        presence = formatPresence(profile.last_active);
+      if (profile) {
+        profileData = profile;
+        if (profile.last_seen_at || profile.last_active) {
+          presence = formatPresence(profile.last_seen_at || profile.last_active);
+        }
       }
     }
 
@@ -116,6 +136,27 @@ export async function GET(
       offer_tags: tags,
       terms_conditions: ad.terms_conditions || ad.terms || '',
       trader_presence: presence,
+      user: profileData ? {
+        id: profileData.id,
+        username: profileData.username || ad.user_display_name || 'Trader',
+        avatar_url: profileData.avatar_url || profileData.photo_url,
+        photo_url: profileData.avatar_url || profileData.photo_url,
+        created_at: profileData.created_at,
+        completed_trades: profileData.completed_trades || 0,
+        positive_feedback: profileData.positive_feedback || 0,
+        negative_feedback: profileData.negative_feedback || 0,
+        avg_release_time: profileData.avg_release_time || 'N/A',
+        avg_release_minutes: profileData.avg_release_minutes,
+        avg_pay_time: profileData.avg_pay_time || 'N/A',
+        avg_payment_minutes: profileData.avg_payment_minutes,
+        last_seen_at: profileData.last_seen_at,
+      } : {
+        id: ad.user_id,
+        username: ad.user_display_name || 'Trader',
+        completed_trades: 0,
+        positive_feedback: 0,
+        negative_feedback: 0,
+      },
       // Legacy compatibility
       adType: (ad.ad_type || ad.type || 'sell').toLowerCase(),
       crypto: ad.crypto || 'BTC',

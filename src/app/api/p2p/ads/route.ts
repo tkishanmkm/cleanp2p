@@ -127,43 +127,33 @@ export async function POST(request: NextRequest) {
       console.warn('Balance lookup warning:', balErr);
     }
 
-    // If user has 0 balance and it's a SELL ad, handle accordingly:
-    // Option A: Block ad creation completely if balance is 0
-    if (adSide === 'SELL' && userBalance <= 0) {
-      return NextResponse.json(
-        { error: 'Insufficient balance to create a sell advertisement.' },
-        { status: 400 }
-      );
-    }
-
-    // 3. Automatically adjust limits based on user's actual balance
-    let requestedMax = Number(body.max_amount || body.max_limit || 0);
-    let requestedMin = Number(body.min_amount || body.min_limit || 0);
-
-    if (adSide === 'SELL') {
-      // If the user's max limit exceeds their actual wallet balance, cap it automatically
-      if (requestedMax > userBalance || !requestedMax) {
-        requestedMax = userBalance;
-      }
-      // If min amount exceeds available balance, adjust min amount as well
-      if (requestedMin > userBalance) {
-        requestedMin = userBalance;
-      }
-    }
+    // 3. Trade limits from user request
+    const requestedMax = Number(body.max_amount ?? body.max_limit ?? 5000);
+    const requestedMin = Number(body.min_amount ?? body.min_limit ?? 100);
 
     // Sanitize and prepare clean payload (preventing PostgreSQL 22P02 errors)
     const cleanPayload: Record<string, any> = {
       ...body,
       user_id: user.id,
       type: adSide,
+      side: adSide,
+      ad_type: adSide.toLowerCase(),
       coin: coinType,
+      crypto: coinType,
+      asset: coinType,
+      crypto_currency: coinType,
+      fiat: (body.fiat || body.fiat_currency || 'USD').toUpperCase(),
+      fiat_currency: (body.fiat || body.fiat_currency || 'USD').toUpperCase(),
       price: body.price !== undefined && body.price !== null && body.price !== '' ? Number(body.price) : null,
-      margin: body.margin !== undefined && body.margin !== null && body.margin !== '' ? Number(body.margin) : (body.price_margin ? Number(body.price_margin) : null),
+      margin: body.margin !== undefined && body.margin !== null && body.margin !== '' ? Number(body.margin) : (body.rate_percent ? Number(body.rate_percent) : (body.price_margin ? Number(body.price_margin) : 0)),
+      rate_percent: body.margin !== undefined && body.margin !== null && body.margin !== '' ? Number(body.margin) : (body.rate_percent ? Number(body.rate_percent) : (body.price_margin ? Number(body.price_margin) : 0)),
       min_amount: requestedMin,
       min_limit: requestedMin,
       max_amount: requestedMax,
       max_limit: requestedMax,
-      is_fixed: Boolean(body.is_fixed ?? (typeof body.fixed_rate === 'boolean' ? body.fixed_rate : false)),
+      active: true,
+      status: 'active',
+      is_fixed: Boolean(body.is_fixed ?? (typeof body.fixed_rate === 'boolean' ? body.fixed_rate : (body.rate_type === 'fixed' || body.pricing_type === 'FIXED'))),
       require_full_name_verified: Boolean(body.require_full_name_verified),
       require_verified_users: Boolean(body.require_verified_users),
     };

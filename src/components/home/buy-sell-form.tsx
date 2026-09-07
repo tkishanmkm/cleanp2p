@@ -31,7 +31,7 @@ import { Card, CardContent } from '../ui/card';
 import { SUPPORTED_CRYPTOS } from '@/lib/constants';
 import type { CryptoCurrency } from '@/lib/types';
 import { useRouter } from 'next/navigation';
-import { currencies } from '@/lib/currencies';
+import { ALL_FIATS, getCurrencyCountryCode } from '@/lib/currencies';
 import { usePrices } from '@/context/price-context';
 import {
   bankTransfers,
@@ -46,16 +46,8 @@ import { useI18n } from '@/context/i18n-context';
 import { FlagIcon } from '@/components/ui/flag-icon';
 import { cn } from '@/lib/utils';
 
-const CURRENCY_TO_FLAG: Record<string, string> = {
-  USD: 'us', EUR: 'eu', GBP: 'gb', INR: 'in', CAD: 'ca', AUD: 'au', JPY: 'jp',
-  CNY: 'cn', BRL: 'br', RUB: 'ru', TRY: 'tr', AED: 'ae', SAR: 'sa', ZAR: 'za',
-  NGN: 'ng', KES: 'ke', GHS: 'gh', EGP: 'eg', PKR: 'pk', BDT: 'bd', VND: 'vn',
-  THB: 'th', IDR: 'id', MYR: 'my', PHP: 'ph', SGD: 'sg', MXN: 'mx', ARS: 'ar',
-  CHF: 'ch', NZD: 'nz', SEK: 'se', KRW: 'kr', NOK: 'no', PLN: 'pl', COP: 'co'
-};
-
 const getFlagCode = (currencyCode: string) =>
-  CURRENCY_TO_FLAG[currencyCode.toUpperCase()] || currencyCode.slice(0, 2).toLowerCase();
+  getCurrencyCountryCode(currencyCode);
 
 const CryptoLogo = ({ crypto, className }: { crypto: CryptoCurrency; className?: string }) => {
   switch (crypto) {
@@ -76,13 +68,13 @@ export function BuySellForm() {
           <TabsList className="grid w-full grid-cols-2 bg-slate-100 dark:bg-slate-800/80 p-1.5 h-auto rounded-xl">
             <TabsTrigger
               value="buy"
-              className="py-2.5 text-sm font-semibold rounded-lg data-[state=active]:bg-[#9273FC] data-[state=active]:text-white data-[state=active]:shadow-md transition-all"
+              className="py-2.5 text-sm font-semibold rounded-lg text-slate-700 dark:text-slate-300 data-[state=active]:bg-emerald-600 data-[state=active]:hover:bg-emerald-500 data-[state=active]:text-white data-[state=active]:shadow-md transition-all"
             >
               {t('buySellForm.buyTab') || 'Buy Crypto'}
             </TabsTrigger>
             <TabsTrigger
               value="sell"
-              className="py-2.5 text-sm font-semibold rounded-lg data-[state=active]:bg-rose-600 data-[state=active]:text-white data-[state=active]:shadow-md transition-all"
+              className="py-2.5 text-sm font-semibold rounded-lg text-slate-700 dark:text-slate-300 data-[state=active]:bg-rose-600 data-[state=active]:hover:bg-rose-500 data-[state=active]:text-white data-[state=active]:shadow-md transition-all"
             >
               {t('buySellForm.sellTab') || 'Sell Crypto'}
             </TabsTrigger>
@@ -126,7 +118,7 @@ function FormContent({ type }: { type: 'buy' | 'sell' }) {
   );
 
   const filteredFiats = useMemo(() => {
-    return currencies.filter(
+    return ALL_FIATS.filter(
       (c) =>
         c.name.toLowerCase().includes(fiatSearch.toLowerCase()) ||
         c.code.toLowerCase().includes(fiatSearch.toLowerCase())
@@ -158,7 +150,7 @@ function FormContent({ type }: { type: 'buy' | 'sell' }) {
     router.push(`/${type}?${params.toString()}`);
   };
 
-  const selectedFiatObj = currencies.find((c) => c.code === fiatCurrency);
+  const selectedFiatObj = ALL_FIATS.find((c) => c.code === fiatCurrency);
 
   return (
     <>
@@ -250,11 +242,16 @@ function FormContent({ type }: { type: 'buy' | 'sell' }) {
         <div className="pt-2">
           <Button
             type="submit"
-            className="w-full h-12 text-base font-bold rounded-xl shadow-lg bg-gradient-to-r from-[#9273FC] via-[#6366F1] to-[#3B82F6] hover:opacity-95 text-white shadow-indigo-500/25 transition-all duration-200 flex items-center justify-center gap-2 group cursor-pointer"
+            className={cn(
+              "w-full h-12 text-base font-bold rounded-xl shadow-lg text-white transition-all duration-200 flex items-center justify-center gap-2 group cursor-pointer",
+              type === 'buy'
+                ? "bg-emerald-600 hover:bg-emerald-500 shadow-emerald-600/30"
+                : "bg-rose-600 hover:bg-rose-500 shadow-rose-600/30"
+            )}
             size="lg"
           >
             <Search className="h-5 w-5 transition-transform group-hover:scale-110" />
-            <span>Find Offers</span>
+            <span>{type === 'buy' ? 'Find Buy Offers' : 'Find Sell Offers'}</span>
           </Button>
         </div>
       </form>

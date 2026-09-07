@@ -116,7 +116,7 @@ export default function TradeInitiationPage() {
           </div>
           <div className="text-right">
             <p className="text-[10px] text-slate-400">Unit Price</p>
-            <p className="text-base font-mono font-extrabold text-white">${Number(ad.price || 0).toLocaleString()}</p>
+            <p className="text-base font-mono font-extrabold text-white">{Number(ad.price || 0).toLocaleString()} {ad.fiat_currency}</p>
           </div>
         </div>
 
@@ -208,7 +208,7 @@ export default function TradeInitiationPage() {
           }`}
         >
           {submitting ? <Loader2 className="h-5 w-5 animate-spin" /> : <ShieldCheck className="h-5 w-5" />}
-          Initiate Escrow Trade
+          {submitting ? 'Initiating Trade...' : 'Initiate Trade'}
         </button>
       </div>
 

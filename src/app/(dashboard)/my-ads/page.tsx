@@ -174,7 +174,7 @@ export default function MyAdsPage() {
   if (isUserLoading || !user) {
     return (
       <div className="flex flex-1 items-center justify-center min-h-[300px]">
-        <Loader2 className="h-8 w-8 animate-spin text-[#5D45F9]" />
+        <Loader2 className="h-8 w-8 animate-spin text-[#9273FC]" />
       </div>
     );
   }
