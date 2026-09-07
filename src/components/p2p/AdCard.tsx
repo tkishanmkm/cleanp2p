@@ -2,6 +2,7 @@
 
 import Link from 'next/link';
 import { ThumbsUp, ThumbsDown, User } from 'lucide-react';
+import { getPublicHandle } from '@/utils/userPrivacy';
 
 export interface AdCardProps {
   ad: {
@@ -13,20 +14,26 @@ export interface AdCardProps {
     min_limit: number;
     max_limit: number;
     payment_method: string;
-    user: {
-      username: string;
+    user?: {
+      username?: string | null;
       avatar_url?: string | null;
       completed_trades?: number;
       positive_feedback?: number;
       negative_feedback?: number;
       is_online?: boolean;
-    };
+    } | null;
+    profiles?: {
+      id?: string;
+      username?: string | null;
+      is_online?: boolean | null;
+      last_seen?: string | null;
+    } | null;
   };
 }
 
 export default function AdCard({ ad }: AdCardProps) {
-  // Always use username over full name
-  const displayUsername = ad.user?.username || 'Trader';
+  // Always use standard @username handle over full name or random numbers
+  const displayUsername = getPublicHandle(ad.user || ad.profiles);
 
   return (
     <div className="bg-white dark:bg-gray-800 p-4 sm:p-5 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-4 transition-colors">

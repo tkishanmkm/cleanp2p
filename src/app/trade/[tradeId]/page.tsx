@@ -4,7 +4,8 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useRouter, useParams } from 'next/navigation';
 import { createClientComponentClient } from '@/utils/supabase/client';
 import Link from 'next/link';
-import { ArrowLeft, Clock, ShieldCheck, AlertCircle, FileText, Send, Paperclip } from 'lucide-react';
+import { ArrowLeft, Clock, ShieldCheck, AlertCircle, FileText, Send, Paperclip, Info } from 'lucide-react';
+import TradeChatInfoModal from '@/components/trade/TradeChatInfoModal';
 
 interface TradeDetails {
   id: string;
@@ -17,8 +18,26 @@ interface TradeDetails {
   buyer_id: string;
   seller_id: string;
   created_at: string;
-  buyer?: { username?: string; avatar_url?: string };
-  seller?: { username?: string; avatar_url?: string };
+  buyer?: {
+    username?: string;
+    avatar_url?: string;
+    full_name?: string | null;
+    name_privacy?: string | null;
+    rating?: number;
+    completed_trades?: number;
+    positive_feedback?: number;
+    negative_feedback?: number;
+  };
+  seller?: {
+    username?: string;
+    avatar_url?: string;
+    full_name?: string | null;
+    name_privacy?: string | null;
+    rating?: number;
+    completed_trades?: number;
+    positive_feedback?: number;
+    negative_feedback?: number;
+  };
 }
 
 interface Message {
@@ -56,6 +75,7 @@ export default function TradeChatRoom({ params }: TradeChatRoomProps) {
   const [actionStatus, setActionStatus] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
   const [disputeReason, setDisputeReason] = useState('');
   const [showDisputeModal, setShowDisputeModal] = useState(false);
+  const [showPartnerInfoModal, setShowPartnerInfoModal] = useState(false);
 
   const chatEndRef = useRef<HTMLDivElement>(null);
 
@@ -82,8 +102,8 @@ export default function TradeChatRoom({ params }: TradeChatRoomProps) {
           .from('trades')
           .select(`
             *,
-            buyer:profiles!trades_buyer_id_fkey(username, avatar_url),
-            seller:profiles!trades_seller_id_fkey(username, avatar_url)
+            buyer:profiles!trades_buyer_id_fkey(id, username, avatar_url, full_name, name_privacy, rating, completed_trades, positive_feedback, negative_feedback),
+            seller:profiles!trades_seller_id_fkey(id, username, avatar_url, full_name, name_privacy, rating, completed_trades, positive_feedback, negative_feedback)
           `)
           .or(`id.eq.${tradeId},trade_id.eq.${tradeId}`)
           .maybeSingle();
@@ -107,8 +127,8 @@ export default function TradeChatRoom({ params }: TradeChatRoomProps) {
           if (simpleTrade) {
             // Fetch profiles separately
             const [bRes, sRes] = await Promise.all([
-              simpleTrade.buyer_id ? supabase.from('profiles').select('username, avatar_url').eq('id', simpleTrade.buyer_id).maybeSingle() : { data: null },
-              simpleTrade.seller_id ? supabase.from('profiles').select('username, avatar_url').eq('id', simpleTrade.seller_id).maybeSingle() : { data: null },
+              simpleTrade.buyer_id ? supabase.from('profiles').select('id, username, avatar_url, full_name, name_privacy, rating, completed_trades, positive_feedback, negative_feedback').eq('id', simpleTrade.buyer_id).maybeSingle() : { data: null },
+              simpleTrade.seller_id ? supabase.from('profiles').select('id, username, avatar_url, full_name, name_privacy, rating, completed_trades, positive_feedback, negative_feedback').eq('id', simpleTrade.seller_id).maybeSingle() : { data: null },
             ]);
 
             loadedTrade = {
@@ -561,10 +581,23 @@ export default function TradeChatRoom({ params }: TradeChatRoomProps) {
 
           {/* Counterparty Info */}
           <div className="bg-white dark:bg-gray-800 p-4 rounded-xl border border-gray-200 dark:border-gray-700 text-xs space-y-2 shadow-sm">
-            <p className="text-gray-500 dark:text-gray-400 font-semibold uppercase">Trading Partner</p>
-            <p className="text-sm font-bold text-gray-900 dark:text-white">
-              @{isBuyer ? trade.seller?.username || 'Seller' : trade.buyer?.username || 'Buyer'}
-            </p>
+            <div className="flex items-center justify-between">
+              <p className="text-gray-500 dark:text-gray-400 font-semibold uppercase">Trading Partner</p>
+              <button
+                type="button"
+                onClick={() => setShowPartnerInfoModal(true)}
+                title="View Partner Privacy Info"
+                className="inline-flex items-center gap-1 text-[11px] font-semibold text-[#9273FC] hover:text-[#8261FA] hover:underline cursor-pointer"
+              >
+                <Info className="w-3.5 h-3.5" />
+                <span>Info</span>
+              </button>
+            </div>
+            <div className="flex items-center justify-between">
+              <p className="text-sm font-bold text-gray-900 dark:text-white font-mono">
+                @{isBuyer ? trade.seller?.username || 'Seller' : trade.buyer?.username || 'Buyer'}
+              </p>
+            </div>
             <p className="text-gray-500 dark:text-gray-400">
               Your Role: <span className="font-semibold text-gray-800 dark:text-gray-200">{isBuyer ? 'Buyer' : 'Seller'}</span>
             </p>
@@ -575,9 +608,24 @@ export default function TradeChatRoom({ params }: TradeChatRoomProps) {
         <div className="lg:col-span-2 bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 flex flex-col h-[650px] shadow-sm overflow-hidden">
           {/* Chat Header */}
           <div className="p-4 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between bg-gray-50/50 dark:bg-gray-900/30">
-            <div>
-              <h3 className="font-bold text-gray-900 dark:text-white text-base">Trade Chat & Proof Hub</h3>
-              <p className="text-xs text-gray-500 dark:text-gray-400">End-to-end recorded audit log for escrow safety</p>
+            <div className="flex items-center gap-2">
+              <div>
+                <h3 className="font-bold text-gray-900 dark:text-white text-base flex items-center gap-2">
+                  <span>Trade Chat</span>
+                  <span className="text-sm font-normal text-gray-500 dark:text-gray-400 font-mono">
+                    with @{isBuyer ? trade.seller?.username || 'Seller' : trade.buyer?.username || 'Buyer'}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setShowPartnerInfoModal(true)}
+                    title="View Partner Privacy Info"
+                    className="p-1 rounded-full text-gray-400 hover:text-[#9273FC] hover:bg-gray-100 dark:hover:bg-gray-700 transition"
+                  >
+                    <Info className="w-4 h-4" />
+                  </button>
+                </h3>
+                <p className="text-xs text-gray-500 dark:text-gray-400">End-to-end recorded audit log for escrow safety</p>
+              </div>
             </div>
             <span className="text-xs bg-blue-50 dark:bg-blue-950/60 text-blue-700 dark:text-blue-300 px-2.5 py-1 rounded-full font-medium">
               Encrypted Room
@@ -697,6 +745,14 @@ export default function TradeChatRoom({ params }: TradeChatRoomProps) {
             </div>
           </div>
         </div>
+      )}
+
+      {/* Trade Partner Privacy / Info Modal */}
+      {showPartnerInfoModal && (
+        <TradeChatInfoModal
+          user={isBuyer ? trade.seller : trade.buyer}
+          onClose={() => setShowPartnerInfoModal(false)}
+        />
       )}
     </div>
   );

@@ -206,9 +206,8 @@ export function TradeInitiationModal({ ad, isOpen, onClose }: TradeInitiationMod
         <div className="flex items-center justify-between p-3 rounded-xl bg-muted/50 border my-2">
           <div className="space-y-0.5">
             <p className="font-semibold text-sm">
-              {traderProfile?.full_name || traderProfile?.username || "Trader"}
+              @{traderProfile?.username || "trader"}
             </p>
-            <p className="text-xs text-muted-foreground">@{traderProfile?.username || "user"}</p>
           </div>
           <UserStatusIndicator lastActive={traderProfile?.last_active} />
         </div>

@@ -31,6 +31,7 @@ import { useToast } from '@/hooks/use-toast';
 import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar';
 import { DefaultAvatar } from '@/components/icons';
 import { Skeleton } from '@/components/ui/skeleton';
+import { getPublicHandle } from '@/utils/userPrivacy';
 
 
 const mobileNavLinks = [
@@ -286,7 +287,7 @@ export function Header() {
                     </Avatar>
                     <div className="hidden sm:block flex-shrink min-w-0 text-left">
                         {user.displayName ? (
-                          <p className="font-semibold text-sm leading-tight truncate">{user.displayName}</p>
+                          <p className="font-semibold text-sm leading-tight truncate">{getPublicHandle(user.displayName)}</p>
                         ) : (
                           <Skeleton className="h-4 w-16" />
                         )}
@@ -306,7 +307,7 @@ export function Header() {
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="end" className="w-56">
                   <div className="px-3 py-2 border-b border-border/60 mb-1">
-                    <p className="text-xs font-bold text-foreground truncate">{user.displayName || 'My Account'}</p>
+                    <p className="text-xs font-bold text-foreground truncate">{getPublicHandle(user.displayName)}</p>
                     <div className="flex items-center gap-1.5 mt-1 text-xs">
                       <Wallet className="w-3 h-3 text-emerald-500 shrink-0" />
                       <span className="font-mono font-bold text-emerald-600 dark:text-emerald-400 text-xs">

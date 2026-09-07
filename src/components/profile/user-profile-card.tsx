@@ -25,18 +25,18 @@ export function UserProfileCard({ userId }: { userId: string }) {
   return (
     <div className="space-y-4 border border-border p-6 rounded-xl bg-card text-card-foreground">
       <div>
-        <h3 className="text-lg font-bold">{profile?.full_name || profile?.username || "N/A"}</h3>
-        <p className="text-sm text-muted-foreground">User ID: @{profile?.username || "N/A"}</p>
+        <h3 className="text-lg font-bold">@{profile?.username || "trader"}</h3>
+        <p className="text-sm text-muted-foreground">Member Since {profile?.created_at ? new Date(profile.created_at).toLocaleDateString() : "N/A"}</p>
       </div>
 
       <div className="grid grid-cols-2 gap-4 pt-4 border-t border-border">
         <div>
-          <span className="text-xs text-muted-foreground">Full Name</span>
-          <p className="font-medium">{profile?.full_name || "N/A"}</p>
+          <span className="text-xs text-muted-foreground">Username</span>
+          <p className="font-medium">@{profile?.username || "trader"}</p>
         </div>
         <div>
-          <span className="text-xs text-muted-foreground">Date of Birth</span>
-          <p className="font-medium">{profile?.date_of_birth || profile?.dob || "N/A"}</p>
+          <span className="text-xs text-muted-foreground">Country</span>
+          <p className="font-medium">{profile?.country || "Global"}</p>
         </div>
         <div>
           <span className="text-xs text-muted-foreground">Member Since</span>

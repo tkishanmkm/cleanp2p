@@ -310,6 +310,31 @@ export async function signUpWithEmail(
 }
 
 /**
+ * Direct User Signup helper with explicit username normalization.
+ */
+export async function handleUserSignup(email: string, pass: string, desiredUsername: string) {
+  const cleanUsername = desiredUsername.trim().toLowerCase().replace(/[^a-z0-9_]/g, '');
+
+  if (cleanUsername.length < 3) {
+    throw new Error('Username must be at least 3 characters long and alphanumeric.');
+  }
+
+  const { data, error } = await supabase.auth.signUp({
+    email: email.trim().toLowerCase(),
+    password: pass,
+    options: {
+      data: {
+        username: cleanUsername,
+        full_name: cleanUsername,
+      },
+    },
+  });
+
+  if (error) throw error;
+  return data;
+}
+
+/**
  * Sign out the currently authenticated user.
  */
 export async function signOut(): Promise<AuthActionResult<void>> {

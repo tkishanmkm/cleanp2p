@@ -1,11 +1,9 @@
-import { NextResponse, type NextRequest } from "next/server";
-import { createServerClient } from "@supabase/ssr";
+import { createServerClient } from '@supabase/ssr';
+import { NextResponse, type NextRequest } from 'next/server';
 
 export async function middleware(request: NextRequest) {
-  const { pathname } = request.nextUrl;
-  let response = NextResponse.next({ request: { headers: request.headers } });
+  let supabaseResponse = NextResponse.next({ request });
 
-  // 1. Initialize Supabase Session with Cookie Management
   const supabase = createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
@@ -18,94 +16,64 @@ export async function middleware(request: NextRequest) {
           cookiesToSet.forEach(({ name, value }) =>
             request.cookies.set(name, value)
           );
-          response = NextResponse.next({ request });
+          supabaseResponse = NextResponse.next({ request });
           cookiesToSet.forEach(({ name, value, options }) =>
-            response.cookies.set(name, value, {
-              ...options,
-              sameSite: "none",
-              secure: true,
-            })
+            supabaseResponse.cookies.set(name, value, options)
           );
         },
       },
     }
   );
 
+  // Refresh session
   const { data: { user } } = await supabase.auth.getUser();
 
-  // 2. Service Authorization for Background Workers and Cron Jobs
-  if (
-    pathname.startsWith("/api/cron/") ||
-    pathname.startsWith("/api/internal/") ||
-    pathname.startsWith("/api/workers/") ||
-    pathname.startsWith("/api/jobs/")
-  ) {
-    const authHeader = request.headers.get("authorization");
-    const cronSecret = process.env.CRON_SECRET || process.env.DEPOSIT_WORKER_SECRET || process.env.CRON_SECRET_KEY;
-    const workerSecret = process.env.WITHDRAWAL_WORKER_SECRET || process.env.DEPOSIT_WORKER_SECRET;
-    
-    const isWorkerAuthorized = Boolean(
-      (cronSecret && (authHeader === `Bearer ${cronSecret}` || request.headers.get("x-worker-secret") === cronSecret || request.headers.get("x-cron-secret") === cronSecret)) ||
-      (workerSecret && (authHeader === `Bearer ${workerSecret}` || request.headers.get("x-worker-secret") === workerSecret))
-    );
+  const url = request.nextUrl.clone();
+  const isAdminRoute = url.pathname.startsWith('/adminnarayan') && !url.pathname.startsWith('/adminnarayan/login');
 
-    if (!isWorkerAuthorized) {
-      return NextResponse.json({ error: "Forbidden: Internal worker authorization required" }, { status: 403 });
-    }
-    return response;
-  }
-
-  // 3. User Financial & Authenticated Endpoints Guard
-  if (
-    pathname.startsWith("/api/withdraw") || 
-    pathname.startsWith("/api/withdrawals/") || 
-    pathname.startsWith("/api/p2p/orders/") ||
-    pathname.startsWith("/dashboard") ||
-    pathname.startsWith("/wallets")
-  ) {
+  if (isAdminRoute) {
+    // 1. Unauthenticated users -> redirect to admin login
     if (!user) {
-      if (pathname.startsWith("/api/")) {
-        return NextResponse.json({ error: "Unauthorized: Active session required" }, { status: 401 });
+      url.pathname = '/adminnarayan/login';
+      return NextResponse.redirect(url);
+    }
+
+    // 2. Check Role in App Metadata, Profiles Table, or verify RPC
+    let userRole = user.app_metadata?.role;
+
+    if (!userRole) {
+      const { data: profile } = await supabase
+        .from('profiles')
+        .select('role')
+        .eq('id', user.id)
+        .maybeSingle();
+      
+      userRole = profile?.role;
+    }
+
+    // Fallback: Check if verify_admin_login or check_is_admin returns true
+    if (userRole !== 'admin') {
+      const { data: isAdmin } = await supabase.rpc('check_is_admin', { p_user_id: user.id }).catch(() => ({ data: false }));
+      if (isAdmin) {
+        userRole = 'admin';
       }
-      return NextResponse.redirect(new URL("/login", request.url));
+    }
+
+    // 3. Reject if not admin
+    if (userRole !== 'admin') {
+      url.pathname = '/unauthorized';
+      return NextResponse.redirect(url);
     }
   }
 
-  // 4. Strict Admin Endpoint Authorization
-  if (pathname.startsWith("/api/admin/") || pathname.startsWith("/adminnarayan")) {
-    if (!user) {
-      if (pathname.startsWith("/api/")) {
-        return NextResponse.json({ error: "Unauthorized: Admin authentication required" }, { status: 401 });
-      }
-      return NextResponse.redirect(new URL("/adminnarayan/login", request.url));
-    }
-
-    // Cryptographic role verification against Supabase database function
-    const { data: isAdmin } = await supabase.rpc("check_is_admin", { p_user_id: user.id });
-
-    if (!isAdmin) {
-      if (pathname.startsWith("/api/")) {
-        return NextResponse.json({ error: "Forbidden: Administrator privileges required" }, { status: 403 });
-      }
-      return NextResponse.redirect(new URL("/unauthorized", request.url));
-    }
-  }
-
-  return response;
+  return supabaseResponse;
 }
 
 export const config = {
   matcher: [
-    "/adminnarayan/:path*",
-    "/api/admin/:path*",
-    "/api/p2p/orders/:path*",
-    "/api/p2p/trades/:path*",
-    "/api/withdraw",
-    "/api/withdrawals/:path*",
-    "/api/internal/:path*",
-    "/api/cron/:path*",
-    "/api/workers/:path*",
-    "/dashboard/:path*",
-    "/wallets/:path*",
+    '/adminnarayan/:path*',
+    '/api/admin/:path*',
+    '/dashboard/:path*',
+    '/wallets/:path*',
   ],
 };

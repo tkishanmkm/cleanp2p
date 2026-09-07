@@ -32,6 +32,7 @@ import {
 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
+import { getPublicHandle, formatCurrencyValue } from '@/utils/userPrivacy';
 
 function getCurrencyCountryCode(currencyCode: string): string {
   const code = currencyCode?.toUpperCase() || 'USD';
@@ -257,7 +258,8 @@ export default function AdDetailPage() {
   }, [ad?.payment_methods, ad?.payment_method, ad?.paymentMethods, ad?.paymentMethod]);
 
   // Username display
-  const username = ad?.user?.username || (ad as any)?.user_display_name || (ad as any)?.username || 'trader';
+  const sellerHandle = getPublicHandle(ad?.user?.username || (ad as any)?.profiles?.username || (ad as any)?.user_display_name || 'pulsepost949');
+  const username = sellerHandle.replace('@', '');
   const avatarUrl = ad?.user?.avatar_url || ad?.user?.photo_url || (ad?.user_id ? `/api/media/avatar/${ad.user_id}` : null);
 
   // Pricing calculations
@@ -550,7 +552,7 @@ export default function AdDetailPage() {
               </div>
             </div>
             <h1 className="text-xl sm:text-2xl font-bold tracking-tight">
-              {grammarTitle} <span className="text-[#9273FC] font-mono">@{username}</span>
+              {grammarTitle} <span className="text-primary font-mono">{sellerHandle}</span>
             </h1>
             <p className="text-xs text-muted-foreground mt-1">
               Protected by Paxones Automated Escrow Protection.
