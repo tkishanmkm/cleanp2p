@@ -786,7 +786,7 @@ export function TradeDetails({
             value={`1 ${trade?.crypto ?? ''} = ${(trade?.price ?? 0).toLocaleString()} ${trade?.fiatCurrency ?? ''}`}
           />
           {trade.escrowFee && (
-            <DetailRow label="Escrow Fee (1%)" value={`${trade.escrowFee.toFixed(8)} ${trade.crypto}`} />
+            <DetailRow label="Escrow Fee (1.5%)" value={`${trade.escrowFee.toFixed(8)} ${trade.crypto}`} />
           )}
           <hr className="my-2 border-dashed" />
           <DetailRow

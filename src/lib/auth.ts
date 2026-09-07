@@ -171,14 +171,78 @@ export function generateUniqueUsername(): string {
   return `trader_${randomSuffix}`;
 }
 
+export interface SignUpMetadata {
+  username?: string;
+  displayName?: string;
+  fullName?: string;
+  full_name?: string;
+  dob?: string;
+  country?: string;
+  securityQuestion?: string;
+  security_question?: string;
+  securityAnswer?: string;
+  security_answer?: string;
+}
+
+/**
+ * Handle signup with formatted options.data for database trigger
+ */
+export async function handleSignUp(formData: {
+  fullName: string;
+  email: string;
+  password: string;
+  day: string;
+  month: string;
+  year: string;
+  country: string;
+  securityQuestion: string;
+  securityAnswer: string;
+}) {
+  const monthMap: Record<string, string> = {
+    January: '01', February: '02', March: '03', April: '04',
+    May: '05', June: '06', July: '07', August: '08',
+    September: '09', October: '10', November: '11', December: '12',
+    '1': '01', '2': '02', '3': '03', '4': '04', '5': '05', '6': '06',
+    '7': '07', '8': '08', '9': '09', '10': '10', '11': '11', '12': '12',
+    '01': '01', '02': '02', '03': '03', '04': '04', '05': '05', '06': '06',
+    '07': '07', '08': '08', '09': '09',
+  };
+
+  const formattedDay = String(formData.day || '1').padStart(2, '0');
+  const formattedMonth = monthMap[formData.month] || String(formData.month || '1').padStart(2, '0');
+  const formattedDob = `${formData.year}-${formattedMonth}-${formattedDay}`;
+
+  const { data, error } = await supabase.auth.signUp({
+    email: formData.email.trim().toLowerCase(),
+    password: formData.password,
+    options: {
+      data: {
+        full_name: formData.fullName,
+        display_name: formData.fullName,
+        dob: formattedDob,
+        country: formData.country,
+        security_question: formData.securityQuestion,
+        security_answer: formData.securityAnswer,
+      },
+    },
+  });
+
+  if (error) {
+    console.error('Signup error:', error.message);
+    return { success: false, message: error.message, error };
+  }
+
+  return { success: true, user: data.user, session: data.session };
+}
+
 /**
  * Sign up a new user with email, password, and metadata via Supabase Auth.
  */
 export async function signUpWithEmail(
   email: string,
   password: string,
-  metadata?: { username?: string; displayName?: string }
-): Promise<AuthActionResult<{ user: User | null; session: Session | null; assignedUsername: string }>> {
+  metadata?: SignUpMetadata
+): Promise<AuthActionResult<{ user: User | null; session: Session | null; assignedUsername: string; rawError?: any }>> {
   try {
     const { isConfigured } = checkSupabaseConfig();
     if (!isConfigured) {
@@ -190,15 +254,20 @@ export async function signUpWithEmail(
 
     // Automatically generate a unique username if not provided
     const resolvedUsername = metadata?.username ? sanitizeUsername(metadata.username) : generateUniqueUsername();
-    const resolvedDisplayName = metadata?.displayName || metadata?.username || resolvedUsername;
+    const resolvedDisplayName = metadata?.fullName || metadata?.full_name || metadata?.displayName || metadata?.username || resolvedUsername;
 
     const { data, error } = await supabase.auth.signUp({
       email: email.trim().toLowerCase(),
       password,
       options: {
         data: {
-          username: resolvedUsername,
+          full_name: metadata?.fullName || metadata?.full_name || resolvedDisplayName,
           display_name: resolvedDisplayName,
+          username: resolvedUsername,
+          dob: metadata?.dob,
+          country: metadata?.country,
+          security_question: metadata?.securityQuestion || metadata?.security_question,
+          security_answer: metadata?.securityAnswer || metadata?.security_answer,
         },
       },
     });
@@ -215,6 +284,7 @@ export async function signUpWithEmail(
           email: data.user.email,
           username: resolvedUsername,
           display_name: resolvedDisplayName,
+          country: metadata?.country,
           role: 'user',
           is_admin: false,
           status: 'active',

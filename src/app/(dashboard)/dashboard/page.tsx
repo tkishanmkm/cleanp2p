@@ -52,8 +52,9 @@ const CryptoLogo = ({ crypto, className }: { crypto: CryptoCurrency; className?:
 export default function DashboardPage() {
   const { user: authUser, profile, isUserLoading: isAuthLoading } = useAuth();
   const router = useRouter();
-  const { prices } = usePrices();
+  const { prices, fiatRates } = usePrices();
   const { balances: reactiveBalances, totalConvertedValue, preferredCurrency } = useWallet();
+  const exchangeRate = (fiatRates && preferredCurrency && fiatRates[preferredCurrency]) ? fiatRates[preferredCurrency] : (fiatRates?.['USD'] || 1);
 
   const [activeTrades, setActiveTrades] = useState<Trade[]>([]);
   const [isLoadingActiveTrades, setIsLoadingActiveTrades] = useState(true);

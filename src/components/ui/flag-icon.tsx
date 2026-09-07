@@ -16,7 +16,8 @@ export function FlagIcon({ countryCode, className }: FlagIconProps) {
       width={20}
       height={15}
       alt={`${countryCode} flag`}
-      className={cn('shrink-0 rounded-sm', className)}
+      className={cn('shrink-0 rounded-xs object-cover', className)}
+      referrerPolicy="no-referrer"
     />
   );
 }

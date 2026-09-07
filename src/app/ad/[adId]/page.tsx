@@ -439,13 +439,9 @@ export default function AdDetailPage() {
         <div className="border-b border-border pb-4 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
           <div>
             <div className="flex items-center gap-2 mb-1">
-              <div className="flex items-center gap-1.5 font-bold text-xs bg-muted/60 px-2 py-1 rounded-md border border-border">
+              <div className="flex items-center gap-1.5 font-bold text-xs bg-muted/60 px-2.5 py-1 rounded-md border border-border">
                 {assetSymbol === 'BTC' ? <BtcLogo className="h-4 w-4 shrink-0" /> : assetSymbol === 'USDT' ? <UsdtLogo className="h-4 w-4 shrink-0" /> : assetSymbol === 'ETH' ? <EthLogo className="h-4 w-4 shrink-0" /> : assetSymbol === 'LTC' ? <LtcLogo className="h-4 w-4 shrink-0" /> : null}
-                <span>{assetSymbol === 'BTC' ? '₿ BTC' : assetSymbol}</span>
-              </div>
-              <div className="flex items-center gap-1.5 font-bold text-xs bg-muted/60 px-2 py-1 rounded-md border border-border">
-                <FlagIcon countryCode={getCurrencyCountryCode(fiatSymbol)} className="h-3.5 w-5 rounded-xs" />
-                <span>{fiatCurrencyConfig.symbol} {fiatSymbol}</span>
+                <span>{assetSymbol}</span>
               </div>
             </div>
             <h1 className="text-xl sm:text-2xl font-bold tracking-tight">
@@ -552,7 +548,6 @@ export default function AdDetailPage() {
                   <span className="text-xs text-muted-foreground block">Unit Price</span>
                   <div className="flex items-baseline gap-2 mt-0.5 flex-wrap">
                     <div className="flex items-center gap-1.5">
-                      <FlagIcon countryCode={getCurrencyCountryCode(fiatSymbol)} className="h-4 w-5 rounded-xs" />
                       <span className="text-2xl font-extrabold text-foreground">
                         {fiatCurrencyConfig.symbol}{effectivePrice.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} {fiatSymbol}
                       </span>
@@ -560,7 +555,7 @@ export default function AdDetailPage() {
                     <span className="text-xs text-muted-foreground">/</span>
                     <div className="flex items-center gap-1 text-sm font-bold text-muted-foreground">
                       {assetSymbol === 'BTC' ? <BtcLogo className="h-4 w-4 shrink-0" /> : assetSymbol === 'USDT' ? <UsdtLogo className="h-4 w-4 shrink-0" /> : assetSymbol === 'ETH' ? <EthLogo className="h-4 w-4 shrink-0" /> : assetSymbol === 'LTC' ? <LtcLogo className="h-4 w-4 shrink-0" /> : null}
-                      <span>{assetSymbol === 'BTC' ? '₿ BTC' : assetSymbol}</span>
+                      <span>{assetSymbol}</span>
                     </div>
                   </div>
                   {/* Percent increase or decrease indicator badge */}
@@ -712,7 +707,7 @@ export default function AdDetailPage() {
                   <div className="absolute right-3 flex items-center gap-1.5 pointer-events-none select-none">
                     {assetSymbol === 'BTC' ? <BtcLogo className="h-4 w-4 shrink-0" /> : assetSymbol === 'USDT' ? <UsdtLogo className="h-4 w-4 shrink-0" /> : assetSymbol === 'ETH' ? <EthLogo className="h-4 w-4 shrink-0" /> : assetSymbol === 'LTC' ? <LtcLogo className="h-4 w-4 shrink-0" /> : null}
                     <span className="text-xs font-bold text-foreground">
-                      {assetSymbol === 'BTC' ? '₿ BTC' : assetSymbol}
+                      {assetSymbol}
                     </span>
                   </div>
                 </div>

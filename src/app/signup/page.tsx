@@ -29,7 +29,8 @@ import { Loader2, AlertCircle, CheckCircle2, Copy, Check, Sparkles, ArrowRight, 
 import { useState, Suspense, useEffect } from "react";
 import { useToast } from "@/hooks/use-toast";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { countries } from "@/lib/countries";
+import { ALL_COUNTRIES } from "@/lib/settings-constants";
+import { FlagIcon } from "@/components/ui/flag-icon";
 import { SECURITY_QUESTIONS } from "@/lib/constants";
 import { signUpWithEmail, updateUserProfile } from "@/lib/auth";
 import { checkSupabaseConfig } from "@/lib/supabase/client";
@@ -45,6 +46,9 @@ const formSchema = z.object({
   country: z.string().min(1, "Please select your country."),
   securityQuestion: z.string().min(1, "Please select a security question."),
   securityAnswer: z.string().min(3, "Answer must be at least 3 characters long."),
+  acceptTerms: z.boolean().refine((val) => val === true, {
+    message: "You must accept the terms and conditions to create an account.",
+  }),
   captcha: z.boolean().refine((val) => val === true, {
     message: "Please confirm you are not a robot.",
   }),
@@ -74,6 +78,12 @@ function SignupFormComponent() {
   const { toast } = useToast();
   const [isSigningUp, setIsSigningUp] = useState(false);
   const [isConfigured, setIsConfigured] = useState(true);
+  const [errorDetails, setErrorDetails] = useState<{
+    message: string;
+    code?: string;
+    status?: number;
+    rawError?: any;
+  } | null>(null);
   const [createdAccountInfo, setCreatedAccountInfo] = useState<{
     email: string;
     username: string;
@@ -98,6 +108,7 @@ function SignupFormComponent() {
       country: "",
       securityQuestion: "",
       securityAnswer: "",
+      acceptTerms: false,
       captcha: false,
     },
   });
@@ -111,14 +122,51 @@ function SignupFormComponent() {
 
   async function onSubmit(values: SignupFormValues) {
     setIsSigningUp(true);
+    setErrorDetails(null);
+
+    // Format Date of Birth (YYYY-MM-DD) with 2-digit padding
+    const monthMap: Record<string, string> = {
+      January: '01', February: '02', March: '03', April: '04',
+      May: '05', June: '06', July: '07', August: '08',
+      September: '09', October: '10', November: '11', December: '12',
+      '1': '01', '2': '02', '3': '03', '4': '04', '5': '05', '6': '06',
+      '7': '07', '8': '08', '9': '09', '10': '10', '11': '11', '12': '12',
+      '01': '01', '02': '02', '03': '03', '04': '04', '05': '05', '06': '06',
+      '07': '07', '08': '08', '09': '09',
+    };
+
+    const formattedDay = String(values.day || '1').padStart(2, '0');
+    const formattedMonth = monthMap[values.month] || String(values.month || '1').padStart(2, '0');
+    const formattedDob = `${values.year}-${formattedMonth}-${formattedDay}`;
+
+    const metadataPayload = {
+      fullName: values.fullName,
+      full_name: values.fullName,
+      dob: formattedDob,
+      country: values.country,
+      securityQuestion: values.securityQuestion,
+      security_question: values.securityQuestion,
+      securityAnswer: values.securityAnswer,
+      security_answer: values.securityAnswer,
+    };
+
+    console.log('Sending Supabase SignUp Payload:', {
+      email: values.email,
+      metadata: metadataPayload,
+    });
 
     try {
-      // 1. Sign up with email via Supabase Auth
-      const { data, error } = await signUpWithEmail(values.email, values.password, {
-        displayName: values.fullName,
-      });
+      // 1. Sign up with email via Supabase Auth passing all options.data metadata
+      const { data, error } = await signUpWithEmail(values.email, values.password, metadataPayload);
 
       if (error) {
+        console.error("Supabase Auth SignUp Error Details:", error);
+        setErrorDetails({
+          message: error.message,
+          code: (error as any).code || 'UNKNOWN_CODE',
+          status: (error as any).status || 400,
+          rawError: error,
+        });
         toast({
           variant: "destructive",
           title: "Signup Failed",
@@ -132,7 +180,6 @@ function SignupFormComponent() {
 
       if (data?.user) {
         // 2. Update additional profile details if available
-        const dob = new Date(parseInt(values.year), parseInt(values.month) - 1, parseInt(values.day));
         await updateUserProfile(data.user.id, {
           display_name: values.fullName,
         });
@@ -147,9 +194,13 @@ function SignupFormComponent() {
           username: assignedUsername,
         });
       }
-    } catch (error: unknown) {
-      console.error("Error during sign up:", error);
-      const description = error instanceof Error ? error.message : "An unexpected error occurred. Please try again.";
+    } catch (error: any) {
+      console.error("Unexpected Signup Execution Exception:", error);
+      const description = error?.message || "An unexpected exception occurred during signup.";
+      setErrorDetails({
+        message: description,
+        rawError: error,
+      });
       toast({ variant: "destructive", title: "Signup Failed", description });
     } finally {
       setIsSigningUp(false);
@@ -162,8 +213,8 @@ function SignupFormComponent() {
         <Card className="w-full max-w-md border border-[#9273FC]/30 shadow-2xl bg-white dark:bg-[#18181c] rounded-2xl overflow-hidden">
           <div className="h-2 bg-gradient-to-r from-[#9273FC] via-[#6366F1] to-[#3B82F6]" />
           <CardHeader className="text-center pt-8 pb-4">
-            <div className="w-16 h-16 rounded-2xl bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 flex items-center justify-center mx-auto mb-3 shadow-inner">
-              <CheckCircle2 className="h-9 w-9 stroke-[2.5]" />
+            <div className="flex justify-center items-center mx-auto mb-4 py-2">
+              <Logo priority variant="auto" />
             </div>
             <CardTitle className="text-2xl font-bold">Account Created Successfully!</CardTitle>
             <CardDescription className="text-sm">
@@ -266,6 +317,30 @@ function SignupFormComponent() {
                   To enable authentication, please provide your <span className="font-mono font-semibold">NEXT_PUBLIC_SUPABASE_URL</span> and <span className="font-mono font-semibold">NEXT_PUBLIC_SUPABASE_ANON_KEY</span> in the <strong>Settings &gt; Secrets / Environment Variables</strong> menu.
                 </p>
               </div>
+            </div>
+          )}
+
+          {/* Detailed Diagnostic Error Banner */}
+          {errorDetails && (
+            <div className="p-4 rounded-lg bg-red-950/80 border border-red-700/80 text-red-200 space-y-2 font-mono text-xs">
+              <div className="flex items-center justify-between font-bold border-b border-red-800/60 pb-1">
+                <span>Signup Failed</span>
+                {errorDetails.status && (
+                  <span className="px-1.5 py-0.5 rounded bg-red-900 text-red-300">
+                    HTTP {errorDetails.status}
+                  </span>
+                )}
+              </div>
+              <p><strong className="text-red-400">Message:</strong> {errorDetails.message}</p>
+              {errorDetails.code && (
+                <p><strong className="text-red-400">Code:</strong> {errorDetails.code}</p>
+              )}
+              <details className="mt-2 cursor-pointer">
+                <summary className="text-red-400 hover:underline">Raw Error Output</summary>
+                <pre className="mt-2 p-2 bg-slate-950 rounded overflow-x-auto text-[11px] text-slate-300">
+                  {JSON.stringify(errorDetails.rawError || errorDetails, null, 2)}
+                </pre>
+              </details>
             </div>
           )}
 
@@ -409,10 +484,26 @@ function SignupFormComponent() {
                     <FormLabel>Country</FormLabel>
                     <Select onValueChange={field.onChange} value={field.value}>
                       <FormControl>
-                        <SelectTrigger><SelectValue placeholder="Select your country" /></SelectTrigger>
+                        <SelectTrigger>
+                          <SelectValue placeholder="Select your country">
+                            {field.value && (
+                              <div className="flex items-center gap-2">
+                                <FlagIcon countryCode={field.value} className="h-4 w-5 shrink-0 rounded-xs" />
+                                <span>{ALL_COUNTRIES.find(c => c.code === field.value)?.name || field.value}</span>
+                              </div>
+                            )}
+                          </SelectValue>
+                        </SelectTrigger>
                       </FormControl>
-                      <SelectContent>
-                        {countries.map(c => <SelectItem key={c.code} value={c.code}>{c.name}</SelectItem>)}
+                      <SelectContent className="max-h-64">
+                        {ALL_COUNTRIES.map(c => (
+                          <SelectItem key={c.code} value={c.code}>
+                            <div className="flex items-center gap-2">
+                              <FlagIcon countryCode={c.code} className="h-4 w-5 shrink-0 rounded-xs" />
+                              <span>{c.name}</span>
+                            </div>
+                          </SelectItem>
+                        ))}
                       </SelectContent>
                     </Select>
                     <FormMessage />
@@ -455,6 +546,44 @@ function SignupFormComponent() {
 
               <FormField
                 control={form.control}
+                name="acceptTerms"
+                render={({ field }) => (
+                  <FormItem className="flex flex-row items-start space-x-3 space-y-0 rounded-md border p-3.5 bg-muted/20">
+                    <FormControl>
+                      <Checkbox
+                        checked={field.value}
+                        onCheckedChange={field.onChange}
+                      />
+                    </FormControl>
+                    <div className="space-y-1 leading-tight">
+                      <FormLabel className="text-xs font-normal cursor-pointer">
+                        I have read and agree to the{" "}
+                        <Link
+                          href="/terms"
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="font-bold text-primary underline hover:text-primary/80 inline-flex items-center gap-0.5"
+                        >
+                          Terms and Conditions
+                        </Link>
+                        {" "}and{" "}
+                        <Link
+                          href="/policy"
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="font-bold text-primary underline hover:text-primary/80 inline-flex items-center gap-0.5"
+                        >
+                          Privacy Policy
+                        </Link>
+                      </FormLabel>
+                      <FormMessage />
+                    </div>
+                  </FormItem>
+                )}
+              />
+
+              <FormField
+                control={form.control}
                 name="captcha"
                 render={({ field }) => (
                   <FormItem className="flex flex-row items-start space-x-3 space-y-0 rounded-md border p-4">
@@ -465,7 +594,7 @@ function SignupFormComponent() {
                       />
                     </FormControl>
                     <div className="space-y-1 leading-none">
-                      <FormLabel>
+                      <FormLabel className="cursor-pointer">
                         I am not a robot
                       </FormLabel>
                     </div>
@@ -473,12 +602,6 @@ function SignupFormComponent() {
                   </FormItem>
                 )}
               />
-
-              <div className="text-xs text-muted-foreground">
-                By creating an account, you agree to our{" "}
-                <Link href="/terms" className="underline hover:text-primary">Terms of Service</Link> and{" "}
-                <Link href="/policy" className="underline hover:text-primary">Privacy Policy</Link>.
-              </div>
 
               <Button type="submit" className="w-full" disabled={isSigningUp}>
                 {isSigningUp && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}

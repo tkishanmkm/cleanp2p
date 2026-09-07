@@ -36,24 +36,26 @@ export async function getUserWalletBalances(
     USDT: { balance: 0, lockedBalance: 0 },
   };
 
+  if (!userId) return balanceMap;
+
+  // 1. Direct query from wallet_assets using select('*')
   try {
-    // 1. Direct query from wallet_assets using confirmed schema columns
     const { data: walletAssets, error: assetsError } = await supabase
       .from('wallet_assets')
-      .select('asset_symbol, available, locked, updated_at')
+      .select('*')
       .eq('user_id', userId);
 
     if (!assetsError && walletAssets && walletAssets.length > 0) {
       walletAssets.forEach((asset: any) => {
-        // Ensure property access matches database column output:
-        const spendable = Number(asset.available ?? 0); // 'available', not 'balance' or 'amount'
-        const symbol = String(asset.asset_symbol ?? '').toUpperCase() as CryptoCurrency; // 'asset_symbol', not 'symbol' or 'asset_code'
-        const lockedAmount = Number(asset.locked ?? 0);
+        const rawSym = String(asset.asset_symbol || asset.asset_code || asset.symbol || '').toUpperCase();
+        const symbol = (['BTC', 'ETH', 'LTC', 'USDT'].includes(rawSym) ? rawSym : null) as CryptoCurrency | null;
+        const spendable = Number(asset.available ?? asset.balance ?? asset.amount ?? 0);
+        const lockedAmount = Number(asset.locked ?? asset.locked_balance ?? asset.locked_escrow ?? 0) + Number(asset.locked_withdrawal ?? 0);
 
         if (symbol) {
           balanceMap[symbol] = {
-            balance: spendable,
-            lockedBalance: lockedAmount,
+            balance: isNaN(spendable) ? 0 : spendable,
+            lockedBalance: isNaN(lockedAmount) ? 0 : lockedAmount,
           };
         }
       });
@@ -63,23 +65,48 @@ export async function getUserWalletBalances(
     console.warn("wallet_assets query error:", err);
   }
 
-  // 2. Query user_wallets table as secondary fallback
+  // 2. Fetch from server API endpoint /api/wallet/balance (which bypasses any RLS using admin client)
+  try {
+    const res = await fetch(`/api/wallet/balance?userId=${encodeURIComponent(userId)}`, {
+      cache: 'no-store',
+    });
+    if (res.ok) {
+      const data = await res.json();
+      if (data?.success && data?.balances) {
+        (['BTC', 'ETH', 'LTC', 'USDT'] as CryptoCurrency[]).forEach((coin) => {
+          const coinData = data.balances[coin];
+          if (coinData) {
+            balanceMap[coin] = {
+              balance: Number(coinData.available ?? 0),
+              lockedBalance: Number(coinData.inEscrow ?? 0) + Number(coinData.inWithdrawal ?? 0),
+            };
+          }
+        });
+        return balanceMap;
+      }
+    }
+  } catch (err) {
+    console.warn("/api/wallet/balance query error:", err);
+  }
+
+  // 3. Query user_wallets table as secondary fallback
   try {
     const { data: userWallets, error: userWalletsError } = await supabase
       .from('user_wallets')
-      .select('asset_symbol, balance, available_balance, locked_balance')
+      .select('*')
       .eq('user_id', userId);
 
     if (!userWalletsError && userWallets && userWallets.length > 0) {
       userWallets.forEach((w: any) => {
-        const spendable = Number(w.available_balance ?? w.balance ?? 0);
-        const symbol = String(w.asset_symbol ?? '').toUpperCase() as CryptoCurrency;
-        const lockedAmount = Number(w.locked_balance ?? 0);
+        const spendable = Number(w.available_balance ?? w.available ?? w.balance ?? 0);
+        const rawSym = String(w.asset_symbol || w.asset_code || w.symbol || '').toUpperCase();
+        const symbol = (['BTC', 'ETH', 'LTC', 'USDT'].includes(rawSym) ? rawSym : null) as CryptoCurrency | null;
+        const lockedAmount = Number(w.locked_balance ?? w.locked ?? 0);
 
         if (symbol) {
           balanceMap[symbol] = {
-            balance: spendable,
-            lockedBalance: lockedAmount,
+            balance: isNaN(spendable) ? 0 : spendable,
+            lockedBalance: isNaN(lockedAmount) ? 0 : lockedAmount,
           };
         }
       });
@@ -89,19 +116,20 @@ export async function getUserWalletBalances(
     console.warn("user_wallets query error:", err);
   }
 
-  // 3. Fallback: Check getSupabaseUserWallets
+  // 4. Fallback: Check getSupabaseUserWallets
   try {
     const { data: userWallet } = await getSupabaseUserWallets(userId);
     if (userWallet?.balances && userWallet.balances.length > 0) {
       userWallet.balances.forEach((asset: any) => {
         const spendable = Number(asset.available ?? asset.balance ?? 0);
-        const symbol = String(asset.asset_symbol ?? asset.asset_code ?? '').toUpperCase() as CryptoCurrency;
+        const rawSym = String(asset.asset_symbol ?? asset.asset_code ?? '').toUpperCase();
+        const symbol = (['BTC', 'ETH', 'LTC', 'USDT'].includes(rawSym) ? rawSym : null) as CryptoCurrency | null;
         const lockedAmount = Number(asset.locked ?? asset.locked_escrow ?? 0) + Number(asset.locked_withdrawal ?? 0);
 
         if (symbol) {
           balanceMap[symbol] = {
-            balance: spendable,
-            lockedBalance: lockedAmount,
+            balance: isNaN(spendable) ? 0 : spendable,
+            lockedBalance: isNaN(lockedAmount) ? 0 : lockedAmount,
           };
         }
       });

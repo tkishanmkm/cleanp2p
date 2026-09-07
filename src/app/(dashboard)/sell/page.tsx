@@ -521,7 +521,7 @@ function P2PMarketplaceContent() {
   return (
     <div className="min-h-screen bg-background text-foreground transition-colors duration-200">
       {/* Theme Purple Header Bar with Dark Mode Support */}
-      <div className="bg-[#5D45F9] dark:bg-[#3C2BB2] text-white border-b border-purple-400/20 shadow-lg transition-colors">
+      <div className="bg-[#9273FC] text-white border-b border-purple-400/20 shadow-lg transition-colors">
         <div className="container mx-auto p-4 sm:p-6 lg:p-8">
             <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
                 <div>
@@ -542,14 +542,14 @@ function P2PMarketplaceContent() {
                     <button
                       type="button"
                       onClick={() => setTourStep(0)}
-                      className="inline-flex items-center justify-center gap-2 px-5 py-2.5 text-sm font-medium transition-all duration-200 rounded-lg shadow-sm border bg-[#5D45F9] text-white hover:bg-[#4833D8] border-transparent focus:outline-none focus:ring-2 focus:ring-[#5D45F9]/50 active:scale-[0.98]"
+                      className="inline-flex items-center justify-center gap-2 px-5 py-2.5 text-sm font-medium transition-all duration-200 rounded-lg shadow-sm border bg-[#9273FC] text-white hover:bg-[#805DF6] border-transparent focus:outline-none focus:ring-2 focus:ring-[#9273FC]/50 active:scale-[0.98]"
                     >
                       <Compass className="w-4 h-4" />
                       <span>Take a tour</span>
                     </button>
                     <Link
                       href="/academy"
-                      className="inline-flex items-center justify-center gap-2 px-5 py-2.5 text-sm font-medium transition-all duration-200 rounded-lg shadow-sm border bg-[#5D45F9] text-white hover:bg-[#4833D8] border-transparent focus:outline-none focus:ring-2 focus:ring-[#5D45F9]/50 active:scale-[0.98]"
+                      className="inline-flex items-center justify-center gap-2 px-5 py-2.5 text-sm font-medium transition-all duration-200 rounded-lg shadow-sm border bg-[#9273FC] text-white hover:bg-[#805DF6] border-transparent focus:outline-none focus:ring-2 focus:ring-[#9273FC]/50 active:scale-[0.98]"
                     >
                       <Compass className="w-4 h-4" />
                       <span>Academy</span>

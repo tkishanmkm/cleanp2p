@@ -68,6 +68,39 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    // 3.5. Verify Trader Requirements (Full name & KYC)
+    const { data: buyerProfile } = await supabase
+      .from('profiles')
+      .select('*')
+      .eq('id', user.id)
+      .maybeSingle();
+
+    const hasFullName = Boolean(
+      buyerProfile?.full_name?.trim() ||
+      buyerProfile?.display_name?.trim() ||
+      user.user_metadata?.full_name?.trim() ||
+      user.user_metadata?.name?.trim()
+    );
+    const isKycVerified = Boolean(
+      buyerProfile?.is_verified ||
+      buyerProfile?.kyc_status === 'approved' ||
+      buyerProfile?.kyc_status === 'verified'
+    );
+
+    if (ad.require_full_name_verified && !hasFullName) {
+      return NextResponse.json(
+        { error: 'This trade requires you to have a verified full legal name on your profile.' },
+        { status: 403 }
+      );
+    }
+
+    if (ad.require_verified_users && !isKycVerified) {
+      return NextResponse.json(
+        { error: 'This trade requires completed identity (KYC) verification.' },
+        { status: 403 }
+      );
+    }
+
     const isSellAd = (ad.type || ad.ad_type || 'SELL').toUpperCase() === 'SELL';
     // If ad is SELL, the creator is seller, current user is buyer
     // If ad is BUY, the creator is buyer, current user is seller

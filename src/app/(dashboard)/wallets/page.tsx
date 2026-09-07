@@ -303,10 +303,10 @@ export default function WalletPage() {
       const currentUserId = user?.uid || authData?.user?.id || sessionRes.data?.session?.user?.id;
       if (!currentUserId) return;
 
-      // 1. Direct query from wallet_assets using confirmed schema columns
+      // 1. Direct query from wallet_assets using select('*')
       const { data: walletAssets, error } = await supabase
         .from('wallet_assets')
-        .select('asset_symbol, available, locked, updated_at')
+        .select('*')
         .eq('user_id', currentUserId);
 
       if (!error && walletAssets && walletAssets.length > 0) {
@@ -318,15 +318,15 @@ export default function WalletPage() {
         };
 
         walletAssets.forEach((asset: any) => {
-          // Ensure property access matches database column output:
-          const spendable = Number(asset.available ?? 0); // 'available', not 'balance' or 'amount'
-          const symbol = String(asset.asset_symbol ?? '').toUpperCase() as CryptoCurrency; // 'asset_symbol', not 'symbol' or 'asset_code'
-          const locked = Number(asset.locked ?? 0);
+          const rawSym = String(asset.asset_symbol || asset.asset_code || asset.symbol || '').toUpperCase();
+          const symbol = (['BTC', 'ETH', 'LTC', 'USDT'].includes(rawSym) ? rawSym : null) as CryptoCurrency | null;
+          const spendable = Number(asset.available ?? asset.balance ?? asset.amount ?? 0);
+          const locked = Number(asset.locked ?? asset.locked_balance ?? asset.locked_escrow ?? 0) + Number(asset.locked_withdrawal ?? 0);
 
           if (symbol) {
             balanceMap[symbol] = {
-              balance: spendable,
-              lockedBalance: locked,
+              balance: isNaN(spendable) ? 0 : spendable,
+              lockedBalance: isNaN(locked) ? 0 : locked,
             };
           }
         });

@@ -225,9 +225,9 @@ export default function MyAdsPage() {
       </div>
 
       {isLoading ? (
-        <div className="p-12 text-center rounded-2xl bg-slate-900 border border-slate-800">
-          <Loader2 className="h-8 w-8 animate-spin mx-auto text-[#5D45F9]" />
-          <p className="text-xs text-slate-400 mt-2">Loading your advertisements...</p>
+        <div className="p-12 text-center rounded-2xl bg-card border border-border">
+          <Loader2 className="h-8 w-8 animate-spin mx-auto text-primary" />
+          <p className="text-xs text-muted-foreground mt-2">Loading your advertisements...</p>
         </div>
       ) : (
         <ManageAds ads={formattedManageAds} />

@@ -42,6 +42,8 @@ import {
   CurrencyItem,
   UtcTimezoneItem,
 } from '@/lib/settings-constants';
+import { FlagIcon } from '@/components/ui/flag-icon';
+import { getCurrencyCountryCode } from '@/lib/currencies';
 
 // =========================================================================
 // TYPES & LIST DEFINITIONS
@@ -1535,7 +1537,7 @@ export default function SettingsPage() {
                         className="w-full flex items-center justify-between px-3.5 py-2.5 rounded-xl border border-input bg-background text-sm text-left hover:border-primary transition-all cursor-pointer"
                       >
                         <div className="flex items-center gap-2.5 min-w-0">
-                          <span className="text-base">{selectedCurrencyObj.flag}</span>
+                          <FlagIcon countryCode={getCurrencyCountryCode(selectedCurrencyObj.code)} className="h-4 w-5 shrink-0 rounded-xs" />
                           <span className="font-bold text-foreground">{selectedCurrencyObj.code}</span>
                           <span className="text-xs text-muted-foreground truncate">
                             {selectedCurrencyObj.name} ({selectedCurrencyObj.symbol})
@@ -1574,7 +1576,7 @@ export default function SettingsPage() {
                                 }`}
                               >
                                 <div className="flex items-center gap-2 min-w-0">
-                                  <span className="text-sm">{c.flag}</span>
+                                  <FlagIcon countryCode={getCurrencyCountryCode(c.code)} className="h-3.5 w-5 shrink-0 rounded-xs" />
                                   <span className="font-bold">{c.code}</span>
                                   <span className="text-muted-foreground truncate">{c.name}</span>
                                 </div>
@@ -2497,7 +2499,7 @@ export default function SettingsPage() {
                             className="w-full flex items-center justify-between px-3.5 py-2.5 rounded-xl border border-input bg-background text-sm text-left hover:border-primary transition-all cursor-pointer"
                           >
                             <div className="flex items-center gap-2 min-w-0">
-                              <span className="text-base">{selectedCountryObj.flag}</span>
+                              <FlagIcon countryCode={selectedCountryObj.code} className="h-4 w-5 shrink-0 rounded-xs" />
                               <span className="font-bold text-foreground">{selectedCountryObj.name}</span>
                               <span className="text-xs text-muted-foreground">({selectedCountryObj.code})</span>
                             </div>
@@ -2534,7 +2536,7 @@ export default function SettingsPage() {
                                     }`}
                                   >
                                     <div className="flex items-center gap-2 min-w-0">
-                                      <span className="text-base">{c.flag}</span>
+                                      <FlagIcon countryCode={c.code} className="h-3.5 w-5 shrink-0 rounded-xs" />
                                       <span className="font-medium truncate">{c.name}</span>
                                     </div>
                                     <span className="font-mono text-muted-foreground shrink-0">{c.code}</span>

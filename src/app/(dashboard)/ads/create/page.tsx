@@ -323,27 +323,43 @@ export default function CreateP2PAdPage() {
   const [authLoading, setAuthLoading] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  // 1. Fetch user and subscribe to auth state changes on mount
+  // 1. Fetch user and subscribe to auth state changes on mount with real-time session recovery
   useEffect(() => {
+    let isMounted = true;
+
     const checkUser = async () => {
       try {
-        const { data: { user: currentUser } } = await supabase.auth.getUser();
-        setUser(currentUser);
+        const { data: { session } } = await supabase.auth.getSession();
+        if (isMounted && session?.user) {
+          setUser(session.user);
+        } else {
+          const { data: { user: currentUser } } = await supabase.auth.getUser();
+          if (isMounted && currentUser) {
+            setUser(currentUser);
+          }
+        }
       } catch (err) {
         console.error('Error fetching auth user:', err);
       } finally {
-        setAuthLoading(false);
+        if (isMounted) {
+          setAuthLoading(false);
+        }
       }
     };
 
     checkUser();
 
-    // Listen for session changes (e.g. token refresh)
+    // Listen for session changes (e.g. token refresh, login, logout)
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      setUser(session?.user ?? null);
+      if (isMounted) {
+        setUser(session?.user ?? null);
+      }
     });
 
-    return () => subscription.unsubscribe();
+    return () => {
+      isMounted = false;
+      subscription.unsubscribe();
+    };
   }, []);
 
   // --- Form State ---
@@ -351,52 +367,157 @@ export default function CreateP2PAdPage() {
   const [crypto, setCrypto] = useState('BTC');
   const [fiat, setFiat] = useState({ name: 'United States Dollar', code: 'USD', flag: 'us' });
   
-  // Payment state
+  // Payment state & Payment search
+  const [paymentSearch, setPaymentSearch] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('bank');
   const [selectedPaymentMethods, setSelectedPaymentMethods] = useState<string[]>([]);
   const [customMethod, setCustomMethod] = useState('');
 
   // Pricing state
-  const [currentMarketPrice, setCurrentMarketPrice] = useState<number>(0);
+  const [currentMarketPrice, setCurrentMarketPrice] = useState<number>(89500);
   const [rateType, setRateType] = useState<'market' | 'fixed'>('market');
   const [ratePercent, setRatePercent] = useState('1.5');
-  const [fixedPrice, setFixedPrice] = useState('77805.00');
+  const [fixedPrice, setFixedPrice] = useState('90842.50');
   const [minAmount, setMinAmount] = useState('100');
   const [maxAmount, setMaxAmount] = useState('5000');
   const [paymentWindow, setPaymentWindow] = useState('30');
 
+  // Compute base market price for any coin & fiat
+  const getBaseMarketPrice = (coinSymbol: string, fiatCode: string, dbPrice?: number | null): number => {
+    if (typeof dbPrice === 'number' && dbPrice > 0) {
+      return dbPrice;
+    }
+
+    const liveUsdPrices: Record<string, number> = {
+      BTC: 89500,
+      ETH: 2650,
+      LTC: 72,
+      USDT: 1.0,
+      BNB: 680,
+      MATIC: 0.45,
+      TRX: 0.15,
+    };
+
+    if (fiatCode === 'INR') {
+      if (coinSymbol === 'USDT') {
+        return 100.00; // 1 USDT = 100 INR base as requested
+      }
+      const usdVal = liveUsdPrices[coinSymbol] || 1.0;
+      return usdVal * 100.00; // In INR, 1 USD/USDT = 100 INR base
+    }
+
+    const fiatRates: Record<string, number> = {
+      USD: 1.0,
+      EUR: 0.92,
+      GBP: 0.78,
+      CAD: 1.38,
+      AUD: 1.52,
+      AED: 3.67,
+      SAR: 3.75,
+      JPY: 154.2,
+      CNY: 7.24,
+      SGD: 1.34,
+      RUB: 96.5,
+      TRY: 34.5,
+      NGN: 1550,
+      PKR: 278,
+      BDT: 120,
+    };
+
+    const usdVal = liveUsdPrices[coinSymbol] || 1.0;
+    const rate = fiatRates[fiatCode] || 1.0;
+    return usdVal * rate;
+  };
+
   // Fetch Live Market Price on Mount / change
   useEffect(() => {
+    let isCancelled = false;
+
     const fetchMarketPrice = async () => {
       try {
-        const { data, error } = await supabase
-          .from('crypto_market_prices')
-          .select('price')
-          .eq('coin', crypto || 'USDT')
-          .eq('fiat', fiat.code || 'INR')
-          .single();
+        let fetchedPrice: number | null = null;
 
-        if (data && typeof data.price === 'number') {
-          setCurrentMarketPrice(data.price);
-        } else {
-          // Fallback base values
-          const fallbackBasePrices: Record<string, number> = {
-            BTC: 77800,
-            USDT: 1.0,
-            ETH: 2500,
-            LTC: 85,
-          };
-          const base = fallbackBasePrices[crypto] || 1.0;
-          const fiatMultiplier = fiat.code === 'INR' ? 86.5 : fiat.code === 'EUR' ? 0.92 : fiat.code === 'GBP' ? 0.79 : 1.0;
-          setCurrentMarketPrice(base * fiatMultiplier);
+        // 1. Try public P2P market prices endpoint
+        try {
+          const res = await fetch(`/api/p2p/market-prices?fiat=${fiat.code}`, { cache: 'no-store' });
+          if (res.ok) {
+            const data = await res.json();
+            if (data.prices && Array.isArray(data.prices)) {
+              const matched = data.prices.find((p: any) => p.asset_symbol?.toUpperCase() === crypto?.toUpperCase());
+              if (matched && typeof matched.price_in_fiat === 'number' && matched.price_in_fiat > 0) {
+                fetchedPrice = matched.price_in_fiat;
+              }
+            }
+          }
+        } catch {}
+
+        // 2. Try Supabase direct crypto_market_prices table
+        if (!fetchedPrice) {
+          try {
+            const { data } = await supabase
+              .from('crypto_market_prices')
+              .select('price')
+              .eq('coin', crypto || 'USDT')
+              .eq('fiat', fiat.code || 'INR')
+              .maybeSingle();
+
+            if (data && typeof data.price === 'number' && data.price > 0) {
+              fetchedPrice = data.price;
+            }
+          } catch {}
+        }
+
+        const finalPrice = getBaseMarketPrice(crypto, fiat.code, fetchedPrice);
+        if (!isCancelled) {
+          setCurrentMarketPrice(finalPrice);
+
+          // If fixed rate or initial load, auto adjust fixed price based on 1.5% margin
+          const margin = parseFloat(ratePercent) || 1.5;
+          const adjustedFixed = (finalPrice * (1 + margin / 100)).toFixed(2);
+          setFixedPrice(adjustedFixed);
         }
       } catch (err) {
-        console.warn('Could not fetch market price from DB:', err);
+        console.warn('Could not fetch market price:', err);
       }
     };
 
     fetchMarketPrice();
+
+    return () => {
+      isCancelled = true;
+    };
   }, [crypto, fiat.code]);
+
+  // Handler for Rate Type Switch (Market vs Fixed)
+  const handleSelectRateType = (type: 'market' | 'fixed') => {
+    setRateType(type);
+    if (type === 'fixed') {
+      // Auto adjust fixed price with +1.5% (or current ratePercent)
+      const margin = parseFloat(ratePercent) || 1.5;
+      const base = currentMarketPrice || getBaseMarketPrice(crypto, fiat.code);
+      const autoAdjusted = (base * (1 + margin / 100)).toFixed(2);
+      setFixedPrice(autoAdjusted);
+    }
+  };
+
+  // Flatten all payment options for global search with category info
+  const allPaymentOptions = React.useMemo(() => {
+    const list: { name: string; category: string }[] = [];
+    PAYMENT_CATEGORIES.forEach((cat) => {
+      cat.options.forEach((opt) => {
+        list.push({ name: opt, category: cat.title });
+      });
+    });
+    return list;
+  }, []);
+
+  const searchedPaymentMethods = React.useMemo(() => {
+    if (!paymentSearch.trim()) return [];
+    const query = paymentSearch.toLowerCase().trim();
+    return allPaymentOptions.filter((item) =>
+      item.name.toLowerCase().includes(query) || item.category.toLowerCase().includes(query)
+    );
+  }, [paymentSearch, allPaymentOptions]);
 
   // Country & Metadata
   const [targetedCountries, setTargetedCountries] = useState<string[]>([]);
@@ -476,16 +597,26 @@ export default function CreateP2PAdPage() {
     const toastId = toast.loading('Publishing your advertisement...');
 
     try {
-      // 2. Immediate check against state + fallback re-fetch
-      let activeUser = user;
-      if (!activeUser) {
-        const { data: { user: recheckedUser } } = await supabase.auth.getUser();
-        activeUser = recheckedUser;
+      // 2. Real-time session resolution
+      const { data: { session: freshSession } } = await supabase.auth.getSession();
+      const { data: { user: freshUser } } = await supabase.auth.getUser();
+      let activeUser = freshSession?.user || freshUser || user;
+
+      // Secondary fallback to localStorage user if present
+      if (!activeUser && typeof window !== 'undefined') {
+        const cached = localStorage.getItem('paxones_user') || localStorage.getItem('sb-auth-token');
+        if (cached) {
+          try {
+            const parsed = JSON.parse(cached);
+            if (parsed?.id || parsed?.user?.id) {
+              activeUser = parsed?.user || parsed;
+            }
+          } catch {}
+        }
       }
 
       if (!activeUser) {
-        alert("No active session found! Please refresh or log in again.");
-        toast.error("No active session found! Please refresh or log in again.", { id: toastId });
+        toast.error('No active session found! Please refresh or log in again.', { id: toastId });
         setIsSubmitting(false);
         return;
       }
@@ -493,26 +624,27 @@ export default function CreateP2PAdPage() {
       const userId = activeUser.id;
       const displayName =
         activeUser.user_metadata?.display_name ||
+        activeUser.user_metadata?.full_name ||
         activeUser.email?.split('@')[0] ||
         'Trader';
 
-      // Safe fallback for market price & dynamic pricing
+      // Safe calculation for market price & dynamic pricing
       const pricingType = rateType === 'fixed' ? 'FIXED' : 'FLOAT';
-      const marketPrice = currentMarketPrice || Number(fixedPrice) || 1.0;
-      const marginPercentage = Number(ratePercent || 0);
+      const marketPrice = currentMarketPrice || getBaseMarketPrice(crypto, fiat.code);
+      const marginPercentage = Number(ratePercent || 1.5);
 
       const calculatedPrice = pricingType === 'FLOAT'
         ? marketPrice * (1 + (marginPercentage / 100))
         : Number(fixedPrice);
 
       const adPayload = {
-        user_id: activeUser.id,
+        user_id: userId,
         type: adType.toUpperCase(), // 'BUY' or 'SELL'
         coin: crypto || 'USDT',
         fiat: fiat.code || 'INR',
         payment_methods: Array.isArray(selectedPaymentMethods) && selectedPaymentMethods.length > 0
           ? selectedPaymentMethods
-          : ['Bank Transfer'], // Must be an Array []
+          : ['Bank Transfer'],
         pricing_type: pricingType,
         price: calculatedPrice,
         min_amount: Number(minAmount),
@@ -550,7 +682,6 @@ export default function CreateP2PAdPage() {
         margin: adPayload.margin ? Number(adPayload.margin) : null,
         min_amount: adPayload.min_amount ? Number(adPayload.min_amount) : null,
         max_amount: adPayload.max_amount ? Number(adPayload.max_amount) : null,
-        // Ensure boolean flags are strictly boolean
         is_fixed: Boolean(rateType === 'fixed'),
         require_full_name_verified: Boolean(requireFullNameVerified),
         require_verified_users: Boolean(requireVerifiedUsers),
@@ -559,39 +690,34 @@ export default function CreateP2PAdPage() {
       // Remove fixed_rate boolean to avoid PostgreSQL 22P02 error on numeric column
       delete cleanPayload.fixed_rate;
 
-      // 3. Call backend API route with credentials: 'include'
-      const { data: { session } } = await supabase.auth.getSession();
+      // 3. Call backend API route with Bearer token & credentials: 'include'
       const headers: Record<string, string> = {
         'Content-Type': 'application/json',
       };
-      if (session?.access_token) {
-        headers['Authorization'] = `Bearer ${session.access_token}`;
+      if (freshSession?.access_token) {
+        headers['Authorization'] = `Bearer ${freshSession.access_token}`;
       }
 
       const response = await fetch('/api/p2p/ads', {
         method: 'POST',
         headers,
-        credentials: 'include', // <--- CRITICAL: Sends browser cookies to Next.js API route
+        credentials: 'include',
         body: JSON.stringify(cleanPayload),
       });
 
       const result = await response.json();
 
       if (!response.ok) {
-        // THIS WILL PRINT THE REAL ERROR IN CONSOLE AND ALERT
-        console.error("Error creating ad:", result.realError || result.error);
-        alert(`Failed: ${result.realError || result.error}`);
+        console.error('Error creating ad:', result.realError || result.error);
         toast.error(`Failed: ${result.realError || result.error}`, { id: toastId, duration: 6000 });
         setIsSubmitting(false);
         return;
       }
 
       console.log('Ad created successfully:', result.data);
-      alert("Ad created successfully!");
       toast.success('P2P Advertisement created successfully!', { id: toastId });
     } catch (err: any) {
       console.error('Runtime error:', err);
-      alert(`Unexpected error: ${err?.message || String(err)}`);
       toast.error(`Unexpected error: ${err?.message || String(err)}`, { id: toastId });
     } finally {
       setIsSubmitting(false);
@@ -604,22 +730,19 @@ export default function CreateP2PAdPage() {
       f.code.toLowerCase().includes(fiatSearch.toLowerCase())
   );
 
+  const calculatedOfferPrice = (currentMarketPrice || 1.0) * (1 + (parseFloat(ratePercent) || 1.5) / 100);
+
   return (
     <div className="min-h-screen bg-[#fafafa] dark:bg-[#0f0f12] text-gray-900 dark:text-gray-100 px-4 py-8 md:py-12 flex justify-center transition-colors">
       <div className="w-full max-w-3xl space-y-8">
         
-        {/* Theme Styled Header banner matching Buy, Sell, and My Ads */}
-        <div className="bg-gradient-to-r from-[#9273FC] via-[#5244E8] to-[#3B82F6] text-white py-8 px-6 sm:px-8 rounded-2xl shadow-lg border border-indigo-400/20">
-          <div className="flex items-center gap-2 mb-1">
-            <span className="text-xs font-semibold uppercase tracking-wider text-indigo-200 bg-white/10 px-2.5 py-0.5 rounded-full border border-white/15">
-              P2P Trading Hub
-            </span>
-          </div>
+        {/* Instruction 1: Solid #9273fc Header banner with exact text and no tag */}
+        <div className="bg-[#9273fc] text-white py-8 px-6 sm:px-8 rounded-2xl shadow-lg">
           <h1 className="text-2xl md:text-3xl font-extrabold text-white tracking-tight">
             Create a P2P Advertisement
           </h1>
-          <p className="text-sm text-indigo-100/90 mt-1">
-            Set up your custom advertisement to buy or sell crypto with zero platform escrow fees.
+          <p className="text-sm text-white/95 mt-1 font-medium">
+            Set up your custom advertisement to buy or sell coin
           </p>
         </div>
 
@@ -667,7 +790,7 @@ export default function CreateP2PAdPage() {
                       onClick={() => setCrypto(c.code)}
                       className={`flex items-center justify-center gap-2 py-2.5 px-3 rounded-lg border text-sm font-medium transition-all ${
                         isSelected
-                          ? 'border-[#6366f1] bg-[#6366f1] text-white shadow-md shadow-indigo-500/20'
+                          ? 'border-[#9273fc] bg-[#9273fc] text-white shadow-md shadow-[#9273fc]/20'
                           : 'border-gray-200 dark:border-gray-700 bg-white dark:bg-[#202026] text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800'
                       }`}
                     >
@@ -708,13 +831,34 @@ export default function CreateP2PAdPage() {
 
           </div>
 
-          {/* STEP 2: Payment Methods */}
+          {/* STEP 2: Payment Methods with Search Option */}
           <div className="bg-white dark:bg-[#18181c] p-5 md:p-6 rounded-xl border border-gray-200 dark:border-gray-800 shadow-sm space-y-5 transition-colors">
             <div>
               <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Payment Methods</h2>
               <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
-                Select up to 5 methods. Add a custom method if yours isn't listed under a category.
+                Select up to 5 methods. Add a custom method if yours isn&apos;t listed under a category.
               </p>
+            </div>
+
+            {/* Instruction 2: Search Payment Method */}
+            <div className="relative">
+              <Search className="w-4 h-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" />
+              <input
+                type="text"
+                placeholder="Search payment methods (e.g. UPI, Bank Transfer, PayPal, Zelle)..."
+                value={paymentSearch}
+                onChange={(e) => setPaymentSearch(e.target.value)}
+                className="w-full pl-9 pr-9 py-2.5 text-xs md:text-sm border border-gray-200 dark:border-gray-700 bg-gray-50/50 dark:bg-[#202026] text-gray-900 dark:text-white rounded-lg focus:outline-none focus:ring-2 focus:ring-[#9273fc] transition"
+              />
+              {paymentSearch && (
+                <button
+                  type="button"
+                  onClick={() => setPaymentSearch('')}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              )}
             </div>
 
             {selectedPaymentMethods.length > 0 && (
@@ -722,7 +866,7 @@ export default function CreateP2PAdPage() {
                 {selectedPaymentMethods.map((method) => (
                   <span
                     key={method}
-                    className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium bg-indigo-50 dark:bg-indigo-950/40 text-[#6366f1] dark:text-indigo-400 border border-indigo-200 dark:border-indigo-800/60"
+                    className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium bg-purple-50 dark:bg-[#9273fc]/20 text-[#9273fc] dark:text-purple-300 border border-[#9273fc]/30"
                   >
                     {method}
                     <button
@@ -737,53 +881,101 @@ export default function CreateP2PAdPage() {
               </div>
             )}
 
-            <div className="flex gap-2 overflow-x-auto pb-2 border-b border-gray-100 dark:border-gray-800">
-              {PAYMENT_CATEGORIES.map((cat) => {
-                const Icon = cat.icon;
-                const active = selectedCategory === cat.id;
-                return (
+            {paymentSearch.trim() ? (
+              <div className="space-y-2">
+                <div className="flex items-center justify-between text-xs text-gray-500 dark:text-gray-400">
+                  <span>Search Results ({searchedPaymentMethods.length})</span>
                   <button
-                    key={cat.id}
                     type="button"
-                    onClick={() => setSelectedCategory(cat.id)}
-                    className={`flex items-center gap-2 px-3.5 py-2 rounded-lg text-xs font-medium whitespace-nowrap transition-all ${
-                      active
-                        ? 'bg-[#6366f1] text-white shadow-sm'
-                        : 'bg-gray-50 dark:bg-[#202026] text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800'
-                    }`}
+                    onClick={() => setPaymentSearch('')}
+                    className="text-[#9273fc] hover:underline"
                   >
-                    <Icon className="w-3.5 h-3.5" />
-                    {cat.title}
+                    Clear search
                   </button>
-                );
-              })}
-            </div>
-
-            {PAYMENT_CATEGORIES.filter((c) => c.id === selectedCategory).map((cat) => (
-              <div key={cat.id} className="space-y-3 pt-1">
-                <p className="text-xs text-gray-500 dark:text-gray-400">{cat.subtitle}</p>
-                <div className="max-h-56 overflow-y-auto pr-1 space-y-1">
-                  {cat.options.map((option) => {
-                    const isSelected = selectedPaymentMethods.includes(option);
+                </div>
+                {searchedPaymentMethods.length > 0 ? (
+                  <div className="max-h-60 overflow-y-auto space-y-1 pr-1">
+                    {searchedPaymentMethods.map((item) => {
+                      const isSelected = selectedPaymentMethods.includes(item.name);
+                      return (
+                        <button
+                          key={`${item.category}-${item.name}`}
+                          type="button"
+                          onClick={() => togglePaymentMethod(item.name)}
+                          className={`w-full flex items-center justify-between px-3 py-2.5 rounded-lg text-left text-xs transition ${
+                            isSelected
+                              ? 'bg-purple-50 dark:bg-[#9273fc]/20 text-[#9273fc] dark:text-purple-300 font-medium border border-[#9273fc]/30'
+                              : 'hover:bg-gray-50 dark:hover:bg-gray-800/60 text-gray-700 dark:text-gray-300 border border-transparent'
+                          }`}
+                        >
+                          <div className="flex items-center gap-2">
+                            <span>{item.name}</span>
+                            <span className="text-[10px] text-gray-400 dark:text-gray-500 bg-gray-100 dark:bg-gray-800 px-1.5 py-0.5 rounded">
+                              {item.category}
+                            </span>
+                          </div>
+                          {isSelected && <Check className="w-4 h-4 text-[#9273fc]" />}
+                        </button>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <div className="py-6 text-center text-xs text-gray-500">
+                    No payment methods matching &quot;{paymentSearch}&quot;. You can add it as a custom method below!
+                  </div>
+                )}
+              </div>
+            ) : (
+              <>
+                <div className="flex gap-2 overflow-x-auto pb-2 border-b border-gray-100 dark:border-gray-800">
+                  {PAYMENT_CATEGORIES.map((cat) => {
+                    const Icon = cat.icon;
+                    const active = selectedCategory === cat.id;
                     return (
                       <button
-                        key={option}
+                        key={cat.id}
                         type="button"
-                        onClick={() => togglePaymentMethod(option)}
-                        className={`w-full flex items-center justify-between px-3 py-2.5 rounded-lg text-left text-xs transition ${
-                          isSelected
-                            ? 'bg-indigo-50 dark:bg-indigo-950/30 text-[#6366f1] dark:text-indigo-400 font-medium'
-                            : 'hover:bg-gray-50 dark:hover:bg-gray-800/60 text-gray-700 dark:text-gray-300'
+                        onClick={() => setSelectedCategory(cat.id)}
+                        className={`flex items-center gap-2 px-3.5 py-2 rounded-lg text-xs font-medium whitespace-nowrap transition-all ${
+                          active
+                            ? 'bg-[#9273fc] text-white shadow-sm'
+                            : 'bg-gray-50 dark:bg-[#202026] text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800'
                         }`}
                       >
-                        <span>{option}</span>
-                        {isSelected && <Check className="w-4 h-4 text-[#6366f1]" />}
+                        <Icon className="w-3.5 h-3.5" />
+                        {cat.title}
                       </button>
                     );
                   })}
                 </div>
-              </div>
-            ))}
+
+                {PAYMENT_CATEGORIES.filter((c) => c.id === selectedCategory).map((cat) => (
+                  <div key={cat.id} className="space-y-3 pt-1">
+                    <p className="text-xs text-gray-500 dark:text-gray-400">{cat.subtitle}</p>
+                    <div className="max-h-56 overflow-y-auto pr-1 space-y-1">
+                      {cat.options.map((option) => {
+                        const isSelected = selectedPaymentMethods.includes(option);
+                        return (
+                          <button
+                            key={option}
+                            type="button"
+                            onClick={() => togglePaymentMethod(option)}
+                            className={`w-full flex items-center justify-between px-3 py-2.5 rounded-lg text-left text-xs transition ${
+                              isSelected
+                                ? 'bg-purple-50 dark:bg-[#9273fc]/20 text-[#9273fc] dark:text-purple-300 font-medium'
+                                : 'hover:bg-gray-50 dark:hover:bg-gray-800/60 text-gray-700 dark:text-gray-300'
+                            }`}
+                          >
+                            <span>{option}</span>
+                            {isSelected && <Check className="w-4 h-4 text-[#9273fc]" />}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                ))}
+              </>
+            )}
 
             <div className="pt-2 border-t border-gray-100 dark:border-gray-800">
               <label className="block text-xs text-gray-500 dark:text-gray-400 mb-1.5">Add Custom Payment Method</label>
@@ -793,7 +985,7 @@ export default function CreateP2PAdPage() {
                   placeholder="e.g. Local Bank Transfer"
                   value={customMethod}
                   onChange={(e) => setCustomMethod(e.target.value)}
-                  className="flex-1 px-3 py-2 text-xs border border-gray-200 dark:border-gray-700 bg-white dark:bg-[#202026] text-gray-900 dark:text-white rounded-lg focus:outline-none focus:ring-1 focus:ring-[#6366f1]"
+                  className="flex-1 px-3 py-2 text-xs border border-gray-200 dark:border-gray-700 bg-white dark:bg-[#202026] text-gray-900 dark:text-white rounded-lg focus:outline-none focus:ring-1 focus:ring-[#9273fc]"
                 />
                 <button
                   type="button"
@@ -807,17 +999,17 @@ export default function CreateP2PAdPage() {
             </div>
           </div>
 
-          {/* STEP 3: Pricing & Limits */}
+          {/* STEP 3: Pricing & Limits with Market Rate vs Fixed Auto-Adjustment */}
           <div className="bg-white dark:bg-[#18181c] p-5 md:p-6 rounded-xl border border-gray-200 dark:border-gray-800 shadow-sm space-y-5 transition-colors">
             <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Pricing</h2>
 
             <div className="grid grid-cols-2 gap-3">
               <button
                 type="button"
-                onClick={() => setRateType('market')}
+                onClick={() => handleSelectRateType('market')}
                 className={`py-2.5 px-4 rounded-lg text-xs font-medium border transition ${
                   rateType === 'market'
-                    ? 'bg-[#6366f1] text-white border-[#6366f1] shadow-sm'
+                    ? 'bg-[#9273fc] text-white border-[#9273fc] shadow-sm'
                     : 'bg-white dark:bg-[#202026] text-gray-700 dark:text-gray-300 border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-800'
                 }`}
               >
@@ -825,10 +1017,10 @@ export default function CreateP2PAdPage() {
               </button>
               <button
                 type="button"
-                onClick={() => setRateType('fixed')}
+                onClick={() => handleSelectRateType('fixed')}
                 className={`py-2.5 px-4 rounded-lg text-xs font-medium border transition ${
                   rateType === 'fixed'
-                    ? 'bg-[#6366f1] text-white border-[#6366f1] shadow-sm'
+                    ? 'bg-[#9273fc] text-white border-[#9273fc] shadow-sm'
                     : 'bg-white dark:bg-[#202026] text-gray-700 dark:text-gray-300 border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-800'
                 }`}
               >
@@ -847,36 +1039,42 @@ export default function CreateP2PAdPage() {
                     step="0.1"
                     value={ratePercent}
                     onChange={(e) => setRatePercent(e.target.value)}
-                    className="w-full pl-3 pr-8 py-2.5 border border-gray-200 dark:border-gray-700 bg-white dark:bg-[#202026] text-gray-900 dark:text-white rounded-lg text-sm focus:outline-none focus:ring-1 focus:ring-[#6366f1]"
+                    className="w-full pl-3 pr-8 py-2.5 border border-gray-200 dark:border-gray-700 bg-white dark:bg-[#202026] text-gray-900 dark:text-white rounded-lg text-sm focus:outline-none focus:ring-1 focus:ring-[#9273fc]"
                   />
-                  <span className="absolute right-3 top-3 text-xs text-gray-400">%</span>
+                  <span className="absolute right-3 top-3 text-xs text-gray-400 font-semibold">%</span>
                 </div>
+                {/* Instruction 4: Live Market Price Display */}
                 <p className="text-xs text-gray-500 dark:text-gray-400 leading-relaxed">
                   Your price will float with the market. Current market price is approx.{' '}
                   <span className="font-semibold text-gray-800 dark:text-gray-200">
-                    {fiat.code} {currentMarketPrice ? currentMarketPrice.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '1.00'}
+                    {fiat.code} {currentMarketPrice ? currentMarketPrice.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '100.00'}
                   </span>
                   . Calculated offer price:{' '}
-                  <span className="font-semibold text-[#6366f1] dark:text-indigo-400">
-                    {fiat.code} {((currentMarketPrice || 1.0) * (1 + (parseFloat(ratePercent) || 0) / 100)).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  <span className="font-semibold text-[#9273fc]">
+                    {fiat.code} {calculatedOfferPrice.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                   </span>
                   .
                   <br />
-                  Set your adjustment percentage (from -50% to 50%). E.g., '1.5' for 1.5% above market.
+                  Set your adjustment percentage (from -50% to 50%). E.g., &apos;1.5&apos; for 1.5% above market.
                 </p>
               </div>
             ) : (
               <div className="space-y-2">
-                <label className="block text-xs font-medium text-gray-700 dark:text-gray-300">Fixed Price</label>
+                <div className="flex items-center justify-between">
+                  <label className="block text-xs font-medium text-gray-700 dark:text-gray-300">Fixed Price</label>
+                  <span className="text-[11px] text-gray-500 dark:text-gray-400">
+                    Market base: <strong className="text-gray-700 dark:text-gray-300">{fiat.code} {currentMarketPrice ? currentMarketPrice.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '100.00'}</strong> (+{ratePercent || '1.5'}% auto-adjusted)
+                  </span>
+                </div>
                 <div className="relative">
                   <input
                     type="number"
                     step="0.01"
                     value={fixedPrice}
                     onChange={(e) => setFixedPrice(e.target.value)}
-                    className="w-full pl-3 pr-12 py-2.5 border border-gray-200 dark:border-gray-700 bg-white dark:bg-[#202026] text-gray-900 dark:text-white rounded-lg text-sm focus:outline-none focus:ring-1 focus:ring-[#6366f1]"
+                    className="w-full pl-3 pr-12 py-2.5 border border-gray-200 dark:border-gray-700 bg-white dark:bg-[#202026] text-gray-900 dark:text-white rounded-lg text-sm focus:outline-none focus:ring-1 focus:ring-[#9273fc]"
                   />
-                  <span className="absolute right-3 top-3 text-xs text-gray-400">
+                  <span className="absolute right-3 top-3 text-xs text-gray-400 font-semibold">
                     {fiat.code}
                   </span>
                 </div>
@@ -892,7 +1090,7 @@ export default function CreateP2PAdPage() {
                   type="number"
                   value={minAmount}
                   onChange={(e) => setMinAmount(e.target.value)}
-                  className="w-full px-3 py-2.5 border border-gray-200 dark:border-gray-700 bg-white dark:bg-[#202026] text-gray-900 dark:text-white rounded-lg text-sm focus:outline-none focus:ring-1 focus:ring-[#6366f1]"
+                  className="w-full px-3 py-2.5 border border-gray-200 dark:border-gray-700 bg-white dark:bg-[#202026] text-gray-900 dark:text-white rounded-lg text-sm focus:outline-none focus:ring-1 focus:ring-[#9273fc]"
                 />
                 <span className="text-[11px] text-gray-400 mt-1 block">
                   In your selected fiat currency.
@@ -907,7 +1105,7 @@ export default function CreateP2PAdPage() {
                   type="number"
                   value={maxAmount}
                   onChange={(e) => setMaxAmount(e.target.value)}
-                  className="w-full px-3 py-2.5 border border-gray-200 dark:border-gray-700 bg-white dark:bg-[#202026] text-gray-900 dark:text-white rounded-lg text-sm focus:outline-none focus:ring-1 focus:ring-[#6366f1]"
+                  className="w-full px-3 py-2.5 border border-gray-200 dark:border-gray-700 bg-white dark:bg-[#202026] text-gray-900 dark:text-white rounded-lg text-sm focus:outline-none focus:ring-1 focus:ring-[#9273fc]"
                 />
                 <span className="text-[11px] text-gray-400 mt-1 block">
                   In your selected fiat currency.
@@ -923,7 +1121,7 @@ export default function CreateP2PAdPage() {
                 <select
                   value={paymentWindow}
                   onChange={(e) => setPaymentWindow(e.target.value)}
-                  className="w-full appearance-none px-3 py-2.5 border border-gray-200 dark:border-gray-700 rounded-lg text-sm bg-white dark:bg-[#202026] text-gray-900 dark:text-white focus:outline-none focus:ring-1 focus:ring-[#6366f1] pr-8"
+                  className="w-full appearance-none px-3 py-2.5 border border-gray-200 dark:border-gray-700 rounded-lg text-sm bg-white dark:bg-[#202026] text-gray-900 dark:text-white focus:outline-none focus:ring-1 focus:ring-[#9273fc] pr-8"
                 >
                   <option value="30">30 minutes</option>
                   <option value="60">60 minutes</option>
@@ -964,7 +1162,7 @@ export default function CreateP2PAdPage() {
                   </span>
                 </div>
                 {targetedCountries.length > 0 && (
-                  <span className="bg-[#6366f1] text-white px-2 py-0.5 rounded-full text-[10px] font-semibold">
+                  <span className="bg-[#9273fc] text-white px-2 py-0.5 rounded-full text-[10px] font-semibold">
                     {targetedCountries.length}
                   </span>
                 )}
@@ -1014,7 +1212,7 @@ export default function CreateP2PAdPage() {
                 value={terms}
                 onChange={(e) => setTerms(e.target.value)}
                 placeholder="e.g., Payment must be made from an account with your name. No third-party payments..."
-                className="w-full px-3 py-2 border border-gray-200 dark:border-gray-700 bg-white dark:bg-[#202026] text-gray-900 dark:text-white rounded-lg text-xs focus:outline-none focus:ring-1 focus:ring-[#6366f1] resize-none"
+                className="w-full px-3 py-2 border border-gray-200 dark:border-gray-700 bg-white dark:bg-[#202026] text-gray-900 dark:text-white rounded-lg text-xs focus:outline-none focus:ring-1 focus:ring-[#9273fc] resize-none"
               />
             </div>
 
@@ -1028,7 +1226,7 @@ export default function CreateP2PAdPage() {
                 value={offerLabel}
                 onChange={(e) => setOfferLabel(e.target.value)}
                 placeholder="e.g., Best rate on the market!"
-                className="w-full px-3 py-2 border border-gray-200 dark:border-gray-700 bg-white dark:bg-[#202026] text-gray-900 dark:text-white rounded-lg text-xs focus:outline-none focus:ring-1 focus:ring-[#6366f1]"
+                className="w-full px-3 py-2 border border-gray-200 dark:border-gray-700 bg-white dark:bg-[#202026] text-gray-900 dark:text-white rounded-lg text-xs focus:outline-none focus:ring-1 focus:ring-[#9273fc]"
               />
               <span className="text-[11px] text-gray-400 mt-1 block">
                 A short, eye-catching label for your ad (max 30 characters).
@@ -1054,7 +1252,7 @@ export default function CreateP2PAdPage() {
                       onClick={() => toggleTag(tag)}
                       className={`flex items-center gap-2 p-2 border rounded-lg cursor-pointer transition text-xs ${
                         isChecked
-                          ? 'border-[#6366f1] bg-indigo-50/50 dark:bg-indigo-950/20 text-[#6366f1] dark:text-indigo-400 font-medium'
+                          ? 'border-[#9273fc] bg-purple-50/50 dark:bg-[#9273fc]/20 text-[#9273fc] dark:text-purple-300 font-medium'
                           : 'border-gray-200 dark:border-gray-700 bg-white dark:bg-[#202026] text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800'
                       }`}
                     >
@@ -1062,7 +1260,7 @@ export default function CreateP2PAdPage() {
                         type="checkbox"
                         checked={isChecked}
                         readOnly
-                        className="rounded border-gray-300 text-[#6366f1] focus:ring-[#6366f1]"
+                        className="rounded border-gray-300 text-[#9273fc] focus:ring-[#9273fc]"
                       />
                       <span>{tag}</span>
                     </label>
@@ -1082,7 +1280,7 @@ export default function CreateP2PAdPage() {
                     id="checkbox-full-name-verified"
                     checked={requireFullNameVerified}
                     onChange={(e) => setRequireFullNameVerified(e.target.checked)}
-                    className="mt-0.5 h-4 w-4 rounded border-gray-300 dark:border-gray-600 text-[#6366f1] focus:ring-[#6366f1] cursor-pointer"
+                    className="mt-0.5 h-4 w-4 rounded border-gray-300 dark:border-gray-600 text-[#9273fc] focus:ring-[#9273fc] cursor-pointer"
                   />
                   <div>
                     <span className="text-xs font-semibold text-gray-900 dark:text-white block">
@@ -1100,7 +1298,7 @@ export default function CreateP2PAdPage() {
                     id="checkbox-verified-users-only"
                     checked={requireVerifiedUsers}
                     onChange={(e) => setRequireVerifiedUsers(e.target.checked)}
-                    className="mt-0.5 h-4 w-4 rounded border-gray-300 dark:border-gray-600 text-[#6366f1] focus:ring-[#6366f1] cursor-pointer"
+                    className="mt-0.5 h-4 w-4 rounded border-gray-300 dark:border-gray-600 text-[#9273fc] focus:ring-[#9273fc] cursor-pointer"
                   />
                   <div>
                     <span className="text-xs font-semibold text-gray-900 dark:text-white block">
@@ -1121,7 +1319,7 @@ export default function CreateP2PAdPage() {
                   <select
                     value={minTrades}
                     onChange={(e) => setMinTrades(e.target.value)}
-                    className="w-full appearance-none px-3 py-2.5 border border-gray-200 dark:border-gray-700 rounded-lg text-xs bg-white dark:bg-[#202026] text-gray-900 dark:text-white focus:outline-none focus:ring-1 focus:ring-[#6366f1] pr-8 cursor-pointer"
+                    className="w-full appearance-none px-3 py-2.5 border border-gray-200 dark:border-gray-700 rounded-lg text-xs bg-white dark:bg-[#202026] text-gray-900 dark:text-white focus:outline-none focus:ring-1 focus:ring-[#9273fc] pr-8 cursor-pointer"
                   >
                     <option value="0">No requirement</option>
                     <option value="1">1 completed trade</option>
@@ -1139,12 +1337,12 @@ export default function CreateP2PAdPage() {
             </div>
           </div>
 
-          {/* Create Ad Submit Button */}
+          {/* Create Ad Submit Button with #9273fc Theme */}
           <button
             type="submit"
             onClick={() => handleSubmit()}
             disabled={isSubmitting}
-            className="w-full py-3.5 bg-[#6366f1] text-white rounded-xl font-medium text-sm hover:bg-indigo-600 transition shadow-md shadow-indigo-500/20 disabled:opacity-50 cursor-pointer active:scale-[0.99]"
+            className="w-full py-3.5 bg-[#9273fc] text-white rounded-xl font-medium text-sm hover:bg-[#8160f5] transition shadow-md shadow-[#9273fc]/25 disabled:opacity-50 cursor-pointer active:scale-[0.99]"
           >
             {isSubmitting ? 'Creating Ad...' : 'Create Ad'}
           </button>
@@ -1170,7 +1368,7 @@ export default function CreateP2PAdPage() {
                   placeholder="Search currency name or code..."
                   value={fiatSearch}
                   onChange={(e) => setFiatSearch(e.target.value)}
-                  className="w-full pl-9 pr-8 py-1.5 border border-gray-200 dark:border-gray-700 bg-white dark:bg-[#202026] text-gray-900 dark:text-white rounded-lg text-xs focus:outline-none focus:ring-1 focus:ring-[#6366f1]"
+                  className="w-full pl-9 pr-8 py-1.5 border border-gray-200 dark:border-gray-700 bg-white dark:bg-[#202026] text-gray-900 dark:text-white rounded-lg text-xs focus:outline-none focus:ring-1 focus:ring-[#9273fc]"
                 />
                 {fiatSearch && (
                   <button type="button" onClick={() => setFiatSearch('')} className="absolute right-2.5 top-2 text-gray-400 hover:text-gray-600">
@@ -1201,7 +1399,7 @@ export default function CreateP2PAdPage() {
                       <div className="text-[11px] text-gray-400">{item.code}</div>
                     </div>
                   </div>
-                  {fiat.code === item.code && <Check className="w-4 h-4 text-[#6366f1]" />}
+                  {fiat.code === item.code && <Check className="w-4 h-4 text-[#9273fc]" />}
                 </button>
               ))}
             </div>
@@ -1235,7 +1433,7 @@ export default function CreateP2PAdPage() {
                   placeholder="Search countries..."
                   value={countrySearch}
                   onChange={(e) => setCountrySearch(e.target.value)}
-                  className="w-full pl-9 pr-8 py-1.5 border border-gray-200 dark:border-gray-700 bg-white dark:bg-[#202026] text-gray-900 dark:text-white rounded-lg text-xs focus:outline-none focus:ring-1 focus:ring-[#6366f1]"
+                  className="w-full pl-9 pr-8 py-1.5 border border-gray-200 dark:border-gray-700 bg-white dark:bg-[#202026] text-gray-900 dark:text-white rounded-lg text-xs focus:outline-none focus:ring-1 focus:ring-[#9273fc]"
                 />
                 {countrySearch && (
                   <button type="button" onClick={() => setCountrySearch('')} className="absolute right-2.5 top-2 text-gray-400 hover:text-gray-600">
@@ -1292,7 +1490,7 @@ export default function CreateP2PAdPage() {
                       />
                       <span className="text-gray-800 dark:text-gray-200">{country.name}</span>
                     </div>
-                    {isSelected && <Check className="w-4 h-4 text-[#6366f1]" />}
+                    {isSelected && <Check className="w-4 h-4 text-[#9273fc]" />}
                   </button>
                 );
               })}

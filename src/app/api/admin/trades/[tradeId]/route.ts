@@ -193,8 +193,8 @@ export async function POST(
 
       // Execute balance updates & Escrow Fee Rules
       if (isRelease) {
-        // Fee calculation: 1% platform fee (or existing trade.escrow_fee)
-        const standardFeePercent = 0.01;
+        // Fee calculation: 1.5% platform fee (or existing trade.escrow_fee) charged only from seller (whose coins are locked)
+        const standardFeePercent = 0.015;
         const calculatedFee = Number(trade.escrow_fee || (cryptoAmount * standardFeePercent).toFixed(6));
         feeCharged = calculatedFee;
 
