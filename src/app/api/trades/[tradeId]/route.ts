@@ -42,7 +42,7 @@ export async function GET(
       return NextResponse.json({ error: 'Trade ID is required.' }, { status: 400 });
     }
 
-    const authSupabase = createClient();
+    const authSupabase = await createClient();
     const adminSupabase = getSupabaseAdminClient();
 
     // 1. Unauthenticated Trade Access Check (Step 20.10)

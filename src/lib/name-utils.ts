@@ -2,8 +2,8 @@
  * Name privacy and display helper utility for P2P trading.
  * 
  * Rules:
- * - FULL: Displays complete legal name in trade chat (e.g. "Adam Dam")
- * - PARTIAL: Displays first initial and last name (e.g. "a. dam" if full name is "adam dam")
+ * - FULL: Displays complete legal name in trade chat (e.g. "Jane Doe")
+ * - PARTIAL: Displays first initial and last name (e.g. "j. doe" if full name is "Jane Doe")
  * - HIDE: Does not display name anywhere (counterparty only sees @username)
  * 
  * In all pages (ads, public profiles, cards, lists), ONLY username is displayed.
@@ -60,7 +60,7 @@ export function formatTradeDisplayName(
 export function getTradeNamePreview(
   fullName: string | null | undefined,
   visibility: NameVisibility,
-  fallbackExample = 'Adam Dam'
+  fallbackExample = 'Jane Doe'
 ): string {
   const nameToUse = fullName?.trim() || fallbackExample;
   const result = formatTradeDisplayName(nameToUse, visibility);

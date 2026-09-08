@@ -1450,9 +1450,9 @@ export default function SettingsPage() {
                             Live Preview in Trade Chat (i) Icon:
                           </span>
                           <span className="font-mono text-xs font-bold text-primary px-2.5 py-0.5 rounded-full bg-primary/10 border border-primary/20">
-                            {nameVisibility === 'FULL' && (fullName?.trim() || 'Adam Dam')}
+                            {nameVisibility === 'FULL' && (fullName?.trim() || profile?.full_name || 'Legal Name')}
                             {nameVisibility === 'PARTIAL' && (
-                              formatTradeDisplayName(fullName?.trim() || 'Adam Dam', 'PARTIAL').formattedName
+                              formatTradeDisplayName(fullName?.trim() || profile?.full_name || 'Legal Name', 'PARTIAL').formattedName
                             )}
                             {nameVisibility === 'HIDE' && `@${profile?.username || username || 'username'} (Name is Hidden)`}
                           </span>
@@ -1461,12 +1461,12 @@ export default function SettingsPage() {
                         <div className="text-[11px] text-muted-foreground">
                           {nameVisibility === 'FULL' && (
                             <p>
-                              Currently showing your <strong>Full Name</strong> ({fullName?.trim() || 'Adam Dam'}) inside the trade chat &lsquo;i&rsquo; info detail modal.
+                              Currently showing your <strong>Full Name</strong> ({fullName?.trim() || profile?.full_name || 'Legal Name'}) inside the trade chat &lsquo;i&rsquo; info detail modal.
                             </p>
                           )}
                           {nameVisibility === 'PARTIAL' && (
                             <p>
-                              Currently showing your <strong>Partial Name</strong> (&ldquo;{formatTradeDisplayName(fullName?.trim() || 'Adam Dam', 'PARTIAL').formattedName}&rdquo; - initial and last name) inside the trade chat &lsquo;i&rsquo; info detail modal.
+                              Currently showing your <strong>Partial Name</strong> (&ldquo;{formatTradeDisplayName(fullName?.trim() || profile?.full_name || 'Legal Name', 'PARTIAL').formattedName}&rdquo; - initial and last name) inside the trade chat &lsquo;i&rsquo; info detail modal.
                             </p>
                           )}
                           {nameVisibility === 'HIDE' && (

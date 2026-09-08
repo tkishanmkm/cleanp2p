@@ -4,6 +4,35 @@ import Link from 'next/link';
 import { ThumbsUp, ThumbsDown, User } from 'lucide-react';
 import { getPublicHandle } from '@/utils/userPrivacy';
 
+export interface SellerStatsProps {
+  avgReleaseTime?: number | string | null;
+  avgPayTime?: number | string | null;
+  completionRate?: number | string | null;
+}
+
+export function SellerTradeMetrics({ stats }: { stats?: SellerStatsProps }) {
+  // Convert any string, null, or undefined metric into a safe primitive number
+  const safeReleaseTime = Number(stats?.avgReleaseTime ?? stats?.avgPayTime ?? 0) || 0;
+  const safeCompletionRate = Number(stats?.completionRate ?? 0) || 0;
+
+  return (
+    <div className="flex items-center gap-4 text-xs text-gray-600 dark:text-gray-300">
+      <div>
+        <span className="font-semibold text-gray-900 dark:text-gray-100">
+          {safeCompletionRate.toFixed(1)}%
+        </span>{' '}
+        Completion
+      </div>
+      <div>
+        <span className="font-semibold text-gray-900 dark:text-gray-100">
+          {safeReleaseTime.toFixed(2)} min
+        </span>{' '}
+        Avg. Release
+      </div>
+    </div>
+  );
+}
+
 export interface AdCardProps {
   ad: {
     id: string;

@@ -5,7 +5,7 @@ export const dynamic = 'force-dynamic';
 
 export async function GET(req: NextRequest) {
   try {
-    const authSupabase = createClient();
+    const authSupabase = await createClient();
     const adminSupabase = getSupabaseAdminClient();
 
     const {

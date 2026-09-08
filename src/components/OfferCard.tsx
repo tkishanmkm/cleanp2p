@@ -1,59 +1,139 @@
 'use client';
 
 import React from 'react';
-import { getPublicHandle, isUserOnline, formatCurrencyValue } from '@/utils/userPrivacy';
 import Link from 'next/link';
 
-export default function OfferCard({ offer }: { offer: any }) {
-  // Enforce profile_username over full_name or metadata
-  const sellerHandle = getPublicHandle(offer.profiles?.username || 'pulsepost949');
-  
-  // Dynamic online state (active within last 5 minutes)
-  const online = isUserOnline(offer.profiles?.is_online, offer.profiles?.last_seen);
+export interface OfferCardProps {
+  offer: {
+    id: string;
+    type: string;
+    asset_symbol: string;
+    fiat_symbol: string;
+    price: number;
+    min_limit: number;
+    max_limit: number;
+    payment_methods?: string[];
+    seller_username?: string;
+    seller_is_online?: boolean;
+    seller_last_seen?: string;
+    completed_trades_count?: number;
+    profiles?: {
+      username?: string;
+      is_online?: boolean;
+      last_seen?: string;
+      completed_trades_count?: number;
+    };
+  };
+}
+
+export default function OfferCard({ offer }: OfferCardProps) {
+  const isSellerAd = offer.type === 'sell';
+  const username = offer.seller_username || offer.profiles?.username || 'unnamed_trader';
+
+  // Dynamic status calculation (active within last 5 minutes = online)
+  const lastSeen = offer.seller_last_seen || offer.profiles?.last_seen;
+  const isRecentlyActive = lastSeen
+    ? new Date().getTime() - new Date(lastSeen).getTime() < 5 * 60 * 1000
+    : false;
+  const isOnline = Boolean(offer.seller_is_online || offer.profiles?.is_online || isRecentlyActive);
+
+  // Format dynamic relative time for Last Seen
+  const formatLastSeen = (timestamp?: string) => {
+    if (!timestamp) return 'Recently';
+    const diffInMinutes = Math.floor(
+      (new Date().getTime() - new Date(timestamp).getTime()) / (1000 * 60)
+    );
+    if (diffInMinutes < 1) return 'Just now';
+    if (diffInMinutes < 60) return `${diffInMinutes}m ago`;
+    const diffInHours = Math.floor(diffInMinutes / 60);
+    if (diffInHours < 24) return `${diffInHours}h ago`;
+    return `${Math.floor(diffInHours / 24)}d ago`;
+  };
+
+  const formatCurrency = (val: number, currencySymbol: string) => {
+    try {
+      return new Intl.NumberFormat('en-US', {
+        style: 'currency',
+        currency: currencySymbol,
+        maximumFractionDigits: 2,
+      }).format(val);
+    } catch {
+      return `${val.toLocaleString()} ${currencySymbol}`;
+    }
+  };
+
+  const tradeCount = offer.completed_trades_count ?? offer.profiles?.completed_trades_count ?? 0;
 
   return (
-    <div className="p-5 border rounded-2xl bg-card flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+    <div className="p-5 border rounded-2xl bg-card flex flex-col md:flex-row justify-between items-start md:items-center gap-4 hover:shadow-sm transition-shadow">
       <div className="space-y-2">
+        {/* User Handle & Real-time Indicator */}
         <div className="flex items-center gap-2">
-          <span className={`w-2.5 h-2.5 rounded-full ${online ? 'bg-emerald-500' : 'bg-gray-400'}`} />
-          <Link href={`/user/${sellerHandle.replace('@', '')}`} className="font-bold text-foreground hover:underline">
-            {sellerHandle.replace('@', '')}
+          <span
+            className={`w-2.5 h-2.5 rounded-full ${
+              isOnline ? 'bg-emerald-500' : 'bg-gray-400'
+            }`}
+          />
+          <Link
+            href={`/user/${username}`}
+            className="font-bold text-foreground hover:underline text-base"
+          >
+            @{username}
           </Link>
         </div>
 
-        <div className="flex items-center gap-2 text-xs text-muted-foreground">
-          <span>0 Trades</span>
-          <span className={`text-xs px-2 py-0.5 rounded ${online ? 'bg-emerald-500/10 text-emerald-500' : 'bg-muted text-muted-foreground'}`}>
-            {online ? 'Online' : 'Offline'}
+        {/* Dynamic Trade Stats and Status */}
+        <div className="flex items-center gap-3 text-xs text-muted-foreground">
+          <span>{tradeCount} Trades</span>
+          <span>•</span>
+          <span
+            className={`px-2 py-0.5 rounded font-semibold text-xs ${
+              isOnline
+                ? 'bg-emerald-500/10 text-emerald-600'
+                : 'bg-muted text-muted-foreground'
+            }`}
+          >
+            {isOnline ? 'Online' : `Seen ${formatLastSeen(lastSeen)}`}
           </span>
         </div>
 
-        <div className="flex flex-wrap gap-1.5 pt-1">
-          {offer.payment_methods?.map((method: string, idx: number) => (
-            <span key={idx} className="text-xs px-2.5 py-1 rounded-md bg-muted font-medium text-foreground">
-              {method}
-            </span>
-          ))}
-        </div>
+        {/* Dynamic Payment Methods */}
+        {offer.payment_methods && offer.payment_methods.length > 0 && (
+          <div className="flex flex-wrap gap-1.5 pt-1">
+            {offer.payment_methods.map((method, idx) => (
+              <span
+                key={idx}
+                className="text-xs px-2.5 py-1 rounded-md bg-muted font-medium text-foreground"
+              >
+                {method}
+              </span>
+            ))}
+          </div>
+        )}
       </div>
 
+      {/* Pricing & Call to Action */}
       <div className="text-right flex md:flex-col justify-between w-full md:w-auto items-center md:items-end gap-2">
         <div>
           <div className="text-xs text-muted-foreground uppercase font-medium">Price</div>
           <div className="text-xl font-extrabold text-foreground">
-            {formatCurrencyValue(offer.price, offer.fiat_symbol)}
-            <span className="text-xs text-emerald-500 ml-1.5 font-bold">+1.50%</span>
+            {formatCurrency(Number(offer.price), offer.fiat_symbol)}
           </div>
           <div className="text-xs text-muted-foreground mt-0.5">
-            Limits: {formatCurrencyValue(offer.min_limit, offer.fiat_symbol)} - {formatCurrencyValue(offer.max_limit, offer.fiat_symbol)}
+            Limits: {formatCurrency(Number(offer.min_limit), offer.fiat_symbol)} -{' '}
+            {formatCurrency(Number(offer.max_limit), offer.fiat_symbol)}
           </div>
         </div>
 
         <Link
           href={`/ad/${offer.id}`}
-          className="bg-red-500 hover:bg-red-600 text-white px-5 py-2 rounded-xl font-bold text-sm transition-colors"
+          className={`px-5 py-2 rounded-xl font-bold text-sm transition-colors text-white ${
+            isSellerAd
+              ? 'bg-emerald-600 hover:bg-emerald-700'
+              : 'bg-red-500 hover:bg-red-600'
+          }`}
         >
-          Sell BTC
+          {isSellerAd ? `Buy ${offer.asset_symbol}` : `Sell ${offer.asset_symbol}`}
         </Link>
       </div>
     </div>

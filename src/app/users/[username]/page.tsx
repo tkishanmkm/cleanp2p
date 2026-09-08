@@ -36,7 +36,7 @@ export default function PublicUserProfile() {
             .from('p2p_ads')
             .select('*')
             .or(`user_id.eq.${data.profile.id},userId.eq.${data.profile.id}`)
-            .eq('active', true)
+            .or('is_active.eq.true,active.eq.true')
             .order('created_at', { ascending: false });
 
           if (userAds) {

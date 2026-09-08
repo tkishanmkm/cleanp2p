@@ -705,16 +705,28 @@ export default function CreateP2PAdPage() {
         body: JSON.stringify(cleanPayload),
       });
 
-      const result = await response.json();
+      let result: any = null;
+      const contentType = response.headers.get('content-type') || '';
+      if (contentType.includes('application/json')) {
+        try {
+          result = await response.json();
+        } catch {
+          result = null;
+        }
+      } else {
+        const textResp = await response.text();
+        console.warn('Non-JSON response received:', textResp);
+      }
 
       if (!response.ok) {
-        console.error('Error creating ad:', result.realError || result.error);
-        toast.error(`Failed: ${result.realError || result.error}`, { id: toastId, duration: 6000 });
+        const errorMsg = result?.realError || result?.error || result?.message || `Server returned ${response.status}`;
+        console.error('Error creating ad:', errorMsg);
+        toast.error(`Failed: ${errorMsg}`, { id: toastId, duration: 6000 });
         setIsSubmitting(false);
         return;
       }
 
-      console.log('Ad created successfully:', result.data);
+      console.log('Ad created successfully:', result?.data);
       toast.success('P2P Advertisement created successfully!', { id: toastId });
     } catch (err: any) {
       console.error('Runtime error:', err);

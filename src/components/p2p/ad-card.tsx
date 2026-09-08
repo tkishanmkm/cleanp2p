@@ -1,18 +1,18 @@
 'use client';
 
+import React from 'react';
 import Link from 'next/link';
 import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar';
-import type { P2PAd, CryptoCurrency, User } from '@/lib/types';
+import type { P2PAd, CryptoCurrency } from '@/lib/types';
 import { usePrices } from '@/context/price-context';
-import { ThumbsUp, ThumbsDown, Info, Award, Clock, Calendar, CheckCircle, User as UserIcon } from 'lucide-react';
+import { ThumbsUp, ThumbsDown, Info, Award, Clock, CheckCircle } from 'lucide-react';
 import { cn, toDate } from '@/lib/utils';
 import { BtcLogo, EthLogo, LtcLogo, UsdtLogo, DefaultAvatar } from '@/components/icons';
 import { FlagIcon } from '../ui/flag-icon';
 import { formatDistanceToNow } from 'date-fns';
-import { UserStatusIndicator } from '@/components/user-status';
 import TraderStatusBadge from '@/components/TraderStatusBadge';
 import { formatJoinedDate } from '@/utils/p2p-helpers';
 import {
@@ -26,20 +26,20 @@ import {
 import { ScrollArea } from '../ui/scroll-area';
 
 const CryptoLogo = ({ crypto, className }: { crypto: CryptoCurrency; className?: string }) => {
-    switch (crypto) {
-        case 'BTC': return <BtcLogo className={className} />;
-        case 'ETH': return <EthLogo className={className} />;
-        case 'LTC': return <LtcLogo className={className} />;
-        case 'USDT': return <UsdtLogo className={className} />;
-        default: return null;
-    }
-}
+  switch (crypto) {
+    case 'BTC': return <BtcLogo className={className} />;
+    case 'ETH': return <EthLogo className={className} />;
+    case 'LTC': return <LtcLogo className={className} />;
+    case 'USDT': return <UsdtLogo className={className} />;
+    default: return null;
+  }
+};
 
 const DetailRow = ({ label, value }: { label: string; value: React.ReactNode }) => (
-    <div className="flex justify-between items-start text-sm">
-      <p className="text-muted-foreground">{label}</p>
-      <div className="text-right font-medium max-w-[70%]">{value}</div>
-    </div>
+  <div className="flex justify-between items-start text-sm">
+    <p className="text-muted-foreground">{label}</p>
+    <div className="text-right font-medium max-w-[70%]">{value}</div>
+  </div>
 );
 
 interface AdCardProps {
@@ -48,14 +48,16 @@ interface AdCardProps {
 
 export function AdCard({ ad }: AdCardProps) {
   const { prices, fiatRates } = usePrices();
-  const adCreator = ad.user;
+  const adCreator = ad.user || ({} as any);
 
   const marketPriceUsd = prices[ad.crypto] || 0;
   const exchangeRate = fiatRates[ad.fiatCurrency] || 1;
   const marketPriceInFiat = marketPriceUsd * exchangeRate;
 
-  const adPrice =
-    ad.rateType === 'fixed' ? ad.fixedRate! : marketPriceInFiat * (1 + (ad.ratePercent || 0) / 100);
+  const unitPriceFromAd = Number(ad.fixedRate ?? (ad as any).unit_price ?? (ad as any).price ?? 0);
+  const adPrice = unitPriceFromAd > 0 
+    ? unitPriceFromAd 
+    : (ad.rateType === 'fixed' ? (ad.fixedRate ?? 0) : marketPriceInFiat * (1 + (ad.ratePercent || 0) / 100));
 
   const pricePremium = marketPriceInFiat > 0 ? (adPrice - marketPriceInFiat) / marketPriceInFiat : 0;
   
@@ -70,7 +72,7 @@ export function AdCard({ ad }: AdCardProps) {
     ? 'bg-green-600 hover:bg-green-700 text-white'
     : 'bg-red-600 hover:bg-red-700 text-white';
 
-  const adCreatorLastActive = adCreator.lastActive ? toDate(adCreator.lastActive) : null;
+  const adCreatorLastActive = adCreator?.lastActive ? toDate(adCreator.lastActive) : null;
   let activity = { text: 'Offline', dotClass: 'bg-gray-500', textClass: 'text-muted-foreground' };
 
   if (adCreatorLastActive) {
@@ -88,9 +90,14 @@ export function AdCard({ ad }: AdCardProps) {
     }
   }
   
-  const userBadges = (adCreator.badges || []);
+  const userBadges = (adCreator?.badges || []);
   const displayedBadges = userBadges.slice(0, 3);
   const hiddenBadgesCount = userBadges.length - displayedBadges.length;
+
+  const rawPayTime = Number(adCreator?.avgPayTime);
+  const rawReleaseTime = Number(adCreator?.avgReleaseTime);
+  const safePayTime = !isNaN(rawPayTime) && rawPayTime > 0 ? rawPayTime : 0;
+  const safeReleaseTime = !isNaN(rawReleaseTime) && rawReleaseTime > 0 ? rawReleaseTime : 0;
 
   return (
     <Card className="hover:shadow-md transition-shadow">
@@ -99,51 +106,54 @@ export function AdCard({ ad }: AdCardProps) {
         <div className="flex-grow space-y-3">
           <div className="flex items-center gap-3">
             <Avatar className="h-10 w-10">
-              <AvatarImage src={adCreator.photoURL} />
+              <AvatarImage src={adCreator?.photoURL} />
               <AvatarFallback><DefaultAvatar /></AvatarFallback>
             </Avatar>
             <div>
               <div className="flex items-center gap-1.5">
-                <Link href={`/users/${adCreator.username}`} className="font-semibold hover:underline">{adCreator.username}</Link>
-                {adCreator.country && <FlagIcon countryCode={adCreator.country} />}
+                <Link href={`/users/${adCreator?.username || 'Trader'}`} className="font-semibold hover:underline">
+                  {adCreator?.username || 'Trader'}
+                </Link>
+                {adCreator?.country && <FlagIcon countryCode={adCreator.country} />}
                 {displayedBadges.map((badge, i) => (
-                   <Dialog key={i}>
-                      <DialogTrigger asChild>
-                         <Badge variant="outline" className="p-1 cursor-pointer"><Award className="h-3 w-3 text-amber-500" /></Badge>
-                      </DialogTrigger>
-                      <DialogContent className="sm:max-w-xs"><DialogHeader><DialogTitle>{badge}</DialogTitle></DialogHeader></DialogContent>
-                   </Dialog>
+                  <span
+                    key={i}
+                    title={badge}
+                    className="inline-flex items-center justify-center p-1 rounded-md border border-amber-300 dark:border-amber-700 bg-amber-50 dark:bg-amber-950/40"
+                  >
+                    <Award className="h-3 w-3 text-amber-500" />
+                  </span>
                 ))}
                 {hiddenBadgesCount > 0 && <Badge variant="secondary">+{hiddenBadgesCount} more</Badge>}
               </div>
               <div className="text-xs text-muted-foreground flex items-center gap-3 flex-wrap">
-                <span>{adCreator.completedTrades || 0} Trades</span>
+                <span>{adCreator?.completedTrades || 0} Trades</span>
                 <div className="flex items-center gap-1">
-                  <ThumbsUp className="h-3 w-3 text-green-500" /> {adCreator.positiveFeedback || 0}
+                  <ThumbsUp className="h-3 w-3 text-green-500" /> {adCreator?.positiveFeedback || 0}
                 </div>
                 <div className="flex items-center gap-1">
-                  <ThumbsDown className="h-3 w-3 text-red-500" /> {adCreator.negativeFeedback || 0}
+                  <ThumbsDown className="h-3 w-3 text-red-500" /> {adCreator?.negativeFeedback || 0}
                 </div>
               </div>
               <div className="mt-1">
-                <TraderStatusBadge lastActive={adCreator.lastActive} />
+                <TraderStatusBadge lastActive={adCreator?.lastActive} />
               </div>
             </div>
           </div>
           
           {ad.offerLabel && (
             <div className="p-2 text-sm font-semibold rounded-md bg-amber-100 dark:bg-amber-900/50 text-amber-800 dark:text-amber-200">
-                {ad.offerLabel}
+              {ad.offerLabel}
             </div>
           )}
           
           <div className="flex flex-wrap gap-1">
-            {ad.paymentMethods.map(pm => <Badge key={pm} variant="outline" className="text-xs">{pm}</Badge>)}
+            {(ad.paymentMethods || []).map(pm => <Badge key={pm} variant="outline" className="text-xs">{pm}</Badge>)}
           </div>
           
-           {ad.tags && ad.tags.length > 0 && (
+          {ad.tags && ad.tags.length > 0 && (
             <div className="flex flex-wrap gap-1">
-                {ad.tags.map(tag => <Badge key={tag} variant="secondary">{tag}</Badge>)}
+              {ad.tags.map(tag => <Badge key={tag} variant="secondary">{tag}</Badge>)}
             </div>
           )}
         </div>
@@ -159,16 +169,16 @@ export function AdCard({ ad }: AdCardProps) {
                 <span className="text-sm text-muted-foreground ml-1">{ad.fiatCurrency}</span>
               </p>
               {marketPriceInFiat > 0 && (
-                  <Badge className={cn('font-semibold', priceBadgeClass)}>
-                      {pricePremium >= 0 ? '+' : ''}{(pricePremium * 100).toFixed(2)}%
-                  </Badge>
+                <Badge className={cn('font-semibold', priceBadgeClass)}>
+                  {pricePremium >= 0 ? '+' : ''}{(pricePremium * 100).toFixed(2)}%
+                </Badge>
               )}
             </div>
           </div>
 
           <div>
             <p className="text-xs text-muted-foreground">Limits</p>
-            <p className="font-medium text-sm">{ad.minAmount.toLocaleString()} - {ad.maxAmount.toLocaleString()} {ad.fiatCurrency}</p>
+            <p className="font-medium text-sm">{(ad.minAmount || 0).toLocaleString()} - {(ad.maxAmount || 0).toLocaleString()} {ad.fiatCurrency}</p>
           </div>
 
           <div className="flex items-center justify-end gap-1 sm:gap-2 mt-2 w-full sm:w-auto">
@@ -182,7 +192,7 @@ export function AdCard({ ad }: AdCardProps) {
                 <DialogHeader>
                   <DialogTitle>Trade Details</DialogTitle>
                   <DialogDescription>
-                    {ad.adType === 'buy' ? 'Buy' : 'Sell'} ad from {adCreator.username}
+                    {ad.adType === 'buy' ? 'Buy' : 'Sell'} ad from {adCreator?.username || 'Trader'}
                   </DialogDescription>
                 </DialogHeader>
                 <ScrollArea className="max-h-[70vh]">
@@ -190,49 +200,49 @@ export function AdCard({ ad }: AdCardProps) {
                     <div>
                       <h4 className="font-semibold text-base mb-2">Trader Info</h4>
                       <div className="space-y-2 text-sm p-3 border rounded-md bg-secondary/50">
-                          <div className="flex items-center gap-3">
-                            <Avatar className="h-10 w-10">
-                                  <AvatarImage src={adCreator.photoURL} />
-                                  <AvatarFallback><DefaultAvatar /></AvatarFallback>
-                              </Avatar>
-                              <div>
-                                  <p className="font-semibold">{adCreator.username}</p>
-                                  <p className="text-xs text-muted-foreground">{formatJoinedDate(adCreator.createdAt)}</p>
-                              </div>
+                        <div className="flex items-center gap-3">
+                          <Avatar className="h-10 w-10">
+                            <AvatarImage src={adCreator?.photoURL} />
+                            <AvatarFallback><DefaultAvatar /></AvatarFallback>
+                          </Avatar>
+                          <div>
+                            <p className="font-semibold">{adCreator?.username || 'Trader'}</p>
+                            <p className="text-xs text-muted-foreground">{formatJoinedDate(adCreator?.createdAt)}</p>
                           </div>
-                          <div className="grid grid-cols-2 gap-y-2 gap-x-4 pt-2">
-                            <div className="flex items-center gap-2"><CheckCircle className="h-4 w-4 text-muted-foreground" /> <span>{adCreator.completedTrades || 0} Trades</span></div>
-                            <div className="flex items-center gap-2"><ThumbsUp className="h-4 w-4 text-green-500" /> <span>{adCreator.positiveFeedback || 0}</span></div>
-                            <div className="flex items-center gap-2"><ThumbsDown className="h-4 w-4 text-red-500" /> <span>{adCreator.negativeFeedback || 0}</span></div>
-                            <div className="flex items-center gap-2">
-                              <Clock className="h-4 w-4 text-muted-foreground" />
-                              <span>
-                                {ad.adType === 'buy'
-                                  ? `${(adCreator.avgPayTime || adCreator.avgReleaseTime || 0).toFixed(1)}m pay`
-                                  : `${(adCreator.avgReleaseTime || 0).toFixed(1)}m release`}
-                              </span>
-                            </div>
+                        </div>
+                        <div className="grid grid-cols-2 gap-y-2 gap-x-4 pt-2">
+                          <div className="flex items-center gap-2"><CheckCircle className="h-4 w-4 text-muted-foreground" /> <span>{adCreator?.completedTrades || 0} Trades</span></div>
+                          <div className="flex items-center gap-2"><ThumbsUp className="h-4 w-4 text-green-500" /> <span>{adCreator?.positiveFeedback || 0}</span></div>
+                          <div className="flex items-center gap-2"><ThumbsDown className="h-4 w-4 text-red-500" /> <span>{adCreator?.negativeFeedback || 0}</span></div>
+                          <div className="flex items-center gap-2">
+                            <Clock className="h-4 w-4 text-muted-foreground" />
+                            <span>
+                              {ad.adType === 'buy'
+                                ? `${(safePayTime || safeReleaseTime).toFixed(1)}m pay`
+                                : `${safeReleaseTime.toFixed(1)}m release`}
+                            </span>
                           </div>
+                        </div>
                       </div>
                     </div>
                     <div>
                       <h4 className="font-semibold text-base mb-2">Ad Info</h4>
                       <div className="space-y-3 text-sm p-3 border rounded-md bg-secondary/50">
-                          <DetailRow label="Price" value={<div className="flex items-center gap-2">{adPrice.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}<span className="text-muted-foreground">{ad.fiatCurrency} / {ad.crypto}</span></div>} />
-                          <DetailRow label="Limits" value={`${ad.minAmount.toLocaleString()} - ${ad.maxAmount.toLocaleString()} ${ad.fiatCurrency}`} />
-                          <DetailRow label="Payment Window" value={`${ad.paymentTimeLimit} minutes`} />
-                          <DetailRow label="Payment Methods" value={<div className="flex flex-wrap gap-1 justify-end">{ad.paymentMethods.map(pm => <Badge key={pm} variant="outline">{pm}</Badge>)}</div>} />
+                        <DetailRow label="Price" value={<div className="flex items-center gap-2">{adPrice.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}<span className="text-muted-foreground">{ad.fiatCurrency} / {ad.crypto}</span></div>} />
+                        <DetailRow label="Limits" value={`${(ad.minAmount || 0).toLocaleString()} - ${(ad.maxAmount || 0).toLocaleString()} ${ad.fiatCurrency}`} />
+                        <DetailRow label="Payment Window" value={`${ad.paymentTimeLimit || 30} minutes`} />
+                        <DetailRow label="Payment Methods" value={<div className="flex flex-wrap gap-1 justify-end">{(ad.paymentMethods || []).map(pm => <Badge key={pm} variant="outline">{pm}</Badge>)}</div>} />
                       </div>
                       <div className="space-y-2 text-sm p-3 border rounded-md bg-secondary/50 mt-2">
-                          <p className="font-medium">Terms & Conditions</p>
-                          <p className="text-muted-foreground whitespace-pre-wrap">{ad.terms}</p>
+                        <p className="font-medium">Terms & Conditions</p>
+                        <p className="text-muted-foreground whitespace-pre-wrap">{ad.terms || 'No specific terms provided.'}</p>
                       </div>
-                        {ad.tags && ad.tags.length > 0 && (
-                          <div className="space-y-2 text-sm p-3 border rounded-md bg-secondary/50 mt-2">
-                              <p className="font-medium">Tags</p>
-                              <div className="flex flex-wrap gap-1">{ad.tags.map(tag => <Badge key={tag} variant="secondary">{tag}</Badge>)}</div>
-                          </div>
-                        )}
+                      {ad.tags && ad.tags.length > 0 && (
+                        <div className="space-y-2 text-sm p-3 border rounded-md bg-secondary/50 mt-2">
+                          <p className="font-medium">Tags</p>
+                          <div className="flex flex-wrap gap-1">{ad.tags.map(tag => <Badge key={tag} variant="secondary">{tag}</Badge>)}</div>
+                        </div>
+                      )}
                     </div>
                   </div>
                 </ScrollArea>
