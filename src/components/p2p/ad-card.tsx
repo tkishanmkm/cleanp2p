@@ -96,8 +96,14 @@ export function AdCard({ ad }: AdCardProps) {
 
   const rawPayTime = Number(adCreator?.avgPayTime);
   const rawReleaseTime = Number(adCreator?.avgReleaseTime);
-  const safePayTime = !isNaN(rawPayTime) && rawPayTime > 0 ? rawPayTime : 0;
-  const safeReleaseTime = !isNaN(rawReleaseTime) && rawReleaseTime > 0 ? rawReleaseTime : 0;
+  const safePayTime = Number.isFinite(rawPayTime) && rawPayTime > 0 ? rawPayTime : 15;
+  const safeReleaseTime = Number.isFinite(rawReleaseTime) && rawReleaseTime > 0 ? rawReleaseTime : 15;
+  const maxLimit = ad.maxAmount || 0;
+  const minLimit = ad.minAmount || 0;
+  const rawAdvertiserBalanceUSD = Number((ad as any).advertiserBalanceUSD ?? (ad as any).creator_crypto_balance_fiat ?? 0);
+  const advertiserBalanceUSD = rawAdvertiserBalanceUSD > 0 ? rawAdvertiserBalanceUSD : (maxLimit || 1000);
+  const effectiveMaxLimit = Math.min(maxLimit, advertiserBalanceUSD);
+  const isAvailable = advertiserBalanceUSD >= minLimit;
 
   return (
     <Card className="hover:shadow-md transition-shadow">
@@ -178,7 +184,15 @@ export function AdCard({ ad }: AdCardProps) {
 
           <div>
             <p className="text-xs text-muted-foreground">Limits</p>
-            <p className="font-medium text-sm">{(ad.minAmount || 0).toLocaleString()} - {(ad.maxAmount || 0).toLocaleString()} {ad.fiatCurrency}</p>
+            {isAvailable ? (
+              <p className="font-medium text-sm">
+                {minLimit.toLocaleString()} - {effectiveMaxLimit.toLocaleString()} {ad.fiatCurrency}
+              </p>
+            ) : (
+              <p className="font-semibold text-xs text-red-500">
+                Insufficient Advertiser Balance
+              </p>
+            )}
           </div>
 
           <div className="flex items-center justify-end gap-1 sm:gap-2 mt-2 w-full sm:w-auto">

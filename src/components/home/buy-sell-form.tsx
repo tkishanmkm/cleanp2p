@@ -258,8 +258,8 @@ function FormContent({ type }: { type: 'buy' | 'sell' }) {
 
       {/* CENTERED MODAL: Fiat Currency Selection */}
       <Dialog open={isFiatModalOpen} onOpenChange={setIsFiatModalOpen}>
-        <DialogContent className="sm:max-w-lg max-h-[85vh] flex flex-col p-6 rounded-2xl border border-[#9273FC]/25 shadow-2xl bg-white dark:bg-[#151518]">
-          <DialogHeader className="space-y-1 text-left pb-2">
+        <DialogContent className="sm:max-w-lg max-h-[85vh] flex flex-col p-6 rounded-2xl border border-[#9273FC]/25 shadow-2xl bg-white dark:bg-[#151518] overflow-hidden">
+          <DialogHeader className="space-y-1 text-left pb-2 shrink-0">
             <DialogTitle className="text-xl font-bold flex items-center gap-2.5 text-slate-900 dark:text-white">
               <div className="w-8 h-8 rounded-lg bg-[#9273FC]/10 dark:bg-[#9273FC]/20 flex items-center justify-center text-[#9273FC]">
                 <Globe className="w-4 h-4" />
@@ -272,7 +272,7 @@ function FormContent({ type }: { type: 'buy' | 'sell' }) {
           </DialogHeader>
 
           {/* Search Input */}
-          <div className="relative my-2">
+          <div className="relative my-2 shrink-0">
             <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
             <Input
               placeholder="Search by currency name or code (e.g. USD, EUR, INR)..."
@@ -293,7 +293,7 @@ function FormContent({ type }: { type: 'buy' | 'sell' }) {
 
           {/* Popular Fast Chips */}
           {!fiatSearch && (
-            <div className="flex items-center gap-1.5 flex-wrap pb-2 pt-0.5">
+            <div className="flex items-center gap-1.5 flex-wrap pb-2 pt-0.5 shrink-0">
               <span className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider mr-1">Popular:</span>
               {['USD', 'EUR', 'GBP', 'INR', 'CAD', 'AUD', 'AED', 'NGN'].map((code) => {
                 const isSelected = fiatCurrency === code;
@@ -322,65 +322,63 @@ function FormContent({ type }: { type: 'buy' | 'sell' }) {
             </div>
           )}
 
-          {/* Currency List */}
-          <ScrollArea className="flex-1 max-h-[360px] pr-2 -mr-1">
-            <div className="space-y-1 py-1">
-              {filteredFiats.map((currency) => {
-                const isSelected = fiatCurrency === currency.code;
-                return (
-                  <button
-                    key={currency.code}
-                    type="button"
-                    onClick={() => {
-                      setFiatCurrency(currency.code);
-                      setIsFiatModalOpen(false);
-                    }}
-                    className={cn(
-                      'w-full flex items-center justify-between p-3 rounded-xl transition-all text-left border',
-                      isSelected
-                        ? 'bg-[#9273FC]/10 dark:bg-[#9273FC]/20 border-[#9273FC]/40 text-foreground shadow-xs'
-                        : 'hover:bg-slate-50 dark:hover:bg-slate-800/60 text-foreground border-transparent'
-                    )}
-                  >
-                    <div className="flex items-center gap-3 min-w-0">
-                      <div className="w-7 h-5 rounded overflow-hidden shrink-0 shadow-xs border border-slate-200 dark:border-slate-700 flex items-center justify-center bg-muted">
-                        <FlagIcon countryCode={getFlagCode(currency.code)} className="w-full h-full object-cover" />
-                      </div>
-                      <div className="min-w-0">
-                        <div className="flex items-center gap-2">
-                          <span className="font-bold text-sm text-slate-900 dark:text-white tracking-tight">
-                            {currency.code}
-                          </span>
-                          <span className="text-xs text-slate-400 font-mono">({currency.symbol})</span>
-                        </div>
-                        <p className="text-xs text-slate-500 dark:text-slate-400 truncate max-w-[240px] sm:max-w-[320px]">
-                          {currency.name}
-                        </p>
-                      </div>
+          {/* Currency List (Fully Scrollable) */}
+          <div className="flex-1 min-h-0 overflow-y-auto max-h-[50vh] sm:max-h-[55vh] overscroll-contain pr-1.5 space-y-1 py-1 select-none">
+            {filteredFiats.map((currency) => {
+              const isSelected = fiatCurrency === currency.code;
+              return (
+                <button
+                  key={currency.code}
+                  type="button"
+                  onClick={() => {
+                    setFiatCurrency(currency.code);
+                    setIsFiatModalOpen(false);
+                  }}
+                  className={cn(
+                    'w-full flex items-center justify-between p-3 rounded-xl transition-all text-left border',
+                    isSelected
+                      ? 'bg-[#9273FC]/10 dark:bg-[#9273FC]/20 border-[#9273FC]/40 text-foreground shadow-xs'
+                      : 'hover:bg-slate-50 dark:hover:bg-slate-800/60 text-foreground border-transparent'
+                  )}
+                >
+                  <div className="flex items-center gap-3 min-w-0">
+                    <div className="w-7 h-5 rounded overflow-hidden shrink-0 shadow-xs border border-slate-200 dark:border-slate-700 flex items-center justify-center bg-muted">
+                      <FlagIcon countryCode={getFlagCode(currency.code)} className="w-full h-full object-cover" />
                     </div>
-
-                    {isSelected && (
-                      <div className="w-6 h-6 rounded-full bg-[#9273FC] text-white flex items-center justify-center shrink-0 shadow-xs">
-                        <Check className="w-3.5 h-3.5 stroke-[3]" />
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-2">
+                        <span className="font-bold text-sm text-slate-900 dark:text-white tracking-tight">
+                          {currency.code}
+                        </span>
+                        <span className="text-xs text-slate-400 font-mono">({currency.symbol})</span>
                       </div>
-                    )}
-                  </button>
-                );
-              })}
-              {filteredFiats.length === 0 && (
-                <div className="text-center py-8 text-sm text-muted-foreground">
-                  No currencies found matching "{fiatSearch}"
-                </div>
-              )}
-            </div>
-          </ScrollArea>
+                      <p className="text-xs text-slate-500 dark:text-slate-400 truncate max-w-[240px] sm:max-w-[320px]">
+                        {currency.name}
+                      </p>
+                    </div>
+                  </div>
+
+                  {isSelected && (
+                    <div className="w-6 h-6 rounded-full bg-[#9273FC] text-white flex items-center justify-center shrink-0 shadow-xs">
+                      <Check className="w-3.5 h-3.5 stroke-[3]" />
+                    </div>
+                  )}
+                </button>
+              );
+            })}
+            {filteredFiats.length === 0 && (
+              <div className="text-center py-8 text-sm text-muted-foreground">
+                No currencies found matching "{fiatSearch}"
+              </div>
+            )}
+          </div>
         </DialogContent>
       </Dialog>
 
       {/* CENTERED MODAL: Payment Method Selection */}
       <Dialog open={isPaymentModalOpen} onOpenChange={setIsPaymentModalOpen}>
-        <DialogContent className="sm:max-w-xl max-h-[85vh] flex flex-col p-6 rounded-2xl border border-[#9273FC]/25 shadow-2xl bg-white dark:bg-[#151518]">
-          <DialogHeader className="space-y-1 text-left pb-2">
+        <DialogContent className="sm:max-w-xl max-h-[85vh] flex flex-col p-6 rounded-2xl border border-[#9273FC]/25 shadow-2xl bg-white dark:bg-[#151518] overflow-hidden">
+          <DialogHeader className="space-y-1 text-left pb-2 shrink-0">
             <DialogTitle className="text-xl font-bold flex items-center gap-2.5 text-slate-900 dark:text-white">
               <div className="w-8 h-8 rounded-lg bg-[#9273FC]/10 dark:bg-[#9273FC]/20 flex items-center justify-center text-[#9273FC]">
                 <CreditCard className="w-4 h-4" />
@@ -393,7 +391,7 @@ function FormContent({ type }: { type: 'buy' | 'sell' }) {
           </DialogHeader>
 
           {/* Search Input */}
-          <div className="relative my-2">
+          <div className="relative my-2 shrink-0">
             <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
             <Input
               placeholder="Search payment methods (e.g. Bank Transfer, Revolut, UPI, Zelle)..."
@@ -413,7 +411,7 @@ function FormContent({ type }: { type: 'buy' | 'sell' }) {
           </div>
 
           {/* Top Option: All Payment Methods */}
-          <div className="pt-1 pb-2">
+          <div className="pt-1 pb-2 shrink-0">
             <button
               type="button"
               onClick={() => {
@@ -447,69 +445,67 @@ function FormContent({ type }: { type: 'buy' | 'sell' }) {
             </button>
           </div>
 
-          {/* Categorized Payment Methods */}
-          <ScrollArea className="flex-1 max-h-[340px] pr-2 -mr-1">
-            <div className="space-y-3 py-1">
-              {allPaymentMethods.map(({ category, methods, icon: Icon }) => {
-                const filteredMethods = methods.filter((m) =>
-                  m.toLowerCase().includes(paymentSearch.toLowerCase())
-                );
-                if (paymentSearch && filteredMethods.length === 0) return null;
+          {/* Categorized Payment Methods (Fully Scrollable) */}
+          <div className="flex-1 min-h-0 overflow-y-auto max-h-[48vh] sm:max-h-[52vh] overscroll-contain pr-1.5 space-y-3 py-1">
+            {allPaymentMethods.map(({ category, methods, icon: Icon }) => {
+              const filteredMethods = methods.filter((m) =>
+                m.toLowerCase().includes(paymentSearch.toLowerCase())
+              );
+              if (paymentSearch && filteredMethods.length === 0) return null;
 
-                return (
-                  <div key={category} className="rounded-xl border border-slate-200 dark:border-slate-800 overflow-hidden bg-slate-50/50 dark:bg-slate-900/40">
-                    <div className="px-3.5 py-2.5 bg-slate-100/70 dark:bg-slate-800/60 flex items-center gap-2 text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider border-b border-slate-200/80 dark:border-slate-800/80">
-                      <Icon className="w-3.5 h-3.5 text-[#9273FC]" />
-                      <span>{category}</span>
-                      <span className="ml-auto text-[11px] text-muted-foreground font-normal lowercase">
-                        ({filteredMethods.length})
-                      </span>
-                    </div>
-                    <div className="p-2 grid grid-cols-1 sm:grid-cols-2 gap-1.5">
-                      {filteredMethods.map((method) => {
-                        const isSelected = paymentMethod === method;
-                        return (
-                          <button
-                            key={method}
-                            type="button"
-                            onClick={() => {
-                              setPaymentMethod(method);
-                              setIsPaymentModalOpen(false);
-                            }}
-                            className={cn(
-                              'flex items-center justify-between px-3 py-2 rounded-lg text-xs font-medium transition-all text-left border',
-                              isSelected
-                                ? 'bg-[#9273FC] text-white border-[#9273FC] shadow-xs'
-                                : 'bg-white dark:bg-slate-800/80 hover:bg-slate-100 dark:hover:bg-slate-750 text-slate-800 dark:text-slate-200 border-slate-200/60 dark:border-slate-700/60'
-                            )}
-                          >
-                            <span className="truncate">{method}</span>
-                            {isSelected && <Check className="w-3.5 h-3.5 text-white ml-1.5 shrink-0 stroke-[3]" />}
-                          </button>
-                        );
-                      })}
-                    </div>
+              return (
+                <div key={category} className="rounded-xl border border-slate-200 dark:border-slate-800 overflow-hidden bg-slate-50/50 dark:bg-slate-900/40">
+                  <div className="px-3.5 py-2.5 bg-slate-100/70 dark:bg-slate-800/60 flex items-center gap-2 text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider border-b border-slate-200/80 dark:border-slate-800/80">
+                    <Icon className="w-3.5 h-3.5 text-[#9273FC]" />
+                    <span>{category}</span>
+                    <span className="ml-auto text-[11px] text-muted-foreground font-normal lowercase">
+                      ({filteredMethods.length})
+                    </span>
                   </div>
-                );
-              })}
-
-              {paymentSearch && (
-                <div className="pt-2">
-                  <Button
-                    type="button"
-                    className="w-full bg-[#9273FC] hover:bg-[#4833D8] text-white rounded-xl"
-                    onClick={() => {
-                      setPaymentMethod(paymentSearch.trim());
-                      setIsPaymentModalOpen(false);
-                    }}
-                  >
-                    <Search className="mr-2 h-4 w-4" />
-                    Use "{paymentSearch.trim()}" as custom payment filter
-                  </Button>
+                  <div className="p-2 grid grid-cols-1 sm:grid-cols-2 gap-1.5">
+                    {filteredMethods.map((method) => {
+                      const isSelected = paymentMethod === method;
+                      return (
+                        <button
+                          key={method}
+                          type="button"
+                          onClick={() => {
+                            setPaymentMethod(method);
+                            setIsPaymentModalOpen(false);
+                          }}
+                          className={cn(
+                            'flex items-center justify-between px-3 py-2 rounded-lg text-xs font-medium transition-all text-left border',
+                            isSelected
+                              ? 'bg-[#9273FC] text-white border-[#9273FC] shadow-xs'
+                              : 'bg-white dark:bg-slate-800/80 hover:bg-slate-100 dark:hover:bg-slate-750 text-slate-800 dark:text-slate-200 border-slate-200/60 dark:border-slate-700/60'
+                          )}
+                        >
+                          <span className="truncate">{method}</span>
+                          {isSelected && <Check className="w-3.5 h-3.5 text-white ml-1.5 shrink-0 stroke-[3]" />}
+                        </button>
+                      );
+                    })}
+                  </div>
                 </div>
-              )}
-            </div>
-          </ScrollArea>
+              );
+            })}
+
+            {paymentSearch && (
+              <div className="pt-2">
+                <Button
+                  type="button"
+                  className="w-full bg-[#9273FC] hover:bg-[#4833D8] text-white rounded-xl"
+                  onClick={() => {
+                    setPaymentMethod(paymentSearch.trim());
+                    setIsPaymentModalOpen(false);
+                  }}
+                >
+                  <Search className="mr-2 h-4 w-4" />
+                  Use "{paymentSearch.trim()}" as custom payment filter
+                </Button>
+              </div>
+            )}
+          </div>
         </DialogContent>
       </Dialog>
     </>

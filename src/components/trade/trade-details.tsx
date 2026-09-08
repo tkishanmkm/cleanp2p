@@ -44,6 +44,7 @@ import { AdminActionDialog } from '../admin/admin-action-dialog';
 import { Checkbox } from '../ui/checkbox';
 import { supabase } from '@/lib/supabase/client';
 import { useAuth } from '@/components/providers/auth-provider';
+import { ReportIssueDialog } from '@/components/trade/report-issue-dialog';
 
 function DetailRow({
   label,
@@ -903,6 +904,16 @@ export function TradeDetails({
             existingFeedback={userFeedback}
             onFeedbackSaved={fetchTradeFeedbackAndDispute}
           />
+        )}
+
+        {(trade.status === 'released' || trade.status === 'completed' || trade.status === 'COMPLETED') && (
+          <div className="pt-2 border-t border-border flex justify-center">
+            <ReportIssueDialog
+              tradeId={trade.id}
+              tradePublicId={(trade as any).public_id || (trade as any).publicId || trade.tradeId || trade.id}
+              reportedUserId={trade.buyerId === user?.uid ? trade.sellerId : trade.buyerId}
+            />
+          </div>
         )}
         {isAdmin && <AdminTradeActions trade={trade} />}
       </CardContent>

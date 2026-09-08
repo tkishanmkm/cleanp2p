@@ -162,13 +162,18 @@ export async function signInWithIdentifier(
   }
 }
 
+const VERBS_NOUNS = ['force', 'energy', 'cyber', 'quantum', 'pulse', 'shadow', 'nexus', 'crypto', 'apex', 'vortex'];
+const WORDS = ['pull', 'ad', 'trade', 'vault', 'strike', 'wave', 'node', 'shift', 'core', 'link'];
+
 /**
  * Generates a random, unique username for newly registered users.
- * Example: trader_48291
+ * Example: forcepull223, energyad3882
  */
 export function generateUniqueUsername(): string {
-  const randomSuffix = Math.floor(10000 + Math.random() * 90000);
-  return `trader_${randomSuffix}`;
+  const prefix = VERBS_NOUNS[Math.floor(Math.random() * VERBS_NOUNS.length)];
+  const word = WORDS[Math.floor(Math.random() * WORDS.length)];
+  const num = Math.floor(100 + Math.random() * 900); // 3 digit number
+  return `${prefix}${word}${num}`; // e.g. forcepull223, energyad3882
 }
 
 export interface SignUpMetadata {
