@@ -85,13 +85,13 @@ export async function openDispute(
   // 2. Fetch trade details if missing
   const { data: tradeData } = await supabase
     .from('trades')
-    .select('id, public_id, buyer_id, seller_id, payment_method, buyer:profiles!trades_buyer_id_fkey(username), seller:profiles!trades_seller_id_fkey(username)')
+    .select('*')
     .eq('id', tradeId)
     .maybeSingle();
 
   const buyerId = tradeData?.buyer_id;
   const sellerId = tradeData?.seller_id;
-  tradePublicId = tradePublicId || tradeData?.public_id || tradeId;
+  tradePublicId = tradePublicId || (tradeData as any)?.public_id || (tradeData as any)?.publicId || tradeData?.id || tradeId;
   paymentMethod = paymentMethod || tradeData?.payment_method || '';
 
   // 3. Insert dispute record

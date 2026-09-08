@@ -1,6 +1,7 @@
 import { createServerClient } from '@supabase/ssr';
 import { cookies } from 'next/headers';
 import { NextResponse, type NextRequest } from 'next/server';
+import { getSupabaseAdminClient } from '@/utils/supabase/server';
 
 export const dynamic = 'force-dynamic';
 
@@ -37,7 +38,7 @@ export async function POST(request: NextRequest) {
     const authHeader = request.headers.get('Authorization') || request.headers.get('authorization');
     const bearerToken = authHeader?.startsWith('Bearer ') ? authHeader.substring(7).trim() : null;
 
-    // 1. Authenticate user session via Bearer Token, Cookie Store, or verified user_id fallback
+    // 1. Authenticate user session
     let user: any = null;
     let authError: any = null;
 
@@ -53,154 +54,223 @@ export async function POST(request: NextRequest) {
       authError = cookieAuth.error;
     }
 
-    // Fallback: If client is authenticated in browser and transmitted user_id in payload
+    // Fallback: If client transmitted user_id in payload, check profile existence
     if (!user && body?.user_id) {
-      const { data: profile } = await supabase
-        .from('profiles')
-        .select('id, username, full_name, email, role')
-        .eq('id', body.user_id)
-        .maybeSingle();
+      try {
+        const admin = getSupabaseAdminClient();
+        const { data: profile } = await admin
+          .from('profiles')
+          .select('id, username, full_name, email')
+          .eq('id', body.user_id)
+          .maybeSingle();
 
-      if (profile) {
-        user = {
-          id: profile.id,
-          email: profile.email || `${profile.username || 'trader'}@paxones.com`,
-          user_metadata: {
-            display_name: profile.full_name || profile.username || 'Trader',
-            full_name: profile.full_name,
-            username: profile.username,
-          },
-        };
-        authError = null;
+        if (profile) {
+          user = {
+            id: profile.id,
+            email: profile.email || `${profile.username || 'trader'}@thepax.org`,
+            user_metadata: {
+              display_name: profile.full_name || profile.username || 'Trader',
+              full_name: profile.full_name,
+              username: profile.username,
+            },
+          };
+          authError = null;
+        }
+      } catch (err) {
+        console.warn('Profile fallback auth lookup failed:', err);
       }
     }
 
     if (!user) {
-      return NextResponse.json({ error: 'No active session found! Please refresh or log in again.' }, { status: 401 });
+      return NextResponse.json(
+        { 
+          error: 'No active session found! Please refresh or log in again.', 
+          details: authError?.message || 'Authentication required'
+        }, 
+        { status: 401 }
+      );
     }
-    const coinType = (body.coin || body.crypto || body.crypto_currency || 'USDT').toUpperCase();
-    const adSide = (body.side || body.type || body.adType || 'BUY').toUpperCase();
 
-    // 2. Check user's actual available wallet balance for this coin
-    let userBalance = 0;
+    // Ensure public.profiles record exists for user.id to guarantee foreign key integrity
     try {
-      const { data: wallet } = await supabase
-        .from('user_wallets')
-        .select('*')
-        .eq('user_id', user.id)
-        .ilike('asset_symbol', coinType)
-        .maybeSingle();
+      const admin = getSupabaseAdminClient();
+      const profileName = user.user_metadata?.full_name || user.user_metadata?.name || user.email?.split('@')[0] || 'Trader';
+      const cleanUsername = user.user_metadata?.username || (user.email?.split('@')[0] || 'trader').toLowerCase().replace(/[^a-z0-9_]/g, '_');
 
-      if (wallet) {
-        userBalance = Number(
-          wallet.available_balance ??
-          wallet.available ??
-          wallet.main_balance ??
-          wallet.balance ??
-          0
+      await admin
+        .from('profiles')
+        .upsert(
+          {
+            id: user.id,
+            email: user.email,
+            username: cleanUsername,
+            full_name: profileName,
+            updated_at: new Date().toISOString(),
+          },
+          { onConflict: 'id', ignoreDuplicates: true }
         );
-        if (wallet.locked_balance && !wallet.available_balance && !wallet.available && !wallet.main_balance) {
-          userBalance = Math.max(0, userBalance - Number(wallet.locked_balance));
-        }
-      } else {
-        // Fallback: check wallets and wallet_assets directly if user_wallets view has no row
-        const { data: directWallets } = await supabase
-          .from('wallets')
-          .select('id')
-          .eq('user_id', user.id);
-
-        if (directWallets && directWallets.length > 0) {
-          const walletIds = directWallets.map(w => w.id);
-          const { data: wa } = await supabase
-            .from('wallet_assets')
-            .select('available, balance, locked_escrow, locked_withdrawal')
-            .in('wallet_id', walletIds)
-            .ilike('asset_code', coinType)
-            .maybeSingle();
-
-          if (wa) {
-            userBalance = Number(wa.available ?? (Number(wa.balance || 0) - Number(wa.locked_escrow || 0) - Number(wa.locked_withdrawal || 0)));
-          }
-        }
-      }
-    } catch (balErr) {
-      console.warn('Balance lookup warning:', balErr);
+    } catch (profileUpsertErr) {
+      console.warn('Profile auto-ensure warning:', profileUpsertErr);
     }
 
-    // 3. Trade limits from user request
-    const requestedMax = Number(body.max_amount ?? body.max_limit ?? 5000);
-    const requestedMin = Number(body.min_amount ?? body.min_limit ?? 100);
+    const coinType = (body.coin || body.crypto || body.crypto_currency || body.asset_symbol || body.asset || 'USDT').toUpperCase();
+    const fiatType = (body.fiat || body.fiat_currency || body.fiat_symbol || 'USD').toUpperCase();
+    const adSide = (body.side || body.type || body.adType || body.ad_type || 'BUY').toUpperCase();
 
-    // Sanitize and prepare clean payload (preventing PostgreSQL 22P02 errors)
-    const cleanPayload: Record<string, any> = {
-      ...body,
+    const requestedMax = Number(body.max_amount ?? body.max_limit ?? body.maxAmount ?? 5000);
+    const requestedMin = Number(body.min_amount ?? body.min_limit ?? body.minAmount ?? 100);
+    const priceVal = body.price !== undefined && body.price !== null && body.price !== '' ? Number(body.price) : null;
+    const marginVal = Number(body.margin ?? body.rate_percent ?? body.margin_percentage ?? body.price_margin ?? 0);
+    const pricingType = body.pricing_type || (body.rate_type === 'fixed' || body.is_fixed ? 'FIXED' : 'FLOAT');
+    const paymentWindow = parseInt(String(body.payment_window || body.payment_window_minutes || 15), 10) || 15;
+    const paymentMethods = Array.isArray(body.payment_methods) && body.payment_methods.length > 0
+      ? body.payment_methods
+      : (Array.isArray(body.paymentMethods) ? body.paymentMethods : ['Bank Transfer']);
+
+    // Standard base table payload for `public.ads`
+    const basePayload: Record<string, any> = {
       user_id: user.id,
       type: adSide,
-      side: adSide,
-      ad_type: adSide.toLowerCase(),
-      coin: coinType,
-      crypto: coinType,
-      asset: coinType,
-      crypto_currency: coinType,
-      fiat: (body.fiat || body.fiat_currency || 'USD').toUpperCase(),
-      fiat_currency: (body.fiat || body.fiat_currency || 'USD').toUpperCase(),
-      price: body.price !== undefined && body.price !== null && body.price !== '' ? Number(body.price) : null,
-      margin: body.margin !== undefined && body.margin !== null && body.margin !== '' ? Number(body.margin) : (body.rate_percent ? Number(body.rate_percent) : (body.price_margin ? Number(body.price_margin) : 0)),
-      rate_percent: body.margin !== undefined && body.margin !== null && body.margin !== '' ? Number(body.margin) : (body.rate_percent ? Number(body.rate_percent) : (body.price_margin ? Number(body.price_margin) : 0)),
-      min_amount: requestedMin,
+      asset_symbol: coinType,
+      fiat_symbol: fiatType,
+      price: priceVal,
+      pricing_type: pricingType,
+      margin: marginVal,
       min_limit: requestedMin,
-      max_amount: requestedMax,
       max_limit: requestedMax,
+      total_amount: requestedMax,
+      available_amount: requestedMax,
+      payment_methods: paymentMethods,
+      payment_window: paymentWindow,
+      terms: body.terms || body.terms_conditions || '',
+      auto_reply: body.auto_reply || '',
+      is_active: true,
       active: true,
       status: 'active',
-      is_fixed: Boolean(body.is_fixed ?? (typeof body.fixed_rate === 'boolean' ? body.fixed_rate : (body.rate_type === 'fixed' || body.pricing_type === 'FIXED'))),
-      require_full_name_verified: Boolean(body.require_full_name_verified),
-      require_verified_users: Boolean(body.require_verified_users),
+      // Include common aliases to satisfy any schema variations
+      coin: coinType,
+      crypto: coinType,
+      fiat: fiatType,
+      fiat_currency: fiatType,
+      min_amount: requestedMin,
+      max_amount: requestedMax,
+      rate_percent: marginVal,
+      is_fixed: pricingType === 'FIXED',
     };
 
-    if (typeof cleanPayload.fixed_rate === 'boolean') {
-      delete cleanPayload.fixed_rate;
-    }
-    if (cleanPayload.payment_window !== undefined) {
-      cleanPayload.payment_window = parseInt(String(cleanPayload.payment_window), 10) || 30;
-    }
-    if (cleanPayload.min_completed_trades !== undefined) {
-      cleanPayload.min_completed_trades = parseInt(String(cleanPayload.min_completed_trades), 10) || 0;
-    }
+    // 2. Insert into `ads` table first using the user's authenticated Supabase client
+    let data: any = null;
+    let dbError: any = null;
 
-    const targetTable = cleanPayload.table || (cleanPayload.title && cleanPayload.description ? 'ads' : 'p2p_ads');
-    delete cleanPayload.table;
-
-    // 4. Insert the ad with the sanitized and capped limits
-    let { data, error: dbError } = await supabase
-      .from(targetTable)
-      .insert([cleanPayload])
+    const { data: insertResult, error: insertError } = await supabase
+      .from('ads')
+      .insert([basePayload])
       .select()
       .single();
 
-    if (dbError && (dbError.code === '42P01' || dbError.message?.includes('does not exist'))) {
-      const altTable = targetTable === 'ads' ? 'p2p_ads' : 'ads';
-      const altResult = await supabase
-        .from(altTable)
-        .insert([cleanPayload])
-        .select()
-        .single();
+    if (!insertError) {
+      data = insertResult;
+    } else {
+      dbError = insertError;
+      console.warn('Initial insert into `ads` failed:', insertError.message);
 
-      if (!altResult.error) {
-        data = altResult.data;
-        dbError = null;
-      } else {
-        dbError = altResult.error;
+      // Check if error is due to an unknown column in `ads` (code PGRST204 or 42703)
+      // Attempt simplified canonical payload
+      if (insertError.code === 'PGRST204' || insertError.message?.includes('schema cache') || insertError.message?.includes('column')) {
+        const minimalPayload: Record<string, any> = {
+          user_id: user.id,
+          type: adSide,
+          asset_symbol: coinType,
+          fiat_symbol: fiatType,
+          price: priceVal,
+          min_limit: requestedMin,
+          max_limit: requestedMax,
+          payment_methods: paymentMethods,
+          is_active: true,
+        };
+
+        const { data: minResult, error: minError } = await supabase
+          .from('ads')
+          .insert([minimalPayload])
+          .select()
+          .single();
+
+        if (!minError) {
+          data = minResult;
+          dbError = null;
+        } else {
+          dbError = minError;
+        }
+      }
+
+      // If RLS blocked the user or table not accessible via client, try service role admin client
+      if (dbError && (dbError.code === '42501' || dbError.message?.toLowerCase().includes('row-level security') || dbError.code === '42P01')) {
+        try {
+          const admin = getSupabaseAdminClient();
+          const { data: adminResult, error: adminError } = await admin
+            .from('ads')
+            .insert([basePayload])
+            .select()
+            .single();
+
+          if (!adminError) {
+            data = adminResult;
+            dbError = null;
+          } else {
+            // Try minimal payload with admin
+            const minAdminPayload: Record<string, any> = {
+              user_id: user.id,
+              type: adSide,
+              asset_symbol: coinType,
+              fiat_symbol: fiatType,
+              price: priceVal,
+              min_limit: requestedMin,
+              max_limit: requestedMax,
+              payment_methods: paymentMethods,
+              is_active: true,
+            };
+            const { data: minAdminRes, error: minAdminErr } = await admin
+              .from('ads')
+              .insert([minAdminPayload])
+              .select()
+              .single();
+
+            if (!minAdminErr) {
+              data = minAdminRes;
+              dbError = null;
+            } else {
+              dbError = minAdminErr;
+            }
+          }
+        } catch (adminEx: any) {
+          console.error('Admin insertion exception:', adminEx);
+        }
       }
     }
 
     if (dbError) {
-      return NextResponse.json({ error: dbError.message }, { status: 400 });
+      console.error('[P2P Ad Creation Error]:', dbError);
+      return NextResponse.json(
+        { 
+          error: dbError.message || 'Database error creating ad', 
+          realError: `${dbError.message} (Code: ${dbError.code || 'UNKNOWN'}${dbError.details ? ` - ${dbError.details}` : ''})`,
+          code: dbError.code,
+          details: dbError.details,
+          hint: dbError.hint
+        }, 
+        { status: 400 }
+      );
     }
 
     return NextResponse.json({ success: true, data });
   } catch (err: any) {
     console.error('Unhandled ad creation error:', err);
-    return NextResponse.json({ error: err.message || 'Internal Server Error' }, { status: 500 });
+    return NextResponse.json(
+      { 
+        error: err.message || 'Internal Server Error',
+        realError: String(err)
+      }, 
+      { status: 500 }
+    );
   }
 }

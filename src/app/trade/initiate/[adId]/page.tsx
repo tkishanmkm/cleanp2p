@@ -116,7 +116,7 @@ export default function TradeInitiationPage() {
           </div>
           <div className="text-right">
             <p className="text-[10px] text-slate-400">Unit Price</p>
-            <p className="text-base font-mono font-extrabold text-white">{Number(ad.price || 0).toLocaleString()} {ad.fiat_currency}</p>
+            <p className="text-base font-mono font-extrabold text-white">{Number(ad.price || 0).toLocaleString()} {ad.fiat_currency}/{ad.asset}</p>
           </div>
         </div>
 
@@ -200,15 +200,15 @@ export default function TradeInitiationPage() {
 
         <button
           onClick={handleInitiateTrade}
-          disabled={submitting}
-          className={`w-full py-4 rounded-xl font-bold text-sm shadow-xl transition-all flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50 ${
+          disabled={submitting || isNaN(parseFloat(fiatAmount)) || parseFloat(fiatAmount) < (ad.min_limit || 0) || parseFloat(fiatAmount) > (ad.max_limit || Infinity)}
+          className={`w-full py-4 rounded-xl font-bold text-sm shadow-xl transition-all flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed ${
             isBuy 
               ? 'bg-gradient-to-r from-emerald-600 to-teal-600 text-white hover:from-emerald-500 hover:to-teal-500 shadow-emerald-600/20' 
               : 'bg-gradient-to-r from-rose-600 to-pink-600 text-white hover:from-rose-500 hover:to-pink-500 shadow-rose-600/20'
           }`}
         >
           {submitting ? <Loader2 className="h-5 w-5 animate-spin" /> : <ShieldCheck className="h-5 w-5" />}
-          {submitting ? 'Initiating Trade...' : 'Initiate Trade'}
+          {submitting ? 'Initiating Trade...' : `${isBuy ? 'Buy' : 'Sell'} ${ad.asset}`}
         </button>
       </div>
 

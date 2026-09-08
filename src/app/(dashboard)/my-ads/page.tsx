@@ -94,40 +94,53 @@ export default function MyAdsPage() {
           .order('created_at', { ascending: false });
 
         if (error) {
-          console.error("My Ads fetch error:", error.message);
-          throw error;
+          console.warn("My Ads p2p_ads fetch error, fallback to ads table:", error.message);
+          const { data: adsData } = await supabase
+            .from('ads')
+            .select('*')
+            .eq('user_id', currentUser.id)
+            .order('created_at', { ascending: false });
+          rawAds = adsData || [];
+        } else {
+          rawAds = data || [];
         }
-        rawAds = data || [];
       }
 
       const mapped: P2PAd[] = rawAds.map((raw: any) => {
-        const rawType = (raw.type || raw.ad_type || raw.adType || 'sell').toLowerCase();
-        const isMarket = raw.pricing_type === 'FLOAT' || raw.rate_type === 'market';
-        const priceVal = raw.price != null ? Number(raw.price) : (raw.fixed_rate ?? raw.fixedRate);
-        const isActive = raw.status ? (raw.status.toLowerCase() === 'active') : (raw.active !== false);
+        const rawType = (raw.type || raw.ad_type || raw.adType || raw.side || 'sell').toLowerCase();
+        const isMarket = raw.pricing_type === 'FLOAT' || raw.rate_type === 'market' || raw.rate_type === 'floating';
+        const priceVal = raw.price != null ? Number(raw.price) : (raw.fixed_rate ?? raw.fixedRate ?? raw.unit_price ?? 0);
+        const isActive = raw.status ? (raw.status.toLowerCase() === 'active') : (raw.is_active ?? raw.active ?? true);
 
         return {
           id: raw.id,
           userId: raw.user_id || raw.userId,
           publicAdId: raw.public_ad_id || raw.publicAdId || raw.id,
           adType: (rawType === 'buy' ? 'buy' : 'sell') as 'buy' | 'sell',
-          crypto: (raw.coin || raw.crypto || raw.crypto_currency || 'USDT') as CryptoCurrency,
-          fiatCurrency: raw.fiat || raw.fiat_currency || raw.fiatCurrency || 'USD',
+          crypto: (raw.asset_symbol || raw.asset || raw.coin || raw.crypto || raw.crypto_currency || 'USDT') as CryptoCurrency,
+          fiatCurrency: raw.fiat_symbol || raw.fiat || raw.fiat_currency || raw.fiatCurrency || 'USD',
           rateType: isMarket ? 'market' : 'fixed',
           fixedRate: priceVal,
-          ratePercent: Number(raw.margin_percentage ?? raw.rate_percent ?? raw.ratePercent ?? 0),
-          minAmount: Number(raw.min_amount ?? raw.minAmount ?? 0),
-          maxAmount: Number(raw.max_amount ?? raw.maxAmount ?? 0),
+          ratePercent: Number(raw.margin_percentage ?? raw.margin ?? raw.rate_percent ?? raw.ratePercent ?? 0),
+          minAmount: Number(raw.min_limit ?? raw.min_amount ?? raw.minAmount ?? 0),
+          maxAmount: Number(raw.max_limit ?? raw.max_amount ?? raw.maxAmount ?? 0),
           paymentMethods: Array.isArray(raw.payment_methods)
             ? raw.payment_methods
             : Array.isArray(raw.paymentMethods)
             ? raw.paymentMethods
             : typeof raw.payment_methods === 'string'
-            ? JSON.parse(raw.payment_methods)
+            ? (() => {
+                try {
+                  const parsed = JSON.parse(raw.payment_methods);
+                  return Array.isArray(parsed) ? parsed : [raw.payment_methods];
+                } catch {
+                  return [raw.payment_methods];
+                }
+              })()
             : ['Bank Transfer'],
-          terms: raw.terms || '',
+          terms: raw.terms || raw.terms_conditions || '',
           active: isActive,
-          createdAt: raw.created_at || raw.createdAt,
+          createdAt: raw.created_at || raw.createdAt || new Date().toISOString(),
         };
       });
 

@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
+import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabaseClient';
 import { toast } from 'sonner';
 import { 
@@ -319,6 +320,7 @@ const PAYMENT_CATEGORIES = [
 ];
 
 export default function CreateP2PAdPage() {
+  const router = useRouter();
   const [user, setUser] = useState<any>(null);
   const [authLoading, setAuthLoading] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -728,6 +730,9 @@ export default function CreateP2PAdPage() {
 
       console.log('Ad created successfully:', result?.data);
       toast.success('P2P Advertisement created successfully!', { id: toastId });
+      setTimeout(() => {
+        router.push('/my-ads');
+      }, 500);
     } catch (err: any) {
       console.error('Runtime error:', err);
       toast.error(`Unexpected error: ${err?.message || String(err)}`, { id: toastId });

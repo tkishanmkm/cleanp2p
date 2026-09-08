@@ -38,6 +38,28 @@ export async function POST(req: Request) {
       );
     }
 
+    // Ensure public.profiles record exists for user.id to guarantee foreign key integrity
+    try {
+      const admin = getSupabaseAdminClient();
+      const profileName = user.user_metadata?.full_name || user.user_metadata?.name || user.email?.split('@')[0] || 'Trader';
+      const cleanUsername = user.user_metadata?.username || (user.email?.split('@')[0] || 'trader').toLowerCase().replace(/[^a-z0-9_]/g, '_');
+
+      await admin
+        .from('profiles')
+        .upsert(
+          {
+            id: user.id,
+            email: user.email,
+            username: cleanUsername,
+            full_name: profileName,
+            updated_at: new Date().toISOString(),
+          },
+          { onConflict: 'id', ignoreDuplicates: true }
+        );
+    } catch (profileUpsertErr) {
+      console.warn('Profile auto-ensure warning in /api/ads/create:', profileUpsertErr);
+    }
+
     const formData = await req.json();
 
     // 2. Sanitize and cast boolean/numeric payload fields before hitting Supabase

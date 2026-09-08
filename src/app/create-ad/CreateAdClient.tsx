@@ -37,9 +37,9 @@ export function CreateAdForm() {
         return;
       }
 
-      if (res.data?.id) {
-        // Successful creation -> Redirect to dynamic ad detail view
-        router.push(`/ad/${res.data.id}`);
+      if (res.data?.id || res.data) {
+        // Successful creation -> Redirect to /my-ads
+        router.push('/my-ads');
         router.refresh();
       } else {
         router.push('/my-ads');

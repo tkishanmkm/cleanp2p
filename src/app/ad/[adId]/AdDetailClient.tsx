@@ -117,6 +117,23 @@ export function AdDetailClient({ ad, currentUserId }: { ad: any; currentUserId?:
   const creatorMaxFiat = creatorCryptoBalance > 0 && unitPrice > 0 ? creatorCryptoBalance * unitPrice : maxLimit;
   const availableMaxLimit = isAdSell ? Math.min(maxLimit, Math.max(minLimit, creatorMaxFiat)) : maxLimit;
 
+  // 4. Payment window (Platform options: 30, 60, 90, 120 minutes)
+  const rawPaymentWindow = Number(
+    ad.payment_window ?? 
+    ad.payment_time_limit ?? 
+    ad.paymentTimeLimit ?? 
+    ad.paymentWindow ?? 
+    ad.payment_time ?? 
+    ad.time_limit
+  );
+  const paymentWindowMinutes = rawPaymentWindow && rawPaymentWindow >= 30 ? rawPaymentWindow : 30;
+
+  // Amount validation for Buy/Sell button
+  const enteredFiat = parseFloat(fiatAmount);
+  const isAmountEntered = !isNaN(enteredFiat) && enteredFiat > 0;
+  const isAmountWithinLimits = isAmountEntered && enteredFiat >= minLimit && enteredFiat <= availableMaxLimit;
+  const isButtonDisabled = isSubmitting || isOwnAd || !isAmountWithinLimits;
+
   // Fetch live trader profile data from Supabase on mount
   useEffect(() => {
     const sellerId = ad.user_id || ad.userId;
@@ -127,7 +144,7 @@ export function AdDetailClient({ ad, currentUserId }: { ad: any; currentUserId?:
       try {
         const { data, error } = await supabase
           .from('profiles')
-          .select('id, username, is_online, last_seen_at, last_seen, updated_at, completed_trades, positive_feedback, negative_feedback, avg_release_minutes, avg_payment_minutes, avg_release_time, avg_pay_time, country, photo_url, avatar_url, created_at')
+          .select('*')
           .eq('id', sellerId)
           .maybeSingle();
 
@@ -180,15 +197,35 @@ export function AdDetailClient({ ad, currentUserId }: { ad: any; currentUserId?:
   // Trader Statistics & Avg Release/Pay Time based on trade direction
   const positiveCount = Number(profile?.positive_feedback ?? ad.positive_feedback ?? 0);
   const negativeCount = Number(profile?.negative_feedback ?? ad.negative_feedback ?? 0);
-  const completedTrades = Number(profile?.completed_trades ?? ad.sellerStats?.completedTrades ?? ad.completed_trades ?? 0);
+  const completedTrades = Number(
+    profile?.total_completed_trades ??
+    profile?.completed_trades ?? 
+    ad.sellerStats?.completedTrades ?? 
+    ad.completed_trades ?? 
+    0
+  );
   const totalFeedback = positiveCount + negativeCount;
   const positiveRatio = totalFeedback > 0 ? ((positiveCount / totalFeedback) * 100).toFixed(1) : '100.0';
 
-  // Average time logic: If user is buying (ad is SELL), display avg release time. If user is selling (ad is BUY), display avg pay time.
-  const rawAvgRelease = Number(profile?.avg_release_minutes ?? profile?.avg_release_time ?? ad.sellerStats?.avgReleaseTime ?? 1.5);
-  const rawAvgPay = Number(profile?.avg_payment_minutes ?? profile?.avg_pay_time ?? 2.0);
-  const avgReleaseTime = rawAvgRelease > 0 ? rawAvgRelease : 1.5;
-  const avgPayTime = rawAvgPay > 0 ? rawAvgPay : 2.0;
+  // Average time logic: Support avg_payment_time_mins, avg_release_time_mins, avg_release_minutes, avg_payment_minutes, etc.
+  const rawAvgRelease = Number(
+    profile?.avg_release_time_mins ??
+    profile?.avg_release_minutes ?? 
+    profile?.avg_release_time ?? 
+    ad.sellerStats?.avgReleaseTime ?? 
+    (ad.profiles ? (Array.isArray(ad.profiles) ? (ad.profiles[0]?.avg_release_time_mins ?? ad.profiles[0]?.avg_release_minutes) : (ad.profiles?.avg_release_time_mins ?? ad.profiles?.avg_release_minutes)) : undefined)
+  );
+  const rawAvgPay = Number(
+    profile?.avg_payment_time_mins ??
+    profile?.avg_payment_minutes ?? 
+    profile?.avg_pay_time ?? 
+    (ad.profiles ? (Array.isArray(ad.profiles) ? (ad.profiles[0]?.avg_payment_time_mins ?? ad.profiles[0]?.avg_payment_minutes) : (ad.profiles?.avg_payment_time_mins ?? ad.profiles?.avg_payment_minutes)) : undefined)
+  );
+  const hasAvgRelease = Number.isFinite(rawAvgRelease) && rawAvgRelease > 0;
+  const hasAvgPay = Number.isFinite(rawAvgPay) && rawAvgPay > 0;
+  const avgTimeDisplay = isAdSell
+    ? (hasAvgRelease ? `${rawAvgRelease.toFixed(1)}m` : 'N/A')
+    : (hasAvgPay ? `${rawAvgPay.toFixed(1)}m` : 'N/A');
 
   const paymentMethodsList: string[] = Array.isArray(ad.payment_methods)
     ? ad.payment_methods
@@ -376,10 +413,21 @@ export function AdDetailClient({ ad, currentUserId }: { ad: any; currentUserId?:
               )}
             </div>
 
+            {isAmountEntered && !isAmountWithinLimits && (
+              <div className="p-2.5 bg-destructive/10 border border-destructive/20 text-destructive text-xs rounded-xl flex items-center gap-1.5">
+                <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+                <span>
+                  {enteredFiat < minLimit
+                    ? `Amount is below minimum limit (${minLimit.toLocaleString()} ${fiatCode})`
+                    : `Amount exceeds available limit (${availableMaxLimit.toLocaleString()} ${fiatCode})`}
+                </span>
+              </div>
+            )}
+
             {/* Submit Button */}
             <button
               type="submit"
-              disabled={isSubmitting || isOwnAd}
+              disabled={isButtonDisabled}
               className={`w-full py-3 px-4 rounded-xl font-bold text-sm text-white transition-all shadow-sm ${
                 isAdSell
                   ? 'bg-emerald-600 hover:bg-emerald-500 active:bg-emerald-700'
@@ -412,7 +460,7 @@ export function AdDetailClient({ ad, currentUserId }: { ad: any; currentUserId?:
               <div className="flex items-baseline gap-2 flex-wrap">
                 <p className="text-2xl font-black font-mono text-emerald-600 dark:text-emerald-400">
                   {unitPrice.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}{' '}
-                  <span className="text-sm font-bold text-muted-foreground">{fiatCode}</span>
+                  <span className="text-sm font-bold text-muted-foreground">{fiatCode}/{cryptoCode}</span>
                 </p>
                 {currentMarketPriceInFiat > 0 && (
                   <span className={`text-xs px-2 py-0.5 rounded-full font-bold border ${
@@ -456,7 +504,7 @@ export function AdDetailClient({ ad, currentUserId }: { ad: any; currentUserId?:
             <div className="p-3.5 bg-muted/30 rounded-xl border border-border/60 flex items-center justify-between">
               <div>
                 <span className="text-xs text-muted-foreground block font-medium">Payment Window</span>
-                <p className="text-xs font-semibold text-foreground mt-0.5">{ad.payment_window || ad.payment_time_limit || 30} minutes</p>
+                <p className="text-xs font-semibold text-foreground mt-0.5">{paymentWindowMinutes} minutes</p>
               </div>
               <Clock className="h-5 w-5 text-muted-foreground" />
             </div>
@@ -525,7 +573,7 @@ export function AdDetailClient({ ad, currentUserId }: { ad: any; currentUserId?:
                 {isAdSell ? 'Avg. Release' : 'Avg. Pay'}
               </p>
               <p className="text-xs font-bold text-foreground mt-0.5">
-                {isAdSell ? `${avgReleaseTime.toFixed(1)}m` : `${avgPayTime.toFixed(1)}m`}
+                {avgTimeDisplay}
               </p>
             </div>
           </div>

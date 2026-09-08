@@ -54,12 +54,19 @@ export function AdCard({ ad }: AdCardProps) {
   const exchangeRate = fiatRates[ad.fiatCurrency] || 1;
   const marketPriceInFiat = marketPriceUsd * exchangeRate;
 
-  const unitPriceFromAd = Number(ad.fixedRate ?? (ad as any).unit_price ?? (ad as any).price ?? 0);
-  const adPrice = unitPriceFromAd > 0 
-    ? unitPriceFromAd 
-    : (ad.rateType === 'fixed' ? (ad.fixedRate ?? 0) : marketPriceInFiat * (1 + (ad.ratePercent || 0) / 100));
+  // Unit price set by seller/buyer fetched from backend (or calculated with rate margin above market)
+  const rawPrice = Number((ad as any).price ?? (ad as any).unit_price ?? ad.fixedRate ?? 0);
+  const marginPercent = Number(ad.ratePercent ?? (ad as any).margin_percentage ?? (ad as any).price_margin_percent ?? 0);
 
-  const pricePremium = marketPriceInFiat > 0 ? (adPrice - marketPriceInFiat) / marketPriceInFiat : 0;
+  const adPrice = rawPrice > 0 
+    ? rawPrice 
+    : (marketPriceInFiat > 0 
+        ? marketPriceInFiat * (1 + marginPercent / 100) 
+        : 0);
+
+  const pricePremium = marketPriceInFiat > 0 && adPrice > 0 
+    ? (adPrice - marketPriceInFiat) / marketPriceInFiat 
+    : 0;
   
   const isForBuyingPage = ad.adType === 'sell';
   
@@ -94,10 +101,28 @@ export function AdCard({ ad }: AdCardProps) {
   const displayedBadges = userBadges.slice(0, 3);
   const hiddenBadgesCount = userBadges.length - displayedBadges.length;
 
-  const rawPayTime = Number(adCreator?.avgPayTime);
-  const rawReleaseTime = Number(adCreator?.avgReleaseTime);
-  const safePayTime = Number.isFinite(rawPayTime) && rawPayTime > 0 ? rawPayTime : 15;
-  const safeReleaseTime = Number.isFinite(rawReleaseTime) && rawReleaseTime > 0 ? rawReleaseTime : 15;
+  const rawPayTime = Number(
+    adCreator?.avg_payment_time_mins ?? 
+    adCreator?.avgPayTime ?? 
+    adCreator?.avg_payment_minutes ?? 
+    adCreator?.avg_pay_time
+  );
+  const rawReleaseTime = Number(
+    adCreator?.avg_release_time_mins ?? 
+    adCreator?.avgReleaseTime ?? 
+    adCreator?.avg_release_minutes ?? 
+    adCreator?.avg_release_time
+  );
+  const hasValidPayTime = Number.isFinite(rawPayTime) && rawPayTime > 0;
+  const hasValidReleaseTime = Number.isFinite(rawReleaseTime) && rawReleaseTime > 0;
+  const configuredPaymentWindow = Number(
+    (ad as any).payment_window_minutes ??
+    (ad as any).payment_time_limit ?? 
+    (ad as any).paymentTimeLimit ?? 
+    (ad as any).payment_window ?? 
+    (ad as any).paymentWindow ?? 
+    30
+  ) || 30;
   const maxLimit = ad.maxAmount || 0;
   const minLimit = ad.minAmount || 0;
   const rawAdvertiserBalanceUSD = Number((ad as any).advertiserBalanceUSD ?? (ad as any).creator_crypto_balance_fiat ?? 0);
@@ -225,15 +250,15 @@ export function AdCard({ ad }: AdCardProps) {
                           </div>
                         </div>
                         <div className="grid grid-cols-2 gap-y-2 gap-x-4 pt-2">
-                          <div className="flex items-center gap-2"><CheckCircle className="h-4 w-4 text-muted-foreground" /> <span>{adCreator?.completedTrades || 0} Trades</span></div>
+                          <div className="flex items-center gap-2"><CheckCircle className="h-4 w-4 text-muted-foreground" /> <span>{adCreator?.total_completed_trades ?? adCreator?.completedTrades ?? adCreator?.completed_trades ?? 0} Trades</span></div>
                           <div className="flex items-center gap-2"><ThumbsUp className="h-4 w-4 text-green-500" /> <span>{adCreator?.positiveFeedback || 0}</span></div>
                           <div className="flex items-center gap-2"><ThumbsDown className="h-4 w-4 text-red-500" /> <span>{adCreator?.negativeFeedback || 0}</span></div>
                           <div className="flex items-center gap-2">
                             <Clock className="h-4 w-4 text-muted-foreground" />
                             <span>
                               {ad.adType === 'buy'
-                                ? `${(safePayTime || safeReleaseTime).toFixed(1)}m pay`
-                                : `${safeReleaseTime.toFixed(1)}m release`}
+                                ? (hasValidPayTime ? `${rawPayTime.toFixed(1)}m pay` : 'N/A')
+                                : (hasValidReleaseTime ? `${rawReleaseTime.toFixed(1)}m release` : 'N/A')}
                             </span>
                           </div>
                         </div>
@@ -244,7 +269,7 @@ export function AdCard({ ad }: AdCardProps) {
                       <div className="space-y-3 text-sm p-3 border rounded-md bg-secondary/50">
                         <DetailRow label="Price" value={<div className="flex items-center gap-2">{adPrice.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}<span className="text-muted-foreground">{ad.fiatCurrency} / {ad.crypto}</span></div>} />
                         <DetailRow label="Limits" value={`${(ad.minAmount || 0).toLocaleString()} - ${(ad.maxAmount || 0).toLocaleString()} ${ad.fiatCurrency}`} />
-                        <DetailRow label="Payment Window" value={`${ad.paymentTimeLimit || 30} minutes`} />
+                        <DetailRow label="Payment Window" value={`${configuredPaymentWindow} minutes`} />
                         <DetailRow label="Payment Methods" value={<div className="flex flex-wrap gap-1 justify-end">{(ad.paymentMethods || []).map(pm => <Badge key={pm} variant="outline">{pm}</Badge>)}</div>} />
                       </div>
                       <div className="space-y-2 text-sm p-3 border rounded-md bg-secondary/50 mt-2">

@@ -41,6 +41,8 @@ export interface P2PAd {
   crypto: CryptoCurrency;
   fiatCurrency: string;
   rateType: 'fixed' | 'floating' | 'market';
+  price?: number;
+  unit_price?: number;
   fixedRate?: number;
   ratePercent?: number;
   minAmount: number;

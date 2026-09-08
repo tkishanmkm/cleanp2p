@@ -144,7 +144,7 @@ export default function PostAdPage() {
       } else {
         console.log('Ad created successfully:', result.data);
         alert("Ad created successfully!");
-        router.push('/p2p');
+        router.push('/my-ads');
       }
     } catch (err: any) {
       console.error("Database error creating ad:", err);

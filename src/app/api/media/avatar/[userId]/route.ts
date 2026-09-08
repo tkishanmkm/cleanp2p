@@ -23,12 +23,8 @@ export async function GET(
     const avatarUrl = profile?.avatar_url || profile?.photo_url;
 
     if (!profile || !avatarUrl) {
-      // Fallback: return a clean default SVG avatar
-      const fallbackSvg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="100" height="100">
-        <rect width="100" height="100" fill="#1e293b"/>
-        <circle cx="50" cy="38" r="18" fill="#64748b"/>
-        <path d="M22 84 C22 64 36 58 50 58 C64 58 78 64 78 84 Z" fill="#64748b"/>
-      </svg>`;
+      // Fallback: return a clean default SVG avatar matching the app
+      const fallbackSvg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="100" height="100"><circle cx="50" cy="50" r="50" fill="#C4C4C4"/><path d="M50 45C56.6274 45 62 39.6274 62 33C62 26.3726 56.6274 21 50 21C43.3726 21 38 26.3726 38 33C38 39.6274 43.3726 45 50 45Z" fill="white"/><path d="M75 79C75 68.5228 63.8071 60 50 60C36.1929 60 25 68.5228 25 79H75Z" fill="white"/></svg>`;
       return new NextResponse(fallbackSvg, {
         headers: {
           'Content-Type': 'image/svg+xml',

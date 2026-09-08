@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import Link from 'next/link';
 import { Logo } from '@/components/logo';
+import { CheckCircle2, Mail, Lock, User, CheckSquare, Square, ArrowRight } from 'lucide-react';
 
 interface AuthFormProps {
   mode: 'login' | 'signup';
@@ -11,10 +12,14 @@ interface AuthFormProps {
 
 export function AuthForm({ mode }: AuthFormProps) {
   const supabase = createClient();
+  const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [acceptTerms, setAcceptTerms] = useState(false);
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
+  const [signupSuccess, setSignupSuccess] = useState(false);
 
   // Google OAuth Login / Signup
   async function handleGoogleAuth() {
@@ -37,32 +42,89 @@ export function AuthForm({ mode }: AuthFormProps) {
   // Password-Based Login / Signup
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    setLoading(true);
     setErrorMsg('');
+
+    if (mode === 'signup') {
+      if (!name.trim()) {
+        setErrorMsg('Please enter your full name');
+        return;
+      }
+      if (password.length < 6) {
+        setErrorMsg('Password must be at least 6 characters long');
+        return;
+      }
+      if (password !== confirmPassword) {
+        setErrorMsg('Passwords do not match');
+        return;
+      }
+      if (!acceptTerms) {
+        setErrorMsg('You must agree to the Terms of Service and Privacy Policy to proceed');
+        return;
+      }
+    }
+
+    setLoading(true);
 
     try {
       if (mode === 'signup') {
-        const { error } = await supabase.auth.signUp({
-          email,
+        const cleanUsername = name.trim().toLowerCase().replace(/[^a-z0-9_]/g, '_').substring(0, 20) || 'trader';
+        const { data, error } = await supabase.auth.signUp({
+          email: email.trim(),
           password,
           options: {
+            data: {
+              full_name: name.trim(),
+              username: cleanUsername,
+              name: name.trim(),
+            },
             emailRedirectTo: `${window.location.origin}/api/auth/callback`,
           },
         });
+
         if (error) throw error;
+
+        // If session was directly established without email verification requirement
+        if (data.session) {
+          window.location.href = '/buy';
+          return;
+        }
+
+        // Show verification prompt
+        setSignupSuccess(true);
       } else {
         const { error } = await supabase.auth.signInWithPassword({
-          email,
+          email: email.trim(),
           password,
         });
         if (error) throw error;
+        window.location.href = '/buy';
       }
-      window.location.href = '/';
     } catch (err: any) {
       setErrorMsg(err.message || 'Authentication failed');
     } finally {
       setLoading(false);
     }
+  }
+
+  if (signupSuccess) {
+    return (
+      <div className="w-full max-w-md mx-auto p-6 sm:p-8 bg-white dark:bg-[#0f1423] border border-slate-200 dark:border-[#1e2640] rounded-2xl text-slate-900 dark:text-slate-100 shadow-xl dark:shadow-2xl text-center">
+        <div className="w-16 h-16 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 rounded-full flex items-center justify-center mx-auto mb-4 border border-emerald-500/20">
+          <Mail className="w-8 h-8" />
+        </div>
+        <h2 className="text-xl font-bold text-slate-900 dark:text-white mb-2">Check your inbox</h2>
+        <p className="text-sm text-slate-600 dark:text-slate-300 mb-6 leading-relaxed">
+          We have sent a verification link to <span className="font-semibold text-slate-900 dark:text-white">{email}</span>. Please confirm your email and log in to begin trading.
+        </p>
+        <Link
+          href="/login"
+          className="inline-flex items-center justify-center gap-2 w-full bg-blue-600 hover:bg-blue-700 text-white font-medium py-2.5 px-4 rounded-xl text-sm transition shadow-sm"
+        >
+          <span>Go to Login</span>
+          <ArrowRight className="w-4 h-4" />
+        </Link>
+      </div>
+    );
   }
 
   return (
@@ -76,7 +138,7 @@ export function AuthForm({ mode }: AuthFormProps) {
           {mode === 'login' ? 'Welcome Back' : 'Create an Account'}
         </h1>
         <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
-          {mode === 'login' ? 'Sign in to access your P2P trading dashboard' : 'Sign up to start trading securely on Paxones'}
+          {mode === 'login' ? 'Sign in to access your P2P trading dashboard' : 'Sign up to start trading securely'}
         </p>
       </div>
 
@@ -126,16 +188,36 @@ export function AuthForm({ mode }: AuthFormProps) {
 
       {/* 2. Standard Form */}
       <form onSubmit={handleSubmit} className="space-y-4">
+        {mode === 'signup' && (
+          <div>
+            <label className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1">Full Name</label>
+            <div className="relative">
+              <User className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+              <input
+                type="text"
+                required
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                placeholder="John Doe"
+                className="w-full bg-slate-50 dark:bg-[#07090e] border border-slate-200 dark:border-[#1e2640] rounded-xl pl-10 pr-3.5 py-2.5 text-sm text-slate-900 dark:text-white placeholder:text-slate-400 dark:placeholder:text-slate-600 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition"
+              />
+            </div>
+          </div>
+        )}
+
         <div>
           <label className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1">Email Address</label>
-          <input
-            type="email"
-            required
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            placeholder="you@example.com"
-            className="w-full bg-slate-50 dark:bg-[#07090e] border border-slate-200 dark:border-[#1e2640] rounded-xl px-3.5 py-2.5 text-sm text-slate-900 dark:text-white placeholder:text-slate-400 dark:placeholder:text-slate-600 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition"
-          />
+          <div className="relative">
+            <Mail className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+            <input
+              type="email"
+              required
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              placeholder="you@example.com"
+              className="w-full bg-slate-50 dark:bg-[#07090e] border border-slate-200 dark:border-[#1e2640] rounded-xl pl-10 pr-3.5 py-2.5 text-sm text-slate-900 dark:text-white placeholder:text-slate-400 dark:placeholder:text-slate-600 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition"
+            />
+          </div>
         </div>
 
         <div>
@@ -147,15 +229,58 @@ export function AuthForm({ mode }: AuthFormProps) {
               </Link>
             )}
           </div>
-          <input
-            type="password"
-            required
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            placeholder="••••••••"
-            className="w-full bg-slate-50 dark:bg-[#07090e] border border-slate-200 dark:border-[#1e2640] rounded-xl px-3.5 py-2.5 text-sm text-slate-900 dark:text-white placeholder:text-slate-400 dark:placeholder:text-slate-600 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition"
-          />
+          <div className="relative">
+            <Lock className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+            <input
+              type="password"
+              required
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              placeholder="••••••••"
+              className="w-full bg-slate-50 dark:bg-[#07090e] border border-slate-200 dark:border-[#1e2640] rounded-xl pl-10 pr-3.5 py-2.5 text-sm text-slate-900 dark:text-white placeholder:text-slate-400 dark:placeholder:text-slate-600 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition"
+            />
+          </div>
         </div>
+
+        {mode === 'signup' && (
+          <div>
+            <label className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1">Confirm Password</label>
+            <div className="relative">
+              <Lock className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+              <input
+                type="password"
+                required
+                value={confirmPassword}
+                onChange={(e) => setConfirmPassword(e.target.value)}
+                placeholder="••••••••"
+                className="w-full bg-slate-50 dark:bg-[#07090e] border border-slate-200 dark:border-[#1e2640] rounded-xl pl-10 pr-3.5 py-2.5 text-sm text-slate-900 dark:text-white placeholder:text-slate-400 dark:placeholder:text-slate-600 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition"
+              />
+            </div>
+          </div>
+        )}
+
+        {mode === 'signup' && (
+          <div className="pt-1">
+            <label className="flex items-start gap-2.5 cursor-pointer select-none text-xs text-slate-600 dark:text-slate-300">
+              <input
+                type="checkbox"
+                checked={acceptTerms}
+                onChange={(e) => setAcceptTerms(e.target.checked)}
+                className="mt-0.5 h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+              />
+              <span>
+                I agree to the{' '}
+                <Link href="/terms" target="_blank" className="text-blue-600 dark:text-blue-400 hover:underline">
+                  Terms of Service
+                </Link>{' '}
+                and{' '}
+                <Link href="/policy" target="_blank" className="text-blue-600 dark:text-blue-400 hover:underline">
+                  Privacy Policy
+                </Link>
+              </span>
+            </label>
+          </div>
+        )}
 
         <button
           type="submit"

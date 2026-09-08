@@ -86,6 +86,10 @@ function normalizeAd(raw: any): P2PAd {
   const rawSide = String(raw.type || raw.side || raw.ad_type || raw.adType || 'buy').toLowerCase();
   const adType = rawSide.includes('buy') ? 'buy' : 'sell';
 
+  const rawPrice = Number(raw.price ?? raw.unit_price ?? raw.fixed_rate ?? raw.fixedRate);
+  const rawRatePercent = Number(raw.rate_percent ?? raw.ratePercent ?? raw.price_margin_percent ?? raw.margin ?? raw.margin_percentage ?? 0);
+  const rateType = raw.rate_type || raw.rateType || (raw.pricing_type === 'FLOAT' ? 'floating' : (rawPrice > 0 ? 'fixed' : 'market'));
+
   return {
     id: raw.id,
     userId: raw.user_id || raw.userId,
@@ -93,9 +97,11 @@ function normalizeAd(raw: any): P2PAd {
     adType: adType,
     crypto: ((raw.crypto || raw.coin || raw.asset || raw.crypto_currency || 'BTC') as string).toUpperCase() as CryptoCurrency,
     fiatCurrency: ((raw.fiat_currency || raw.fiatCurrency || raw.fiat || 'USD') as string).toUpperCase(),
-    rateType: raw.rate_type || raw.rateType || 'market',
-    fixedRate: raw.fixed_rate ?? raw.fixedRate ?? (raw.rate_type === 'fixed' || raw.pricing_type === 'FIXED' ? Number(raw.price) : undefined),
-    ratePercent: raw.rate_percent ?? raw.ratePercent ?? (raw.rate_type === 'floating' || raw.rate_type === 'market' || raw.pricing_type === 'FLOAT' ? Number(raw.price_margin_percent ?? raw.margin ?? raw.margin_percent ?? 0) : 0),
+    rateType: rateType as 'fixed' | 'floating' | 'market',
+    price: rawPrice > 0 ? rawPrice : undefined,
+    unit_price: rawPrice > 0 ? rawPrice : undefined,
+    fixedRate: rawPrice > 0 ? rawPrice : undefined,
+    ratePercent: rawRatePercent,
     minAmount: Number(raw.min_amount ?? raw.minAmount ?? raw.min_limit ?? 0),
     maxAmount: Number(raw.max_amount ?? raw.maxAmount ?? raw.max_limit ?? 0),
     paymentMethods: Array.isArray(raw.payment_methods)
@@ -108,7 +114,7 @@ function normalizeAd(raw: any): P2PAd {
     offerLabel: raw.offer_label || raw.offerLabel,
     tags: Array.isArray(raw.tags) ? raw.tags : Array.isArray(raw.offer_tags) ? raw.offer_tags : Array.isArray(raw.ad_tags) ? raw.ad_tags : [],
     terms: raw.terms_conditions || raw.terms || '',
-    paymentTimeLimit: Number(raw.payment_time_limit ?? raw.paymentTimeLimit ?? raw.payment_window ?? 30),
+    paymentTimeLimit: Number(raw.payment_time_limit ?? raw.paymentTimeLimit ?? raw.payment_window ?? raw.paymentWindow ?? raw.time_limit ?? 30),
     active: raw.active !== false && raw.status !== 'inactive' && raw.status !== 'INACTIVE' && raw.status !== 'DELETED' && raw.status !== 'draft' && raw.status !== 'DRAFT',
     targetedCountries: raw.targeted_countries || raw.targetedCountries || [],
     blockedCountries: raw.blocked_countries || raw.blockedCountries || [],

@@ -11,16 +11,7 @@ export default async function AdminDisputesPage() {
     .select(`
       *,
       trade:trade_id (
-        id,
-        public_id,
-        status,
-        fiat_amount,
-        fiat_currency,
-        crypto_amount,
-        asset_symbol,
-        payment_method,
-        buyer:buyer_id(username),
-        seller:seller_id(username)
+        *
       ),
       opener:opened_by(username)
     `)

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient, getSupabaseAdminClient } from '@/utils/supabase/server';
 import { uploadToB2 } from '@/lib/b2';
+import sharp from 'sharp';
 
 export const dynamic = 'force-dynamic';
 
@@ -26,32 +27,46 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Only image files are allowed for avatar' }, { status: 400 });
     }
 
-    if (file.size > 5 * 1024 * 1024) {
-      return NextResponse.json({ error: 'Image exceeds 5MB limit' }, { status: 400 });
+    if (file.size > 10 * 1024 * 1024) {
+      return NextResponse.json({ error: 'Image exceeds 10MB limit' }, { status: 400 });
     }
 
-    const fileExt = file.name.split('.').pop() || 'jpg';
+    const rawArrayBuffer = await file.arrayBuffer();
+    const rawBuffer = Buffer.from(rawArrayBuffer);
+
+    // Compress & resize image with Sharp for ultra-fast loading
+    let compressedBuffer: Buffer;
+    let mimeType = 'image/webp';
+    let fileExt = 'webp';
+
+    try {
+      compressedBuffer = await sharp(rawBuffer)
+        .resize(256, 256, { fit: 'cover' })
+        .webp({ quality: 80 })
+        .toBuffer();
+    } catch (sharpErr) {
+      console.warn('Sharp compression failed, using original buffer:', sharpErr);
+      compressedBuffer = rawBuffer;
+      mimeType = file.type;
+      fileExt = file.name.split('.').pop() || 'jpg';
+    }
+
     const objectKey = `avatars/${user.id}.${fileExt}`;
-
-    const arrayBuffer = await file.arrayBuffer();
-    const buffer = Buffer.from(arrayBuffer);
-
     let avatarUrl = '';
     const admin = getSupabaseAdminClient();
 
     // Upload to Backblaze B2
     try {
-      await uploadToB2(objectKey, buffer, file.type);
-      // Use media proxy route which signs B2 URLs on the fly and caches cleanly
+      await uploadToB2(objectKey, compressedBuffer, mimeType);
       avatarUrl = `/api/media/avatar/${user.id}?v=${Date.now()}`;
     } catch (b2Err) {
       console.warn('B2 upload failed or unconfigured, falling back to data URI:', b2Err);
     }
 
-    // Fallback: If not uploaded to B2, store data URI
+    // Fallback: If not uploaded to B2, store compressed base64 data URI
     if (!avatarUrl) {
-      const base64 = buffer.toString('base64');
-      avatarUrl = `data:${file.type};base64,${base64}`;
+      const base64 = compressedBuffer.toString('base64');
+      avatarUrl = `data:${mimeType};base64,${base64}`;
     }
 
     // Update user profile in database
@@ -64,7 +79,7 @@ export async function POST(req: NextRequest) {
       })
       .eq('id', user.id);
 
-    // Update Supabase Auth user metadata so it implants everywhere immediately
+    // Update Supabase Auth user metadata
     try {
       await admin.auth.admin.updateUserById(user.id, {
         user_metadata: {
@@ -82,7 +97,7 @@ export async function POST(req: NextRequest) {
       success: true,
       avatarUrl,
       avatar_url: avatarUrl,
-      message: 'Profile picture updated successfully.'
+      message: 'Profile picture updated and compressed successfully.'
     });
   } catch (err: any) {
     console.error('Error uploading avatar:', err);

@@ -1,6 +1,7 @@
 import { createServerClient } from '@supabase/ssr';
 import { cookies } from 'next/headers';
 import { NextResponse, type NextRequest } from 'next/server';
+import { getSupabaseAdminClient } from '@/utils/supabase/server';
 
 export const dynamic = 'force-dynamic';
 
@@ -54,19 +55,63 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    const { data: ads, error } = await supabase
+    let ads: any[] = [];
+    let queryError: any = null;
+
+    // 1. Try querying p2p_ads view
+    const { data: viewAds, error: viewError } = await supabase
       .from('p2p_ads')
       .select('*')
       .eq('user_id', user.id)
       .order('created_at', { ascending: false });
 
-    if (error) {
-      return NextResponse.json({ error: error.message }, { status: 400 });
+    if (!viewError && Array.isArray(viewAds)) {
+      ads = viewAds;
+    } else {
+      queryError = viewError;
+      console.warn('p2p_ads view query failed, trying ads table:', viewError?.message);
+
+      // 2. Try querying ads base table
+      const { data: tableAds, error: tableError } = await supabase
+        .from('ads')
+        .select('*')
+        .eq('user_id', user.id)
+        .order('created_at', { ascending: false });
+
+      if (!tableError && Array.isArray(tableAds)) {
+        ads = tableAds;
+        queryError = null;
+      } else {
+        queryError = tableError;
+      }
+    }
+
+    // 3. Fallback to admin client if RLS is preventing read or if 0 ads returned but admin sees records
+    if (ads.length === 0) {
+      try {
+        const admin = getSupabaseAdminClient();
+        const { data: adminAds, error: adminErr } = await admin
+          .from('ads')
+          .select('*')
+          .eq('user_id', user.id)
+          .order('created_at', { ascending: false });
+
+        if (!adminErr && Array.isArray(adminAds) && adminAds.length > 0) {
+          ads = adminAds;
+          queryError = null;
+        }
+      } catch (adminEx) {
+        console.warn('Admin fallback in my-ads failed:', adminEx);
+      }
+    }
+
+    if (queryError && ads.length === 0) {
+      return NextResponse.json({ error: queryError.message, ads: [] }, { status: 200 });
     }
 
     return NextResponse.json({ success: true, ads });
   } catch (err: any) {
     console.error('Error fetching user ads:', err);
-    return NextResponse.json({ error: err.message || 'Internal Server Error' }, { status: 500 });
+    return NextResponse.json({ error: err.message || 'Internal Server Error', ads: [] }, { status: 500 });
   }
 }

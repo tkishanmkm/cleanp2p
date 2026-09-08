@@ -10,6 +10,6 @@ export async function GET(request: Request) {
     await supabase.auth.exchangeCodeForSession(code);
   }
 
-  // Redirect user to home page after sign-in
-  return NextResponse.redirect(`${requestUrl.origin}/`);
+  // Redirect user to /buy page after sign-in
+  return NextResponse.redirect(`${requestUrl.origin}/buy`);
 }

@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
-import { authenticator } from 'otplib';
+import { verifySync } from 'otplib';
 
 export async function POST(req: Request) {
   try {
@@ -42,7 +42,7 @@ export async function POST(req: Request) {
       if (!profile.two_factor_secret) {
         return NextResponse.json({ error: '2FA secret not configured' }, { status: 400 });
       }
-      const isValid = authenticator.verify({ token: String(totpCode).trim(), secret: profile.two_factor_secret });
+      const isValid = verifySync({ token: String(totpCode).trim(), secret: profile.two_factor_secret });
       if (!isValid) {
         return NextResponse.json({ error: 'Invalid 2FA code' }, { status: 400 });
       }
