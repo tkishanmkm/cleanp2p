@@ -225,13 +225,37 @@ export async function requestWithdrawal(
 }
 
 /**
- * Cancels a trade.
+ * Cancels a trade in Supabase.
  */
 export async function cancelTrade(
-  trade: Trade,
-  reason: string
+  tradeOrId: any,
+  reason?: string
 ): Promise<{ success: boolean }> {
   try {
+    const tradeId = typeof tradeOrId === 'string' ? tradeOrId : tradeOrId?.id || tradeOrId?.tradeId;
+    const cancelReason = reason || 'Cancelled by user.';
+    
+    await supabase
+      .from('trades')
+      .update({
+        status: 'cancelled',
+        cancellation_reason: cancelReason,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', tradeId);
+
+    // Insert system message into trade_messages
+    await supabase.from('trade_messages').insert([
+      {
+        trade_id: tradeId,
+        sender_id: 'system',
+        sender_username: 'System',
+        message: `Trade has been cancelled. Reason: ${cancelReason}`,
+        is_moderator: true,
+        created_at: new Date().toISOString(),
+      },
+    ]);
+
     return { success: true };
   } catch (err) {
     console.error("Failed to cancel trade:", err);
@@ -246,12 +270,43 @@ export async function addReceiptToTrade(
   tradeId: string,
   receiptUrl: string
 ): Promise<void> {
-  // Attached receipt URL
+  await supabase
+    .from('trades')
+    .update({
+      payment_receipt_url: receiptUrl,
+      updated_at: new Date().toISOString(),
+    })
+    .eq('id', tradeId);
 }
+
+/**
+ * Marks a trade as paid in Supabase.
+ */
 export async function markTradeAsPaid(
   tradeId: string
 ): Promise<{ success: boolean }> {
   try {
+    await supabase
+      .from('trades')
+      .update({
+        status: 'paid',
+        paid_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', tradeId);
+
+    // Insert system message into trade_messages
+    await supabase.from('trade_messages').insert([
+      {
+        trade_id: tradeId,
+        sender_id: 'system',
+        sender_username: 'System',
+        message: 'Buyer has marked the trade as Paid. Seller, please check your bank account and confirm receipt before releasing coin.',
+        is_moderator: true,
+        created_at: new Date().toISOString(),
+      },
+    ]);
+
     return { success: true };
   } catch (err) {
     console.error("Failed to mark trade as paid:", err);
@@ -260,12 +315,89 @@ export async function markTradeAsPaid(
 }
 
 /**
- * Releases funds from escrow for a trade.
+ * Releases funds from escrow for a trade in Supabase.
  */
 export async function releaseFundsFromEscrow(
   tradeId: string
 ): Promise<{ success: boolean }> {
-  return completeEscrow(tradeId);
+  try {
+    const { data: tradeData } = await supabase
+      .from('trades')
+      .select('*')
+      .eq('id', tradeId)
+      .maybeSingle();
+
+    await supabase
+      .from('trades')
+      .update({
+        status: 'released',
+        released_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', tradeId);
+
+    // Increment completed_trades in profiles table for buyer and seller
+    if (tradeData?.buyer_id) {
+      const { data: bProf } = await supabase
+        .from('profiles')
+        .select('completed_trades')
+        .eq('id', tradeData.buyer_id)
+        .maybeSingle();
+      await supabase
+        .from('profiles')
+        .update({ completed_trades: (bProf?.completed_trades || 0) + 1 })
+        .eq('id', tradeData.buyer_id);
+    }
+
+    if (tradeData?.seller_id) {
+      const { data: sProf } = await supabase
+        .from('profiles')
+        .select('completed_trades')
+        .eq('id', tradeData.seller_id)
+        .maybeSingle();
+      await supabase
+        .from('profiles')
+        .update({ completed_trades: (sProf?.completed_trades || 0) + 1 })
+        .eq('id', tradeData.seller_id);
+    }
+
+    await completeEscrow(tradeId);
+
+    // Insert system message into trade_messages
+    await supabase.from('trade_messages').insert([
+      {
+        trade_id: tradeId,
+        sender_id: 'system',
+        sender_username: 'System',
+        message: 'Trade Released. The coin has been credited to your account.\nYou can now leave feedback for your partner.',
+        is_moderator: true,
+        created_at: new Date().toISOString(),
+      },
+    ]);
+
+    return { success: true };
+  } catch (err) {
+    console.error("Failed to release funds from escrow:", err);
+    throw err;
+  }
+}
+
+/**
+ * Claims escrow funds for a trade.
+ */
+export async function claimFundsForTrade(
+  _dbOrClient: any,
+  trade: any,
+  buyerId: string
+): Promise<void> {
+  const tradeId = typeof trade === 'string' ? trade : trade?.id;
+  await supabase
+    .from('trades')
+    .update({
+      claimed_by_buyer: true,
+      updated_at: new Date().toISOString(),
+    })
+    .eq('id', tradeId);
 }
 
 /**
@@ -348,5 +480,19 @@ export async function createWithdrawalRequest(
  */
 export async function cancelWithdrawalRequest(userId: string, withdrawalId: string): Promise<void> {
   // Cancel withdrawal
+}
+
+/**
+ * Opens a dispute for an active or paid trade.
+ */
+export async function disputeTrade(
+  trade: Trade | any,
+  reason: string,
+  explanation: string,
+  currentUserId: string,
+  currentUsername: string
+): Promise<void> {
+  const { openDispute } = await import('@/lib/disputes');
+  return openDispute(null, trade, currentUserId, currentUsername, reason, explanation);
 }
 

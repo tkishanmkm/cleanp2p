@@ -8,6 +8,8 @@ export interface AppNotification {
   message: string;
   link?: string;
   is_read: boolean;
+  sender_photo_url?: string | null;
+  sender_username?: string | null;
   created_at: string;
 }
 
@@ -30,9 +32,12 @@ export async function getUserNotifications(userId: string): Promise<Notification
     return (data || []).map((n) => ({
       id: n.id,
       userId: n.user_id,
+      title: n.title || 'Notification',
       message: n.message || n.title || '',
       link: n.link || undefined,
       isRead: n.is_read ?? false,
+      senderPhotoURL: n.sender_photo_url || undefined,
+      senderUsername: n.sender_username || undefined,
       createdAt: n.created_at,
     }));
   } catch (err) {
@@ -91,7 +96,9 @@ export async function createNotification(
   userId: string,
   message: string,
   title?: string,
-  link?: string
+  link?: string,
+  senderPhotoURL?: string,
+  senderUsername?: string
 ): Promise<AppNotification | null> {
   try {
     const { data, error } = await supabase
@@ -102,6 +109,8 @@ export async function createNotification(
         message,
         link: link || null,
         is_read: false,
+        sender_photo_url: senderPhotoURL || null,
+        sender_username: senderUsername || null,
       })
       .select()
       .single();
@@ -115,6 +124,35 @@ export async function createNotification(
     console.error('Failed to create notification:', err);
     return null;
   }
+}
+
+/**
+ * Helper to dispatch trade lifecycle notifications with counterparty DP
+ */
+export async function dispatchTradeNotification({
+  recipientId,
+  title,
+  message,
+  tradeId,
+  senderPhotoURL,
+  senderUsername,
+}: {
+  recipientId: string;
+  title: string;
+  message: string;
+  tradeId: string;
+  senderPhotoURL?: string;
+  senderUsername?: string;
+}) {
+  if (!recipientId) return;
+  return createNotification(
+    recipientId,
+    message,
+    title,
+    `/trade/${tradeId}`,
+    senderPhotoURL,
+    senderUsername
+  );
 }
 
 /**
@@ -139,9 +177,12 @@ export function subscribeToUserNotifications(
         onNewNotification({
           id: newRecord.id,
           userId: newRecord.user_id,
+          title: newRecord.title || 'Notification',
           message: newRecord.message || newRecord.title || '',
-          link: newRecord.link,
+          link: newRecord.link || undefined,
           isRead: newRecord.is_read ?? false,
+          senderPhotoURL: newRecord.sender_photo_url || undefined,
+          senderUsername: newRecord.sender_username || undefined,
           createdAt: newRecord.created_at,
         });
       }

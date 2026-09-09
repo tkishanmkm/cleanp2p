@@ -45,6 +45,23 @@ export async function POST(req: Request) {
       return NextResponse.json({ success: true, message: 'Report queued for review' });
     }
 
+    const reporterUsername = user.user_metadata?.username || user.email?.split('@')[0] || 'Trader';
+    const reportSysMsg = `⚠️ @${reporterUsername} reported an issue:\nCategory: ${category}\nDetails: ${description}`;
+
+    // Post to trade chat
+    try {
+      await supabase.from('trade_messages').insert({
+        trade_id: tradeId,
+        sender_id: 'system',
+        sender_username: 'System',
+        message: reportSysMsg,
+        is_moderator: true,
+        created_at: new Date().toISOString()
+      });
+    } catch (msgErr) {
+      console.warn('Could not post trade message for report:', msgErr);
+    }
+
     return NextResponse.json({ success: true, report: data });
   } catch (error: any) {
     return NextResponse.json({ error: error.message || 'Server error' }, { status: 500 });

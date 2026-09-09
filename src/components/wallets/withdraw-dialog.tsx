@@ -280,7 +280,7 @@ export function WithdrawDialog({ open, onOpenChange, asset, userWallets }: Withd
                     </Button>
                   </div>
                   <div className="flex justify-between items-center text-xs text-muted-foreground pt-1">
-                    <span>Available: {Number(availableBalance || 0).toFixed(8)} {asset}</span>
+                    <span>Available: {Number(availableBalance || 0) === 0 ? '0' : Number(availableBalance || 0).toFixed(8)} {asset}</span>
                     {prices[asset || ''] ? (
                       <span>≈ ${(Number(availableBalance || 0) * (prices[asset || ''] || 0)).toFixed(2)} USD</span>
                     ) : null}

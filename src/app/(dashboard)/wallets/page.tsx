@@ -516,7 +516,9 @@ export default function WalletPage() {
             </CardHeader>
             <CardContent className="space-y-2">
               <div>
-                <div className="text-3xl font-bold">{data.availableBalance.toFixed(6)}</div>
+                <div className="text-3xl font-bold">
+                  {data.availableBalance === 0 ? '0' : data.availableBalance.toFixed(6)}
+                </div>
                 <p className="text-xs text-muted-foreground">
                   ≈{' '}
                   {data.fiatValue.toLocaleString(undefined, {
@@ -529,13 +531,13 @@ export default function WalletPage() {
                 {data.inEscrow > 0 && (
                   <p className="text-[11px] text-amber-500 font-medium font-mono flex items-center justify-between">
                     <span>In P2P Escrow:</span>
-                    <span>{data.inEscrow.toFixed(6)}</span>
+                    <span>{data.inEscrow === 0 ? '0' : data.inEscrow.toFixed(6)}</span>
                   </p>
                 )}
                 {data.inWithdrawal > 0 && (
                   <p className="text-[11px] text-blue-400 font-medium font-mono flex items-center justify-between">
                     <span>Pending Withdrawal:</span>
-                    <span>{data.inWithdrawal.toFixed(6)}</span>
+                    <span>{data.inWithdrawal === 0 ? '0' : data.inWithdrawal.toFixed(6)}</span>
                   </p>
                 )}
                 {data.inEscrow === 0 && data.inWithdrawal === 0 && (

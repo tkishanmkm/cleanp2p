@@ -285,7 +285,10 @@ export type Notification = {
   id: string;
   userId: string;
   message: string;
+  title?: string;
   link?: string;
   isRead: boolean;
+  senderPhotoURL?: string;
+  senderUsername?: string;
   createdAt: string;
 };

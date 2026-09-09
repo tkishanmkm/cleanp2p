@@ -91,7 +91,7 @@ export function TransferHistoryTable({ userId, type, onRowClick }: TransferHisto
                 <TableCell className="font-mono text-xs">{t.publicId}</TableCell>
                 <TableCell>{type === 'sent' ? t.recipientUsername : t.senderUsername}</TableCell>
                 <TableCell className="font-medium">
-                  {t.amount.toFixed(8)} {t.crypto}
+                  {t.amount === 0 ? '0' : t.amount.toFixed(8)} {t.crypto}
                 </TableCell>
                 <TableCell className="text-muted-foreground">{toDate(t.createdAt)?.toLocaleString() ?? 'N/A'}</TableCell>
               </TableRow>

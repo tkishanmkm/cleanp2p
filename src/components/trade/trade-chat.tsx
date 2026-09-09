@@ -3,9 +3,11 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react';
 import Image from 'next/image';
 import Link from 'next/link';
-import { supabase } from '@/lib/supabase/client';
+import { createClient } from '@/lib/supabase/client';
 import { useToast } from '@/hooks/use-toast';
 import { useStopwatch } from '@/hooks/use-stopwatch';
+import { addReceiptToTrade, claimFundsForTrade } from '@/lib/wallet';
+import { compressImage } from '@/lib/media-compression';
 import { cn, toDate } from '@/lib/utils';
 import type { Trade, User, TradeChatMessage } from '@/lib/types';
 
@@ -14,120 +16,246 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
-import { Skeleton } from "@/components/ui/skeleton";
-
-import { DefaultAvatar } from '@/components/icons';
+import { Skeleton } from '@/components/ui/skeleton';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle
+} from '@/components/ui/dialog';
+import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
+import { Label } from '@/components/ui/label';
+import { DefaultAvatar, BtcLogo, EthLogo, LtcLogo, UsdtLogo } from '@/components/icons';
 import { Logo } from '@/components/logo';
 import { FlagIcon } from '@/components/ui/flag-icon';
 import { Alert, AlertTitle, AlertDescription } from '@/components/ui/alert';
-import { Clock, Send, Plus, Info as InfoIcon, Loader2, ThumbsUp, ThumbsDown } from 'lucide-react';
+import {
+  Clock,
+  Send,
+  Plus,
+  Info as InfoIcon,
+  Loader2,
+  ThumbsUp,
+  ThumbsDown,
+  Paperclip,
+  Lock,
+  Eye,
+  FileCheck,
+  FileText,
+  Video,
+  ShieldCheck,
+  AlertTriangle
+} from 'lucide-react';
 import { formatDistanceToNow } from 'date-fns';
 
-function TradeInstructions({ trade, isBuyer }: { trade: Trade, isBuyer: boolean }) {
-    const title = isBuyer 
-        ? `You're buying ${trade.amount.toFixed(8)} ${trade.crypto} for ${trade.fiatAmount.toLocaleString()} ${trade.fiatCurrency}.`
-        : `You're selling ${trade.amount.toFixed(8)} ${trade.crypto} for ${trade.fiatAmount.toLocaleString()} ${trade.fiatCurrency}.`;
-    
-    const subtitle = "The crypto is now in escrow.";
-    
-    const buyerInstructions = [
-        "Wait for the seller to provide their payment details in the chat.",
-        "Make your payment using the details provided.",
-        "Mark the trade as 'Paid' and upload proof of payment if necessary.",
-        "Wait for your trade partner to confirm they have received your payment.",
-        "Your trade partner will release the crypto to you.",
-    ];
-    const sellerInstructions = [
-        "Share your payment details with the buyer in the chat.",
-        "Wait for the buyer to make the payment.",
-        "Once payment is received and confirmed in your account, release the crypto.",
-        "Do not release funds based on payment proof alone. Always verify in your account.",
-        "If the buyer doesn't pay within the time limit, the trade will automatically expire.",
-    ];
-
-    const instructions = isBuyer ? buyerInstructions : sellerInstructions;
-    
-    return (
-        <Alert className="bg-amber-50 border-amber-200 text-amber-900 dark:bg-amber-950/40 dark:border-amber-800/40 dark:text-amber-200">
-            <InfoIcon className="h-4 w-4 text-amber-600 dark:text-amber-400" />
-            <AlertTitle className="font-bold text-amber-900 dark:text-amber-100 text-xs sm:text-sm">
-                {title}
-            </AlertTitle>
-            <AlertDescription className="text-amber-800 dark:text-amber-200/90 text-xs">
-                <p>{subtitle}</p>
-                <ol className="list-decimal list-inside space-y-1 mt-2">
-                    {instructions.map((step, i) => <li key={i}>{step}</li>)}
-                </ol>
-            </AlertDescription>
-        </Alert>
-    );
+function CoinInsignia({ symbol, className = "h-4 w-4" }: { symbol: string; className?: string }) {
+  const s = (symbol || '').toUpperCase();
+  switch (s) {
+    case 'BTC':
+      return (
+        <span className="inline-flex items-center gap-1 font-bold font-mono">
+          <BtcLogo className={className} />
+          <span>BTC</span>
+        </span>
+      );
+    case 'ETH':
+      return (
+        <span className="inline-flex items-center gap-1 font-bold font-mono">
+          <EthLogo className={className} />
+          <span>ETH</span>
+        </span>
+      );
+    case 'USDT':
+      return (
+        <span className="inline-flex items-center gap-1 font-bold font-mono">
+          <UsdtLogo className={className} />
+          <span>USDT</span>
+        </span>
+      );
+    case 'LTC':
+      return (
+        <span className="inline-flex items-center gap-1 font-bold font-mono">
+          <LtcLogo className={className} />
+          <span>LTC</span>
+        </span>
+      );
+    default:
+      return <span className="font-bold font-mono">{symbol}</span>;
+  }
 }
 
-function SystemMessage({ title, children, timestamp, variant }: { title: string; children: React.ReactNode; timestamp: string, variant?: 'default' | 'destructive' | 'success' | 'warning' }) {
-    const timeString = toDate(timestamp)?.toLocaleString('default', { dateStyle: 'short', timeStyle: 'short' }) || '';
+function TradeInstructions({ trade, isBuyer }: { trade: Trade | any; isBuyer: boolean }) {
+  const coinAmount = Number(trade?.amount ?? trade?.crypto_amount ?? 0).toFixed(8);
+  const coinSymbol = trade?.crypto ?? trade?.asset_symbol ?? 'BTC';
+  const fiatAmount = Number(trade?.fiatAmount ?? trade?.fiat_amount ?? trade?.amount_usd ?? 0).toLocaleString();
+  const fiatCurrency = trade?.fiatCurrency ?? trade?.fiat_currency ?? trade?.fiat_symbol ?? 'USD';
 
-    const variants = {
-        default: "bg-blue-50 border-blue-200 text-blue-900 dark:bg-blue-950/40 dark:border-blue-800/40 dark:text-blue-200",
-        destructive: "bg-red-50 border-red-200 text-red-900 dark:bg-red-950/40 dark:border-red-800/40 dark:text-red-200",
-        success: "bg-green-50 border-green-200 text-green-900 dark:bg-green-950/40 dark:border-green-800/40 dark:text-green-200",
-        warning: "bg-secondary border-border text-secondary-foreground",
-    };
+  const title = isBuyer
+    ? `You're buying ${coinAmount} ${coinSymbol} for ${fiatAmount} ${fiatCurrency}.`
+    : `You're selling ${coinAmount} ${coinSymbol} for ${fiatAmount} ${fiatCurrency}.`;
 
-    return (
-        <div className={cn("text-center text-xs p-3 rounded-lg border my-2", variants[variant || 'default'])}>
-            <p className="font-bold mb-1">{title}</p>
-            <div className="text-left text-xs whitespace-pre-wrap">{children}</div>
-            <p className="text-right text-[10px] opacity-70 mt-2">{timeString}</p>
-        </div>
-    );
+  const buyerInstructions = [
+    'Wait for the seller to provide their payment details in the chat.',
+    'Make your payment using the details provided.',
+    "Mark the trade as 'Paid' and upload proof of payment if requested.",
+    'Wait for your trade partner to confirm receipt in their account.',
+    'Your trade partner will release the coin from escrow.'
+  ];
+  const sellerInstructions = [
+    'Share your payment instructions in the chat.',
+    'Wait for the buyer to make the payment.',
+    'Once payment is received in your account, release the coin.',
+    'Do not release funds based on payment proof alone. Always check your bank/wallet.',
+    "If the buyer doesn't pay within the countdown, the trade will automatically expire."
+  ];
+
+  const instructions = isBuyer ? buyerInstructions : sellerInstructions;
+
+  return (
+    <Alert className="bg-amber-500/10 border-amber-500/30 text-amber-900 dark:text-amber-200">
+      <InfoIcon className="h-4 w-4 text-amber-600 dark:text-amber-400" />
+      <AlertTitle className="font-bold text-xs sm:text-sm">{title}</AlertTitle>
+      <AlertDescription className="text-xs mt-1">
+        <p className="font-medium">Coin deposit is locked securely in Escrow.</p>
+        <ol className="list-decimal list-inside space-y-0.5 text-[11px] sm:text-xs mt-1.5 opacity-90">
+          {instructions.map((step, i) => (
+            <li key={i}>{step}</li>
+          ))}
+        </ol>
+      </AlertDescription>
+    </Alert>
+  );
 }
 
-const TradeSummaryBar = ({ trade, currentUserRole }: { trade: Trade, currentUserRole: 'buy' | 'sell' }) => {
-    const isBuyer = currentUserRole === 'buy';
-    const bgColor = isBuyer ? 'bg-emerald-600 dark:bg-emerald-700 text-white' : 'bg-destructive text-destructive-foreground';
-    const roleText = isBuyer ? 'Buying' : 'Selling';
-    
-    return (
-        <div className={cn('p-3 rounded-xl text-xs sm:text-sm font-semibold text-center shadow-sm', bgColor)}>
-            {roleText} {trade.amount.toFixed(8)} {trade.crypto} for {trade.fiatAmount.toLocaleString()} {trade.fiatCurrency}
-        </div>
-    );
+function SystemMessage({
+  title,
+  children,
+  timestamp,
+  variant
+}: {
+  title: string;
+  children: React.ReactNode;
+  timestamp?: string;
+  variant?: 'default' | 'destructive' | 'success' | 'warning' | 'info';
+}) {
+  const timeString = toDate(timestamp)?.toLocaleString('default', { dateStyle: 'short', timeStyle: 'short' }) || '';
+
+  const variants = {
+    default: 'bg-muted/80 border-border text-foreground',
+    destructive: 'bg-destructive/10 border-destructive/30 text-destructive',
+    success: 'bg-emerald-500/10 border-emerald-500/30 text-emerald-700 dark:text-emerald-300',
+    warning: 'bg-amber-500/10 border-amber-500/30 text-amber-800 dark:text-amber-300',
+    info: 'bg-primary/10 border-primary/30 text-primary'
+  };
+
+  return (
+    <div className={cn('text-center text-xs p-3 rounded-xl border my-2', variants[variant || 'default'])}>
+      <p className="font-bold mb-1 flex items-center justify-center gap-1.5">{title}</p>
+      <div className="text-left text-xs whitespace-pre-wrap leading-relaxed">{children}</div>
+      <p className="text-right text-[10px] opacity-70 mt-1 font-mono">{timeString}</p>
+    </div>
+  );
+}
+
+const TradeSummaryBar = ({ trade, currentUserRole }: { trade: Trade | any; currentUserRole: 'buy' | 'sell' }) => {
+  const isBuyer = currentUserRole === 'buy';
+  const roleText = isBuyer ? 'Buying' : 'Selling';
+
+  const coinAmount = Number(trade?.amount ?? trade?.crypto_amount ?? 0).toFixed(8);
+  const coinSymbol = trade?.crypto ?? trade?.asset_symbol ?? 'BTC';
+  const fiatAmount = Number(trade?.fiatAmount ?? trade?.fiat_amount ?? trade?.amount_usd ?? 0).toLocaleString();
+  const fiatCurrency = trade?.fiatCurrency ?? trade?.fiat_currency ?? trade?.fiat_symbol ?? 'USD';
+
+  return (
+    <div
+      className={cn(
+        'px-3.5 py-2.5 rounded-xl text-xs sm:text-sm font-semibold border flex flex-wrap items-center justify-center gap-1.5 sm:gap-2 shadow-xs transition-all',
+        isBuyer
+          ? 'bg-emerald-500/10 dark:bg-emerald-500/15 border-emerald-500/30 text-emerald-800 dark:text-emerald-300'
+          : 'bg-rose-500/10 dark:bg-rose-500/15 border-rose-500/30 text-rose-800 dark:text-rose-300'
+      )}
+    >
+      <span className="font-bold tracking-tight">{roleText}</span>
+      <span className="font-serif tabular-nums font-bold tracking-tight">{coinAmount}</span>
+      <CoinInsignia symbol={coinSymbol} className="h-4 w-4" />
+      <span className="font-medium opacity-90">for</span>
+      <span className="font-serif tabular-nums font-bold tracking-tight">
+        {fiatAmount}
+      </span>
+      <span className="font-sans font-bold">{fiatCurrency}</span>
+    </div>
+  );
 };
 
-export function TradeChat({ currentUserId, trade, opponent, isAdmin, sellerTerms, onInfoClick }: { currentUserId: string; trade: Trade; opponent: User | null | undefined; isAdmin: boolean; sellerTerms?: string; onInfoClick: () => void; }) {
+export function TradeChat({
+  currentUserId,
+  trade,
+  opponent,
+  isAdmin,
+  sellerTerms,
+  onInfoClick
+}: {
+  currentUserId: string;
+  trade: Trade | any;
+  opponent: User | any;
+  isAdmin: boolean;
+  sellerTerms?: string;
+  onInfoClick: () => void;
+}) {
+  const supabase = createClient();
   const { toast } = useToast();
   const scrollAreaRef = useRef<HTMLDivElement>(null);
-  const [messages, setMessages] = useState<TradeChatMessage[]>([]);
+  const [messages, setMessages] = useState<any[]>([]);
   const [areMessagesLoading, setAreMessagesLoading] = useState(true);
   const [newMessage, setNewMessage] = useState('');
   const [isUploading, setIsUploading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const isTradeStopped = ['released', 'cancelled', 'expired'].includes(trade.status);
-  const stopwatch = useStopwatch(trade.createdAt, isTradeStopped);
 
+  // Dispute privacy modal state
+  const [pendingUploadFile, setPendingUploadFile] = useState<File | null>(null);
+  const [disputeVisibility, setDisputeVisibility] = useState<'all' | 'moderator_only'>('all');
+  const [isPrivacyModalOpen, setIsPrivacyModalOpen] = useState(false);
+
+  const tradeStatus = (trade?.status || 'active').toLowerCase();
+  const isTradeStopped = ['released', 'cancelled', 'expired', 'completed'].includes(tradeStatus);
+  const isDisputed = ['disputed', 'dispute'].includes(tradeStatus);
+
+  // Freeze stopwatch at exact finish time (Instruction 7)
+  const stopEndTime = trade?.releasedAt || trade?.released_at || trade?.cancelledAt || trade?.cancelled_at || trade?.updated_at;
+  const stopwatch = useStopwatch(trade?.createdAt || trade?.created_at || Date.now(), isTradeStopped, stopEndTime);
+
+  const tradeId = trade?.id;
+  const isBuyer = currentUserId === (trade?.buyerId || trade?.buyer_id);
+
+  // Fetch initial messages & subscribe to Realtime
   useEffect(() => {
+    if (!tradeId) return;
+
     const fetchMessages = async () => {
       setAreMessagesLoading(true);
       const { data, error } = await supabase
         .from('trade_messages')
         .select('*')
-        .eq('trade_id', trade.id)
+        .eq('trade_id', tradeId)
         .order('created_at', { ascending: true });
 
       if (error) {
-        console.error('Failed to load chat messages:', error);
-      } else if (data) {
+        toast({ variant: 'destructive', title: 'Error loading messages', description: error.message });
+      } else {
         setMessages(
-          data.map((m: any) => ({
+          (data || []).map((m: any) => ({
             id: m.id,
-            tradeId: m.trade_id || trade.id,
-            senderId: m.sender_id || 'system',
-            senderUsername: m.sender_username || 'User',
-            message: m.message || '',
-            mediaUrl: m.media_url || undefined,
-            mediaType: m.media_type || 'none',
-            isModerator: !!m.is_moderator,
-            createdAt: m.created_at || new Date().toISOString(),
+            tradeId: m.trade_id,
+            senderId: m.sender_id,
+            senderUsername: m.sender_username,
+            message: m.message,
+            mediaUrl: m.media_url,
+            mediaType: m.media_type,
+            visibility: m.visibility || 'all',
+            isModerator: Boolean(m.is_moderator),
+            createdAt: m.created_at
           }))
         );
       }
@@ -136,25 +264,27 @@ export function TradeChat({ currentUserId, trade, opponent, isAdmin, sellerTerms
 
     fetchMessages();
 
+    const channelTopic = `trade-chat-${tradeId}-${Math.random().toString(36).substring(2, 9)}`;
     const channel = supabase
-      .channel(`trade_messages:${trade.id}`)
+      .channel(channelTopic)
       .on(
         'postgres_changes',
-        { event: 'INSERT', schema: 'public', table: 'trade_messages', filter: `trade_id=eq.${trade.id}` },
+        { event: 'INSERT', schema: 'public', table: 'trade_messages', filter: `trade_id=eq.${tradeId}` },
         (payload) => {
-          const m = payload.new as any;
-          const mappedMessage: TradeChatMessage = {
-            id: m.id,
-            tradeId: m.trade_id || trade.id,
-            senderId: m.sender_id || 'system',
-            senderUsername: m.sender_username || 'User',
-            message: m.message || '',
-            mediaUrl: m.media_url || undefined,
-            mediaType: m.media_type || 'none',
-            isModerator: !!m.is_moderator,
-            createdAt: m.created_at || new Date().toISOString(),
+          const raw = payload.new as any;
+          const formatted: any = {
+            id: raw.id,
+            tradeId: raw.trade_id,
+            senderId: raw.sender_id,
+            senderUsername: raw.sender_username,
+            message: raw.message,
+            mediaUrl: raw.media_url,
+            mediaType: raw.media_type,
+            visibility: raw.visibility || 'all',
+            isModerator: Boolean(raw.is_moderator),
+            createdAt: raw.created_at
           };
-          setMessages((prev) => [...prev, mappedMessage]);
+          setMessages((prev) => [...prev, formatted]);
         }
       )
       .subscribe();
@@ -162,7 +292,7 @@ export function TradeChat({ currentUserId, trade, opponent, isAdmin, sellerTerms
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [trade.id]);
+  }, [tradeId, supabase, toast]);
 
   const displayMessages = useMemo(() => {
     if (!messages) return [];
@@ -174,71 +304,139 @@ export function TradeChat({ currentUserId, trade, opponent, isAdmin, sellerTerms
   useEffect(() => {
     if (scrollAreaRef.current) {
       const viewport = scrollAreaRef.current.querySelector('[data-radix-scroll-area-viewport]');
-      if (viewport) { viewport.scrollTop = viewport.scrollHeight; }
+      if (viewport) {
+        viewport.scrollTop = viewport.scrollHeight;
+      }
     }
   }, [displayMessages]);
 
-  const handleSendMessage = async (e: React.FormEvent, mediaUrl?: string, mediaType?: 'image' | 'video' | 'audio') => {
-    e.preventDefault();
-    if ((!newMessage.trim() && !mediaUrl)) return;
+  useEffect(() => {
+    if (tradeStatus === 'released' && !trade?.claimedByBuyer && !trade?.claimed_by_buyer && isBuyer) {
+      const claim = async () => {
+        try {
+          await claimFundsForTrade(supabase, trade, currentUserId);
+          toast({ title: 'Funds Claimed', description: 'The crypto has been credited to your wallet.' });
+        } catch (error: any) {
+          console.error('Auto-claiming funds failed:', error);
+        }
+      };
+      claim();
+    }
+  }, [tradeStatus, trade, isBuyer, currentUserId, supabase, toast]);
+
+  const handleSendMessage = async (
+    e?: React.FormEvent,
+    mediaUrl?: string,
+    mediaType?: 'image' | 'video' | 'document' | 'none',
+    visibility: 'all' | 'moderator_only' = 'all'
+  ) => {
+    if (e) e.preventDefault();
+    if (!newMessage.trim() && !mediaUrl) return;
+
     const blockedWords = ['telegram', 'whatsapp', 'phone', 'contact'];
-    if (blockedWords.some(word => newMessage.toLowerCase().includes(word))) {
-      toast({ variant: 'destructive', title: 'Message Blocked', description: 'Please do not share contact information.' });
+    if (newMessage && blockedWords.some((word) => newMessage.toLowerCase().includes(word))) {
+      toast({
+        variant: 'destructive',
+        title: 'Message Blocked',
+        description: 'Please do not share external contact information in the encrypted escrow chat.'
+      });
       return;
     }
-    const messageToSend = newMessage;
-    setNewMessage('');
-    try {
-      const { error } = await supabase.from('trade_messages').insert({
-        trade_id: trade.id,
-        sender_id: currentUserId,
-        sender_username: opponent?.userId || 'User',
-        message: messageToSend,
-        is_moderator: isAdmin,
-        media_url: mediaUrl || null,
-        media_type: mediaType || 'none',
-      });
 
-      if (error) {
-        toast({ variant: 'destructive', title: 'Send Failed', description: error.message });
-      } else if (mediaUrl && trade.status === 'active') {
-        await supabase.from('trades').update({ payment_receipt_url: mediaUrl }).eq('id', trade.id);
-        toast({ title: 'Receipt Uploaded', description: 'The seller has been notified.' });
+    const messageToSend = newMessage.trim();
+    setNewMessage('');
+
+    try {
+      const { error } = await supabase.from('trade_messages').insert([
+        {
+          trade_id: tradeId,
+          sender_id: currentUserId,
+          sender_username: opponent?.username || opponent?.userId || 'Trader',
+          message: messageToSend,
+          is_moderator: isAdmin,
+          media_url: mediaUrl || null,
+          media_type: mediaType || 'none',
+          visibility,
+          created_at: new Date().toISOString()
+        }
+      ]);
+
+      if (error) throw error;
+
+      if (mediaUrl && (tradeStatus === 'active' || tradeStatus === 'pending')) {
+        await addReceiptToTrade(tradeId, mediaUrl);
       }
-    } catch (error: any) { 
-      toast({ variant: 'destructive', title: 'Send Failed', description: error.message }); 
+    } catch (error: any) {
+      toast({ variant: 'destructive', title: 'Send Failed', description: error.message });
     }
   };
-  
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
+
+  const processAndUploadFile = async (fileToUpload: File, chosenVisibility: 'all' | 'moderator_only') => {
     setIsUploading(true);
-    const reader = new FileReader();
-    reader.onload = (event) => {
-      const result = event.target?.result as string;
-      if (result) {
-        let mediaType: 'image' | 'video' | 'audio' = 'image';
-        if (file.type.startsWith('video/')) mediaType = 'video';
-        if (file.type.startsWith('audio/')) mediaType = 'audio';
-        handleSendMessage(new Event('submit') as any, result, mediaType).finally(() => { 
-          setIsUploading(false); 
-          if (fileInputRef.current) fileInputRef.current.value = ""; 
-        });
-      } else { 
-        setIsUploading(false); 
+    try {
+      // 1. Image compression (Instruction 8)
+      let finalFile = fileToUpload;
+      if (fileToUpload.type.startsWith('image/')) {
+        finalFile = await compressImage(fileToUpload);
       }
-    };
-    reader.onerror = () => { 
-      setIsUploading(false); 
-      toast({ variant: 'destructive', title: 'File Read Error', description: 'Could not read the selected file.' }); 
-    };
-    reader.readAsDataURL(file);
+
+      // 2. Video 30MB validation
+      if (fileToUpload.type.startsWith('video/') && fileToUpload.size > 30 * 1024 * 1024) {
+        throw new Error('Video exceeds maximum 30 MB size limit.');
+      }
+
+      // 3. Upload to Backblaze B2 via API endpoint
+      const formData = new FormData();
+      formData.append('file', finalFile);
+      formData.append('tradeId', tradeId);
+      formData.append('senderId', currentUserId);
+      formData.append('visibility', chosenVisibility);
+
+      const res = await fetch('/api/upload/trade-media', {
+        method: 'POST',
+        body: formData
+      });
+
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        throw new Error(data.error || 'Failed to upload media to Backblaze B2');
+      }
+
+      await handleSendMessage(undefined, data.url, data.mediaType, chosenVisibility);
+      toast({
+        title: 'Media Uploaded',
+        description: `Uploaded to Backblaze B2 (${chosenVisibility === 'moderator_only' ? 'Moderator Only' : 'Public to Counterpart'})`
+      });
+    } catch (err: any) {
+      toast({ variant: 'destructive', title: 'Upload Failed', description: err.message });
+    } finally {
+      setIsUploading(false);
+      setPendingUploadFile(null);
+      setIsPrivacyModalOpen(false);
+      if (fileInputRef.current) fileInputRef.current.value = '';
+    }
   };
 
-  const isBuyer = currentUserId === trade.buyerId;
-  const opponentLastActive = opponent?.lastActive ? toDate(opponent.lastActive) : null;
-  let activity = { text: 'Offline', dotClass: 'bg-zinc-400 dark:bg-zinc-600', textClass: 'text-muted-foreground' };
+  const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    // Check if in dispute mode
+    if (isDisputed) {
+      setPendingUploadFile(file);
+      setIsPrivacyModalOpen(true);
+    } else {
+      await processAndUploadFile(file, 'all');
+    }
+  };
+
+  const opponentUsername = opponent?.username || opponent?.userId || opponent?.user_id || 'Trader';
+  const opponentPhoto = opponent?.photoURL || opponent?.photo_url;
+  const positiveFeedback = Number(opponent?.positiveFeedback ?? opponent?.positive_feedback ?? 0);
+  const negativeFeedback = Number(opponent?.negativeFeedback ?? opponent?.negative_feedback ?? 0);
+
+  const opponentLastActive = opponent?.lastActive ? toDate(opponent.lastActive) : opponent?.last_active ? toDate(opponent.last_active) : null;
+  let activity = { text: 'Offline', dotClass: 'bg-gray-500', textClass: 'text-muted-foreground' };
 
   if (opponentLastActive) {
     const diffMinutes = (new Date().getTime() - opponentLastActive.getTime()) / (1000 * 60);
@@ -246,115 +444,219 @@ export function TradeChat({ currentUserId, trade, opponent, isAdmin, sellerTerms
 
     if (diffMinutes < 5) {
       activity = { text: 'Active now', dotClass: 'bg-emerald-500', textClass: 'text-emerald-600 dark:text-emerald-400' };
-    } else if (diffMinutes < 60) {
-      activity = { text: `${formattedDistance} ago`, dotClass: 'bg-emerald-500', textClass: 'text-emerald-600 dark:text-emerald-400' };
-    } else if (diffMinutes < 24 * 60) {
-      activity = { text: `${formattedDistance} ago`, dotClass: 'bg-amber-500', textClass: 'text-amber-600 dark:text-amber-400' };
     } else {
-      activity = { text: `${formattedDistance} ago`, dotClass: 'bg-zinc-400 dark:bg-zinc-600', textClass: 'text-muted-foreground' };
+      activity = { text: `${formattedDistance} ago`, dotClass: 'bg-emerald-500', textClass: 'text-emerald-600 dark:text-emerald-400' };
     }
   }
 
   return (
-    <Card className="flex flex-col h-full shadow-sm border bg-card text-card-foreground rounded-xl overflow-hidden">
-      <CardHeader className="space-y-3 p-4 sm:p-6 border-b bg-muted/30">
-        <div className="flex justify-between items-center gap-2">
-            <div className="flex items-center gap-3 min-w-0">
-                <Link href={`/users/${opponent?.userId || ''}`} className="shrink-0">
-                    <Avatar className="h-10 w-10 border"><AvatarImage src={opponent?.photoURL} /><AvatarFallback><DefaultAvatar /></AvatarFallback></Avatar>
+    <Card className="flex flex-col h-full shadow-none border-0 rounded-none bg-card text-card-foreground">
+      <CardHeader className="space-y-3 border-b border-border/60 p-4">
+        <div className="flex justify-between items-center">
+          <div className="flex items-center gap-3">
+            <Link href={`/users/${opponentUsername}`}>
+              <Avatar className="h-10 w-10 border border-primary/20">
+                <AvatarImage src={opponentPhoto} alt={opponentUsername} />
+                <AvatarFallback className="bg-primary/10 text-primary font-bold">
+                  <DefaultAvatar />
+                </AvatarFallback>
+              </Avatar>
+            </Link>
+            <div>
+              <div className="flex items-center gap-1.5">
+                <Link href={`/users/${opponentUsername}`} className="font-bold text-sm text-foreground hover:underline">
+                  @{opponentUsername}
                 </Link>
-                <div className="min-w-0">
-                    <div className="flex items-center gap-1.5 flex-wrap">
-                        <Link href={`/users/${opponent?.userId || ''}`} className="font-semibold text-sm hover:underline truncate">{opponent?.userId}</Link>
-                        {opponent?.country && <FlagIcon countryCode={opponent.country} />}
-                        <Button variant="ghost" size="icon" onClick={onInfoClick} className="h-6 w-6 ml-1"><InfoIcon className="h-4 w-4" /></Button>
-                    </div>
-                     <div className="flex items-center gap-1.5 mt-0.5">
-                        <div className={cn('h-2 w-2 rounded-full shrink-0', activity.dotClass)} />
-                        <p className={cn("text-xs truncate", activity.textClass)}>
-                            {activity.text}
-                        </p>
-                    </div>
-                </div>
+                {opponent?.country && <FlagIcon countryCode={opponent.country} />}
+                <Button variant="ghost" size="icon" onClick={onInfoClick} className="h-6 w-6 text-primary hover:text-primary">
+                  <InfoIcon className="h-4 w-4" />
+                </Button>
+              </div>
+              <div className="flex items-center gap-2 mt-0.5">
+                <div className={cn('h-2 w-2 rounded-full', activity.dotClass)} />
+                <p className={cn('text-xs font-medium', activity.textClass)}>{activity.text}</p>
+              </div>
             </div>
-            <div className="text-right shrink-0">
-                <div className="flex items-center gap-3 text-xs justify-end">
-                    <span className="flex items-center gap-1 text-emerald-600 dark:text-emerald-400"><ThumbsUp className="h-3.5 w-3.5" />{opponent?.positiveFeedback || 0}</span>
-                    <span className="flex items-center gap-1 text-destructive"><ThumbsDown className="h-3.5 w-3.5" />{opponent?.negativeFeedback || 0}</span>
-                </div>
-                <div className="text-xs font-semibold font-mono flex items-center gap-1 justify-end mt-1 text-muted-foreground"><Clock className="h-3.5 w-3.5" />{stopwatch}</div>
+          </div>
+
+          <div className="text-right">
+            <div className="flex items-center gap-3 text-xs justify-end font-semibold">
+              <div className="flex items-center gap-1 text-emerald-600 dark:text-emerald-400">
+                <ThumbsUp className="h-3.5 w-3.5" />
+                <span>{positiveFeedback}</span>
+              </div>
+              <div className="flex items-center gap-1 text-destructive">
+                <ThumbsDown className="h-3.5 w-3.5" />
+                <span>{negativeFeedback}</span>
+              </div>
             </div>
+            <div className="text-xs font-semibold font-mono flex items-center gap-1.5 justify-end mt-1 text-primary">
+              <Clock className="h-3.5 w-3.5" />
+              {stopwatch}
+            </div>
+          </div>
         </div>
+
         <TradeSummaryBar trade={trade} currentUserRole={isBuyer ? 'buy' : 'sell'} />
       </CardHeader>
-      
-      <CardContent className="flex-1 overflow-hidden p-3 sm:p-4 min-h-0 bg-background/50">
+
+      {/* Independent Scrollable Chat Area */}
+      <CardContent className="flex-1 overflow-hidden p-4 min-h-0">
         <ScrollArea className="h-full pr-3" ref={scrollAreaRef}>
-          <div className="space-y-3">
+          <div className="space-y-4">
             <TradeInstructions trade={trade} isBuyer={isBuyer} />
+
             {sellerTerms && (
-              <SystemMessage title="Seller's Terms & Conditions" timestamp={trade.createdAt} variant="warning">
+              <SystemMessage title="Seller's Terms & Conditions" timestamp={trade?.createdAt || trade?.created_at}>
                 <p className="whitespace-pre-wrap">{sellerTerms}</p>
               </SystemMessage>
             )}
+
             {areMessagesLoading ? (
-                <div className="space-y-3 py-4">
-                    <Skeleton className="h-16 w-3/4 rounded-lg" />
-                    <Skeleton className="h-12 w-1/2 ml-auto rounded-lg" />
-                </div>
+              <div className="space-y-3">
+                <Skeleton className="h-14 w-3/4" />
+                <Skeleton className="h-14 w-3/4 ml-auto" />
+              </div>
             ) : (
               <div className="space-y-3">
                 {displayMessages.map((msg) => {
-                  if (msg.senderId === 'system' || !msg.senderId) {
-                    if (msg.message.includes("disputed")) {
-                      return <SystemMessage key={msg.id} title="Trade is disputed. A moderator will join the chat shortly." timestamp={msg.createdAt} variant="destructive">{msg.message}</SystemMessage>;
+                  if (msg.senderId === 'system') {
+                    const text = msg.message || '';
+                    if (text.includes('positive feedback')) {
+                      return (
+                        <SystemMessage key={msg.id} title="🌟 Positive Feedback Received" timestamp={msg.createdAt} variant="success">
+                          {text}
+                        </SystemMessage>
+                      );
                     }
-                    if (msg.message.includes("The trade is complete")) {
-                      return <SystemMessage key={msg.id} title="Trade Completed" timestamp={msg.createdAt} variant="success"><p>{msg.message}</p></SystemMessage>;
+                    if (text.includes('negative feedback')) {
+                      return (
+                        <SystemMessage key={msg.id} title="👎 Negative Feedback Received" timestamp={msg.createdAt} variant="destructive">
+                          {text}
+                        </SystemMessage>
+                      );
                     }
-                    if (msg.message.toLowerCase().includes("cancelled") || msg.message.toLowerCase().includes("expired")) {
-                      return <SystemMessage key={msg.id} title="Trade Cancelled" timestamp={msg.createdAt} variant="destructive">{msg.message}</SystemMessage>;
+                    if (text.includes('feedback')) {
+                      return (
+                        <SystemMessage key={msg.id} title="🌟 Trade Feedback" timestamp={msg.createdAt} variant="success">
+                          {text}
+                        </SystemMessage>
+                      );
                     }
-                    if (msg.message.includes("Buyer has marked the trade as Paid")) {
-                      return <SystemMessage key={msg.id} title="Buyer has marked the trade as Paid." timestamp={msg.createdAt} variant="success">{msg.message}</SystemMessage>;
+                    if (text.includes('reported an issue') || text.includes('Issue Reported') || text.includes('dispute') || text.includes('disputed')) {
+                      return (
+                        <SystemMessage key={msg.id} title="⚠️ Issue / Dispute Notice" timestamp={msg.createdAt} variant="warning">
+                          {text}
+                        </SystemMessage>
+                      );
                     }
-                    if (msg.message.includes("Dispute resolved")) {
-                      return <SystemMessage key={msg.id} title="Dispute Resolved" timestamp={msg.createdAt} variant="default">{msg.message}</SystemMessage>;
+                    if (text.includes('complete') || text.includes('released')) {
+                      return (
+                        <SystemMessage key={msg.id} title="✅ Trade Completed" timestamp={msg.createdAt} variant="success">
+                          {text}
+                        </SystemMessage>
+                      );
                     }
-                    return <SystemMessage key={msg.id} title="System Message" timestamp={msg.createdAt}>{msg.message}</SystemMessage>;
+                    if (text.toLowerCase().includes('cancelled') || text.toLowerCase().includes('expired')) {
+                      return (
+                        <SystemMessage key={msg.id} title="❌ Trade Cancelled" timestamp={msg.createdAt} variant="destructive">
+                          {text}
+                        </SystemMessage>
+                      );
+                    }
+                    if (text.includes('Paid')) {
+                      return (
+                        <SystemMessage key={msg.id} title="💵 Marked as Paid" timestamp={msg.createdAt} variant="info">
+                          {text}
+                        </SystemMessage>
+                      );
+                    }
+                    return (
+                      <SystemMessage key={msg.id} title="System Message" timestamp={msg.createdAt}>
+                        {text}
+                      </SystemMessage>
+                    );
                   }
 
                   const isCurrentUser = msg.senderId === currentUserId;
-                  let senderName: string | React.ReactNode = isCurrentUser ? 'You' : opponent?.userId || 'Opponent';
-                  if (msg.isModerator) senderName = 'Moderator';
-                  
-                  const senderAvatar = isCurrentUser 
-                    ? null 
-                    : msg.isModerator 
-                      ? <Avatar className="h-7 w-7 border"><AvatarFallback className="bg-transparent"><Logo /></AvatarFallback></Avatar> 
-                      : <Avatar className="h-7 w-7 border"><AvatarImage src={opponent?.photoURL} /><AvatarFallback>{opponent?.userId?.substring(0, 2)}</AvatarFallback></Avatar>;
+                  const isModeratorOnly = msg.visibility === 'moderator_only';
+                  const canViewModeratorFile = isAdmin || isCurrentUser;
+
+                  let senderDisplayName = isCurrentUser ? 'You' : `@${opponentUsername}`;
+                  if (msg.isModerator) senderDisplayName = 'Pax Moderator';
 
                   return (
                     <div key={msg.id} className={cn('flex items-end gap-2', isCurrentUser ? 'justify-end' : 'justify-start')}>
-                      {!isCurrentUser && (<div className="self-end mb-1">{senderAvatar}</div>)}
-                      <div className={cn(
-                          'max-w-[80%] sm:max-w-[70%] rounded-2xl px-3.5 py-2.5 text-xs sm:text-sm flex flex-col items-start gap-1 shadow-sm',
-                          isCurrentUser && !msg.isModerator && 'bg-primary text-primary-foreground rounded-br-none',
-                          !isCurrentUser && !msg.isModerator && 'bg-muted text-muted-foreground rounded-bl-none',
-                          msg.isModerator && 'bg-blue-50 border border-blue-200 text-blue-900 dark:bg-blue-950/50 dark:border-blue-800/50 dark:text-blue-200 w-full'
-                      )}>
-                        <p className={cn("font-bold text-[10px] opacity-80", isCurrentUser && !msg.isModerator && "text-primary-foreground/90")}>{senderName}</p>
-                        {msg.message && <p className="whitespace-pre-wrap break-words w-full">{msg.message}</p>}
-                        {msg.mediaUrl && msg.mediaType === 'image' && (
-                            <a href={msg.mediaUrl} target="_blank" rel="noopener noreferrer" className="mt-1 block">
-                                <Image src={msg.mediaUrl} alt="Uploaded attachment" width={200} height={200} className="rounded-lg max-w-full h-auto border object-cover" />
-                            </a>
+                      {!isCurrentUser && (
+                        <Avatar className="h-7 w-7 shrink-0 border border-border">
+                          {msg.isModerator ? (
+                            <AvatarFallback className="bg-primary/20 text-primary text-xs font-bold">MOD</AvatarFallback>
+                          ) : (
+                            <>
+                              <AvatarImage src={opponentPhoto} />
+                              <AvatarFallback className="text-[10px]">{opponentUsername?.substring(0, 2)}</AvatarFallback>
+                            </>
+                          )}
+                        </Avatar>
+                      )}
+
+                      <div
+                        className={cn(
+                          'max-w-[80%] rounded-2xl p-3 text-xs sm:text-sm flex flex-col gap-1 shadow-2xs',
+                          isCurrentUser && !msg.isModerator && 'bg-primary text-primary-foreground rounded-br-xs',
+                          !isCurrentUser && !msg.isModerator && 'bg-muted text-foreground rounded-bl-xs',
+                          msg.isModerator && 'bg-amber-500/10 border border-amber-500/30 text-amber-900 dark:text-amber-200'
                         )}
-                        {msg.mediaUrl && (msg.mediaType === 'video' || msg.mediaType === 'audio' || msg.mediaType === undefined) && (
-                            <a href={msg.mediaUrl} target="_blank" rel="noopener noreferrer" className="text-current underline font-medium mt-1">View Attached File</a>
+                      >
+                        <div className="flex items-center justify-between gap-3">
+                          <p className="font-bold text-[11px] opacity-90">{senderDisplayName}</p>
+                          {isModeratorOnly && (
+                            <span className="inline-flex items-center gap-1 text-[10px] font-bold px-1.5 py-0.5 rounded-sm bg-destructive/10 text-destructive border border-destructive/20">
+                              <Lock className="h-2.5 w-2.5" /> Moderator Only
+                            </span>
+                          )}
+                        </div>
+
+                        {msg.message && <p className="whitespace-pre-wrap leading-relaxed">{msg.message}</p>}
+
+                        {/* Media attachments */}
+                        {msg.mediaUrl && (
+                          <div className="mt-1">
+                            {isModeratorOnly && !canViewModeratorFile ? (
+                              <div className="p-2.5 rounded-lg bg-background/50 border border-border/60 text-xs flex items-center gap-2 text-muted-foreground">
+                                <Lock className="h-4 w-4 text-destructive" />
+                                <span>Private evidence submitted to Moderator</span>
+                              </div>
+                            ) : msg.mediaType === 'image' ? (
+                              <a href={msg.mediaUrl} target="_blank" rel="noopener noreferrer" className="block mt-1">
+                                <Image
+                                  src={msg.mediaUrl}
+                                  alt="Trade Media"
+                                  width={240}
+                                  height={240}
+                                  className="rounded-lg object-cover max-h-56 w-auto border border-border/40"
+                                />
+                              </a>
+                            ) : msg.mediaType === 'video' ? (
+                              <div className="mt-1">
+                                <video controls className="max-h-56 rounded-lg w-full" src={msg.mediaUrl} />
+                              </div>
+                            ) : (
+                              <a
+                                href={msg.mediaUrl}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="inline-flex items-center gap-2 p-2 rounded-lg bg-background/40 hover:bg-background/80 border text-xs font-semibold underline mt-1"
+                              >
+                                <FileText className="h-4 w-4" />
+                                View Attached Document
+                              </a>
+                            )}
+                          </div>
                         )}
-                        <p className={cn("text-[10px] mt-1 opacity-70 text-right w-full", isCurrentUser && !msg.isModerator && "text-primary-foreground/70")}>
-                            {toDate(msg.createdAt)?.toLocaleString('default', { dateStyle: 'short', timeStyle: 'short' }) ?? 'sending...'}
+
+                        <p className="text-[10px] font-mono opacity-70 text-right w-full mt-0.5">
+                          {toDate(msg.createdAt)?.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                         </p>
                       </div>
                     </div>
@@ -366,25 +668,102 @@ export function TradeChat({ currentUserId, trade, opponent, isAdmin, sellerTerms
         </ScrollArea>
       </CardContent>
 
-      <CardFooter className="p-3 sm:p-4 border-t bg-muted/20">
-        <form onSubmit={handleSendMessage} className="flex w-full items-center gap-2">
-            <input type="file" ref={fileInputRef} className="hidden" onChange={handleFileChange} accept="image/*,video/*,application/pdf" />
-            <Button variant="outline" size="icon" type="button" onClick={() => fileInputRef.current?.click()} disabled={isUploading} className="shrink-0 rounded-full h-9 w-9">
-              {isUploading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
-            </Button>
-            <Input 
-                value={newMessage} 
-                onChange={(e) => setNewMessage(e.target.value)} 
-                placeholder="Write a message..." 
-                autoComplete="off" 
-                disabled={isUploading} 
-                className="flex-1 rounded-full text-xs sm:text-sm bg-background"
-            />
-            <Button type="submit" size="icon" disabled={isUploading || !newMessage.trim()} className="shrink-0 rounded-full h-9 w-9">
-              <Send className="h-4 w-4" /><span className="sr-only">Send</span>
-            </Button>
+      <CardFooter className="border-t border-border/60 p-3">
+        <form onSubmit={handleSendMessage} className="flex w-full items-center space-x-2">
+          <input
+            type="file"
+            ref={fileInputRef}
+            className="hidden"
+            onChange={handleFileSelect}
+            accept="image/*,video/*,application/pdf,.doc,.docx"
+          />
+          <Button
+            variant="ghost"
+            size="icon"
+            type="button"
+            onClick={() => fileInputRef.current?.click()}
+            disabled={isUploading}
+            className="text-muted-foreground hover:text-foreground shrink-0"
+          >
+            {isUploading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Paperclip className="h-4 w-4" />}
+          </Button>
+          <Input
+            value={newMessage}
+            onChange={(e) => setNewMessage(e.target.value)}
+            placeholder="Write a message in escrow room..."
+            autoComplete="off"
+            disabled={isUploading}
+            className="text-xs sm:text-sm"
+          />
+          <Button type="submit" size="icon" disabled={isUploading || !newMessage.trim()} className="shrink-0 font-bold">
+            <Send className="h-4 w-4" />
+          </Button>
         </form>
       </CardFooter>
+
+      {/* Dispute Media Privacy Selection Modal */}
+      <Dialog open={isPrivacyModalOpen} onOpenChange={setIsPrivacyModalOpen}>
+        <DialogContent className="sm:max-w-md bg-card border-border">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-sm font-bold">
+              <ShieldCheck className="h-5 w-5 text-primary" />
+              Dispute Evidence Privacy
+            </DialogTitle>
+            <DialogDescription className="text-xs">
+              This trade is currently in dispute. Who should be allowed to view this attachment?
+            </DialogDescription>
+          </DialogHeader>
+
+          <RadioGroup
+            value={disputeVisibility}
+            onValueChange={(val: any) => setDisputeVisibility(val)}
+            className="space-y-2.5 py-2"
+          >
+            <div className="flex items-center space-x-3 p-3 rounded-xl border border-border bg-muted/20 cursor-pointer">
+              <RadioGroupItem value="all" id="opt-all" />
+              <Label htmlFor="opt-all" className="cursor-pointer text-xs font-semibold">
+                <div className="text-foreground">Moderator and Counterparty</div>
+                <div className="text-[11px] text-muted-foreground font-normal">
+                  Visible to both you, your trading partner, and the Pax escrow mediator.
+                </div>
+              </Label>
+            </div>
+
+            <div className="flex items-center space-x-3 p-3 rounded-xl border border-destructive/30 bg-destructive/5 cursor-pointer">
+              <RadioGroupItem value="moderator_only" id="opt-mod" />
+              <Label htmlFor="opt-mod" className="cursor-pointer text-xs font-semibold">
+                <div className="text-destructive flex items-center gap-1.5">
+                  <Lock className="h-3.5 w-3.5" /> Only Moderator (Private Evidence)
+                </div>
+                <div className="text-[11px] text-muted-foreground font-normal">
+                  Your counterparty cannot view or open this file. Only the mediator can review it.
+                </div>
+              </Label>
+            </div>
+          </RadioGroup>
+
+          <DialogFooter className="gap-2">
+            <Button variant="ghost" size="sm" onClick={() => setIsPrivacyModalOpen(false)}>
+              Cancel
+            </Button>
+            <Button
+              size="sm"
+              onClick={() => {
+                if (pendingUploadFile) {
+                  processAndUploadFile(pendingUploadFile, disputeVisibility);
+                }
+              }}
+              disabled={isUploading}
+            >
+              {isUploading ? <Loader2 className="h-4 w-4 animate-spin mr-1.5" /> : null}
+              Upload to Backblaze B2
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </Card>
   );
 }
+
+export { TradeChat as TradeChatSupabase };
+export default TradeChat;

@@ -108,3 +108,5 @@ export function AdminActionDialog({ open, onOpenChange, user, action, onConfirm 
     </Dialog>
   );
 }
+
+export default AdminActionDialog;

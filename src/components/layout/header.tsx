@@ -32,6 +32,7 @@ import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar';
 import { DefaultAvatar } from '@/components/icons';
 import { Skeleton } from '@/components/ui/skeleton';
 import { getPublicHandle } from '@/utils/userPrivacy';
+import { NotificationBell } from '@/components/notifications/notification-bell';
 
 
 const mobileNavLinks = [
@@ -227,6 +228,7 @@ export function Header() {
         </div>
 
         <div className="flex items-center gap-2">
+            {user && <NotificationBell />}
             <ModeToggle />
              <DropdownMenu>
               <DropdownMenuTrigger asChild>
