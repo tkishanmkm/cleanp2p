@@ -2,7 +2,20 @@
 
 import React, { useState, useEffect, useCallback } from 'react';
 import { useParams } from 'next/navigation';
-import { Star, Lock, Unlock, ThumbsUp, ThumbsDown, Loader2 } from 'lucide-react';
+import { 
+  Star, 
+  Lock, 
+  Unlock, 
+  ThumbsUp, 
+  ThumbsDown, 
+  Loader2, 
+  CheckCircle2, 
+  ShieldCheck, 
+  MailCheck, 
+  MessageSquare,
+  Clock,
+  UserCheck
+} from 'lucide-react';
 import { supabase } from '@/lib/supabase/client';
 import type { P2PAd, CryptoCurrency } from '@/lib/types';
 import { AdCard } from '@/components/p2p/ad-card';
@@ -18,6 +31,8 @@ export default function PublicUserProfile() {
   const [blockLoading, setBlockLoading] = useState(false);
   const [ads, setAds] = useState<P2PAd[]>([]);
   const [adsLoading, setAdsLoading] = useState(false);
+  const [feedbacks, setFeedbacks] = useState<any[]>([]);
+  const [feedbackTab, setFeedbackTab] = useState<'received' | 'given'>('received');
 
   const loadData = useCallback(async () => {
     if (!username) return;
@@ -66,6 +81,29 @@ export default function PublicUserProfile() {
             setAds(mapped);
           }
           setAdsLoading(false);
+
+          // Fetch user feedback
+          const { data: fbData } = await supabase
+            .from('trade_feedback')
+            .select(`
+              id,
+              trade_id,
+              reviewer_id,
+              reviewee_id,
+              rating,
+              feedback_type,
+              comment,
+              created_at,
+              reviewer:profiles!trade_feedback_reviewer_id_fkey(username, avatar_url),
+              reviewee:profiles!trade_feedback_reviewee_id_fkey(username, avatar_url)
+            `)
+            .or(`reviewee_id.eq.${data.profile.id},reviewer_id.eq.${data.profile.id}`)
+            .order('created_at', { ascending: false })
+            .limit(20);
+
+          if (fbData) {
+            setFeedbacks(fbData);
+          }
         }
       }
     } catch (err) {
@@ -103,7 +141,7 @@ export default function PublicUserProfile() {
   if (loading) {
     return (
       <div className="min-h-[50vh] flex flex-col items-center justify-center gap-3">
-        <Loader2 className="h-8 w-8 text-indigo-500 animate-spin" />
+        <Loader2 className="h-8 w-8 text-amber-500 animate-spin" />
         <p className="text-sm text-slate-400 font-medium">Loading profile...</p>
       </div>
     );
@@ -118,12 +156,19 @@ export default function PublicUserProfile() {
     );
   }
 
+  const isEmailVerified = Boolean(profile.is_email_verified ?? true);
+  const isIdVerified = Boolean(profile.is_id_verified || profile.kyc_status === 'VERIFIED' || profile.verification_tier === 2);
+
+  const receivedFeedbacks = feedbacks.filter((f) => f.reviewee_id === profile.id);
+  const givenFeedbacks = feedbacks.filter((f) => f.reviewer_id === profile.id);
+  const displayedFeedbacks = feedbackTab === 'received' ? receivedFeedbacks : givenFeedbacks;
+
   return (
     <div className="max-w-5xl mx-auto p-4 sm:p-6 lg:p-8 space-y-8">
       {/* Profile Header Card */}
-      <div className="p-6 sm:p-8 rounded-3xl bg-slate-900 border border-slate-800 shadow-2xl flex flex-col md:flex-row items-center justify-between gap-6">
+      <div className="p-6 sm:p-8 rounded-3xl bg-white dark:bg-[#0f1423] border border-slate-200 dark:border-[#1e2640] shadow-xl flex flex-col md:flex-row items-center justify-between gap-6">
         <div className="flex items-center gap-5">
-          <div className="relative h-20 w-20 rounded-2xl overflow-hidden bg-gradient-to-tr from-indigo-600 to-violet-600 flex items-center justify-center font-bold text-white text-3xl shadow-lg shrink-0 border border-slate-700">
+          <div className="relative h-20 w-20 rounded-2xl overflow-hidden bg-gradient-to-tr from-amber-500 to-amber-600 flex items-center justify-center font-bold text-white text-3xl shadow-lg shrink-0 border border-slate-200 dark:border-slate-700">
             {profile.avatar_url || profile.photo_url ? (
               <img
                 src={profile.avatar_url || profile.photo_url || `/api/media/avatar/${profile.id}`}
@@ -137,22 +182,48 @@ export default function PublicUserProfile() {
               <span>{(profile.username || 'U').charAt(0).toUpperCase()}</span>
             )}
           </div>
-          <div className="space-y-1">
-            <div className="flex items-center gap-3">
-              <h1 className="text-2xl font-extrabold text-white">@{profile.username}</h1>
-              <span className="px-2.5 py-0.5 rounded-full bg-indigo-500/10 border border-indigo-500/30 text-indigo-400 text-xs font-semibold">
-                {profile.preferred_currency || 'USD'}
+          <div className="space-y-1.5">
+            <div className="flex flex-wrap items-center gap-2.5">
+              <h1 className="text-2xl font-extrabold text-slate-900 dark:text-white">@{profile.username}</h1>
+              <span className="px-2.5 py-0.5 rounded-full bg-amber-500/10 border border-amber-500/30 text-amber-600 dark:text-amber-400 text-xs font-semibold">
+                {profile.preferred_currency || profile.preferred_fiat || 'USD'}
               </span>
             </div>
-            <p className="text-xs text-slate-400">
-              Joined {profile.created_at ? new Date(profile.created_at).toLocaleDateString() : 'Recently'}
+
+            {/* Verification Badges */}
+            <div className="flex flex-wrap items-center gap-2 pt-0.5">
+              {isEmailVerified && (
+                <span className="inline-flex items-center gap-1 text-[11px] font-semibold px-2 py-0.5 rounded-md bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">
+                  <MailCheck className="h-3 w-3" />
+                  Email Verified
+                </span>
+              )}
+              {isIdVerified ? (
+                <span className="inline-flex items-center gap-1 text-[11px] font-semibold px-2 py-0.5 rounded-md bg-blue-500/10 text-blue-600 dark:text-blue-400 border border-blue-500/20">
+                  <ShieldCheck className="h-3 w-3" />
+                  ID Verified
+                </span>
+              ) : (
+                <span className="inline-flex items-center gap-1 text-[11px] font-medium px-2 py-0.5 rounded-md bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400">
+                  Tier 1 Trader
+                </span>
+              )}
+            </div>
+
+            <p className="text-xs text-slate-500 dark:text-slate-400 pt-0.5">
+              Member since {profile.created_at ? new Date(profile.created_at).toLocaleDateString() : 'Recently'}
             </p>
 
-            <div className="pt-2">
-              {blockStatus === 'NOT_BLOCKED' && <span className="text-xs text-slate-500">Status: Not Blocked</span>}
-              {blockStatus === 'YOU_BLOCKED_THIS_USER' && <span className="text-xs text-amber-400 font-semibold">You Blocked This User</span>}
-              {blockStatus === 'THIS_USER_BLOCKED_YOU' && <span className="text-xs text-amber-400 font-semibold">This User Blocked You</span>}
-              {blockStatus === 'BLOCKED_BOTH_WAYS' && <span className="text-xs text-rose-400 font-semibold">Blocked Both Ways</span>}
+            <div className="pt-1">
+              {blockStatus === 'YOU_BLOCKED_THIS_USER' && (
+                <span className="text-xs text-amber-500 font-semibold bg-amber-500/10 px-2 py-0.5 rounded">You Blocked This User</span>
+              )}
+              {blockStatus === 'THIS_USER_BLOCKED_YOU' && (
+                <span className="text-xs text-amber-500 font-semibold bg-amber-500/10 px-2 py-0.5 rounded">This User Blocked You</span>
+              )}
+              {blockStatus === 'BLOCKED_BOTH_WAYS' && (
+                <span className="text-xs text-rose-500 font-semibold bg-rose-500/10 px-2 py-0.5 rounded">Blocked Both Ways</span>
+              )}
             </div>
           </div>
         </div>
@@ -163,8 +234,8 @@ export default function PublicUserProfile() {
           disabled={blockLoading}
           className={`px-6 py-3 rounded-xl font-semibold text-xs flex items-center gap-2 transition-all cursor-pointer ${
             blockStatus === 'YOU_BLOCKED_THIS_USER' || blockStatus === 'BLOCKED_BOTH_WAYS'
-              ? 'bg-slate-800 hover:bg-slate-700 text-white'
-              : 'bg-rose-600/20 hover:bg-rose-600/30 text-rose-400 border border-rose-500/30'
+              ? 'bg-slate-800 hover:bg-slate-700 text-white shadow-sm'
+              : 'bg-rose-500/10 hover:bg-rose-500/20 text-rose-600 dark:text-rose-400 border border-rose-500/30'
           }`}
         >
           {blockLoading ? (
@@ -179,40 +250,40 @@ export default function PublicUserProfile() {
 
       {/* Stats Cards */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-        <div className="p-5 rounded-2xl bg-slate-900 border border-slate-800 text-center space-y-1">
-          <p className="text-xs text-slate-400">Overall Rating</p>
-          <p className="text-2xl font-black text-amber-400 flex items-center justify-center gap-1">
-            <Star className="h-5 w-5 fill-amber-400" /> {typeof profile.rating === 'number' ? profile.rating.toFixed(1) : (profile.rating || '5.0')}
+        <div className="p-5 rounded-2xl bg-white dark:bg-[#0f1423] border border-slate-200 dark:border-[#1e2640] text-center space-y-1">
+          <p className="text-xs text-slate-500 dark:text-slate-400">Overall Rating</p>
+          <p className="text-2xl font-black text-amber-500 flex items-center justify-center gap-1">
+            <Star className="h-5 w-5 fill-amber-500" /> {typeof profile.rating === 'number' ? profile.rating.toFixed(1) : (profile.rating || '5.0')}
           </p>
         </div>
-        <div className="p-5 rounded-2xl bg-slate-900 border border-slate-800 text-center space-y-1">
-          <p className="text-xs text-slate-400">Completed Trades</p>
-          <p className="text-2xl font-black text-white">{profile.completed_trades || 0}</p>
+        <div className="p-5 rounded-2xl bg-white dark:bg-[#0f1423] border border-slate-200 dark:border-[#1e2640] text-center space-y-1">
+          <p className="text-xs text-slate-500 dark:text-slate-400">Completed Trades</p>
+          <p className="text-2xl font-black text-slate-900 dark:text-white">{profile.completed_trades || 0}</p>
         </div>
-        <div className="p-5 rounded-2xl bg-slate-900 border border-slate-800 text-center space-y-1">
-          <p className="text-xs text-slate-400">Positive Feedback</p>
-          <p className="text-2xl font-black text-emerald-400">{profile.positive_feedback_pct ?? 100}%</p>
+        <div className="p-5 rounded-2xl bg-white dark:bg-[#0f1423] border border-slate-200 dark:border-[#1e2640] text-center space-y-1">
+          <p className="text-xs text-slate-500 dark:text-slate-400">Positive Feedback</p>
+          <p className="text-2xl font-black text-emerald-600 dark:text-emerald-400">{profile.positive_feedback_pct ?? 100}%</p>
         </div>
-        <div className="p-5 rounded-2xl bg-slate-900 border border-slate-800 text-center space-y-1">
-          <p className="text-xs text-slate-400">Default Currency</p>
-          <p className="text-2xl font-black text-indigo-400">{profile.preferred_currency || 'USD'}</p>
+        <div className="p-5 rounded-2xl bg-white dark:bg-[#0f1423] border border-slate-200 dark:border-[#1e2640] text-center space-y-1">
+          <p className="text-xs text-slate-500 dark:text-slate-400">Default Currency</p>
+          <p className="text-2xl font-black text-slate-900 dark:text-white">{profile.preferred_currency || profile.preferred_fiat || 'USD'}</p>
         </div>
       </div>
 
       {/* Active Listings Section */}
       <div className="space-y-4 pt-2">
-        <div className="flex items-center justify-between border-b border-border/40 pb-3">
-          <h2 className="text-lg font-bold text-foreground">
+        <div className="flex items-center justify-between border-b border-slate-200 dark:border-[#1e2640] pb-3">
+          <h2 className="text-lg font-bold text-slate-900 dark:text-white">
             Active Offers by @{profile.username}
           </h2>
-          <span className="text-xs text-muted-foreground font-mono">
+          <span className="text-xs text-slate-500 font-mono">
             {ads.length} {ads.length === 1 ? 'offer' : 'offers'} active
           </span>
         </div>
 
         {adsLoading ? (
           <div className="py-8 flex justify-center">
-            <Loader2 className="h-6 w-6 text-indigo-500 animate-spin" />
+            <Loader2 className="h-6 w-6 text-amber-500 animate-spin" />
           </div>
         ) : ads.length > 0 ? (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -221,8 +292,82 @@ export default function PublicUserProfile() {
             ))}
           </div>
         ) : (
-          <div className="p-8 text-center rounded-2xl bg-card border border-border text-muted-foreground text-sm">
+          <div className="p-8 text-center rounded-2xl bg-white dark:bg-[#0f1423] border border-slate-200 dark:border-[#1e2640] text-slate-500 text-sm">
             This user does not currently have any active public buy or sell offers.
+          </div>
+        )}
+      </div>
+
+      {/* Trader Feedback Section */}
+      <div className="space-y-4 pt-4">
+        <div className="flex items-center justify-between border-b border-slate-200 dark:border-[#1e2640] pb-3">
+          <h2 className="text-lg font-bold text-slate-900 dark:text-white flex items-center gap-2">
+            <MessageSquare className="h-5 w-5 text-amber-500" />
+            <span>Trader Reviews & Feedback</span>
+          </h2>
+
+          <div className="flex items-center gap-1 bg-slate-100 dark:bg-slate-800 p-1 rounded-xl text-xs">
+            <button
+              type="button"
+              onClick={() => setFeedbackTab('received')}
+              className={`px-3 py-1 rounded-lg font-semibold transition-all cursor-pointer ${
+                feedbackTab === 'received' 
+                  ? 'bg-white dark:bg-[#0f1423] text-slate-900 dark:text-white shadow-sm' 
+                  : 'text-slate-500 hover:text-slate-900 dark:hover:text-white'
+              }`}
+            >
+              Received ({receivedFeedbacks.length})
+            </button>
+            <button
+              type="button"
+              onClick={() => setFeedbackTab('given')}
+              className={`px-3 py-1 rounded-lg font-semibold transition-all cursor-pointer ${
+                feedbackTab === 'given' 
+                  ? 'bg-white dark:bg-[#0f1423] text-slate-900 dark:text-white shadow-sm' 
+                  : 'text-slate-500 hover:text-slate-900 dark:hover:text-white'
+              }`}
+            >
+              Given ({givenFeedbacks.length})
+            </button>
+          </div>
+        </div>
+
+        {displayedFeedbacks.length === 0 ? (
+          <div className="p-8 text-center rounded-2xl bg-white dark:bg-[#0f1423] border border-slate-200 dark:border-[#1e2640] text-slate-500 text-sm">
+            No feedback entries found for this category.
+          </div>
+        ) : (
+          <div className="space-y-3">
+            {displayedFeedbacks.map((fb) => {
+              const counterparty = feedbackTab === 'received' ? fb.reviewer : fb.reviewee;
+              const isPositive = fb.feedback_type === 'POSITIVE' || (fb.rating && fb.rating >= 4);
+
+              return (
+                <div 
+                  key={fb.id} 
+                  className="p-4 rounded-2xl bg-white dark:bg-[#0f1423] border border-slate-200 dark:border-[#1e2640] flex items-start gap-3.5"
+                >
+                  <div className={`p-2 rounded-xl shrink-0 ${isPositive ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400' : 'bg-rose-500/10 text-rose-600 dark:text-rose-400'}`}>
+                    {isPositive ? <ThumbsUp className="h-4 w-4" /> : <ThumbsDown className="h-4 w-4" />}
+                  </div>
+
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center justify-between gap-2">
+                      <p className="text-xs font-bold text-slate-900 dark:text-white">
+                        @{counterparty?.username || 'Trader'}
+                      </p>
+                      <span className="text-[10px] text-slate-400 font-mono">
+                        {fb.created_at ? new Date(fb.created_at).toLocaleDateString() : ''}
+                      </span>
+                    </div>
+
+                    <p className="text-xs text-slate-600 dark:text-slate-300 mt-1 leading-relaxed">
+                      {fb.comment || (isPositive ? 'Smooth and fast escrow trade.' : 'Trade dispute encountered.')}
+                    </p>
+                  </div>
+                </div>
+              );
+            })}
           </div>
         )}
       </div>

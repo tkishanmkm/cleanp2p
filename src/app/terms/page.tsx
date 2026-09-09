@@ -4,60 +4,92 @@ import Link from "next/link";
 
 export default function TermsPage() {
   return (
-    <div className="flex flex-col min-h-screen">
+    <div className="flex flex-col min-h-screen bg-background text-foreground">
       <Header />
-      <main className="flex-grow container mx-auto px-4 py-12 md:py-16">
-        <div className="prose dark:prose-invert max-w-4xl mx-auto">
-          <h1>Terms of Service</h1>
-          <p className="text-muted-foreground">Last updated: {new Date().toLocaleDateString()}</p>
+      <main className="flex-grow container mx-auto px-4 py-12 md:py-16 max-w-4xl">
+        <div className="prose dark:prose-invert max-w-none space-y-6">
+          <div className="border-b border-border pb-6">
+            <h1 className="text-3xl font-extrabold tracking-tight text-foreground mb-2">Terms of Service</h1>
+            <p className="text-sm text-muted-foreground">Effective Date: January 1, 2026 | Last Updated: September 9, 2026</p>
+          </div>
 
-          <section className="bg-destructive/10 p-6 rounded-lg border-l-4 border-destructive my-8">
-            <h2 className="text-destructive mt-0">Crucial Dispute Disclaimer</h2>
-            <p className="font-semibold">
-              Paxones is not responsible for the final result of any dispute. Dispute awards are granted solely at the discretion of our moderation team to the party that provides all requested evidence and cooperates fully with the investigation. If you lose any funds as a result of a trade or a dispute resolution, Paxones is not liable or responsible for those losses.
-            </p>
-          </section>
-
-          <h2>1. Introduction & Our Role</h2>
+          <h2>1. Introduction & Acceptance of Terms</h2>
           <p>
-            Welcome to Paxones! These Terms of Service ("Terms") govern your use of our peer-to-peer cryptocurrency
-            trading platform. By accessing or using our Services, you agree to be bound by these Terms.
-          </p>
-          <p>
-            <strong>Important Disclaimer:</strong> Paxones is a technology platform that connects users (buyers and sellers) for the purpose of executing peer-to-peer (P2P) transactions. We are not a party to any trade between users.
+            Welcome to <strong>Paxones™</strong> (&quot;Paxones&quot;, &quot;we&quot;, &quot;us&quot;, or &quot;our&quot;). Paxones operates a peer-to-peer (P2P) digital currency escrow trading marketplace accessible via our web and mobile applications. By creating an account, accessing, browsing, or utilizing any services provided by Paxones, you unconditionally agree to comply with and be legally bound by these Terms of Service and our Privacy Policy.
           </p>
 
-          <h2>2. General P2P Trading Rules</h2>
+          <h2>2. Eligibility & Identity Verification (KYC)</h2>
           <p>
-            All trades on Paxones are secured by our automated escrow system. You agree to communicate with other users professionally and to not engage in
-            any fraudulent or illegal activities. <strong>All communication and transactions must remain strictly on the Paxones platform.</strong>
+            To use Paxones, you must be at least 18 years of age and possess full legal capacity to enter into binding agreements. You agree to provide accurate, complete, and current information during registration.
           </p>
+          <ul>
+            <li>
+              <strong>Didit KYC Verification:</strong> Verification of your identity is powered by automated biometric and document verification engines. Upon successful KYC approval, your legal Full Name, Date of Birth (DOB), and country of origin are extracted directly from official government documents and permanently locked to your account profile to prevent account sharing, synthetic identity fraud, or unauthorized modification.
+            </li>
+            <li>
+              <strong>One Account Per Person:</strong> Each individual is permitted to maintain only one active Paxones account. Multi-accounting, account leasing, or operating accounts on behalf of unverified third parties is strictly prohibited.
+            </li>
+          </ul>
 
-          <h2>3. Dispute Resolution & Liability</h2>
+          <h2>3. Automated Escrow Protection Protocol</h2>
           <p>
-            In the event of a disagreement, our moderation team will intervene. Our decision is final and based on evidence provided within the trade chat. We do not guarantee any specific outcome and are not responsible for funds lost during trades.
+            All trades initiated on Paxones are protected by our cryptographic and custodial dual-ledger escrow system:
           </p>
+          <ul>
+            <li>
+              <strong>Seller Deposit Locking:</strong> When a trade is initiated, the designated amount of cryptocurrency is instantly deducted from the seller&apos;s available wallet balance and locked in platform escrow.
+            </li>
+            <li>
+              <strong>Escrow Fee:</strong> A standard platform escrow fee of 1.5% is calculated on the gross trade value upon successful settlement.
+            </li>
+            <li>
+              <strong>Buyer Payment Window:</strong> The buyer is allocated a specific time window to transfer the exact fiat payment using the payment method specified in the advertisement.
+            </li>
+            <li>
+              <strong>Fund Release:</strong> The seller is required to release the locked escrow funds immediately upon verifying receipt of cleared funds in their personal bank or payment account.
+            </li>
+          </ul>
 
-          <h2 id="how-to-trade">4. How to Trade: A Step-by-Step Guide</h2>
+          <h2>4. User Code of Conduct & Trading Rules</h2>
+          <p>To ensure a safe, fair, and reliable trading environment, all users must adhere to the following mandatory rules:</p>
           <ol>
-            <li><strong>Find an Advertisement:</strong> Browse the "Buy" or "Sell" pages to find a suitable match.</li>
-            <li><strong>Initiate the Trade:</strong> Enter the amount. The cryptocurrency is locked in our secure escrow.</li>
-            <li><strong>Communicate in Chat:</strong> Use the trade chat to provide or receive payment details.</li>
-            <li><strong>Payment (Buyer's Role):</strong> Send the agreed-upon amount within the time limit.</li>
-            <li><strong>Confirm Payment (Buyer's Role):</strong> Click the "Mark as Paid" button.</li>
-            <li><strong>Release Crypto (Seller's Role):</strong> Once payment is confirmed in your account, release the crypto.</li>
+            <li>
+              <strong>On-Platform Transactions Only:</strong> All trade-related communications, negotiation of terms, and payment confirmations must occur exclusively within the official Paxones trade room. Attempting to direct trade partners off-platform (e.g., Telegram, WhatsApp, email) is strictly prohibited and results in immediate account termination.
+            </li>
+            <li>
+              <strong>First-Party Payments:</strong> Payment must be sent from a bank or payment account registered in the exact legal name matching the user&apos;s verified Paxones profile. Third-party payments are forbidden.
+            </li>
+            <li>
+              <strong>Legitimate Proof of Payment:</strong> Uploading fraudulent, altered, or fabricated payment receipts, chargebacking legitimate fiat payments, or claiming false payment will result in permanent banning and referral to financial crime enforcement authorities.
+            </li>
+            <li>
+              <strong>Coin-Locking & Malicious Delays:</strong> Initiating trades without the intention or ability to complete payment, or intentionally stalling trade timers, is treated as market abuse.
+            </li>
           </ol>
 
-          <h2>5. Prohibited Conduct</h2>
-          <ul>
-            <li>Providing fake payment receipts or proof of payment.</li>
-            <li>Sharing contact information (phone numbers, social media handles) to move the trade off-platform.</li>
-            <li>Attempting to cheat or defraud other users or the platform.</li>
-            <li>Coercive behavior or harassment of trade partners or moderators.</li>
-          </ul>
-          
-          <div className="not-prose mt-8 border-t pt-8">
-            <p>If you have questions about these Terms, please <Link href="/contact" className="text-primary font-semibold underline">contact our support team</Link>.</p>
+          <h2>5. Internal User-to-User Transfers & Withdrawals</h2>
+          <p>
+            Internal user-to-user transfers on Paxones allow fast, zero-confirmation off-chain balance movement between registered usernames subject to the standard 1.5% internal transfer fee. External on-chain withdrawals are processed via multi-signature hot wallets and require Two-Factor Authentication (2FA) verification.
+          </p>
+
+          <h2>6. Account Security & Two-Factor Authentication (2FA)</h2>
+          <p>
+            You are solely responsible for maintaining the confidentiality of your credentials, password, TOTP authenticator secret keys, and backup codes. Paxones is not liable for unauthorized account access resulting from compromised user devices or phishing attacks.
+          </p>
+
+          <h2>7. Service Availability & Modifications</h2>
+          <p>
+            Paxones reserves the right to modify, suspend, or discontinue any aspect of our services, introduce rate limits, or adjust platform fee schedules with prior notice where practicable.
+          </p>
+
+          <div className="not-prose mt-10 border-t border-border pt-6 text-xs text-muted-foreground">
+            <p>
+              For legal inquiries or account support, contact our compliance team at{' '}
+              <a href="mailto:support@paxones.com" className="text-primary font-semibold underline">
+                support@paxones.com
+              </a>{' '}
+              or visit our <Link href="/support" className="text-primary font-semibold underline">Support Center</Link>.
+            </p>
           </div>
         </div>
       </main>
@@ -65,3 +97,4 @@ export default function TermsPage() {
     </div>
   );
 }
+

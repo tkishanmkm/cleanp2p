@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
-import { createClient } from '@/utils/supabase/server';
+import { createClient } from '@/lib/supabase/server';
 
 function getB2Client() {
   const endpoint = process.env.B2_ENDPOINT;
@@ -25,13 +25,14 @@ function getB2Client() {
 export async function POST(req: Request) {
   try {
     const supabase = await createClient();
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    const { data: { user }, error: authError } = await supabase.auth.getUser();
+    if (authError || !user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
-    const { category, fileExtension, contentType, isTxtData, txtContent } = await req.json();
-    const userId = user.id; // Unique Immutable ID (never public)
+    const { category, fileExtension, contentType, isTxtData, txtContent, tradeId } = await req.json();
+    const userId = user.id;
 
     let objectKey = '';
+    const isPrivateDocument = category === 'kyc-image' || category === 'kyc-data' || category === 'trade-attachment';
 
     if (category === 'avatar') {
       objectKey = `avatars/${userId}.${fileExtension || 'jpg'}`;
@@ -39,6 +40,9 @@ export async function POST(req: Request) {
       objectKey = `kyc-documents/${userId}.${fileExtension || 'jpg'}`;
     } else if (category === 'kyc-data') {
       objectKey = `kyc-documents/${userId}.txt`;
+    } else if (category === 'trade-attachment') {
+      const tradePrefix = tradeId ? `${tradeId}/` : '';
+      objectKey = `trades/${tradePrefix}${userId}-${Date.now()}.${fileExtension || 'jpg'}`;
     } else {
       objectKey = `misc/${userId}-${Date.now()}.${fileExtension || 'bin'}`;
     }
@@ -55,11 +59,14 @@ export async function POST(req: Request) {
         ContentType: 'text/plain',
       }));
 
-      const fileUrl = `${process.env.B2_ENDPOINT}/${bucketName}/${objectKey}`;
-      return NextResponse.json({ success: true, publicUrl: fileUrl, objectKey });
+      return NextResponse.json({
+        success: true,
+        objectKey,
+        isPrivate: isPrivateDocument,
+      });
     }
 
-    // Direct Pre-signed Upload URL for binary images
+    // Direct Pre-signed Upload URL for binary images (PUT)
     const command = new PutObjectCommand({
       Bucket: bucketName,
       Key: objectKey,
@@ -67,9 +74,14 @@ export async function POST(req: Request) {
     });
 
     const uploadUrl = await getSignedUrl(b2Client, command, { expiresIn: 900 });
-    const publicUrl = `${process.env.B2_ENDPOINT}/${bucketName}/${objectKey}`;
+    const publicUrl = isPrivateDocument ? undefined : `${process.env.B2_ENDPOINT}/${bucketName}/${objectKey}`;
 
-    return NextResponse.json({ uploadUrl, publicUrl, objectKey });
+    return NextResponse.json({
+      uploadUrl,
+      publicUrl,
+      objectKey,
+      isPrivate: isPrivateDocument,
+    });
   } catch (err: any) {
     console.error('Upload error:', err);
     return NextResponse.json({ error: err?.message || 'Unable to process upload.' }, { status: 500 });

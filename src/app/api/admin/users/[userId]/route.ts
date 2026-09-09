@@ -248,6 +248,92 @@ export async function POST(
       return NextResponse.json({ success: true, message: `Role updated to ${newRole}` });
     }
 
+    if (action === "reset_kyc") {
+      await supabase
+        .from("profiles")
+        .update({
+          kyc_status: "NOT_SUBMITTED",
+          kyc_attempts: 0,
+          is_id_verified: false,
+          verification_tier: 1,
+          kyc_vendor_session_id: null,
+          kyc_retry_after: null,
+        })
+        .eq("id", userId);
+
+      await supabase.from("admin_audit_logs").insert({
+        admin_email: adminEmail || "admin@paxones.com",
+        action: "RESET_USER_KYC",
+        target_user_id: userId,
+        details: { reset_at: new Date().toISOString() },
+      });
+
+      return NextResponse.json({ success: true, message: "KYC verification reset. User can submit documents again." });
+    }
+
+    if (action === "verify_kyc") {
+      await supabase
+        .from("profiles")
+        .update({
+          kyc_status: "VERIFIED",
+          is_id_verified: true,
+          verification_tier: 2,
+        })
+        .eq("id", userId);
+
+      await supabase.from("admin_audit_logs").insert({
+        admin_email: adminEmail || "admin@paxones.com",
+        action: "FORCE_VERIFY_KYC",
+        target_user_id: userId,
+        details: { verified_at: new Date().toISOString() },
+      });
+
+      return NextResponse.json({ success: true, message: "User KYC marked as Verified (Tier 2)." });
+    }
+
+    if (action === "unverify_kyc") {
+      await supabase
+        .from("profiles")
+        .update({
+          kyc_status: "UNVERIFIED",
+          is_id_verified: false,
+          verification_tier: 1,
+        })
+        .eq("id", userId);
+
+      await supabase.from("admin_audit_logs").insert({
+        admin_email: adminEmail || "admin@paxones.com",
+        action: "FORCE_UNVERIFY_KYC",
+        target_user_id: userId,
+        details: { unverified_at: new Date().toISOString() },
+      });
+
+      return NextResponse.json({ success: true, message: "User KYC marked as Unverified (Tier 1)." });
+    }
+
+    if (action === "toggle_withdrawal") {
+      const lock = Boolean(body.locked);
+      await supabase
+        .from("profiles")
+        .update({
+          is_withdrawal_locked: lock,
+          withdrawals_disabled: lock,
+        })
+        .eq("id", userId);
+
+      await supabase.from("admin_audit_logs").insert({
+        admin_email: adminEmail || "admin@paxones.com",
+        action: lock ? "LOCK_USER_WITHDRAWAL" : "UNLOCK_USER_WITHDRAWAL",
+        target_user_id: userId,
+        details: { locked: lock, date: new Date().toISOString() },
+      });
+
+      return NextResponse.json({
+        success: true,
+        message: lock ? "User withdrawals temporarily stopped." : "User withdrawals resumed.",
+      });
+    }
+
     return NextResponse.json({ success: false, error: "Unsupported action" }, { status: 400 });
   } catch (err: any) {
     console.error("[API/ADMIN/USER_ACTION] Error:", err);

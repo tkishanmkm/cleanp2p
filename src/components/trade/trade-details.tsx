@@ -310,12 +310,10 @@ export function ReportIssueDialog({
     <Dialog open={isOpen} onOpenChange={setIsOpen}>
       <DialogTrigger asChild>
         <Button
-          variant="outline"
-          size="sm"
-          className="w-full text-xs font-semibold gap-1.5 border-destructive/40 text-destructive hover:bg-destructive/10"
+          className="w-full py-2.5 bg-red-600 hover:bg-red-700 active:bg-red-800 text-white font-bold text-xs sm:text-sm rounded-xl border border-red-600 shadow-sm flex items-center justify-center gap-2 transition-all cursor-pointer"
         >
-          <ShieldAlert className="h-3.5 w-3.5" />
-          Report an Issue
+          <ShieldAlert className="h-4 w-4 shrink-0" />
+          <span>Report an Issue</span>
         </Button>
       </DialogTrigger>
       <DialogContent className="sm:max-w-md bg-card border-border">
@@ -1122,7 +1120,7 @@ export function TradeDetails({
             <div className="flex justify-between items-center text-xs sm:text-sm py-1 border-b border-border/40">
               <span className="text-muted-foreground">{isBuying ? 'You are buying' : 'You are selling'}</span>
               <div className="flex items-center gap-1.5">
-                <span className="font-serif tabular-nums font-bold text-sm sm:text-base text-foreground tracking-tight">{coinAmount}</span>
+                <span className="font-[Arial,Helvetica,sans-serif] tabular-nums font-bold text-sm sm:text-base text-foreground tracking-tight">{coinAmount}</span>
                 <CoinInsignia symbol={coinSymbol} className="h-4 w-4" />
               </div>
             </div>
@@ -1131,7 +1129,7 @@ export function TradeDetails({
               <span className="text-muted-foreground">Rate</span>
               <div className="flex items-center gap-1 text-xs sm:text-sm font-medium text-foreground">
                 <span>1 {coinSymbol} = </span>
-                <span className="font-serif tabular-nums font-bold tracking-tight">{priceFormatted}</span>
+                <span className="font-[Arial,Helvetica,sans-serif] tabular-nums font-bold tracking-tight">{priceFormatted}</span>
                 <span>{fiatCurrency}</span>
               </div>
             </div>
@@ -1139,7 +1137,7 @@ export function TradeDetails({
             <div className="flex justify-between items-center text-xs sm:text-sm py-1 border-b border-border/40">
               <span className="text-muted-foreground">Escrow Fee (1.5%)</span>
               <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                <span className="font-serif tabular-nums font-bold tracking-tight">{escrowFeeCoin}</span>
+                <span className="font-[Arial,Helvetica,sans-serif] tabular-nums font-bold tracking-tight">{escrowFeeCoin}</span>
                 <CoinInsignia symbol={coinSymbol} className="h-3.5 w-3.5" />
               </div>
             </div>
@@ -1147,7 +1145,7 @@ export function TradeDetails({
             <div className="flex justify-between items-center pt-2">
               <span className="text-xs sm:text-sm font-semibold text-foreground">{isBuying ? 'Total to Pay' : 'Total to Receive'}</span>
               <div className="flex items-baseline gap-1 text-emerald-600 dark:text-emerald-400">
-                <span className="text-base sm:text-xl font-bold font-serif tabular-nums tracking-tight">
+                <span className="text-base sm:text-xl font-bold font-[Arial,Helvetica,sans-serif] tabular-nums tracking-tight">
                   {fiatAmount}
                 </span>
                 <span className="text-xs sm:text-sm font-bold font-sans">

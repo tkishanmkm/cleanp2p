@@ -68,12 +68,30 @@ export async function POST(req: Request) {
       }, { status: 400 });
     }
 
-    // 2. Check 2FA if enabled
+    // 2. Check Global Platform Withdrawal Switch & User-Specific Restrictions
+    const { data: globalSettings } = await supabaseAdmin
+      .from('platform_settings')
+      .select('global_withdrawals_disabled, maintenance_mode')
+      .maybeSingle();
+
+    if (globalSettings?.global_withdrawals_disabled) {
+      return NextResponse.json({
+        error: 'External crypto withdrawals are temporarily paused for platform maintenance. Please try again shortly.'
+      }, { status: 503 });
+    }
+
+    // Check user profile for 2FA, ban status, and individual withdrawal locks
     const { data: profile } = await supabaseAdmin
       .from('profiles')
-      .select('is_2fa_enabled, two_factor_secret')
+      .select('is_2fa_enabled, two_factor_secret, is_banned, is_withdrawal_locked, withdrawals_disabled')
       .eq('id', userId)
       .maybeSingle();
+
+    if (profile?.is_banned || profile?.is_withdrawal_locked || profile?.withdrawals_disabled) {
+      return NextResponse.json({
+        error: 'Withdrawals for your account have been temporarily restricted. Please contact support@paxones.com.'
+      }, { status: 403 });
+    }
 
     if (profile?.is_2fa_enabled) {
       if (!totpCode || typeof totpCode !== 'string' || !/^\d{4,8}$/.test(totpCode.trim())) {

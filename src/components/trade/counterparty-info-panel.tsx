@@ -16,6 +16,7 @@ import {
   ArrowLeftRight,
   User as UserIcon,
   ShieldAlert,
+  ShieldCheck,
   Ban,
   UserCheck,
   Loader2
@@ -317,37 +318,75 @@ export function CounterpartyInfoPanel({
             {/* Detailed Stats List */}
             <div className="space-y-1">
               <DetailItem icon={<UserIcon size={16} />} label="Full Name" value={fullName} />
+              
+              {/* Verification Badges */}
+              <div className="flex items-center justify-between py-2.5 border-b border-border/50 text-sm">
+                <div className="flex items-center gap-2.5 text-muted-foreground">
+                  <CheckCircle className="h-4 w-4 text-primary shrink-0" />
+                  <span>Email Verified</span>
+                </div>
+                <div>
+                  {(current.email_verified || current.is_email_verified || current.emailVerified) ? (
+                    <span className="inline-flex items-center gap-1 text-xs font-bold px-2 py-0.5 rounded-md bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">
+                      <CheckCircle className="h-3 w-3" /> Verified
+                    </span>
+                  ) : (
+                    <span className="inline-flex items-center gap-1 text-xs font-semibold px-2 py-0.5 rounded-md bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20">
+                      Unverified
+                    </span>
+                  )}
+                </div>
+              </div>
+
+              <div className="flex items-center justify-between py-2.5 border-b border-border/50 text-sm">
+                <div className="flex items-center gap-2.5 text-muted-foreground">
+                  <ShieldCheck className="h-4 w-4 text-primary shrink-0" />
+                  <span>ID / KYC Verified</span>
+                </div>
+                <div>
+                  {(current.id_verified || current.kyc_status === 'verified' || current.is_id_verified || current.idVerified) ? (
+                    <span className="inline-flex items-center gap-1 text-xs font-bold px-2 py-0.5 rounded-md bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">
+                      <CheckCircle className="h-3 w-3" /> Verified
+                    </span>
+                  ) : (
+                    <span className="inline-flex items-center gap-1 text-xs font-semibold px-2 py-0.5 rounded-md bg-slate-500/10 text-slate-600 dark:text-slate-400 border border-slate-500/20">
+                      Unverified
+                    </span>
+                  )}
+                </div>
+              </div>
+
               <DetailItem
                 icon={<ArrowLeftRight size={16} />}
                 label="Completed Trades With You"
-                value={completedTradesWithUser !== undefined ? completedTradesWithUser : 0}
+                value={<span className="font-[Arial,Helvetica,sans-serif]">{completedTradesWithUser !== undefined ? completedTradesWithUser : 0}</span>}
                 highlight
               />
               <DetailItem icon={<Calendar size={16} />} label="Member Since" value={joinedAgo} />
               <DetailItem
                 icon={<CheckCircle size={16} />}
                 label="All Completed Trades"
-                value={completedTradesCount.toLocaleString()}
+                value={<span className="font-[Arial,Helvetica,sans-serif]">{completedTradesCount.toLocaleString()}</span>}
               />
               <DetailItem
                 icon={<ThumbsUp size={16} />}
                 label="Positive Feedback"
-                value={`${positiveCount} (+)`}
+                value={<span className="font-[Arial,Helvetica,sans-serif] text-emerald-600 dark:text-emerald-400 font-bold">{positiveCount} (+)</span>}
               />
               <DetailItem
                 icon={<ThumbsDown size={16} />}
                 label="Negative Feedback"
-                value={`${negativeCount} (-)`}
+                value={<span className="font-[Arial,Helvetica,sans-serif] text-destructive font-bold">{negativeCount} (-)</span>}
               />
               <DetailItem
                 icon={<ShieldBan size={16} />}
                 label="Users Blocked by Them"
-                value={blockedUsersCount}
+                value={<span className="font-[Arial,Helvetica,sans-serif]">{blockedUsersCount}</span>}
               />
               <DetailItem
                 icon={<ShieldAlert size={16} />}
                 label="Users Who Blocked Them"
-                value={blockedByCount}
+                value={<span className="font-[Arial,Helvetica,sans-serif]">{blockedByCount}</span>}
               />
               <DetailItem
                 icon={<Globe size={16} />}

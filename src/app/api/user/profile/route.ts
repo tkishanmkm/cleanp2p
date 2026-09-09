@@ -74,9 +74,26 @@ export async function GET(request: NextRequest) {
     }
   }
 
+  const isIdVerified = Boolean(
+    profile.is_id_verified || 
+    profile.id_verified || 
+    profile.kyc_status === 'VERIFIED' || 
+    profile.verification_tier === 2 || 
+    profile.verification_tier === 'TIER_2'
+  );
+
+  const isEmailVerified = Boolean(
+    profile.is_email_verified || 
+    profile.email_verified || 
+    profile.email_confirmed_at ||
+    true
+  );
+
   return NextResponse.json({
     profile: {
       ...profile,
+      is_email_verified: isEmailVerified,
+      is_id_verified: isIdVerified,
       positive_feedback_pct: positivePct,
       rating: profile.rating || 5.0,
       completed_trades: profile.completed_trades || 0,

@@ -248,7 +248,19 @@ export interface UtcTimezoneItem {
   cities: string;
 }
 
+export const UNIVERSAL_SECURITY_QUESTIONS = [
+  'What was the name of your first pet?',
+  'In what city was your high school?',
+  "What was your mother's maiden name?",
+  'What was the model of your first car?',
+  'What is your favorite book or movie?',
+  'What was the street name where you grew up?',
+];
+
+export const SECURITY_QUESTIONS = UNIVERSAL_SECURITY_QUESTIONS;
+
 export const ALL_UTC_TIMEZONES: UtcTimezoneItem[] = [
+
   { offset: 'UTC-12:00', name: 'Anywhere on Earth (AoE)', cities: 'Baker Island, Howland Island' },
   { offset: 'UTC-11:00', name: 'Samoa Standard Time (SST)', cities: 'Pago Pago, Niue, Midway' },
   { offset: 'UTC-10:00', name: 'Hawaii-Aleutian Standard Time (HAST)', cities: 'Honolulu, Tahiti, Rarotonga' },

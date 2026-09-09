@@ -129,12 +129,6 @@ function SupportContent() {
               Need assistance with an escrow trade, deposit, or account verification? Our support team is here to help.
             </p>
           </div>
-          <div className="flex sm:flex-col items-start sm:items-end gap-2 text-xs text-white/90">
-            <div className="flex items-center gap-1.5 bg-black/10 px-3 py-1.5 rounded-lg">
-              <Clock className="w-4 h-4 text-emerald-300" />
-              <span>Avg. response: &lt; 15 mins</span>
-            </div>
-          </div>
         </div>
       </div>
 

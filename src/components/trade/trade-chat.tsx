@@ -14,6 +14,7 @@ import type { Trade, User, TradeChatMessage } from '@/lib/types';
 import { Card, CardContent, CardHeader, CardFooter } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { Textarea } from '@/components/ui/textarea';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -178,10 +179,10 @@ const TradeSummaryBar = ({ trade, currentUserRole }: { trade: Trade | any; curre
       )}
     >
       <span className="font-bold tracking-tight">{roleText}</span>
-      <span className="font-serif tabular-nums font-bold tracking-tight">{coinAmount}</span>
+      <span className="font-[Arial,Helvetica,sans-serif] tabular-nums font-bold tracking-tight">{coinAmount}</span>
       <CoinInsignia symbol={coinSymbol} className="h-4 w-4" />
       <span className="font-medium opacity-90">for</span>
-      <span className="font-serif tabular-nums font-bold tracking-tight">
+      <span className="font-[Arial,Helvetica,sans-serif] tabular-nums font-bold tracking-tight">
         {fiatAmount}
       </span>
       <span className="font-sans font-bold">{fiatCurrency}</span>
@@ -333,6 +334,15 @@ export function TradeChat({
     if (e) e.preventDefault();
     if (!newMessage.trim() && !mediaUrl) return;
 
+    if (newMessage.length > 1000) {
+      toast({
+        variant: 'destructive',
+        title: 'Message Too Long',
+        description: 'Messages cannot exceed 1000 characters.'
+      });
+      return;
+    }
+
     const blockedWords = ['telegram', 'whatsapp', 'phone', 'contact'];
     if (newMessage && blockedWords.some((word) => newMessage.toLowerCase().includes(word))) {
       toast({
@@ -483,16 +493,16 @@ export function TradeChat({
             <div className="flex items-center gap-3 text-xs justify-end font-semibold">
               <div className="flex items-center gap-1 text-emerald-600 dark:text-emerald-400">
                 <ThumbsUp className="h-3.5 w-3.5" />
-                <span>{positiveFeedback}</span>
+                <span className="font-[Arial,Helvetica,sans-serif]">{positiveFeedback}</span>
               </div>
               <div className="flex items-center gap-1 text-destructive">
                 <ThumbsDown className="h-3.5 w-3.5" />
-                <span>{negativeFeedback}</span>
+                <span className="font-[Arial,Helvetica,sans-serif]">{negativeFeedback}</span>
               </div>
             </div>
-            <div className="text-xs font-semibold font-mono flex items-center gap-1.5 justify-end mt-1 text-primary">
+            <div className="text-xs font-semibold font-[Arial,Helvetica,sans-serif] flex items-center gap-1.5 justify-end mt-1 text-primary">
               <Clock className="h-3.5 w-3.5" />
-              {stopwatch}
+              <span>{stopwatch}</span>
             </div>
           </div>
         </div>
@@ -668,8 +678,8 @@ export function TradeChat({
         </ScrollArea>
       </CardContent>
 
-      <CardFooter className="border-t border-border/60 p-3">
-        <form onSubmit={handleSendMessage} className="flex w-full items-center space-x-2">
+      <CardFooter className="border-t border-border/60 p-3 flex flex-col gap-2">
+        <form onSubmit={handleSendMessage} className="w-full space-y-2">
           <input
             type="file"
             ref={fileInputRef}
@@ -677,27 +687,54 @@ export function TradeChat({
             onChange={handleFileSelect}
             accept="image/*,video/*,application/pdf,.doc,.docx"
           />
-          <Button
-            variant="ghost"
-            size="icon"
-            type="button"
-            onClick={() => fileInputRef.current?.click()}
-            disabled={isUploading}
-            className="text-muted-foreground hover:text-foreground shrink-0"
-          >
-            {isUploading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Paperclip className="h-4 w-4" />}
-          </Button>
-          <Input
-            value={newMessage}
-            onChange={(e) => setNewMessage(e.target.value)}
-            placeholder="Write a message in escrow room..."
-            autoComplete="off"
-            disabled={isUploading}
-            className="text-xs sm:text-sm"
-          />
-          <Button type="submit" size="icon" disabled={isUploading || !newMessage.trim()} className="shrink-0 font-bold">
-            <Send className="h-4 w-4" />
-          </Button>
+          <div className="flex w-full items-end space-x-2">
+            <Button
+              variant="ghost"
+              size="icon"
+              type="button"
+              onClick={() => fileInputRef.current?.click()}
+              disabled={isUploading}
+              className="text-muted-foreground hover:text-foreground shrink-0 mb-1"
+            >
+              {isUploading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Paperclip className="h-4 w-4" />}
+            </Button>
+            <div className="relative flex-1">
+              <textarea
+                maxLength={1000}
+                value={newMessage}
+                onChange={(e) => setNewMessage(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && !e.shiftKey) {
+                    e.preventDefault();
+                    if (!isUploading && newMessage.trim()) {
+                      handleSendMessage(e);
+                    }
+                  }
+                }}
+                placeholder="Type a message..."
+                disabled={isUploading}
+                rows={2}
+                className="w-full resize-none rounded-xl border border-input bg-background/50 px-3 py-2 text-xs sm:text-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus:bg-background transition-colors disabled:cursor-not-allowed disabled:opacity-50"
+              />
+            </div>
+            <Button
+              type="submit"
+              size="icon"
+              disabled={isUploading || !newMessage.trim()}
+              className="shrink-0 font-bold mb-1"
+            >
+              <Send className="h-4 w-4" />
+            </Button>
+          </div>
+
+          <div className="flex items-center justify-between px-1 text-xs">
+            <span className="text-[11px] text-muted-foreground">
+              Press <kbd className="px-1 py-0.5 rounded bg-muted font-mono text-[10px]">Enter ↵</kbd> to send, <kbd className="px-1 py-0.5 rounded bg-muted font-mono text-[10px]">Shift+Enter</kbd> for new line
+            </span>
+            <span className="text-xs text-slate-500 font-mono">
+              {newMessage.length}/1000
+            </span>
+          </div>
         </form>
       </CardFooter>
 

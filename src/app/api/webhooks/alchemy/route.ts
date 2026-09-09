@@ -1,98 +1,68 @@
-import { NextResponse } from 'next/server';
-import { getSupabaseAdminClient } from '@/lib/supabase/server';
+import { NextRequest, NextResponse } from 'next/server';
 import crypto from 'crypto';
+import { createClient } from '@supabase/supabase-js';
 
-// Standardized Token Contract Mapping (EVM Network -> Whitelisted Address)
-const SUPPORTED_CONTRACTS: Record<string, Record<string, string>> = {
-  'eth-mainnet': {
-    USDT: '0xdac17f958d2ee523a2206206994597c13d831ec7',
-  },
-  'eth-sepolia': {
-    USDT: process.env.SEPOLIA_USDT_CONTRACT?.toLowerCase() || '0x7169d38820c256952b1e624b8140312521ec4f70',
-  },
-};
+// Service role client to bypass RLS for automated deposits
+const supabaseAdmin = createClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL!,
+  process.env.SUPABASE_SERVICE_ROLE_KEY!
+);
 
-export async function POST(req: Request) {
+export async function POST(req: NextRequest) {
   try {
     const rawBody = await req.text();
     const signature = req.headers.get('x-alchemy-signature');
     const webhookSigningKey = process.env.ALCHEMY_WEBHOOK_SIGNING_KEY;
 
-    // Fail-Closed Signature Inspection
-    if (!webhookSigningKey) {
-      console.error('FATAL: ALCHEMY_WEBHOOK_SIGNING_KEY not set.');
-      return NextResponse.json({ error: 'Webhook processing misconfigured' }, { status: 500 });
-    }
+    // 1. Verify HMAC Signature
+    if (webhookSigningKey) {
+      const hmac = crypto.createHmac('sha256', webhookSigningKey);
+      hmac.update(rawBody);
+      const expectedSignature = hmac.digest('hex');
 
-    if (!signature) {
-      return NextResponse.json({ error: 'Missing signature' }, { status: 401 });
-    }
-
-    const expectedSignature = crypto
-      .createHmac('sha256', webhookSigningKey)
-      .update(rawBody)
-      .digest('hex');
-
-    if (!crypto.timingSafeEqual(Buffer.from(signature), Buffer.from(expectedSignature))) {
-      return NextResponse.json({ error: 'Invalid signature' }, { status: 401 });
-    }
-
-    const body = JSON.parse(rawBody);
-    const { event } = body;
-
-    if (!event || !event.activity || !Array.isArray(event.activity)) {
-      return NextResponse.json({ status: 'ignored' });
-    }
-
-    const supabaseAdmin = getSupabaseAdminClient();
-
-    for (const act of event.activity) {
-      const network = body.network ? body.network.toLowerCase() : 'eth-mainnet';
-      const rawContractAddress = act.rawContract?.address?.toLowerCase();
-      const claimedAsset = (act.asset || '').toUpperCase();
-
-      // Native ETH Transfer
-      if (claimedAsset === 'ETH' && !rawContractAddress) {
-        await processCredit(supabaseAdmin, act.toAddress, 'ETH', network, act.value);
-        continue;
+      if (signature !== expectedSignature) {
+        return NextResponse.json({ error: 'Invalid HMAC signature' }, { status: 401 });
       }
-
-      // ERC-20 Token Transfer Verification
-      const verifiedContract = SUPPORTED_CONTRACTS[network]?.[claimedAsset];
-
-      if (!verifiedContract || rawContractAddress !== verifiedContract) {
-        console.warn(`[SECURITY ALERT] Fraudulent Token Attempt. Network: ${network}, Claimed: ${claimedAsset}, Contract: ${rawContractAddress}`);
-        continue; // REJECT Counterfeit Contract
-      }
-
-      await processCredit(supabaseAdmin, act.toAddress, claimedAsset, network, act.value);
     }
 
-    return NextResponse.json({ success: true });
+    const payload = JSON.parse(rawBody);
+    const event = payload.event;
+
+    if (!event || !event.activity) {
+      return NextResponse.json({ message: 'No activity found in payload' }, { status: 200 });
+    }
+
+    // 2. Process Transfers Atomic & Idempotently
+    for (const activity of event.activity) {
+      const toAddress = activity.toAddress;
+      const asset = activity.asset || 'USDT';
+      const network = activity.category || 'ETH_MAINNET';
+      const amount = parseFloat(activity.value);
+      const txid = activity.hash;
+      const outputIndex = activity.logIndex || 0;
+
+      if (!toAddress || !txid || isNaN(amount) || amount <= 0) continue;
+
+      // Call hardened RPC
+      const { data, error } = await supabaseAdmin.rpc('process_incoming_deposit', {
+        p_to_address: toAddress,
+        p_asset: asset,
+        p_network: network,
+        p_amount: amount,
+        p_txid: txid,
+        p_output_index: outputIndex,
+      });
+
+      if (error) {
+        console.error(`Failed to process deposit ${txid}:`, error.message);
+      } else if (data?.code === 'ALREADY_PROCESSED') {
+        console.log(`Replay ignored for deposit ${txid}`);
+      }
+    }
+
+    return NextResponse.json({ success: true }, { status: 200 });
   } catch (err: any) {
-    return NextResponse.json({ error: err.message }, { status: 500 });
+    console.error('Alchemy webhook error:', err);
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }
-
-async function processCredit(supabaseAdmin: any, toAddress: string, asset: string, network: string, rawAmount: number | string) {
-  // Convert string to safe numeric representation avoiding float truncation
-  const numericAmount = typeof rawAmount === 'string' ? parseFloat(rawAmount) : rawAmount;
-  if (isNaN(numericAmount) || numericAmount <= 0) return;
-
-  // Resolve user account tied to the deposit address
-  const { data: addressRecord } = await supabaseAdmin
-    .from('deposit_addresses')
-    .select('user_id')
-    .ilike('address', toAddress)
-    .single();
-
-  if (addressRecord?.user_id) {
-    await supabaseAdmin.rpc('credit_user_balance', {
-      target_user_id: addressRecord.user_id,
-      target_asset: asset,
-      target_network: network,
-      credit_amount: numericAmount,
-    });
-  }
-}
-

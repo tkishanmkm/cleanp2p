@@ -16,10 +16,10 @@ export function Footer() {
           <div className="pt-2">
             <span className="block text-slate-500 dark:text-slate-500 font-medium">Contact Us:</span>
             <a 
-              href="mailto:support@thepax.org" 
-              className="text-blue-600 dark:text-blue-400 hover:text-blue-500 dark:hover:text-blue-300 font-mono text-sm underline transition-colors"
+              href="mailto:support@paxones.com" 
+              className="text-slate-800 dark:text-slate-200 hover:text-amber-600 dark:hover:text-amber-400 font-mono text-sm underline transition-colors"
             >
-              support@thepax.org
+              support@paxones.com
             </a>
           </div>
         </div>
@@ -40,12 +40,12 @@ export function Footer() {
           <h4 className="text-slate-900 dark:text-white font-semibold mb-3">Support & Help</h4>
           <ul className="space-y-2">
             <li>
-              <a href="mailto:support@thepax.org" className="hover:text-slate-900 dark:hover:text-white transition-colors flex items-center gap-1">
-                📧 Help Center (support@thepax.org)
+              <a href="mailto:support@paxones.com" className="hover:text-slate-900 dark:hover:text-white transition-colors flex items-center gap-1">
+                📧 Help Desk (support@paxones.com)
               </a>
             </li>
-            <li><Link href="/faq" className="hover:text-slate-900 dark:hover:text-white transition-colors">FAQ & Guides</Link></li>
-            <li><Link href="/disputes" className="hover:text-slate-900 dark:hover:text-white transition-colors">Dispute Resolution Policy</Link></li>
+            <li><Link href="/faq" className="hover:text-slate-900 dark:hover:text-white transition-colors">FAQ & User Guides</Link></li>
+            <li><Link href="/support" className="hover:text-slate-900 dark:hover:text-white transition-colors">Submit Support Ticket</Link></li>
           </ul>
         </div>
 
@@ -55,18 +55,17 @@ export function Footer() {
           <ul className="space-y-2">
             <li><Link href="/terms" className="hover:text-slate-900 dark:hover:text-white transition-colors">Terms of Service</Link></li>
             <li><Link href="/policy" className="hover:text-slate-900 dark:hover:text-white transition-colors">Privacy Policy</Link></li>
-            <li><Link href="/risk-disclosure" className="hover:text-slate-900 dark:hover:text-white transition-colors">Risk Warning</Link></li>
           </ul>
         </div>
       </div>
 
       {/* Footer Bottom Bar */}
       <div className="max-w-7xl mx-auto pt-6 border-t border-slate-200 dark:border-[#1e2640]/50 flex flex-col md:flex-row justify-between items-center gap-4 text-[11px] text-slate-500 dark:text-slate-500">
-        <p>© 2026 ThePax. All rights reserved.</p>
+        <p>© 2026 Paxones™ All rights reserved.</p>
         <p>
           Contact Us:{' '}
-          <a href="mailto:support@thepax.org" className="text-slate-700 dark:text-slate-400 hover:underline">
-            support@thepax.org
+          <a href="mailto:support@paxones.com" className="text-slate-700 dark:text-slate-400 hover:underline">
+            support@paxones.com
           </a>
         </p>
       </div>

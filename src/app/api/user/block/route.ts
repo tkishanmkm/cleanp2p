@@ -34,12 +34,22 @@ export async function POST(request: NextRequest) {
   }
 
   if (action === 'BLOCK') {
-    const { error } = await supabase
+    // Check if block already exists to prevent duplicate entries
+    const { data: existingBlock } = await supabase
       .from('user_blocks')
-      .insert({ blocker_id: user.id, blocked_id: targetUserId });
+      .select('id')
+      .eq('blocker_id', user.id)
+      .eq('blocked_id', targetUserId)
+      .maybeSingle();
 
-    if (error && error.code !== '23505') {
-      return NextResponse.json({ error: error.message }, { status: 400 });
+    if (!existingBlock) {
+      const { error } = await supabase
+        .from('user_blocks')
+        .insert({ blocker_id: user.id, blocked_id: targetUserId });
+
+      if (error && error.code !== '23505') {
+        return NextResponse.json({ error: error.message }, { status: 400 });
+      }
     }
 
     // Post System Message in Active Trade Chat if currently running

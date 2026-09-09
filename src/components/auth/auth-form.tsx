@@ -39,6 +39,24 @@ export function AuthForm({ mode }: AuthFormProps) {
     }
   }
 
+  // Discord OAuth Login / Signup
+  async function handleDiscordAuth() {
+    try {
+      setLoading(true);
+      setErrorMsg('');
+      const { error } = await supabase.auth.signInWithOAuth({
+        provider: 'discord',
+        options: {
+          redirectTo: `${window.location.origin}/api/auth/callback`,
+        },
+      });
+      if (error) throw error;
+    } catch (err: any) {
+      setErrorMsg(err.message || 'Failed to initialize Discord authentication');
+      setLoading(false);
+    }
+  }
+
   // Password-Based Login / Signup
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -148,33 +166,47 @@ export function AuthForm({ mode }: AuthFormProps) {
         </div>
       )}
 
-      {/* 1. Official Google "G" Single Sign-On Button */}
-      <button
-        type="button"
-        onClick={handleGoogleAuth}
-        disabled={loading}
-        className="w-full flex items-center justify-center gap-3 bg-white hover:bg-slate-50 dark:bg-[#151a2d] dark:hover:bg-[#1b223a] text-slate-700 dark:text-slate-200 font-medium py-2.5 px-4 rounded-xl text-sm border border-slate-200 dark:border-slate-700/80 transition shadow-sm mb-6 disabled:opacity-50 cursor-pointer"
-      >
-        <svg className="w-5 h-5" viewBox="0 0 24 24">
-          <path
-            fill="#4285F4"
-            d="M23.745 12.27c0-.7-.06-1.4-.19-2.07H12v4.51h6.6c-.29 1.52-1.14 2.82-2.4 3.68v3.05h3.88c2.27-2.09 3.66-5.17 3.66-9.17z"
-          />
-          <path
-            fill="#34A853"
-            d="M12 24c3.24 0 5.95-1.08 7.93-2.91l-3.88-3.05c-1.08.72-2.45 1.16-4.05 1.16-3.12 0-5.77-2.11-6.72-4.96H1.26v3.15C3.25 21.3 7.31 24 12 24z"
-          />
-          <path
-            fill="#FBBC05"
-            d="M5.28 14.24c-.25-.72-.38-1.49-.38-2.24s.13-1.52.38-2.24V6.61H1.26C.46 8.23 0 10.06 0 12s.46 3.77 1.26 5.39l4.02-3.15z"
-          />
-          <path
-            fill="#EA4335"
-            d="M12 4.75c1.77 0 3.35.61 4.6 1.8l3.42-3.42C17.95 1.19 15.24 0 12 0 7.31 0 3.25 2.7 1.26 6.61l4.02 3.15c.95-2.85 3.6-4.96 6.72-4.96z"
-          />
-        </svg>
-        <span>Continue with Google</span>
-      </button>
+      {/* 1. Official Google & Discord Single Sign-On Buttons */}
+      <div className="space-y-2.5 mb-6">
+        <button
+          type="button"
+          onClick={handleGoogleAuth}
+          disabled={loading}
+          className="w-full flex items-center justify-center gap-3 bg-white hover:bg-slate-50 dark:bg-[#151a2d] dark:hover:bg-[#1b223a] text-slate-700 dark:text-slate-200 font-medium py-2.5 px-4 rounded-xl text-sm border border-slate-200 dark:border-slate-700/80 transition shadow-sm disabled:opacity-50 cursor-pointer"
+        >
+          <svg className="w-5 h-5 shrink-0" viewBox="0 0 24 24">
+            <path
+              fill="#4285F4"
+              d="M23.745 12.27c0-.7-.06-1.4-.19-2.07H12v4.51h6.6c-.29 1.52-1.14 2.82-2.4 3.68v3.05h3.88c2.27-2.09 3.66-5.17 3.66-9.17z"
+            />
+            <path
+              fill="#34A853"
+              d="M12 24c3.24 0 5.95-1.08 7.93-2.91l-3.88-3.05c-1.08.72-2.45 1.16-4.05 1.16-3.12 0-5.77-2.11-6.72-4.96H1.26v3.15C3.25 21.3 7.31 24 12 24z"
+            />
+            <path
+              fill="#FBBC05"
+              d="M5.28 14.24c-.25-.72-.38-1.49-.38-2.24s.13-1.52.38-2.24V6.61H1.26C.46 8.23 0 10.06 0 12s.46 3.77 1.26 5.39l4.02-3.15z"
+            />
+            <path
+              fill="#EA4335"
+              d="M12 4.75c1.77 0 3.35.61 4.6 1.8l3.42-3.42C17.95 1.19 15.24 0 12 0 7.31 0 3.25 2.7 1.26 6.61l4.02 3.15c.95-2.85 3.6-4.96 6.72-4.96z"
+            />
+          </svg>
+          <span>Continue with Google</span>
+        </button>
+
+        <button
+          type="button"
+          onClick={handleDiscordAuth}
+          disabled={loading}
+          className="w-full flex items-center justify-center gap-3 bg-white hover:bg-slate-50 dark:bg-[#151a2d] dark:hover:bg-[#1b223a] text-slate-700 dark:text-slate-200 font-medium py-2.5 px-4 rounded-xl text-sm border border-slate-200 dark:border-slate-700/80 transition shadow-sm disabled:opacity-50 cursor-pointer"
+        >
+          <svg className="w-5 h-5 shrink-0 fill-[#5865F2]" viewBox="0 0 127.14 96.36">
+            <path d="M107.7 8.07A105.15 105.15 0 0 0 81.47 0a72.06 72.06 0 0 0-3.36 6.83 97.68 97.68 0 0 0-29.11 0A72.37 72.37 0 0 0 45.64 0a105.89 105.89 0 0 0-26.25 8.09C2.79 32.65-1.71 56.6.54 80.21a105.73 105.73 0 0 0 32.17 16.15 77.7 77.7 0 0 0 6.89-11.11 68.42 68.42 0 0 1-10.85-5.18c.91-.66 1.8-1.34 2.66-2a74.57 74.57 0 0 0 64.3 0c.87.68 1.76 1.36 2.66 2a68.68 68.68 0 0 1-10.87 5.19 77 77 0 0 0 6.89 11.1 105.25 105.25 0 0 0 32.19-16.14c2.64-27.38-4.51-51.11-18.88-72.14zM42.45 65.69c-6.31 0-11.5-5.79-11.5-12.87 0-7.08 5.07-12.87 11.5-12.87 6.47 0 11.62 5.82 11.5 12.87 0 7.08-5.03 12.87-11.5 12.87zm42.24 0c-6.31 0-11.5-5.79-11.5-12.87 0-7.08 5.07-12.87 11.5-12.87 6.47 0 11.62 5.82 11.5 12.87 0 7.08-5.03 12.87-11.5 12.87z"/>
+          </svg>
+          <span>Continue with Discord</span>
+        </button>
+      </div>
 
       {/* Divider */}
       <div className="relative my-6 flex items-center justify-center">
@@ -285,7 +317,7 @@ export function AuthForm({ mode }: AuthFormProps) {
         <button
           type="submit"
           disabled={loading}
-          className="w-full bg-blue-600 hover:bg-blue-700 dark:bg-blue-600 dark:hover:bg-blue-500 text-white font-semibold py-2.5 px-4 rounded-xl text-sm transition mt-2 disabled:opacity-50 cursor-pointer shadow-sm"
+          className="w-full bg-slate-900 hover:bg-slate-800 dark:bg-white dark:hover:bg-slate-100 text-white dark:text-slate-900 font-semibold py-2.5 px-4 rounded-xl text-sm transition mt-2 disabled:opacity-50 cursor-pointer shadow-sm"
         >
           {loading ? 'Processing...' : mode === 'login' ? 'Sign In' : 'Create Account'}
         </button>
@@ -295,15 +327,15 @@ export function AuthForm({ mode }: AuthFormProps) {
       <div className="text-center mt-6 text-xs text-slate-500 dark:text-slate-400">
         {mode === 'login' ? (
           <p>
-            Don't have an account?{' '}
-            <Link href="/signup" className="text-blue-600 dark:text-blue-400 hover:underline font-semibold">
+            Don&apos;t have an account?{' '}
+            <Link href="/signup" className="text-amber-600 dark:text-amber-400 hover:underline font-semibold">
               Sign up
             </Link>
           </p>
         ) : (
           <p>
             Already have an account?{' '}
-            <Link href="/login" className="text-blue-600 dark:text-blue-400 hover:underline font-semibold">
+            <Link href="/login" className="text-amber-600 dark:text-amber-400 hover:underline font-semibold">
               Sign in
             </Link>
           </p>

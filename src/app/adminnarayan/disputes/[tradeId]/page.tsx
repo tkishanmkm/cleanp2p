@@ -258,17 +258,33 @@ export default function AdminDisputeModeratorPage({ params }: { params?: Promise
         )}
       </div>
 
-      <form onSubmit={handleSendMessage} className="flex space-x-2">
-        <input
-          type="text"
-          value={newMessage}
-          onChange={(e) => setNewMessage(e.target.value)}
-          placeholder="Type message as moderator..."
-          className="flex-1 p-2 border rounded-lg text-sm bg-transparent"
-        />
-        <button type="submit" className="bg-black dark:bg-white dark:text-black text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-gray-800 dark:hover:bg-gray-200 transition-colors">
-          Send
-        </button>
+      <form onSubmit={handleSendMessage} className="space-y-1.5">
+        <div className="flex space-x-2">
+          <textarea
+            maxLength={1000}
+            value={newMessage}
+            onChange={(e) => setNewMessage(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                if (newMessage.trim()) {
+                  handleSendMessage(e);
+                }
+              }
+            }}
+            placeholder="Type a message..."
+            rows={2}
+            className="flex-1 p-2.5 border border-border rounded-xl text-sm bg-transparent resize-none focus:outline-none focus:ring-1 focus:ring-primary"
+          />
+          <button type="submit" className="self-end bg-black dark:bg-white dark:text-black text-white px-5 py-2.5 rounded-xl text-sm font-semibold hover:bg-gray-800 dark:hover:bg-gray-200 transition-colors">
+            Send
+          </button>
+        </div>
+        <div className="flex justify-end pr-1">
+          <span className="text-xs text-slate-500">
+            {newMessage.length}/1000
+          </span>
+        </div>
       </form>
     </div>
   );
