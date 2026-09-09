@@ -45,12 +45,12 @@ export async function GET(req: NextRequest) {
     try {
       const { data: completedTrades } = await supabaseAdmin
         .from('trades')
-        .select('crypto_amount, fiat_amount, status')
-        .in('status', ['COMPLETED', 'RELEASED']);
+        .select('*')
+        .or('status.eq.COMPLETED,status.eq.completed,status.eq.RELEASED,status.eq.released');
 
       if (completedTrades) {
         completedTradesCount = completedTrades.length;
-        totalVolumeUsdt = completedTrades.reduce((acc, t) => acc + Number(t.crypto_amount || 0), 0);
+        totalVolumeUsdt = completedTrades.reduce((acc: number, t: any) => acc + Number(t.amount ?? t.crypto_amount ?? t.amount_usd ?? t.fiat_amount ?? 0), 0);
       }
     } catch (_) {}
 

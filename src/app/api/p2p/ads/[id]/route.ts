@@ -19,12 +19,16 @@ export async function GET(
       process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'placeholder-anon-key'
     );
 
-    // 1. Fetch ad by id or public_ad_id
-    const { data: ad, error: adError } = await supabaseAdmin
-      .from('p2p_ads')
-      .select('*')
-      .or(`id.eq.${id},public_ad_id.eq.${id}`)
-      .maybeSingle();
+    const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id);
+
+    // 1. Fetch ad by id or public_ad_id safely
+    let p2pQuery = supabaseAdmin.from('p2p_ads').select('*');
+    if (isUuid) {
+      p2pQuery = p2pQuery.or(`id.eq.${id},public_ad_id.eq.${id}`);
+    } else {
+      p2pQuery = p2pQuery.or(`public_ad_id.eq.${id},public_id.eq.${id},id.eq.${id}`);
+    }
+    const { data: ad, error: adError } = await p2pQuery.maybeSingle();
 
     if (adError || !ad) {
       return NextResponse.json({ error: 'Advertisement not found' }, { status: 404 });
@@ -185,13 +189,19 @@ export async function PATCH(
     if (body.is_fixed !== undefined) body.is_fixed = Boolean(body.is_fixed);
     if (typeof body.fixed_rate === 'boolean') delete body.fixed_rate;
 
-    const { data, error } = await supabase
+    const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id);
+    let updateQuery = supabase
       .from('p2p_ads')
       .update({ ...body, updated_at: new Date().toISOString() })
-      .eq('id', id)
-      .eq('user_id', user.id)
-      .select()
-      .single();
+      .eq('user_id', user.id);
+
+    if (isUuid) {
+      updateQuery = updateQuery.eq('id', id);
+    } else {
+      updateQuery = updateQuery.or(`public_ad_id.eq.${id},public_id.eq.${id},id.eq.${id}`);
+    }
+
+    const { data, error } = await updateQuery.select().single();
 
     if (error) {
       return NextResponse.json({ error: error.message }, { status: 400 });
@@ -261,11 +271,18 @@ export async function DELETE(
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    const { error } = await supabase
+    let deleteQuery = supabase
       .from('p2p_ads')
       .delete()
-      .eq('id', id)
       .eq('user_id', user.id);
+
+    if (isUuid) {
+      deleteQuery = deleteQuery.eq('id', id);
+    } else {
+      deleteQuery = deleteQuery.or(`public_ad_id.eq.${id},public_id.eq.${id},id.eq.${id}`);
+    }
+
+    const { error } = await deleteQuery;
 
     if (error) {
       return NextResponse.json({ error: error.message }, { status: 400 });

@@ -260,7 +260,8 @@ export function AdDetailClient({ ad, currentUserId }: { ad: any; currentUserId?:
 
     setIsSubmitting(true);
     try {
-      const res = await createTradeOrderWithEscrow({ adId: ad.id, fiatAmount: amt });
+      const cleanAdId = String(ad.public_ad_id || ad.public_id || ad.id || '').replace(/^#/, '').trim();
+      const res = await createTradeOrderWithEscrow({ adId: cleanAdId, fiatAmount: amt });
       if (res.error) {
         setErrorMsg(res.error.message);
         setIsSubmitting(false);

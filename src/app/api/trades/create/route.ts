@@ -3,6 +3,11 @@ import { NextRequest, NextResponse } from 'next/server';
 
 export const dynamic = 'force-dynamic';
 
+function isValidUUID(str: any): boolean {
+  if (!str || typeof str !== 'string') return false;
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(str.trim());
+}
+
 export async function POST(req: NextRequest) {
   try {
     const supabase = await createClient();
@@ -30,20 +35,42 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Invalid fiat amount.' }, { status: 400 });
     }
 
-    // 1. Fetch Ad
-    let { data: ad } = await supabase
-      .from('p2p_ads')
-      .select('*')
-      .or(`id.eq.${ad_id},public_ad_id.eq.${ad_id}`)
-      .maybeSingle();
+    const isIdUUID = isValidUUID(ad_id);
 
-    if (!ad) {
-      const { data: fallbackAd } = await supabase
-        .from('ads')
-        .select('*')
-        .eq('id', ad_id)
-        .maybeSingle();
-      ad = fallbackAd;
+    // 1. Fetch Ad safely from p2p_ads or ads
+    let ad: any = null;
+    let validAdUuid: string | null = null;
+
+    let p2pQuery = supabase.from('p2p_ads').select('*');
+    if (isIdUUID) {
+      p2pQuery = p2pQuery.or(`id.eq.${ad_id},public_ad_id.eq.${ad_id}`);
+    } else {
+      p2pQuery = p2pQuery.or(`public_ad_id.eq.${ad_id},public_id.eq.${ad_id},id.eq.${ad_id}`);
+    }
+    const { data: p2pAd } = await p2pQuery.maybeSingle();
+
+    if (p2pAd) {
+      ad = p2pAd;
+      if (isValidUUID(p2pAd.id)) {
+        const { data: adExists } = await supabase.from('ads').select('id').eq('id', p2pAd.id).maybeSingle();
+        if (adExists?.id) {
+          validAdUuid = adExists.id;
+        }
+      }
+    } else {
+      if (isIdUUID) {
+        const { data: primaryAd } = await supabase.from('ads').select('*').eq('id', ad_id).maybeSingle();
+        if (primaryAd) {
+          ad = primaryAd;
+          validAdUuid = primaryAd.id;
+        }
+      } else {
+        const { data: primaryAd } = await supabase.from('ads').select('*').or(`public_id.eq.${ad_id},public_ad_id.eq.${ad_id}`).maybeSingle();
+        if (primaryAd && isValidUUID(primaryAd.id)) {
+          ad = primaryAd;
+          validAdUuid = primaryAd.id;
+        }
+      }
     }
 
     if (!ad) {
@@ -102,10 +129,9 @@ export async function POST(req: NextRequest) {
     }
 
     const isSellAd = (ad.type || ad.ad_type || 'SELL').toUpperCase() === 'SELL';
-    // If ad is SELL, the creator is seller, current user is buyer
-    // If ad is BUY, the creator is buyer, current user is seller
-    const buyerId = isSellAd ? user.id : ad.user_id;
-    const sellerId = isSellAd ? ad.user_id : user.id;
+    const adOwnerId = ad.user_id || ad.seller_id || ad.advertiser_id || (ad.profiles && ad.profiles.id);
+    const buyerId = isSellAd ? user.id : adOwnerId;
+    const sellerId = isSellAd ? adOwnerId : user.id;
 
     const unitPrice = Number(ad.fixed_rate ?? ad.price ?? 1);
     const calculatedCrypto = parseFloat(crypto_amount) || (unitPrice > 0 ? numericFiat / unitPrice : 0);
@@ -119,46 +145,71 @@ export async function POST(req: NextRequest) {
 
     const shortId = 'TRD-' + Math.random().toString(36).substring(2, 9).toUpperCase();
 
-    // 4. Insert Trade into database
+    // 4. Insert Trade into database safely
     let tradeResult: any = null;
+
+    const tradePayload: Record<string, any> = {
+      trade_id: shortId,
+      public_id: shortId,
+      buyer_id: buyerId,
+      seller_id: sellerId,
+      crypto: ad.crypto || ad.asset || 'BTC',
+      amount: calculatedCrypto,
+      fiat_currency: ad.fiat_currency || ad.fiat || 'USD',
+      fiat_amount: numericFiat,
+      amount_usd: numericFiat,
+      price: unitPrice,
+      payment_method: paymentMethod,
+      status: 'pending',
+    };
+
+    if (validAdUuid) {
+      tradePayload.ad_id = validAdUuid;
+    }
 
     // Full schema attempt
     const { data: insertedTrade, error: insertError } = await supabase
       .from('trades')
-      .insert({
-        ad_id: ad.id,
-        trade_id: shortId,
-        buyer_id: buyerId,
-        seller_id: sellerId,
-        crypto: ad.crypto || ad.asset || 'BTC',
-        amount: calculatedCrypto,
-        fiat_currency: ad.fiat_currency || ad.fiat || 'USD',
-        fiat_amount: numericFiat,
-        amount_usd: numericFiat,
-        price: unitPrice,
-        payment_method: paymentMethod,
-        status: 'pending',
-      })
+      .insert(tradePayload)
       .select('*')
       .single();
 
     if (insertError) {
-      console.warn('Full trade insertion failed, trying compatible schema fallback:', insertError);
+      console.warn('Full trade insertion failed, trying safe fallback:', insertError);
+      // Clean fallback without ad_id to prevent fkey or uuid errors
       const { data: fallbackTrade, error: fallbackError } = await supabase
         .from('trades')
         .insert({
+          trade_id: shortId,
           buyer_id: buyerId,
           seller_id: sellerId,
-          amount_usd: numericFiat,
+          crypto_amount: calculatedCrypto,
+          amount: calculatedCrypto,
+          fiat_amount: numericFiat,
+          price: unitPrice,
           status: 'pending',
         })
         .select('*')
         .single();
 
       if (fallbackError) {
-        throw fallbackError;
+        // Minimal fallback
+        const { data: ultraMinimal, error: ultraError } = await supabase
+          .from('trades')
+          .insert({
+            buyer_id: buyerId,
+            seller_id: sellerId,
+            amount_usd: numericFiat,
+            status: 'pending',
+          })
+          .select('*')
+          .single();
+
+        if (ultraError) throw ultraError;
+        tradeResult = ultraMinimal;
+      } else {
+        tradeResult = fallbackTrade;
       }
-      tradeResult = fallbackTrade;
     } else {
       tradeResult = insertedTrade;
     }

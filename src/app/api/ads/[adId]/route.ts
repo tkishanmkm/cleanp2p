@@ -38,21 +38,39 @@ export async function GET(
     }
 
     if (!ad) {
-      const { data } = await supabase
-        .from('p2p_ads')
-        .select('*')
-        .or(`public_ad_id.eq.${adId},id.eq.${adId}`)
-        .maybeSingle();
-      ad = data;
+      if (isUuid) {
+        const { data } = await supabase
+          .from('p2p_ads')
+          .select('*')
+          .or(`public_ad_id.eq.${adId},public_id.eq.${adId},id.eq.${adId}`)
+          .maybeSingle();
+        ad = data;
+      } else {
+        const { data } = await supabase
+          .from('p2p_ads')
+          .select('*')
+          .or(`public_ad_id.eq.${adId},public_id.eq.${adId}`)
+          .maybeSingle();
+        ad = data;
+      }
     }
 
     if (!ad) {
-      const { data: fallbackAd } = await supabase
-        .from('ads')
-        .select('*')
-        .eq('id', adId)
-        .maybeSingle();
-      ad = fallbackAd;
+      if (isUuid) {
+        const { data: fallbackAd } = await supabase
+          .from('ads')
+          .select('*')
+          .eq('id', adId)
+          .maybeSingle();
+        ad = fallbackAd;
+      } else {
+        const { data: fallbackAd } = await supabase
+          .from('ads')
+          .select('*')
+          .or(`public_id.eq.${adId},public_ad_id.eq.${adId}`)
+          .maybeSingle();
+        ad = fallbackAd;
+      }
     }
 
     if (!ad) {
