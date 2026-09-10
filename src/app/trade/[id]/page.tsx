@@ -284,6 +284,7 @@ export default function TradePage() {
           open={isCounterpartyOpen}
           onOpenChange={setIsCounterpartyOpen}
           completedTradesWithUser={completedTradesWithUser}
+          activeTradeId={trade?.id}
         />
       </div>
     </OnboardingGuard>

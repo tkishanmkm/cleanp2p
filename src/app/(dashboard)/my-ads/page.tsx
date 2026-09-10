@@ -187,7 +187,7 @@ export default function MyAdsPage() {
   if (isUserLoading || !user) {
     return (
       <div className="flex flex-1 items-center justify-center min-h-[300px]">
-        <Loader2 className="h-8 w-8 animate-spin text-[#9273FC]" />
+        <Loader2 className="h-8 w-8 animate-spin text-[#6347ea]" />
       </div>
     );
   }
@@ -216,7 +216,7 @@ export default function MyAdsPage() {
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div>
             <div className="flex items-center gap-2 mb-1.5">
-              <span className="text-xs font-bold uppercase tracking-wider text-[#9273FC] bg-[#9273FC]/10 dark:bg-[#9273FC]/20 px-2.5 py-0.5 rounded-md">
+              <span className="text-xs font-bold uppercase tracking-wider text-[#6347ea] bg-[#6347ea]/10 dark:bg-[#6347ea]/20 px-2.5 py-0.5 rounded-md">
                 Peer-to-Peer Market
               </span>
             </div>
@@ -229,7 +229,7 @@ export default function MyAdsPage() {
           </div>
           <Link
             href="/ads/create"
-            className="inline-flex items-center justify-center gap-2 px-5 py-2.5 bg-[#9273FC] hover:bg-[#4F46E5] text-white font-bold text-sm rounded-xl shadow-sm transition-all active:scale-[0.98]"
+            className="inline-flex items-center justify-center gap-2 px-5 py-2.5 bg-[#6347ea] hover:bg-[#5238d6] text-white font-bold text-sm rounded-xl shadow-sm transition-all active:scale-[0.98]"
           >
             <Plus className="w-4 h-4" />
             <span>Create New Ad</span>

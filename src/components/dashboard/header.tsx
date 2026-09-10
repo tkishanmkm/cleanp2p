@@ -16,6 +16,17 @@ import {
   ArrowLeftRight,
   LifeBuoy,
   Mail,
+  CheckCircle2,
+  XCircle,
+  Clock,
+  ShieldAlert,
+  MessageSquare,
+  Shield,
+  Tag,
+  ThumbsUp,
+  ThumbsDown,
+  Timer,
+  CheckCheck,
 } from 'lucide-react';
 import {
   HdDashboardIcon,
@@ -49,12 +60,13 @@ import { Logo } from '@/components/logo';
 import { ModeToggle } from '@/components/mode-toggle';
 import { BtcLogo, EthLogo, LtcLogo, UsdtLogo, DefaultAvatar } from '../icons';
 import { Badge } from '../ui/badge';
-import type { Language, Trade, CryptoCurrency } from '@/lib/types';
+import type { Language, Trade, CryptoCurrency, Notification } from '@/lib/types';
 import { Skeleton } from '../ui/skeleton';
 import { cn, toDate } from '@/lib/utils';
 import { usePrices } from '@/context/price-context';
 import { useWallet } from '@/context/wallet-context';
 import { useToast } from '@/hooks/use-toast';
+import { useStopwatch, formatTime } from '@/hooks/use-stopwatch';
 import { LANGUAGES } from '@/lib/constants';
 import { FlagIcon } from '../ui/flag-icon';
 import { useI18n } from '@/context/i18n-context';
@@ -83,20 +95,165 @@ const navItems: NavItem[] = [
   { href: '/support', label: 'Support', shortDesc: '24/7 help desk', icon: HdSupportIcon },
 ];
 
-const CryptoLogo = ({ crypto, className }: { crypto: CryptoCurrency; className?: string }) => {
-  switch (crypto) {
+const CryptoLogo = ({ crypto, className }: { crypto?: string; className?: string }) => {
+  const norm = (crypto || 'BTC').toUpperCase();
+  switch (norm) {
     case 'BTC':
+    case 'BITCOIN':
       return <BtcLogo className={className} />;
     case 'ETH':
+    case 'ETHEREUM':
       return <EthLogo className={className} />;
     case 'LTC':
+    case 'LITECOIN':
       return <LtcLogo className={className} />;
     case 'USDT':
+    case 'TETHER':
       return <UsdtLogo className={className} />;
     default:
-      return null;
+      return <BtcLogo className={className} />;
   }
 };
+
+const formatDateArial = (dateVal: any): string => {
+  const d = toDate(dateVal);
+  if (!d) return 'N/A';
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  const year = String(d.getFullYear()).slice(-2);
+  let hours = d.getHours();
+  const minutes = String(d.getMinutes()).padStart(2, '0');
+  const ampm = hours >= 12 ? 'pm' : 'am';
+  hours = hours % 12;
+  hours = hours ? hours : 12;
+  return `${month}/${day}/${year}, ${hours}:${minutes} ${ampm}`;
+};
+
+function getActivityIcon(message: string) {
+  const m = (message || '').toLowerCase();
+  if (m.includes('completed') || m.includes('released') || m.includes('sold') || m.includes('bought')) {
+    return <CheckCircle2 className="h-4 w-4 text-emerald-500 shrink-0 mt-0.5" />;
+  }
+  if (m.includes('cancelled') || m.includes('canceled')) {
+    return <XCircle className="h-4 w-4 text-rose-500 shrink-0 mt-0.5" />;
+  }
+  if (m.includes('expired')) {
+    return <Clock className="h-4 w-4 text-amber-500 shrink-0 mt-0.5" />;
+  }
+  if (m.includes('dispute') || m.includes('disputed')) {
+    return <ShieldAlert className="h-4 w-4 text-rose-600 shrink-0 mt-0.5" />;
+  }
+  if (m.includes('feedback') || m.includes('positive') || m.includes('negative')) {
+    return m.includes('negative') ? (
+      <ThumbsDown className="h-4 w-4 text-rose-500 shrink-0 mt-0.5" />
+    ) : (
+      <ThumbsUp className="h-4 w-4 text-emerald-500 shrink-0 mt-0.5" />
+    );
+  }
+  if (m.includes('moderator') || m.includes('support') || m.includes('admin')) {
+    return <Shield className="h-4 w-4 text-purple-500 shrink-0 mt-0.5" />;
+  }
+  if (m.includes('ad created') || m.includes('offer')) {
+    return <Tag className="h-4 w-4 text-indigo-500 shrink-0 mt-0.5" />;
+  }
+  if (m.includes('message') || m.includes('chat')) {
+    return <MessageSquare className="h-4 w-4 text-blue-500 shrink-0 mt-0.5" />;
+  }
+  return <ArrowLeftRight className="h-4 w-4 text-primary shrink-0 mt-0.5" />;
+}
+
+function RecentTradeNotificationRow({ trade, currentUserId }: { trade: any; currentUserId?: string }) {
+  const isBuyer = (trade.buyerId || trade.buyer_id) === currentUserId;
+  const partner = isBuyer ? trade.seller : trade.buyer;
+  const partnerUsername = partner?.username || (isBuyer ? trade.seller_username : trade.buyer_username) || 'Trader';
+  const partnerAvatar = partner?.avatar_url || partner?.photo_url;
+  const rawCoin = trade.crypto || trade.cryptocurrency || trade.coin_symbol || trade.coin || trade.asset || 'BTC';
+  const coin = rawCoin.toUpperCase();
+  const amount = Number(trade.amount || 0);
+  const fiatAmount = Number(trade.fiatAmount || trade.fiat_amount || 0);
+  const fiatCurrency = trade.fiatCurrency || trade.fiat_currency || 'USD';
+  const paymentMethod = trade.paymentMethod || trade.payment_method || 'Bank Transfer';
+  const tradeIdFormatted = trade.tradeId || (trade.id ? '#' + trade.id.replace(/-/g, '').slice(0, 8).toUpperCase() : '');
+  const status = (trade.status || 'active').toLowerCase();
+  const isActive = status === 'active' || status === 'pending';
+
+  const stopwatch = useStopwatch(trade.createdAt || trade.created_at, !isActive);
+
+  return (
+    <DropdownMenuItem asChild className="p-0 focus:bg-accent/40 rounded-xl">
+      <Link
+        href={`/trade/${trade.id}`}
+        className="flex flex-col gap-2 p-2.5 hover:bg-slate-100/80 dark:hover:bg-slate-800/80 rounded-xl transition-all border border-border/40 hover:border-primary/40 bg-card mb-1.5 shadow-xs"
+      >
+        {/* Row 1: Counterparty DP, username, roles, and status badge */}
+        <div className="flex items-center justify-between gap-2">
+          <div className="flex items-center gap-2 min-w-0">
+            <Avatar className="h-8 w-8 rounded-lg shrink-0 border border-border/80 overflow-hidden">
+              {partnerAvatar ? (
+                <AvatarImage src={partnerAvatar} alt={partnerUsername} className="object-cover" />
+              ) : null}
+              <AvatarFallback className="bg-primary/10 text-primary font-bold text-xs">
+                {partnerUsername.substring(0, 2).toUpperCase()}
+              </AvatarFallback>
+            </Avatar>
+            <div className="flex flex-col min-w-0">
+              <span className="text-xs font-bold text-foreground truncate">
+                @{partnerUsername}
+              </span>
+              <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground font-medium">
+                <span className={cn('font-bold', isBuyer ? 'text-emerald-600 dark:text-emerald-400' : 'text-amber-600 dark:text-amber-400')}>
+                  You: {isBuyer ? 'Buyer' : 'Seller'}
+                </span>
+                <span>•</span>
+                <span>Partner: {isBuyer ? 'Seller' : 'Buyer'}</span>
+              </div>
+            </div>
+          </div>
+
+          <div className="flex flex-col items-end shrink-0 gap-0.5">
+            <Badge
+              variant="outline"
+              className={cn(
+                'capitalize text-[10px] px-2 py-0.5 font-bold font-mono',
+                statusColors[status as keyof typeof statusColors] || 'border-border'
+              )}
+            >
+              {status === 'paid' ? 'Mark Paid' : status === 'dispute' ? 'Disputed' : status}
+            </Badge>
+            {isActive && (
+              <span className="text-[10px] font-mono text-amber-600 dark:text-amber-400 font-bold flex items-center gap-0.5">
+                <Timer className="h-3 w-3 animate-spin" />
+                {formatTime(stopwatch.elapsedSeconds)}
+              </span>
+            )}
+          </div>
+        </div>
+
+        {/* Row 2: Coin Amount, Coin Icon, Fiat Amount, Payment Method, Trade ID */}
+        <div className="flex items-center justify-between text-xs pt-1.5 border-t border-border/40 text-muted-foreground">
+          <div className="flex items-center gap-1.5">
+            <span className="font-[Arial,Helvetica,sans-serif] tabular-nums font-bold text-foreground">
+              {amount.toFixed(4)} {coin}
+            </span>
+            <CryptoLogo crypto={coin} className="h-3.5 w-3.5" />
+            <span className="text-[11px] font-bold text-muted-foreground">
+              ({fiatAmount.toLocaleString()} {fiatCurrency})
+            </span>
+          </div>
+
+          <div className="flex items-center gap-1.5 text-[10px]">
+            <span className="bg-muted/80 border border-border/50 px-1.5 py-0.5 rounded text-foreground font-medium truncate max-w-[100px]">
+              {paymentMethod}
+            </span>
+            <span className="font-mono text-primary font-bold">
+              {tradeIdFormatted}
+            </span>
+          </div>
+        </div>
+      </Link>
+    </DropdownMenuItem>
+  );
+}
 
 export function DashboardHeader() {
   const { user: authUser, profile, isUserLoading, signOut } = useAuth();
@@ -107,11 +264,12 @@ export function DashboardHeader() {
   const { language, setLanguage } = useI18n();
   const selectedLanguage = LANGUAGES.flatMap((l) => l.dialects || l).find((l) => l.code === language) || LANGUAGES[0];
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [notifTab, setNotifTab] = useState<'activity' | 'trades'>('activity');
   const [showAllNotifications, setShowAllNotifications] = useState(false);
   const [allTrades, setAllTrades] = useState<Trade[]>([]);
 
-  const { notifications, unreadCount, markAsRead: handleMarkAsRead } = useNotifications();
-  const visibleNotifications = showAllNotifications ? notifications : notifications?.slice(0, 3);
+  const { notifications, unreadCount, markAsRead: handleMarkAsRead, markAllAsRead } = useNotifications();
+  const visibleNotifications = showAllNotifications ? notifications : notifications?.slice(0, 5);
 
   useEffect(() => {
     if (!authUser?.uid) {
@@ -129,42 +287,64 @@ export function DashboardHeader() {
           .limit(10);
 
         if (error) {
-          // Gracefully suppress RLS recursion notices if policies are being updated
           if (error.code !== '42P17') {
             console.warn('Trades fetch notice:', error.message || error);
           }
           return;
         }
 
-        const mapped: Trade[] = (data || []).map((t: any) => ({
-          id: t.id,
-          tradeId: t.trade_id || t.id,
-          buyerId: t.buyer_id,
-          sellerId: t.seller_id,
-          adId: t.ad_id,
-          fiatAmount: Number(t.fiat_amount || 0),
-          fiatCurrency: t.fiat_currency || 'USD',
-          crypto: t.crypto || 'USDT',
-          amount: Number(t.amount || 0),
-          price: Number(t.price || 0),
-          status: t.status || 'created',
-          createdAt: t.created_at || new Date().toISOString(),
-          paymentMethod: t.payment_method || 'Bank Transfer',
-          buyer: {
-            id: t.buyer_id,
-            username: t.buyer_username || 'Buyer',
-            feedbackScore: 100,
-            completedTrades: 0,
-          },
-          seller: {
-            id: t.seller_id,
-            username: t.seller_username || 'Seller',
-            feedbackScore: 100,
-            completedTrades: 0,
-          },
-        }));
+        if (data && data.length > 0) {
+          const userIds = Array.from(new Set(data.flatMap((t: any) => [t.buyer_id, t.seller_id]).filter(Boolean)));
+          let profilesMap: Record<string, any> = {};
+          if (userIds.length > 0) {
+            const { data: profs } = await supabase
+              .from('profiles')
+              .select('id, username, avatar_url, photo_url')
+              .in('id', userIds);
+            if (profs) {
+              profs.forEach((p: any) => {
+                profilesMap[p.id] = p;
+              });
+            }
+          }
 
-        setAllTrades(mapped);
+          const mapped: Trade[] = data.map((t: any) => {
+            const buyerProfile = profilesMap[t.buyer_id];
+            const sellerProfile = profilesMap[t.seller_id];
+            return {
+              id: t.id,
+              tradeId: t.trade_id || t.id,
+              buyerId: t.buyer_id,
+              sellerId: t.seller_id,
+              adId: t.ad_id,
+              fiatAmount: Number(t.fiat_amount || 0),
+              fiatCurrency: t.fiat_currency || 'USD',
+              crypto: (t.crypto || t.cryptocurrency || t.coin_symbol || t.coin || t.asset || 'BTC').toUpperCase(),
+              amount: Number(t.amount || 0),
+              price: Number(t.price || 0),
+              status: t.status || 'created',
+              createdAt: t.created_at || new Date().toISOString(),
+              paymentMethod: t.payment_method || 'Bank Transfer',
+              buyer: {
+                id: t.buyer_id,
+                username: buyerProfile?.username || t.buyer_username || 'Buyer',
+                avatar_url: buyerProfile?.avatar_url || buyerProfile?.photo_url || null,
+                feedbackScore: 100,
+                completedTrades: 0,
+              } as any,
+              seller: {
+                id: t.seller_id,
+                username: sellerProfile?.username || t.seller_username || 'Seller',
+                avatar_url: sellerProfile?.avatar_url || sellerProfile?.photo_url || null,
+                feedbackScore: 100,
+                completedTrades: 0,
+              } as any,
+            };
+          });
+          setAllTrades(mapped);
+        } else {
+          setAllTrades([]);
+        }
       } catch (err: any) {
         if (err?.code !== '42P17') {
           console.warn('Notice fetching user trades for header:', err?.message || err);
@@ -228,9 +408,9 @@ export function DashboardHeader() {
   // Authenticated State
   return (
     <header className="sticky top-0 z-30 w-full border-b border-border bg-background shadow-xs">
-      <div className="flex h-16 items-center px-4 sm:px-6 lg:px-8">
+      <div className="flex h-16 items-center justify-between px-3 sm:px-6 lg:px-8 gap-2">
         {/* Mobile Header Left Toggle & Logo */}
-        <div className="flex items-center gap-2 lg:hidden">
+        <div className="flex items-center gap-2 sm:gap-3 lg:hidden shrink-0">
           <Sheet open={mobileMenuOpen} onOpenChange={setMobileMenuOpen}>
             <SheetTrigger asChild>
               <Button variant="ghost" size="icon" className="h-9 w-9 rounded-lg shrink-0 hover:bg-slate-100 dark:hover:bg-slate-800">
@@ -356,7 +536,7 @@ export function DashboardHeader() {
               </div>
             </SheetContent>
           </Sheet>
-          <Link href="/dashboard" className="flex items-center">
+          <Link href="/dashboard" className="flex items-center shrink-0">
             <Logo />
           </Link>
         </div>
@@ -414,16 +594,18 @@ export function DashboardHeader() {
         <div className="flex-1" />
 
         {/* Right side controls: Theme, Language (EN), Notifications, User Profile & Balance */}
-        <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
+        <div className="flex items-center gap-1 sm:gap-2 shrink-0">
           {/* Toggle theme */}
-          <ModeToggle />
+          <div className="shrink-0">
+            <ModeToggle />
+          </div>
 
           {/* Language Selector ("EN") */}
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button
                 variant="ghost"
-                className="hidden sm:inline-flex items-center gap-1.5 h-9 px-2.5 rounded-xl border border-slate-200/80 dark:border-slate-800 bg-slate-100/70 dark:bg-slate-800/60 hover:bg-slate-200/80 dark:hover:bg-slate-700/80 text-slate-700 dark:text-slate-200 font-bold text-xs tracking-wider transition-all shadow-xs cursor-pointer"
+                className="hidden sm:inline-flex items-center gap-1.5 h-9 px-2.5 rounded-xl border border-slate-200/80 dark:border-slate-800 bg-slate-100/70 dark:bg-slate-800/60 hover:bg-slate-200/80 dark:hover:bg-slate-700/80 text-slate-700 dark:text-slate-200 font-bold text-xs tracking-wider transition-all shadow-xs cursor-pointer shrink-0"
                 title="Change language"
               >
                 <Globe className="h-3.5 w-3.5 text-[#9273FC] shrink-0 stroke-[2.2]" />
@@ -484,103 +666,146 @@ export function DashboardHeader() {
                 <span className="sr-only">Toggle notifications</span>
               </Button>
             </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="w-[380px] p-0">
-              <div className="flex items-center justify-between p-2">
-                <DropdownMenuLabel className="p-0">Activity Center</DropdownMenuLabel>
-                <Button asChild variant="link" className="text-xs h-auto p-0">
-                  <Link href="/notifications">View All</Link>
-                </Button>
+            <DropdownMenuContent align="end" className="w-[390px] sm:w-[420px] p-0 rounded-2xl shadow-2xl border border-border overflow-hidden">
+              {/* Dropdown Header & Segmented Tabs */}
+              <div className="p-3 bg-muted/30 border-b border-border/60">
+                <div className="flex items-center justify-between mb-2">
+                  <span className="font-bold text-sm text-foreground">Notifications & Activity</span>
+                  <div className="flex items-center gap-2">
+                    {unreadCount > 0 && (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-6 text-[11px] px-2 text-primary font-medium hover:text-primary/80 flex items-center gap-1"
+                        onClick={() => markAllAsRead && markAllAsRead()}
+                      >
+                        <CheckCheck className="h-3 w-3" /> Mark all read
+                      </Button>
+                    )}
+                    <Button asChild variant="link" className="text-xs h-auto p-0 text-muted-foreground hover:text-foreground">
+                      <Link href="/notifications">View All</Link>
+                    </Button>
+                  </div>
+                </div>
+
+                {/* Segmented Switcher */}
+                <div className="grid grid-cols-2 gap-1 p-1 bg-muted/60 dark:bg-slate-900/60 rounded-xl border border-border/40">
+                  <button
+                    type="button"
+                    onClick={() => setNotifTab('activity')}
+                    className={cn(
+                      'flex items-center justify-center gap-1.5 py-1.5 px-2 rounded-lg text-xs font-bold transition-all',
+                      notifTab === 'activity'
+                        ? 'bg-background text-foreground shadow-xs'
+                        : 'text-muted-foreground hover:text-foreground'
+                    )}
+                  >
+                    <span>Activity Center</span>
+                    {unreadCount > 0 && (
+                      <span className="px-1.5 py-0.2 rounded-full bg-rose-500 text-white text-[10px] font-mono leading-tight">
+                        {unreadCount}
+                      </span>
+                    )}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setNotifTab('trades')}
+                    className={cn(
+                      'flex items-center justify-center gap-1.5 py-1.5 px-2 rounded-lg text-xs font-bold transition-all',
+                      notifTab === 'trades'
+                        ? 'bg-background text-foreground shadow-xs'
+                        : 'text-muted-foreground hover:text-foreground'
+                    )}
+                  >
+                    <span>Recent Trades</span>
+                    {allTrades.length > 0 && (
+                      <span className="px-1.5 py-0.2 rounded-full bg-muted-foreground/20 text-foreground text-[10px] font-mono leading-tight">
+                        {allTrades.length}
+                      </span>
+                    )}
+                  </button>
+                </div>
               </div>
-              <DropdownMenuSeparator />
-              <ScrollArea className="h-[450px]">
-                <div className="p-1 space-y-1">
-                  {notifications && notifications.length > 0 ? (
-                    <>
-                      {visibleNotifications?.map((n) => (
-                        <DropdownMenuItem
-                          key={n.id}
-                          asChild
-                          className={cn('flex items-start gap-2 whitespace-normal', !n.isRead && 'bg-secondary')}
-                        >
-                          <Link href={n.link || '#'} onClick={() => handleMarkAsRead(n.id)}>
-                            <Mail className="mt-1 h-4 w-4 text-muted-foreground flex-shrink-0" />
-                            <div className="flex flex-col">
-                              <p className="text-sm leading-snug">{n.message}</p>
-                              <p className="text-xs text-muted-foreground mt-1">
-                                {toDate(n.createdAt)?.toLocaleString('default', {
-                                  dateStyle: 'short',
-                                  timeStyle: 'short',
-                                }) ?? 'Invalid Date'}
-                              </p>
-                            </div>
-                          </Link>
-                        </DropdownMenuItem>
-                      ))}
-                      {!showAllNotifications && notifications.length > 3 && (
-                        <Button
-                          variant="ghost"
-                          className="w-full justify-center text-xs"
-                          onClick={() => setShowAllNotifications(true)}
-                        >
-                          <ChevronDown className="h-4 w-4 mr-1" /> Show All
-                        </Button>
-                      )}
-                    </>
-                  ) : (
-                    <p className="p-4 text-center text-sm text-muted-foreground">No new notifications.</p>
-                  )}
-                </div>
-                <DropdownMenuSeparator />
-                <div className="p-2">
-                  <DropdownMenuLabel className="p-0 text-xs font-semibold">Recent Trades</DropdownMenuLabel>
-                </div>
-                <div className="p-1 space-y-1">
-                  {allTrades.length > 0 ? (
-                    allTrades.slice(0, 5).map((trade) => {
-                      const isBuyer = trade.buyerId === authUser?.uid;
-                      const partner = isBuyer ? trade.seller : trade.buyer;
-                      return (
-                        <DropdownMenuItem key={trade.id} asChild className="p-0">
-                          <Link href={`/trade/${trade.id}`} className="flex items-center gap-3 p-2">
-                            <Avatar className="h-9 w-9">
-                              <AvatarFallback>{partner.username.substring(0, 2).toUpperCase()}</AvatarFallback>
-                            </Avatar>
-                            <div className="flex-grow overflow-hidden">
-                              <p className="text-sm font-medium truncate">{partner.username}</p>
-                              <div className="flex items-center gap-2">
-                                <Badge
-                                  className={cn(
-                                    'text-xs h-auto',
-                                    isBuyer
-                                      ? 'bg-green-600 text-primary-foreground hover:bg-green-600/90'
-                                      : 'bg-destructive text-destructive-foreground hover:bg-destructive/90'
-                                  )}
-                                >
-                                  {isBuyer ? 'Buy' : 'Sell'}
-                                </Badge>
-                                <p className="text-xs text-muted-foreground truncate flex items-center gap-1">
-                                  {trade.amount.toFixed(4)} {trade.crypto}
-                                  <CryptoLogo crypto={trade.crypto as CryptoCurrency} className="h-4 w-4" />
-                                </p>
-                              </div>
-                            </div>
-                            <div className="text-right text-xs shrink-0">
-                              <p className="font-semibold">
-                                {trade.fiatAmount.toLocaleString()} {trade.fiatCurrency}
-                              </p>
-                              <Badge variant="outline" className={cn('capitalize mt-1', statusColors[trade.status])}>
-                                {trade.status}
-                              </Badge>
-                            </div>
-                          </Link>
-                        </DropdownMenuItem>
-                      );
-                    })
-                  ) : (
-                    <p className="p-4 text-center text-sm text-muted-foreground">No recent trades.</p>
-                  )}
-                </div>
-              </ScrollArea>
+
+              {/* Tab 1: Activity Center */}
+              {notifTab === 'activity' && (
+                <ScrollArea className="max-h-[420px] p-2">
+                  <div className="space-y-1">
+                    {notifications && notifications.length > 0 ? (
+                      <>
+                        {visibleNotifications?.map((n) => {
+                          const icon = getActivityIcon(n.message);
+                          return (
+                            <DropdownMenuItem
+                              key={n.id}
+                              asChild
+                              className={cn(
+                                'flex items-start gap-3 p-2.5 rounded-xl cursor-pointer transition-colors whitespace-normal mb-1',
+                                !n.isRead ? 'bg-primary/5 dark:bg-primary/10 border border-primary/20' : 'hover:bg-muted/50 border border-transparent'
+                              )}
+                            >
+                              <Link href={n.link || '#'} onClick={() => handleMarkAsRead(n.id)}>
+                                <div className="mt-0.5 p-1.5 rounded-lg bg-muted/80 shrink-0 border border-border/50">
+                                  {icon}
+                                </div>
+                                <div className="flex flex-col min-w-0 flex-grow">
+                                  <div className="flex items-start justify-between gap-1">
+                                    <p className="text-xs font-semibold text-foreground leading-snug">
+                                      {n.message}
+                                    </p>
+                                    {!n.isRead && (
+                                      <span className="h-2 w-2 rounded-full bg-primary shrink-0 mt-1" />
+                                    )}
+                                  </div>
+                                  <p className="text-[10px] font-medium text-muted-foreground mt-1 font-[Arial,Helvetica,sans-serif] tabular-nums">
+                                    {formatDateArial(n.createdAt)}
+                                  </p>
+                                </div>
+                              </Link>
+                            </DropdownMenuItem>
+                          );
+                        })}
+                        {!showAllNotifications && notifications.length > 5 && (
+                          <Button
+                            variant="ghost"
+                            className="w-full justify-center text-xs h-8 text-muted-foreground hover:text-foreground mt-1"
+                            onClick={() => setShowAllNotifications(true)}
+                          >
+                            <ChevronDown className="h-3.5 w-3.5 mr-1" /> Show All Activities
+                          </Button>
+                        )}
+                      </>
+                    ) : (
+                      <div className="py-8 text-center">
+                        <Bell className="h-8 w-8 text-muted-foreground/40 mx-auto mb-2" />
+                        <p className="text-xs text-muted-foreground font-medium">No recent activity.</p>
+                      </div>
+                    )}
+                  </div>
+                </ScrollArea>
+              )}
+
+              {/* Tab 2: Recent Trades */}
+              {notifTab === 'trades' && (
+                <ScrollArea className="max-h-[420px] p-2">
+                  <div className="space-y-1">
+                    {allTrades.length > 0 ? (
+                      allTrades.map((trade) => (
+                        <RecentTradeNotificationRow
+                          key={trade.id}
+                          trade={trade}
+                          currentUserId={authUser?.uid}
+                        />
+                      ))
+                    ) : (
+                      <div className="py-8 text-center">
+                        <ArrowLeftRight className="h-8 w-8 text-muted-foreground/40 mx-auto mb-2" />
+                        <p className="text-xs text-muted-foreground font-medium">No recent trades found.</p>
+                      </div>
+                    )}
+                  </div>
+                </ScrollArea>
+              )}
             </DropdownMenuContent>
           </DropdownMenu>
 
@@ -588,7 +813,7 @@ export function DashboardHeader() {
             <DropdownMenuTrigger asChild>
               <Button
                 variant="ghost"
-                className="h-10 pl-2 pr-2.5 py-1 rounded-xl border border-slate-200/80 dark:border-slate-800 bg-slate-50/90 dark:bg-slate-800/60 hover:bg-slate-100 dark:hover:bg-slate-800 text-foreground transition-all shadow-xs flex items-center gap-2 cursor-pointer select-none group"
+                className="h-10 px-1.5 sm:px-2.5 py-1 rounded-xl border border-slate-200/80 dark:border-slate-800 bg-slate-50/90 dark:bg-slate-800/60 hover:bg-slate-100 dark:hover:bg-slate-800 text-foreground transition-all shadow-xs flex items-center gap-1.5 sm:gap-2 cursor-pointer select-none group shrink-0"
               >
                 <div className="relative shrink-0 flex items-center">
                   <Avatar className="h-7 w-7 rounded-lg border border-slate-200 dark:border-slate-700 overflow-hidden">
@@ -604,20 +829,20 @@ export function DashboardHeader() {
                 </div>
 
                 {profile?.country && (
-                  <FlagIcon countryCode={profile.country} className="w-4 h-3 rounded-[2px] object-cover shadow-xs shrink-0" />
+                  <FlagIcon countryCode={profile.country} className="hidden xs:block w-4 h-3 rounded-[2px] object-cover shadow-xs shrink-0" />
                 )}
 
                 <div className="flex flex-col text-left min-w-0 justify-center">
                   {authUser?.displayName || profile?.username ? (
-                    <span className="font-bold text-xs sm:text-[13px] text-slate-900 dark:text-white tracking-tight truncate max-w-[90px] sm:max-w-[120px] leading-tight">
+                    <span className="font-bold text-xs sm:text-[13px] text-slate-900 dark:text-white tracking-tight truncate max-w-[70px] xs:max-w-[95px] sm:max-w-[120px] leading-tight">
                       {authUser.displayName || profile?.username}
                     </span>
                   ) : (
-                    <Skeleton className="h-3.5 w-16 mb-0.5" />
+                    <Skeleton className="h-3.5 w-14 sm:w-16 mb-0.5" />
                   )}
-                  <div className="flex items-center gap-1 text-[11px] font-bold text-emerald-600 dark:text-emerald-400 font-mono leading-none mt-0.5">
+                  <div className="flex items-center gap-1 text-[10px] sm:text-[11px] font-bold text-emerald-600 dark:text-emerald-400 font-mono leading-none mt-0.5">
                     <Wallet className="h-2.5 w-2.5 text-emerald-500 shrink-0 stroke-[2.2]" />
-                    <span className="truncate">
+                    <span className="truncate max-w-[65px] xs:max-w-[85px] sm:max-w-none">
                       {totalWalletValueConverted.toLocaleString(undefined, {
                         style: 'currency',
                         currency: preferredCurrency,
@@ -628,7 +853,7 @@ export function DashboardHeader() {
                   </div>
                 </div>
 
-                <ChevronDown className="h-3.5 w-3.5 text-muted-foreground/70 shrink-0 group-hover:text-foreground transition-colors ml-0.5" />
+                <ChevronDown className="h-3 w-3 sm:h-3.5 sm:w-3.5 text-muted-foreground/70 shrink-0 group-hover:text-foreground transition-colors ml-0.5" />
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="w-56 rounded-xl p-1.5 shadow-xl border border-border">

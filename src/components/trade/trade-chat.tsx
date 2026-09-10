@@ -49,7 +49,9 @@ import {
   AlertCircle,
   Scale,
   Ban,
-  UserCheck
+  UserCheck,
+  Download,
+  ImageIcon
 } from 'lucide-react';
 import { formatDistanceToNow } from 'date-fns';
 
@@ -366,13 +368,119 @@ export function TradeChat({
   const [isUploading, setIsUploading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // External link security modal state
+  // External link security modal state (only for typed chat web links)
   const [selectedExternalUrl, setSelectedExternalUrl] = useState<string | null>(null);
+
+  // In-app media lightbox modal state for uploaded trade attachments
+  const [previewMedia, setPreviewMedia] = useState<{ url: string; type: string; filename?: string; isPdf?: boolean; isCsv?: boolean; isText?: boolean } | null>(null);
+  const [csvContent, setCsvContent] = useState<string | null>(null);
+  const [textContent, setTextContent] = useState<string | null>(null);
+  const [isLoadingPreviewContent, setIsLoadingPreviewContent] = useState(false);
+
+  // Dynamic live feedback state for opponent in chat header
+  const [liveOpponentFeedback, setLiveOpponentFeedback] = useState<{ positive: number; negative: number }>({
+    positive: Number(opponent?.positiveFeedback ?? opponent?.positive_feedback ?? 0),
+    negative: Number(opponent?.negativeFeedback ?? opponent?.negative_feedback ?? 0)
+  });
+
+  useEffect(() => {
+    setLiveOpponentFeedback({
+      positive: Number(opponent?.positiveFeedback ?? opponent?.positive_feedback ?? 0),
+      negative: Number(opponent?.negativeFeedback ?? opponent?.negative_feedback ?? 0)
+    });
+  }, [opponent?.positiveFeedback, opponent?.positive_feedback, opponent?.negativeFeedback, opponent?.negative_feedback]);
+
+  // Realtime subscription to feedback changes to immediately update positive/negative counts
+  useEffect(() => {
+    const oppId = opponent?.id;
+    if (!oppId) return;
+
+    const fetchCounts = async () => {
+      const { count: pos } = await supabase
+        .from('feedback')
+        .select('*', { count: 'exact', head: true })
+        .eq('to_user', oppId)
+        .eq('rating', 'positive');
+
+      const { count: neg } = await supabase
+        .from('feedback')
+        .select('*', { count: 'exact', head: true })
+        .eq('to_user', oppId)
+        .eq('rating', 'negative');
+
+      if (pos !== null || neg !== null) {
+        setLiveOpponentFeedback({
+          positive: pos ?? 0,
+          negative: neg ?? 0
+        });
+      }
+    };
+
+    fetchCounts();
+
+    const fbChannel = supabase
+      .channel(`feedback-chat-counts-${oppId}-${Math.random().toString(36).substring(2, 7)}`)
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'feedback', filter: `to_user=eq.${oppId}` },
+        () => {
+          fetchCounts();
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(fbChannel);
+    };
+  }, [opponent?.id, supabase]);
+
+  const openAttachmentPreview = async (rawUrl: string, mediaType: string) => {
+    const displayUrl = getMediaDisplayUrl(rawUrl);
+    const lowerUrl = (rawUrl || '').toLowerCase();
+    const isPdf = lowerUrl.includes('.pdf') || mediaType === 'pdf';
+    const isCsv = lowerUrl.includes('.csv');
+    const isText = lowerUrl.includes('.txt') || lowerUrl.includes('.json') || lowerUrl.includes('.log');
+    const extractedFilename = rawUrl.split('/').pop()?.split('?')[0] || 'Attachment';
+
+    setCsvContent(null);
+    setTextContent(null);
+
+    setPreviewMedia({
+      url: displayUrl,
+      type: mediaType,
+      filename: extractedFilename,
+      isPdf,
+      isCsv,
+      isText,
+    });
+
+    if (isCsv || isText) {
+      setIsLoadingPreviewContent(true);
+      try {
+        const res = await fetch(displayUrl);
+        const text = await res.text();
+        if (isCsv) setCsvContent(text);
+        else setTextContent(text);
+      } catch (err) {
+        console.error('Failed to preview text/csv file:', err);
+      } finally {
+        setIsLoadingPreviewContent(false);
+      }
+    }
+  };
 
   // Dispute privacy modal state
   const [pendingUploadFile, setPendingUploadFile] = useState<File | null>(null);
   const [disputeVisibility, setDisputeVisibility] = useState<'all' | 'moderator_only'>('all');
   const [isPrivacyModalOpen, setIsPrivacyModalOpen] = useState(false);
+
+  const getMediaDisplayUrl = (url?: string) => {
+    if (!url) return '';
+    if (url.includes('backblazeb2.com') || url.includes('/trades/')) {
+      return `/api/trade/media?url=${encodeURIComponent(url)}`;
+    }
+    return url;
+  };
 
   const tradeStatus = (trade?.status || 'active').toLowerCase();
   const isTradeStopped = ['released', 'cancelled', 'expired', 'completed'].includes(tradeStatus);
@@ -591,13 +699,13 @@ export function TradeChat({
 
       const data = await res.json();
       if (!res.ok || !data.success) {
-        throw new Error(data.error || 'Failed to upload media to Backblaze B2');
+        throw new Error(data.error || 'Failed to upload media');
       }
 
       await handleSendMessage(undefined, data.url, data.mediaType, chosenVisibility);
       toast({
         title: 'Media Uploaded',
-        description: `Uploaded to Backblaze B2 (${chosenVisibility === 'moderator_only' ? 'Moderator Only' : 'Public to Counterpart'})`
+        description: chosenVisibility === 'moderator_only' ? 'Uploaded (Moderator Only)' : 'Media uploaded successfully'
       });
     } catch (err: any) {
       toast({ variant: 'destructive', title: 'Upload Failed', description: err.message });
@@ -679,11 +787,11 @@ export function TradeChat({
             <div className="flex items-center gap-3 text-xs justify-end font-semibold">
               <div className="flex items-center gap-1 text-emerald-600 dark:text-emerald-400">
                 <ThumbsUp className="h-3.5 w-3.5" />
-                <span className="font-[Arial,Helvetica,sans-serif]">{positiveFeedback}</span>
+                <span className="font-[Arial,Helvetica,sans-serif]">{liveOpponentFeedback.positive}</span>
               </div>
               <div className="flex items-center gap-1 text-destructive">
                 <ThumbsDown className="h-3.5 w-3.5" />
-                <span className="font-[Arial,Helvetica,sans-serif]">{negativeFeedback}</span>
+                <span className="font-[Arial,Helvetica,sans-serif]">{liveOpponentFeedback.negative}</span>
               </div>
             </div>
             <div className="text-xs font-semibold font-[Arial,Helvetica,sans-serif] flex items-center gap-1.5 justify-end mt-1 text-primary">
@@ -795,29 +903,27 @@ export function TradeChat({
                             ) : msg.mediaType === 'image' ? (
                               <button
                                 type="button"
-                                onClick={() => setSelectedExternalUrl(msg.mediaUrl)}
-                                className="block mt-1 text-left"
+                                onClick={() => openAttachmentPreview(msg.mediaUrl, 'image')}
+                                className="block mt-1 text-left cursor-pointer group"
                               >
-                                <Image
-                                  src={msg.mediaUrl}
-                                  alt="Trade Media"
-                                  width={240}
-                                  height={240}
-                                  className="rounded-lg object-cover max-h-56 w-auto border border-border/40 hover:opacity-95 transition-opacity"
+                                <img
+                                  src={getMediaDisplayUrl(msg.mediaUrl)}
+                                  alt="Media Attachment"
+                                  className="rounded-lg object-cover max-h-56 max-w-full border border-border/40 group-hover:opacity-90 transition-opacity"
                                 />
                               </button>
                             ) : msg.mediaType === 'video' ? (
                               <div className="mt-1">
-                                <video controls className="max-h-56 rounded-lg w-full" src={msg.mediaUrl} />
+                                <video controls className="max-h-56 rounded-lg w-full" src={getMediaDisplayUrl(msg.mediaUrl)} />
                               </div>
                             ) : (
                               <button
                                 type="button"
-                                onClick={() => setSelectedExternalUrl(msg.mediaUrl)}
-                                className="inline-flex items-center gap-2 p-2 rounded-lg bg-background/40 hover:bg-background/80 border text-xs font-semibold underline mt-1"
+                                onClick={() => openAttachmentPreview(msg.mediaUrl, msg.mediaType || 'document')}
+                                className="inline-flex items-center gap-2 p-2 rounded-lg bg-background/40 hover:bg-background/80 border text-xs font-semibold underline mt-1 cursor-pointer"
                               >
-                                <FileText className="h-4 w-4" />
-                                View Attached Document
+                                <FileText className="h-4 w-4 text-primary" />
+                                <span>View Attachment ({msg.mediaUrl.split('.').pop()?.toUpperCase() || 'FILE'})</span>
                               </button>
                             )}
                           </div>
@@ -997,7 +1103,119 @@ export function TradeChat({
               disabled={isUploading}
             >
               {isUploading ? <Loader2 className="h-4 w-4 animate-spin mr-1.5" /> : null}
-              Upload to Backblaze B2
+              Upload Media
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* In-App Media Lightbox & Document Preview Dialog */}
+      <Dialog open={!!previewMedia} onOpenChange={(open) => !open && setPreviewMedia(null)}>
+        <DialogContent className="max-w-4xl max-h-[90vh] bg-card border-border p-4 flex flex-col">
+          <DialogHeader>
+            <DialogTitle className="flex items-center justify-between text-sm font-bold">
+              <span className="flex items-center gap-2 truncate">
+                <FileText className="h-4 w-4 text-primary shrink-0" />
+                <span className="truncate">{previewMedia?.filename || 'Attachment Preview'}</span>
+              </span>
+            </DialogTitle>
+            <DialogDescription className="text-xs">
+              Direct in-app attachment view.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="flex-1 min-h-[350px] max-h-[65vh] flex flex-col items-center justify-center p-2 bg-muted/20 rounded-xl border border-border/50 overflow-auto">
+            {previewMedia?.type === 'image' ? (
+              <img
+                src={previewMedia.url}
+                alt="Attachment Preview"
+                className="max-h-[60vh] max-w-full object-contain rounded-lg shadow-xs"
+              />
+            ) : previewMedia?.type === 'video' ? (
+              <video controls autoPlay className="max-h-[60vh] max-w-full rounded-lg" src={previewMedia.url} />
+            ) : previewMedia?.isPdf ? (
+              <iframe
+                src={previewMedia.url}
+                title="PDF Attachment Viewer"
+                className="w-full h-[60vh] rounded-lg border-0 bg-white"
+              />
+            ) : previewMedia?.isCsv ? (
+              isLoadingPreviewContent ? (
+                <div className="flex flex-col items-center gap-2 py-12 text-muted-foreground">
+                  <Loader2 className="h-6 w-6 animate-spin text-primary" />
+                  <span className="text-xs font-medium">Loading spreadsheet data...</span>
+                </div>
+              ) : csvContent ? (
+                <div className="w-full h-[60vh] overflow-auto bg-background rounded-lg p-2 font-mono text-xs">
+                  <table className="w-full border-collapse border border-border/60 text-left">
+                    <tbody>
+                      {csvContent.split('\n').filter(Boolean).map((row, rIdx) => {
+                        const cols = row.split(',');
+                        return (
+                          <tr key={rIdx} className={rIdx === 0 ? 'bg-muted font-bold' : 'hover:bg-muted/40'}>
+                            {cols.map((c, cIdx) => (
+                              <td key={cIdx} className="border border-border/60 px-2.5 py-1.5 whitespace-nowrap">
+                                {c.trim()}
+                              </td>
+                            ))}
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              ) : (
+                <p className="text-xs text-muted-foreground">Unable to render CSV inline.</p>
+              )
+            ) : previewMedia?.isText ? (
+              isLoadingPreviewContent ? (
+                <div className="flex flex-col items-center gap-2 py-12 text-muted-foreground">
+                  <Loader2 className="h-6 w-6 animate-spin text-primary" />
+                  <span className="text-xs font-medium">Loading text content...</span>
+                </div>
+              ) : (
+                <pre className="w-full h-[60vh] overflow-auto bg-background rounded-lg p-3 font-mono text-xs whitespace-pre-wrap text-foreground">
+                  {textContent || 'Empty document.'}
+                </pre>
+              )
+            ) : (
+              <div className="p-8 text-center space-y-3">
+                <FileText className="h-16 w-16 text-primary mx-auto" />
+                <p className="text-sm font-semibold text-foreground">
+                  {previewMedia?.filename || 'Attachment File'}
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  Click the download button below to save the file to your device.
+                </p>
+              </div>
+            )}
+          </div>
+
+          <DialogFooter className="flex items-center justify-between gap-2 sm:justify-between pt-2">
+            <Button
+              variant="outline"
+              size="sm"
+              asChild
+            >
+              <a
+                href={previewMedia?.url ? (previewMedia.url.includes('?') ? `${previewMedia.url}&download=true` : `${previewMedia.url}?download=true`) : '#'}
+                download={previewMedia?.filename || true}
+                target="_blank"
+                rel="noreferrer"
+                className="flex items-center gap-1.5 text-xs font-bold"
+              >
+                <Download className="h-3.5 w-3.5" />
+                Download File
+              </a>
+            </Button>
+
+            <Button
+              size="sm"
+              variant="secondary"
+              onClick={() => setPreviewMedia(null)}
+              className="text-xs font-bold"
+            >
+              Close
             </Button>
           </DialogFooter>
         </DialogContent>

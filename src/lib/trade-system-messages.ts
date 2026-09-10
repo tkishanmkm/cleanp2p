@@ -25,6 +25,7 @@ export interface SystemMessagePayload {
   paymentMethod?: string;
   issueDetails?: string;
   issueCategory?: string;
+  feedbackComment?: string;
   customText?: string;
 }
 
@@ -41,11 +42,13 @@ export function formatSystemMessageContent(payload: SystemMessagePayload): strin
     paymentMethod = '',
     issueDetails = '',
     issueCategory = '',
+    feedbackComment = '',
     customText
   } = payload;
 
   const formattedAmount = typeof coinAmount === 'number' ? coinAmount.toFixed(8) : String(coinAmount);
   const cleanCoin = (coinSymbol || 'BTC').toUpperCase();
+  const trimmedComment = (feedbackComment || customText || '').trim().slice(0, 100);
 
   switch (type) {
     case 'TRADE_COMPLETED':
@@ -76,9 +79,15 @@ export function formatSystemMessageContent(payload: SystemMessagePayload): strin
     }
 
     case 'POSITIVE_FEEDBACK':
+      if (trimmedComment) {
+        return `@${openerUsername} left positive feedback "${trimmedComment}"`;
+      }
       return `@${openerUsername} left positive feedback.`;
 
     case 'NEGATIVE_FEEDBACK':
+      if (trimmedComment) {
+        return `@${openerUsername} left negative feedback "${trimmedComment}"`;
+      }
       return `@${openerUsername} left negative feedback.`;
 
     case 'USER_BLOCKED':

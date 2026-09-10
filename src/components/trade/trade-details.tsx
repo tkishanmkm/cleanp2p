@@ -139,23 +139,39 @@ const statusColors = {
   expired: 'border-muted-foreground/40 text-muted-foreground bg-muted'
 };
 
+const formatDateArial = (dateVal: any): string => {
+  const d = toDate(dateVal);
+  if (!d) return 'N/A';
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  const year = String(d.getFullYear()).slice(-2);
+  let hours = d.getHours();
+  const minutes = String(d.getMinutes()).padStart(2, '0');
+  const ampm = hours >= 12 ? 'pm' : 'am';
+  hours = hours % 12;
+  hours = hours ? hours : 12;
+  return `${month}/${day}/${year}, ${hours}:${minutes} ${ampm}`;
+};
+
 const DetailRow = ({
   label,
   value,
   isLink = false,
   href = '#',
-  valueClass = ''
+  valueClass = '',
+  boldLabel = false
 }: {
   label: string;
   value: React.ReactNode;
   isLink?: boolean;
   href?: string;
   valueClass?: string;
+  boldLabel?: boolean;
 }) => (
   <div className="flex justify-between items-center text-xs sm:text-sm py-1 border-b border-border/40 last:border-0">
-    <p className="text-muted-foreground">{label}</p>
+    <p className={boldLabel ? "font-bold text-foreground" : "text-muted-foreground"}>{label}</p>
     {isLink ? (
-      <Link href={href} className="font-mono font-medium text-primary hover:underline">
+      <Link href={href} className="font-mono font-bold text-primary hover:underline">
         {value}
       </Link>
     ) : (
@@ -204,10 +220,10 @@ const ParticipantRow = ({
 
   return (
     <div className="flex justify-between items-center text-xs sm:text-sm py-1.5 border-b border-border/40">
-      <p className="text-muted-foreground">{label}</p>
+      <p className="font-bold text-foreground">{label}</p>
       <Link
         href={`/users/${displayUsername}`}
-        className="font-semibold text-primary hover:underline flex items-center gap-1.5"
+        className="font-bold text-primary hover:underline flex items-center gap-1.5"
       >
         <span>@{displayUsername}</span>
       </Link>
@@ -685,71 +701,105 @@ function FeedbackForm({
 
     try {
       let savedFbRecord: any = null;
-      if (existingFeedback?.id) {
-        const { data: updatedData } = await supabase
-          .from('feedback')
-          .update({
-            rating: values.rating,
-            comment: values.comment
-          })
-          .eq('id', existingFeedback.id)
-          .select()
-          .maybeSingle();
-        savedFbRecord = updatedData;
-      } else {
-        const { data: insertedData } = await supabase.from('feedback').insert([
-          {
-            trade_id: trade.id,
-            from_user: currentUserId,
-            from_username: currentUsername || 'Trader',
-            to_user: opponentId,
+
+      // 1. First attempt via secure API route (handles RLS bypass, profiles update, chat system message)
+      try {
+        const res = await fetch('/api/trade/feedback', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            tradeId: trade.id,
             rating: values.rating,
             comment: values.comment,
+            counterpartId: opponentId,
+          }),
+        });
+
+        if (res.ok) {
+          const apiData = await res.json();
+          if (apiData.feedback) {
+            savedFbRecord = apiData.feedback;
+          }
+        } else {
+          const errData = await res.json().catch(() => ({}));
+          console.warn('API feedback notice:', errData?.error);
+        }
+      } catch (apiErr) {
+        console.warn('API feedback error:', apiErr);
+      }
+
+      // 2. Fallback to direct supabase client if needed
+      if (!savedFbRecord) {
+        if (existingFeedback?.id) {
+          const { data: updatedData, error: updateErr } = await supabase
+            .from('feedback')
+            .update({
+              rating: values.rating,
+              comment: values.comment,
+              updated_at: new Date().toISOString()
+            })
+            .eq('id', existingFeedback.id)
+            .select()
+            .maybeSingle();
+          if (updateErr) throw updateErr;
+          savedFbRecord = updatedData;
+        } else {
+          const { data: insertedData, error: insertErr } = await supabase.from('feedback').insert([
+            {
+              trade_id: trade.id,
+              from_user: currentUserId,
+              from_username: currentUsername || 'Trader',
+              to_user: opponentId,
+              rating: values.rating,
+              comment: values.comment,
+              created_at: new Date().toISOString()
+            }
+          ]).select().maybeSingle();
+          if (insertErr) throw insertErr;
+          savedFbRecord = insertedData;
+        }
+
+        // Adjust counts in profiles table
+        const { data: allFb } = await supabase
+          .from('feedback')
+          .select('rating')
+          .eq('to_user', opponentId);
+
+        if (allFb) {
+          const positiveCount = allFb.filter((f) => f.rating === 'positive').length;
+          const negativeCount = allFb.filter((f) => f.rating === 'negative').length;
+          const total = positiveCount + negativeCount;
+          const score = total > 0 ? Math.round((positiveCount / total) * 100) : 100;
+
+          await supabase
+            .from('profiles')
+            .update({
+              positive_feedback: positiveCount,
+              negative_feedback: negativeCount,
+              feedback_score: score
+            })
+            .eq('id', opponentId);
+        }
+
+        // Add official Paxones system message in trade_messages
+        await insertPaxonesSystemMessage(supabase, {
+          tradeId: trade.id,
+          type: values.rating === 'positive' ? 'POSITIVE_FEEDBACK' : 'NEGATIVE_FEEDBACK',
+          openerUsername: currentUsername || 'Trader',
+          feedbackComment: values.comment
+        });
+
+        // Add notification for opponent
+        await supabase.from('notifications').insert([
+          {
+            user_id: opponentId,
+            message: `@${currentUsername || 'Trader'} left you ${values.rating} feedback for trade #${publicTradeId}.`,
+            link: `/trade/${trade.id}`,
+            is_read: false,
             created_at: new Date().toISOString()
           }
-        ]).select().maybeSingle();
-        savedFbRecord = insertedData;
+        ]);
       }
-
-      // 2. Adjust counts in profiles table
-      const { data: allFb } = await supabase
-        .from('feedback')
-        .select('rating')
-        .eq('to_user', opponentId);
-
-      if (allFb) {
-        const positiveCount = allFb.filter((f) => f.rating === 'positive').length;
-        const negativeCount = allFb.filter((f) => f.rating === 'negative').length;
-        const total = positiveCount + negativeCount;
-        const score = total > 0 ? Math.round((positiveCount / total) * 100) : 100;
-
-        await supabase
-          .from('profiles')
-          .update({
-            positive_feedback: positiveCount,
-            negative_feedback: negativeCount,
-            feedback_score: score
-          })
-          .eq('id', opponentId);
-      }
-
-      // 3. Add official Paxones system message in trade_messages
-      await insertPaxonesSystemMessage(supabase, {
-        tradeId: trade.id,
-        type: values.rating === 'positive' ? 'POSITIVE_FEEDBACK' : 'NEGATIVE_FEEDBACK',
-        openerUsername: currentUsername || 'Trader'
-      });
-
-      // 4. Add notification for opponent
-      await supabase.from('notifications').insert([
-        {
-          user_id: opponentId,
-          message: `@${currentUsername || 'Trader'} left you ${values.rating} feedback for trade #${publicTradeId}.`,
-          link: `/trade/${trade.id}`,
-          is_read: false,
-          created_at: new Date().toISOString()
-        }
-      ]);
 
       const updatedFb: Feedback = {
         id: savedFbRecord?.id || existingFeedback?.id || 'fb_' + Date.now(),
@@ -1027,29 +1077,71 @@ export function TradeDetails({
       if (user) {
         setCurrentUser(user);
 
-        // Fetch existing feedback between these two users across any trade
+        // Fetch existing feedback for this specific trade
         const oppId = user.id === buyerId ? sellerId : buyerId;
-        if (oppId) {
-          const { data: fbData } = await supabase
+        if (trade?.id) {
+          try {
+            const apiRes = await fetch(`/api/trade/feedback?tradeId=${trade.id}&userId=${user.id}`);
+            if (apiRes.ok) {
+              const apiData = await apiRes.json();
+              if (apiData?.feedback) {
+                setExistingFeedback({
+                  id: apiData.feedback.id,
+                  tradeId: apiData.feedback.trade_id,
+                  fromUser: apiData.feedback.from_user,
+                  fromUsername: apiData.feedback.from_username,
+                  toUser: apiData.feedback.to_user,
+                  rating: apiData.feedback.rating,
+                  comment: apiData.feedback.comment,
+                  createdAt: apiData.feedback.created_at,
+                });
+                return;
+              }
+            }
+          } catch (e) {
+            console.warn('Feedback API fetch notice:', e);
+          }
+
+          const { data: tradeFb } = await supabase
             .from('feedback')
             .select('*')
+            .eq('trade_id', trade.id)
             .eq('from_user', user.id)
-            .eq('to_user', oppId)
-            .order('created_at', { ascending: false })
-            .limit(1)
             .maybeSingle();
 
-          if (fbData) {
+          if (tradeFb) {
             setExistingFeedback({
-              id: fbData.id,
-              tradeId: fbData.trade_id,
-              fromUser: fbData.from_user,
-              fromUsername: fbData.from_username,
-              toUser: fbData.to_user,
-              rating: fbData.rating,
-              comment: fbData.comment,
-              createdAt: fbData.created_at
+              id: tradeFb.id,
+              tradeId: tradeFb.trade_id,
+              fromUser: tradeFb.from_user,
+              fromUsername: tradeFb.from_username,
+              toUser: tradeFb.to_user,
+              rating: tradeFb.rating,
+              comment: tradeFb.comment,
+              createdAt: tradeFb.created_at
             });
+          } else if (oppId) {
+            const { data: fbData } = await supabase
+              .from('feedback')
+              .select('*')
+              .eq('from_user', user.id)
+              .eq('to_user', oppId)
+              .order('created_at', { ascending: false })
+              .limit(1)
+              .maybeSingle();
+
+            if (fbData) {
+              setExistingFeedback({
+                id: fbData.id,
+                tradeId: fbData.trade_id,
+                fromUser: fbData.from_user,
+                fromUsername: fbData.from_username,
+                toUser: fbData.to_user,
+                rating: fbData.rating,
+                comment: fbData.comment,
+                createdAt: fbData.created_at
+              });
+            }
           }
         }
 
@@ -1128,7 +1220,7 @@ export function TradeDetails({
           {/* Main Trade Values Card */}
           <div className="space-y-2.5 rounded-xl border border-border/60 p-4 bg-muted/20">
             <div className="flex justify-between items-center text-xs sm:text-sm py-1 border-b border-border/40">
-              <span className="text-muted-foreground">{isBuying ? 'You are buying' : 'You are selling'}</span>
+              <span className="font-bold text-foreground">{isBuying ? 'You are buying' : 'You are selling'}</span>
               <div className="flex items-center gap-1.5">
                 <span className="font-[Arial,Helvetica,sans-serif] tabular-nums font-bold text-sm sm:text-base text-foreground tracking-tight">{coinAmount}</span>
                 <CoinInsignia symbol={coinSymbol} className="h-4 w-4" />
@@ -1136,7 +1228,7 @@ export function TradeDetails({
             </div>
 
             <div className="flex justify-between items-center text-xs sm:text-sm py-1 border-b border-border/40">
-              <span className="text-muted-foreground">Rate</span>
+              <span className="font-bold text-foreground">Rate</span>
               <div className="flex items-center gap-1 text-xs sm:text-sm font-medium text-foreground">
                 <span>1 {coinSymbol} = </span>
                 <span className="font-[Arial,Helvetica,sans-serif] tabular-nums font-bold tracking-tight">{priceFormatted}</span>
@@ -1145,9 +1237,9 @@ export function TradeDetails({
             </div>
 
             <div className="flex justify-between items-center text-xs sm:text-sm py-1 border-b border-border/40">
-              <span className="text-muted-foreground">Escrow Fee (1.5%)</span>
+              <span className="font-bold text-foreground">Escrow Fee (1.5%)</span>
               <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                <span className="font-[Arial,Helvetica,sans-serif] tabular-nums font-bold tracking-tight">{escrowFeeCoin}</span>
+                <span className="font-[Arial,Helvetica,sans-serif] tabular-nums font-bold tracking-tight text-foreground">{escrowFeeCoin}</span>
                 <CoinInsignia symbol={coinSymbol} className="h-3.5 w-3.5" />
               </div>
             </div>
@@ -1217,7 +1309,7 @@ export function TradeDetails({
 
           {/* Participants with Usernames */}
           <div className="space-y-1 rounded-xl border border-border/60 p-3 bg-muted/10">
-            <h4 className="text-xs font-bold text-muted-foreground uppercase tracking-wider mb-2">
+            <h4 className="text-xs font-bold text-foreground uppercase tracking-wider mb-2">
               Participants & Payment
             </h4>
             <ParticipantRow
@@ -1237,37 +1329,50 @@ export function TradeDetails({
 
           {/* Timestamps */}
           <div className="space-y-1 rounded-xl border border-border/60 p-3 bg-muted/10">
-            <h4 className="text-xs font-bold text-muted-foreground uppercase tracking-wider mb-2">
+            <h4 className="text-xs font-bold text-foreground uppercase tracking-wider mb-2">
               Timeline
             </h4>
             <DetailRow
               label="Created"
-              value={toDate(trade?.createdAt || trade?.created_at)?.toLocaleString('default', { dateStyle: 'short', timeStyle: 'short' }) ?? 'N/A'}
-              valueClass="font-mono text-xs"
+              boldLabel
+              value={
+                <span className="font-[Arial,Helvetica,sans-serif] text-xs font-medium text-foreground">
+                  {formatDateArial(trade?.createdAt || trade?.created_at)}
+                </span>
+              }
             />
             {(trade?.paidAt || trade?.paid_at) && (
               <DetailRow
                 label="Marked Paid"
-                value={toDate(trade.paidAt || trade.paid_at)?.toLocaleString('default', { dateStyle: 'short', timeStyle: 'short' }) ?? 'N/A'}
-                valueClass="font-mono text-xs"
+                boldLabel
+                value={
+                  <span className="font-[Arial,Helvetica,sans-serif] text-xs font-medium text-foreground">
+                    {formatDateArial(trade.paidAt || trade.paid_at)}
+                  </span>
+                }
               />
             )}
             {(trade?.releasedAt || trade?.released_at) && (
               <DetailRow
                 label="Released"
-                value={toDate(trade.releasedAt || trade.released_at)?.toLocaleString('default', { dateStyle: 'short', timeStyle: 'short' }) ?? 'N/A'}
-                valueClass="font-mono text-xs"
+                boldLabel
+                value={
+                  <span className="font-[Arial,Helvetica,sans-serif] text-xs font-medium text-foreground">
+                    {formatDateArial(trade.releasedAt || trade.released_at)}
+                  </span>
+                }
               />
             )}
           </div>
 
           {resolvedDispute && (
             <div className="space-y-1 rounded-xl border border-border/60 p-3 bg-muted/10">
-              <h4 className="text-xs font-bold text-muted-foreground uppercase tracking-wider mb-2">
+              <h4 className="text-xs font-bold text-foreground uppercase tracking-wider mb-2">
                 Dispute Resolution
               </h4>
               <DetailRow
                 label="Awarded To"
+                boldLabel
                 value={resolvedDispute.winner_id === buyerId ? 'Buyer' : 'Seller'}
                 valueClass="font-bold text-primary"
               />
@@ -1280,12 +1385,13 @@ export function TradeDetails({
 
           {/* Ad Reference */}
           <div className="space-y-1 rounded-xl border border-border/60 p-3 bg-muted/10">
-            <h4 className="text-xs font-bold text-muted-foreground uppercase tracking-wider mb-2">
+            <h4 className="text-xs font-bold text-foreground uppercase tracking-wider mb-2">
               Offer Terms
             </h4>
             {(ad?.publicAdId || ad?.ad_id || trade?.adId || trade?.ad_id) && (
               <DetailRow
                 label="Ad Reference"
+                boldLabel
                 value={ad?.publicAdId || ad?.ad_id || trade?.adId || trade?.ad_id}
                 isLink
                 href={`/ad/${ad?.id || trade?.adId || trade?.ad_id}`}

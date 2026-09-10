@@ -76,18 +76,22 @@ export function CounterpartyInfoPanel({
   user,
   open,
   onOpenChange,
-  completedTradesWithUser
+  completedTradesWithUser,
+  activeTradeId
 }: {
   user: User | any;
   open: boolean;
   onOpenChange: (open: boolean) => void;
   completedTradesWithUser?: number;
+  activeTradeId?: string;
 }) {
   const supabase = createClient();
   const { toast } = useToast();
   const [profileData, setProfileData] = useState<any>(user);
   const [blockedByCount, setBlockedByCount] = useState<number>(0);
   const [isBlockedByMe, setIsBlockedByMe] = useState(false);
+  const [isBlockedByThem, setIsBlockedByThem] = useState(false);
+  const [isCheckingStatus, setIsCheckingStatus] = useState(true);
   const [isBlocking, setIsBlocking] = useState(false);
 
   useEffect(() => {
@@ -95,6 +99,7 @@ export function CounterpartyInfoPanel({
     if (!open || !user) return;
 
     const fetchLiveStats = async () => {
+      setIsCheckingStatus(true);
       try {
         const { data: { user: currentUser } } = await supabase.auth.getUser();
 
@@ -114,6 +119,16 @@ export function CounterpartyInfoPanel({
         if (!error && prof) {
           targetProfileId = prof.id;
           setProfileData((prev: any) => ({ ...prev, ...prof }));
+
+          // Check if target user blocked currentUser
+          if (currentUser) {
+            const targetBlocked: string[] = Array.isArray(prof.blocked_users) ? prof.blocked_users : [];
+            setIsBlockedByThem(
+              targetBlocked.includes(currentUser.id) ||
+              targetBlocked.includes(currentUser.user_metadata?.username) ||
+              targetBlocked.includes(currentUser.email?.split('@')[0])
+            );
+          }
         }
 
         // Live fetch actual completed trades count for target user from trades table
@@ -209,6 +224,8 @@ export function CounterpartyInfoPanel({
         }
       } catch (err) {
         console.error('Error fetching counterparty stats:', err);
+      } finally {
+        setIsCheckingStatus(false);
       }
     };
 
@@ -231,6 +248,7 @@ export function CounterpartyInfoPanel({
         body: JSON.stringify({
           targetUserId: targetId,
           action,
+          activeTradeId,
         }),
       });
 
@@ -330,7 +348,13 @@ export function CounterpartyInfoPanel({
                   <span>Email Verified</span>
                 </div>
                 <div>
-                  {(current.email_verified || current.is_email_verified || current.emailVerified) ? (
+                  {(
+                    current.email_verified === true ||
+                    current.is_email_verified === true ||
+                    current.emailVerified === true ||
+                    current.email_confirmed_at != null ||
+                    current.is_email_verified ?? true
+                  ) ? (
                     <span className="inline-flex items-center gap-1 text-xs font-bold px-2 py-0.5 rounded-md bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">
                       <CheckCircle className="h-3 w-3" /> Verified
                     </span>
@@ -348,7 +372,16 @@ export function CounterpartyInfoPanel({
                   <span>ID / KYC Verified</span>
                 </div>
                 <div>
-                  {(current.id_verified || current.kyc_status === 'verified' || current.is_id_verified || current.idVerified) ? (
+                  {(
+                    current.id_verified === true ||
+                    current.is_id_verified === true ||
+                    current.idVerified === true ||
+                    current.kyc_status === 'VERIFIED' ||
+                    current.kyc_status === 'verified' ||
+                    current.verification_tier === 2 ||
+                    current.verification_tier === 'TIER_2' ||
+                    current.kyc_verified === true
+                  ) ? (
                     <span className="inline-flex items-center gap-1 text-xs font-bold px-2 py-0.5 rounded-md bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">
                       <CheckCircle className="h-3 w-3" /> Verified
                     </span>

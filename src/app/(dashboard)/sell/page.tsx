@@ -542,8 +542,8 @@ function P2PMarketplaceContent() {
 
   return (
     <div className="min-h-screen bg-background text-foreground transition-colors duration-200">
-      {/* Theme Purple Header Bar with Dark Mode Support */}
-      <div className="bg-[#9273FC] text-white border-b border-purple-400/20 shadow-lg transition-colors">
+      {/* Theme Header Bar with Dark Mode Support */}
+      <div className="bg-[#6347ea] text-white border-b border-indigo-400/20 shadow-lg transition-colors">
         <div className="container mx-auto p-4 sm:p-6 lg:p-8">
             <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
                 <div>
@@ -564,14 +564,14 @@ function P2PMarketplaceContent() {
                     <button
                       type="button"
                       onClick={() => setTourStep(0)}
-                      className="inline-flex items-center justify-center gap-2 px-5 py-2.5 text-sm font-medium transition-all duration-200 rounded-lg shadow-sm border bg-[#9273FC] text-white hover:bg-[#805DF6] border-transparent focus:outline-none focus:ring-2 focus:ring-[#9273FC]/50 active:scale-[0.98]"
+                      className="inline-flex items-center justify-center gap-2 px-5 py-2.5 text-sm font-medium transition-all duration-200 rounded-lg shadow-sm border bg-[#6347ea] text-white hover:bg-[#5238d6] border-transparent focus:outline-none focus:ring-2 focus:ring-[#6347ea]/50 active:scale-[0.98] cursor-pointer"
                     >
                       <Compass className="w-4 h-4" />
                       <span>Take a tour</span>
                     </button>
                     <Link
                       href="/academy"
-                      className="inline-flex items-center justify-center gap-2 px-5 py-2.5 text-sm font-medium transition-all duration-200 rounded-lg shadow-sm border bg-[#9273FC] text-white hover:bg-[#805DF6] border-transparent focus:outline-none focus:ring-2 focus:ring-[#9273FC]/50 active:scale-[0.98]"
+                      className="inline-flex items-center justify-center gap-2 px-5 py-2.5 text-sm font-medium transition-all duration-200 rounded-lg shadow-sm border bg-[#6347ea] text-white hover:bg-[#5238d6] border-transparent focus:outline-none focus:ring-2 focus:ring-[#6347ea]/50 active:scale-[0.98]"
                     >
                       <Compass className="w-4 h-4" />
                       <span>Academy</span>
@@ -1047,7 +1047,7 @@ function P2PMarketplaceContent() {
                         />
                         <Label htmlFor="remember-filters" className="text-xs cursor-pointer">Remember my filters for next visit</Label>
                     </div>
-                    <Button className="w-full bg-[#5D45F9] hover:bg-[#4833D8] text-white font-semibold" onClick={() => setIsFiltersDialogOpen(false)}>
+                    <Button className="w-full bg-[#6347ea] hover:bg-[#5238d6] text-white font-semibold" onClick={() => setIsFiltersDialogOpen(false)}>
                       Apply Filters
                     </Button>
                 </div>
@@ -1078,7 +1078,7 @@ function P2PMarketplaceContent() {
                 ))}
             </div>
             <div className="pt-3 border-t border-border">
-                <Button onClick={() => setIsOfferTagsDialogOpen(false)} className="w-full bg-[#5D45F9] hover:bg-[#4833D8] text-white font-semibold">Done</Button>
+                <Button onClick={() => setIsOfferTagsDialogOpen(false)} className="w-full bg-[#6347ea] hover:bg-[#5238d6] text-white font-semibold">Done</Button>
             </div>
         </DialogContent>
       </Dialog>
@@ -1124,10 +1124,10 @@ function P2PMarketplaceContent() {
           />
           <div 
             style={{ top: `${tooltipPos.top}px`, left: `${tooltipPos.left}px` }}
-            className="absolute z-50 w-[320px] sm:w-[360px] bg-white dark:bg-slate-900 border-2 border-[#5D45F9] text-slate-900 dark:text-slate-100 rounded-xl shadow-2xl p-4 animate-in fade-in duration-200"
+            className="absolute z-50 w-[320px] sm:w-[360px] bg-white dark:bg-slate-900 border-2 border-[#6347ea] text-slate-900 dark:text-slate-100 rounded-xl shadow-2xl p-4 animate-in fade-in duration-200"
           >
             <div className="flex items-center justify-between pb-2 border-b border-slate-200 dark:border-slate-800">
-              <span className="text-xs font-bold text-white bg-[#5D45F9] px-2.5 py-0.5 rounded-full">
+              <span className="text-xs font-bold text-white bg-[#6347ea] px-2.5 py-0.5 rounded-full">
                 Step {tourStep + 1} of {tourSteps.length}
               </span>
               <button 
@@ -1155,7 +1155,7 @@ function P2PMarketplaceContent() {
                 Previous
               </Button>
               {tourStep < tourSteps.length - 1 ? (
-                <Button size="sm" className="bg-[#5D45F9] hover:bg-[#4833D8] text-white h-8 text-xs font-semibold" onClick={() => setTourStep(prev => (prev !== null ? prev + 1 : prev))}>
+                <Button size="sm" className="bg-[#6347ea] hover:bg-[#5238d6] text-white h-8 text-xs font-semibold" onClick={() => setTourStep(prev => (prev !== null ? prev + 1 : prev))}>
                   Next Step
                 </Button>
               ) : (
