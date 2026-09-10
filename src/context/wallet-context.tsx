@@ -90,30 +90,33 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
 
       // 1. Primary: Server-side API endpoint with admin privileges and RLS bypass
       try {
-        const res = await fetch(`/api/wallet/balance?userId=${encodeURIComponent(userId)}`, {
-          cache: 'no-store',
-        });
-        if (res.ok) {
-          const apiData = await res.json();
-          if (apiData?.success && apiData?.balances) {
-            (Object.keys(apiData.balances) as CryptoCurrency[]).forEach((coin) => {
-              if (nextMap[coin]) {
-                const coinItem = apiData.balances[coin];
-                const avail = Number(coinItem.available ?? 0);
-                const escrow = Number(coinItem.inEscrow ?? 0);
-                const withdraw = Number(coinItem.inWithdrawal ?? 0);
+        if (userId) {
+          const res = await fetch(`/api/wallet/balance?userId=${encodeURIComponent(userId)}`, {
+            cache: 'no-store',
+          });
+          if (res.ok) {
+            const apiData = await res.json();
+            if (apiData?.success && apiData?.balances) {
+              (Object.keys(apiData.balances) as CryptoCurrency[]).forEach((coin) => {
+                if (nextMap[coin]) {
+                  const coinItem = apiData.balances[coin];
+                  const avail = Number(coinItem.available ?? 0);
+                  const escrow = Number(coinItem.inEscrow ?? 0);
+                  const withdraw = Number(coinItem.inWithdrawal ?? 0);
 
-                nextMap[coin] = {
-                  available: Math.max(nextMap[coin].available, isNaN(avail) ? 0 : avail),
-                  inEscrow: Math.max(nextMap[coin].inEscrow, isNaN(escrow) ? 0 : escrow),
-                  inWithdrawal: Math.max(nextMap[coin].inWithdrawal, isNaN(withdraw) ? 0 : withdraw),
-                };
-              }
-            });
+                  nextMap[coin] = {
+                    available: Math.max(nextMap[coin].available, isNaN(avail) ? 0 : avail),
+                    inEscrow: Math.max(nextMap[coin].inEscrow, isNaN(escrow) ? 0 : escrow),
+                    inWithdrawal: Math.max(nextMap[coin].inWithdrawal, isNaN(withdraw) ? 0 : withdraw),
+                  };
+                }
+              });
+            }
           }
         }
       } catch (apiErr) {
-        console.warn('[WalletProvider] /api/wallet/balance fetch error:', apiErr);
+        // Silently catch transient fetch failure during startup or offline states
+        console.debug('[WalletProvider] /api/wallet/balance fetch note:', apiErr);
       }
 
       // 2. Fetch wallet_assets directly by user_id using select('*')

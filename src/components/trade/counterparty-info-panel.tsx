@@ -133,20 +133,31 @@ export function CounterpartyInfoPanel({
           }
         }
 
-        // Check if current user has blocked this user
-        if (currentUser) {
-          const { data: myProfile } = await supabase
-            .from('profiles')
-            .select('blocked_users')
-            .eq('id', currentUser.id)
-            .maybeSingle();
+        // Check if current user has blocked this user via api/user/block-status
+        if (currentUser && targetProfileId) {
+          try {
+            const res = await fetch(`/api/user/block-status?targetId=${targetProfileId}`);
+            const blockData = await res.json();
+            if (typeof blockData.isBlockedByMe === 'boolean') {
+              setIsBlockedByMe(blockData.isBlockedByMe);
+            }
+            if (typeof blockData.blockedByCount === 'number') {
+              setBlockedByCount(blockData.blockedByCount);
+            }
+          } catch {
+            const { data: myProfile } = await supabase
+              .from('profiles')
+              .select('blocked_users')
+              .eq('id', currentUser.id)
+              .maybeSingle();
 
-          const myBlocked: string[] = Array.isArray(myProfile?.blocked_users) ? myProfile.blocked_users : [];
-          setIsBlockedByMe(
-            myBlocked.includes(targetProfileId) || 
-            (targetId && myBlocked.includes(targetId)) ||
-            (targetUsername ? myBlocked.includes(targetUsername) : false)
-          );
+            const myBlocked: string[] = Array.isArray(myProfile?.blocked_users) ? myProfile.blocked_users : [];
+            setIsBlockedByMe(
+              myBlocked.includes(targetProfileId) || 
+              (targetId && myBlocked.includes(targetId)) ||
+              (targetUsername ? myBlocked.includes(targetUsername) : false)
+            );
+          }
         }
 
         // Calculate how many distinct users have blocked this target user
@@ -210,36 +221,29 @@ export function CounterpartyInfoPanel({
       const { data: { user: currentUser } } = await supabase.auth.getUser();
       if (!currentUser) throw new Error('Please sign in first');
 
-      const { data: myProfile } = await supabase
-        .from('profiles')
-        .select('blocked_users')
-        .eq('id', currentUser.id)
-        .maybeSingle();
-
-      let currentBlocked: string[] = Array.isArray(myProfile?.blocked_users) ? [...myProfile.blocked_users] : [];
       const targetId = profileData?.id || user?.id;
       const targetUser = profileData?.username || user?.username;
+      const action = isBlockedByMe ? 'UNBLOCK' : 'BLOCK';
+
+      const res = await fetch('/api/user/block', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          targetUserId: targetId,
+          action,
+        }),
+      });
+
+      if (!res.ok) {
+        const data = await res.json();
+        throw new Error(data.error || 'Failed to update block state');
+      }
 
       if (isBlockedByMe) {
-        currentBlocked = currentBlocked.filter((id) => id !== targetId && id !== targetUser && id !== user?.id);
-        // Ensure unique
-        currentBlocked = Array.from(new Set(currentBlocked));
-        await supabase
-          .from('profiles')
-          .update({ blocked_users: currentBlocked })
-          .eq('id', currentUser.id);
         setIsBlockedByMe(false);
         setBlockedByCount((prev) => Math.max(0, prev - 1));
         toast({ title: 'User Unblocked', description: `You have unblocked @${targetUser || 'user'}` });
       } else {
-        const uniqueSet = new Set(currentBlocked);
-        if (targetId) uniqueSet.add(targetId);
-        currentBlocked = Array.from(uniqueSet);
-
-        await supabase
-          .from('profiles')
-          .update({ blocked_users: currentBlocked })
-          .eq('id', currentUser.id);
         setIsBlockedByMe(true);
         setBlockedByCount((prev) => prev + 1);
         toast({ title: 'User Blocked', description: `You have blocked @${targetUser || 'user'}` });

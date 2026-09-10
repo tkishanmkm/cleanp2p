@@ -223,21 +223,29 @@ function P2PMarketplaceContent() {
   };
 
   useEffect(() => {
-    const params = new URLSearchParams(searchParams.toString());
-    if (amount) params.set('amount', amount); else params.delete('amount');
-    if (paymentMethod) params.set('paymentMethod', paymentMethod); else params.delete('paymentMethod');
-    if (selectedCoin !== 'ALL') params.set('coin', selectedCoin); else params.delete('coin');
-    if (selectedFiat) params.set('fiat', selectedFiat); else params.delete('fiat');
-    if (selectedCountry) params.set('country', selectedCountry); else params.delete('country');
-    if (sortBy !== 'price') params.set('sortBy', sortBy); else params.delete('sortBy');
-    if (selectedTags.length > 0) params.set('tags', selectedTags.join(',')); else params.delete('tags');
-    if (showTopRated) params.set('topRated', 'true'); else params.delete('topRated');
-    if (showVerifiedOnly) params.set('verified', 'true'); else params.delete('verified');
-    if (showRecentlyActive) params.set('recentlyActive', 'true'); else params.delete('recentlyActive');
-    if (showAcceptable) params.set('acceptable', 'true'); else params.delete('acceptable');
-    router.replace(`${pathname}?${params.toString()}`);
+    const params = new URLSearchParams();
+    if (amount) params.set('amount', amount);
+    if (paymentMethod) params.set('paymentMethod', paymentMethod);
+    if (selectedCoin !== 'ALL') params.set('coin', selectedCoin);
+    if (selectedFiat && selectedFiat !== 'USD') params.set('fiat', selectedFiat);
+    if (selectedCountry) params.set('country', selectedCountry);
+    if (sortBy !== 'price') params.set('sortBy', sortBy);
+    if (selectedTags.length > 0) params.set('tags', selectedTags.join(','));
+    if (showTopRated) params.set('topRated', 'true');
+    if (showVerifiedOnly) params.set('verified', 'true');
+    if (showRecentlyActive) params.set('recentlyActive', 'true');
+    if (showAcceptable) params.set('acceptable', 'true');
+
+    const qs = params.toString();
+    const newUrl = qs ? `${pathname}?${qs}` : pathname;
+    if (typeof window !== 'undefined') {
+      const currentUrl = `${window.location.pathname}${window.location.search}`;
+      if (currentUrl !== newUrl) {
+        window.history.replaceState(null, '', newUrl);
+      }
+    }
     handleSaveFilters();
-  }, [amount, paymentMethod, selectedCoin, selectedFiat, selectedCountry, sortBy, selectedTags, showTopRated, showVerifiedOnly, showRecentlyActive, showAcceptable, handleSaveFilters, pathname, router, searchParams]);
+  }, [amount, paymentMethod, selectedCoin, selectedFiat, selectedCountry, sortBy, selectedTags, showTopRated, showVerifiedOnly, showRecentlyActive, showAcceptable, handleSaveFilters, pathname]);
 
   const allPaymentCategories = useMemo(() => [
     { category: 'Bank Transfers', methods: bankTransfers, icon: Landmark },
@@ -482,7 +490,7 @@ function P2PMarketplaceContent() {
     ? `1 ${activePriceCoin} = ${calculatedPrice.toLocaleString('en-US', { style: 'currency', currency: activeFiatCurrency, minimumFractionDigits: 2 })}`
     : `1 ${activePriceCoin} = Fetching price...`;
 
-  const tourSteps = [
+  const tourSteps = useMemo(() => [
     {
       title: "Step 1: Action Selector",
       targetId: "tour-action-toggle",
@@ -513,7 +521,7 @@ function P2PMarketplaceContent() {
       targetId: "tour-offers-list",
       content: "Browse matched offers safely. All crypto funds are held securely in Escrow until payment is validated.",
     }
-  ];
+  ], []);
 
   // Dynamically recalculate tooltip position next to target highlight element
   useEffect(() => {
@@ -527,7 +535,7 @@ function P2PMarketplaceContent() {
       setTooltipPos({ top: topPos, left: leftPos });
       el.scrollIntoView({ behavior: 'smooth', block: 'center' });
     }
-  }, [tourStep]);
+  }, [tourStep, tourSteps]);
 
   const currentCoinInfo = COIN_CONFIG[selectedCoin];
 

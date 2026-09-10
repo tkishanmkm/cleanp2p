@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
+import { insertPaxonesSystemMessage } from '@/lib/trade-system-messages';
 
 export async function POST(req: Request) {
   try {
@@ -45,22 +46,20 @@ export async function POST(req: Request) {
       return NextResponse.json({ success: true, message: 'Report queued for review' });
     }
 
-    const reporterUsername = user.user_metadata?.username || user.email?.split('@')[0] || 'Trader';
-    const reportSysMsg = `⚠️ @${reporterUsername} reported an issue:\nCategory: ${category}\nDetails: ${description}`;
-
-    // Post to trade chat
+    let reporterUsername = user.user_metadata?.username || user.email?.split('@')[0] || 'Trader';
     try {
-      await supabase.from('trade_messages').insert({
-        trade_id: tradeId,
-        sender_id: 'system',
-        sender_username: 'System',
-        message: reportSysMsg,
-        is_moderator: true,
-        created_at: new Date().toISOString()
-      });
-    } catch (msgErr) {
-      console.warn('Could not post trade message for report:', msgErr);
-    }
+      const { data: prof } = await supabase.from('profiles').select('username').eq('id', user.id).maybeSingle();
+      if (prof?.username) reporterUsername = prof.username;
+    } catch {}
+
+    // Post official Paxones system message to trade chat
+    await insertPaxonesSystemMessage(supabase, {
+      tradeId,
+      type: 'ISSUE_REPORTED',
+      openerUsername: reporterUsername,
+      issueCategory: category,
+      issueDetails: description
+    });
 
     return NextResponse.json({ success: true, report: data });
   } catch (error: any) {

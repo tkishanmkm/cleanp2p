@@ -1,70 +1,87 @@
 'use client';
 
 import { useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
 import Link from 'next/link';
 import { Logo } from '@/components/logo';
-import { CheckCircle2, Mail, Lock, User, CheckSquare, Square, ArrowRight } from 'lucide-react';
+import { Mail, Lock, User, Calendar, ArrowRight, AlertTriangle, ShieldCheck, Loader2 } from 'lucide-react';
 
 interface AuthFormProps {
   mode: 'login' | 'signup';
 }
 
 export function AuthForm({ mode }: AuthFormProps) {
+  const router = useRouter();
   const supabase = createClient();
   const [name, setName] = useState('');
+  const [dob, setDob] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [acceptTerms, setAcceptTerms] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [loadingOAuth, setLoadingOAuth] = useState<'google' | 'discord' | null>(null);
   const [errorMsg, setErrorMsg] = useState('');
+  const [isSuspendedAlert, setIsSuspendedAlert] = useState(false);
+  const [suspensionDetails, setSuspensionDetails] = useState('');
   const [signupSuccess, setSignupSuccess] = useState(false);
 
-  // Google OAuth Login / Signup
-  async function handleGoogleAuth() {
-    try {
-      setLoading(true);
-      setErrorMsg('');
-      const { error } = await supabase.auth.signInWithOAuth({
-        provider: 'google',
-        options: {
-          redirectTo: `${window.location.origin}/api/auth/callback`,
-        },
-      });
-      if (error) throw error;
-    } catch (err: any) {
-      setErrorMsg(err.message || 'Failed to initialize Google authentication');
-      setLoading(false);
-    }
-  }
-
-  // Discord OAuth Login / Signup
-  async function handleDiscordAuth() {
-    try {
-      setLoading(true);
-      setErrorMsg('');
-      const { error } = await supabase.auth.signInWithOAuth({
-        provider: 'discord',
-        options: {
-          redirectTo: `${window.location.origin}/api/auth/callback`,
-        },
-      });
-      if (error) throw error;
-    } catch (err: any) {
-      setErrorMsg(err.message || 'Failed to initialize Discord authentication');
-      setLoading(false);
-    }
-  }
-
-  // Password-Based Login / Signup
-  async function handleSubmit(e: React.FormEvent) {
-    e.preventDefault();
+  // Social OAuth Handler (Google & Discord)
+  const handleOAuthSignIn = async (provider: 'google' | 'discord') => {
     setErrorMsg('');
+    setIsSuspendedAlert(false);
+    setLoadingOAuth(provider);
+
+    try {
+      const redirectUrl = `${typeof window !== 'undefined' ? window.location.origin : ''}/api/auth/callback`;
+      const { data, error } = await supabase.auth.signInWithOAuth({
+        provider,
+        options: {
+          redirectTo: redirectUrl,
+        },
+      });
+
+      if (error) {
+        throw error;
+      }
+
+      if (data?.url) {
+        window.location.href = data.url;
+      }
+    } catch (err: any) {
+      console.error(`${provider} OAuth error:`, err);
+      setErrorMsg(err.message || `Failed to initiate ${provider} login. Please try again.`);
+      setLoadingOAuth(null);
+    }
+  };
+
+  // Pure Supabase Email & Password Authentication (Independent of OAuth)
+  async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    e.stopPropagation();
+    setErrorMsg('');
+    setIsSuspendedAlert(false);
+    setSuspensionDetails('');
+
+    const cleanEmail = email.trim();
+    if (!cleanEmail) {
+      setErrorMsg('Please enter your email address');
+      return;
+    }
+
+    if (!password) {
+      setErrorMsg('Please enter your password');
+      return;
+    }
 
     if (mode === 'signup') {
       if (!name.trim()) {
-        setErrorMsg('Please enter your full name');
+        setErrorMsg('Please enter your legal full name');
+        return;
+      }
+      if (!dob) {
+        setErrorMsg('Please enter your date of birth');
         return;
       }
       if (password.length < 6) {
@@ -76,7 +93,7 @@ export function AuthForm({ mode }: AuthFormProps) {
         return;
       }
       if (!acceptTerms) {
-        setErrorMsg('You must agree to the Terms of Service and Privacy Policy to proceed');
+        setErrorMsg('You must agree to the Terms of Service and Privacy Notice to proceed');
         return;
       }
     }
@@ -85,40 +102,113 @@ export function AuthForm({ mode }: AuthFormProps) {
 
     try {
       if (mode === 'signup') {
-        const cleanUsername = name.trim().toLowerCase().replace(/[^a-z0-9_]/g, '_').substring(0, 20) || 'trader';
+        // Step 1: Pre-Registration Duplicate Identity Check (Name + DOB)
+        const validateRes = await fetch('/api/auth/validate-registration', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            name: name.trim(),
+            dob: dob.trim(),
+            email: cleanEmail,
+          }),
+        });
+
+        const validateData = await validateRes.json();
+
+        if (!validateRes.ok || validateData.error) {
+          if (validateData.suspended || validateData.code === 'DUPLICATE_IDENTITY_SUSPENDED') {
+            setIsSuspendedAlert(true);
+            setSuspensionDetails(validateData.error);
+          } else {
+            setErrorMsg(validateData.error || 'Identity verification check failed.');
+          }
+          setLoading(false);
+          return;
+        }
+
+        // Step 2: Sign Up via Pure Supabase GoTrue Engine
+        const cleanUsername =
+          name.trim().toLowerCase().replace(/[^a-z0-9_]/g, '_').substring(0, 20) || 'trader';
+
         const { data, error } = await supabase.auth.signUp({
-          email: email.trim(),
+          email: cleanEmail,
           password,
           options: {
             data: {
               full_name: name.trim(),
               username: cleanUsername,
               name: name.trim(),
+              dob: dob.trim(),
+              date_of_birth: dob.trim(),
             },
             emailRedirectTo: `${window.location.origin}/api/auth/callback`,
           },
         });
 
-        if (error) throw error;
+        if (error) {
+          console.error('Sign-up error:', error.message);
+          setErrorMsg(error.message);
+          return;
+        }
 
-        // If session was directly established without email verification requirement
+        // Auto-link profile data if session is immediately active
+        if (data.user) {
+          await supabase
+            .from('profiles')
+            .update({
+              full_name: name.trim(),
+              dob: dob.trim(),
+              date_of_birth: dob.trim(),
+            })
+            .eq('id', data.user.id);
+        }
+
         if (data.session) {
           window.location.href = '/buy';
           return;
         }
 
-        // Show verification prompt
         setSignupSuccess(true);
       } else {
-        const { error } = await supabase.auth.signInWithPassword({
-          email: email.trim(),
-          password,
+        // Step 3: Pure Email & Password Login
+        const { data, error } = await supabase.auth.signInWithPassword({
+          email: cleanEmail,
+          password: password,
         });
-        if (error) throw error;
-        window.location.href = '/buy';
+
+        if (error) {
+          console.error('Login error:', error.message);
+          setErrorMsg(error.message);
+          return;
+        }
+
+        // Check if account has been suspended
+        if (data.user) {
+          const { data: profile } = await supabase
+            .from('profiles')
+            .select('status, is_suspended, suspension_reason')
+            .eq('id', data.user.id)
+            .maybeSingle();
+
+          if (profile?.is_suspended || profile?.status === 'suspended') {
+            await supabase.auth.signOut();
+            setIsSuspendedAlert(true);
+            setSuspensionDetails(
+              profile.suspension_reason ||
+                'This account has been suspended due to duplicate identity or terms violation.'
+            );
+            return;
+          }
+        }
+
+        if (data.session || data.user) {
+          window.location.href = '/buy';
+          return;
+        }
       }
     } catch (err: any) {
-      setErrorMsg(err.message || 'Authentication failed');
+      console.error('Auth exception:', err);
+      setErrorMsg(err.message || 'Authentication request failed. Please check your credentials.');
     } finally {
       setLoading(false);
     }
@@ -132,7 +222,9 @@ export function AuthForm({ mode }: AuthFormProps) {
         </div>
         <h2 className="text-xl font-bold text-slate-900 dark:text-white mb-2">Check your inbox</h2>
         <p className="text-sm text-slate-600 dark:text-slate-300 mb-6 leading-relaxed">
-          We have sent a verification link to <span className="font-semibold text-slate-900 dark:text-white">{email}</span>. Please confirm your email and log in to begin trading.
+          We have sent a verification link to{' '}
+          <span className="font-semibold text-slate-900 dark:text-white">{email}</span>. Please
+          confirm your email to begin trading.
         </p>
         <Link
           href="/login"
@@ -156,93 +248,161 @@ export function AuthForm({ mode }: AuthFormProps) {
           {mode === 'login' ? 'Welcome Back' : 'Create an Account'}
         </h1>
         <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
-          {mode === 'login' ? 'Sign in to access your P2P trading dashboard' : 'Sign up to start trading securely'}
+          {mode === 'login'
+            ? 'Sign in to access your P2P crypto escrow portfolio'
+            : 'Register your secure P2P trading account'}
         </p>
       </div>
 
-      {errorMsg && (
+      {/* Account Suspension Alert */}
+      {isSuspendedAlert && (
+        <div className="mb-5 p-4 bg-red-500/10 border border-red-500/30 rounded-xl text-red-600 dark:text-red-400 space-y-2">
+          <div className="flex items-center gap-2 font-bold text-xs uppercase tracking-wider">
+            <AlertTriangle className="w-4 h-4 text-red-500 shrink-0" />
+            <span>Account Suspended / Registration Blocked</span>
+          </div>
+          <p className="text-xs leading-relaxed">{suspensionDetails}</p>
+          <div className="text-[11px] pt-1 text-slate-500 dark:text-slate-400">
+            For appeal inquiries, contact{' '}
+            <a href="mailto:support@paxones.com" className="text-red-600 dark:text-red-400 underline font-mono">
+              support@paxones.com
+            </a>.
+          </div>
+        </div>
+      )}
+
+      {/* General Error Message */}
+      {errorMsg && !isSuspendedAlert && (
         <div className="mb-4 p-3 bg-red-50 dark:bg-red-500/10 border border-red-200 dark:border-red-500/30 rounded-xl text-red-600 dark:text-red-400 text-xs">
           {errorMsg}
         </div>
       )}
 
-      {/* 1. Official Google & Discord Single Sign-On Buttons */}
-      <div className="space-y-2.5 mb-6">
+      {/* Social OAuth Buttons (Google & Discord) */}
+      <div className="space-y-2.5 mb-5">
+        {/* Continue with Google */}
         <button
           type="button"
-          onClick={handleGoogleAuth}
-          disabled={loading}
-          className="w-full flex items-center justify-center gap-3 bg-white hover:bg-slate-50 dark:bg-[#151a2d] dark:hover:bg-[#1b223a] text-slate-700 dark:text-slate-200 font-medium py-2.5 px-4 rounded-xl text-sm border border-slate-200 dark:border-slate-700/80 transition shadow-sm disabled:opacity-50 cursor-pointer"
+          onClick={() => handleOAuthSignIn('google')}
+          disabled={loading || loadingOAuth !== null}
+          className="w-full flex items-center justify-center gap-3 bg-white hover:bg-slate-50 dark:bg-[#151a2d] dark:hover:bg-[#1b223a] text-slate-800 dark:text-slate-200 font-medium h-11 px-4 rounded-xl border border-slate-200 dark:border-slate-700/80 shadow-xs transition duration-150 disabled:opacity-50 cursor-pointer text-sm"
         >
-          <svg className="w-5 h-5 shrink-0" viewBox="0 0 24 24">
-            <path
-              fill="#4285F4"
-              d="M23.745 12.27c0-.7-.06-1.4-.19-2.07H12v4.51h6.6c-.29 1.52-1.14 2.82-2.4 3.68v3.05h3.88c2.27-2.09 3.66-5.17 3.66-9.17z"
-            />
-            <path
-              fill="#34A853"
-              d="M12 24c3.24 0 5.95-1.08 7.93-2.91l-3.88-3.05c-1.08.72-2.45 1.16-4.05 1.16-3.12 0-5.77-2.11-6.72-4.96H1.26v3.15C3.25 21.3 7.31 24 12 24z"
-            />
-            <path
-              fill="#FBBC05"
-              d="M5.28 14.24c-.25-.72-.38-1.49-.38-2.24s.13-1.52.38-2.24V6.61H1.26C.46 8.23 0 10.06 0 12s.46 3.77 1.26 5.39l4.02-3.15z"
-            />
-            <path
-              fill="#EA4335"
-              d="M12 4.75c1.77 0 3.35.61 4.6 1.8l3.42-3.42C17.95 1.19 15.24 0 12 0 7.31 0 3.25 2.7 1.26 6.61l4.02 3.15c.95-2.85 3.6-4.96 6.72-4.96z"
-            />
-          </svg>
+          {loadingOAuth === 'google' ? (
+            <Loader2 className="w-4 h-4 animate-spin text-slate-500" />
+          ) : (
+            <svg className="w-4 h-4 shrink-0" viewBox="0 0 24 24">
+              <path
+                fill="#4285F4"
+                d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"
+              />
+              <path
+                fill="#34A853"
+                d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"
+              />
+              <path
+                fill="#FBBC05"
+                d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z"
+              />
+              <path
+                fill="#EA4335"
+                d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z"
+              />
+            </svg>
+          )}
           <span>Continue with Google</span>
         </button>
 
+        {/* Continue with Discord */}
         <button
           type="button"
-          onClick={handleDiscordAuth}
-          disabled={loading}
-          className="w-full flex items-center justify-center gap-3 bg-white hover:bg-slate-50 dark:bg-[#151a2d] dark:hover:bg-[#1b223a] text-slate-700 dark:text-slate-200 font-medium py-2.5 px-4 rounded-xl text-sm border border-slate-200 dark:border-slate-700/80 transition shadow-sm disabled:opacity-50 cursor-pointer"
+          onClick={() => handleOAuthSignIn('discord')}
+          disabled={loading || loadingOAuth !== null}
+          className="w-full flex items-center justify-center gap-3 bg-white hover:bg-slate-50 dark:bg-[#151a2d] dark:hover:bg-[#1b223a] text-slate-800 dark:text-slate-200 font-medium h-11 px-4 rounded-xl border border-slate-200 dark:border-slate-700/80 shadow-xs transition duration-150 disabled:opacity-50 cursor-pointer text-sm"
         >
-          <svg className="w-5 h-5 shrink-0 fill-[#5865F2]" viewBox="0 0 127.14 96.36">
-            <path d="M107.7 8.07A105.15 105.15 0 0 0 81.47 0a72.06 72.06 0 0 0-3.36 6.83 97.68 97.68 0 0 0-29.11 0A72.37 72.37 0 0 0 45.64 0a105.89 105.89 0 0 0-26.25 8.09C2.79 32.65-1.71 56.6.54 80.21a105.73 105.73 0 0 0 32.17 16.15 77.7 77.7 0 0 0 6.89-11.11 68.42 68.42 0 0 1-10.85-5.18c.91-.66 1.8-1.34 2.66-2a74.57 74.57 0 0 0 64.3 0c.87.68 1.76 1.36 2.66 2a68.68 68.68 0 0 1-10.87 5.19 77 77 0 0 0 6.89 11.1 105.25 105.25 0 0 0 32.19-16.14c2.64-27.38-4.51-51.11-18.88-72.14zM42.45 65.69c-6.31 0-11.5-5.79-11.5-12.87 0-7.08 5.07-12.87 11.5-12.87 6.47 0 11.62 5.82 11.5 12.87 0 7.08-5.03 12.87-11.5 12.87zm42.24 0c-6.31 0-11.5-5.79-11.5-12.87 0-7.08 5.07-12.87 11.5-12.87 6.47 0 11.62 5.82 11.5 12.87 0 7.08-5.03 12.87-11.5 12.87z"/>
-          </svg>
+          {loadingOAuth === 'discord' ? (
+            <Loader2 className="w-4 h-4 animate-spin text-slate-500" />
+          ) : (
+            <svg className="w-4 h-4 fill-[#5865F2] shrink-0" viewBox="0 0 127.14 96.36">
+              <path d="M107.7 8.07A105.15 105.15 0 0 0 81.47 0a72.06 72.06 0 0 0-3.36 6.83 97.68 97.68 0 0 0-29.11 0A72.37 72.37 0 0 0 45.64 0a105.89 105.89 0 0 0-26.25 8.09C2.79 32.65-1.71 56.6.54 80.21a105.73 105.73 0 0 0 32.17 16.15 77.7 77.7 0 0 0 6.89-11.11 68.42 68.42 0 0 1-10.85-5.18c.91-.66 1.8-1.34 2.66-2a74.57 74.57 0 0 0 64.3 0c.87.68 1.76 1.36 2.66 2a68.68 68.68 0 0 1-10.87 5.19 77 77 0 0 0 6.89 11.1 105.25 105.25 0 0 0 32.19-16.14c2.64-27.38-4.51-51.11-18.88-72.14zM42.45 65.69c-6.31 0-11.5-5.79-11.5-12.87 0-7.08 5.07-12.87 11.5-12.87 6.47 0 11.62 5.82 11.5 12.87 0 7.08-5.03 12.87-11.5 12.87zm42.24 0c-6.31 0-11.5-5.79-11.5-12.87 0-7.08 5.07-12.87 11.5-12.87 6.47 0 11.62 5.82 11.5 12.87 0 7.08-5.03 12.87-11.5 12.87z" />
+            </svg>
+          )}
           <span>Continue with Discord</span>
         </button>
       </div>
 
-      {/* Divider */}
-      <div className="relative my-6 flex items-center justify-center">
-        <div className="absolute inset-0 flex items-center">
-          <div className="w-full border-t border-slate-200 dark:border-[#1e2640]"></div>
-        </div>
-        <span className="relative bg-white dark:bg-[#0f1423] px-3 text-[11px] font-medium text-slate-400 dark:text-slate-500 uppercase tracking-wider">
-          Or with Email
+      {/* Crisp Divider */}
+      <div className="relative my-5 flex items-center justify-center">
+        <div className="border-t border-slate-200 dark:border-slate-800 w-full" />
+        <span className="bg-white dark:bg-[#0f1423] px-3 text-[11px] font-semibold text-slate-400 dark:text-slate-500 uppercase tracking-wider shrink-0">
+          or continue with email
         </span>
+        <div className="border-t border-slate-200 dark:border-slate-800 w-full" />
       </div>
 
-      {/* 2. Standard Form */}
-      <form onSubmit={handleSubmit} className="space-y-4">
+      {/* Pure Email/Password Form */}
+      <form onSubmit={handleSubmit} method="POST" className="space-y-4">
         {mode === 'signup' && (
-          <div>
-            <label className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1">Full Name</label>
-            <div className="relative">
-              <User className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
-              <input
-                type="text"
-                required
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                placeholder="John Doe"
-                className="w-full bg-slate-50 dark:bg-[#07090e] border border-slate-200 dark:border-[#1e2640] rounded-xl pl-10 pr-3.5 py-2.5 text-sm text-slate-900 dark:text-white placeholder:text-slate-400 dark:placeholder:text-slate-600 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition"
-              />
+          <>
+            <div>
+              <label
+                htmlFor="auth-name"
+                className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1"
+              >
+                Legal Full Name
+              </label>
+              <div className="relative">
+                <User className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+                <input
+                  id="auth-name"
+                  name="name"
+                  type="text"
+                  autoComplete="name"
+                  required
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  placeholder="e.g. Alex Morgan"
+                  className="w-full bg-slate-50 dark:bg-[#07090e] border border-slate-200 dark:border-[#1e2640] rounded-xl pl-10 pr-3.5 py-2.5 text-sm text-slate-900 dark:text-white placeholder:text-slate-400 dark:placeholder:text-slate-600 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition"
+                />
+              </div>
             </div>
-          </div>
+
+            <div>
+              <label
+                htmlFor="auth-dob"
+                className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1"
+              >
+                Date of Birth
+              </label>
+              <div className="relative">
+                <Calendar className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+                <input
+                  id="auth-dob"
+                  name="dob"
+                  type="date"
+                  required
+                  value={dob}
+                  onChange={(e) => setDob(e.target.value)}
+                  className="w-full bg-slate-50 dark:bg-[#07090e] border border-slate-200 dark:border-[#1e2640] rounded-xl pl-10 pr-3.5 py-2.5 text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition"
+                />
+              </div>
+            </div>
+          </>
         )}
 
         <div>
-          <label className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1">Email Address</label>
+          <label
+            htmlFor="auth-email"
+            className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1"
+          >
+            Email Address
+          </label>
           <div className="relative">
             <Mail className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
             <input
+              id="auth-email"
+              name="email"
               type="email"
+              autoComplete="email"
               required
               value={email}
               onChange={(e) => setEmail(e.target.value)}
@@ -254,9 +414,17 @@ export function AuthForm({ mode }: AuthFormProps) {
 
         <div>
           <div className="flex justify-between items-center mb-1">
-            <label className="block text-xs font-medium text-slate-700 dark:text-slate-300">Password</label>
+            <label
+              htmlFor="auth-password"
+              className="block text-xs font-medium text-slate-700 dark:text-slate-300"
+            >
+              Password
+            </label>
             {mode === 'login' && (
-              <Link href="/forgot-password" className="text-xs text-blue-600 dark:text-blue-400 hover:underline">
+              <Link
+                href="/forgot-password"
+                className="text-xs text-blue-600 dark:text-blue-400 hover:underline"
+              >
                 Forgot password?
               </Link>
             )}
@@ -264,7 +432,10 @@ export function AuthForm({ mode }: AuthFormProps) {
           <div className="relative">
             <Lock className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
             <input
+              id="auth-password"
+              name="password"
               type="password"
+              autoComplete={mode === 'login' ? 'current-password' : 'new-password'}
               required
               value={password}
               onChange={(e) => setPassword(e.target.value)}
@@ -276,11 +447,19 @@ export function AuthForm({ mode }: AuthFormProps) {
 
         {mode === 'signup' && (
           <div>
-            <label className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1">Confirm Password</label>
+            <label
+              htmlFor="auth-confirm-password"
+              className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1"
+            >
+              Confirm Password
+            </label>
             <div className="relative">
               <Lock className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
               <input
+                id="auth-confirm-password"
+                name="confirmPassword"
                 type="password"
+                autoComplete="new-password"
                 required
                 value={confirmPassword}
                 onChange={(e) => setConfirmPassword(e.target.value)}
@@ -302,12 +481,20 @@ export function AuthForm({ mode }: AuthFormProps) {
               />
               <span>
                 I agree to the{' '}
-                <Link href="/terms" target="_blank" className="text-blue-600 dark:text-blue-400 hover:underline">
+                <Link
+                  href="/terms"
+                  target="_blank"
+                  className="text-blue-600 dark:text-blue-400 hover:underline font-medium"
+                >
                   Terms of Service
                 </Link>{' '}
                 and{' '}
-                <Link href="/policy" target="_blank" className="text-blue-600 dark:text-blue-400 hover:underline">
-                  Privacy Policy
+                <Link
+                  href="/policy"
+                  target="_blank"
+                  className="text-blue-600 dark:text-blue-400 hover:underline font-medium"
+                >
+                  Privacy Notice
                 </Link>
               </span>
             </label>
@@ -316,10 +503,17 @@ export function AuthForm({ mode }: AuthFormProps) {
 
         <button
           type="submit"
-          disabled={loading}
-          className="w-full bg-slate-900 hover:bg-slate-800 dark:bg-white dark:hover:bg-slate-100 text-white dark:text-slate-900 font-semibold py-2.5 px-4 rounded-xl text-sm transition mt-2 disabled:opacity-50 cursor-pointer shadow-sm"
+          disabled={loading || loadingOAuth !== null}
+          className="w-full py-3 px-4 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-xl shadow-md transition-colors duration-200 mt-2 disabled:opacity-50 cursor-pointer text-sm flex items-center justify-center gap-2"
         >
-          {loading ? 'Processing...' : mode === 'login' ? 'Sign In' : 'Create Account'}
+          {loading ? (
+            <span>Verifying &amp; Processing...</span>
+          ) : (
+            <>
+              <ShieldCheck className="w-4 h-4" />
+              <span>{mode === 'login' ? 'Sign In with Email' : 'Create Account'}</span>
+            </>
+          )}
         </button>
       </form>
 
@@ -328,14 +522,20 @@ export function AuthForm({ mode }: AuthFormProps) {
         {mode === 'login' ? (
           <p>
             Don&apos;t have an account?{' '}
-            <Link href="/signup" className="text-amber-600 dark:text-amber-400 hover:underline font-semibold">
+            <Link
+              href="/signup"
+              className="text-amber-600 dark:text-amber-400 hover:underline font-semibold"
+            >
               Sign up
             </Link>
           </p>
         ) : (
           <p>
             Already have an account?{' '}
-            <Link href="/login" className="text-amber-600 dark:text-amber-400 hover:underline font-semibold">
+            <Link
+              href="/login"
+              className="text-amber-600 dark:text-amber-400 hover:underline font-semibold"
+            >
               Sign in
             </Link>
           </p>

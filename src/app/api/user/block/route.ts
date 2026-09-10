@@ -1,6 +1,7 @@
 import { createServerClient } from '@supabase/ssr';
 import { cookies } from 'next/headers';
 import { NextResponse, type NextRequest } from 'next/server';
+import { getSupabaseAdminClient } from '@/utils/supabase/server';
 
 export async function POST(request: NextRequest) {
   const cookieHeader = cookies();
@@ -33,54 +34,106 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'Target user ID is required' }, { status: 400 });
   }
 
+  const admin = getSupabaseAdminClient();
+
+  // Get current user profile
+  const { data: blockerProfile } = await admin
+    .from('profiles')
+    .select('id, username, blocked_users')
+    .eq('id', user.id)
+    .maybeSingle();
+
+  const currentBlocked: string[] = Array.isArray(blockerProfile?.blocked_users)
+    ? blockerProfile.blocked_users
+    : [];
+
   if (action === 'BLOCK') {
-    // Check if block already exists to prevent duplicate entries
-    const { data: existingBlock } = await supabase
-      .from('user_blocks')
-      .select('id')
-      .eq('blocker_id', user.id)
-      .eq('blocked_id', targetUserId)
-      .maybeSingle();
-
-    if (!existingBlock) {
-      const { error } = await supabase
+    // 1. Sync user_blocks table
+    try {
+      const { data: existingBlock } = await admin
         .from('user_blocks')
-        .insert({ blocker_id: user.id, blocked_id: targetUserId });
+        .select('id')
+        .eq('blocker_id', user.id)
+        .eq('blocked_id', targetUserId)
+        .maybeSingle();
 
-      if (error && error.code !== '23505') {
-        return NextResponse.json({ error: error.message }, { status: 400 });
+      if (!existingBlock) {
+        await admin
+          .from('user_blocks')
+          .insert({ blocker_id: user.id, blocked_id: targetUserId });
       }
+    } catch (e) {
+      console.warn('user_blocks table insert notice:', e);
     }
 
-    // Post System Message in Active Trade Chat if currently running
+    // 2. Sync profiles.blocked_users array (ensure unique)
+    const updatedBlocked = Array.from(new Set([...currentBlocked, targetUserId]));
+    await admin
+      .from('profiles')
+      .update({ blocked_users: updatedBlocked, updated_at: new Date().toISOString() })
+      .eq('id', user.id);
+
+    // 3. Post System Message in Active Trade Chat if currently running
     if (activeTradeId) {
-      const { data: blockerProfile } = await supabase
-        .from('profiles')
-        .select('username')
-        .eq('id', user.id)
-        .single();
+      const blockerName = blockerProfile?.username || 'Trader';
+      let blockedName = 'Counterpart';
+      try {
+        const { data: targetProfile } = await admin
+          .from('profiles')
+          .select('username')
+          .eq('id', targetUserId)
+          .maybeSingle();
+        if (targetProfile?.username) blockedName = targetProfile.username;
+      } catch {}
 
-      const systemMessage = `⚠️ System Message: @${blockerProfile?.username || 'This user'} has blocked you. \nThe active trade remains ongoing and is NOT cancelled. You can continue sending necessary trade messages until completion or dispute resolution.`;
+      const systemMessage = `@${blockerName} blocked @${blockedName}.\nImportant: This trade is still active. If you have already made a payment, do not cancel the trade. Keep your payment evidence and follow the trade/dispute instructions.`;
 
-      await supabase.from('trade_chat_messages').insert({
-        trade_id: activeTradeId,
-        sender_id: user.id,
-        message: systemMessage,
-        is_system_message: true,
-      });
+      try {
+        await admin.from('trade_messages').insert({
+          trade_id: activeTradeId,
+          sender_id: 'system',
+          sender_username: 'Paxones System',
+          message: systemMessage,
+          is_system: true,
+          is_moderator: true,
+          created_at: new Date().toISOString(),
+        });
+      } catch (err) {
+        console.warn('Notice inserting into trade_messages:', err);
+      }
+
+      try {
+        await admin.from('trade_chat_messages').insert({
+          trade_id: activeTradeId,
+          sender_id: '00000000-0000-0000-0000-000000000000',
+          message: systemMessage,
+          is_system_message: true,
+          created_at: new Date().toISOString(),
+        });
+      } catch (err) {
+        // optional table
+      }
     }
 
     return NextResponse.json({ success: true, message: 'User blocked.' });
   } else if (action === 'UNBLOCK') {
-    const { error } = await supabase
-      .from('user_blocks')
-      .delete()
-      .eq('blocker_id', user.id)
-      .eq('blocked_id', targetUserId);
-
-    if (error) {
-      return NextResponse.json({ error: error.message }, { status: 400 });
+    // 1. Sync user_blocks table
+    try {
+      await admin
+        .from('user_blocks')
+        .delete()
+        .eq('blocker_id', user.id)
+        .eq('blocked_id', targetUserId);
+    } catch (e) {
+      console.warn('user_blocks table delete notice:', e);
     }
+
+    // 2. Sync profiles.blocked_users array
+    const updatedBlocked = currentBlocked.filter((id) => id !== targetUserId);
+    await admin
+      .from('profiles')
+      .update({ blocked_users: updatedBlocked, updated_at: new Date().toISOString() })
+      .eq('id', user.id);
 
     return NextResponse.json({ success: true, message: 'User unblocked.' });
   }

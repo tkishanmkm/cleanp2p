@@ -1,6 +1,7 @@
 import type { Trade, Dispute } from './types';
 import { supabase as clientSupabase } from '@/lib/supabase/client';
 import { createClient as createServerClient } from '@/lib/supabase/server';
+import { insertPaxonesSystemMessage } from '@/lib/trade-system-messages';
 
 export interface OpenDisputeParams {
   tradeId: string;
@@ -15,22 +16,22 @@ export function getDisputeInstructions(paymentMethod?: string): string {
   const method = (paymentMethod || '').toLowerCase();
   
   if (method.includes('upi') || method.includes('imps') || method.includes('gpay') || method.includes('phonepe') || method.includes('paytm')) {
-    return `[DISPUTE PROTOCOL - UPI/IMPS]\n1. Buyer: Submit full screenshot from UPI app showing 12-digit UTR/Ref number, recipient UPI ID/account, and time.\n2. Seller: Provide bank account statement or video recording showing transaction timeline without incoming credit.\n3. Both: If upload size is exceeded, upload media to Google Drive, Dropbox, or OneDrive and paste the public link here.`;
+    return `Instructions for UPI / IMPS:\n1. Buyer: Submit full screenshot from UPI app showing 12-digit UTR/Ref number, recipient UPI ID/account, and time.\n2. Seller: Provide bank account statement or video recording showing transaction timeline without incoming credit.\n3. Both: If upload size is exceeded, upload media to cloud storage and paste the link here.`;
   }
   
   if (method.includes('paypal')) {
-    return `[DISPUTE PROTOCOL - PAYPAL]\n1. Buyer: Provide unedited screenshot of PayPal transaction details showing recipient email, transaction ID, and status.\n2. Seller: Provide screenshot of PayPal balance/activity page demonstrating transaction hold or non-receipt.\n3. Both: If upload size is exceeded, upload media to Google Drive, Dropbox, or OneDrive and paste the public link here.`;
+    return `Instructions for PayPal:\n1. Buyer: Provide unedited screenshot of PayPal transaction details showing recipient email, transaction ID, and status.\n2. Seller: Provide screenshot of PayPal balance/activity page demonstrating transaction hold or non-receipt.\n3. Both: If upload size is exceeded, upload media to cloud storage and paste the link here.`;
   }
 
   if (method.includes('wise') || method.includes('transferwise')) {
-    return `[DISPUTE PROTOCOL - WISE]\n1. Buyer: Upload official Wise transfer receipt PDF showing recipient details, transfer reference, and 'Sent' status.\n2. Seller: Upload screenshot of Wise multi-currency account activity for the trade period.\n3. Both: If upload size is exceeded, upload media to Google Drive, Dropbox, or OneDrive and paste the public link here.`;
+    return `Instructions for Wise:\n1. Buyer: Upload official Wise transfer receipt PDF showing recipient details, transfer reference, and 'Sent' status.\n2. Seller: Upload screenshot of Wise multi-currency account activity for the trade period.\n3. Both: If upload size is exceeded, upload media to cloud storage and paste the link here.`;
   }
 
   if (method.includes('bank') || method.includes('wire') || method.includes('sepa') || method.includes('ach')) {
-    return `[DISPUTE PROTOCOL - BANK TRANSFER / SEPA]\n1. Buyer: Upload official bank wire receipt/statement PDF showing sender, beneficiary account, reference code, and debit confirmation.\n2. Seller: Upload bank statement PDF covering from trade start timestamp to present showing no credit matching reference.\n3. Both: If upload size is exceeded, upload media to Google Drive, Dropbox, or OneDrive and paste the public link here.`;
+    return `Instructions for Bank Transfer / Wire / SEPA:\n1. Buyer: Upload official bank wire receipt/statement PDF showing sender, beneficiary account, reference code, and debit confirmation.\n2. Seller: Upload bank statement PDF covering from trade start timestamp to present showing no credit matching reference.\n3. Both: If upload size is exceeded, upload media to cloud storage and paste the link here.`;
   }
 
-  return `[DISPUTE PROTOCOL - GENERAL]\n1. Buyer: Upload proof of payment (statement, receipt, transaction ID, or video proof of transfer).\n2. Seller: Upload proof of non-receipt (account statement covering the trade timeframe).\n3. Both: If upload size is exceeded, upload media to Google Drive, Dropbox, or OneDrive and paste the public viewable link here.`;
+  return `Instructions for ${paymentMethod || 'Selected Payment Method'}:\n1. Buyer: Upload proof of payment (statement, receipt, transaction ID, or video proof of transfer).\n2. Seller: Upload proof of non-receipt (account statement covering the trade timeframe).\n3. Both: If upload size is exceeded, upload media to cloud storage and paste the link here.`;
 }
 
 /**
@@ -92,7 +93,13 @@ export async function openDispute(
   const buyerId = tradeData?.buyer_id;
   const sellerId = tradeData?.seller_id;
   tradePublicId = tradePublicId || (tradeData as any)?.public_id || (tradeData as any)?.publicId || tradeData?.id || tradeId;
-  paymentMethod = paymentMethod || tradeData?.payment_method || '';
+  paymentMethod = paymentMethod || tradeData?.payment_method || tradeData?.paymentMethod || '';
+
+  // Get opener username if needed
+  if (openerId && (!openerUsername || openerUsername === 'User')) {
+    const { data: opProf } = await supabase.from('profiles').select('username').eq('id', openerId).maybeSingle();
+    if (opProf?.username) openerUsername = opProf.username;
+  }
 
   // 3. Insert dispute record
   await supabase.from('disputes').insert([
@@ -106,20 +113,15 @@ export async function openDispute(
     },
   ]);
 
-  // 4. Automated Dispute Assistant System Message in chat
-  const instructions = getDisputeInstructions(paymentMethod);
-  const botMessage = `⚠️ [PAXONES AUTOMATED DISPUTE ASSISTANT]\nThis trade is now DISPUTED. Escrow is locked.\n\nReason: ${reason}${explanation ? ` - ${explanation}` : ''}\n\n${instructions}\n\nA Paxones Moderator has been alerted and will review all submitted proofs.`;
-
-  await supabase.from('trade_messages').insert([
-    {
-      trade_id: tradeId,
-      sender_id: 'system',
-      sender_username: 'Paxones Dispute Assistant',
-      message: botMessage,
-      is_moderator: true,
-      created_at: new Date().toISOString(),
-    },
-  ]);
+  // 4. Official Paxones Dispute System Message in chat
+  await insertPaxonesSystemMessage(supabase, {
+    tradeId,
+    type: 'TRADE_DISPUTED',
+    openerUsername: openerUsername,
+    disputeReason: reason,
+    disputeExplanation: explanation,
+    paymentMethod: paymentMethod
+  });
 
   // 5. Notifications
   const opponentId = openerId === buyerId ? sellerId : buyerId;

@@ -21,6 +21,7 @@ import {
   cancelTrade,
   disputeTrade
 } from '@/lib/wallet';
+import { insertPaxonesSystemMessage } from '@/lib/trade-system-messages';
 import { cn, toDate } from '@/lib/utils';
 import type { Trade, P2PAd, Dispute, Feedback } from '@/lib/types';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -466,6 +467,7 @@ const ActionButtons = ({
   const tradeStatus = (trade?.status || '').toLowerCase();
   const isBuyer = currentUserRole === 'buy';
 
+  const [didNotPayChecked, setDidNotPayChecked] = useState(false);
   const [cancelInput, setCancelInput] = useState('');
   const [isPaidConfirmOpen, setIsPaidConfirmOpen] = useState(false);
   const [isReleaseConfirmOpen, setIsReleaseConfirmOpen] = useState(false);
@@ -508,7 +510,7 @@ const ActionButtons = ({
     }
   };
 
-  const isCancelInputCorrect = cancelInput.trim().toUpperCase() === 'I DID NOT PAID';
+  const isCancelAllowed = didNotPayChecked || cancelInput.trim().toUpperCase() === 'I DID NOT PAID' || cancelInput.trim().toUpperCase() === 'I DID NOT PAY';
 
   return (
     <div className="space-y-2">
@@ -560,28 +562,42 @@ const ActionButtons = ({
         {canBuyerCancel && (
           <AlertDialog>
             <AlertDialogTrigger asChild>
-              <Button variant="outline" size="sm" className="w-full text-xs">
+              <Button variant="outline" size="sm" className="w-full text-xs text-destructive hover:bg-destructive/10">
                 Cancel Trade
               </Button>
             </AlertDialogTrigger>
-            <AlertDialogContent>
+            <AlertDialogContent className="sm:max-w-md">
               <AlertDialogHeader>
-                <AlertDialogTitle>Confirm Trade Cancellation</AlertDialogTitle>
-                <AlertDialogDescription>
-                  To prevent accidental cancellations, please type &quot;I DID NOT PAID&quot; below:
+                <AlertDialogTitle className="text-base text-destructive flex items-center gap-2">
+                  <AlertCircle className="h-5 w-5" />
+                  Are you sure you want to cancel this trade?
+                </AlertDialogTitle>
+                <AlertDialogDescription className="text-xs space-y-2 text-foreground/80">
+                  <p>
+                    Only confirm cancellation if you have not made the required payment. False cancellation information may affect dispute resolution and account status.
+                  </p>
                 </AlertDialogDescription>
               </AlertDialogHeader>
-              <div className="py-2">
-                <Input
-                  value={cancelInput}
-                  onChange={(e) => setCancelInput(e.target.value)}
-                  placeholder='Type "I DID NOT PAID"'
-                  className="font-mono text-xs"
-                />
+              <div className="space-y-3 py-2">
+                <div className="flex items-start space-x-2.5 p-3 rounded-xl border border-destructive/20 bg-destructive/5">
+                  <Checkbox
+                    id="did-not-pay-check"
+                    checked={didNotPayChecked}
+                    onCheckedChange={(checked) => setDidNotPayChecked(Boolean(checked))}
+                    className="mt-0.5"
+                  />
+                  <Label htmlFor="did-not-pay-check" className="text-xs font-semibold leading-snug cursor-pointer">
+                    I did not pay (I confirm I have not sent any money to the seller)
+                  </Label>
+                </div>
               </div>
               <AlertDialogFooter>
-                <AlertDialogCancel>Back</AlertDialogCancel>
-                <AlertDialogAction onClick={handleCancelTrade} disabled={!isCancelInputCorrect}>
+                <AlertDialogCancel>Keep Trade</AlertDialogCancel>
+                <AlertDialogAction
+                  onClick={handleCancelTrade}
+                  disabled={!isCancelAllowed}
+                  className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                >
                   Confirm Cancellation
                 </AlertDialogAction>
               </AlertDialogFooter>
@@ -717,18 +733,12 @@ function FeedbackForm({
           .eq('id', opponentId);
       }
 
-      // 3. Add system message in trade_messages
-      const feedbackNotice = `@${currentUsername || 'Trader'} left ${values.rating} feedback: "${values.comment}"`;
-      await supabase.from('trade_messages').insert([
-        {
-          trade_id: trade.id,
-          sender_id: 'system',
-          sender_username: 'System',
-          message: feedbackNotice,
-          is_moderator: true,
-          created_at: new Date().toISOString()
-        }
-      ]);
+      // 3. Add official Paxones system message in trade_messages
+      await insertPaxonesSystemMessage(supabase, {
+        tradeId: trade.id,
+        type: values.rating === 'positive' ? 'POSITIVE_FEEDBACK' : 'NEGATIVE_FEEDBACK',
+        openerUsername: currentUsername || 'Trader'
+      });
 
       // 4. Add notification for opponent
       await supabase.from('notifications').insert([

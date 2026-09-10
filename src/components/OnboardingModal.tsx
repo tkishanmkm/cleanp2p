@@ -8,6 +8,7 @@ import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Label } from '@/components/ui/label';
 import { useToast } from '@/hooks/use-toast';
+import { AlertTriangle } from 'lucide-react';
 
 export function OnboardingModal() {
   const { toast } = useToast();
@@ -20,6 +21,7 @@ export function OnboardingModal() {
   const [dob, setDob] = useState('');
   const [securityQuestion, setSecurityQuestion] = useState('first_pet');
   const [securityAnswer, setSecurityAnswer] = useState('');
+  const [suspendedError, setSuspendedError] = useState('');
 
   useEffect(() => {
     async function checkUserOnboarding() {
@@ -31,12 +33,17 @@ export function OnboardingModal() {
 
         const { data: profile } = await supabase
           .from('profiles')
-          .select('onboarding_completed, full_name, dob')
+          .select('onboarding_completed, full_name, dob, is_suspended, status')
           .eq('id', currentUser.id)
           .maybeSingle();
 
+        if (profile?.is_suspended || profile?.status === 'suspended') {
+          return;
+        }
+
         if (profile && profile.onboarding_completed === false) {
           setFullName(profile?.full_name || currentUser.user_metadata?.full_name || '');
+          setDob(profile?.dob || currentUser.user_metadata?.dob || '');
           setIsOpen(true);
         }
       } catch (err) {
@@ -45,11 +52,13 @@ export function OnboardingModal() {
     }
 
     checkUserOnboarding();
-  }, [supabase]);
+  }, []);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!fullName || !dob || !securityAnswer) {
+    setSuspendedError('');
+
+    if (!fullName.trim() || !dob || !securityAnswer.trim()) {
       toast({ variant: 'destructive', title: 'Missing Information', description: 'Please fill out all fields.' });
       return;
     }
@@ -57,34 +66,37 @@ export function OnboardingModal() {
     setLoading(true);
 
     try {
-      // 1. Try RPC function
-      const { error: rpcErr } = await supabase.rpc('complete_user_onboarding', {
-        p_user_id: user.id,
-        p_full_name: fullName,
-        p_dob: dob,
-        p_security_question: securityQuestion,
-        p_security_answer: securityAnswer
+      const res = await fetch('/api/auth/complete-profile', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: fullName.trim(),
+          dob: dob.trim(),
+          securityQuestion,
+          securityAnswer: securityAnswer.trim(),
+        }),
       });
 
-      if (rpcErr) {
-        // Direct profile update fallback
-        const { error: updateErr } = await supabase
-          .from('profiles')
-          .update({
-            full_name: fullName,
-            dob: dob,
-            security_question: securityQuestion,
-            security_answer: securityAnswer,
-            onboarding_completed: true,
-            updated_at: new Date().toISOString()
-          })
-          .eq('id', user.id);
+      const data = await res.json();
 
-        if (updateErr) {
-          toast({ variant: 'destructive', title: 'Update Failed', description: updateErr.message });
-          setLoading(false);
-          return;
+      if (!res.ok || data.error) {
+        if (data.suspended) {
+          setSuspendedError(data.error);
+          await supabase.auth.signOut();
+          toast({
+            variant: 'destructive',
+            title: 'Account Suspended',
+            description: data.error,
+          });
+        } else {
+          toast({
+            variant: 'destructive',
+            title: 'Update Failed',
+            description: data.error || 'Could not save profile.',
+          });
         }
+        setLoading(false);
+        return;
       }
 
       toast({ title: 'Profile Configured', description: 'Your security profile is complete.' });
@@ -102,46 +114,75 @@ export function OnboardingModal() {
         <DialogHeader>
           <DialogTitle>Complete Security Profile</DialogTitle>
           <DialogDescription>
-            Please complete your profile details to start trading.
+            Please complete your profile details and date of birth to start trading securely.
           </DialogDescription>
         </DialogHeader>
 
-        <form onSubmit={handleSubmit} className="space-y-4 py-2">
-          <div className="space-y-1">
-            <Label htmlFor="fullName">Full Name</Label>
-            <Input id="fullName" value={fullName} onChange={(e) => setFullName(e.target.value)} required />
+        {suspendedError ? (
+          <div className="p-4 bg-red-500/10 border border-red-500/30 rounded-xl text-red-600 dark:text-red-400 space-y-2 my-2">
+            <div className="flex items-center gap-2 font-bold text-xs">
+              <AlertTriangle className="w-4 h-4" />
+              <span>Identity Verification Violation</span>
+            </div>
+            <p className="text-xs leading-relaxed">{suspendedError}</p>
           </div>
+        ) : (
+          <form onSubmit={handleSubmit} className="space-y-4 py-2">
+            <div className="space-y-1">
+              <Label htmlFor="fullName">Legal Full Name</Label>
+              <Input
+                id="fullName"
+                value={fullName}
+                onChange={(e) => setFullName(e.target.value)}
+                placeholder="e.g. Alex Morgan"
+                required
+              />
+            </div>
 
-          <div className="space-y-1">
-            <Label htmlFor="dob">Date of Birth</Label>
-            <Input id="dob" type="date" value={dob} onChange={(e) => setDob(e.target.value)} required />
-          </div>
+            <div className="space-y-1">
+              <Label htmlFor="dob">Date of Birth</Label>
+              <Input
+                id="dob"
+                type="date"
+                value={dob}
+                onChange={(e) => setDob(e.target.value)}
+                required
+              />
+            </div>
 
-          <div className="space-y-1">
-            <Label>Security Question</Label>
-            <Select value={securityQuestion} onValueChange={setSecurityQuestion}>
-              <SelectTrigger>
-                <SelectValue placeholder="Select security question" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="first_pet">What was the name of your first pet?</SelectItem>
-                <SelectItem value="mother_maiden">What is your mother&apos;s maiden name?</SelectItem>
-                <SelectItem value="first_school">What was the name of your first school?</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
+            <div className="space-y-1">
+              <Label>Security Question</Label>
+              <Select value={securityQuestion} onValueChange={setSecurityQuestion}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Select security question" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="first_pet">What was the name of your first pet?</SelectItem>
+                  <SelectItem value="mother_maiden">What is your mother&apos;s maiden name?</SelectItem>
+                  <SelectItem value="first_school">What was the name of your first school?</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
 
-          <div className="space-y-1">
-            <Label htmlFor="securityAnswer">Security Answer</Label>
-            <Input id="securityAnswer" type="password" value={securityAnswer} onChange={(e) => setSecurityAnswer(e.target.value)} required />
-          </div>
+            <div className="space-y-1">
+              <Label htmlFor="securityAnswer">Security Answer</Label>
+              <Input
+                id="securityAnswer"
+                type="password"
+                value={securityAnswer}
+                onChange={(e) => setSecurityAnswer(e.target.value)}
+                placeholder="Answer"
+                required
+              />
+            </div>
 
-          <DialogFooter className="pt-4">
-            <Button type="submit" className="w-full" disabled={loading}>
-              {loading ? 'Saving...' : 'Save & Continue'}
-            </Button>
-          </DialogFooter>
-        </form>
+            <DialogFooter className="pt-4">
+              <Button type="submit" className="w-full" disabled={loading}>
+                {loading ? 'Validating & Saving...' : 'Save & Continue'}
+              </Button>
+            </DialogFooter>
+          </form>
+        )}
       </DialogContent>
     </Dialog>
   );

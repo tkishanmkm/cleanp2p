@@ -2,15 +2,11 @@
 
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { createBrowserClient } from '@supabase/ssr';
+import { createClient } from '@/lib/supabase/client';
 
 export default function P2PMarketplace() {
   const router = useRouter();
-  const [supabase] = useState(() => {
-    const url = process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://placeholder.supabase.co';
-    const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'placeholder-key';
-    return createBrowserClient(url, key);
-  });
+  const supabase = createClient();
 
   const [activeTab, setActiveTab] = useState<'BUY' | 'SELL'>('BUY'); // BUY crypto = view SELL ads
   const [ads, setAds] = useState<any[]>([]);

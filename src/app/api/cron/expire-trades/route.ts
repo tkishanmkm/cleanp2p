@@ -63,16 +63,19 @@ export async function GET(req: Request) {
           if (!updateErr) {
             expiredTrades.push({ id: trade.id, trade_id: trade.trade_id, status: 'CANCELLED' });
 
-            // Post system log in trade chat
+            // Post official Paxones system message in trade chat
             try {
-              const cancelMsg = 'Trade automatically cancelled due to 15-minute payment expiration window closing. Escrow returned to seller.';
+              const cancelMsg = 'This trade has expired and is cancelled. Do not make any payment for this trade.';
               await supabaseAdmin.from('trade_messages').insert({
                 trade_id: trade.id,
-                sender_id: trade.seller_id,
+                sender_id: 'system',
+                sender_username: 'Paxones System',
                 content: cancelMsg,
                 message: cancelMsg,
                 is_system_message: true,
                 is_system: true,
+                is_moderator: true,
+                created_at: new Date().toISOString()
               });
             } catch (msgErr) {
               console.warn('Could not post expiration system message:', msgErr);

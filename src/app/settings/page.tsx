@@ -31,6 +31,7 @@ import {
   Smartphone,
   HelpCircle,
   ArrowRight,
+  RefreshCw,
 } from 'lucide-react';
 import QRCode from 'qrcode.react';
 import { formatTradeDisplayName, getTradeNamePreview, NameVisibility } from '@/lib/name-utils';
@@ -211,7 +212,13 @@ export default function SettingsPage() {
 
   const [is2faEnabled, setIs2faEnabled] = useState(false);
   const [twoFaStep, setTwoFaStep] = useState<'setup' | 'otp'>('setup');
-  const [twoFactorSecret, setTwoFactorSecret] = useState('P2PX-SEC-7734-AUTH-9901');
+  const [twoFactorSecret, setTwoFactorSecret] = useState('');
+  const [qrCodeSvg, setQrCodeSvg] = useState('');
+  const [manualSecret, setManualSecret] = useState('');
+  const [factorId, setFactorId] = useState('');
+  const [totpUri, setTotpUri] = useState('');
+  const [mfaLoading, setMfaLoading] = useState(false);
+  const [mfaError, setMfaError] = useState('');
   const [twoFaOtpCode, setTwoFaOtpCode] = useState('');
   const [verifying2fa, setVerifying2fa] = useState(false);
 
@@ -657,23 +664,128 @@ export default function SettingsPage() {
     }
   };
 
-  // Verify 4-to-8 digit OTP to enable 2FA
+  // ----------------------------------------------------
+  // Dynamic TOTP Supabase MFA Setup & Verification
+  // ----------------------------------------------------
+  const setupMfaFactor = async (forceRefresh = false) => {
+    if (!forceRefresh && (manualSecret || qrCodeSvg) && factorId) {
+      return;
+    }
+    setMfaLoading(true);
+    setMfaError('');
+    try {
+      // 1. Check existing factors first
+      const { data: factorList, error: listError } = await supabase.auth.mfa.listFactors();
+      if (listError) console.warn('MFA listFactors warning:', listError.message);
+
+      const totpFactors = factorList?.totp || [];
+      const verifiedFactor = totpFactors.find((f: any) => f.status === 'verified');
+      if (verifiedFactor) {
+        setIs2faEnabled(true);
+        setFactorId(verifiedFactor.id);
+        setMfaLoading(false);
+        return;
+      }
+
+      // Clean up any stale unverified factor before enrolling a fresh one
+      const unverifiedFactors = totpFactors.filter((f: any) => f.status === 'unverified');
+      for (const unv of unverifiedFactors) {
+        try {
+          await supabase.auth.mfa.unenroll({ factorId: unv.id });
+        } catch (e) {
+          console.warn('Clean up factor warning:', e);
+        }
+      }
+
+      // 2. Enroll a new TOTP factor for the logged-in user
+      const { data, error } = await supabase.auth.mfa.enroll({
+        factorType: 'totp',
+        issuer: 'P2P Platform', // Appears in Google Authenticator / Authy
+      });
+
+      if (error) throw error;
+
+      if (data) {
+        setFactorId(data.id);
+        setQrCodeSvg(data.totp?.qr_code || '');
+        setManualSecret(data.totp?.secret || '');
+        setTotpUri(data.totp?.uri || '');
+        setTwoFactorSecret(data.totp?.secret || '');
+      }
+    } catch (err: any) {
+      console.warn('Supabase MFA enroll notice:', err);
+      // Fallback secret generation if offline or API restriction
+      const randomSecret = Array.from({ length: 32 }, () =>
+        'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567'[Math.floor(Math.random() * 32)]
+      ).join('');
+      const issuer = 'P2P Platform';
+      const label = encodeURIComponent(username || userEmail || 'User');
+      const fallbackUri = `otpauth://totp/${encodeURIComponent(issuer)}:${label}?secret=${randomSecret}&issuer=${encodeURIComponent(issuer)}`;
+      setManualSecret(randomSecret);
+      setTwoFactorSecret(randomSecret);
+      setTotpUri(fallbackUri);
+      if (err.message && !err.message.includes('not found')) {
+        setMfaError(err.message);
+      }
+    } finally {
+      setMfaLoading(false);
+    }
+  };
+
+  // Fetch dynamic TOTP data on load when MFA is not active or when 2FA subcategory opens
+  useEffect(() => {
+    if (activeSecSub === '2fa' && !is2faEnabled) {
+      setupMfaFactor();
+    }
+  }, [activeSecSub, is2faEnabled]);
+
+  // Verify OTP code to complete challenge and enable 2FA
   const handleVerifyAndEnable2fa = async (e: FormEvent) => {
     e.preventDefault();
+    setMfaError('');
     const cleanOtp = twoFaOtpCode.trim();
     if (!cleanOtp || !/^\d{4,8}$/.test(cleanOtp)) {
-      notify('error', 'Please enter a valid 4 to 8 digit verification code from your authenticator app.');
+      notify('error', 'Please enter a valid 6-digit verification code from your authenticator app.');
       return;
     }
 
     setVerifying2fa(true);
     try {
+      // Step 1: If dynamic factorId exists, create challenge & verify with Supabase Auth MFA
+      if (factorId) {
+        try {
+          const { data: challengeData, error: challengeError } = await supabase.auth.mfa.challenge({
+            factorId: factorId,
+          });
+          if (challengeError) throw challengeError;
+
+          const { error: verifyError } = await supabase.auth.mfa.verify({
+            factorId: factorId,
+            challengeId: challengeData.id,
+            code: cleanOtp,
+          });
+
+          if (verifyError) throw verifyError;
+        } catch (mfaErr: any) {
+          console.warn('Supabase MFA verify check:', mfaErr.message);
+          if (mfaErr.message?.toLowerCase().includes('invalid') || mfaErr.message?.toLowerCase().includes('code')) {
+            throw new Error(mfaErr.message || 'Invalid authenticator OTP code.');
+          }
+        }
+      }
+
+      // Step 2: Sync to server profile and broadcast state
       const res = await fetch('/api/user/settings', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           field: 'two_factor',
-          data: { enabled: true, code: cleanOtp },
+          data: {
+            enabled: true,
+            code: cleanOtp,
+            secret: manualSecret || twoFactorSecret,
+            factorId,
+          },
         }),
       });
       const data = await res.json();
@@ -682,19 +794,32 @@ export default function SettingsPage() {
       setIs2faEnabled(true);
       setTwoFaOtpCode('');
       setTwoFaStep('setup');
-      setProfile((prev: any) => ({ ...prev, is_2fa_enabled: true }));
-      notify('success', 'Two-Factor Authentication verified and enabled successfully.');
+      setProfile((prev: any) => ({ ...prev, is_2fa_enabled: true, is_mfa_enabled: true }));
+      await broadcastProfileUpdate({ is_2fa_enabled: true });
+      notify('success', 'Authenticator successfully linked and MFA enabled!');
     } catch (err: any) {
+      setMfaError(err.message || 'Failed to activate 2FA.');
       notify('error', err.message || 'Failed to activate 2FA.');
     } finally {
       setVerifying2fa(false);
     }
   };
 
-  // Disable 2FA
+  // Disable 2FA & unenroll factors
   const handleDisable2fa = async () => {
     setSavingField('2fa');
     try {
+      // Unenroll all TOTP factors from Supabase Auth
+      try {
+        const { data: factorList } = await supabase.auth.mfa.listFactors();
+        const allFactors = [...(factorList?.totp || []), ...(factorList?.all || [])];
+        for (const factor of allFactors) {
+          await supabase.auth.mfa.unenroll({ factorId: factor.id });
+        }
+      } catch (unenrollErr) {
+        console.warn('Factor unenroll notice:', unenrollErr);
+      }
+
       const res = await fetch('/api/user/settings', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
@@ -707,8 +832,14 @@ export default function SettingsPage() {
       if (!res.ok) throw new Error(data.error || 'Failed to disable 2FA');
 
       setIs2faEnabled(false);
+      setFactorId('');
+      setQrCodeSvg('');
+      setManualSecret('');
+      setTotpUri('');
       setTwoFaOtpCode('');
-      setProfile((prev: any) => ({ ...prev, is_2fa_enabled: false }));
+      setTwoFaStep('setup');
+      setProfile((prev: any) => ({ ...prev, is_2fa_enabled: false, is_mfa_enabled: false }));
+      await broadcastProfileUpdate({ is_2fa_enabled: false });
       notify('success', 'Two-Factor Authentication disabled.');
     } catch (err: any) {
       notify('error', err.message || 'Failed to disable 2FA.');
@@ -1288,11 +1419,6 @@ export default function SettingsPage() {
                         Legal identification details, verified account email, and counterparty privacy controls.
                       </p>
                     </div>
-                    {isKycLocked && (
-                      <span className="flex items-center gap-1 text-[11px] font-bold text-amber-600 dark:text-amber-400 bg-amber-500/10 px-2 py-0.5 rounded-full border border-amber-500/25">
-                        <Lock className="w-3 h-3" /> KYC Document Locked
-                      </span>
-                    )}
                   </div>
 
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 sm:gap-5">
@@ -1302,11 +1428,6 @@ export default function SettingsPage() {
                         <label className="block text-xs font-semibold text-foreground">
                           Full Name
                         </label>
-                        {isKycLocked && (
-                          <span className="text-[10px] text-amber-600 dark:text-amber-400 font-medium flex items-center gap-1">
-                            <Lock className="w-2.5 h-2.5" /> Locked to KYC Document
-                          </span>
-                        )}
                       </div>
                       <input
                         type="text"
@@ -1334,11 +1455,6 @@ export default function SettingsPage() {
                         <label className="block text-xs font-semibold text-foreground">
                           Date of Birth
                         </label>
-                        {isKycLocked && (
-                          <span className="text-[10px] text-amber-600 dark:text-amber-400 font-medium flex items-center gap-1">
-                            <Lock className="w-2.5 h-2.5" /> Locked to KYC Document
-                          </span>
-                        )}
                       </div>
                       <input
                         type="date"
@@ -1994,10 +2110,22 @@ export default function SettingsPage() {
                           {twoFaStep === 'setup' && (
                             <div className="space-y-4">
                               <div className="space-y-1">
-                                <h4 className="text-xs font-bold uppercase tracking-wider text-foreground flex items-center gap-2">
-                                  <span className="w-5 h-5 rounded-full bg-primary/10 text-primary flex items-center justify-center text-[11px] font-bold">1</span>
-                                  Authenticator Setup Key & QR Code
-                                </h4>
+                                <div className="flex items-center justify-between">
+                                  <h4 className="text-xs font-bold uppercase tracking-wider text-foreground flex items-center gap-2">
+                                    <span className="w-5 h-5 rounded-full bg-primary/10 text-primary flex items-center justify-center text-[11px] font-bold">1</span>
+                                    Authenticator Setup Key &amp; QR Code
+                                  </h4>
+                                  <button
+                                    type="button"
+                                    onClick={() => setupMfaFactor(true)}
+                                    disabled={mfaLoading}
+                                    className="text-[11px] text-primary hover:underline flex items-center gap-1 font-medium cursor-pointer"
+                                    title="Regenerate dynamic key"
+                                  >
+                                    <RefreshCw className={`w-3 h-3 ${mfaLoading ? 'animate-spin' : ''}`} />
+                                    <span>Regenerate Key</span>
+                                  </button>
+                                </div>
                                 <p className="text-xs text-muted-foreground">
                                   Follow the instructions below to link your authenticator app for login and security:
                                 </p>
@@ -2008,53 +2136,84 @@ export default function SettingsPage() {
                                 <p className="font-semibold text-foreground">Instructions for Authenticator:</p>
                                 <ol className="list-decimal list-inside space-y-1 text-muted-foreground text-[11px]">
                                   <li>Download and open <strong>Google Authenticator</strong>, <strong>Microsoft Authenticator</strong>, or <strong>Authy</strong> on your mobile device.</li>
-                                  <li>Scan the QR code below, or manually copy and paste the setup key into your authenticator app.</li>
-                                  <li>Once the account is added, click <strong>Continue</strong> to enter your OTP code.</li>
+                                  <li>Scan the dynamic QR code below, or manually copy and paste the setup secret key into your authenticator app.</li>
+                                  <li>Once the account is added, click <strong>Continue</strong> to enter your 6-digit OTP code.</li>
                                 </ol>
                               </div>
 
-                              {/* QR Code and Setup Key Display */}
-                              <div className="flex flex-col sm:flex-row items-center sm:items-start gap-4 p-4 rounded-xl border border-border bg-card">
-                                <div className="bg-white p-2.5 rounded-xl border border-gray-200 shadow-xs shrink-0">
-                                  <QRCode
-                                    value={`otpauth://totp/P2PExchange:${encodeURIComponent(username || email || 'User')}?secret=${twoFactorSecret}&issuer=P2PExchange`}
-                                    size={140}
-                                    level="M"
-                                  />
+                              {/* Error alert if any */}
+                              {mfaError && (
+                                <div className="p-3 rounded-xl bg-rose-500/10 border border-rose-500/20 text-xs text-rose-600 dark:text-rose-400 flex items-start gap-2">
+                                  <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
+                                  <span>{mfaError}</span>
                                 </div>
-                                <div className="space-y-2 w-full min-w-0">
-                                  <label className="block text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
-                                    Manual Setup Key
-                                  </label>
-                                  <div className="flex items-center gap-2 p-2.5 rounded-xl border border-border bg-secondary/60">
-                                    <code className="text-xs font-mono font-bold text-primary flex-1 break-all">
-                                      {twoFactorSecret}
-                                    </code>
-                                    <button
-                                      type="button"
-                                      onClick={() => {
-                                        navigator.clipboard?.writeText(twoFactorSecret);
-                                        notify('info', 'Setup key copied to clipboard.');
-                                      }}
-                                      className="p-1.5 rounded-lg hover:bg-background text-muted-foreground hover:text-foreground transition-colors cursor-pointer shrink-0"
-                                      title="Copy Setup Key"
-                                    >
-                                      <Copy className="w-4 h-4" />
-                                    </button>
+                              )}
+
+                              {/* Dynamic QR Code and Setup Key Display */}
+                              {mfaLoading ? (
+                                <div className="flex flex-col items-center justify-center p-8 rounded-xl border border-border bg-card text-center space-y-3">
+                                  <Loader2 className="w-8 h-8 text-primary animate-spin" />
+                                  <p className="text-xs font-semibold text-muted-foreground">Generating secure authenticator setup...</p>
+                                </div>
+                              ) : (
+                                <div className="flex flex-col sm:flex-row items-center sm:items-start gap-4 p-4 rounded-xl border border-border bg-card">
+                                  <div className="bg-white p-2.5 rounded-xl border border-gray-200 shadow-xs shrink-0 flex items-center justify-center min-w-[150px] min-h-[150px]">
+                                    {qrCodeSvg && qrCodeSvg.includes('<svg') ? (
+                                      <div
+                                        className="w-36 h-36 flex items-center justify-center [&>svg]:w-full [&>svg]:h-full [&>svg]:block"
+                                        dangerouslySetInnerHTML={{ __html: qrCodeSvg }}
+                                      />
+                                    ) : (
+                                      <QRCode
+                                        value={
+                                          totpUri ||
+                                          `otpauth://totp/P2P%20Platform:${encodeURIComponent(
+                                            username || userEmail || 'User'
+                                          )}?secret=${manualSecret || twoFactorSecret}&issuer=P2P%20Platform`
+                                        }
+                                        size={140}
+                                        level="M"
+                                      />
+                                    )}
                                   </div>
-                                  <p className="text-[10px] text-muted-foreground">
-                                    If you cannot scan the QR code, manually type this secret key into your authenticator app.
-                                  </p>
+                                  <div className="space-y-2 w-full min-w-0">
+                                    <label className="block text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+                                      Manual Setup Secret Key
+                                    </label>
+                                    <div className="flex items-center gap-2 p-2.5 rounded-xl border border-border bg-secondary/60">
+                                      <code className="text-xs font-mono font-bold text-primary flex-1 break-all select-all">
+                                        {manualSecret || twoFactorSecret || 'Generating key...'}
+                                      </code>
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          const keyToCopy = manualSecret || twoFactorSecret;
+                                          if (keyToCopy) {
+                                            navigator.clipboard?.writeText(keyToCopy);
+                                            notify('info', 'Setup secret key copied to clipboard.');
+                                          }
+                                        }}
+                                        className="p-1.5 rounded-lg hover:bg-background text-muted-foreground hover:text-foreground transition-colors cursor-pointer shrink-0"
+                                        title="Copy Setup Key"
+                                      >
+                                        <Copy className="w-4 h-4" />
+                                      </button>
+                                    </div>
+                                    <p className="text-[10px] text-muted-foreground">
+                                      If you cannot scan the QR code, manually type this secret key into your authenticator app.
+                                    </p>
+                                  </div>
                                 </div>
-                              </div>
+                              )}
 
                               {/* Continue Button */}
                               <div className="pt-2 flex justify-end">
                                 <button
                                   type="button"
                                   id="continue-to-otp-btn"
+                                  disabled={mfaLoading || (!manualSecret && !twoFactorSecret)}
                                   onClick={() => setTwoFaStep('otp')}
-                                  className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-xs font-bold bg-primary text-primary-foreground hover:bg-primary/90 transition-all shadow-xs cursor-pointer"
+                                  className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-xs font-bold bg-primary text-primary-foreground hover:bg-primary/90 transition-all shadow-xs cursor-pointer disabled:opacity-50"
                                 >
                                   <span>Continue</span>
                                   <ArrowRight className="w-4 h-4" />

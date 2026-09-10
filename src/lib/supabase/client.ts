@@ -1,24 +1,10 @@
-import { createBrowserClient } from "@supabase/ssr";
+import { getBrowserClient, supabase } from "@/lib/supabaseClient";
 
 export function createClient() {
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://placeholder.supabase.co';
-  const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'placeholder-anon-key';
-
-  return createBrowserClient(
-    url,
-    key,
-    {
-      cookieOptions: {
-        sameSite: "none",
-        secure: true,
-        path: "/",
-      },
-    }
-  );
+  return getBrowserClient();
 }
 
-// Default singleton client for existing application components
-export const supabase = createClient();
+export { supabase };
 
 export function checkSupabaseConfig(): { isConfigured: boolean; hasUrl: boolean; hasAnonKey: boolean; url: string } {
   const url = (process.env.NEXT_PUBLIC_SUPABASE_URL || '').trim();

@@ -591,12 +591,12 @@ export function DashboardHeader() {
                 className="h-10 pl-2 pr-2.5 py-1 rounded-xl border border-slate-200/80 dark:border-slate-800 bg-slate-50/90 dark:bg-slate-800/60 hover:bg-slate-100 dark:hover:bg-slate-800 text-foreground transition-all shadow-xs flex items-center gap-2 cursor-pointer select-none group"
               >
                 <div className="relative shrink-0 flex items-center">
-                  <Avatar className="h-7 w-7 rounded-lg border border-slate-200 dark:border-slate-700">
+                  <Avatar className="h-7 w-7 rounded-lg border border-slate-200 dark:border-slate-700 overflow-hidden">
                     {(authUser?.photoURL || (profile as any)?.avatar_url || (profile as any)?.photo_url) ? (
                       <AvatarImage src={authUser?.photoURL || (profile as any)?.avatar_url || (profile as any)?.photo_url} alt={authUser?.displayName || profile?.username || 'User Avatar'} />
                     ) : (
-                      <AvatarFallback className="bg-gradient-to-br from-[#9273FC] to-[#3B82F6] text-white text-[11px] font-bold">
-                        {(authUser?.displayName || profile?.username || 'User').substring(0, 2).toUpperCase()}
+                      <AvatarFallback className="bg-[#18181b] p-0.5">
+                        <img src="/default-avatar.svg" alt="Avatar" className="w-full h-full object-cover" />
                       </AvatarFallback>
                     )}
                   </Avatar>

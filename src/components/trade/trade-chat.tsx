@@ -9,12 +9,11 @@ import { useStopwatch } from '@/hooks/use-stopwatch';
 import { addReceiptToTrade, claimFundsForTrade } from '@/lib/wallet';
 import { compressImage } from '@/lib/media-compression';
 import { cn, toDate } from '@/lib/utils';
-import type { Trade, User, TradeChatMessage } from '@/lib/types';
+import { insertPaxonesSystemMessage, checkOffPlatformMessage, extractUrls } from '@/lib/trade-system-messages';
+import type { Trade, User } from '@/lib/types';
 
 import { Card, CardContent, CardHeader, CardFooter } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Textarea } from '@/components/ui/textarea';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -29,29 +28,32 @@ import {
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { Label } from '@/components/ui/label';
 import { DefaultAvatar, BtcLogo, EthLogo, LtcLogo, UsdtLogo } from '@/components/icons';
-import { Logo } from '@/components/logo';
 import { FlagIcon } from '@/components/ui/flag-icon';
 import { Alert, AlertTitle, AlertDescription } from '@/components/ui/alert';
 import {
   Clock,
   Send,
-  Plus,
   Info as InfoIcon,
   Loader2,
   ThumbsUp,
   ThumbsDown,
   Paperclip,
   Lock,
-  Eye,
-  FileCheck,
   FileText,
-  Video,
   ShieldCheck,
-  AlertTriangle
+  ShieldAlert,
+  AlertTriangle,
+  ExternalLink,
+  CheckCircle2,
+  XCircle,
+  AlertCircle,
+  Scale,
+  Ban,
+  UserCheck
 } from 'lucide-react';
 import { formatDistanceToNow } from 'date-fns';
 
-function CoinInsignia({ symbol, className = "h-4 w-4" }: { symbol: string; className?: string }) {
+function CoinInsignia({ symbol, className = 'h-4 w-4' }: { symbol: string; className?: string }) {
   const s = (symbol || '').toUpperCase();
   switch (s) {
     case 'BTC':
@@ -130,33 +132,183 @@ function TradeInstructions({ trade, isBuyer }: { trade: Trade | any; isBuyer: bo
   );
 }
 
-function SystemMessage({
-  title,
-  children,
-  timestamp,
-  variant
+/**
+ * Enhanced System Message bubble with official Paxones badge, color accents,
+ * and high-contrast readable styling.
+ */
+function PaxonesSystemMessageBubble({
+  msg,
+  onOpenExternalLink
 }: {
-  title: string;
-  children: React.ReactNode;
-  timestamp?: string;
-  variant?: 'default' | 'destructive' | 'success' | 'warning' | 'info';
+  msg: any;
+  onOpenExternalLink: (url: string) => void;
 }) {
+  const text = msg.message || '';
+  const timestamp = msg.createdAt;
   const timeString = toDate(timestamp)?.toLocaleString('default', { dateStyle: 'short', timeStyle: 'short' }) || '';
 
-  const variants = {
-    default: 'bg-muted/80 border-border text-foreground',
-    destructive: 'bg-destructive/10 border-destructive/30 text-destructive',
-    success: 'bg-emerald-500/10 border-emerald-500/30 text-emerald-700 dark:text-emerald-300',
-    warning: 'bg-amber-500/10 border-amber-500/30 text-amber-800 dark:text-amber-300',
-    info: 'bg-primary/10 border-primary/30 text-primary'
-  };
+  // Determine system message category
+  const isCompleted = text.includes('sold') && text.includes('successfully') || text.includes('bought') && text.includes('successfully') || text.includes('Trade Completed') || text.includes('released');
+  const isCancelled = text.toLowerCase().includes('trade cancelled') || text.toLowerCase().includes('trade has expired') || text.toLowerCase().includes('cancelled.');
+  const isDispute = text.includes('in dispute') || text.includes('DISPUTE') || text.includes('Dispute Assistant') || text.includes('Dispute Notice');
+  const isBlockedUser = text.includes('blocked @') || text.includes('User Blocked');
+  const isPositiveFeedback = text.includes('positive feedback');
+  const isNegativeFeedback = text.includes('negative feedback');
+  const isIssueReported = text.includes('reported an issue') || text.includes('Issue Reported');
+  const isMessageBlocked = text.includes('Message blocked:') || text.includes('off-platform communication');
+  const isPaid = text.includes('confirmed payment') || text.includes('Marked as Paid') || text.includes('marked as paid');
+  const isSecurityReminder = text.includes('Paxones Security Reminder');
+
+  let title = 'Paxones System';
+  let badgeClass = 'bg-primary/10 text-primary border-primary/20';
+  let containerClass = 'bg-muted/60 border-border/80 text-foreground';
+  let IconComponent = ShieldCheck;
+
+  if (isCompleted) {
+    title = 'Trade Completed';
+    badgeClass = 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border-emerald-500/30';
+    containerClass = 'bg-emerald-500/10 border-emerald-500/30 text-emerald-950 dark:text-emerald-100';
+    IconComponent = CheckCircle2;
+  } else if (isCancelled) {
+    title = text.toLowerCase().includes('expired') ? 'Trade Expired' : 'Trade Cancelled';
+    badgeClass = 'bg-destructive/15 text-destructive border-destructive/30';
+    containerClass = 'bg-destructive/10 border-destructive/30 text-destructive dark:text-rose-200';
+    IconComponent = XCircle;
+  } else if (isDispute) {
+    title = 'Official Dispute Notice';
+    badgeClass = 'bg-amber-500/15 text-amber-700 dark:text-amber-300 border-amber-500/30';
+    containerClass = 'bg-amber-500/10 border-amber-500/30 text-amber-950 dark:text-amber-100';
+    IconComponent = Scale;
+  } else if (isBlockedUser) {
+    title = 'User Blocked Notice';
+    badgeClass = 'bg-destructive/15 text-destructive border-destructive/30';
+    containerClass = 'bg-destructive/10 border-destructive/30 text-destructive dark:text-rose-200';
+    IconComponent = Ban;
+  } else if (isPositiveFeedback) {
+    title = 'Positive Feedback Left';
+    badgeClass = 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border-emerald-500/30';
+    containerClass = 'bg-emerald-500/10 border-emerald-500/30 text-emerald-950 dark:text-emerald-100';
+    IconComponent = ThumbsUp;
+  } else if (isNegativeFeedback) {
+    title = 'Negative Feedback Left';
+    badgeClass = 'bg-destructive/15 text-destructive border-destructive/30';
+    containerClass = 'bg-destructive/10 border-destructive/30 text-destructive dark:text-rose-200';
+    IconComponent = ThumbsDown;
+  } else if (isIssueReported) {
+    title = 'Issue Reported';
+    badgeClass = 'bg-amber-500/15 text-amber-700 dark:text-amber-300 border-amber-500/30';
+    containerClass = 'bg-amber-500/10 border-amber-500/30 text-amber-950 dark:text-amber-100';
+    IconComponent = AlertTriangle;
+  } else if (isMessageBlocked) {
+    title = 'Security Alert: Message Blocked';
+    badgeClass = 'bg-destructive/15 text-destructive border-destructive/30';
+    containerClass = 'bg-destructive/10 border-destructive/30 text-destructive dark:text-rose-200';
+    IconComponent = ShieldAlert;
+  } else if (isPaid) {
+    title = 'Payment Confirmed';
+    badgeClass = 'bg-primary/15 text-primary border-primary/30';
+    containerClass = 'bg-primary/10 border-primary/30 text-foreground';
+    IconComponent = UserCheck;
+  } else if (isSecurityReminder) {
+    title = 'Paxones Security Reminder';
+    badgeClass = 'bg-amber-500/15 text-amber-700 dark:text-amber-300 border-amber-500/30';
+    containerClass = 'bg-amber-500/10 border-amber-500/30 text-amber-950 dark:text-amber-100';
+    IconComponent = ShieldCheck;
+  }
+
+  // Format message text: highlight @mentions and lines
+  const lines = text.split('\n');
 
   return (
-    <div className={cn('text-center text-xs p-3 rounded-xl border my-2', variants[variant || 'default'])}>
-      <p className="font-bold mb-1 flex items-center justify-center gap-1.5">{title}</p>
-      <div className="text-left text-xs whitespace-pre-wrap leading-relaxed">{children}</div>
-      <p className="text-right text-[10px] opacity-70 mt-1 font-mono">{timeString}</p>
+    <div className={cn('rounded-xl border p-3.5 my-2.5 text-xs transition-all shadow-xs', containerClass)}>
+      <div className="flex items-center justify-between gap-2 mb-2 pb-1.5 border-b border-current/15">
+        <div className="flex items-center gap-1.5 font-bold tracking-tight">
+          <IconComponent className="h-4 w-4 shrink-0" />
+          <span>{title}</span>
+        </div>
+        <span className={cn('px-2 py-0.5 rounded-full text-[10px] font-bold tracking-wider uppercase border', badgeClass)}>
+          PAXONES SYSTEM
+        </span>
+      </div>
+
+      <div className="space-y-1.5 text-left text-xs leading-relaxed whitespace-pre-wrap font-sans">
+        {lines.map((line: string, i: number) => {
+          const trimmed = line.trim();
+          if (!trimmed) return <div key={i} className="h-1" />;
+
+          // Highlight @usernames
+          const parts = line.split(/(@\w+)/g);
+
+          return (
+            <p key={i} className={cn(trimmed.startsWith('Important:') || trimmed.startsWith('Reason:') ? 'font-semibold' : '')}>
+              {parts.map((part, pIdx) => {
+                if (part.startsWith('@')) {
+                  return (
+                    <span key={pIdx} className="font-bold underline decoration-dotted">
+                      {part}
+                    </span>
+                  );
+                }
+                return part;
+              })}
+            </p>
+          );
+        })}
+      </div>
+
+      <div className="flex items-center justify-between mt-2 pt-1 border-t border-current/10 text-[10px] opacity-75 font-mono">
+        <span>Verified Automated Event</span>
+        <span>{timeString}</span>
+      </div>
     </div>
+  );
+}
+
+/**
+ * Text renderer that wraps URLs with a secure click interceptor to trigger the Phishing Warning Modal.
+ */
+function FormattedUserMessage({
+  content,
+  onOpenExternalLink
+}: {
+  content: string;
+  onOpenExternalLink: (url: string) => void;
+}) {
+  if (!content) return null;
+
+  // Regex to match URLs and @mentions
+  const tokens = content.split(/(https?:\/\/[^\s]+|www\.[^\s]+|@\w+)/gi);
+
+  return (
+    <span className="whitespace-pre-wrap leading-relaxed break-words">
+      {tokens.map((token, idx) => {
+        if (/^https?:\/\//i.test(token) || /^www\./i.test(token)) {
+          const fullUrl = token.startsWith('http') ? token : `https://${token}`;
+          return (
+            <button
+              key={idx}
+              type="button"
+              onClick={() => onOpenExternalLink(fullUrl)}
+              className="inline-flex items-center gap-0.5 font-bold underline underline-offset-2 text-primary hover:text-primary/80 transition-colors mx-0.5 text-xs"
+              title="Click to open external link security check"
+            >
+              <span>{token}</span>
+              <ExternalLink className="h-3 w-3 inline" />
+            </button>
+          );
+        }
+
+        if (/^@\w+/i.test(token)) {
+          return (
+            <span key={idx} className="font-bold bg-primary/15 px-1 py-0.5 rounded text-[11px] mx-0.5">
+              {token}
+            </span>
+          );
+        }
+
+        return token;
+      })}
+    </span>
   );
 }
 
@@ -214,6 +366,9 @@ export function TradeChat({
   const [isUploading, setIsUploading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  // External link security modal state
+  const [selectedExternalUrl, setSelectedExternalUrl] = useState<string | null>(null);
+
   // Dispute privacy modal state
   const [pendingUploadFile, setPendingUploadFile] = useState<File | null>(null);
   const [disputeVisibility, setDisputeVisibility] = useState<'all' | 'moderator_only'>('all');
@@ -223,12 +378,13 @@ export function TradeChat({
   const isTradeStopped = ['released', 'cancelled', 'expired', 'completed'].includes(tradeStatus);
   const isDisputed = ['disputed', 'dispute'].includes(tradeStatus);
 
-  // Freeze stopwatch at exact finish time (Instruction 7)
+  // Freeze stopwatch at exact finish time
   const stopEndTime = trade?.releasedAt || trade?.released_at || trade?.cancelledAt || trade?.cancelled_at || trade?.updated_at;
   const stopwatch = useStopwatch(trade?.createdAt || trade?.created_at || Date.now(), isTradeStopped, stopEndTime);
 
   const tradeId = trade?.id;
   const isBuyer = currentUserId === (trade?.buyerId || trade?.buyer_id);
+  const userRoleLabel = isBuyer ? 'Buyer' : 'Seller';
 
   // Fetch initial messages & subscribe to Realtime
   useEffect(() => {
@@ -285,7 +441,10 @@ export function TradeChat({
             isModerator: Boolean(raw.is_moderator),
             createdAt: raw.created_at
           };
-          setMessages((prev) => [...prev, formatted]);
+          setMessages((prev) => {
+            if (prev.some((m) => m.id === formatted.id)) return prev;
+            return [...prev, formatted];
+          });
         }
       )
       .subscribe();
@@ -311,19 +470,33 @@ export function TradeChat({
     }
   }, [displayMessages]);
 
+  const hasClaimedRef = useRef(false);
+
   useEffect(() => {
-    if (tradeStatus === 'released' && !trade?.claimedByBuyer && !trade?.claimed_by_buyer && isBuyer) {
+    if (typeof window === 'undefined') return;
+    const claimStorageKey = `trade_funds_claimed_${tradeId}_${currentUserId}`;
+    const alreadyClaimedInStorage = sessionStorage.getItem(claimStorageKey) === 'true';
+
+    if (
+      tradeStatus === 'released' &&
+      !hasClaimedRef.current &&
+      !alreadyClaimedInStorage &&
+      !trade?.claimedByBuyer &&
+      !trade?.claimed_by_buyer &&
+      isBuyer
+    ) {
+      hasClaimedRef.current = true;
+      sessionStorage.setItem(claimStorageKey, 'true');
       const claim = async () => {
         try {
           await claimFundsForTrade(supabase, trade, currentUserId);
-          toast({ title: 'Funds Claimed', description: 'The crypto has been credited to your wallet.' });
         } catch (error: any) {
           console.error('Auto-claiming funds failed:', error);
         }
       };
       claim();
     }
-  }, [tradeStatus, trade, isBuyer, currentUserId, supabase, toast]);
+  }, [tradeStatus, trade, isBuyer, currentUserId, supabase, tradeId]);
 
   const handleSendMessage = async (
     e?: React.FormEvent,
@@ -343,13 +516,22 @@ export function TradeChat({
       return;
     }
 
-    const blockedWords = ['telegram', 'whatsapp', 'phone', 'contact'];
-    if (newMessage && blockedWords.some((word) => newMessage.toLowerCase().includes(word))) {
+    // Security Check: Off-platform communication detection
+    const offPlatformCheck = checkOffPlatformMessage(newMessage);
+    if (offPlatformCheck.isBlocked) {
       toast({
         variant: 'destructive',
-        title: 'Message Blocked',
-        description: 'Please do not share external contact information in the encrypted escrow chat.'
+        title: 'Message Blocked by Security Protocol',
+        description: offPlatformCheck.reason || 'Off-platform communication is strictly prohibited.'
       });
+
+      // Insert official Paxones System Message warning to chat
+      await insertPaxonesSystemMessage(supabase, {
+        tradeId,
+        type: 'MESSAGE_BLOCKED'
+      });
+
+      setNewMessage('');
       return;
     }
 
@@ -384,7 +566,7 @@ export function TradeChat({
   const processAndUploadFile = async (fileToUpload: File, chosenVisibility: 'all' | 'moderator_only') => {
     setIsUploading(true);
     try {
-      // 1. Image compression (Instruction 8)
+      // 1. Image compression
       let finalFile = fileToUpload;
       if (fileToUpload.type.startsWith('image/')) {
         finalFile = await compressImage(fileToUpload);
@@ -441,6 +623,7 @@ export function TradeChat({
   };
 
   const opponentUsername = opponent?.username || opponent?.userId || opponent?.user_id || 'Trader';
+  const opponentRoleLabel = isBuyer ? 'Seller' : 'Buyer';
   const opponentPhoto = opponent?.photoURL || opponent?.photo_url;
   const positiveFeedback = Number(opponent?.positiveFeedback ?? opponent?.positive_feedback ?? 0);
   const negativeFeedback = Number(opponent?.negativeFeedback ?? opponent?.negative_feedback ?? 0);
@@ -477,6 +660,9 @@ export function TradeChat({
                 <Link href={`/users/${opponentUsername}`} className="font-bold text-sm text-foreground hover:underline">
                   @{opponentUsername}
                 </Link>
+                <span className="text-[11px] font-semibold px-1.5 py-0.5 rounded bg-muted text-muted-foreground">
+                  {opponentRoleLabel}
+                </span>
                 {opponent?.country && <FlagIcon countryCode={opponent.country} />}
                 <Button variant="ghost" size="icon" onClick={onInfoClick} className="h-6 w-6 text-primary hover:text-primary">
                   <InfoIcon className="h-4 w-4" />
@@ -508,6 +694,14 @@ export function TradeChat({
         </div>
 
         <TradeSummaryBar trade={trade} currentUserRole={isBuyer ? 'buy' : 'sell'} />
+
+        {/* Official Pinned Security Banner */}
+        <div className="flex items-center gap-2 p-2.5 rounded-lg bg-amber-500/10 border border-amber-500/20 text-[11px] text-amber-900 dark:text-amber-200">
+          <ShieldAlert className="h-4 w-4 text-amber-600 dark:text-amber-400 shrink-0" />
+          <p className="leading-tight">
+            <strong>Paxones Security:</strong> Never share passwords, 2FA tokens, or seed phrases. All trades must stay within Paxones escrow.
+          </p>
+        </div>
       </CardHeader>
 
       {/* Independent Scrollable Chat Area */}
@@ -517,9 +711,13 @@ export function TradeChat({
             <TradeInstructions trade={trade} isBuyer={isBuyer} />
 
             {sellerTerms && (
-              <SystemMessage title="Seller's Terms & Conditions" timestamp={trade?.createdAt || trade?.created_at}>
-                <p className="whitespace-pre-wrap">{sellerTerms}</p>
-              </SystemMessage>
+              <div className="rounded-xl border border-border/80 bg-muted/40 p-3 text-xs">
+                <p className="font-bold flex items-center gap-1.5 mb-1 text-foreground">
+                  <InfoIcon className="h-3.5 w-3.5 text-primary" />
+                  Seller&apos;s Terms &amp; Conditions
+                </p>
+                <p className="whitespace-pre-wrap leading-relaxed opacity-90">{sellerTerms}</p>
+              </div>
             )}
 
             {areMessagesLoading ? (
@@ -531,60 +729,12 @@ export function TradeChat({
               <div className="space-y-3">
                 {displayMessages.map((msg) => {
                   if (msg.senderId === 'system') {
-                    const text = msg.message || '';
-                    if (text.includes('positive feedback')) {
-                      return (
-                        <SystemMessage key={msg.id} title="🌟 Positive Feedback Received" timestamp={msg.createdAt} variant="success">
-                          {text}
-                        </SystemMessage>
-                      );
-                    }
-                    if (text.includes('negative feedback')) {
-                      return (
-                        <SystemMessage key={msg.id} title="👎 Negative Feedback Received" timestamp={msg.createdAt} variant="destructive">
-                          {text}
-                        </SystemMessage>
-                      );
-                    }
-                    if (text.includes('feedback')) {
-                      return (
-                        <SystemMessage key={msg.id} title="🌟 Trade Feedback" timestamp={msg.createdAt} variant="success">
-                          {text}
-                        </SystemMessage>
-                      );
-                    }
-                    if (text.includes('reported an issue') || text.includes('Issue Reported') || text.includes('dispute') || text.includes('disputed')) {
-                      return (
-                        <SystemMessage key={msg.id} title="⚠️ Issue / Dispute Notice" timestamp={msg.createdAt} variant="warning">
-                          {text}
-                        </SystemMessage>
-                      );
-                    }
-                    if (text.includes('complete') || text.includes('released')) {
-                      return (
-                        <SystemMessage key={msg.id} title="✅ Trade Completed" timestamp={msg.createdAt} variant="success">
-                          {text}
-                        </SystemMessage>
-                      );
-                    }
-                    if (text.toLowerCase().includes('cancelled') || text.toLowerCase().includes('expired')) {
-                      return (
-                        <SystemMessage key={msg.id} title="❌ Trade Cancelled" timestamp={msg.createdAt} variant="destructive">
-                          {text}
-                        </SystemMessage>
-                      );
-                    }
-                    if (text.includes('Paid')) {
-                      return (
-                        <SystemMessage key={msg.id} title="💵 Marked as Paid" timestamp={msg.createdAt} variant="info">
-                          {text}
-                        </SystemMessage>
-                      );
-                    }
                     return (
-                      <SystemMessage key={msg.id} title="System Message" timestamp={msg.createdAt}>
-                        {text}
-                      </SystemMessage>
+                      <PaxonesSystemMessageBubble
+                        key={msg.id}
+                        msg={msg}
+                        onOpenExternalLink={(url) => setSelectedExternalUrl(url)}
+                      />
                     );
                   }
 
@@ -592,8 +742,8 @@ export function TradeChat({
                   const isModeratorOnly = msg.visibility === 'moderator_only';
                   const canViewModeratorFile = isAdmin || isCurrentUser;
 
-                  let senderDisplayName = isCurrentUser ? 'You' : `@${opponentUsername}`;
-                  if (msg.isModerator) senderDisplayName = 'Pax Moderator';
+                  let senderDisplayName = isCurrentUser ? `You (${userRoleLabel})` : `@${opponentUsername} (${opponentRoleLabel})`;
+                  if (msg.isModerator) senderDisplayName = 'Paxones Moderator';
 
                   return (
                     <div key={msg.id} className={cn('flex items-end gap-2', isCurrentUser ? 'justify-end' : 'justify-start')}>
@@ -627,7 +777,12 @@ export function TradeChat({
                           )}
                         </div>
 
-                        {msg.message && <p className="whitespace-pre-wrap leading-relaxed">{msg.message}</p>}
+                        {msg.message && (
+                          <FormattedUserMessage
+                            content={msg.message}
+                            onOpenExternalLink={(url) => setSelectedExternalUrl(url)}
+                          />
+                        )}
 
                         {/* Media attachments */}
                         {msg.mediaUrl && (
@@ -638,29 +793,32 @@ export function TradeChat({
                                 <span>Private evidence submitted to Moderator</span>
                               </div>
                             ) : msg.mediaType === 'image' ? (
-                              <a href={msg.mediaUrl} target="_blank" rel="noopener noreferrer" className="block mt-1">
+                              <button
+                                type="button"
+                                onClick={() => setSelectedExternalUrl(msg.mediaUrl)}
+                                className="block mt-1 text-left"
+                              >
                                 <Image
                                   src={msg.mediaUrl}
                                   alt="Trade Media"
                                   width={240}
                                   height={240}
-                                  className="rounded-lg object-cover max-h-56 w-auto border border-border/40"
+                                  className="rounded-lg object-cover max-h-56 w-auto border border-border/40 hover:opacity-95 transition-opacity"
                                 />
-                              </a>
+                              </button>
                             ) : msg.mediaType === 'video' ? (
                               <div className="mt-1">
                                 <video controls className="max-h-56 rounded-lg w-full" src={msg.mediaUrl} />
                               </div>
                             ) : (
-                              <a
-                                href={msg.mediaUrl}
-                                target="_blank"
-                                rel="noopener noreferrer"
+                              <button
+                                type="button"
+                                onClick={() => setSelectedExternalUrl(msg.mediaUrl)}
                                 className="inline-flex items-center gap-2 p-2 rounded-lg bg-background/40 hover:bg-background/80 border text-xs font-semibold underline mt-1"
                               >
                                 <FileText className="h-4 w-4" />
                                 View Attached Document
-                              </a>
+                              </button>
                             )}
                           </div>
                         )}
@@ -738,6 +896,52 @@ export function TradeChat({
         </form>
       </CardFooter>
 
+      {/* External Link & Phishing Warning Modal */}
+      <Dialog open={Boolean(selectedExternalUrl)} onOpenChange={(open) => !open && setSelectedExternalUrl(null)}>
+        <DialogContent className="sm:max-w-md bg-card border-border">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-sm font-bold text-destructive">
+              <ShieldAlert className="h-5 w-5 text-destructive" />
+              Security Warning: External Link
+            </DialogTitle>
+            <DialogDescription className="text-xs text-foreground/90 space-y-2 pt-1">
+              <p className="font-semibold text-destructive">
+                Do not open links unless you have verified that they are safe and belong to the intended service. Links may contain phishing or malicious content.
+              </p>
+              <p>
+                <strong>Never enter your Paxones password, 2FA code, private keys, or other sensitive credentials</strong> after following a link from another user.
+              </p>
+            </DialogDescription>
+          </DialogHeader>
+
+          {selectedExternalUrl && (
+            <div className="p-3 rounded-lg bg-muted/60 border border-border text-xs break-all font-mono">
+              <span className="text-muted-foreground block text-[10px] uppercase font-sans font-bold mb-1">Target Destination</span>
+              {selectedExternalUrl}
+            </div>
+          )}
+
+          <DialogFooter className="gap-2 sm:justify-between">
+            <Button variant="outline" size="sm" onClick={() => setSelectedExternalUrl(null)}>
+              Cancel (Stay Safe)
+            </Button>
+            <Button
+              variant="destructive"
+              size="sm"
+              onClick={() => {
+                if (selectedExternalUrl) {
+                  window.open(selectedExternalUrl, '_blank', 'noopener,noreferrer');
+                }
+                setSelectedExternalUrl(null);
+              }}
+            >
+              <ExternalLink className="h-3.5 w-3.5 mr-1.5" />
+              Open External Link
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       {/* Dispute Media Privacy Selection Modal */}
       <Dialog open={isPrivacyModalOpen} onOpenChange={setIsPrivacyModalOpen}>
         <DialogContent className="sm:max-w-md bg-card border-border">
@@ -761,7 +965,7 @@ export function TradeChat({
               <Label htmlFor="opt-all" className="cursor-pointer text-xs font-semibold">
                 <div className="text-foreground">Moderator and Counterparty</div>
                 <div className="text-[11px] text-muted-foreground font-normal">
-                  Visible to both you, your trading partner, and the Pax escrow mediator.
+                  Visible to both you, your trading partner, and the Paxones escrow mediator.
                 </div>
               </Label>
             </div>

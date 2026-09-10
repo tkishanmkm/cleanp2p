@@ -5,12 +5,25 @@ import { Button } from '@/components/ui/button';
 
 export function DiscordAuthButton() {
   const handleDiscordLogin = async () => {
-    await supabase.auth.signInWithOAuth({
-      provider: 'discord',
-      options: {
-        redirectTo: `${typeof window !== 'undefined' ? window.location.origin : ''}/api/auth/callback`,
-      },
-    });
+    try {
+      const { data, error } = await supabase.auth.signInWithOAuth({
+        provider: 'discord',
+        options: {
+          redirectTo: `${typeof window !== 'undefined' ? window.location.origin : ''}/api/auth/callback`,
+          skipBrowserRedirect: true,
+        },
+      });
+      if (error) throw error;
+      if (data?.url) {
+        window.open(
+          data.url,
+          'discord_oauth_popup',
+          'width=600,height=700,status=no,toolbar=no,menubar=no,location=yes'
+        );
+      }
+    } catch (err) {
+      console.error('Discord OAuth error:', err);
+    }
   };
 
   return (

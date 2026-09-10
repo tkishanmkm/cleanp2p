@@ -18,14 +18,17 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Invalid withdrawal payload' }, { status: 400 });
     }
 
-    // 1. Mandatory 2FA Verification Check
+    // 1. Conditional 2FA Verification Check - Only required if user enabled it in Settings
     const { data: profile } = await supabase
       .from('profiles')
-      .select('is_mfa_enabled, security_answer_hash')
+      .select('is_2fa_enabled, is_mfa_enabled, two_factor_secret, security_answer_hash')
       .eq('id', user.id)
-      .single();
+      .maybeSingle();
 
-    if (profile?.is_mfa_enabled) {
+    const is2faActive = Boolean(profile?.is_2fa_enabled || profile?.is_mfa_enabled);
+    const secret = profile?.two_factor_secret || profile?.security_answer_hash;
+
+    if (is2faActive && secret) {
       if (!totpCode) {
         return NextResponse.json(
           { error: 'Two-Factor Authentication (2FA) code required' }, 
@@ -34,10 +37,10 @@ export async function POST(req: NextRequest) {
       }
 
       const isValidTotp = speakeasy.totp.verify({
-        secret: profile.security_answer_hash,
+        secret: secret,
         encoding: 'base32',
         token: totpCode.trim(),
-        window: 1,
+        window: 2,
       });
 
       if (!isValidTotp) {

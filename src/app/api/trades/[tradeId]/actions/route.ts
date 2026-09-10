@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@/utils/supabase/server';
+import { insertPaxonesSystemMessage } from '@/lib/trade-system-messages';
 
 export const dynamic = 'force-dynamic';
 
@@ -34,6 +35,18 @@ export async function POST(
 
     const actualTradeId = trade?.id || tradeId;
 
+    // Fetch buyer and seller profiles for mentions
+    let buyerName = 'Buyer';
+    let sellerName = 'Seller';
+    if (trade?.buyer_id) {
+      const { data: bp } = await supabase.from('profiles').select('username').eq('id', trade.buyer_id).maybeSingle();
+      if (bp?.username) buyerName = bp.username;
+    }
+    if (trade?.seller_id) {
+      const { data: sp } = await supabase.from('profiles').select('username').eq('id', trade.seller_id).maybeSingle();
+      if (sp?.username) sellerName = sp.username;
+    }
+
     if (action === 'MARK_PAID') {
       const now = new Date().toISOString();
       const { error } = await supabase
@@ -50,23 +63,13 @@ export async function POST(
         return NextResponse.json({ error: error.message }, { status: 400 });
       }
 
-      const announcement = `Buyer marked payment as SENT.${receiptUrl ? ' Payment proof attached.' : ''}`;
-
-      // Post system announcement to trade_messages
-      try {
-        await supabase.from('trade_messages').insert({
-          trade_id: actualTradeId,
-          sender_id: user.id,
-          content: announcement,
-          message: announcement,
-          file_url: receiptUrl || null,
-          attachment_url: receiptUrl || null,
-          is_system_message: true,
-          is_system: true,
-        });
-      } catch (msgErr) {
-        console.warn('Failed to insert into trade_messages:', msgErr);
-      }
+      // Post official Paxones system announcement
+      await insertPaxonesSystemMessage(supabase, {
+        tradeId: actualTradeId,
+        type: 'MARKED_PAID',
+        buyerUsername: buyerName,
+        sellerUsername: sellerName
+      });
 
       return NextResponse.json({ success: true, message: 'Payment marked successfully.' });
     }
@@ -117,19 +120,17 @@ export async function POST(
         return NextResponse.json({ error: updateError.message }, { status: 400 });
       }
 
-      const releaseMsg = 'Seller released the cryptocurrency from escrow. Trade completed successfully.';
-      try {
-        await supabase.from('trade_messages').insert({
-          trade_id: actualTradeId,
-          sender_id: user.id,
-          content: releaseMsg,
-          message: releaseMsg,
-          is_system_message: true,
-          is_system: true,
-        });
-      } catch (mErr) {
-        console.warn('Message insert error:', mErr);
-      }
+      const coinAmount = Number(trade?.amount ?? trade?.crypto_amount ?? 0);
+      const coinSymbol = trade?.crypto ?? trade?.asset_symbol ?? 'BTC';
+
+      await insertPaxonesSystemMessage(supabase, {
+        tradeId: actualTradeId,
+        type: 'TRADE_COMPLETED',
+        sellerUsername: sellerName,
+        buyerUsername: buyerName,
+        coinAmount,
+        coinSymbol
+      });
 
       return NextResponse.json({ success: true, message: 'Escrow released successfully.' });
     }
@@ -179,19 +180,10 @@ export async function POST(
         return NextResponse.json({ error: updateError.message }, { status: 400 });
       }
 
-      const cancelMsg = `Trade was cancelled: ${reason || 'Cancelled by user'}.`;
-      try {
-        await supabase.from('trade_messages').insert({
-          trade_id: actualTradeId,
-          sender_id: user.id,
-          content: cancelMsg,
-          message: cancelMsg,
-          is_system_message: true,
-          is_system: true,
-        });
-      } catch (mErr) {
-        console.warn('Message insert error:', mErr);
-      }
+      await insertPaxonesSystemMessage(supabase, {
+        tradeId: actualTradeId,
+        type: 'TRADE_CANCELLED'
+      });
 
       return NextResponse.json({ success: true, message: 'Trade cancelled successfully.' });
     }

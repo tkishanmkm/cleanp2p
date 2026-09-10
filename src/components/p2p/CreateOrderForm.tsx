@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { createBrowserClient } from '@supabase/ssr';
+import { createClient } from '@/lib/supabase/client';
 
 export default function CreateOrderForm({ onOrderCreated }: { onOrderCreated?: () => void }) {
   const [orderType, setOrderType] = useState<'BUY' | 'SELL'>('SELL');
@@ -22,11 +22,8 @@ export default function CreateOrderForm({ onOrderCreated }: { onOrderCreated?: (
     setMessage(null);
 
     try {
-      // 1. Explicitly fetch current session token from the browser client
-      const supabase = createBrowserClient(
-        process.env.NEXT_PUBLIC_SUPABASE_URL!,
-        process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-      );
+      // 1. Explicitly fetch current session token from the browser client singleton
+      const supabase = createClient();
 
       const { data: { session }, error: sessionError } = await supabase.auth.getSession();
 

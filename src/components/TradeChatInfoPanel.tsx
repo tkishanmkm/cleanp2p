@@ -48,6 +48,8 @@ export default function TradeChatInfoPanel({ trade, currentUserId, counterparty 
   const [blockStatus, setBlockStatus] = useState<string>('NOT_BLOCKED');
   const [loading, setLoading] = useState(false);
   const [detailedProfile, setDetailedProfile] = useState<any>(null);
+  const [liveBlockedByCount, setLiveBlockedByCount] = useState<number>(counterparty.usersBlockedByCount ?? 0);
+  const [liveBlockedCount, setLiveBlockedCount] = useState<number>(counterparty.usersBlockedCount ?? 0);
 
   const isBuyer = currentUserId === trade.buyer_id;
   const rawDisplayName = isBuyer 
@@ -65,6 +67,12 @@ export default function TradeChatInfoPanel({ trade, currentUserId, counterparty 
         const res = await fetch(`/api/user/block-status?targetId=${counterparty.id}`);
         const data = await res.json();
         if (data.status) setBlockStatus(data.status);
+        if (typeof data.blockedByCount === 'number') {
+          setLiveBlockedByCount(data.blockedByCount);
+        }
+        if (typeof data.usersBlockedCount === 'number') {
+          setLiveBlockedCount(data.usersBlockedCount);
+        }
       } catch (e) {
         console.error('Failed to fetch block status:', e);
       }
@@ -82,7 +90,8 @@ export default function TradeChatInfoPanel({ trade, currentUserId, counterparty 
 
   const handleBlockToggle = async () => {
     setLoading(true);
-    const action = (blockStatus === 'YOU_BLOCKED_THIS_USER' || blockStatus === 'BLOCKED_BOTH_WAYS') ? 'UNBLOCK' : 'BLOCK';
+    const isCurrentlyBlocked = (blockStatus === 'YOU_BLOCKED_THIS_USER' || blockStatus === 'BLOCKED_BOTH_WAYS');
+    const action = isCurrentlyBlocked ? 'UNBLOCK' : 'BLOCK';
 
     try {
       const res = await fetch('/api/user/block', {
@@ -97,6 +106,7 @@ export default function TradeChatInfoPanel({ trade, currentUserId, counterparty 
 
       if (res.ok) {
         setBlockStatus(action === 'BLOCK' ? 'YOU_BLOCKED_THIS_USER' : 'NOT_BLOCKED');
+        setLiveBlockedByCount((prev) => (action === 'BLOCK' ? prev + 1 : Math.max(0, prev - 1)));
       }
     } catch (e) {
       console.error('Block toggle failed:', e);
@@ -222,11 +232,11 @@ export default function TradeChatInfoPanel({ trade, currentUserId, counterparty 
                 </div>
                 <div className="flex justify-between text-slate-500 dark:text-slate-400">
                   <span>Has blocked:</span>
-                  <span className="text-slate-700 dark:text-slate-200">{counterparty.usersBlockedCount ?? 0} users</span>
+                  <span className="text-slate-700 dark:text-slate-200">{liveBlockedCount} users</span>
                 </div>
                 <div className="flex justify-between text-slate-500 dark:text-slate-400">
                   <span>Blocked by:</span>
-                  <span className="text-slate-700 dark:text-slate-200">{counterparty.usersBlockedByCount ?? 0} users</span>
+                  <span className="text-slate-700 dark:text-slate-200">{liveBlockedByCount} users</span>
                 </div>
               </div>
             </div>

@@ -181,13 +181,52 @@ export async function PATCH(req: NextRequest) {
         };
 
         // If KYC is verified, full name and date of birth cannot be modified
-        // STRICT: Never set display_name to full_name! display_name must always be username!
         if (!isKycVerified) {
+          const targetName = (fullName !== undefined ? fullName : prof?.full_name)?.trim();
+          const targetDob = (dob !== undefined ? dob : prof?.dob)?.trim();
+
+          if (targetName && targetDob) {
+            // Check for duplicate profile
+            const { data: duplicateProfiles } = await admin
+              .from('profiles')
+              .select('id, full_name, dob, date_of_birth')
+              .neq('id', user.id)
+              .neq('status', 'deleted');
+
+            const match = (duplicateProfiles || []).find((p: any) => {
+              const pName = (p.full_name || '').trim().toLowerCase();
+              const pDob = (p.dob || p.date_of_birth || '').trim();
+              return pName && pDob && pName === targetName.toLowerCase() && pDob === targetDob;
+            });
+
+            if (match) {
+              // Suspend user for duplicate identity violation
+              await admin
+                .from('profiles')
+                .update({
+                  status: 'suspended',
+                  is_suspended: true,
+                  suspension_reason: `Duplicate identity violation: Attempted to set legal name ("${targetName}") and DOB ("${targetDob}") matching existing user (${match.id}).`,
+                  updated_at: new Date().toISOString(),
+                })
+                .eq('id', user.id);
+
+              return NextResponse.json(
+                {
+                  error: 'Duplicate Identity Violation: An account with this legal name and date of birth is already registered. Your account has been suspended.',
+                  suspended: true,
+                },
+                { status: 403 }
+              );
+            }
+          }
+
           if (fullName !== undefined) {
             updates.full_name = fullName?.trim() || null;
           }
           if (dob !== undefined) {
             updates.dob = dob || null;
+            updates.date_of_birth = dob || null;
           }
         }
 
@@ -283,21 +322,31 @@ export async function PATCH(req: NextRequest) {
       case 'two_factor': {
         const enabled = Boolean(data?.enabled);
         const code = data?.code?.toString().trim();
+        const secret = data?.secret?.toString().trim();
 
         if (enabled) {
           if (!code || !/^\d{4,8}$/.test(code)) {
             return NextResponse.json({
-              error: 'Invalid authenticator code. Please enter a valid 4 to 8-digit OTP code shown in your authenticator app.'
+              error: 'Invalid authenticator code. Please enter a valid 6-digit OTP code shown in your authenticator app.'
             }, { status: 400 });
           }
         }
 
+        const updates: any = {
+          is_2fa_enabled: enabled,
+          is_mfa_enabled: enabled,
+          updated_at: new Date().toISOString(),
+        };
+
+        if (enabled && secret) {
+          updates.two_factor_secret = secret;
+        } else if (!enabled) {
+          updates.two_factor_secret = null;
+        }
+
         const { error: updateErr } = await admin
           .from('profiles')
-          .update({
-            is_2fa_enabled: enabled,
-            updated_at: new Date().toISOString(),
-          })
+          .update(updates)
           .eq('id', user.id);
 
         if (updateErr) throw updateErr;

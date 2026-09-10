@@ -5,6 +5,7 @@ import { add, isPast } from 'date-fns';
 import { toDate } from '@/lib/utils';
 import { SUPPORTED_CRYPTOS, CHAINS } from './constants';
 import { supabase } from '@/lib/supabase/client';
+import { insertPaxonesSystemMessage } from '@/lib/trade-system-messages';
 import {
   getUserWallets as getSupabaseUserWallets,
   requestWithdrawal as requestSupabaseWithdrawal,
@@ -233,7 +234,7 @@ export async function cancelTrade(
 ): Promise<{ success: boolean }> {
   try {
     const tradeId = typeof tradeOrId === 'string' ? tradeOrId : tradeOrId?.id || tradeOrId?.tradeId;
-    const cancelReason = reason || 'Cancelled by user.';
+    const cancelReason = reason || 'Cancelled by buyer.';
     
     await supabase
       .from('trades')
@@ -244,17 +245,11 @@ export async function cancelTrade(
       })
       .eq('id', tradeId);
 
-    // Insert system message into trade_messages
-    await supabase.from('trade_messages').insert([
-      {
-        trade_id: tradeId,
-        sender_id: 'system',
-        sender_username: 'System',
-        message: `Trade has been cancelled. Reason: ${cancelReason}`,
-        is_moderator: true,
-        created_at: new Date().toISOString(),
-      },
-    ]);
+    // Insert official Paxones system message into trade_messages
+    await insertPaxonesSystemMessage(supabase, {
+      tradeId,
+      type: 'TRADE_CANCELLED'
+    });
 
     return { success: true };
   } catch (err) {
@@ -283,9 +278,17 @@ export async function addReceiptToTrade(
  * Marks a trade as paid in Supabase.
  */
 export async function markTradeAsPaid(
-  tradeId: string
+  tradeOrId: any
 ): Promise<{ success: boolean }> {
   try {
+    const tradeId = typeof tradeOrId === 'string' ? tradeOrId : tradeOrId?.id || tradeOrId?.tradeId;
+
+    const { data: tradeData } = await supabase
+      .from('trades')
+      .select('*')
+      .eq('id', tradeId)
+      .maybeSingle();
+
     await supabase
       .from('trades')
       .update({
@@ -295,17 +298,26 @@ export async function markTradeAsPaid(
       })
       .eq('id', tradeId);
 
-    // Insert system message into trade_messages
-    await supabase.from('trade_messages').insert([
-      {
-        trade_id: tradeId,
-        sender_id: 'system',
-        sender_username: 'System',
-        message: 'Buyer has marked the trade as Paid. Seller, please check your bank account and confirm receipt before releasing coin.',
-        is_moderator: true,
-        created_at: new Date().toISOString(),
-      },
-    ]);
+    // Fetch usernames for roles
+    let buyerName = 'Buyer';
+    let sellerName = 'Seller';
+
+    if (tradeData?.buyer_id) {
+      const { data: bp } = await supabase.from('profiles').select('username').eq('id', tradeData.buyer_id).maybeSingle();
+      if (bp?.username) buyerName = bp.username;
+    }
+    if (tradeData?.seller_id) {
+      const { data: sp } = await supabase.from('profiles').select('username').eq('id', tradeData.seller_id).maybeSingle();
+      if (sp?.username) sellerName = sp.username;
+    }
+
+    // Insert official Paxones system message
+    await insertPaxonesSystemMessage(supabase, {
+      tradeId,
+      type: 'MARKED_PAID',
+      buyerUsername: buyerName,
+      sellerUsername: sellerName
+    });
 
     return { success: true };
   } catch (err) {
@@ -337,12 +349,16 @@ export async function releaseFundsFromEscrow(
       .eq('id', tradeId);
 
     // Increment completed_trades in profiles table for buyer and seller
+    let buyerName = 'buyer';
+    let sellerName = 'seller';
+
     if (tradeData?.buyer_id) {
       const { data: bProf } = await supabase
         .from('profiles')
-        .select('completed_trades')
+        .select('completed_trades, username')
         .eq('id', tradeData.buyer_id)
         .maybeSingle();
+      if (bProf?.username) buyerName = bProf.username;
       await supabase
         .from('profiles')
         .update({ completed_trades: (bProf?.completed_trades || 0) + 1 })
@@ -352,9 +368,10 @@ export async function releaseFundsFromEscrow(
     if (tradeData?.seller_id) {
       const { data: sProf } = await supabase
         .from('profiles')
-        .select('completed_trades')
+        .select('completed_trades, username')
         .eq('id', tradeData.seller_id)
         .maybeSingle();
+      if (sProf?.username) sellerName = sProf.username;
       await supabase
         .from('profiles')
         .update({ completed_trades: (sProf?.completed_trades || 0) + 1 })
@@ -363,17 +380,18 @@ export async function releaseFundsFromEscrow(
 
     await completeEscrow(tradeId);
 
-    // Insert system message into trade_messages
-    await supabase.from('trade_messages').insert([
-      {
-        trade_id: tradeId,
-        sender_id: 'system',
-        sender_username: 'System',
-        message: 'Trade Released. The coin has been credited to your account.\nYou can now leave feedback for your partner.',
-        is_moderator: true,
-        created_at: new Date().toISOString(),
-      },
-    ]);
+    const coinAmount = Number(tradeData?.amount ?? tradeData?.crypto_amount ?? 0);
+    const coinSymbol = tradeData?.crypto ?? tradeData?.asset_symbol ?? 'BTC';
+
+    // Insert official Paxones Completed system message
+    await insertPaxonesSystemMessage(supabase, {
+      tradeId,
+      type: 'TRADE_COMPLETED',
+      sellerUsername: sellerName,
+      buyerUsername: buyerName,
+      coinAmount: coinAmount,
+      coinSymbol: coinSymbol
+    });
 
     return { success: true };
   } catch (err) {
