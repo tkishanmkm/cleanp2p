@@ -128,11 +128,21 @@ export default function MyTradesPage() {
 
   const handleDownloadCSV = () => {
     if (!allTrades.length) return;
-    const headers = 'Crypto,Amount,Date (GMT),Buyer,Seller,Status\n';
+    const headers = 'Trade ID,Buyer Username,Seller Username,Crypto Asset,Coin Amount,Fiat Amount,Fiat Currency,Escrow Fee,Status,Date (UTC)\n';
     const csvContent = allTrades
       .map((t) => {
-        const date = toDate(t.createdAt)?.toUTCString() ?? 'N/A';
-        return `${t.crypto},${t.amount},"${date}",${t.buyer?.username || 'N/A'},${t.seller?.username || 'N/A'},${t.status}`;
+        const dateStr = t.createdAt ? new Date(t.createdAt).toISOString().replace('T', ' ').replace(/\..+/, ' UTC') : 'N/A';
+        const tradeId = `"${(t.tradeId || t.id || '').replace(/"/g, '""')}"`;
+        const buyer = `"${(t.buyer?.username || t.buyerId || 'N/A').replace(/"/g, '""')}"`;
+        const seller = `"${(t.seller?.username || t.sellerId || 'N/A').replace(/"/g, '""')}"`;
+        const crypto = t.crypto || 'BTC';
+        const coinAmount = t.amount || 0;
+        const fiatAmount = t.fiatAmount || 0;
+        const fiatCurrency = t.fiatCurrency || 'USD';
+        const escrowFee = t.escrowFee || 0;
+        const status = t.status || 'unknown';
+
+        return `${tradeId},${buyer},${seller},${crypto},${coinAmount},${fiatAmount},${fiatCurrency},${escrowFee},${status},"${dateStr}"`;
       })
       .join('\n');
 
@@ -140,7 +150,7 @@ export default function MyTradesPage() {
     const link = document.createElement('a');
     const url = URL.createObjectURL(blob);
     link.setAttribute('href', url);
-    link.setAttribute('download', 'trade_history.csv');
+    link.setAttribute('download', `trade_history_${Date.now()}.csv`);
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);

@@ -24,11 +24,18 @@ export default function UserProfilePage() {
       const supabase = createClient();
 
       // Query by username or id
-      const { data, error } = await supabase
+      const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(targetUsername);
+      let query = supabase
         .from('profiles')
-        .select('id, username, is_online, last_seen, created_at')
-        .or(`username.eq.${targetUsername},id.eq.${targetUsername}`)
-        .maybeSingle();
+        .select('id, username, is_online, last_seen, created_at');
+
+      if (isUuid) {
+        query = query.or(`username.eq.${targetUsername},id.eq.${targetUsername}`);
+      } else {
+        query = query.eq('username', targetUsername);
+      }
+
+      const { data, error } = await query.maybeSingle();
 
       if (data) {
         setProfile(data);

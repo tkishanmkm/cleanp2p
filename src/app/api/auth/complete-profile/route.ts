@@ -84,10 +84,18 @@ export async function POST(req: Request) {
     // Hash the security answer for protection
     const securityAnswerHash = crypto.createHash('sha256').update(securityAnswer.trim().toLowerCase()).digest('hex');
 
+    // Retrieve existing profile to preserve username as display_name
+    const { data: userProfile } = await adminSupabase
+      .from('profiles')
+      .select('username')
+      .eq('id', currentUserId)
+      .maybeSingle();
+
+    const usernameDisplayName = userProfile?.username || undefined;
+
     const updatePayload: Record<string, any> = {
-      name: name.trim(),
-      full_name: name.trim(),
-      display_name: name.trim(),
+      name: (name || '').trim(),
+      full_name: (name || '').trim(),
       date_of_birth: cleanDob,
       dob: cleanDob,
       security_question: securityQuestion,
@@ -97,6 +105,10 @@ export async function POST(req: Request) {
       onboarding_completed: true,
       updated_at: new Date().toISOString(),
     };
+
+    if (usernameDisplayName) {
+      updatePayload.display_name = usernameDisplayName;
+    }
 
     if (country) updatePayload.country = country;
     if (email && email.trim()) updatePayload.email = email.trim();

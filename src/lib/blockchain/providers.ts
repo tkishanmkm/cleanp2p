@@ -1,4 +1,13 @@
 import { ethers } from 'ethers';
+import { createPublicClient, http } from 'viem';
+import { sepolia } from 'viem/chains';
+
+export const publicClient = createPublicClient({
+  chain: sepolia,
+  transport: http(process.env.ETH_SEPOLIA_RPC_URL || 'https://eth-sepolia.g.alchemy.com/v2/alch_60h82hz17l-PYtgn20DyU'),
+});
+
+export const sepoliaClient = publicClient;
 
 export interface ChainConfig {
   chainId: number;
@@ -40,7 +49,9 @@ export const SUPPORTED_EVM_CHAINS: Record<string, ChainConfig> = {
     nativeSymbol: 'ETH',
     nativeDecimals: 18,
     rpcUrls: [
+      process.env.ETH_SEPOLIA_RPC_URL || '',
       process.env.SEPOLIA_RPC_URL || '',
+      'https://eth-sepolia.g.alchemy.com/v2/alch_60h82hz17l-PYtgn20DyU',
       'https://rpc.sepolia.org',
       'https://ethereum-sepolia-rpc.publicnode.com',
     ].filter(Boolean),

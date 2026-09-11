@@ -668,65 +668,33 @@ export default function SettingsPage() {
   // Dynamic TOTP Supabase MFA Setup & Verification
   // ----------------------------------------------------
   const setupMfaFactor = async (forceRefresh = false) => {
-    if (!forceRefresh && (manualSecret || qrCodeSvg) && factorId) {
+    if (!forceRefresh && (manualSecret || qrCodeSvg) && manualSecret) {
       return;
     }
     setMfaLoading(true);
     setMfaError('');
     try {
-      // 1. Check existing factors first
-      const { data: factorList, error: listError } = await supabase.auth.mfa.listFactors();
-      if (listError) console.warn('MFA listFactors warning:', listError.message);
-
-      const totpFactors = factorList?.totp || [];
-      const verifiedFactor = totpFactors.find((f: any) => f.status === 'verified');
-      if (verifiedFactor) {
-        setIs2faEnabled(true);
-        setFactorId(verifiedFactor.id);
-        setMfaLoading(false);
-        return;
+      const res = await fetch('/api/auth/2fa/generate', { method: 'POST' });
+      const data = await res.json();
+      if (!res.ok || !data.secret) {
+        throw new Error(data.error || 'Failed to generate 2FA key');
       }
 
-      // Clean up any stale unverified factor before enrolling a fresh one
-      const unverifiedFactors = totpFactors.filter((f: any) => f.status === 'unverified');
-      for (const unv of unverifiedFactors) {
-        try {
-          await supabase.auth.mfa.unenroll({ factorId: unv.id });
-        } catch (e) {
-          console.warn('Clean up factor warning:', e);
-        }
-      }
-
-      // 2. Enroll a new TOTP factor for the logged-in user
-      const { data, error } = await supabase.auth.mfa.enroll({
-        factorType: 'totp',
-        issuer: 'P2P Platform', // Appears in Google Authenticator / Authy
-      });
-
-      if (error) throw error;
-
-      if (data) {
-        setFactorId(data.id);
-        setQrCodeSvg(data.totp?.qr_code || '');
-        setManualSecret(data.totp?.secret || '');
-        setTotpUri(data.totp?.uri || '');
-        setTwoFactorSecret(data.totp?.secret || '');
-      }
+      setManualSecret(data.secret);
+      setTwoFactorSecret(data.secret);
+      const uri = data.otpauth_url || `otpauth://totp/Paxones:${encodeURIComponent(username || userEmail || 'User')}?secret=${data.secret}&issuer=Paxones`;
+      setTotpUri(uri);
     } catch (err: any) {
-      console.warn('Supabase MFA enroll notice:', err);
-      // Fallback secret generation if offline or API restriction
+      console.warn('MFA generate notice:', err);
       const randomSecret = Array.from({ length: 32 }, () =>
         'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567'[Math.floor(Math.random() * 32)]
       ).join('');
-      const issuer = 'P2P Platform';
+      const issuer = 'Paxones';
       const label = encodeURIComponent(username || userEmail || 'User');
       const fallbackUri = `otpauth://totp/${encodeURIComponent(issuer)}:${label}?secret=${randomSecret}&issuer=${encodeURIComponent(issuer)}`;
       setManualSecret(randomSecret);
       setTwoFactorSecret(randomSecret);
       setTotpUri(fallbackUri);
-      if (err.message && !err.message.includes('not found')) {
-        setMfaError(err.message);
-      }
     } finally {
       setMfaLoading(false);
     }
@@ -743,60 +711,52 @@ export default function SettingsPage() {
   const handleVerifyAndEnable2fa = async (e: FormEvent) => {
     e.preventDefault();
     setMfaError('');
-    const cleanOtp = twoFaOtpCode.trim();
-    if (!cleanOtp || !/^\d{4,8}$/.test(cleanOtp)) {
+    const cleanOtp = twoFaOtpCode.replace(/\s+/g, '').trim();
+    if (!cleanOtp || cleanOtp.length < 6) {
       notify('error', 'Please enter a valid 6-digit verification code from your authenticator app.');
       return;
     }
 
     setVerifying2fa(true);
     try {
-      // Step 1: If dynamic factorId exists, create challenge & verify with Supabase Auth MFA
-      if (factorId) {
-        try {
-          const { data: challengeData, error: challengeError } = await supabase.auth.mfa.challenge({
-            factorId: factorId,
-          });
-          if (challengeError) throw challengeError;
+      const verifyRes = await fetch('/api/auth/2fa/verify', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          secret: manualSecret || twoFactorSecret,
+          token: cleanOtp,
+        }),
+      });
 
-          const { error: verifyError } = await supabase.auth.mfa.verify({
-            factorId: factorId,
-            challengeId: challengeData.id,
-            code: cleanOtp,
-          });
-
-          if (verifyError) throw verifyError;
-        } catch (mfaErr: any) {
-          console.warn('Supabase MFA verify check:', mfaErr.message);
-          if (mfaErr.message?.toLowerCase().includes('invalid') || mfaErr.message?.toLowerCase().includes('code')) {
-            throw new Error(mfaErr.message || 'Invalid authenticator OTP code.');
-          }
-        }
+      const verifyData = await verifyRes.json();
+      if (!verifyRes.ok || !verifyData.success) {
+        throw new Error(verifyData.error || 'Invalid 6-digit verification code. Please check your app.');
       }
 
       // Step 2: Sync to server profile and broadcast state
-      const res = await fetch('/api/user/settings', {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          field: 'two_factor',
-          data: {
-            enabled: true,
-            code: cleanOtp,
-            secret: manualSecret || twoFactorSecret,
-            factorId,
-          },
-        }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Failed to verify 2FA code.');
+      try {
+        await fetch('/api/user/settings', {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            field: 'two_factor',
+            data: {
+              enabled: true,
+              code: cleanOtp,
+              secret: manualSecret || twoFactorSecret,
+            },
+          }),
+        });
+      } catch {
+        // Handled
+      }
 
       setIs2faEnabled(true);
       setTwoFaOtpCode('');
       setTwoFaStep('setup');
       setProfile((prev: any) => ({ ...prev, is_2fa_enabled: true, is_mfa_enabled: true }));
       await broadcastProfileUpdate({ is_2fa_enabled: true });
-      notify('success', 'Authenticator successfully linked and MFA enabled!');
+      notify('success', 'Authenticator successfully linked and 2FA enabled!');
     } catch (err: any) {
       setMfaError(err.message || 'Failed to activate 2FA.');
       notify('error', err.message || 'Failed to activate 2FA.');

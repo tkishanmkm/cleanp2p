@@ -91,11 +91,14 @@ export default function AdminTradeModeratorPage({ params }: { params?: Promise<{
     }
 
     // 2. Client fallback
-    const { data: simpleTrade, error: fetchErr } = await supabase
-      .from("trades")
-      .select("*")
-      .or(`id.eq.${tradeId},trade_id.eq.${tradeId}`)
-      .maybeSingle();
+    const isTradeUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(tradeId);
+    let fallbackQuery = supabase.from("trades").select("*");
+    if (isTradeUuid) {
+      fallbackQuery = fallbackQuery.or(`id.eq.${tradeId},trade_id.eq.${tradeId}`);
+    } else {
+      fallbackQuery = fallbackQuery.eq("trade_id", tradeId);
+    }
+    const { data: simpleTrade, error: fetchErr } = await fallbackQuery.maybeSingle();
 
     if (fetchErr || !simpleTrade) {
       setErrorMessage(fetchErr?.message || `Trade ID "${tradeId}" not found in database.`);

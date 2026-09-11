@@ -49,11 +49,14 @@ export default function TradePage() {
       setCurrentUser(user);
 
       // 2. Fetch trade details
-      let { data: tradeData, error: tradeErr } = await supabase
-        .from('trades')
-        .select('*')
-        .or(`id.eq.${tradeIdParam},trade_id.eq.${tradeIdParam}`)
-        .maybeSingle();
+      const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(tradeIdParam);
+      let tradeQuery = supabase.from('trades').select('*');
+      if (isUuid) {
+        tradeQuery = tradeQuery.or(`id.eq.${tradeIdParam},trade_id.eq.${tradeIdParam},public_id.eq.${tradeIdParam}`);
+      } else {
+        tradeQuery = tradeQuery.or(`trade_id.eq.${tradeIdParam},public_id.eq.${tradeIdParam}`);
+      }
+      let { data: tradeData, error: tradeErr } = await tradeQuery.maybeSingle();
 
       if (!tradeData && tradeErr) {
         setError('Trade record not found or access denied.');

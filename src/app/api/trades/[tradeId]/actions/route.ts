@@ -26,14 +26,19 @@ export async function POST(
 
     const { action, reason, receiptUrl } = await req.json();
 
+    const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(tradeId);
+
     // Fetch trade record (support by UUID or trade_id)
-    let { data: trade } = await supabase
-      .from('trades')
-      .select('*')
-      .or(`id.eq.${tradeId},trade_id.eq.${tradeId}`)
-      .maybeSingle();
+    let tradeQuery = supabase.from('trades').select('*');
+    if (isUuid) {
+      tradeQuery = tradeQuery.or(`id.eq.${tradeId},trade_id.eq.${tradeId}`);
+    } else {
+      tradeQuery = tradeQuery.eq('trade_id', tradeId);
+    }
+    const { data: trade } = await tradeQuery.maybeSingle();
 
     const actualTradeId = trade?.id || tradeId;
+    const isActualUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(actualTradeId);
 
     // Fetch buyer and seller profiles for mentions
     let buyerName = 'Buyer';
@@ -49,15 +54,22 @@ export async function POST(
 
     if (action === 'MARK_PAID') {
       const now = new Date().toISOString();
-      const { error } = await supabase
+      let updateQuery = supabase
         .from('trades')
         .update({
           status: 'PAID',
           payment_confirmed_at: now,
           paid_at: now,
-        })
-        .or(`id.eq.${actualTradeId},trade_id.eq.${tradeId}`)
-        .eq('buyer_id', user.id);
+        });
+
+      if (isActualUuid) {
+        updateQuery = updateQuery.eq('id', actualTradeId);
+      } else {
+        updateQuery = updateQuery.eq('trade_id', tradeId);
+      }
+      updateQuery = updateQuery.eq('buyer_id', user.id);
+
+      const { error } = await updateQuery;
 
       if (error) {
         return NextResponse.json({ error: error.message }, { status: 400 });
@@ -106,15 +118,22 @@ export async function POST(
 
       // Fallback: direct update if RPC is missing
       const now = new Date().toISOString();
-      const { error: updateError } = await supabase
+      let updateQuery = supabase
         .from('trades')
         .update({
           status: 'COMPLETED',
           escrow_status: 'released',
           released_at: now,
-        })
-        .or(`id.eq.${actualTradeId},trade_id.eq.${tradeId}`)
-        .eq('seller_id', user.id);
+        });
+
+      if (isActualUuid) {
+        updateQuery = updateQuery.eq('id', actualTradeId);
+      } else {
+        updateQuery = updateQuery.eq('trade_id', tradeId);
+      }
+      updateQuery = updateQuery.eq('seller_id', user.id);
+
+      const { error: updateError } = await updateQuery;
 
       if (updateError) {
         return NextResponse.json({ error: updateError.message }, { status: 400 });
@@ -166,15 +185,22 @@ export async function POST(
       }
 
       // Fallback: direct update if RPC is missing
-      const { error: updateError } = await supabase
+      let updateQuery = supabase
         .from('trades')
         .update({
           status: 'CANCELLED',
           escrow_status: 'refunded',
           cancellation_reason: reason || 'Cancelled by user',
-        })
-        .or(`id.eq.${actualTradeId},trade_id.eq.${tradeId}`)
-        .or(`buyer_id.eq.${user.id},seller_id.eq.${user.id}`);
+        });
+
+      if (isActualUuid) {
+        updateQuery = updateQuery.eq('id', actualTradeId);
+      } else {
+        updateQuery = updateQuery.eq('trade_id', tradeId);
+      }
+      updateQuery = updateQuery.or(`buyer_id.eq.${user.id},seller_id.eq.${user.id}`);
+
+      const { error: updateError } = await updateQuery;
 
       if (updateError) {
         return NextResponse.json({ error: updateError.message }, { status: 400 });

@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useEffect, useState } from 'react';
+import { useMemo, useEffect, useState, useCallback } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import * as z from 'zod';
@@ -35,17 +35,17 @@ import {
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
-import { Loader2 } from 'lucide-react';
+import { Loader2, ShieldCheck, ArrowRight, CheckCircle2 } from 'lucide-react';
 import { CryptoCurrency, CoinTransfer } from '@/lib/types';
 import { useRouter } from 'next/navigation';
 import { TransferHistoryTable } from '@/components/wallets/transfer-history-table';
 import { SUPPORTED_CRYPTOS } from '@/lib/constants';
 
 const transferSchema = z.object({
-  recipientUsername: z.string().min(3, 'Recipient User ID is required.'),
+  recipientUsername: z.string().min(2, 'Recipient username is required.'),
   crypto: z.string().min(1, 'Please select a cryptocurrency.'),
-  amount: z.coerce.number().positive('Amount must be a positive number.'),
-  password: z.string().min(1, 'Password required.'),
+  amount: z.coerce.number().positive('Amount must be greater than 0.'),
+  totpCode: z.string().optional(),
 });
 
 type TransferFormValues = z.infer<typeof transferSchema>;
@@ -60,27 +60,31 @@ export default function TransferPage() {
   const [balances, setBalances] = useState<{ [key in CryptoCurrency]?: { balance: number; lockedBalance: number } }>({});
   const [, setSelectedTransfer] = useState<CoinTransfer | null>(null);
   const [, setIsDetailsOpen] = useState(false);
+  const [historyKey, setHistoryKey] = useState(0);
+
+  const is2faActive = Boolean(profile?.is_2fa_enabled || profile?.is_mfa_enabled);
 
   useEffect(() => {
     if (!isAuthLoading && !authUser) router.push('/login');
   }, [authUser, isAuthLoading, router]);
 
-  useEffect(() => {
-    async function loadBalances() {
-      if (!authUser?.uid) return;
-      try {
-        const bal = await getUserWalletBalances(authUser.uid);
-        if (bal) setBalances(bal);
-      } catch (err) {
-        console.warn('Failed to load user balances for transfer:', err);
-      }
+  const loadBalances = useCallback(async () => {
+    if (!authUser?.uid) return;
+    try {
+      const bal = await getUserWalletBalances(authUser.uid);
+      if (bal) setBalances(bal);
+    } catch (err) {
+      console.warn('Failed to load user balances for transfer:', err);
     }
-    loadBalances();
   }, [authUser?.uid]);
+
+  useEffect(() => {
+    loadBalances();
+  }, [loadBalances]);
 
   const form = useForm<TransferFormValues>({
     resolver: zodResolver(transferSchema),
-    defaultValues: { recipientUsername: '', crypto: 'BTC', amount: 0, password: '' },
+    defaultValues: { recipientUsername: '', crypto: 'BTC', amount: 0, totpCode: '' },
   });
 
   const watchedCrypto = form.watch('crypto') as CryptoCurrency;
@@ -98,8 +102,8 @@ export default function TransferPage() {
         try {
           const { data } = await supabase
             .from('profiles')
-            .select('id, username, photo_url')
-            .ilike('username', `%${recipientUsernameValue}%`)
+            .select('id, username, avatar_url, photo_url')
+            .ilike('username', `%${recipientUsernameValue.replace(/^@/, '')}%`)
             .neq('id', authUser?.uid || '')
             .limit(5);
 
@@ -109,7 +113,7 @@ export default function TransferPage() {
         } catch (err) {
           console.error('Error searching users:', err);
         }
-      }, 400);
+      }, 300);
       return () => {
         active = false;
         clearTimeout(timeout);
@@ -120,37 +124,45 @@ export default function TransferPage() {
   }, [recipientUsernameValue, authUser?.uid]);
 
   async function onSubmit(values: TransferFormValues) {
-    if (!authUser?.email) return;
+    if (!authUser?.uid) return;
     setIsProcessing(true);
 
     if (values.amount > availableBalance) {
-      form.setError('amount', { message: 'Amount exceeds available balance.' });
+      form.setError('amount', { message: `Amount exceeds available balance (${availableBalance.toFixed(8)} ${watchedCrypto}).` });
+      setIsProcessing(false);
+      return;
+    }
+
+    if (is2faActive && (!values.totpCode || values.totpCode.trim().length < 6)) {
+      form.setError('totpCode', { message: 'Please enter your 6-digit Authenticator code.' });
       setIsProcessing(false);
       return;
     }
 
     try {
-      const { error: authError } = await supabase.auth.signInWithPassword({
-        email: authUser.email,
-        password: values.password,
-      });
-
-      if (authError) {
-        throw new Error('Invalid password. Authentication failed.');
-      }
-
       const transferId = await sendCoinToUser(
         { uid: authUser.uid, displayName: profile?.username || authUser.displayName || 'User' },
         values.recipientUsername,
         values.crypto as CryptoCurrency,
-        values.amount
+        values.amount,
+        values.totpCode
       );
 
-      toast({ title: 'Transfer Successful!', description: `Transaction ID: ${transferId}` });
-      form.reset();
+      toast({
+        title: 'Transfer Completed!',
+        description: `Successfully sent ${values.amount} ${values.crypto} to @${values.recipientUsername.replace(/^@/, '')}. (ID: ${transferId})`,
+      });
+
+      form.reset({ recipientUsername: '', crypto: values.crypto, amount: 0, totpCode: '' });
       setSearchResults([]);
+      await loadBalances();
+      setHistoryKey((prev) => prev + 1);
     } catch (error: any) {
-      toast({ variant: 'destructive', title: 'Transfer Failed', description: error.message });
+      toast({
+        variant: 'destructive',
+        title: 'Transfer Failed',
+        description: error.message || 'Could not complete transfer.',
+      });
     } finally {
       setIsProcessing(false);
     }
@@ -158,7 +170,7 @@ export default function TransferPage() {
 
   if (isAuthLoading || !authUser) {
     return (
-      <div className="flex flex-1 items-center justify-center">
+      <div className="flex flex-1 items-center justify-center min-h-[300px]">
         <Loader2 className="h-8 w-8 animate-spin text-primary" />
       </div>
     );
@@ -166,67 +178,85 @@ export default function TransferPage() {
 
   return (
     <>
-      <div className="flex items-center mb-6">
-        <h1 className="text-lg font-semibold md:text-2xl">Transfer Coins</h1>
+      <div className="flex items-center justify-between mb-6">
+        <div>
+          <h1 className="text-xl md:text-2xl font-bold tracking-tight">Direct User-to-User Transfer</h1>
+          <p className="text-xs text-muted-foreground mt-0.5">
+            Instant zero-fee internal transfers between Paxones user accounts.
+          </p>
+        </div>
       </div>
-      <div className="grid gap-8 md:grid-cols-2 lg:grid-cols-5">
-        <Card className="lg:col-span-2">
+
+      <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-5">
+        <Card className="lg:col-span-2 shadow-xs">
           <CardHeader>
-            <CardTitle>Send to User</CardTitle>
-            <CardDescription>Directly send coins to another username or User ID.</CardDescription>
+            <CardTitle className="text-base font-bold">Send Coins</CardTitle>
+            <CardDescription className="text-xs">
+              Transfer cryptocurrency instantly to any registered trader username.
+            </CardDescription>
           </CardHeader>
           <CardContent>
             <Form {...form}>
-              <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-6">
+              <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
                 <FormField
                   control={form.control}
                   name="recipientUsername"
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel>Recipient Username</FormLabel>
+                      <FormLabel className="text-xs font-semibold">Recipient Username</FormLabel>
                       <FormControl>
-                        <Input placeholder="Search recipient username" {...field} autoComplete="off" />
+                        <Input
+                          id="recipient-username-input"
+                          placeholder="Search username (e.g. Satoshi)"
+                          {...field}
+                          autoComplete="off"
+                          className="font-medium"
+                        />
                       </FormControl>
                       <FormMessage />
                     </FormItem>
                   )}
                 />
+
                 {searchResults.length > 0 && (
-                  <div className="border rounded-md max-h-48 overflow-y-auto">
+                  <div className="border rounded-xl max-h-48 overflow-y-auto bg-card divide-y divide-border shadow-md">
                     {searchResults.map((user) => (
                       <div
                         key={user.id}
-                        className="p-2 flex items-center gap-2 cursor-pointer hover:bg-muted"
+                        className="p-2.5 flex items-center gap-2.5 cursor-pointer hover:bg-muted/70 transition-colors"
                         onClick={() => {
                           form.setValue('recipientUsername', user.username);
                           setSearchResults([]);
                         }}
                       >
-                        <Avatar className="h-8 w-8">
-                          <AvatarImage src={user.photo_url} />
-                          <AvatarFallback>{(user.username || 'U').slice(0, 2)}</AvatarFallback>
+                        <Avatar className="h-7 w-7">
+                          <AvatarImage src={user.avatar_url || user.photo_url} />
+                          <AvatarFallback className="text-[10px] font-bold">
+                            {(user.username || 'U').slice(0, 2).toUpperCase()}
+                          </AvatarFallback>
                         </Avatar>
-                        <span className="font-medium text-sm">{user.username}</span>
+                        <span className="font-semibold text-xs text-foreground">@{user.username}</span>
                       </div>
                     ))}
                   </div>
                 )}
+
                 <FormField
                   control={form.control}
                   name="crypto"
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel>Coin</FormLabel>
+                      <FormLabel className="text-xs font-semibold">Select Coin</FormLabel>
                       <Select onValueChange={field.onChange} value={field.value}>
                         <FormControl>
-                          <SelectTrigger>
+                          <SelectTrigger id="transfer-crypto-select" className="h-10">
                             <SelectValue placeholder="Select coin" />
                           </SelectTrigger>
                         </FormControl>
                         <SelectContent>
                           {SUPPORTED_CRYPTOS.map((c) => (
                             <SelectItem key={c.name} value={c.name}>
-                              {c.name}
+                              {c.name} ({c.symbol})
                             </SelectItem>
                           ))}
                         </SelectContent>
@@ -235,52 +265,101 @@ export default function TransferPage() {
                     </FormItem>
                   )}
                 />
+
                 <FormField
                   control={form.control}
                   name="amount"
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel>Amount</FormLabel>
+                      <div className="flex items-center justify-between">
+                        <FormLabel className="text-xs font-semibold">Amount</FormLabel>
+                        <button
+                          type="button"
+                          onClick={() => form.setValue('amount', availableBalance)}
+                          className="text-[11px] font-bold text-primary hover:underline cursor-pointer"
+                        >
+                          Max: {availableBalance.toFixed(8)} {watchedCrypto}
+                        </button>
+                      </div>
                       <FormControl>
-                        <Input type="number" step="any" {...field} />
+                        <Input
+                          id="transfer-amount-input"
+                          type="number"
+                          step="any"
+                          placeholder="0.00"
+                          {...field}
+                          className="font-mono text-sm"
+                        />
                       </FormControl>
-                      <FormDescription>
-                        Available: {availableBalance.toFixed(8)} {watchedCrypto}
+                      <FormDescription className="text-[11px]">
+                        Available in wallet: <span className="font-mono font-bold text-foreground">{availableBalance.toFixed(8)} {watchedCrypto}</span>
                       </FormDescription>
                       <FormMessage />
                     </FormItem>
                   )}
                 />
-                <FormField
-                  control={form.control}
-                  name="password"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Confirm Password</FormLabel>
-                      <FormControl>
-                        <Input type="password" placeholder="Account password" {...field} />
-                      </FormControl>
-                      <FormMessage />
-                    </FormItem>
+
+                {/* Conditional 2FA Prompt - Only shown if 2FA is active */}
+                {is2faActive && (
+                  <FormField
+                    control={form.control}
+                    name="totpCode"
+                    render={({ field }) => (
+                      <FormItem className="pt-1">
+                        <FormLabel className="text-xs font-semibold flex items-center gap-1.5 text-primary">
+                          <ShieldCheck className="w-3.5 h-3.5 text-primary" />
+                          <span>Authenticator 6-Digit Code</span>
+                        </FormLabel>
+                        <FormControl>
+                          <Input
+                            id="transfer-totp-input"
+                            type="text"
+                            inputMode="numeric"
+                            maxLength={6}
+                            placeholder="Enter 6-digit TOTP code"
+                            {...field}
+                            className="font-mono text-center text-base tracking-widest"
+                          />
+                        </FormControl>
+                        <FormDescription className="text-[11px]">
+                          Your account has 2FA enabled. Enter the code from your Authenticator app.
+                        </FormDescription>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                )}
+
+                <Button
+                  id="submit-transfer-btn"
+                  type="submit"
+                  className="w-full font-bold text-xs h-10 mt-2 cursor-pointer"
+                  disabled={isProcessing}
+                >
+                  {isProcessing ? (
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  ) : (
+                    <ArrowRight className="mr-2 h-4 w-4" />
                   )}
-                />
-                <Button type="submit" className="w-full" disabled={isProcessing}>
-                  {isProcessing && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                  Send Coins
+                  <span>Send {watchedCrypto} Now</span>
                 </Button>
               </form>
             </Form>
           </CardContent>
         </Card>
-        <Card className="lg:col-span-3">
+
+        <Card className="lg:col-span-3 shadow-xs">
           <CardHeader>
-            <CardTitle>Transfer History</CardTitle>
+            <CardTitle className="text-base font-bold">Transfer History</CardTitle>
+            <CardDescription className="text-xs">
+              Direct transfers sent and received on your account.
+            </CardDescription>
           </CardHeader>
           <CardContent>
-            <Tabs defaultValue="received">
+            <Tabs defaultValue="received" key={historyKey}>
               <TabsList className="grid w-full grid-cols-2">
-                <TabsTrigger value="received">Received</TabsTrigger>
-                <TabsTrigger value="sent">Sent</TabsTrigger>
+                <TabsTrigger value="received" className="text-xs">Received</TabsTrigger>
+                <TabsTrigger value="sent" className="text-xs">Sent</TabsTrigger>
               </TabsList>
               <TabsContent value="received" className="mt-4">
                 <TransferHistoryTable

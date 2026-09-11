@@ -162,18 +162,53 @@ export async function signInWithIdentifier(
   }
 }
 
-const VERBS_NOUNS = ['force', 'energy', 'cyber', 'quantum', 'pulse', 'shadow', 'nexus', 'crypto', 'apex', 'vortex'];
-const WORDS = ['pull', 'ad', 'trade', 'vault', 'strike', 'wave', 'node', 'shift', 'core', 'link'];
+const PREFIXES = [
+  'force', 'speed', 'energy', 'power', 'swift', 'quick', 'hyper', 'cyber', 
+  'apex', 'turbo', 'shadow', 'smart', 'vortex', 'crypto', 'prime', 'bold', 
+  'flash', 'star', 'alpha', 'delta', 'pulse', 'ultra', 'solid', 'storm', 
+  'fire', 'iron', 'titan', 'bright', 'zenith', 'vector'
+];
+
+const ROOTS = [
+  'call', 'hui', 'man', 'core', 'wave', 'link', 'node', 'hub', 'flow', 
+  'run', 'dex', 'fox', 'bot', 'trader', 'vault', 'zone', 'byte', 'hawk', 
+  'ray', 'peak', 'grid', 'pulse', 'flex', 'nest', 'spark', 'sync'
+];
+
+const SEPARATORS = ['', '', '', '', '_', '.'];
 
 /**
- * Generates a random, unique username for newly registered users.
- * Example: forcepull223, energyad3882
+ * Generates an auto-generated profile username between 5 and 25 characters.
+ * Uses lowercase alphabets, numbers, '.', and '_'.
+ * Examples: forcecall33, speedhui66, energyman6338, swiftnode.92, cyber_wave77
  */
 export function generateUniqueUsername(): string {
-  const prefix = VERBS_NOUNS[Math.floor(Math.random() * VERBS_NOUNS.length)];
-  const word = WORDS[Math.floor(Math.random() * WORDS.length)];
-  const num = Math.floor(100 + Math.random() * 900); // 3 digit number
-  return `${prefix}${word}${num}`; // e.g. forcepull223, energyad3882
+  const prefix = PREFIXES[Math.floor(Math.random() * PREFIXES.length)];
+  const root = ROOTS[Math.floor(Math.random() * ROOTS.length)];
+  const sep = SEPARATORS[Math.floor(Math.random() * SEPARATORS.length)];
+  
+  // 2 to 4 digit number
+  const randType = Math.random();
+  let numStr = '';
+  if (randType < 0.4) {
+    numStr = String(Math.floor(10 + Math.random() * 90)); // 2 digits (e.g. 33, 66)
+  } else if (randType < 0.7) {
+    numStr = String(Math.floor(100 + Math.random() * 900)); // 3 digits
+  } else {
+    numStr = String(Math.floor(1000 + Math.random() * 9000)); // 4 digits (e.g. 6338)
+  }
+
+  let username = `${prefix}${root}${sep}${numStr}`.toLowerCase();
+  
+  // Ensure strictly 5 to 25 characters
+  if (username.length > 25) {
+    username = username.substring(0, 25);
+  }
+  if (username.length < 5) {
+    username = `${username}99`;
+  }
+  
+  return username;
 }
 
 export interface SignUpMetadata {
@@ -217,14 +252,19 @@ export async function handleSignUp(formData: {
   const formattedMonth = monthMap[formData.month] || String(formData.month || '1').padStart(2, '0');
   const formattedDob = `${formData.year}-${formattedMonth}-${formattedDay}`;
 
+  const generatedUsername = generateUniqueUsername();
+
   const { data, error } = await supabase.auth.signUp({
     email: formData.email.trim().toLowerCase(),
     password: formData.password,
     options: {
       data: {
-        full_name: formData.fullName,
-        display_name: formData.fullName,
+        full_name: formData.fullName.trim(),
+        name: formData.fullName.trim(),
+        username: generatedUsername,
+        display_name: generatedUsername, // Profile username is display name
         dob: formattedDob,
+        date_of_birth: formattedDob,
         country: formData.country,
         security_question: formData.securityQuestion,
         security_answer: formData.securityAnswer,
@@ -237,7 +277,29 @@ export async function handleSignUp(formData: {
     return { success: false, message: error.message, error };
   }
 
-  return { success: true, user: data.user, session: data.session };
+  // Update profile with full_name and auto-generated username as display name
+  if (data.user) {
+    try {
+      await supabase.from('profiles').upsert({
+        id: data.user.id,
+        email: data.user.email,
+        full_name: formData.fullName.trim(),
+        name: formData.fullName.trim(),
+        username: generatedUsername,
+        display_name: generatedUsername, // Profile username is display name
+        dob: formattedDob,
+        date_of_birth: formattedDob,
+        security_question: formData.securityQuestion,
+        security_answer: formData.securityAnswer,
+        country: formData.country,
+        updated_at: new Date().toISOString(),
+      });
+    } catch (e) {
+      console.warn('Profile save note:', e);
+    }
+  }
+
+  return { success: true, user: data.user, session: data.session, username: generatedUsername };
 }
 
 /**
@@ -257,19 +319,23 @@ export async function signUpWithEmail(
       };
     }
 
-    // Automatically generate a unique username if not provided
+    // Automatically generate a unique 5-25 char username if not provided
     const resolvedUsername = metadata?.username ? sanitizeUsername(metadata.username) : generateUniqueUsername();
-    const resolvedDisplayName = metadata?.fullName || metadata?.full_name || metadata?.displayName || metadata?.username || resolvedUsername;
+    // Profile username is display name
+    const resolvedDisplayName = resolvedUsername;
+    const resolvedFullName = metadata?.fullName || metadata?.full_name || '';
 
     const { data, error } = await supabase.auth.signUp({
       email: email.trim().toLowerCase(),
       password,
       options: {
         data: {
-          full_name: metadata?.fullName || metadata?.full_name || resolvedDisplayName,
+          full_name: resolvedFullName,
+          name: resolvedFullName,
           display_name: resolvedDisplayName,
           username: resolvedUsername,
           dob: metadata?.dob,
+          date_of_birth: metadata?.dob,
           country: metadata?.country,
           security_question: metadata?.securityQuestion || metadata?.security_question,
           security_answer: metadata?.securityAnswer || metadata?.security_answer,
@@ -281,7 +347,7 @@ export async function signUpWithEmail(
       return { data: null, error: handleAuthError(error) };
     }
 
-    // Ensure profile row exists in profiles table with username_changed = false
+    // Ensure profile row exists in profiles table with username and full_name
     if (data.user) {
       try {
         await supabase.from('profiles').upsert({
@@ -289,6 +355,12 @@ export async function signUpWithEmail(
           email: data.user.email,
           username: resolvedUsername,
           display_name: resolvedDisplayName,
+          full_name: resolvedFullName,
+          name: resolvedFullName,
+          dob: metadata?.dob,
+          date_of_birth: metadata?.dob,
+          security_question: metadata?.securityQuestion || metadata?.security_question,
+          security_answer: metadata?.securityAnswer || metadata?.security_answer,
           country: metadata?.country,
           role: 'user',
           is_admin: false,

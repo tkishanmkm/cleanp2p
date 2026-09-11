@@ -8,16 +8,19 @@ import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Label } from '@/components/ui/label';
 import { useToast } from '@/hooks/use-toast';
-import { AlertTriangle } from 'lucide-react';
+import { AlertTriangle, Shield, Mail, Calendar, User, HelpCircle, Lock } from 'lucide-react';
+import { useAuth } from '@/components/providers/auth-provider';
 
 export function OnboardingModal() {
   const { toast } = useToast();
+  const { refreshProfile } = useAuth();
 
   const [isOpen, setIsOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [user, setUser] = useState<any>(null);
 
   const [fullName, setFullName] = useState('');
+  const [email, setEmail] = useState('');
   const [dob, setDob] = useState('');
   const [securityQuestion, setSecurityQuestion] = useState('first_pet');
   const [securityAnswer, setSecurityAnswer] = useState('');
@@ -30,10 +33,11 @@ export function OnboardingModal() {
         if (!currentUser) return;
 
         setUser(currentUser);
+        setEmail(currentUser.email || '');
 
         const { data: profile } = await supabase
           .from('profiles')
-          .select('onboarding_completed, full_name, dob, is_suspended, status')
+          .select('onboarding_completed, full_name, name, dob, date_of_birth, security_question, is_suspended, status')
           .eq('id', currentUser.id)
           .maybeSingle();
 
@@ -41,9 +45,15 @@ export function OnboardingModal() {
           return;
         }
 
-        if (profile && profile.onboarding_completed === false) {
-          setFullName(profile?.full_name || currentUser.user_metadata?.full_name || '');
-          setDob(profile?.dob || currentUser.user_metadata?.dob || '');
+        // Trigger onboarding modal if onboarding_completed is false OR security question/dob is missing
+        const isCompleted = profile?.onboarding_completed === true && !!(profile?.dob || profile?.date_of_birth) && !!profile?.security_question;
+        
+        if (!isCompleted) {
+          setFullName(profile?.full_name || profile?.name || currentUser.user_metadata?.full_name || currentUser.user_metadata?.name || '');
+          setDob(profile?.dob || profile?.date_of_birth || currentUser.user_metadata?.dob || '');
+          if (profile?.security_question) {
+            setSecurityQuestion(profile.security_question);
+          }
           setIsOpen(true);
         }
       } catch (err) {
@@ -58,8 +68,16 @@ export function OnboardingModal() {
     e.preventDefault();
     setSuspendedError('');
 
-    if (!fullName.trim() || !dob || !securityAnswer.trim()) {
-      toast({ variant: 'destructive', title: 'Missing Information', description: 'Please fill out all fields.' });
+    if (!fullName.trim()) {
+      toast({ variant: 'destructive', title: 'Missing Full Name', description: 'Please provide your legal full name.' });
+      return;
+    }
+    if (!dob) {
+      toast({ variant: 'destructive', title: 'Missing Date of Birth', description: 'Please enter your date of birth.' });
+      return;
+    }
+    if (!securityAnswer.trim()) {
+      toast({ variant: 'destructive', title: 'Missing Security Answer', description: 'Please enter an answer for your security question.' });
       return;
     }
 
@@ -71,6 +89,8 @@ export function OnboardingModal() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           name: fullName.trim(),
+          fullName: fullName.trim(),
+          email: email.trim() || user?.email,
           dob: dob.trim(),
           securityQuestion,
           securityAnswer: securityAnswer.trim(),
@@ -99,8 +119,13 @@ export function OnboardingModal() {
         return;
       }
 
-      toast({ title: 'Profile Configured', description: 'Your security profile is complete.' });
+      toast({ title: 'Security Profile Completed', description: 'Your profile and security questions are saved successfully.' });
       setIsOpen(false);
+      try {
+        await refreshProfile?.();
+      } catch (e) {
+        // ignore
+      }
     } catch (err: any) {
       toast({ variant: 'destructive', title: 'Update Error', description: err.message || 'Could not save profile.' });
     } finally {
@@ -110,16 +135,22 @@ export function OnboardingModal() {
 
   return (
     <Dialog open={isOpen} onOpenChange={() => {}}>
-      <DialogContent className="sm:max-w-md [&>button]:hidden">
-        <DialogHeader>
-          <DialogTitle>Complete Security Profile</DialogTitle>
-          <DialogDescription>
-            Please complete your profile details and date of birth to start trading securely.
+      <DialogContent className="sm:max-w-lg [&>button]:hidden">
+        <DialogHeader className="space-y-2">
+          <div className="flex items-center gap-2 text-primary font-bold text-sm">
+            <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center">
+              <Shield className="w-4 h-4 text-primary" />
+            </div>
+            <span>First-Time Security Profile Setup</span>
+          </div>
+          <DialogTitle className="text-xl font-bold">Complete Your Identity &amp; Security</DialogTitle>
+          <DialogDescription className="text-xs text-muted-foreground">
+            To ensure account protection and secure P2P trading, please confirm your full name, email, date of birth, and setup your security question.
           </DialogDescription>
         </DialogHeader>
 
         {suspendedError ? (
-          <div className="p-4 bg-red-500/10 border border-red-500/30 rounded-xl text-red-600 dark:text-red-400 space-y-2 my-2">
+          <div className="p-4 bg-rose-500/10 border border-rose-500/30 rounded-xl text-rose-600 dark:text-rose-400 space-y-2 my-2">
             <div className="flex items-center gap-2 font-bold text-xs">
               <AlertTriangle className="w-4 h-4" />
               <span>Identity Verification Violation</span>
@@ -128,57 +159,108 @@ export function OnboardingModal() {
           </div>
         ) : (
           <form onSubmit={handleSubmit} className="space-y-4 py-2">
-            <div className="space-y-1">
-              <Label htmlFor="fullName">Legal Full Name</Label>
-              <Input
-                id="fullName"
-                value={fullName}
-                onChange={(e) => setFullName(e.target.value)}
-                placeholder="e.g. Alex Morgan"
-                required
-              />
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              {/* Full Name */}
+              <div className="space-y-1.5">
+                <Label htmlFor="onboardingFullName" className="text-xs font-semibold flex items-center gap-1.5">
+                  <User className="w-3.5 h-3.5 text-muted-foreground" />
+                  <span>Legal Full Name</span>
+                  <span className="text-rose-500">*</span>
+                </Label>
+                <Input
+                  id="onboardingFullName"
+                  value={fullName}
+                  onChange={(e) => setFullName(e.target.value)}
+                  placeholder="e.g. John Doe"
+                  className="rounded-xl text-sm"
+                  required
+                />
+              </div>
+
+              {/* Email (Read-only / Display) */}
+              <div className="space-y-1.5">
+                <Label htmlFor="onboardingEmail" className="text-xs font-semibold flex items-center gap-1.5">
+                  <Mail className="w-3.5 h-3.5 text-muted-foreground" />
+                  <span>Email Address</span>
+                </Label>
+                <Input
+                  id="onboardingEmail"
+                  type="email"
+                  value={email}
+                  readOnly
+                  disabled
+                  className="rounded-xl text-sm bg-muted/50 cursor-not-allowed opacity-80"
+                />
+              </div>
             </div>
 
-            <div className="space-y-1">
-              <Label htmlFor="dob">Date of Birth</Label>
+            {/* Date of Birth */}
+            <div className="space-y-1.5">
+              <Label htmlFor="onboardingDob" className="text-xs font-semibold flex items-center gap-1.5">
+                <Calendar className="w-3.5 h-3.5 text-muted-foreground" />
+                <span>Date of Birth (DOB)</span>
+                <span className="text-rose-500">*</span>
+              </Label>
               <Input
-                id="dob"
+                id="onboardingDob"
                 type="date"
                 value={dob}
                 onChange={(e) => setDob(e.target.value)}
+                className="rounded-xl text-sm"
                 required
               />
+              <p className="text-[11px] text-muted-foreground">
+                Required for regulatory compliance and identity verification.
+              </p>
             </div>
 
-            <div className="space-y-1">
-              <Label>Security Question</Label>
+            {/* Security Question Selection */}
+            <div className="space-y-1.5">
+              <Label className="text-xs font-semibold flex items-center gap-1.5">
+                <HelpCircle className="w-3.5 h-3.5 text-muted-foreground" />
+                <span>Security Question</span>
+                <span className="text-rose-500">*</span>
+              </Label>
               <Select value={securityQuestion} onValueChange={setSecurityQuestion}>
-                <SelectTrigger>
+                <SelectTrigger className="rounded-xl text-xs sm:text-sm">
                   <SelectValue placeholder="Select security question" />
                 </SelectTrigger>
-                <SelectContent>
+                <SelectContent className="max-h-60">
                   <SelectItem value="first_pet">What was the name of your first pet?</SelectItem>
                   <SelectItem value="mother_maiden">What is your mother&apos;s maiden name?</SelectItem>
                   <SelectItem value="first_school">What was the name of your first school?</SelectItem>
+                  <SelectItem value="birth_city">In what city or town were you born?</SelectItem>
+                  <SelectItem value="childhood_nickname">What was your childhood nickname?</SelectItem>
+                  <SelectItem value="first_car">What was the make of your first car?</SelectItem>
+                  <SelectItem value="favorite_teacher">What was the last name of your favorite teacher?</SelectItem>
                 </SelectContent>
               </Select>
             </div>
 
-            <div className="space-y-1">
-              <Label htmlFor="securityAnswer">Security Answer</Label>
+            {/* Security Answer */}
+            <div className="space-y-1.5">
+              <Label htmlFor="onboardingSecurityAnswer" className="text-xs font-semibold flex items-center gap-1.5">
+                <Lock className="w-3.5 h-3.5 text-muted-foreground" />
+                <span>Security Answer</span>
+                <span className="text-rose-500">*</span>
+              </Label>
               <Input
-                id="securityAnswer"
+                id="onboardingSecurityAnswer"
                 type="password"
                 value={securityAnswer}
                 onChange={(e) => setSecurityAnswer(e.target.value)}
-                placeholder="Answer"
+                placeholder="Enter secret answer"
+                className="rounded-xl text-sm"
                 required
               />
+              <p className="text-[11px] text-muted-foreground">
+                This answer will be used to verify high-security actions or account recovery.
+              </p>
             </div>
 
-            <DialogFooter className="pt-4">
-              <Button type="submit" className="w-full" disabled={loading}>
-                {loading ? 'Validating & Saving...' : 'Save & Continue'}
+            <DialogFooter className="pt-3">
+              <Button type="submit" className="w-full rounded-xl font-bold py-2.5" disabled={loading}>
+                {loading ? 'Validating & Saving to Database...' : 'Save & Complete Setup'}
               </Button>
             </DialogFooter>
           </form>

@@ -5,8 +5,6 @@ import { privateKeyToAccount } from 'viem/accounts';
 import { sepolia } from 'viem/chains';
 
 const WORKER_SECRET = process.env.WITHDRAWAL_WORKER_SECRET;
-
-// Hot wallet private key configured in environment secrets
 const HOT_WALLET_KEY = process.env.HOT_WALLET_PRIVATE_KEY || process.env.EVM_HOT_WALLET_PRIVATE_KEY;
 
 export async function POST(req: Request) {
@@ -18,13 +16,31 @@ export async function POST(req: Request) {
 
     const supabaseAdmin = getSupabaseAdminClient();
 
-    // 1. Claim pending withdrawals using atomic row-level DB locks
-    const { data: pendingItems, error: claimError } = await supabaseAdmin.rpc(
+    // 1. Fetch pending withdrawals (via RPC or direct table query)
+    let pendingItems: any[] = [];
+    const { data: rpcItems, error: claimError } = await supabaseAdmin.rpc(
       'claim_pending_withdrawals',
       { p_limit: 10 }
     );
 
-    if (claimError) throw new Error(claimError.message);
+    if (!claimError && Array.isArray(rpcItems)) {
+      pendingItems = rpcItems;
+    } else {
+      // Fallback to querying withdrawals directly
+      const { data: directItems, error: fetchErr } = await supabaseAdmin
+        .from('withdrawals')
+        .select('*')
+        .in('status', ['QUEUED', 'approved', 'PENDING'])
+        .limit(10);
+
+      if (fetchErr) {
+        console.error('[Withdrawal Worker] Database fetch error:', fetchErr.message);
+      }
+      if (directItems && directItems.length > 0) {
+        pendingItems = directItems;
+      }
+    }
+
     if (!pendingItems || pendingItems.length === 0) {
       return NextResponse.json({ success: true, processedCount: 0, message: 'No pending payouts' });
     }
@@ -32,63 +48,115 @@ export async function POST(req: Request) {
     let successCount = 0;
     const errors: any[] = [];
 
-    // 2. Dispatch real on-chain transaction for each claimed item
-    for (const payout of pendingItems) {
+    // 2. Dispatch on-chain transactions with Viem
+    for (const withdrawal of pendingItems) {
+      let txHash: string | undefined;
+      let isBroadcasted = false;
+
       try {
-        let txHash: string;
+        // Resolve destination address from database row (to_address, destination_address, or address)
+        const targetAddress = (withdrawal.to_address || withdrawal.destination_address || withdrawal.address)?.trim();
 
-        if (HOT_WALLET_KEY && HOT_WALLET_KEY.startsWith('0x')) {
-          const account = privateKeyToAccount(HOT_WALLET_KEY as `0x${string}`);
-          const walletClient = createWalletClient({
-            account,
-            chain: sepolia,
-            transport: http(process.env.EVM_RPC_URL || 'https://rpc.ankr.com/eth_sepolia'),
-          });
-
-          // Send native chain transaction
-          txHash = await walletClient.sendTransaction({
-            to: payout.destination_address as `0x${string}`,
-            value: parseEther(payout.amount.toString()),
-          });
-        } else {
-          // Fallback simulation hash if no hot wallet key is configured
-          txHash = `0xmock_tx_${Date.now()}_${Math.random().toString(36).substring(7)}`;
+        if (!targetAddress || !targetAddress.startsWith('0x') || targetAddress.length !== 42) {
+          throw new Error(`Invalid or missing destination EVM address: ${targetAddress}`);
         }
 
-        // 3. Update status to completed
-        await supabaseAdmin
+        if (HOT_WALLET_KEY && HOT_WALLET_KEY.startsWith('0x')) {
+          const hotWalletAccount = privateKeyToAccount(HOT_WALLET_KEY as `0x${string}`);
+          const walletClient = createWalletClient({
+            account: hotWalletAccount,
+            chain: sepolia,
+            transport: http(process.env.ETH_SEPOLIA_RPC_URL || process.env.EVM_RPC_URL || 'https://eth-sepolia.g.alchemy.com/v2/alch_60h82hz17l-PYtgn20DyU'),
+          });
+
+          console.log(`[Withdrawal Worker] Broadcasting withdrawal ${withdrawal.id} of ${withdrawal.amount} to ${targetAddress}`);
+
+          // Send on-chain transaction with explicit destination address mapping
+          const hash = await walletClient.sendTransaction({
+            account: hotWalletAccount,
+            chain: sepolia,
+            to: targetAddress as `0x${string}`, // Ensure this matches destination address from database
+            value: parseEther(withdrawal.amount.toString()),
+          });
+
+          txHash = hash;
+          isBroadcasted = true;
+          console.log(`[Withdrawal Worker] Broadcast successful! Tx Hash: ${txHash}`);
+        } else {
+          throw new Error('EVM Hot Wallet key (HOT_WALLET_PRIVATE_KEY) is not configured or invalid.');
+        }
+
+        // 3. Mark withdrawal as completed in database (with explicit error verification)
+        const { error: updateWithdrawalErr } = await supabaseAdmin
           .from('withdrawals')
           .update({
             status: 'completed',
             tx_hash: txHash,
+            txid: txHash,
+            broadcasted_at: new Date().toISOString(),
             updated_at: new Date().toISOString(),
           })
-          .eq('id', payout.id);
+          .eq('id', withdrawal.id);
 
-        // 4. Record entry in ledger
-        await supabaseAdmin.from('ledger_entries').insert({
-          user_id: payout.user_id,
-          type: 'withdrawal',
-          amount: payout.amount,
-          asset: payout.asset,
-          chain: payout.chain,
-          status: 'completed',
+        if (updateWithdrawalErr) {
+          console.error(`[Withdrawal Worker] Database update error for withdrawals table (ID: ${withdrawal.id}):`, updateWithdrawalErr);
+          throw new Error(`Database update failed after on-chain broadcast: ${updateWithdrawalErr.message}`);
+        }
+
+        // Also update onchain_withdrawals if matching record exists
+        const { error: onchainErr } = await supabaseAdmin
+          .from('onchain_withdrawals')
+          .update({
+            status: 'COMPLETED',
+            tx_hash: txHash,
+            updated_at: new Date().toISOString(),
+          })
+          .eq('id', withdrawal.id);
+
+        if (onchainErr) {
+          console.warn(`[Withdrawal Worker] Notice: onchain_withdrawals update returned:`, onchainErr.message);
+        }
+
+        // 4. Record ledger entry for auditing
+        const { error: ledgerErr } = await supabaseAdmin.from('ledger_entries').insert({
+          user_id: withdrawal.user_id,
+          amount: withdrawal.amount,
+          entry_type: 'withdrawal_payout',
+          reference_type: 'withdrawals',
           reference_id: txHash,
-          metadata: { destination: payout.destination_address, withdrawal_id: payout.id },
+          metadata: {
+            destination: targetAddress,
+            withdrawal_id: withdrawal.id,
+            tx_hash: txHash,
+          },
         });
+
+        if (ledgerErr) {
+          console.warn(`[Withdrawal Worker] Ledger entry record warning:`, ledgerErr.message);
+        }
 
         successCount++;
       } catch (err: any) {
-        await supabaseAdmin
+        console.error(`[Withdrawal Worker] Exception during withdrawal ${withdrawal.id}:`, err.message);
+
+        // If the transaction was already broadcasted on-chain, do NOT mark status as failed (prevent double spends)
+        const statusToSet = isBroadcasted ? 'BROADCASTED' : 'failed';
+
+        const { error: failUpdateErr } = await supabaseAdmin
           .from('withdrawals')
           .update({
-            status: 'failed',
-            error_reason: err.message,
+            status: statusToSet,
+            tx_hash: txHash || withdrawal.tx_hash,
+            broadcast_error: err.message,
             updated_at: new Date().toISOString(),
           })
-          .eq('id', payout.id);
+          .eq('id', withdrawal.id);
 
-        errors.push({ withdrawalId: payout.id, error: err.message });
+        if (failUpdateErr) {
+          console.error(`[Withdrawal Worker] Critical: Failed to update withdrawal status on error:`, failUpdateErr.message);
+        }
+
+        errors.push({ withdrawalId: withdrawal.id, isBroadcasted, txHash, error: err.message });
       }
     }
 
@@ -99,6 +167,7 @@ export async function POST(req: Request) {
       errors: errors.length > 0 ? errors : undefined,
     });
   } catch (error: any) {
+    console.error('[Withdrawal Worker] Fatal route error:', error.message);
     return NextResponse.json({ error: error.message || 'Withdrawal worker failed' }, { status: 500 });
   }
 }

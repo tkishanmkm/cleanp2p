@@ -31,16 +31,53 @@ export async function GET(request: NextRequest) {
   const { data: profile, error } = await supabase
     .from('profiles')
     .select('*')
-    .ilike('username', username)
+    .ilike('username', username.replace(/^@/, ''))
     .maybeSingle();
 
   if (error || !profile) {
     return NextResponse.json({ error: 'User not found' }, { status: 404 });
   }
 
-  // Calculate feedback and ratings if available
-  const positive = profile.positive_feedback || 0;
-  const negative = profile.negative_feedback || 0;
+  // Calculate dynamic trades & fiat trade volume
+  let completedTradeCount = profile.completed_trades || 0;
+  let totalTradeVolumeFiat = profile.total_trade_volume_usd || profile.trade_volume || 0;
+
+  try {
+    const { data: completedTrades } = await supabase
+      .from('trades')
+      .select('id, fiat_amount, fiat_amount_usd, crypto_amount, crypto, status')
+      .or(`buyer_id.eq.${profile.id},seller_id.eq.${profile.id}`)
+      .in('status', ['completed', 'released']);
+
+    if (completedTrades && completedTrades.length > 0) {
+      completedTradeCount = completedTrades.length;
+      totalTradeVolumeFiat = completedTrades.reduce((acc, t) => {
+        const val = Number(t.fiat_amount || t.fiat_amount_usd || 0);
+        return acc + (isNaN(val) ? 0 : val);
+      }, 0);
+    }
+  } catch (err) {
+    console.warn('Could not aggregate trade volume:', err);
+  }
+
+  // Calculate feedback and ratings
+  let positive = Number(profile.positive_feedback || 0);
+  let negative = Number(profile.negative_feedback || 0);
+
+  try {
+    const { data: fbList } = await supabase
+      .from('trade_feedback')
+      .select('rating, feedback_type')
+      .eq('reviewee_id', profile.id);
+
+    if (fbList && fbList.length > 0) {
+      positive = fbList.filter(f => f.feedback_type === 'POSITIVE' || (f.rating && f.rating >= 4)).length;
+      negative = fbList.filter(f => f.feedback_type === 'NEGATIVE' || (f.rating && f.rating < 4)).length;
+    }
+  } catch (err) {
+    console.warn('Feedback query warning:', err);
+  }
+
   const totalFeedback = positive + negative;
   const positivePct = totalFeedback > 0 ? Math.round((positive / totalFeedback) * 100) : 100;
 
@@ -94,9 +131,13 @@ export async function GET(request: NextRequest) {
       ...profile,
       is_email_verified: isEmailVerified,
       is_id_verified: isIdVerified,
+      positive_feedback: positive,
+      negative_feedback: negative,
       positive_feedback_pct: positivePct,
       rating: profile.rating || 5.0,
-      completed_trades: profile.completed_trades || 0,
+      completed_trades: completedTradeCount,
+      total_volume: totalTradeVolumeFiat,
+      trade_volume: totalTradeVolumeFiat,
     },
     blockStatus,
   });

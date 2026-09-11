@@ -25,14 +25,19 @@ export async function POST(
 
     const { reason } = await req.json();
 
+    const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(tradeId);
+
     // Fetch trade (by UUID or trade_id)
-    let { data: trade } = await supabase
-      .from('trades')
-      .select('*')
-      .or(`id.eq.${tradeId},trade_id.eq.${tradeId}`)
-      .maybeSingle();
+    let tradeQuery = supabase.from('trades').select('*');
+    if (isUuid) {
+      tradeQuery = tradeQuery.or(`id.eq.${tradeId},trade_id.eq.${tradeId}`);
+    } else {
+      tradeQuery = tradeQuery.eq('trade_id', tradeId);
+    }
+    const { data: trade } = await tradeQuery.maybeSingle();
 
     const actualTradeId = trade?.id || tradeId;
+    const isActualUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(actualTradeId);
 
     // Call stored RPC procedure if available
     let rpcSucceeded = false;
@@ -68,15 +73,22 @@ export async function POST(
     const now = new Date().toISOString();
     const disputeReason = reason || 'Non-responsive counterparty or payment issue';
 
-    const { error: updateError } = await supabase
+    let updateQuery = supabase
       .from('trades')
       .update({
         status: 'DISPUTED',
         disputed_at: now,
         dispute_reason: disputeReason,
         disputed_by: user.id,
-      })
-      .or(`id.eq.${actualTradeId},trade_id.eq.${tradeId}`);
+      });
+
+    if (isActualUuid) {
+      updateQuery = updateQuery.eq('id', actualTradeId);
+    } else {
+      updateQuery = updateQuery.eq('trade_id', tradeId);
+    }
+
+    const { error: updateError } = await updateQuery;
 
     if (updateError) {
       return NextResponse.json({ error: updateError.message }, { status: 400 });

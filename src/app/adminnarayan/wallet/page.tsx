@@ -22,17 +22,20 @@ export default function AdminMainWalletPage() {
   }
 
   async function fetchMainWallets() {
-    const { data } = await supabase.from("admin_main_wallets").select("*");
-    if (data && data.length > 0) {
-      setWallets(data);
-    } else {
-      setWallets([
-        { currency: "BTC", balance: "0.00000000" },
-        { currency: "ETH", balance: "0.00000000" },
-        { currency: "USDT", balance: "0.00000000" },
-        { currency: "TRX", balance: "0.00000000" },
-      ]);
+    let { data } = await supabase.from("admin_main_wallets").select("*");
+    if (!data || data.length === 0) {
+      const { data: platformWallets } = await supabase
+        .from("platform_wallets")
+        .select("asset_code, network_code, public_address, role");
+      if (platformWallets && platformWallets.length > 0) {
+        data = platformWallets.map((pw: any) => ({
+          currency: pw.asset_code,
+          balance: "0.00000000",
+          address: pw.public_address,
+        }));
+      }
     }
+    setWallets(data || []);
   }
 
   async function fetchQueuedWithdrawals() {

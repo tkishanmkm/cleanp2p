@@ -34,10 +34,18 @@ export async function GET(request: NextRequest) {
 
   try {
     // 1. Fetch blocker & target profile
-    const { data: profiles } = await admin
+    const isTargetUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(targetId);
+    let profileQuery = admin
       .from('profiles')
-      .select('id, username, blocked_users')
-      .or(`id.eq.${user.id},id.eq.${targetId},username.eq.${targetId}`);
+      .select('id, username, blocked_users');
+
+    if (isTargetUuid) {
+      profileQuery = profileQuery.or(`id.eq.${user.id},id.eq.${targetId},username.eq.${targetId}`);
+    } else {
+      profileQuery = profileQuery.or(`id.eq.${user.id},username.eq.${targetId}`);
+    }
+
+    const { data: profiles } = await profileQuery;
 
     const myProfile = profiles?.find((p) => p.id === user.id);
     const targetProfile = profiles?.find((p) => p.id === targetId || p.username === targetId);

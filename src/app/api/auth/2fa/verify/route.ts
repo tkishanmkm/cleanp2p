@@ -12,34 +12,42 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    const { secret, token } = await req.json();
+    const { secret, token, code } = await req.json();
+    const rawToken = token || code;
 
-    if (!secret || !token) {
-      return NextResponse.json({ error: 'Secret and OTP token are required' }, { status: 400 });
+    if (!secret || !rawToken) {
+      return NextResponse.json({ error: 'Secret and 6-digit OTP token are required' }, { status: 400 });
     }
 
-    // Clean token
-    const cleanToken = token.toString().replace(/\s+/g, '').trim();
+    const cleanSecret = secret.toString().trim();
+    const cleanToken = rawToken.toString().replace(/\s+/g, '').trim();
 
+    if (cleanToken.length < 4 || cleanToken.length > 8) {
+      return NextResponse.json({ error: 'Please enter a valid 6-digit OTP code' }, { status: 400 });
+    }
+
+    // Verify TOTP with tolerance for minor time drift
     const isVerified = speakeasy.totp.verify({
-      secret,
+      secret: cleanSecret,
       encoding: 'base32',
       token: cleanToken,
-      window: 2, // Allow ±60s clock skew
+      window: 4, // ±120s tolerance for mobile clock discrepancies
     });
 
     if (!isVerified) {
-      return NextResponse.json({ error: 'Invalid authenticator code. Please check your app and try again.' }, { status: 400 });
+      return NextResponse.json({
+        error: 'Invalid authenticator code. Please check that the code in your authenticator app is current and try again.'
+      }, { status: 400 });
     }
 
-    // Enable 2FA on profile with admin client to bypass RLS column restrictions
+    // Enable 2FA on profile with admin client
     const adminClient = getSupabaseAdminClient();
     const { error: updateError } = await adminClient
       .from('profiles')
       .update({
         is_2fa_enabled: true,
         is_mfa_enabled: true,
-        two_factor_secret: secret,
+        two_factor_secret: cleanSecret,
         updated_at: new Date().toISOString(),
       })
       .eq('id', user.id);

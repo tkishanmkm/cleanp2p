@@ -43,12 +43,12 @@ export async function GET(req: NextRequest) {
       }
     }
 
-    // Attempt RPC on-chain query if RPC is configured and address is valid EVM
-    if (address && address.startsWith('0x') && address.length === 42 && process.env.EVM_RPC_URL) {
+    // Attempt RPC on-chain query if address is valid EVM
+    if (address && address.startsWith('0x') && address.length === 42) {
       try {
         const client = createPublicClient({
           chain: sepolia,
-          transport: http(process.env.EVM_RPC_URL),
+          transport: http(process.env.ETH_SEPOLIA_RPC_URL || process.env.EVM_RPC_URL || 'https://eth-sepolia.g.alchemy.com/v2/alch_60h82hz17l-PYtgn20DyU'),
         });
         const onChainBal = await client.getBalance({ address: address as `0x${string}` });
         ethBalance = parseFloat(formatEther(onChainBal)).toFixed(4);

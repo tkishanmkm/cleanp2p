@@ -190,29 +190,7 @@ export async function processWithdrawalQueue(): Promise<WithdrawalProcessResult>
     const { provider, signer, address } = getEvmHotWalletSigner(network);
 
     if (!signer || !address) {
-      // In local dev without private key configured, generate deterministic simulation reference
-      const mockTxHash = `0xsim_${Date.now()}_${Math.random().toString(36).substring(2, 10)}`;
-      const simulatedNonce = Math.floor(Date.now() / 1000);
-
-      await supabaseAdmin
-        .from('onchain_withdrawals')
-        .update({
-          tx_hash: mockTxHash,
-          nonce: simulatedNonce,
-          status: 'SUBMITTED',
-          updated_at: new Date().toISOString(),
-        })
-        .eq('id', withdrawal.id);
-
-      console.log(`[Withdrawal Worker - Dev Mock] Simulated EVM payout ${withdrawal.id} (tx: ${mockTxHash})`);
-
-      return {
-        processed: true,
-        withdrawalId: withdrawal.id,
-        txHash: mockTxHash,
-        nonce: simulatedNonce,
-        status: 'SUBMITTED',
-      };
+      throw new Error(`EVM Hot Wallet signer not available for network ${network}. Check EVM_HOT_WALLET_PRIVATE_KEY.`);
     }
 
     // 1. Allocate synchronized nonce

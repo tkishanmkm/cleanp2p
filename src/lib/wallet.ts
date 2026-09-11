@@ -434,15 +434,32 @@ export async function initiateTrade(
 }
 
 /**
- * Sends coins from one user to another.
+ * Sends coins from one user to another via internal transfer API.
  */
 export async function sendCoinToUser(
   sender: { uid: string; displayName: string | null },
   recipientUsername: string,
   crypto: CryptoCurrency,
-  amount: number
+  amount: number,
+  totpCode?: string
 ): Promise<string> {
-  return generateId("TX-", 10);
+  const res = await fetch('/api/wallet/transfer', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      recipientUsername,
+      asset: crypto,
+      amount,
+      totpCode: totpCode || '',
+    }),
+  });
+
+  const data = await res.json();
+  if (!res.ok) {
+    throw new Error(data.error || 'Failed to complete internal transfer');
+  }
+
+  return data.transferId || `TX-${Date.now().toString(36).toUpperCase()}`;
 }
 
 /**

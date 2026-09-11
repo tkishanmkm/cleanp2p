@@ -64,14 +64,17 @@ export default function TradeRoom({
   // Load messages & subscribe to real-time updates
   useEffect(() => {
     let isMounted = true;
+    const isTradeUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(tradeId);
 
     async function fetchTradeAndMessages() {
       // 1. Fetch latest trade status
-      const { data: tradeData } = await supabase
-        .from('trades')
-        .select('*')
-        .or(`trade_id.eq.${tradeId},id.eq.${tradeId}`)
-        .single();
+      let tradeQuery = supabase.from('trades').select('*');
+      if (isTradeUuid) {
+        tradeQuery = tradeQuery.or(`trade_id.eq.${tradeId},id.eq.${tradeId}`);
+      } else {
+        tradeQuery = tradeQuery.eq('trade_id', tradeId);
+      }
+      const { data: tradeData } = await tradeQuery.maybeSingle();
 
       if (tradeData && isMounted) {
         setStatus(tradeData.status || initialStatus);
@@ -133,13 +136,17 @@ export default function TradeRoom({
     setNewMessage('');
     setIsSending(true);
 
+    const isTradeUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(tradeId);
+
     try {
       // Find database primary trade id
-      const { data: tradeRecord } = await supabase
-        .from('trades')
-        .select('id')
-        .or(`trade_id.eq.${tradeId},id.eq.${tradeId}`)
-        .single();
+      let tradeRecordQuery = supabase.from('trades').select('id');
+      if (isTradeUuid) {
+        tradeRecordQuery = tradeRecordQuery.or(`trade_id.eq.${tradeId},id.eq.${tradeId}`);
+      } else {
+        tradeRecordQuery = tradeRecordQuery.eq('trade_id', tradeId);
+      }
+      const { data: tradeRecord } = await tradeRecordQuery.maybeSingle();
 
       const targetId = tradeRecord?.id || tradeId;
 
@@ -189,10 +196,16 @@ export default function TradeRoom({
         });
       } else {
         // Direct fallback update
-        await supabase
+        const isTradeUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(tradeId);
+        let updateQuery = supabase
           .from('trades')
-          .update({ status: 'payment_sent', paid_at: new Date().toISOString() })
-          .or(`trade_id.eq.${tradeId},id.eq.${tradeId}`);
+          .update({ status: 'payment_sent', paid_at: new Date().toISOString() });
+        if (isTradeUuid) {
+          updateQuery = updateQuery.or(`trade_id.eq.${tradeId},id.eq.${tradeId}`);
+        } else {
+          updateQuery = updateQuery.eq('trade_id', tradeId);
+        }
+        await updateQuery;
         setStatus('payment_sent');
         toast({
           title: 'Payment Confirmed',
@@ -231,10 +244,16 @@ export default function TradeRoom({
           description: 'Crypto has been transferred to the buyer.',
         });
       } else {
-        await supabase
+        const isTradeUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(tradeId);
+        let updateQuery = supabase
           .from('trades')
-          .update({ status: 'completed', released_at: new Date().toISOString() })
-          .or(`trade_id.eq.${tradeId},id.eq.${tradeId}`);
+          .update({ status: 'completed', released_at: new Date().toISOString() });
+        if (isTradeUuid) {
+          updateQuery = updateQuery.or(`trade_id.eq.${tradeId},id.eq.${tradeId}`);
+        } else {
+          updateQuery = updateQuery.eq('trade_id', tradeId);
+        }
+        await updateQuery;
         setStatus('completed');
         toast({
           title: 'Escrow Released',
@@ -257,10 +276,16 @@ export default function TradeRoom({
     if (!confirm('Are you sure you want to cancel this trade?')) return;
     setIsActionLoading(true);
     try {
-      await supabase
+      const isTradeUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(tradeId);
+      let updateQuery = supabase
         .from('trades')
-        .update({ status: 'cancelled', cancelled_at: new Date().toISOString() })
-        .or(`trade_id.eq.${tradeId},id.eq.${tradeId}`);
+        .update({ status: 'cancelled', cancelled_at: new Date().toISOString() });
+      if (isTradeUuid) {
+        updateQuery = updateQuery.or(`trade_id.eq.${tradeId},id.eq.${tradeId}`);
+      } else {
+        updateQuery = updateQuery.eq('trade_id', tradeId);
+      }
+      await updateQuery;
       setStatus('cancelled');
       toast({
         title: 'Trade Cancelled',
