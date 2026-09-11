@@ -3,13 +3,18 @@
 import { supabase } from '@/lib/supabase/client';
 import { Button } from '@/components/ui/button';
 
+const getURL = () => {
+  let url = process.env.NEXT_PUBLIC_SITE_URL ?? 'https://paxones.com';
+  return url.endsWith('/') ? url : `${url}/`;
+};
+
 export function DiscordAuthButton() {
   const handleDiscordLogin = async () => {
     try {
       const { data, error } = await supabase.auth.signInWithOAuth({
         provider: 'discord',
         options: {
-          redirectTo: `${typeof window !== 'undefined' ? window.location.origin : ''}/api/auth/callback`,
+          redirectTo: `${getURL()}auth/callback`,
           skipBrowserRedirect: true,
         },
       });

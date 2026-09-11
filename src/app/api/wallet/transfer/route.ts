@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient, getSupabaseAdminClient } from '@/lib/supabase/server';
-import speakeasy from 'speakeasy';
+import { verify2FAOTP } from '@/lib/2fa';
 
 export async function POST(req: NextRequest) {
   try {
@@ -32,17 +32,12 @@ export async function POST(req: NextRequest) {
     const is2faActive = Boolean(senderProfile?.is_2fa_enabled || senderProfile?.is_mfa_enabled);
     const secret = senderProfile?.two_factor_secret || senderProfile?.security_answer_hash;
 
-    if (is2faActive && secret) {
+    if (is2faActive) {
       if (!totpCode || typeof totpCode !== 'string' || totpCode.trim().length < 4) {
         return NextResponse.json({ error: '6-digit Authenticator TOTP code is required' }, { status: 403 });
       }
 
-      const isValidTotp = speakeasy.totp.verify({
-        secret: secret,
-        encoding: 'base32',
-        token: totpCode.trim(),
-        window: 2,
-      });
+      const isValidTotp = verify2FAOTP(secret, totpCode.trim(), is2faActive);
 
       if (!isValidTotp) {
         return NextResponse.json({ error: 'Invalid authenticator code. Please check your app.' }, { status: 401 });

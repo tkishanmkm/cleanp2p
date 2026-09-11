@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "next dev",
+    "dev": "next dev -p 3000",
     "build": "NODE_ENV=production next build",
     "start": "next start",
     "lint": "next lint",
@@ -11,6 +11,8 @@
     "emergency:halt": "ts-node scripts/kill-switch.ts halt",
     "emergency:resume": "ts-node scripts/kill-switch.ts resume",
     "workers:start": "ts-node src/jobs/scheduler.ts",
+    "build:worker": "tsc",
+    "start:worker": "node dist/worker.js",
     "test:p2p": "tsx tests/p2p-trade-flow.test.ts",
     "test:blockchain": "tsx tests/blockchain-worker.test.ts",
     "test:reconcile": "tsx tests/reconciliation.test.ts",

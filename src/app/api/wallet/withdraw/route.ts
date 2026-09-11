@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createRouteHandlerClient } from '@supabase/auth-helpers-nextjs';
 import { cookies } from 'next/headers';
-import speakeasy from 'speakeasy';
+import { verify2FAOTP } from '@/lib/2fa';
 
 export async function POST(req: NextRequest) {
   try {
@@ -28,7 +28,7 @@ export async function POST(req: NextRequest) {
     const is2faActive = Boolean(profile?.is_2fa_enabled || profile?.is_mfa_enabled);
     const secret = profile?.two_factor_secret || profile?.security_answer_hash;
 
-    if (is2faActive && secret) {
+    if (is2faActive) {
       if (!totpCode) {
         return NextResponse.json(
           { error: 'Two-Factor Authentication (2FA) code required' }, 
@@ -36,12 +36,7 @@ export async function POST(req: NextRequest) {
         );
       }
 
-      const isValidTotp = speakeasy.totp.verify({
-        secret: secret,
-        encoding: 'base32',
-        token: totpCode.trim(),
-        window: 2,
-      });
+      const isValidTotp = verify2FAOTP(secret, totpCode.trim(), is2faActive);
 
       if (!isValidTotp) {
         return NextResponse.json({ error: 'Invalid 2FA authentication code' }, { status: 401 });

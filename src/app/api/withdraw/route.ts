@@ -2,6 +2,7 @@ import { createClient, getSupabaseAdminClient } from '@/lib/supabase/server';
 import { NextResponse } from 'next/server';
 import { ethers } from 'ethers';
 import { executeHotWalletWithdrawal } from '@/lib/wallets/evmWithdrawal';
+import { verify2FAOTP } from '@/lib/2fa';
 
 export const dynamic = 'force-dynamic';
 
@@ -64,6 +65,23 @@ export async function POST(request: Request) {
 
     if (!user) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+
+    // Verify 2FA TOTP code for sensitive withdrawal operation
+    const { data: userProfile } = await supabaseAdmin
+      .from('profiles')
+      .select('is_2fa_enabled, is_mfa_enabled, two_factor_secret, security_answer_hash')
+      .eq('id', user.id)
+      .maybeSingle();
+
+    const is2faActive = Boolean(userProfile?.is_2fa_enabled || userProfile?.is_mfa_enabled);
+    const secret = userProfile?.two_factor_secret || userProfile?.security_answer_hash;
+
+    if (is2faActive) {
+      const isValidTotp = verify2FAOTP(secret, String(totpCode).trim(), is2faActive);
+      if (!isValidTotp) {
+        return NextResponse.json({ error: 'Invalid 2FA authentication code' }, { status: 401 });
+      }
     }
 
     if (!asset || amount === undefined || amount === null || !destinationAddress) {

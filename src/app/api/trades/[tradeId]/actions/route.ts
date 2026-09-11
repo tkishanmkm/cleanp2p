@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@/utils/supabase/server';
 import { insertPaxonesSystemMessage } from '@/lib/trade-system-messages';
+import { verify2FAOTP } from '@/lib/2fa';
 
 export const dynamic = 'force-dynamic';
 
@@ -24,7 +25,9 @@ export async function POST(
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    const { action, reason, receiptUrl } = await req.json();
+    const body = await req.json().catch(() => ({}));
+    const { action, reason, receiptUrl } = body;
+    const totpCode = body.totpCode || body.totp_code || body.code;
 
     const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(tradeId);
 
@@ -87,6 +90,29 @@ export async function POST(
     }
 
     if (action === 'RELEASE_ESCROW') {
+      // 2FA check for sensitive trade release operation
+      const { data: sellerProfile } = await supabase
+        .from('profiles')
+        .select('is_2fa_enabled, is_mfa_enabled, two_factor_secret, security_answer_hash')
+        .eq('id', user.id)
+        .maybeSingle();
+
+      const is2faActive = Boolean(sellerProfile?.is_2fa_enabled || sellerProfile?.is_mfa_enabled);
+      const secret = sellerProfile?.two_factor_secret || sellerProfile?.security_answer_hash;
+
+      if (is2faActive) {
+        if (!totpCode) {
+          return NextResponse.json(
+            { error: 'TWO_FACTOR_REQUIRED: 2FA TOTP code is required to release escrow.' },
+            { status: 403 }
+          );
+        }
+        const isValid = verify2FAOTP(secret, String(totpCode).trim(), is2faActive);
+        if (!isValid) {
+          return NextResponse.json({ error: 'Invalid 2FA authentication code.' }, { status: 401 });
+        }
+      }
+
       let rpcSucceeded = false;
       let rpcResult: any = null;
 

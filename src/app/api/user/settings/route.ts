@@ -173,14 +173,23 @@ export async function PATCH(req: NextRequest) {
           .eq('id', user.id)
           .maybeSingle();
 
-        const isKycVerified = prof?.kyc_status === 'VERIFIED' || prof?.kyc_status === 'APPROVED';
+        const isKycVerified =
+          prof?.kyc_status?.toUpperCase() === 'VERIFIED' ||
+          prof?.kyc_status?.toUpperCase() === 'APPROVED';
+
+        if (isKycVerified && (fullName !== undefined || dob !== undefined)) {
+          return NextResponse.json(
+            { error: 'Your legal name and date of birth are permanently locked once KYC verification is approved.' },
+            { status: 400 }
+          );
+        }
 
         const updates: any = {
           name_visibility: nameVisibility || 'FULL',
           updated_at: new Date().toISOString(),
         };
 
-        // If KYC is verified, full name and date of birth cannot be modified
+        // If KYC is not verified, allow updating with duplicate identity check
         if (!isKycVerified) {
           const targetName = (fullName !== undefined ? fullName : prof?.full_name)?.trim();
           const targetDob = (dob !== undefined ? dob : prof?.dob)?.trim();

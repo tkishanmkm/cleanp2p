@@ -236,8 +236,14 @@ export default function SettingsPage() {
     },
   ]);
 
-  // Is KYC locked (verified or submitted permanent document)
-  const isKycLocked = isKycSubmitted || kycStatus === 'VERIFIED' || kycStatus === 'PENDING';
+  // Is KYC locked (verified, approved, or pending verification)
+  const isKycLocked =
+    isKycSubmitted ||
+    kycStatus?.toUpperCase() === 'VERIFIED' ||
+    kycStatus?.toUpperCase() === 'APPROVED' ||
+    kycStatus?.toUpperCase() === 'PENDING' ||
+    profile?.kyc_status?.toLowerCase() === 'approved' ||
+    Boolean(profile?.is_kyc_locked);
 
   // Filtered lists for search selectors
   const filteredCountries = useMemo(() => {
@@ -895,54 +901,43 @@ export default function SettingsPage() {
       notify('error', 'Please select your regional country.');
       return;
     }
-    if (!kycDocNumber.trim()) {
-      notify('error', 'Please enter your document identification number.');
-      return;
-    }
     if (!kycStreet.trim() || !kycCity.trim()) {
       notify('error', 'Please enter your street address and city.');
-      return;
-    }
-    if (!frontDocFile && !frontDocName) {
-      notify('error', 'Please attach the front scan of your identification document.');
       return;
     }
 
     setSubmittingKyc(true);
     try {
-      const res = await fetch('/api/user/settings', {
-        method: 'PATCH',
+      const fullAddress = `${kycStreet.trim()}, ${kycCity.trim()} ${kycPostalCode.trim()}`.trim();
+      const res = await fetch('/api/kyc/initiate', {
+        method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          field: 'kyc_submission',
-          data: {
-            country: kycCountry,
-            documentType: kycDocType,
-            documentNumber: kycDocNumber,
-            street: kycStreet,
-            city: kycCity,
-            postalCode: kycPostalCode,
-            frontDocName: frontDocName || 'front_id.jpg',
-            backDocName: backDocName || 'back_id.jpg',
-            submittedAt: new Date().toISOString(),
-          },
+          userId: user?.id,
+          country: kycCountry,
+          address: fullAddress,
         }),
       });
 
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Failed to submit verification');
+      if (!res.ok) throw new Error(data.error || 'Failed to initiate Didit verification session');
 
       setIsKycSubmitted(true);
       setKycStatus('PENDING');
       setProfile((prev: any) => ({
         ...prev,
-        kyc_status: 'PENDING',
+        kyc_status: 'pending',
         country: kycCountry,
+        address: fullAddress,
       }));
 
-      notify('success', 'Documents permanently submitted and saved for Tier 2 verification.');
+      notify('success', 'Address saved. Launching Didit biometric identity verification...');
+
+      if (data.url) {
+        window.location.href = data.url;
+      }
     } catch (err: any) {
-      notify('error', err.message || 'Error submitting identification documents.');
+      notify('error', err.message || 'Error initiating verification.');
     } finally {
       setSubmittingKyc(false);
     }
@@ -2754,76 +2749,36 @@ export default function SettingsPage() {
                         </div>
                       </div>
 
-                      {/* File Upload Scans */}
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-2">
-                        {/* Front Doc */}
-                        <div className="p-4 rounded-xl border border-dashed border-border bg-secondary/30 space-y-2 text-center">
-                          <input
-                            type="file"
-                            ref={frontDocInputRef}
-                            onChange={handleFrontDocSelected}
-                            accept="image/*,.pdf"
-                            className="hidden"
-                          />
-                          <p className="text-xs font-bold text-foreground">
-                            Front Side of Document <span className="text-rose-500">*</span>
-                          </p>
-                          {frontDocPreview ? (
-                            <div className="relative mx-auto w-32 h-20 rounded-lg overflow-hidden border border-border">
-                              <img src={frontDocPreview} alt="Front ID" className="w-full h-full object-cover" />
-                            </div>
-                          ) : (
-                            <Upload className="w-6 h-6 text-primary mx-auto" />
-                          )}
-                          <p className="text-[11px] text-muted-foreground truncate">
-                            {frontDocName || 'Front of ID or Passport'}
-                          </p>
-                          <button
-                            type="button"
-                            onClick={() => frontDocInputRef.current?.click()}
-                            className="text-xs font-semibold px-3 py-1 rounded-lg bg-secondary text-secondary-foreground hover:bg-secondary/80 transition-colors cursor-pointer"
-                          >
-                            {frontDocName ? 'Change Front File' : 'Select Front File'}
-                          </button>
+                      {/* Biometric & Identity Verification Flow (No file upload on PaxOnes) */}
+                      <div className="p-4 rounded-xl border border-primary/20 bg-primary/5 space-y-3">
+                        <div className="flex items-center gap-2 text-xs font-bold text-foreground">
+                          <ShieldCheck className="w-4 h-4 text-primary" />
+                          <span>Automated Biometric & ID Verification Powered by Didit</span>
                         </div>
-
-                        {/* Back Doc */}
-                        <div className="p-4 rounded-xl border border-dashed border-border bg-secondary/30 space-y-2 text-center">
-                          <input
-                            type="file"
-                            ref={backDocInputRef}
-                            onChange={handleBackDocSelected}
-                            accept="image/*,.pdf"
-                            className="hidden"
-                          />
-                          <p className="text-xs font-bold text-foreground">
-                            Back Side / Address Proof
-                          </p>
-                          {backDocPreview ? (
-                            <div className="relative mx-auto w-32 h-20 rounded-lg overflow-hidden border border-border">
-                              <img src={backDocPreview} alt="Back ID" className="w-full h-full object-cover" />
-                            </div>
-                          ) : (
-                            <Upload className="w-6 h-6 text-primary mx-auto" />
-                          )}
-                          <p className="text-[11px] text-muted-foreground truncate">
-                            {backDocName || 'Back of card (optional for passport)'}
-                          </p>
-                          <button
-                            type="button"
-                            onClick={() => backDocInputRef.current?.click()}
-                            className="text-xs font-semibold px-3 py-1 rounded-lg bg-secondary text-secondary-foreground hover:bg-secondary/80 transition-colors cursor-pointer"
-                          >
-                            {backDocName ? 'Change Back File' : 'Select Back File'}
-                          </button>
+                        <p className="text-xs text-muted-foreground leading-relaxed">
+                          For bank-grade security and fraud prevention, PaxOnes does not store or process raw document file uploads on our servers. Your government-issued ID, 3D biometric liveness, and face match are verified live in an encrypted Didit verification session.
+                        </p>
+                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 pt-1">
+                          <div className="p-2.5 rounded-lg border border-border bg-background flex items-center gap-2">
+                            <span className="w-2 h-2 rounded-full bg-emerald-500 shrink-0" />
+                            <span className="text-[11px] font-medium text-foreground">1. ID Document Scan</span>
+                          </div>
+                          <div className="p-2.5 rounded-lg border border-border bg-background flex items-center gap-2">
+                            <span className="w-2 h-2 rounded-full bg-emerald-500 shrink-0" />
+                            <span className="text-[11px] font-medium text-foreground">2. 3D Liveness Detection</span>
+                          </div>
+                          <div className="p-2.5 rounded-lg border border-border bg-background flex items-center gap-2">
+                            <span className="w-2 h-2 rounded-full bg-emerald-500 shrink-0" />
+                            <span className="text-[11px] font-medium text-foreground">3. Biometric Face Match</span>
+                          </div>
                         </div>
                       </div>
 
                       {/* Permanent Save Notice */}
-                      <div className="p-3.5 rounded-xl bg-primary/10 border border-primary/20 flex items-start gap-2.5 text-xs text-foreground">
+                      <div className="p-3.5 rounded-xl bg-secondary/60 border border-border flex items-start gap-2.5 text-xs text-foreground">
                         <Info className="w-4 h-4 shrink-0 text-primary mt-0.5" />
                         <span>
-                          <strong>Permanent Save Policy:</strong> After submitting your regional country and identification documents, this verification data is permanently saved and locked for your account compliance.
+                          <strong>Verification Policy:</strong> Submitting your residential address initiates your biometric verification. Once approved by Didit, your legal name and date of birth are permanently saved and locked for regulatory compliance.
                         </span>
                       </div>
 
@@ -2839,7 +2794,7 @@ export default function SettingsPage() {
                           ) : (
                             <ShieldCheck className="w-4 h-4" />
                           )}
-                          <span>Submit Identification Documents (Permanent Save)</span>
+                          <span>Save Address & Launch Biometric Verification</span>
                         </button>
                       </div>
                     </form>

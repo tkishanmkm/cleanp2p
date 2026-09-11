@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import speakeasy from 'speakeasy';
+import { verify2FAOTP } from '@/lib/2fa';
 import { createClient } from '@/lib/supabase/server';
 import { getSupabaseAdminClient } from '@/lib/supabase/server';
 
@@ -12,31 +12,29 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    const { token } = await req.json();
+    const { token, code, totpCode } = await req.json();
+    const rawToken = token || code || totpCode;
 
-    if (!token) {
+    if (!rawToken) {
       return NextResponse.json({ error: 'Current OTP code is required to disable 2FA' }, { status: 400 });
     }
 
     const adminClient = getSupabaseAdminClient();
     const { data: profile } = await adminClient
       .from('profiles')
-      .select('two_factor_secret, is_2fa_enabled')
+      .select('two_factor_secret, is_2fa_enabled, is_mfa_enabled')
       .eq('id', user.id)
       .single();
 
-    if (!profile?.two_factor_secret) {
+    const is2FAEnabled = Boolean(profile?.is_2fa_enabled || profile?.is_mfa_enabled);
+
+    if (!is2FAEnabled || !profile?.two_factor_secret) {
       return NextResponse.json({ error: '2FA is not currently enabled' }, { status: 400 });
     }
 
-    const cleanToken = token.toString().replace(/\s+/g, '').trim();
+    const cleanToken = rawToken.toString().replace(/\s+/g, '').trim();
 
-    const isVerified = speakeasy.totp.verify({
-      secret: profile.two_factor_secret,
-      encoding: 'base32',
-      token: cleanToken,
-      window: 2,
-    });
+    const isVerified = verify2FAOTP(profile.two_factor_secret, cleanToken, true);
 
     if (!isVerified) {
       return NextResponse.json({ error: 'Invalid authenticator code' }, { status: 400 });

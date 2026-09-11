@@ -28,6 +28,12 @@ export function AuthForm({ mode }: AuthFormProps) {
   const [suspensionDetails, setSuspensionDetails] = useState('');
   const [signupSuccess, setSignupSuccess] = useState(false);
 
+  // Dynamic URL helper for OAuth callback redirection
+  const getURL = () => {
+    let url = process.env.NEXT_PUBLIC_SITE_URL ?? 'https://paxones.com';
+    return url.endsWith('/') ? url : `${url}/`;
+  };
+
   // Social OAuth Handler (Google & Discord)
   const handleOAuthSignIn = async (provider: 'google' | 'discord') => {
     setErrorMsg('');
@@ -35,11 +41,10 @@ export function AuthForm({ mode }: AuthFormProps) {
     setLoadingOAuth(provider);
 
     try {
-      const redirectUrl = `${typeof window !== 'undefined' ? window.location.origin : ''}/api/auth/callback`;
       const { data, error } = await supabase.auth.signInWithOAuth({
         provider,
         options: {
-          redirectTo: redirectUrl,
+          redirectTo: `${getURL()}auth/callback`,
         },
       });
 
@@ -142,7 +147,7 @@ export function AuthForm({ mode }: AuthFormProps) {
               dob: dob.trim(),
               date_of_birth: dob.trim(),
             },
-            emailRedirectTo: `${window.location.origin}/api/auth/callback`,
+            emailRedirectTo: `${getURL()}auth/callback`,
           },
         });
 

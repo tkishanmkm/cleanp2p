@@ -29,6 +29,15 @@ export function toDate(timestamp: any): Date | null {
 // Username Regex Pattern: 5 to 25 characters, lowercase letters, numbers, periods (.), and underscores (_)
 export const USERNAME_REGEX = /^[a-z0-9._]{5,25}$/;
 
+/**
+ * Dynamic URL helper ensuring local testing stays on localhost while production resolves to paxones.com
+ */
+export const getURL = () => {
+  let url = process.env.NEXT_PUBLIC_SITE_URL ?? 'https://paxones.com';
+  return url.endsWith('/') ? url : `${url}/`;
+};
+
+
 export function isValidUsername(username: string): boolean {
   return USERNAME_REGEX.test(username);
 }
