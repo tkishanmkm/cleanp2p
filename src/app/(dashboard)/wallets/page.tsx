@@ -17,7 +17,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { DepositDialog } from '@/components/wallets/deposit-dialog';
 import { WithdrawDialog } from '@/components/wallets/withdraw-dialog';
 import { BtcLogo, EthLogo, LtcLogo, UsdtLogo } from '@/components/icons';
-import { cancelWithdrawalRequest, getUserWalletBalances } from '@/lib/wallet';
+import { getUserWalletBalances } from '@/lib/wallet';
 import { getUserDeposits, getUserWithdrawals, type DepositRecord, type WithdrawalRecord } from '@/lib/supabase/db';
 import { supabase } from '@/lib/supabase/client';
 import { SUPPORTED_CRYPTOS } from '@/lib/constants';
@@ -55,6 +55,7 @@ interface DisplayWithdrawal {
   crypto: CryptoCurrency;
   chain: string;
   amount: number;
+  gasFee: number;
   status: string;
   createdAt: Date | string | null;
   address?: string;
@@ -185,6 +186,7 @@ function WithdrawalsHistory({
           crypto: w.asset_code as CryptoCurrency,
           chain: w.network_code,
           amount: Number(w.amount),
+          gasFee: Number(w.network_fee ?? 0),
           status: w.status,
           createdAt: w.created_at,
           address: w.destination_address,
@@ -426,19 +428,6 @@ export default function WalletPage() {
     setIsDetailsOpen(true);
   };
 
-  const handleCancelWithdrawal = async (withdrawal: DisplayWithdrawal) => {
-    if (!user || !withdrawal) return;
-    try {
-      await cancelWithdrawalRequest(null, user.uid, withdrawal.id);
-      toast({ title: 'Withdrawal Cancelled' });
-      setIsDetailsOpen(false);
-      loadBalances();
-      refreshBalances();
-    } catch (e: any) {
-      toast({ variant: 'destructive', title: 'Cancellation Failed', description: e?.message || 'Failed to cancel' });
-    }
-  };
-
   if (isUserLoading || (!user && typeof window !== 'undefined')) {
     return (
       <div className="flex flex-1 items-center justify-center min-h-[300px]">
@@ -597,53 +586,72 @@ export default function WalletPage() {
       </Card>
 
       <Dialog open={isDetailsOpen} onOpenChange={setIsDetailsOpen}>
-        <DialogContent>
+        <DialogContent className="max-w-md">
           <DialogHeader>
             <DialogTitle>Transaction Details</DialogTitle>
           </DialogHeader>
           {selectedTx && (
-            <div className="space-y-2 text-sm">
-              <div className="flex justify-between">
-                <span className="text-muted-foreground">Type:</span>{' '}
-                <span>{'walletAddress' in selectedTx || 'txid' in selectedTx ? 'Deposit' : 'Withdrawal'}</span>
+            <div className="space-y-3 text-sm divide-y divide-border/60">
+              <div className="flex justify-between pt-1">
+                <span className="text-muted-foreground">Receipt Address:</span>
+                <span className="font-mono text-xs break-all text-right max-w-[220px]">
+                  {'walletAddress' in selectedTx
+                    ? selectedTx.walletAddress || 'N/A'
+                    : (selectedTx as DisplayWithdrawal).address || 'N/A'}
+                </span>
               </div>
-              <div className="flex justify-between">
-                <span className="text-muted-foreground">Amount:</span>{' '}
-                <span className="font-medium">
+              <div className="flex justify-between pt-2">
+                <span className="text-muted-foreground">Time:</span>
+                <span className="text-xs">
+                  {selectedTx.createdAt ? new Date(selectedTx.createdAt).toLocaleString() : 'N/A'}
+                </span>
+              </div>
+              <div className="flex justify-between pt-2">
+                <span className="text-muted-foreground">Amount:</span>
+                <span className="font-semibold font-mono">
                   {selectedTx.amount} {selectedTx.crypto}
                 </span>
               </div>
-              <div className="flex justify-between">
-                <span className="text-muted-foreground">Status:</span> <Badge variant="outline">{selectedTx.status}</Badge>
+              <div className="flex justify-between pt-2">
+                <span className="text-muted-foreground">Coin:</span>
+                <span className="font-medium">{selectedTx.crypto} ({selectedTx.chain})</span>
               </div>
-              <div className="flex justify-between">
-                <span className="text-muted-foreground">Network:</span> <span>{selectedTx.chain}</span>
+              <div className="flex justify-between pt-2">
+                <span className="text-muted-foreground">Gas Fee:</span>
+                <span className="font-mono">
+                  {'gasFee' in selectedTx
+                    ? `${(selectedTx as DisplayWithdrawal).gasFee} ${selectedTx.crypto}`
+                    : 'Network Included'}
+                </span>
               </div>
-              {('walletAddress' in selectedTx || 'address' in selectedTx) && (
-                <div className="flex justify-between items-start gap-4">
-                  <span className="text-muted-foreground">Address:</span>
-                  <span className="font-mono text-xs break-all text-right">
-                    {'walletAddress' in selectedTx ? selectedTx.walletAddress : (selectedTx as DisplayWithdrawal).address}
-                  </span>
-                </div>
-              )}
+              <div className="flex justify-between pt-2">
+                <span className="text-muted-foreground">Status:</span>
+                <Badge
+                  variant="outline"
+                  className={cn('capitalize text-xs', statusColors[selectedTx.status] || 'bg-muted text-muted-foreground')}
+                >
+                  {depositStatusText[selectedTx.status] || selectedTx.status}
+                </Badge>
+              </div>
               {selectedTx.txid && (
-                <div className="flex justify-between items-start gap-4">
+                <div className="flex justify-between pt-2">
                   <span className="text-muted-foreground">TxID:</span>
-                  <span className="font-mono text-xs break-all text-right">{selectedTx.txid}</span>
+                  <span className="font-mono text-xs break-all text-right max-w-[220px] text-muted-foreground">
+                    {selectedTx.txid}
+                  </span>
                 </div>
               )}
             </div>
           )}
-          {selectedTx && 'address' in selectedTx && selectedTx.status === 'pending' && (
+          <div className="mt-4 flex justify-end">
             <Button
-              variant="destructive"
-              className="w-full mt-4"
-              onClick={() => handleCancelWithdrawal(selectedTx as DisplayWithdrawal)}
+              variant="outline"
+              className="w-full"
+              onClick={() => setIsDetailsOpen(false)}
             >
-              Cancel Withdrawal
+              Close
             </Button>
-          )}
+          </div>
         </DialogContent>
       </Dialog>
     </>

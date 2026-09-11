@@ -127,7 +127,51 @@ export async function POST(request: NextRequest) {
       ? body.payment_methods
       : (Array.isArray(body.paymentMethods) ? body.paymentMethods : ['Bank Transfer']);
 
-    // Standard base table payload for `public.ads`
+    // BALANCE VALIDATION: If user is creating a SELL ad (offering to sell coin), check that minimum limit in coin is present in their account
+    if (adSide === 'SELL') {
+      const adminClient = getSupabaseAdminClient();
+      let availableBalance = 0;
+
+      try {
+        const { data: walletData } = await adminClient
+          .from('user_wallets')
+          .select('available_balance, balance, locked_balance')
+          .eq('user_id', user.id)
+          .ilike('asset_symbol', coinType)
+          .maybeSingle();
+
+        if (walletData) {
+          availableBalance = Number(walletData.available_balance ?? (Number(walletData.balance || 0) - Number(walletData.locked_balance || 0)));
+        } else {
+          // Check profiles table column fallback (e.g. usdt_balance, btc_balance)
+          const { data: prof } = await adminClient
+            .from('profiles')
+            .select('*')
+            .eq('id', user.id)
+            .maybeSingle();
+          if (prof) {
+            const col = `${coinType.toLowerCase()}_balance`;
+            if (prof[col] !== undefined) {
+              availableBalance = Number(prof[col] || 0);
+            }
+          }
+        }
+      } catch (balErr) {
+        console.warn('Balance check error during ad creation:', balErr);
+      }
+
+      const effectiveUnitPrice = priceVal && priceVal > 0 ? priceVal : 1;
+      const minCoinRequired = requestedMin / effectiveUnitPrice;
+
+      if (availableBalance < minCoinRequired) {
+        return NextResponse.json({
+          error: `Insufficient ${coinType} balance. You must have at least ${minCoinRequired.toFixed(6)} ${coinType} in your wallet to create a sell offer with a minimum limit of ${requestedMin} ${fiatType}. Current available: ${availableBalance.toFixed(6)} ${coinType}.`,
+          code: 'INSUFFICIENT_BALANCE',
+        }, { status: 400 });
+      }
+    }
+
+    // Standard base table payload for `public.ads` and `public.p2p_ads`
     const basePayload: Record<string, any> = {
       user_id: user.id,
       type: adSide,

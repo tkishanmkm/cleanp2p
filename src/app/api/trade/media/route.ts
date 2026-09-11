@@ -3,9 +3,9 @@ import { S3Client, GetObjectCommand } from '@aws-sdk/client-s3';
 
 const b2Endpoint = process.env.B2_ENDPOINT || 'https://s3.us-east-005.backblazeb2.com';
 const b2Region = process.env.B2_REGION || 'us-east-005';
-const b2AccessKeyId = process.env.B2_ACCESS_KEY_ID || process.env.B2_KEY_ID || '0056c3cfd0f3f020000000001';
-const b2SecretAccessKey = process.env.B2_SECRET_ACCESS_KEY || process.env.B2_APP_KEY || 'K0050OvwcFMBcdIqGMNBFYB0UNjWCwY';
-const b2Bucket = process.env.B2_BUCKET_NAME || 'thepax';
+const b2AccessKeyId = process.env.B2_ACCESS_KEY_ID || process.env.B2_KEY_ID || '';
+const b2SecretAccessKey = process.env.B2_SECRET_ACCESS_KEY || process.env.B2_APP_KEY || process.env.B2_APPLICATION_KEY || '';
+const b2Bucket = process.env.B2_BUCKET_NAME || '';
 
 const s3Client = new S3Client({
   endpoint: b2Endpoint,

@@ -3,7 +3,17 @@ import { Header } from "@/components/layout/header";
 import { Footer } from "@/components/layout/footer";
 import { BuySellForm } from "@/components/home/buy-sell-form";
 import { HomeSignupForm } from "@/components/home/home-signup-form";
-import { CheckCircle, Globe, Gavel, Lock, MessageSquare, Search, ShieldCheck, UserPlus, Users, Landmark } from 'lucide-react';
+import { 
+  HdUserRegisterIcon, 
+  HdMarketSearchIcon, 
+  HdPeerChatIcon, 
+  HdSettlementSealIcon, 
+  HdDirectTradingIcon, 
+  HdGlobalPaymentsIcon, 
+  HdTotalControlIcon, 
+  HdEscrowVaultIcon, 
+  HdDisputeMatrixIcon 
+} from '@/components/hd-nav-icons';
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { BtcLogo, EthLogo, LtcLogo, UsdtLogo } from '@/components/icons';
 import { SUPPORTED_CRYPTOS } from "@/lib/constants";
@@ -80,7 +90,7 @@ export default function Home() {
                   <CardHeader>
                       <div className="flex items-center gap-4">
                           <div className="bg-primary/10 text-primary p-3 rounded-full">
-                              <UserPlus className="h-6 w-6" />
+                              <HdUserRegisterIcon className="h-6 w-6" />
                           </div>
                           <h3 className="text-xl font-semibold">{t('home.step1Title')}</h3>
                       </div>
@@ -95,7 +105,7 @@ export default function Home() {
                   <CardHeader>
                       <div className="flex items-center gap-4">
                           <div className="bg-primary/10 text-primary p-3 rounded-full">
-                              <Search className="h-6 w-6" />
+                              <HdMarketSearchIcon className="h-6 w-6" />
                           </div>
                           <h3 className="text-xl font-semibold">{t('home.step2Title')}</h3>
                       </div>
@@ -110,7 +120,7 @@ export default function Home() {
                   <CardHeader>
                       <div className="flex items-center gap-4">
                           <div className="bg-primary/10 text-primary p-3 rounded-full">
-                              <MessageSquare className="h-6 w-6" />
+                              <HdPeerChatIcon className="h-6 w-6" />
                           </div>
                           <h3 className="text-xl font-semibold">{t('home.step3Title')}</h3>
                       </div>
@@ -125,7 +135,7 @@ export default function Home() {
                   <CardHeader>
                       <div className="flex items-center gap-4">
                           <div className="bg-primary/10 text-primary p-3 rounded-full">
-                              <CheckCircle className="h-6 w-6" />
+                              <HdSettlementSealIcon className="h-6 w-6" />
                           </div>
                           <h3 className="text-xl font-semibold">{t('home.step4Title')}</h3>
                       </div>
@@ -153,7 +163,7 @@ export default function Home() {
                 <Card className="bg-card border-border shadow-xs">
                     <CardHeader>
                         <div className="bg-primary/10 text-primary p-3 rounded-full w-max">
-                            <Users className="h-8 w-8" />
+                            <HdDirectTradingIcon className="h-8 w-8" />
                         </div>
                         <CardTitle className="mt-4">{t('home.directTradingTitle')}</CardTitle>
                     </CardHeader>
@@ -164,7 +174,7 @@ export default function Home() {
                 <Card className="bg-card border-border shadow-xs">
                     <CardHeader>
                         <div className="bg-primary/10 text-primary p-3 rounded-full w-max">
-                            <Landmark className="h-8 w-8" />
+                            <HdGlobalPaymentsIcon className="h-8 w-8" />
                         </div>
                         <CardTitle className="mt-4">{t('home.globalPaymentsTitle')}</CardTitle>
                     </CardHeader>
@@ -175,7 +185,7 @@ export default function Home() {
                 <Card className="bg-card border-border shadow-xs">
                     <CardHeader>
                         <div className="bg-primary/10 text-primary p-3 rounded-full w-max">
-                            <Globe className="h-8 w-8" />
+                            <HdTotalControlIcon className="h-8 w-8" />
                         </div>
                         <CardTitle className="mt-4">{t('home.controlTitle')}</CardTitle>
                     </CardHeader>
@@ -201,7 +211,7 @@ export default function Home() {
                     <CardHeader>
                         <div className="flex items-center gap-4">
                             <div className="bg-primary/10 text-primary p-3 rounded-full">
-                                <Lock className="h-6 w-6" />
+                                <HdEscrowVaultIcon className="h-6 w-6" />
                             </div>
                             <h3 className="text-xl font-semibold">{t('home.escrowTitle')}</h3>
                         </div>
@@ -216,7 +226,7 @@ export default function Home() {
                     <CardHeader>
                         <div className="flex items-center gap-4">
                             <div className="bg-primary/10 text-primary p-3 rounded-full">
-                                <Gavel className="h-6 w-6" />
+                                <HdDisputeMatrixIcon className="h-6 w-6" />
                             </div>
                             <h3 className="text-xl font-semibold">{t('home.disputeTitle')}</h3>
                         </div>

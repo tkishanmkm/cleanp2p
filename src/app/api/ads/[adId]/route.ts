@@ -1,4 +1,4 @@
-import { createClient } from '@/utils/supabase/server';
+import { createClient, getSupabaseAdminClient } from '@/utils/supabase/server';
 import { NextRequest, NextResponse } from 'next/server';
 
 export const dynamic = 'force-dynamic';
@@ -209,18 +209,15 @@ export async function DELETE(
   try {
     const rawParams = await Promise.resolve(context.params);
     const adId = rawParams.adId;
-    const supabase = await createClient();
+    const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(adId);
+    const admin = getSupabaseAdminClient();
 
-    // Soft delete or mark inactive
-    await supabase
-      .from('p2p_ads')
-      .update({ active: false, status: 'INACTIVE' })
-      .eq('id', adId);
-
-    await supabase
-      .from('ads')
-      .update({ status: 'INACTIVE' })
-      .eq('id', adId);
+    if (isUuid) {
+      await admin.from('p2p_ads').delete().eq('id', adId);
+      await admin.from('ads').delete().eq('id', adId);
+    } else {
+      await admin.from('p2p_ads').delete().or(`public_ad_id.eq.${adId},public_id.eq.${adId},id.eq.${adId}`);
+    }
 
     return NextResponse.json({ success: true, message: 'Ad deleted successfully.' });
   } catch (err: any) {
@@ -235,23 +232,31 @@ export async function PATCH(
   try {
     const rawParams = await Promise.resolve(context.params);
     const adId = rawParams.adId;
+    const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(adId);
     const body = await request.json();
-    const supabase = await createClient();
+    const admin = getSupabaseAdminClient();
 
-    const newStatus = body.status;
-    const isActive = newStatus === 'ACTIVE';
+    const newStatus = body.status || (body.active ? 'ACTIVE' : 'INACTIVE');
+    const isActive = newStatus === 'ACTIVE' || Boolean(body.active);
 
-    await supabase
-      .from('p2p_ads')
-      .update({ active: isActive, status: newStatus })
-      .eq('id', adId);
+    if (isUuid) {
+      await admin
+        .from('p2p_ads')
+        .update({ active: isActive, status: newStatus, updated_at: new Date().toISOString() })
+        .eq('id', adId);
 
-    await supabase
-      .from('ads')
-      .update({ status: newStatus })
-      .eq('id', adId);
+      await admin
+        .from('ads')
+        .update({ status: newStatus, is_active: isActive, updated_at: new Date().toISOString() })
+        .eq('id', adId);
+    } else {
+      await admin
+        .from('p2p_ads')
+        .update({ active: isActive, status: newStatus, updated_at: new Date().toISOString() })
+        .or(`public_ad_id.eq.${adId},public_id.eq.${adId}`);
+    }
 
-    return NextResponse.json({ success: true, status: newStatus });
+    return NextResponse.json({ success: true, status: newStatus, active: isActive });
   } catch (err: any) {
     return NextResponse.json({ error: err.message || 'Failed to update ad' }, { status: 500 });
   }

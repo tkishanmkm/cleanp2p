@@ -3,7 +3,18 @@
 
 import Link from "next/link";
 import { useState } from "react";
-import { Globe, Menu, ChevronDown, ArrowDownToLine, ArrowUpFromLine, PlusCircle, BookOpen, FileText, Shield, HelpCircle, User, Settings, LayoutDashboard, LogOut, Wallet } from "lucide-react";
+import { Globe, Menu, ChevronDown, User, Settings, LogOut, Wallet } from "lucide-react";
+import { 
+  HdBuyCoinIcon, 
+  HdSellCoinIcon, 
+  HdCreateAdIcon, 
+  HdGuideBookIcon, 
+  HdTermsPolicyIcon, 
+  HdSecurityShieldIcon, 
+  HdSupportIcon, 
+  HdDashboardIcon,
+  HdWalletsIcon 
+} from "@/components/hd-nav-icons";
 import { Button } from "@/components/ui/button";
 import { Logo } from "@/components/logo";
 import {
@@ -156,20 +167,20 @@ export function Header() {
               <DropdownMenuContent>
                 <DropdownMenuGroup>
                     <DropdownMenuItem asChild>
-                        <Link href="/buy">
-                            <ArrowDownToLine />
+                        <Link href="/buy" className="flex items-center gap-2">
+                            <HdBuyCoinIcon className="h-4 w-4 text-[#9273FC]" />
                             Buy Coin
                         </Link>
                     </DropdownMenuItem>
                     <DropdownMenuItem asChild>
-                        <Link href="/sell">
-                            <ArrowUpFromLine />
+                        <Link href="/sell" className="flex items-center gap-2">
+                            <HdSellCoinIcon className="h-4 w-4 text-[#9273FC]" />
                             Sell Coin
                         </Link>
                     </DropdownMenuItem>
                     <DropdownMenuItem asChild>
-                        <Link href="/ads/create">
-                            <PlusCircle />
+                        <Link href="/ads/create" className="flex items-center gap-2">
+                            <HdCreateAdIcon className="h-4 w-4 text-[#9273FC]" />
                             Create Ad
                         </Link>
                     </DropdownMenuItem>
@@ -192,26 +203,26 @@ export function Header() {
               <DropdownMenuContent>
                 <DropdownMenuGroup>
                   <DropdownMenuItem asChild>
-                    <Link href="/faq">
-                      <HelpCircle />
+                    <Link href="/faq" className="flex items-center gap-2">
+                      <HdSupportIcon className="h-4 w-4 text-[#9273FC]" />
                       FAQ
                     </Link>
                   </DropdownMenuItem>
                   <DropdownMenuItem asChild>
-                    <Link href="/guides">
-                      <BookOpen />
+                    <Link href="/guides" className="flex items-center gap-2">
+                      <HdGuideBookIcon className="h-4 w-4 text-[#9273FC]" />
                       Trading Guides
                     </Link>
                   </DropdownMenuItem>
                   <DropdownMenuItem asChild>
-                    <Link href="/terms">
-                      <FileText />
+                    <Link href="/terms" className="flex items-center gap-2">
+                      <HdTermsPolicyIcon className="h-4 w-4 text-[#9273FC]" />
                       Terms of Service
                     </Link>
                   </DropdownMenuItem>
                   <DropdownMenuItem asChild>
-                    <Link href="/policy">
-                      <Shield />
+                    <Link href="/policy" className="flex items-center gap-2">
+                      <HdSecurityShieldIcon className="h-4 w-4 text-[#9273FC]" />
                       Privacy Policy
                     </Link>
                   </DropdownMenuItem>
@@ -323,7 +334,7 @@ export function Header() {
                     </div>
                   </div>
                   <DropdownMenuItem asChild>
-                    <Link href="/dashboard"><LayoutDashboard className="mr-2 h-4 w-4" /><span>Dashboard</span></Link>
+                    <Link href="/dashboard" className="flex items-center gap-2"><HdDashboardIcon className="h-4 w-4 text-[#9273FC]" /><span>Dashboard</span></Link>
                   </DropdownMenuItem>
                    <DropdownMenuItem asChild>
                     <Link href="/profile"><User className="mr-2 h-4 w-4" /><span>Profile</span></Link>

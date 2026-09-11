@@ -100,7 +100,7 @@ export default function PolicyPage() {
               <div>
                 <h3 className="text-base font-semibold text-slate-900 dark:text-white mb-2">1.3 KYC and Identity Verification Information</h3>
                 <p className="mb-2">
-                  Where identity verification is required, Paxones may use third-party identity-verification providers, including <strong>Didit</strong>, to conduct KYC and related verification procedures.
+                  Where identity verification is required, Paxones may use authorized third-party identity verification providers to conduct KYC and related verification procedures.
                 </p>
                 <p className="mb-2">Depending on the verification process, information may include:</p>
                 <ul className="list-disc pl-5 space-y-1 text-slate-600 dark:text-slate-400">
@@ -318,7 +318,7 @@ export default function PolicyPage() {
             <div className="space-y-3 pl-2">
               <div>
                 <h4 className="font-semibold text-slate-900 dark:text-white">Service Providers and Data Processors</h4>
-                <p className="text-slate-600 dark:text-slate-400">We may share Personal Data with trusted service providers that process information on our behalf, including providers supporting cloud and database infrastructure, identity verification, KYC and compliance, security and fraud prevention, data storage, media storage, customer support, communications, and technical operations (e.g., Supabase, Didit, Backblaze S3).</p>
+                <p className="text-slate-600 dark:text-slate-400">We may share Personal Data with trusted service providers that process information on our behalf, including providers supporting cloud and database infrastructure, identity verification services, KYC and compliance, security and fraud prevention, secure cloud storage, customer support, communications, and technical operations.</p>
               </div>
               <div>
                 <h4 className="font-semibold text-slate-900 dark:text-white">Legal and Regulatory Requests</h4>

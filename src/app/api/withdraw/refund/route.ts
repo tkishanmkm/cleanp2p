@@ -107,8 +107,7 @@ async function fallbackProcessFailedWithdrawal(withdrawalId: string, reason: str
 export async function POST(req: Request) {
   const expectedSecret =
     process.env.WORKER_SECRET?.trim() ||
-    process.env.WITHDRAWAL_WORKER_SECRET?.trim() ||
-    process.env.NEXT_PUBLIC_WITHDRAWAL_WORKER_SECRET?.trim();
+    process.env.WITHDRAWAL_WORKER_SECRET?.trim();
 
   const secret =
     req.headers.get('x-worker-secret') ||

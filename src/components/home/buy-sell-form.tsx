@@ -13,6 +13,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { BtcLogo, EthLogo, LtcLogo, UsdtLogo } from '@/components/icons';
+import { HdMarketSearchIcon } from '@/components/hd-nav-icons';
 import { 
   Search, 
   Landmark, 
@@ -245,7 +246,7 @@ function FormContent({ type }: { type: 'buy' | 'sell' }) {
             className="w-full h-12 text-base font-bold rounded-xl shadow-lg text-white transition-all duration-200 flex items-center justify-center gap-2 group cursor-pointer bg-[#6347ea] hover:bg-[#5238d6] shadow-[#6347ea]/30"
             size="lg"
           >
-            <Search className="h-5 w-5 transition-transform group-hover:scale-110" />
+            <HdMarketSearchIcon className="h-5 w-5 transition-transform group-hover:scale-110" />
             <span>{type === 'buy' ? 'Find Buy Offers' : 'Find Sell Offers'}</span>
           </Button>
         </div>

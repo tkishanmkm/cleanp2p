@@ -56,20 +56,24 @@ export function WithdrawalHistoryItem({ item }: { item: WithdrawalRecord }) {
             
             <div className="space-y-3 text-sm">
               <div className="flex justify-between border-b pb-2">
-                <span className="text-slate-500">Receipt Time</span>
-                <span className="text-slate-900">{new Date(item.created_at).toLocaleString()}</span>
+                <span className="text-slate-500">Receipt Address</span>
+                <span className="text-slate-900 font-mono text-xs break-all text-right max-w-[220px]">{item.to_address}</span>
               </div>
               <div className="flex justify-between border-b pb-2">
-                <span className="text-slate-500">Recipient Address</span>
-                <span className="text-slate-900 font-mono text-xs break-all">{item.to_address}</span>
+                <span className="text-slate-500">Time</span>
+                <span className="text-slate-900 text-xs">{new Date(item.created_at).toLocaleString()}</span>
               </div>
               <div className="flex justify-between border-b pb-2">
                 <span className="text-slate-500">Amount</span>
                 <span className="text-slate-900 font-semibold">{item.amount} {item.currency}</span>
               </div>
               <div className="flex justify-between border-b pb-2">
-                <span className="text-slate-500">Gas Fee (2x Charged)</span>
-                <span className="text-slate-900">{item.estimated_gas_fee} {item.currency}</span>
+                <span className="text-slate-500">Coin</span>
+                <span className="text-slate-900 font-medium">{item.currency}</span>
+              </div>
+              <div className="flex justify-between border-b pb-2">
+                <span className="text-slate-500">Gas Fee</span>
+                <span className="text-slate-900 font-mono">{item.estimated_gas_fee} {item.currency}</span>
               </div>
               <div className="flex justify-between border-b pb-2">
                 <span className="text-slate-500">Status</span>

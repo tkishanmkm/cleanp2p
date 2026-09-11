@@ -3,6 +3,8 @@
 import React, { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabaseClient';
+import { useWallet } from '@/context/wallet-context';
+import { CryptoCurrency } from '@/lib/types';
 import { toast } from 'sonner';
 import { 
   Check, 
@@ -321,6 +323,7 @@ const PAYMENT_CATEGORIES = [
 
 export default function CreateP2PAdPage() {
   const router = useRouter();
+  const { balances } = useWallet();
   const [user, setUser] = useState<any>(null);
   const [authLoading, setAuthLoading] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -593,6 +596,24 @@ export default function CreateP2PAdPage() {
     if (!minAmount || !maxAmount || parseFloat(minAmount) > parseFloat(maxAmount)) {
       toast.error('Invalid trade limits: Minimum amount must be less than maximum amount.');
       return;
+    }
+
+    // BALANCE CHECK: If creating a Sell ad, verify available coin balance against minimum limit
+    const activePricingType = rateType === 'fixed' ? 'FIXED' : 'FLOAT';
+    const activeMarketPrice = currentMarketPrice || getBaseMarketPrice(crypto, fiat.code);
+    const activeMarginPercentage = Number(ratePercent || 1.5);
+    const effectiveAdPrice = activePricingType === 'FLOAT'
+      ? activeMarketPrice * (1 + (activeMarginPercentage / 100))
+      : Number(fixedPrice || 1);
+
+    if (adType === 'sell') {
+      const availableBalance = balances[crypto as CryptoCurrency]?.available || 0;
+      const minCoinRequired = (parseFloat(minAmount || '0') || 0) / (effectiveAdPrice || 1);
+
+      if (availableBalance < minCoinRequired) {
+        toast.error(`Insufficient ${crypto} balance. You need at least ${minCoinRequired.toFixed(6)} ${crypto} to set a minimum limit of ${minAmount} ${fiat.code}. Available: ${availableBalance.toFixed(6)} ${crypto}.`);
+        return;
+      }
     }
 
     setIsSubmitting(true);
@@ -1129,6 +1150,39 @@ export default function CreateP2PAdPage() {
                 </span>
               </div>
             </div>
+
+            {/* Sell Ad Balance Requirement Check */}
+            {adType === 'sell' && (
+              <div className="pt-2">
+                {(() => {
+                  const avail = balances[crypto as CryptoCurrency]?.available || 0;
+                  const reqCoin = (parseFloat(minAmount || '0') || 0) / (calculatedOfferPrice || 1);
+                  const isShort = avail < reqCoin;
+
+                  return (
+                    <div className={`p-3 rounded-lg border text-xs flex items-start gap-2.5 transition ${
+                      isShort
+                        ? 'bg-rose-50 dark:bg-rose-950/30 border-rose-200 dark:border-rose-900/60 text-rose-700 dark:text-rose-300'
+                        : 'bg-emerald-50 dark:bg-emerald-950/30 border-emerald-200 dark:border-emerald-900/60 text-emerald-700 dark:text-emerald-300'
+                    }`}>
+                      <div className="mt-0.5 font-bold">
+                        {isShort ? '⚠️' : '✓'}
+                      </div>
+                      <div className="flex-1 space-y-0.5">
+                        <div className="font-semibold">
+                          {isShort ? 'Insufficient balance for minimum limit' : 'Wallet balance verified'}
+                        </div>
+                        <div className="text-[11px] opacity-90 leading-relaxed">
+                          Your available balance: <span className="font-mono font-bold">{avail.toFixed(6)} {crypto}</span>. 
+                          Minimum required for {minAmount || '0'} {fiat.code}: <span className="font-mono font-bold">{reqCoin.toFixed(6)} {crypto}</span>.
+                          {isShort && ' Please deposit funds or lower your minimum trade limit before publishing.'}
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })()}
+              </div>
+            )}
 
             <div>
               <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">

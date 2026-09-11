@@ -67,7 +67,7 @@ export function KYCVerifyButton({
         throw new Error(data.message || 'Failed to start verification session.');
       }
 
-      // Launch Didit modal if supported; fallback to redirection
+      // Launch verification session; prefer web SDK or fallback to redirection
       const sessionUrl = data.sessionUrl || data.url;
       if (sessionUrl) {
         try {
@@ -83,10 +83,10 @@ export function KYCVerifyButton({
             return;
           }
         } catch (sdkErr) {
-          console.warn('Didit Web SDK modal fallback to redirect:', sdkErr);
+          // Fallback gracefully to direct redirect
         }
 
-        // Redirect user to the Didit verification URL
+        // Direct user to the secure verification session
         window.location.href = sessionUrl;
       } else {
         throw new Error('No session URL returned.');

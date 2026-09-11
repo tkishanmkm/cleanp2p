@@ -14,11 +14,15 @@ export function Footer() {
             Secure, peer-to-peer cryptocurrency trading platform with automated escrow protection.
           </p>
           <div className="pt-2">
-            <span className="block text-slate-500 dark:text-slate-500 font-medium">Contact Us:</span>
+            <span className="block text-slate-500 dark:text-slate-500 font-medium mb-1">Contact Us:</span>
             <a 
               href="mailto:support@paxones.com" 
-              className="text-slate-800 dark:text-slate-200 hover:text-amber-600 dark:hover:text-amber-400 font-mono text-sm underline transition-colors"
+              className="inline-flex items-center gap-1.5 text-slate-800 dark:text-slate-200 hover:text-[#9273FC] dark:hover:text-[#9273FC] font-mono text-sm underline transition-colors"
             >
+              <svg className="h-3.5 w-3.5 text-[#9273FC]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
+                <path d="M12 2.5L20.5 7.5V16.5L12 21.5L3.5 16.5V7.5L12 2.5Z" />
+                <circle cx="12" cy="12" r="2" fill="currentColor" />
+              </svg>
               support@paxones.com
             </a>
           </div>
@@ -40,8 +44,13 @@ export function Footer() {
           <h4 className="text-slate-900 dark:text-white font-semibold mb-3">Support & Help</h4>
           <ul className="space-y-2">
             <li>
-              <a href="mailto:support@paxones.com" className="hover:text-slate-900 dark:hover:text-white transition-colors flex items-center gap-1">
-                📧 Help Desk (support@paxones.com)
+              <a href="mailto:support@paxones.com" className="hover:text-slate-900 dark:hover:text-white transition-colors flex items-center gap-1.5">
+                <svg className="h-3.5 w-3.5 text-[#9273FC]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
+                  <circle cx="12" cy="12" r="9" />
+                  <path d="M8 12C8 9.79 9.79 8 12 8C14.21 8 16 9.79 16 12C16 14.21 14.21 16 12 16" />
+                  <circle cx="12" cy="12" r="1.5" fill="currentColor" />
+                </svg>
+                Help Desk (support@paxones.com)
               </a>
             </li>
             <li><Link href="/faq" className="hover:text-slate-900 dark:hover:text-white transition-colors">FAQ & User Guides</Link></li>
@@ -62,9 +71,9 @@ export function Footer() {
       {/* Footer Bottom Bar */}
       <div className="max-w-7xl mx-auto pt-6 border-t border-slate-200 dark:border-[#1e2640]/50 flex flex-col md:flex-row justify-between items-center gap-4 text-[11px] text-slate-500 dark:text-slate-500">
         <p>© 2026 Paxones™ All rights reserved.</p>
-        <p>
-          Contact Us:{' '}
-          <a href="mailto:support@paxones.com" className="text-slate-700 dark:text-slate-400 hover:underline">
+        <p className="flex items-center gap-1.5">
+          <span>Direct Channel:</span>
+          <a href="mailto:support@paxones.com" className="text-slate-700 dark:text-slate-400 hover:text-[#9273FC] hover:underline flex items-center gap-1 font-mono">
             support@paxones.com
           </a>
         </p>

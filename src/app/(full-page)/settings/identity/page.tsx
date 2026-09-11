@@ -126,7 +126,7 @@ export default function IdentitySettingsPage() {
           </p>
           <label className="cursor-pointer inline-flex items-center gap-2 px-4 py-2 bg-slate-800 hover:bg-slate-700 text-xs font-semibold rounded-lg border border-slate-700 text-emerald-400 transition shadow-xs">
             <UploadCloud className="w-4 h-4" />
-            {uploadingDp ? 'Uploading to B2...' : 'Change DP'}
+            {uploadingDp ? 'Uploading...' : 'Change DP'}
             <input
               type="file"
               accept="image/*"
@@ -145,7 +145,7 @@ export default function IdentitySettingsPage() {
             <h2 className="font-semibold text-lg flex items-center gap-2">
               <ShieldCheck className="w-5 h-5 text-emerald-400" /> KYC Verification
             </h2>
-            <p className="text-xs text-slate-400 mt-0.5">Powered by Didit Identity Verification</p>
+            <p className="text-xs text-slate-400 mt-0.5">Powered by Secure Identity Verification Service</p>
           </div>
           <span
             className={`px-3 py-1 text-xs font-bold rounded-full ${

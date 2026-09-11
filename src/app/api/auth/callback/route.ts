@@ -15,7 +15,18 @@ export async function GET(request: Request) {
   if (code) {
     try {
       const supabase = await createClient();
-      await supabase.auth.exchangeCodeForSession(code);
+      const { data, error: exchangeErr } = await supabase.auth.exchangeCodeForSession(code);
+      if (!exchangeErr && data?.user) {
+        try {
+          await fetch(`${requestUrl.origin}/api/auth/provision-wallets`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ userId: data.user.id }),
+          });
+        } catch (provErr) {
+          console.error('[OAuth Callback] Auto-provisioning notice:', provErr);
+        }
+      }
     } catch (exchangeErr) {
       console.error('Session exchange error:', exchangeErr);
     }

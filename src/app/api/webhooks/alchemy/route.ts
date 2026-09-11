@@ -2,67 +2,74 @@ import { NextRequest, NextResponse } from 'next/server';
 import crypto from 'crypto';
 import { createClient } from '@supabase/supabase-js';
 
-// Service role client to bypass RLS for automated deposits
+export const dynamic = 'force-dynamic';
+
 const supabaseAdmin = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
+  process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL || 'https://placeholder.supabase.co',
+  process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'placeholder-anon-key',
+  { auth: { persistSession: false, autoRefreshToken: false } }
 );
+
+function verifyAlchemySignature(rawBody: string, signature: string | null): boolean {
+  const signingKey = process.env.ALCHEMY_WEBHOOK_SIGNING_KEY;
+  if (!signingKey || !signature) return false;
+
+  try {
+    const hmac = crypto.createHmac('sha256', signingKey);
+    hmac.update(rawBody, 'utf8');
+    const digest = hmac.digest('hex');
+
+    const sigBuf = Buffer.from(signature, 'hex');
+    const digestBuf = Buffer.from(digest, 'hex');
+
+    if (sigBuf.length !== digestBuf.length) return false;
+    return crypto.timingSafeEqual(sigBuf, digestBuf);
+  } catch {
+    return false;
+  }
+}
 
 export async function POST(req: NextRequest) {
   try {
     const rawBody = await req.text();
     const signature = req.headers.get('x-alchemy-signature');
-    const webhookSigningKey = process.env.ALCHEMY_WEBHOOK_SIGNING_KEY;
 
-    // 1. Verify HMAC Signature
-    if (webhookSigningKey) {
-      const hmac = crypto.createHmac('sha256', webhookSigningKey);
-      hmac.update(rawBody);
-      const expectedSignature = hmac.digest('hex');
-
-      if (signature !== expectedSignature) {
-        return NextResponse.json({ error: 'Invalid HMAC signature' }, { status: 401 });
-      }
+    // 1. Constant-Time HMAC Signature Check
+    if (!verifyAlchemySignature(rawBody, signature)) {
+      return NextResponse.json({ error: 'Unauthorized signature' }, { status: 401 });
     }
 
     const payload = JSON.parse(rawBody);
-    const event = payload.event;
+    const activity = payload.event?.activity;
 
-    if (!event || !event.activity) {
-      return NextResponse.json({ message: 'No activity found in payload' }, { status: 200 });
+    if (!Array.isArray(activity) || activity.length === 0) {
+      return NextResponse.json({ message: 'No transfers in payload' }, { status: 200 });
     }
 
-    // 2. Process Transfers Atomic & Idempotently
-    for (const activity of event.activity) {
-      const toAddress = activity.toAddress;
-      const asset = activity.asset || 'USDT';
-      const network = activity.category || 'ETH_MAINNET';
-      const amount = parseFloat(activity.value);
-      const txid = activity.hash;
-      const outputIndex = activity.logIndex || 0;
+    // 2. Process incoming transfers
+    for (const tx of activity) {
+      const toAddress = tx.toAddress;
+      const asset = (tx.asset || 'ETH').toUpperCase();
+      const network = tx.category || 'EVM';
+      const txid = tx.hash;
+      const logIndex = tx.logIndex ? parseInt(tx.logIndex, 16) : 0;
+      const amount = tx.value;
 
-      if (!toAddress || !txid || isNaN(amount) || amount <= 0) continue;
+      if (!toAddress || !txid || !amount || Number(amount) <= 0) continue;
 
-      // Call hardened RPC
-      const { data, error } = await supabaseAdmin.rpc('process_incoming_deposit', {
+      await supabaseAdmin.rpc('process_incoming_deposit', {
         p_to_address: toAddress,
         p_asset: asset,
         p_network: network,
         p_amount: amount,
         p_txid: txid,
-        p_output_index: outputIndex,
+        p_output_index: logIndex,
       });
-
-      if (error) {
-        console.error(`Failed to process deposit ${txid}:`, error.message);
-      } else if (data?.code === 'ALREADY_PROCESSED') {
-        console.log(`Replay ignored for deposit ${txid}`);
-      }
     }
 
     return NextResponse.json({ success: true }, { status: 200 });
   } catch (err: any) {
-    console.error('Alchemy webhook error:', err);
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+    console.error('[Alchemy Webhook Error]:', err);
+    return NextResponse.json({ error: 'Internal Ingestion Error' }, { status: 500 });
   }
 }
