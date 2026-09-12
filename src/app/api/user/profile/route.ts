@@ -42,23 +42,106 @@ export async function GET(request: NextRequest) {
   let completedTradeCount = profile.completed_trades || 0;
   let totalTradeVolumeFiat = profile.total_trade_volume_usd || profile.trade_volume || 0;
 
-  try {
-    const { data: completedTrades } = await supabase
-      .from('trades')
-      .select('id, fiat_amount, fiat_amount_usd, crypto_amount, crypto, status')
-      .or(`buyer_id.eq.${profile.id},seller_id.eq.${profile.id}`)
-      .in('status', ['completed', 'released']);
+  // Real Dynamic Pay & Release Metrics
+  let avgPayTimeSeconds: number | null = profile.avg_pay_time_seconds ?? null;
+  let avgReleaseTimeSeconds: number | null = profile.avg_release_time_seconds ?? null;
 
-    if (completedTrades && completedTrades.length > 0) {
-      completedTradeCount = completedTrades.length;
-      totalTradeVolumeFiat = completedTrades.reduce((acc, t) => {
+  try {
+    const { data: allUserTrades } = await supabase
+      .from('trades')
+      .select('id, buyer_id, seller_id, created_at, paid_at, marked_paid_at, released_at, completed_at, fiat_amount, fiat_amount_usd, status')
+      .or(`buyer_id.eq.${profile.id},seller_id.eq.${profile.id}`);
+
+    if (allUserTrades && allUserTrades.length > 0) {
+      const completedList = allUserTrades.filter(t => t.status === 'completed' || t.status === 'released');
+      completedTradeCount = completedList.length;
+      totalTradeVolumeFiat = completedList.reduce((acc, t) => {
         const val = Number(t.fiat_amount || t.fiat_amount_usd || 0);
         return acc + (isNaN(val) ? 0 : val);
       }, 0);
+
+      // Average Pay Time (for buyer trades): AVG(marked_paid_at - created_at)
+      let buyerSum = 0;
+      let buyerCount = 0;
+      for (const t of allUserTrades) {
+        if (t.buyer_id === profile.id && ['paid', 'completed', 'released', 'payment_sent'].includes(t.status)) {
+          const paidStr = t.marked_paid_at || t.paid_at;
+          const createdStr = t.created_at;
+          if (paidStr && createdStr) {
+            const diff = (new Date(paidStr).getTime() - new Date(createdStr).getTime()) / 1000;
+            if (diff >= 2 && diff <= 86400) {
+              buyerSum += diff;
+              buyerCount++;
+            }
+          }
+        }
+      }
+      if (buyerCount > 0) {
+        avgPayTimeSeconds = Math.round(buyerSum / buyerCount);
+      }
+
+      // Average Release Time (for seller trades): AVG(released_at - marked_paid_at)
+      let sellerSum = 0;
+      let sellerCount = 0;
+      for (const t of allUserTrades) {
+        if (t.seller_id === profile.id && (t.status === 'completed' || t.status === 'released')) {
+          const paidStr = t.marked_paid_at || t.paid_at;
+          const releaseStr = t.released_at || t.completed_at;
+          if (paidStr && releaseStr) {
+            const diff = (new Date(releaseStr).getTime() - new Date(paidStr).getTime()) / 1000;
+            if (diff >= 2 && diff <= 172800) {
+              sellerSum += diff;
+              sellerCount++;
+            }
+          }
+        }
+      }
+      if (sellerCount > 0) {
+        avgReleaseTimeSeconds = Math.round(sellerSum / sellerCount);
+      }
     }
   } catch (err) {
-    console.warn('Could not aggregate trade volume:', err);
+    console.warn('Could not aggregate trade metrics:', err);
   }
+
+  // Calculate block counts: "Has blocked X users" & "Has blocked by X users"
+  let blockingCount = Array.isArray(profile.blocked_users) ? profile.blocked_users.length : 0;
+  let blockedByCount = 0;
+
+  try {
+    // 1. Check user_blocks table
+    const { count: ubBlocking } = await supabase
+      .from('user_blocks')
+      .select('id', { count: 'exact', head: true })
+      .eq('blocker_id', profile.id);
+
+    const { count: ubBlockedBy } = await supabase
+      .from('user_blocks')
+      .select('id', { count: 'exact', head: true })
+      .eq('blocked_id', profile.id);
+
+    if (typeof ubBlocking === 'number' && ubBlocking > blockingCount) {
+      blockingCount = ubBlocking;
+    }
+    if (typeof ubBlockedBy === 'number') {
+      blockedByCount = ubBlockedBy;
+    }
+  } catch (err) {
+    console.warn('Block count query notice:', err);
+  }
+
+  // Format times nicely
+  const formatTime = (secs: number | null | undefined) => {
+    if (secs == null || isNaN(secs) || secs <= 0) return 'N/A';
+    if (secs < 60) return `${Math.round(secs)}s`;
+    const mins = Math.round(secs / 60);
+    if (mins < 60) return `${mins} min${mins > 1 ? 's' : ''}`;
+    const hrs = (secs / 3600).toFixed(1);
+    return `${hrs} hr${Number(hrs) > 1 ? 's' : ''}`;
+  };
+
+  const avgPayFormatted = formatTime(avgPayTimeSeconds);
+  const avgReleaseFormatted = formatTime(avgReleaseTimeSeconds);
 
   // Calculate feedback and ratings
   let positive = Number(profile.positive_feedback || 0);
@@ -138,6 +221,18 @@ export async function GET(request: NextRequest) {
       completed_trades: completedTradeCount,
       total_volume: totalTradeVolumeFiat,
       trade_volume: totalTradeVolumeFiat,
+      avg_pay_time_seconds: avgPayTimeSeconds,
+      avg_release_time_seconds: avgReleaseTimeSeconds,
+      avg_pay_time: avgPayFormatted,
+      avg_release_time: avgReleaseFormatted,
+      avg_payment_minutes: avgPayTimeSeconds ? Math.ceil(avgPayTimeSeconds / 60) : null,
+      avg_release_minutes: avgReleaseTimeSeconds ? Math.ceil(avgReleaseTimeSeconds / 60) : null,
+      blocking_count: blockingCount,
+      blocked_by_count: blockedByCount,
+      merchant_tier: profile.merchant_tier || 'NONE',
+      merchant_deposit_locked: profile.merchant_deposit_locked || 0,
+      preferred_currency: profile.preferred_currency || profile.preferred_fiat || 'USD',
+      preferred_fiat: profile.preferred_currency || profile.preferred_fiat || 'USD',
     },
     blockStatus,
   });

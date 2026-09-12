@@ -32,9 +32,10 @@ export function useUserPresence(userId?: string | null) {
 
     setOnline();
 
+    // Heartbeat update every 60 seconds (1 minute)
     const interval = setInterval(() => {
       setOnline();
-    }, 2 * 60 * 1000);
+    }, 60 * 1000);
 
     window.addEventListener('beforeunload', setOffline);
 
@@ -81,8 +82,8 @@ export default function UserPresenceProvider({ children }: { children: React.Rea
       // 1. Send initial heartbeat ping
       await updatePresence();
 
-      // 2. Set interval to ping every 2 minutes
-      intervalId = setInterval(updatePresence, 2 * 60 * 1000);
+      // 2. Set interval to ping every 60 seconds (1 minute)
+      intervalId = setInterval(updatePresence, 60 * 1000);
 
       // 3. Mark offline when user closes tab/window
       const handleBeforeUnload = () => {

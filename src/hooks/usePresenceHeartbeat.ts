@@ -26,8 +26,8 @@ export function usePresenceHeartbeat(userId?: string) {
     // Update immediately on mount
     updatePresence();
 
-    // Heartbeat ping every 2 minutes
-    const interval = setInterval(updatePresence, 2 * 60 * 1000);
+    // Heartbeat ping every 60 seconds (1 minute)
+    const interval = setInterval(updatePresence, 60 * 1000);
 
     // Set offline on tab unload
     const handleUnload = () => {

@@ -23,6 +23,7 @@ import {
 } from '@/lib/wallet';
 import { insertPaxonesSystemMessage } from '@/lib/trade-system-messages';
 import { cn, toDate } from '@/lib/utils';
+import { MerchantBadge } from '@/components/merchant/merchant-badge';
 import type { Trade, P2PAd, Dispute, Feedback } from '@/lib/types';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -191,6 +192,7 @@ const ParticipantRow = ({
 }) => {
   const supabase = createClient();
   const [displayUsername, setDisplayUsername] = useState<string>(fallbackUsername || 'Trader');
+  const [merchantTier, setMerchantTier] = useState<string | null>(null);
 
   useEffect(() => {
     if (!userId) {
@@ -203,14 +205,17 @@ const ParticipantRow = ({
       if (userId.includes('-')) {
         const { data } = await supabase
           .from('profiles')
-          .select('username')
+          .select('username, merchant_tier')
           .eq('id', userId)
           .maybeSingle();
 
         if (data?.username) {
           setDisplayUsername(data.username);
-          return;
         }
+        if (data?.merchant_tier) {
+          setMerchantTier(data.merchant_tier);
+        }
+        return;
       }
       setDisplayUsername(fallbackUsername || userId);
     };
@@ -221,12 +226,15 @@ const ParticipantRow = ({
   return (
     <div className="flex justify-between items-center text-xs sm:text-sm py-1.5 border-b border-border/40">
       <p className="font-bold text-foreground">{label}</p>
-      <Link
-        href={`/users/${displayUsername}`}
-        className="font-bold text-primary hover:underline flex items-center gap-1.5"
-      >
-        <span>@{displayUsername}</span>
-      </Link>
+      <div className="flex items-center gap-1.5">
+        <Link
+          href={`/users/${displayUsername}`}
+          className="font-bold text-primary hover:underline flex items-center gap-1.5"
+        >
+          <span>@{displayUsername}</span>
+        </Link>
+        <MerchantBadge tier={merchantTier} size="sm" />
+      </div>
     </div>
   );
 };
@@ -489,7 +497,8 @@ const ActionButtons = ({
   const [isReleaseConfirmOpen, setIsReleaseConfirmOpen] = useState(false);
 
   const canMarkPaid = isBuyer && tradeStatus === 'active';
-  const canRelease = !isBuyer && (tradeStatus === 'paid' || tradeStatus === 'active');
+  // CRITICAL ESCROW RULE: The Release Escrow button MUST strictly render ONLY when trade status is PAID / buyer_marked_paid
+  const canRelease = !isBuyer && (tradeStatus === 'paid' || tradeStatus === 'buyer_marked_paid' || tradeStatus === 'payment_sent');
   const canBuyerCancel = isBuyer && tradeStatus === 'active';
 
   const paidAtDate = trade?.paidAt || trade?.paid_at ? new Date(trade?.paidAt || trade?.paid_at) : null;

@@ -243,7 +243,11 @@ export default function MyAdsPage() {
           <p className="text-xs text-muted-foreground mt-2">Loading your advertisements...</p>
         </div>
       ) : (
-        <ManageAds ads={formattedManageAds} />
+        <ManageAds 
+          ads={formattedManageAds} 
+          onStatusChange={handleStatusToggle} 
+          onDelete={handleDelete} 
+        />
       )}
     </div>
   );

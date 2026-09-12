@@ -6,6 +6,8 @@ import Link from 'next/link';
 import { createClient } from '@/lib/supabase/client';
 import { useToast } from '@/hooks/use-toast';
 import { useStopwatch } from '@/hooks/use-stopwatch';
+import { useCountdown } from '@/hooks/use-countdown';
+import { TradeChatTimer } from '@/components/trade-chat-timer';
 import { addReceiptToTrade, claimFundsForTrade } from '@/lib/wallet';
 import { compressImage } from '@/lib/media-compression';
 import { cn, toDate } from '@/lib/utils';
@@ -29,6 +31,7 @@ import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { Label } from '@/components/ui/label';
 import { DefaultAvatar, BtcLogo, EthLogo, LtcLogo, UsdtLogo } from '@/components/icons';
 import { FlagIcon } from '@/components/ui/flag-icon';
+import { MerchantBadge } from '@/components/merchant/merchant-badge';
 import { Alert, AlertTitle, AlertDescription } from '@/components/ui/alert';
 import {
   Clock,
@@ -490,9 +493,46 @@ export function TradeChat({
   const stopEndTime = trade?.releasedAt || trade?.released_at || trade?.cancelledAt || trade?.cancelled_at || trade?.updated_at;
   const stopwatch = useStopwatch(trade?.createdAt || trade?.created_at || Date.now(), isTradeStopped, stopEndTime);
 
+  // Reverse countdown timer based on ad's time limit
+  const timeLimitMinutes = Number(
+    trade?.payment_time_limit ??
+    trade?.time_limit ??
+    trade?.ad?.payment_window ??
+    trade?.ad?.payment_time_limit ??
+    30
+  );
+
+  const expiresDate = useMemo(() => {
+    const start = new Date(trade?.createdAt || trade?.created_at || Date.now()).getTime();
+    return new Date(start + timeLimitMinutes * 60 * 1000);
+  }, [trade?.createdAt, trade?.created_at, timeLimitMinutes]);
+
+  const countdown = useCountdown(
+    !isTradeStopped && (tradeStatus === 'active' || tradeStatus === 'pending')
+      ? expiresDate
+      : new Date(0)
+  );
+
   const tradeId = trade?.id;
   const isBuyer = currentUserId === (trade?.buyerId || trade?.buyer_id);
   const userRoleLabel = isBuyer ? 'Buyer' : 'Seller';
+
+  // Persist duration_seconds to trade record upon completion
+  useEffect(() => {
+    if (isTradeStopped && tradeId) {
+      const persistDuration = async () => {
+        try {
+          const startMs = new Date(trade?.createdAt || trade?.created_at || Date.now()).getTime();
+          const endMs = stopEndTime ? new Date(stopEndTime).getTime() : Date.now();
+          const duration = Math.max(1, Math.floor((endMs - startMs) / 1000));
+          if (!isNaN(duration) && (!trade?.duration_seconds || trade?.duration_seconds === null)) {
+            await supabase.from('trades').update({ duration_seconds: duration }).eq('id', tradeId);
+          }
+        } catch {}
+      };
+      persistDuration();
+    }
+  }, [isTradeStopped, tradeId, trade, stopEndTime, supabase]);
 
   // Fetch initial messages & subscribe to Realtime
   useEffect(() => {
@@ -764,10 +804,11 @@ export function TradeChat({
               </Avatar>
             </Link>
             <div>
-              <div className="flex items-center gap-1.5">
+              <div className="flex items-center gap-1.5 flex-wrap">
                 <Link href={`/users/${opponentUsername}`} className="font-bold text-sm text-foreground hover:underline">
                   @{opponentUsername}
                 </Link>
+                <MerchantBadge tier={opponent?.merchant_tier || (opponent as any)?.merchantTier} size="sm" />
                 <span className="text-[11px] font-semibold px-1.5 py-0.5 rounded bg-muted text-muted-foreground">
                   {opponentRoleLabel}
                 </span>
@@ -794,9 +835,15 @@ export function TradeChat({
                 <span className="font-[Arial,Helvetica,sans-serif]">{liveOpponentFeedback.negative}</span>
               </div>
             </div>
-            <div className="text-xs font-semibold font-[Arial,Helvetica,sans-serif] flex items-center gap-1.5 justify-end mt-1 text-primary">
-              <Clock className="h-3.5 w-3.5" />
-              <span>{stopwatch}</span>
+            
+            {/* Dual Timer Badges: Reverse Countdown + Active Stopwatch via TradeChatTimer */}
+            <div className="mt-1">
+              <TradeChatTimer
+                createdAt={trade?.createdAt || trade?.created_at || new Date().toISOString()}
+                status={tradeStatus?.toUpperCase() || (isTradeStopped ? 'COMPLETED' : 'PENDING')}
+                durationSeconds={trade?.duration_seconds}
+                paymentWindowMinutes={timeLimitMinutes}
+              />
             </div>
           </div>
         </div>

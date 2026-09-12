@@ -2,6 +2,7 @@ import { createServerClient } from '@supabase/ssr';
 import { cookies } from 'next/headers';
 import { NextResponse, type NextRequest } from 'next/server';
 import { getSupabaseAdminClient } from '@/utils/supabase/server';
+import { generateAdId } from '@/lib/id-generator';
 
 export const dynamic = 'force-dynamic';
 
@@ -171,8 +172,12 @@ export async function POST(request: NextRequest) {
       }
     }
 
+    const uniqueAdId = generateAdId();
+
     // Standard base table payload for `public.ads` and `public.p2p_ads`
     const basePayload: Record<string, any> = {
+      ad_id: uniqueAdId,
+      public_id: uniqueAdId,
       user_id: user.id,
       type: adSide,
       asset_symbol: coinType,

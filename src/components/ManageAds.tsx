@@ -34,7 +34,15 @@ function getCurrencySymbol(code: string): string {
   return found?.symbol || code;
 }
 
-export default function ManageAds({ ads: initialAds = [] }: { ads?: AdItem[] }) {
+export default function ManageAds({
+  ads: initialAds = [],
+  onStatusChange,
+  onDelete,
+}: {
+  ads?: AdItem[];
+  onStatusChange?: (id: string, newStatus: boolean) => Promise<void> | void;
+  onDelete?: (id: string) => Promise<void> | void;
+}) {
   const [ads, setAds] = useState<AdItem[]>(initialAds || []);
   const [selectedInfoAd, setSelectedInfoAd] = useState<AdItem | null>(null);
   const [shareModalAd, setShareModalAd] = useState<AdItem | null>(null);
@@ -83,11 +91,15 @@ export default function ManageAds({ ads: initialAds = [] }: { ads?: AdItem[] }) 
     setAds(prev => prev.map(a => a.id === id ? { ...a, status: nextStatus as any } : a));
     
     try {
-      await fetch(`/api/ads/${id}/toggle`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ status: nextStatus }),
-      });
+      if (onStatusChange) {
+        await onStatusChange(id, nextStatus === 'ACTIVE');
+      } else {
+        await fetch(`/api/ads/${id}/toggle`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ status: nextStatus }),
+        });
+      }
     } catch (err) {
       console.error('Failed to toggle ad status:', err);
     }
@@ -97,7 +109,11 @@ export default function ManageAds({ ads: initialAds = [] }: { ads?: AdItem[] }) 
     if (!confirm('Are you sure you want to delete this ad?')) return;
     setAds(prev => prev.filter(a => a.id !== id));
     try {
-      await fetch(`/api/ads/${id}`, { method: 'DELETE' });
+      if (onDelete) {
+        await onDelete(id);
+      } else {
+        await fetch(`/api/ads/${id}`, { method: 'DELETE' });
+      }
     } catch (err) {
       console.error('Failed to delete ad:', err);
     }

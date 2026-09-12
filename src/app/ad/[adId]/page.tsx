@@ -12,6 +12,7 @@ import { Alert, AlertTitle, AlertDescription } from '@/components/ui/alert';
 import { ShieldCheck, ThumbsUp, ThumbsDown, Clock, AlertTriangle, ArrowRightLeft, ArrowLeft, Loader2 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import Link from 'next/link';
+import { generateTradeId } from '@/lib/id-generator';
 
 export default function AdDetailPage() {
   const params = useParams();
@@ -39,46 +40,64 @@ export default function AdDetailPage() {
       // 2. Fetch Ad details joining profiles
       const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(adId);
       
-      let query = supabase
-        .from('p2p_ads')
-        .select(`
-          *,
-          profiles:user_id (id, username, full_name, avatar_url, positive_feedback, negative_feedback, created_at)
-        `);
+      let adResult: any = null;
 
-      if (isUuid) {
-        query = query.or(`id.eq.${adId},public_ad_id.eq.${adId}`);
-      } else {
-        query = query.or(`public_ad_id.eq.${adId},public_id.eq.${adId}`);
+      try {
+        let query = supabase
+          .from('p2p_ads')
+          .select(`
+            *,
+            profiles:user_id (id, username, full_name, avatar_url, positive_feedback, negative_feedback, created_at)
+          `);
+
+        if (isUuid) {
+          query = query.or(`id.eq.${adId},public_ad_id.eq.${adId},ad_id.eq.${adId},public_id.eq.${adId}`);
+        } else {
+          query = query.or(`public_ad_id.eq.${adId},public_id.eq.${adId},ad_id.eq.${adId}`);
+        }
+
+        const { data: adData } = await query.maybeSingle();
+        if (adData) adResult = adData;
+      } catch {}
+
+      if (!adResult) {
+        try {
+          const { data: adsTableData } = await supabase
+            .from('ads')
+            .select(`
+              *,
+              profiles:user_id (id, username, full_name, avatar_url, positive_feedback, negative_feedback, created_at)
+            `)
+            .or(isUuid ? `id.eq.${adId},public_id.eq.${adId},public_ad_id.eq.${adId},ad_id.eq.${adId}` : `public_id.eq.${adId},public_ad_id.eq.${adId},ad_id.eq.${adId}`)
+            .maybeSingle();
+          if (adsTableData) adResult = adsTableData;
+        } catch {}
       }
 
-      const { data: adData, error: adErr } = await query.maybeSingle();
+      // API route fallback
+      if (!adResult) {
+        try {
+          const res = await fetch(`/api/ads/${encodeURIComponent(adId)}`);
+          if (res.ok) {
+            const json = await res.json();
+            if (json && (json.id || json.ad)) {
+              adResult = json.ad || json;
+            }
+          }
+        } catch {}
+      }
 
-      if (adErr || !adData) {
-        // Direct fallback query without joins if column mismatch
-        const { data: fallbackAd } = await supabase
-          .from('p2p_ads')
-          .select('*')
-          .or(isUuid ? `id.eq.${adId},public_ad_id.eq.${adId}` : `public_ad_id.eq.${adId}`)
-          .maybeSingle();
-
-        if (fallbackAd) {
-          setAd(fallbackAd);
-          setTrader({ username: 'Verified Trader', positive_feedback: 100, negative_feedback: 0 });
-          setPayAmount((fallbackAd.min_limit || fallbackAd.min_amount || 10).toString());
-          const unitP = fallbackAd.fixed_rate || fallbackAd.price || 1;
-          setReceiveAmount(((fallbackAd.min_limit || 10) / unitP).toFixed(8));
-        } else {
-          toast({ variant: 'destructive', title: 'Ad Not Found', description: 'This offer is inactive or does not exist.' });
-        }
+      if (!adResult) {
         setLoading(false);
         return;
       }
 
-      setAd(adData);
-      setTrader(adData.profiles || { username: 'Verified Trader', positive_feedback: 100, negative_feedback: 0 });
-      const minLimit = adData.min_limit || adData.min_amount || 10;
-      const unitP = adData.fixed_rate || adData.price || 1;
+      setAd(adResult);
+      setTrader(
+        Array.isArray(adResult.profiles) ? adResult.profiles[0] : (adResult.profiles || adResult.user || { username: 'Verified Trader', positive_feedback: 100, negative_feedback: 0 })
+      );
+      const minLimit = adResult.min_limit || adResult.min_amount || 10;
+      const unitP = adResult.fixed_rate || adResult.price || 1;
       setPayAmount(minLimit.toString());
       setReceiveAmount((minLimit / unitP).toFixed(8));
       setLoading(false);
@@ -140,7 +159,7 @@ export default function AdDetailPage() {
       }
     }
 
-    const generatedTradeId = `tr_${Math.random().toString(36).substring(2, 9)}`;
+    const generatedTradeId = generateTradeId();
     const paymentMethods = Array.isArray(ad.payment_methods) 
       ? ad.payment_methods[0] 
       : (ad.payment_method || 'Bank Transfer');

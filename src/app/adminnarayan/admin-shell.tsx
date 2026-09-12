@@ -225,6 +225,7 @@ export function AdminShell({
     { href: "/adminnarayan/dashboard", label: "Dashboard", icon: LayoutDashboard },
     { href: "/adminnarayan/search", label: "Global Search", icon: Search },
     { href: "/adminnarayan/users", label: "Users", icon: Users },
+    { href: "/adminnarayan/merchants", label: "Merchant Tiers", icon: Shield },
     { href: "/adminnarayan/trades", label: "Trades", icon: ArrowLeftRight },
     {
       href: "/adminnarayan/disputes",

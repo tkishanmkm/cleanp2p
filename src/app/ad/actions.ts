@@ -2,6 +2,7 @@
 
 import { createClient } from '@/lib/supabase/server';
 import { getSupabaseAdminClient } from '@/lib/supabase/server';
+import { generateTradeId } from '@/lib/id-generator';
 
 export interface ActionResponse<T> {
   data: T | null;
@@ -747,7 +748,7 @@ export async function createTradeOrderWithEscrow(input: {
     }
 
     // 8. Insert Trade Record (Defensive foreign-key and UUID safe logic)
-    const shortTradeId = 'TRD-' + Math.random().toString(36).substring(2, 9).toUpperCase();
+    const shortTradeId = generateTradeId();
     const paymentMethods = Array.isArray(ad.payment_methods)
       ? ad.payment_methods
       : typeof ad.payment_methods === 'string'

@@ -66,31 +66,38 @@ export function getTradeChatDisplayName(user?: UserDataInput | null): string {
 }
 
 /**
- * Determines if user is online based on is_online flag or last_seen within 5 minutes.
+ * Determines if user is online based on last_seen within 2 minutes.
  */
 export function isUserOnline(isOnline?: boolean | null, lastSeen?: string | null): boolean {
-  if (isOnline) return true;
-  if (!lastSeen) return false;
-  const diffMs = new Date().getTime() - new Date(lastSeen).getTime();
-  if (isNaN(diffMs) || diffMs < 0) return false;
-  return Math.floor(diffMs / (1000 * 60)) < 5;
+  if (lastSeen) {
+    const diffMs = Date.now() - new Date(lastSeen).getTime();
+    if (!isNaN(diffMs) && diffMs >= 0) {
+      return Math.floor(diffMs / (1000 * 60)) <= 2;
+    }
+  }
+  return Boolean(isOnline);
 }
 
 /**
- * Formatting Last Seen Text Helper for presence badges & trader cards
+ * Formatting Last Seen Text Helper for presence badges & trader cards.
+ * User is marked "Online" if last_seen is within the last 2 minutes;
+ * otherwise displays exact last_seen relative timestamp.
  */
 export function getUserStatusText(isOnline?: boolean | null, lastSeen?: string | null): string {
-  if (isOnline) return 'Online';
-  if (!lastSeen) return 'Offline';
+  if (!lastSeen) {
+    return isOnline ? 'Online' : 'Offline';
+  }
 
-  const diffMs = new Date().getTime() - new Date(lastSeen).getTime();
-  if (isNaN(diffMs) || diffMs < 0) return 'Offline';
+  const diffMs = Date.now() - new Date(lastSeen).getTime();
+  if (isNaN(diffMs) || diffMs < 0) {
+    return isOnline ? 'Online' : 'Offline';
+  }
 
   const diffMins = Math.floor(diffMs / (1000 * 60));
   const diffHours = Math.floor(diffMs / (1000 * 60 * 60));
   const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
 
-  if (diffMins < 5) return 'Online';
+  if (diffMins <= 2) return 'Online';
   if (diffMins < 60) return `Last seen ${diffMins}m ago`;
   if (diffHours < 24) return `Last seen ${diffHours}h ago`;
   return `Last seen ${diffDays}d ago`;

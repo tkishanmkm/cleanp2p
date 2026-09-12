@@ -12,6 +12,7 @@ import { ThumbsUp, ThumbsDown, Info, Award, Clock, CheckCircle } from 'lucide-re
 import { cn, toDate } from '@/lib/utils';
 import { BtcLogo, EthLogo, LtcLogo, UsdtLogo, DefaultAvatar } from '@/components/icons';
 import { FlagIcon } from '../ui/flag-icon';
+import { MerchantBadge } from '@/components/merchant/merchant-badge';
 import { formatDistanceToNow } from 'date-fns';
 import TraderStatusBadge from '@/components/TraderStatusBadge';
 import { formatJoinedDate } from '@/utils/p2p-helpers';
@@ -145,6 +146,7 @@ export function AdCard({ ad }: AdCardProps) {
                 <Link href={`/users/${adCreator?.username || 'Trader'}`} className="font-semibold hover:underline">
                   {adCreator?.username || 'Trader'}
                 </Link>
+                <MerchantBadge tier={adCreator?.merchant_tier || (ad as any)?.merchant_tier} size="sm" />
                 {adCreator?.country && <FlagIcon countryCode={adCreator.country} />}
                 {displayedBadges.map((badge, i) => (
                   <span

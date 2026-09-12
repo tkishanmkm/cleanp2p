@@ -76,6 +76,7 @@ export async function PATCH(request: NextRequest) {
     .from('profiles')
     .update({
       username: cleanUsername,
+      display_name: cleanUsername,
       username_changed_count: changeCount + 1,
       updated_at: new Date().toISOString(),
     })
@@ -89,6 +90,18 @@ export async function PATCH(request: NextRequest) {
       );
     }
     return NextResponse.json({ error: updateError.message || 'Failed to update username' }, { status: 400 });
+  }
+
+  // Update user metadata to strictly mirror username
+  try {
+    await supabase.auth.updateUser({
+      data: {
+        username: cleanUsername,
+        display_name: cleanUsername,
+      }
+    });
+  } catch (metaErr) {
+    console.warn('Could not update auth user_metadata:', metaErr);
   }
 
   return NextResponse.json({

@@ -63,6 +63,7 @@ export async function GET(request: NextRequest) {
       .from('p2p_ads')
       .select('*')
       .eq('user_id', user.id)
+      .neq('status', 'DELETED')
       .order('created_at', { ascending: false });
 
     if (!viewError && Array.isArray(viewAds)) {
@@ -76,6 +77,7 @@ export async function GET(request: NextRequest) {
         .from('ads')
         .select('*')
         .eq('user_id', user.id)
+        .neq('status', 'DELETED')
         .order('created_at', { ascending: false });
 
       if (!tableError && Array.isArray(tableAds)) {
@@ -94,6 +96,7 @@ export async function GET(request: NextRequest) {
           .from('ads')
           .select('*')
           .eq('user_id', user.id)
+          .neq('status', 'DELETED')
           .order('created_at', { ascending: false });
 
         if (!adminErr && Array.isArray(adminAds) && adminAds.length > 0) {
@@ -104,6 +107,9 @@ export async function GET(request: NextRequest) {
         console.warn('Admin fallback in my-ads failed:', adminEx);
       }
     }
+
+    // Clean filter out any deleted items
+    ads = ads.filter((a) => (a.status || '').toUpperCase() !== 'DELETED');
 
     if (queryError && ads.length === 0) {
       return NextResponse.json({ error: queryError.message, ads: [] }, { status: 200 });

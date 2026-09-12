@@ -1,50 +1,61 @@
 'use client';
 
-import { useEffect, useState } from 'react';
-import { createClient } from '@/utils/supabase/client';
+import { useEffect } from 'react';
+import { createClientComponentClient } from '@supabase/auth-helpers-nextjs';
 
 export function usePresence(userId?: string) {
-  const supabase = createClient();
-  const [onlineUsers, setOnlineUsers] = useState<Set<string>>(new Set());
+  const supabase = createClientComponentClient();
 
   useEffect(() => {
     if (!userId) return;
 
-    const channel = supabase.channel('online-users', {
-      config: { presence: { key: userId } },
-    });
-
-    channel
-      .on('presence', { event: 'sync' }, () => {
-        const state = channel.presenceState();
-        const activeIds = new Set<string>(Object.keys(state));
-        setOnlineUsers(activeIds);
-      })
-      .subscribe(async (status) => {
-        if (status === 'SUBSCRIBED') {
-          await channel.track({ online_at: new Date().toISOString() });
-        }
-      });
-
-    // Pulse heartbeat every 2 minutes
-    const interval = setInterval(async () => {
+    const sendHeartbeat = async () => {
       try {
-        await supabase
-          .from('profiles')
-          .update({ last_seen_at: new Date().toISOString() })
-          .eq('id', userId);
-      } catch (err) {
-        console.warn('Presence heartbeat error:', err);
+        const { error } = await supabase.rpc('update_user_presence', { user_id: userId });
+        if (error) {
+          await supabase
+            .from('profiles')
+            .update({ 
+              last_seen: new Date().toISOString(), 
+              last_seen_at: new Date().toISOString(),
+              is_online: true 
+            })
+            .eq('id', userId);
+        }
+      } catch {
+        try {
+          await supabase
+            .from('profiles')
+            .update({ 
+              last_seen: new Date().toISOString(), 
+              last_seen_at: new Date().toISOString(),
+              is_online: true 
+            })
+            .eq('id', userId);
+        } catch {}
       }
-    }, 120000);
-
-    return () => {
-      clearInterval(interval);
-      supabase.removeChannel(channel);
     };
-  }, [userId, supabase]);
 
-  return { onlineUsers, isOnline: (id: string) => onlineUsers.has(id) };
+    // Send initial heartbeat on mount
+    sendHeartbeat();
+
+    // Pulse presence every 60 seconds (1 minute)
+    const interval = setInterval(sendHeartbeat, 60000);
+
+    return () => clearInterval(interval);
+  }, [userId, supabase]);
+}
+
+/**
+ * Utility to check online status based on last_seen timestamp
+ */
+export function isUserOnline(lastSeenTimestamp?: string | Date | null): boolean {
+  if (!lastSeenTimestamp) return false;
+  const lastSeen = new Date(lastSeenTimestamp).getTime();
+  const now = Date.now();
+  // Marked as Online if last seen within the last 2 minutes (120,000 ms)
+  return now - lastSeen < 120000;
 }
 
 export default usePresence;
+

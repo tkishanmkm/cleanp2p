@@ -1,5 +1,6 @@
 import { createClient, getSupabaseAdminClient } from '@/utils/supabase/server';
 import { NextRequest, NextResponse } from 'next/server';
+import { revalidatePath } from 'next/cache';
 
 export const dynamic = 'force-dynamic';
 
@@ -213,11 +214,22 @@ export async function DELETE(
     const admin = getSupabaseAdminClient();
 
     if (isUuid) {
+      await admin.from('p2p_ads').update({ status: 'DELETED', active: false, updated_at: new Date().toISOString() }).eq('id', adId);
+      await admin.from('ads').update({ status: 'DELETED', is_active: false, updated_at: new Date().toISOString() }).eq('id', adId);
       await admin.from('p2p_ads').delete().eq('id', adId);
       await admin.from('ads').delete().eq('id', adId);
     } else {
-      await admin.from('p2p_ads').delete().or(`public_ad_id.eq.${adId},public_id.eq.${adId},id.eq.${adId}`);
+      await admin.from('p2p_ads').update({ status: 'DELETED', active: false, updated_at: new Date().toISOString() }).or(`public_ad_id.eq.${adId},public_id.eq.${adId}`);
+      await admin.from('ads').update({ status: 'DELETED', is_active: false, updated_at: new Date().toISOString() }).or(`public_id.eq.${adId},public_ad_id.eq.${adId}`);
+      await admin.from('p2p_ads').delete().or(`public_ad_id.eq.${adId},public_id.eq.${adId}`);
+      await admin.from('ads').delete().or(`public_id.eq.${adId},public_ad_id.eq.${adId}`);
     }
+
+    try {
+      revalidatePath('/my-ads');
+      revalidatePath('/buy');
+      revalidatePath('/sell');
+    } catch {}
 
     return NextResponse.json({ success: true, message: 'Ad deleted successfully.' });
   } catch (err: any) {
@@ -254,7 +266,18 @@ export async function PATCH(
         .from('p2p_ads')
         .update({ active: isActive, status: newStatus, updated_at: new Date().toISOString() })
         .or(`public_ad_id.eq.${adId},public_id.eq.${adId}`);
+
+      await admin
+        .from('ads')
+        .update({ status: newStatus, is_active: isActive, updated_at: new Date().toISOString() })
+        .or(`public_id.eq.${adId},public_ad_id.eq.${adId}`);
     }
+
+    try {
+      revalidatePath('/my-ads');
+      revalidatePath('/buy');
+      revalidatePath('/sell');
+    } catch {}
 
     return NextResponse.json({ success: true, status: newStatus, active: isActive });
   } catch (err: any) {

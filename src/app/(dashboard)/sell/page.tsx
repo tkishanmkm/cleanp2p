@@ -701,7 +701,7 @@ function P2PMarketplaceContent() {
                           asChild 
                           className={cn("bg-emerald-500 hover:bg-emerald-400 text-white border-0 shadow-md font-semibold transition-all duration-300", tourStep === 4 && "ring-4 ring-amber-400 scale-105 shadow-2xl z-50")}
                         >
-                            <Link href="/ads/create"><PlusCircle className="mr-2 h-4 w-4" /> Post Offer</Link>
+                            <Link href="/create-ad"><PlusCircle className="mr-2 h-4 w-4" /> Post Offer</Link>
                         </Button>
                         <Button 
                           id="tour-filter-btn"
