@@ -514,3 +514,76 @@ export function HdSecurityShieldIcon({ className = "h-4 w-4" }: { className?: st
     </svg>
   );
 }
+
+// 22. Profile: Unique holographic biometric identity core with orbital crest
+export function HdProfileIcon({ className = "h-4 w-4" }: { className?: string }) {
+  return (
+    <svg
+      className={className}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      {/* Hexagonal biometric perimeter shield */}
+      <path d="M12 2.8L19.5 7.1V16.9L12 21.2L4.5 16.9V7.1L12 2.8Z" strokeWidth="1.6" />
+      {/* Central neural user node */}
+      <circle cx="12" cy="9.5" r="3" strokeWidth="1.8" />
+      <path d="M7.5 17.5C8.5 15.2 10.1 14.2 12 14.2C13.9 14.2 15.5 15.2 16.5 17.5" strokeWidth="1.8" strokeLinecap="round" />
+      {/* Top telemetry spark */}
+      <circle cx="12" cy="4.5" r="0.8" fill="currentColor" />
+    </svg>
+  );
+}
+
+// 23. Settings: Unique quantum gear with cryptographic calibration nodes
+export function HdSettingsIcon({ className = "h-4 w-4" }: { className?: string }) {
+  return (
+    <svg
+      className={className}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      {/* Hexagonal precision tooth frame */}
+      <path d="M12 15C13.6569 15 15 13.6569 15 12C15 10.3431 13.6569 9 12 9C10.3431 9 9 10.3431 9 12C9 13.6569 10.3431 15 12 15Z" strokeWidth="1.8" />
+      <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1Z" strokeWidth="1.6" />
+      {/* Central quantum aperture */}
+      <circle cx="12" cy="12" r="1.5" fill="currentColor" />
+    </svg>
+  );
+}
+
+// 24. Tickets / Support Dispatch: Dynamic cryptographic ticket voucher with antenna pulse
+export function HdTicketsIcon({ className = "h-4 w-4" }: { className?: string }) {
+  return (
+    <svg
+      className={className}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      {/* Cryptographic ticket coupon chamber with side notches */}
+      <path d="M3 8C4.5 8 5.5 7 5.5 5.5V4H18.5V5.5C18.5 7 19.5 8 21 8V16C19.5 16 18.5 17 18.5 18.5V20H5.5V18.5C5.5 17 4.5 16 3 16V8Z" strokeWidth="1.7" />
+      {/* Perforation dashed line */}
+      <path d="M9 4V20" strokeWidth="1.5" strokeDasharray="2 2" />
+      {/* Dynamic assistance beacon */}
+      <circle cx="14.5" cy="12" r="2" strokeWidth="1.6" />
+      <path d="M14.5 8.5V9.5" strokeWidth="1.5" />
+      <path d="M14.5 14.5V15.5" strokeWidth="1.5" />
+      <circle cx="6.5" cy="12" r="1" fill="currentColor" />
+    </svg>
+  );
+}
+

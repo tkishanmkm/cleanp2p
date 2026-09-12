@@ -13,7 +13,12 @@ import {
   HdSecurityShieldIcon, 
   HdSupportIcon, 
   HdDashboardIcon,
-  HdWalletsIcon 
+  HdWalletsIcon,
+  HdProfileIcon,
+  HdSettingsIcon,
+  HdTicketsIcon,
+  HdMyAdsIcon,
+  HdMyTradesIcon,
 } from "@/components/hd-nav-icons";
 import { Button } from "@/components/ui/button";
 import { Logo } from "@/components/logo";
@@ -346,13 +351,46 @@ export function Header() {
                     </div>
                   </div>
                   <DropdownMenuItem asChild>
-                    <Link href="/dashboard" className="flex items-center gap-2"><HdDashboardIcon className="h-4 w-4 text-[#9273FC]" /><span>Dashboard</span></Link>
-                  </DropdownMenuItem>
-                   <DropdownMenuItem asChild>
-                    <Link href="/profile"><User className="mr-2 h-4 w-4" /><span>Profile</span></Link>
+                    <Link href="/dashboard" className="flex items-center gap-2.5">
+                      <HdDashboardIcon className="h-4 w-4 text-[#9273FC]" />
+                      <span>Dashboard</span>
+                    </Link>
                   </DropdownMenuItem>
                   <DropdownMenuItem asChild>
-                    <Link href="/settings"><Settings className="mr-2 h-4 w-4" /><span>Settings</span></Link>
+                    <Link href="/profile" className="flex items-center gap-2.5">
+                      <HdProfileIcon className="h-4 w-4 text-[#9273FC]" />
+                      <span>Profile</span>
+                    </Link>
+                  </DropdownMenuItem>
+                  <DropdownMenuItem asChild>
+                    <Link href="/wallets" className="flex items-center gap-2.5">
+                      <HdWalletsIcon className="h-4 w-4 text-[#9273FC]" />
+                      <span>Wallets</span>
+                    </Link>
+                  </DropdownMenuItem>
+                  <DropdownMenuItem asChild>
+                    <Link href="/my-ads" className="flex items-center gap-2.5">
+                      <HdMyAdsIcon className="h-4 w-4 text-[#9273FC]" />
+                      <span>My Ads</span>
+                    </Link>
+                  </DropdownMenuItem>
+                  <DropdownMenuItem asChild>
+                    <Link href="/trades" className="flex items-center gap-2.5">
+                      <HdMyTradesIcon className="h-4 w-4 text-[#9273FC]" />
+                      <span>My Trades</span>
+                    </Link>
+                  </DropdownMenuItem>
+                  <DropdownMenuItem asChild>
+                    <Link href="/my-tickets" className="flex items-center gap-2.5">
+                      <HdTicketsIcon className="h-4 w-4 text-[#9273FC]" />
+                      <span>My Tickets</span>
+                    </Link>
+                  </DropdownMenuItem>
+                  <DropdownMenuItem asChild>
+                    <Link href="/settings" className="flex items-center gap-2.5">
+                      <HdSettingsIcon className="h-4 w-4 text-[#9273FC]" />
+                      <span>Settings</span>
+                    </Link>
                   </DropdownMenuItem>
                   <DropdownMenuSeparator />
                   <DropdownMenuItem onClick={handleLogout} className="text-destructive">

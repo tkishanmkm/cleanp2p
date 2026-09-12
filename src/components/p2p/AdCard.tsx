@@ -4,8 +4,7 @@ import React from 'react';
 import Link from 'next/link';
 import { ThumbsUp, ThumbsDown, User } from 'lucide-react';
 import { getPublicHandle } from '@/utils/userPrivacy';
-import TraderStatusBadge from '@/components/TraderStatusBadge';
-import { getUserPresenceStatus } from '@/lib/utils/timeFormatter';
+import { getPresenceStatus, formatJoinedDate } from '@/lib/presence';
 import { MerchantBadge } from '@/components/merchant/merchant-badge';
 
 export interface SellerStatsProps {
@@ -84,8 +83,9 @@ export default function AdCard({ ad }: AdCardProps) {
   
   // Presence calculation using seller_last_seen with 120-second online threshold
   const lastSeen = ad.seller_last_seen || ad.last_seen || ad.user?.seller_last_seen || ad.user?.last_seen || ad.profiles?.seller_last_seen || ad.profiles?.last_seen || null;
-  const isOnlineFlag = ad.user?.is_online ?? ad.profiles?.is_online ?? false;
-  const presence = getUserPresenceStatus(lastSeen, isOnlineFlag);
+  const createdAt = ad.user?.created_at || ad.user?.createdAt || ad.profiles?.created_at || ad.profiles?.createdAt || ad.created_at;
+  const presence = getPresenceStatus(lastSeen);
+  const joinedText = formatJoinedDate(createdAt);
 
   // Asset and fiat defaults: BTC and USD
   const assetSymbol = (ad.asset || (ad as any).crypto || (ad as any).coin || 'BTC').toUpperCase();
@@ -146,7 +146,23 @@ export default function AdCard({ ad }: AdCardProps) {
               {displayUsername}
             </h3>
             {merchantTier && <MerchantBadge tier={merchantTier} size="sm" />}
-            <TraderStatusBadge lastActive={lastSeen} presence={presence.statusText} />
+          </div>
+          <div className="flex items-center space-x-1.5 text-xs text-neutral-500 dark:text-neutral-400 mt-1">
+            {/* Online / Offline Dot */}
+            <span
+              className={`w-2 h-2 rounded-full ${
+                presence.isOnline ? 'bg-green-500' : 'bg-neutral-400'
+              }`}
+            />
+            {/* Status Label (Online or "Seen Xm ago") */}
+            <span className={presence.isOnline ? 'text-green-600 dark:text-green-400 font-medium' : ''}>
+              {presence.label}
+            </span>
+
+            <span>•</span>
+
+            {/* Dynamic Joined Date ("Joined 3 days ago", "Joined 1 month ago", etc.) */}
+            <span>{joinedText}</span>
           </div>
           <div className="flex items-center gap-3 text-xs text-gray-500 dark:text-gray-400 mt-1">
             <span>{completedTrades} Trades</span>

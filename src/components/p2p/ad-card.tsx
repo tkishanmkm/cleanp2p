@@ -14,8 +14,7 @@ import { BtcLogo, EthLogo, LtcLogo, UsdtLogo, DefaultAvatar } from '@/components
 import { FlagIcon } from '../ui/flag-icon';
 import { MerchantBadge } from '@/components/merchant/merchant-badge';
 import { formatDistanceToNow } from 'date-fns';
-import TraderStatusBadge from '@/components/TraderStatusBadge';
-import { formatJoinedDate } from '@/utils/p2p-helpers';
+import { getPresenceStatus, formatJoinedDate } from '@/lib/presence';
 import {
   Dialog,
   DialogContent,
@@ -131,6 +130,11 @@ export function AdCard({ ad }: AdCardProps) {
   const effectiveMaxLimit = Math.min(maxLimit, advertiserBalanceUSD);
   const isAvailable = advertiserBalanceUSD >= minLimit;
 
+  const userLastSeen = adCreator?.last_seen || adCreator?.last_seen_at || adCreator?.lastActive || adCreator?.last_active;
+  const userCreatedAt = adCreator?.created_at || adCreator?.createdAt;
+  const presence = getPresenceStatus(userLastSeen);
+  const joinedText = formatJoinedDate(userCreatedAt);
+
   return (
     <Card className="hover:shadow-md transition-shadow">
       <div className="p-4 flex flex-col sm:flex-row justify-between items-start gap-4">
@@ -168,8 +172,22 @@ export function AdCard({ ad }: AdCardProps) {
                   <ThumbsDown className="h-3 w-3 text-red-500" /> {adCreator?.negativeFeedback || 0}
                 </div>
               </div>
-              <div className="mt-1">
-                <TraderStatusBadge lastActive={adCreator?.lastActive} />
+              <div className="flex items-center space-x-1.5 text-xs text-neutral-500 dark:text-neutral-400 mt-1">
+                {/* Online / Offline Dot */}
+                <span
+                  className={`w-2 h-2 rounded-full ${
+                    presence.isOnline ? 'bg-green-500' : 'bg-neutral-400'
+                  }`}
+                />
+                {/* Status Label (Online or "Seen Xm ago") */}
+                <span className={presence.isOnline ? 'text-green-600 dark:text-green-400 font-medium' : ''}>
+                  {presence.label}
+                </span>
+
+                <span>•</span>
+
+                {/* Dynamic Joined Date ("Joined 3 days ago", "Joined 1 month ago", etc.) */}
+                <span>{joinedText}</span>
               </div>
             </div>
           </div>

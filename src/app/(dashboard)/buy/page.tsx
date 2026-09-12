@@ -22,7 +22,7 @@ import { ALL_FIATS, getCurrencyCountryCode } from "@/lib/currencies";
 import { countries } from "@/lib/countries";
 import { Skeleton } from "@/components/ui/skeleton";
 import type { P2PAd, CryptoCurrency } from "@/lib/types";
-import { useState, useMemo, Suspense, useEffect, useCallback } from "react";
+import { useState, useMemo, Suspense, useEffect, useCallback, useRef } from "react";
 import { useSearchParams, useRouter, usePathname } from "next/navigation";
 import Link from 'next/link';
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -175,26 +175,53 @@ function P2PMarketplaceContent() {
 
   const { prices, fiatRates } = usePrices();
 
+  const hasInitializedFilters = useRef(false);
+
   useEffect(() => {
-    const saved = localStorage.getItem('p2p_saved_filters');
+    if (hasInitializedFilters.current) return;
+
+    const urlFiat = searchParams.get('fiat');
+    const urlCoin = searchParams.get('coin');
+    const urlCountry = searchParams.get('country');
+    const urlPayment = searchParams.get('paymentMethod');
+    const urlAmount = searchParams.get('amount');
+
+    const saved = typeof window !== 'undefined' ? localStorage.getItem('p2p_saved_filters') : null;
+    let parsedSaved: any = null;
     if (saved) {
       try {
-        const parsed = JSON.parse(saved);
-        if (parsed.coin) setSelectedCoin(parsed.coin);
-        if (parsed.fiat) setSelectedFiat(parsed.fiat);
-        if (parsed.country) setSelectedCountry(parsed.country);
-        if (parsed.paymentMethod) setPaymentMethod(parsed.paymentMethod);
-        if (parsed.topRated !== undefined) setShowTopRated(parsed.topRated);
-        if (parsed.verified !== undefined) setShowVerifiedOnly(parsed.verified);
+        parsedSaved = JSON.parse(saved);
       } catch (e) {
         console.error('Failed to load saved filters', e);
       }
-    } else if (!searchParams.get('fiat') && currentUserData) {
+    }
+
+    if (urlCoin) setSelectedCoin(urlCoin as ExtendedCoinOption);
+    else if (parsedSaved?.coin) setSelectedCoin(parsedSaved.coin);
+
+    if (urlFiat) {
+      setSelectedFiat(urlFiat.toUpperCase());
+    } else if (parsedSaved?.fiat) {
+      setSelectedFiat(parsedSaved.fiat.toUpperCase());
+    } else if (currentUserData) {
       const pref = (currentUserData as any)?.preferred_currency || (currentUserData as any)?.preferredCurrency || (currentUserData as any)?.preferred_fiat;
       if (pref && typeof pref === 'string') {
         setSelectedFiat(pref.toUpperCase());
       }
     }
+
+    if (urlCountry) setSelectedCountry(urlCountry);
+    else if (parsedSaved?.country) setSelectedCountry(parsedSaved.country);
+
+    if (urlPayment) setPaymentMethod(urlPayment);
+    else if (parsedSaved?.paymentMethod) setPaymentMethod(parsedSaved.paymentMethod);
+
+    if (urlAmount) setAmount(urlAmount);
+
+    if (parsedSaved?.topRated !== undefined) setShowTopRated(parsedSaved.topRated);
+    if (parsedSaved?.verified !== undefined) setShowVerifiedOnly(parsedSaved.verified);
+
+    hasInitializedFilters.current = true;
   }, [currentUserData, searchParams]);
 
   const handleSaveFilters = useCallback(() => {
@@ -224,17 +251,22 @@ function P2PMarketplaceContent() {
     setShowRecentlyActive(false);
     setShowAcceptable(false);
     setIsFiltersDialogOpen(false);
-    localStorage.removeItem('p2p_saved_filters');
+    if (typeof window !== 'undefined') {
+      localStorage.removeItem('p2p_saved_filters');
+      window.history.replaceState(null, '', pathname);
+    }
   };
 
   useEffect(() => {
+    if (!hasInitializedFilters.current) return;
+
     const params = new URLSearchParams();
     if (amount) params.set('amount', amount);
     if (paymentMethod) params.set('paymentMethod', paymentMethod);
-    if (selectedCoin !== 'ALL') params.set('coin', selectedCoin);
-    if (selectedFiat && selectedFiat !== 'USD') params.set('fiat', selectedFiat);
+    if (selectedCoin && selectedCoin !== 'ALL') params.set('coin', selectedCoin);
+    if (selectedFiat) params.set('fiat', selectedFiat);
     if (selectedCountry) params.set('country', selectedCountry);
-    if (sortBy !== 'price') params.set('sortBy', sortBy);
+    if (sortBy && sortBy !== 'price') params.set('sortBy', sortBy);
     if (selectedTags.length > 0) params.set('tags', selectedTags.join(','));
     if (showTopRated) params.set('topRated', 'true');
     if (showVerifiedOnly) params.set('verified', 'true');
@@ -425,16 +457,24 @@ function P2PMarketplaceContent() {
       }
       
       const amountNum = parseFloat(amount);
-      if (amount && !isNaN(amountNum)) {
-        if (amountNum < ad.minAmount || amountNum > ad.maxAmount) return false;
+      if (amount && !isNaN(amountNum) && amountNum > 0) {
+        if (amountNum < ad.minAmount || (ad.maxAmount > 0 && amountNum > ad.maxAmount)) return false;
       }
       if (paymentMethod) {
           const hasMethod = ad.paymentMethods.some(pm => pm.toLowerCase().includes(paymentMethod.toLowerCase()));
           if (!hasMethod) return false;
       }
-      if (selectedCoin !== 'ALL' && ad.crypto !== selectedCoin) return false;
-      if (selectedFiat && selectedFiat !== 'ALL' && !isOwn && ad.fiatCurrency !== selectedFiat) return false;
-      if (selectedCountry && !isOwn && ad.user?.country !== selectedCountry) return false;
+      if (selectedCoin !== 'ALL' && ad.crypto?.toUpperCase() !== selectedCoin.toUpperCase()) return false;
+      if (selectedFiat && selectedFiat !== 'ALL') {
+        const adFiat = (ad.fiatCurrency || (ad as any).fiat_currency || (ad as any).fiat || '').toUpperCase();
+        if (adFiat !== selectedFiat.toUpperCase()) return false;
+      }
+      if (selectedCountry && selectedCountry !== 'ALL') {
+        const adCountry = ((ad.user?.country || (ad as any).country || (adCreators[ad.userId]?.country) || '') as string).toUpperCase();
+        const targeted = Array.isArray(ad.targetedCountries) ? ad.targetedCountries.map((c: string) => String(c).toUpperCase()) : [];
+        const isMatchedCountry = adCountry === selectedCountry.toUpperCase() || targeted.includes(selectedCountry.toUpperCase()) || targeted.includes('ALL');
+        if (!isMatchedCountry) return false;
+      }
       if (showTopRated && !ad.user?.badges?.includes('power')) return false;
       if (showVerifiedOnly && !ad.user?.isVerified) return false;
       

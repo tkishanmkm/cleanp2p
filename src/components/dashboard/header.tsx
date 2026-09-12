@@ -38,6 +38,9 @@ import {
   HdMyAdsIcon,
   HdMyTradesIcon,
   HdSupportIcon,
+  HdProfileIcon,
+  HdSettingsIcon,
+  HdTicketsIcon,
 } from '@/components/hd-nav-icons';
 import { Button } from '@/components/ui/button';
 import {
@@ -878,43 +881,43 @@ export function DashboardHeader() {
               </div>
               <DropdownMenuItem asChild className="rounded-lg py-2 cursor-pointer">
                 <Link href="/dashboard" className="flex items-center gap-2.5 text-xs font-medium">
-                  <LayoutDashboard className="h-4 w-4 text-[#9273FC] stroke-[2]" />
+                  <HdDashboardIcon className="h-4 w-4 text-[#9273FC]" />
                   <span>Dashboard</span>
                 </Link>
               </DropdownMenuItem>
               <DropdownMenuItem asChild className="rounded-lg py-2 cursor-pointer">
                 <Link href="/profile" className="flex items-center gap-2.5 text-xs font-medium">
-                  <User className="h-4 w-4 text-blue-500 stroke-[2]" />
+                  <HdProfileIcon className="h-4 w-4 text-[#9273FC]" />
                   <span>Profile</span>
                 </Link>
               </DropdownMenuItem>
               <DropdownMenuItem asChild className="rounded-lg py-2 cursor-pointer">
                 <Link href="/wallets" className="flex items-center gap-2.5 text-xs font-medium">
-                  <Wallet className="h-4 w-4 text-emerald-500 stroke-[2]" />
+                  <HdWalletsIcon className="h-4 w-4 text-[#9273FC]" />
                   <span>Wallets</span>
                 </Link>
               </DropdownMenuItem>
               <DropdownMenuItem asChild className="rounded-lg py-2 cursor-pointer">
                 <Link href="/my-ads" className="flex items-center gap-2.5 text-xs font-medium">
-                  <FileText className="h-4 w-4 text-amber-500 stroke-[2]" />
+                  <HdMyAdsIcon className="h-4 w-4 text-[#9273FC]" />
                   <span>My Ads</span>
                 </Link>
               </DropdownMenuItem>
               <DropdownMenuItem asChild className="rounded-lg py-2 cursor-pointer">
                 <Link href="/trades" className="flex items-center gap-2.5 text-xs font-medium">
-                  <ArrowLeftRight className="h-4 w-4 text-purple-500 stroke-[2]" />
+                  <HdMyTradesIcon className="h-4 w-4 text-[#9273FC]" />
                   <span>My Trades</span>
                 </Link>
               </DropdownMenuItem>
               <DropdownMenuItem asChild className="rounded-lg py-2 cursor-pointer">
                 <Link href="/my-tickets" className="flex items-center gap-2.5 text-xs font-medium">
-                  <LifeBuoy className="h-4 w-4 text-sky-500 stroke-[2]" />
+                  <HdTicketsIcon className="h-4 w-4 text-[#9273FC]" />
                   <span>My Tickets</span>
                 </Link>
               </DropdownMenuItem>
               <DropdownMenuItem asChild className="rounded-lg py-2 cursor-pointer">
                 <Link href="/settings" className="flex items-center gap-2.5 text-xs font-medium">
-                  <Settings className="h-4 w-4 text-slate-500 stroke-[2]" />
+                  <HdSettingsIcon className="h-4 w-4 text-[#9273FC]" />
                   <span>Settings</span>
                 </Link>
               </DropdownMenuItem>

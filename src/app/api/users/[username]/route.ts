@@ -14,47 +14,27 @@ export async function GET(
 
     const isUuid = /^[0-9a-fA-F-]{32,36}$/.test(cleanUsername);
 
-    // 1. Query sanitized public profile view
+    // 1. Query public profile / profiles table
     let profile: any = null;
-    let query = supabaseAdmin.from('public_profiles').select('*');
+    let query = supabaseAdmin.from('profiles').select('*');
     if (isUuid) {
       query = query.or(`id.eq.${cleanUsername},username.ilike.${cleanUsername}`);
     } else {
       query = query.ilike('username', cleanUsername);
     }
-    const { data: pubProfile, error } = await query.maybeSingle();
+    const { data: directProfile, error } = await query.maybeSingle();
 
-    if (pubProfile && !error) {
-      profile = pubProfile;
+    if (directProfile && !error) {
+      profile = directProfile;
     } else {
-      // Fallback to querying sanitized public columns from profiles table
-      let fallbackQuery = supabaseAdmin
-        .from('profiles')
-        .select('id, username, full_name, avatar_url, country, last_seen_at, last_active, updated_at, created_at, completed_trades, total_trade_volume, avg_payment_minutes, avg_release_minutes, feedback_score, badges');
-      
-      if (isUuid) {
-        fallbackQuery = fallbackQuery.or(`id.eq.${cleanUsername},username.ilike.${cleanUsername}`);
-      } else {
-        fallbackQuery = fallbackQuery.ilike('username', cleanUsername);
-      }
+      const { data: pubProfile } = await supabaseAdmin
+        .from('public_profiles')
+        .select('*')
+        .or(isUuid ? `id.eq.${cleanUsername},username.ilike.${cleanUsername}` : `username.ilike.${cleanUsername}`)
+        .maybeSingle();
 
-      const { data: directProfile } = await fallbackQuery.maybeSingle();
-
-      if (directProfile) {
-        profile = {
-          id: directProfile.id,
-          username: directProfile.username || directProfile.full_name,
-          avatar_url: directProfile.avatar_url,
-          country: directProfile.country || 'US',
-          last_seen_at: directProfile.last_seen_at || directProfile.last_active,
-          joined_at: directProfile.created_at,
-          completed_trades: directProfile.completed_trades || 0,
-          total_trade_volume: directProfile.total_trade_volume || 0,
-          avg_payment_minutes: directProfile.avg_payment_minutes || 0,
-          avg_release_minutes: directProfile.avg_release_minutes || 0,
-          feedback_score: directProfile.feedback_score || 100,
-          badges: directProfile.badges || ['Verified Trader'],
-        };
+      if (pubProfile) {
+        profile = pubProfile;
       }
     }
 
@@ -62,37 +42,70 @@ export async function GET(
       return NextResponse.json({ error: 'User not found' }, { status: 404 });
     }
 
-    // 2. Retrieve feedback summaries
-    let feedback: any[] | null = null;
+    // 2. Verification flags
+    const isEmailVerified = Boolean(
+      profile.is_email_verified ||
+      profile.email_verified ||
+      profile.email_confirmed_at ||
+      (profile.email && !profile.email.includes('placeholder'))
+    );
+
+    const kycStatus = (profile.kyc_status || profile.identity_status || '').toUpperCase();
+    const isIdVerified = Boolean(
+      profile.is_id_verified ||
+      profile.id_verified ||
+      kycStatus === 'VERIFIED' ||
+      kycStatus === 'APPROVED' ||
+      profile.verification_tier === 2 ||
+      profile.verification_tier === 'TIER_2'
+    );
+
+    // 3. Feedback statistics
+    let feedbacks: any[] = [];
     try {
-      const { data: fb } = await supabaseAdmin
-        .from('trade_feedback')
-        .select('rating, is_positive, comment, created_at')
-        .eq('target_user_id', profile.id);
-      feedback = fb;
+      const { data: fb1 } = await supabaseAdmin
+        .from('feedbacks')
+        .select('*')
+        .eq('to_user_id', profile.id);
+      if (Array.isArray(fb1) && fb1.length > 0) {
+        feedbacks = fb1;
+      } else {
+        const { data: fb2 } = await supabaseAdmin
+          .from('trade_feedback')
+          .select('*')
+          .eq('reviewee_id', profile.id);
+        if (Array.isArray(fb2)) {
+          feedbacks = fb2;
+        }
+      }
     } catch {
-      feedback = [];
+      feedbacks = [];
     }
 
-    const total = feedback?.length || 0;
-    const positive = feedback?.filter((f) => f.is_positive === true || f.is_positive === 'true' || (f.rating || '').toUpperCase() === 'POSITIVE' || (f.rating_type || '').toUpperCase() === 'POSITIVE').length || 0;
-    const positiveRatio = total > 0 ? ((positive / total) * 100).toFixed(1) : '100.0';
-    const negativeRatio = total > 0 ? ((100 - parseFloat(positiveRatio)).toFixed(1)) : '0.0';
+    const totalFeedback = feedbacks.length;
+    const positiveFeedback = feedbacks.filter((f) => f.is_positive === true || f.is_positive === 'true' || (f.rating || '').toUpperCase() === 'POSITIVE').length;
+    const negativeFeedback = feedbacks.filter((f) => f.is_positive === false || f.is_positive === 'false' || (f.rating || '').toUpperCase() === 'NEGATIVE').length;
+    const positiveRatio = totalFeedback > 0 ? ((positiveFeedback / totalFeedback) * 100).toFixed(1) : '100.0';
 
     return NextResponse.json({
       id: profile.id,
       username: `@${(profile.username || cleanUsername).replace(/^@/, '')}`,
       avatar_url: profile.avatar_url || null,
-      last_seen_at: profile.last_seen_at || null,
-      joined_at: profile.joined_at || profile.created_at || null,
+      country: profile.country || 'US',
+      is_email_verified: isEmailVerified,
+      is_id_verified: isIdVerified,
+      kyc_status: kycStatus || (isIdVerified ? 'VERIFIED' : 'UNVERIFIED'),
+      last_seen_at: profile.last_seen_at || profile.last_active || null,
+      joined_at: profile.created_at || null,
       stats: {
         completed_trades: profile.completed_trades || 0,
-        total_trade_volume: profile.total_trade_volume || 0,
+        total_trade_volume: profile.total_trade_volume || profile.trade_volume || 0,
         avg_payment_minutes: profile.avg_payment_minutes || 0,
         avg_release_minutes: profile.avg_release_minutes || 0,
+        positive_feedback_count: positiveFeedback,
+        negative_feedback_count: negativeFeedback,
         positive_feedback_pct: `${positiveRatio}%`,
-        negative_feedback_pct: `${negativeRatio}%`,
-        total_feedback_count: total,
+        total_feedback_count: totalFeedback,
       },
     });
   } catch (error) {

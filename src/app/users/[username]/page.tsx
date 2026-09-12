@@ -1,71 +1,275 @@
-import React from 'react'
-import { createServerClient } from '@supabase/ssr'
-import { cookies } from 'next/headers'
-import { notFound } from 'next/navigation'
-import UserProfileClient from './UserProfileClient'
+import React from 'react';
+import { notFound } from 'next/navigation';
+import { getSupabaseAdminClient } from '@/lib/supabase/server';
+import UserProfileClient from './UserProfileClient';
 
 interface PageProps {
-  params: Promise<{ username: string }>
+  params: Promise<{ username: string }> | { username: string };
 }
 
+export const dynamic = 'force-dynamic';
+
 export default async function UserProfilePage({ params }: PageProps) {
-  const { username } = await params
-  const cookieStore = await cookies()
+  const rawParams = await Promise.resolve(params);
+  const username = (rawParams?.username || '').replace(/^@/, '').trim();
 
-  const supabase = createServerClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-    { cookies: { getAll: () => cookieStore.getAll() } }
-  )
+  if (!username) return notFound();
 
-  // 1. Fetch Profile
-  const { data: profile } = await supabase
-    .from('profiles')
-    .select('*')
-    .eq('username', username)
-    .maybeSingle()
+  const supabase = getSupabaseAdminClient();
+  const isUuid = /^[0-9a-fA-F-]{32,36}$/.test(username);
 
-  if (!profile) return notFound()
+  // 1. Fetch Target Profile
+  let profileQuery = supabase.from('profiles').select('*');
+  if (isUuid) {
+    profileQuery = profileQuery.or(`id.eq.${username},username.ilike.${username}`);
+  } else {
+    profileQuery = profileQuery.ilike('username', username);
+  }
 
-  // 2. Fetch Active Ads listed by this user
-  const { data: ads } = await supabase
-    .from('ads')
-    .select('*')
-    .eq('user_id', profile.id)
-    .eq('status', 'ACTIVE')
-    .order('created_at', { ascending: false })
+  const { data: profile, error: profileError } = await profileQuery.maybeSingle();
 
-  // 3. Fetch Feedbacks RECEIVED by user
-  const { data: receivedFeedbacks } = await supabase
-    .from('feedbacks')
-    .select('*, from_profile:profiles!from_user_id(username, avatar_url)')
-    .eq('to_user_id', profile.id)
-    .order('created_at', { ascending: false })
+  if (profileError || !profile) {
+    return notFound();
+  }
 
-  // 4. Fetch Feedbacks GIVEN by user
-  const { data: givenFeedbacks } = await supabase
-    .from('feedbacks')
-    .select('*, to_profile:profiles!to_user_id(username, avatar_url)')
-    .eq('from_user_id', profile.id)
-    .order('created_at', { ascending: false })
+  // 2. Fetch Active Ads listed by this user (both buy & sell)
+  let userAds: any[] = [];
+  try {
+    const { data: adsData, error: adsError } = await supabase
+      .from('ads')
+      .select('*')
+      .eq('user_id', profile.id)
+      .neq('status', 'DELETED')
+      .order('created_at', { ascending: false });
 
-  // 5. Aggregate Trade Stats
-  const { data: tradeStats } = await supabase
-    .rpc('get_seller_trade_stats', { target_user_id: profile.id })
-    .maybeSingle()
+    if (!adsError && Array.isArray(adsData)) {
+      userAds = adsData;
+    } else {
+      // Fallback to p2p_ads if table is structured under view
+      const { data: p2pAdsData } = await supabase
+        .from('p2p_ads')
+        .select('*')
+        .eq('user_id', profile.id)
+        .neq('status', 'DELETED')
+        .order('created_at', { ascending: false });
+      if (Array.isArray(p2pAdsData)) {
+        userAds = p2pAdsData;
+      }
+    }
+  } catch (err) {
+    console.warn('Error querying user ads:', err);
+  }
+
+  // Filter ads from visitor perspective:
+  // 1. If advertiser created a 'SELL' ad, the visitor BUYs crypto from advertiser -> "Buy Ads" tab
+  const buyAds = userAds.filter((ad) => {
+    const type = String(ad.type || ad.ad_type || ad.trade_type || '').toUpperCase();
+    const isActive = ad.is_active !== false && ad.active !== false && String(ad.status || '').toUpperCase() !== 'INACTIVE';
+    return (type === 'SELL' || type === 'ONLINE_SELL' || type === '') && isActive;
+  });
+
+  // 2. If advertiser created a 'BUY' ad, the visitor SELLs crypto to advertiser -> "Sell Ads" tab
+  const sellAds = userAds.filter((ad) => {
+    const type = String(ad.type || ad.ad_type || ad.trade_type || '').toUpperCase();
+    const isActive = ad.is_active !== false && ad.active !== false && String(ad.status || '').toUpperCase() !== 'INACTIVE';
+    return (type === 'BUY' || type === 'ONLINE_BUY') && isActive;
+  });
+
+  // 3. Aggregate Real Trade Stats & Dynamic Averages from trades table
+  let completedTradeCount = Number(profile.completed_trades || 0);
+  let totalVolumeUSD = Number(profile.total_trade_volume_usd || profile.trade_volume || profile.total_volume || 0);
+  let avgPayTimeSeconds = profile.avg_pay_time_seconds ?? null;
+  let avgReleaseTimeSeconds = profile.avg_release_time_seconds ?? null;
+
+  try {
+    const { data: userTrades } = await supabase
+      .from('trades')
+      .select('id, buyer_id, seller_id, created_at, paid_at, marked_paid_at, released_at, completed_at, resolved_at, fiat_amount, fiat_amount_usd, amount_usd, price, amount, crypto_amount, status')
+      .or(`buyer_id.eq.${profile.id},seller_id.eq.${profile.id}`);
+
+    if (userTrades && userTrades.length > 0) {
+      const completedList = userTrades.filter((t) => {
+        const s = String(t.status || '').toLowerCase();
+        return ['completed', 'released', 'resolved', 'paid', 'settled'].includes(s);
+      });
+
+      if (completedList.length > 0) {
+        completedTradeCount = completedList.length;
+
+        const calculatedVolume = completedList.reduce((acc, t) => {
+          const val = Number(t.fiat_amount || t.fiat_amount_usd || t.amount_usd || 0);
+          if (val > 0) return acc + val;
+          const cryptoAmt = Number(t.amount || t.crypto_amount || 0);
+          const unitPrice = Number(t.price || 0);
+          if (cryptoAmt > 0 && unitPrice > 0) return acc + (cryptoAmt * unitPrice);
+          return acc;
+        }, 0);
+
+        if (calculatedVolume > 0) {
+          totalVolumeUSD = calculatedVolume;
+        }
+
+        // Avg Pay Time (for buyer trades): AVG(marked_paid_at - created_at)
+        let buyerPaySum = 0;
+        let buyerPayCount = 0;
+        for (const t of userTrades) {
+          if (t.buyer_id === profile.id) {
+            const paidStr = t.marked_paid_at || t.paid_at;
+            const createdStr = t.created_at;
+            if (paidStr && createdStr) {
+              const diffSec = (new Date(paidStr).getTime() - new Date(createdStr).getTime()) / 1000;
+              if (diffSec >= 5 && diffSec <= 86400) {
+                buyerPaySum += diffSec;
+                buyerPayCount++;
+              }
+            }
+          }
+        }
+        if (buyerPayCount > 0) {
+          avgPayTimeSeconds = Math.round(buyerPaySum / buyerPayCount);
+        }
+
+        // Avg Release Time (for seller trades): AVG(released_at - marked_paid_at)
+        let sellerRelSum = 0;
+        let sellerRelCount = 0;
+        for (const t of userTrades) {
+          if (t.seller_id === profile.id) {
+            const paidStr = t.marked_paid_at || t.paid_at;
+            const relStr = t.released_at || t.completed_at || t.resolved_at;
+            if (paidStr && relStr) {
+              const diffSec = (new Date(relStr).getTime() - new Date(paidStr).getTime()) / 1000;
+              if (diffSec >= 5 && diffSec <= 172800) {
+                sellerRelSum += diffSec;
+                sellerRelCount++;
+              }
+            }
+          }
+        }
+        if (sellerRelCount > 0) {
+          avgReleaseTimeSeconds = Math.round(sellerRelSum / sellerRelCount);
+        }
+      }
+    }
+  } catch (tradeErr) {
+    console.warn('Trades stats query notice:', tradeErr);
+  }
+
+  // 4. Fetch Feedbacks (Trade feedback received and given)
+  let receivedFeedbacks: any[] = [];
+  let givenFeedbacks: any[] = [];
+
+  try {
+    // A. Received feedbacks
+    const { data: recFb1 } = await supabase
+      .from('feedbacks')
+      .select('id, rating, is_positive, comment, created_at, from_user_id, from_profile:profiles!from_user_id(id, username, avatar_url)')
+      .eq('to_user_id', profile.id)
+      .order('created_at', { ascending: false });
+
+    if (Array.isArray(recFb1) && recFb1.length > 0) {
+      receivedFeedbacks = recFb1;
+    } else {
+      const { data: recFb2 } = await supabase
+        .from('trade_feedback')
+        .select('id, rating, is_positive, feedback_type, comment, created_at, reviewer_id, reviewer:profiles!reviewer_id(id, username, avatar_url)')
+        .eq('reviewee_id', profile.id)
+        .order('created_at', { ascending: false });
+
+      if (Array.isArray(recFb2)) {
+        receivedFeedbacks = recFb2.map((f: any) => ({
+          id: f.id,
+          rating: f.rating,
+          is_positive: f.is_positive === true || f.is_positive === 'true' || f.feedback_type === 'POSITIVE' || f.rating === 'positive',
+          comment: f.comment,
+          created_at: f.created_at,
+          from_profile: f.reviewer || null,
+        }));
+      }
+    }
+
+    // B. Given feedbacks
+    const { data: givFb1 } = await supabase
+      .from('feedbacks')
+      .select('id, rating, is_positive, comment, created_at, to_user_id, to_profile:profiles!to_user_id(id, username, avatar_url)')
+      .eq('from_user_id', profile.id)
+      .order('created_at', { ascending: false });
+
+    if (Array.isArray(givFb1) && givFb1.length > 0) {
+      givenFeedbacks = givFb1;
+    } else {
+      const { data: givFb2 } = await supabase
+        .from('trade_feedback')
+        .select('id, rating, is_positive, feedback_type, comment, created_at, reviewee_id, reviewee:profiles!reviewee_id(id, username, avatar_url)')
+        .eq('reviewer_id', profile.id)
+        .order('created_at', { ascending: false });
+
+      if (Array.isArray(givFb2)) {
+        givenFeedbacks = givFb2.map((f: any) => ({
+          id: f.id,
+          rating: f.rating,
+          is_positive: f.is_positive === true || f.is_positive === 'true' || f.feedback_type === 'POSITIVE' || f.rating === 'positive',
+          comment: f.comment,
+          created_at: f.created_at,
+          to_profile: f.reviewee || null,
+        }));
+      }
+    }
+  } catch (fbErr) {
+    console.warn('Feedback query warning:', fbErr);
+  }
+
+  // 5. Compute Positive/Negative Feedback Summary
+  const positiveFeedbacksCount = receivedFeedbacks.filter((f) => f.is_positive === true || f.is_positive === 'true' || (f.rating || '').toUpperCase() === 'POSITIVE').length;
+  const negativeFeedbacksCount = receivedFeedbacks.filter((f) => f.is_positive === false || f.is_positive === 'false' || (f.rating || '').toUpperCase() === 'NEGATIVE').length;
+  const totalFeedbackCount = receivedFeedbacks.length;
+  const positiveRatio = totalFeedbackCount > 0 ? ((positiveFeedbacksCount / totalFeedbackCount) * 100).toFixed(0) : '100';
+
+  // 6. Verification Statuses
+  const isEmailVerified = Boolean(
+    profile.is_email_verified ||
+    profile.email_verified ||
+    profile.email_confirmed_at ||
+    (profile.email && !profile.email.includes('placeholder'))
+  );
+
+  const kycStatusRaw = (profile.kyc_status || profile.identity_status || '').toUpperCase();
+  const isIdVerified = Boolean(
+    profile.is_id_verified ||
+    profile.id_verified ||
+    kycStatusRaw === 'VERIFIED' ||
+    kycStatusRaw === 'APPROVED' ||
+    profile.verification_tier === 2 ||
+    profile.verification_tier === 'TIER_2'
+  );
+
+  const countryCode = (profile.country || profile.country_code || 'US').toUpperCase();
 
   return (
     <UserProfileClient
-      profile={profile}
-      ads={ads || []}
-      receivedFeedbacks={receivedFeedbacks || []}
-      givenFeedbacks={givenFeedbacks || []}
-      tradeStats={{
-        totalTrades: Number(tradeStats?.total_trades || profile.completed_trades || 0),
-        avgReleaseSeconds: Number(tradeStats?.avg_release_seconds || 0),
-        blockedBy: Number(tradeStats?.blocked_by_count || profile.blocked_by_count || 0),
-        hasBlocked: Number(tradeStats?.has_blocked_count || profile.blocking_count || 0),
+      profile={{
+        ...profile,
+        username: profile.username || username,
+        is_email_verified: isEmailVerified,
+        is_id_verified: isIdVerified,
+        kyc_status: kycStatusRaw || (isIdVerified ? 'VERIFIED' : 'UNVERIFIED'),
+        country: countryCode,
+      }}
+      buyAds={buyAds}
+      sellAds={sellAds}
+      receivedFeedbacks={receivedFeedbacks}
+      givenFeedbacks={givenFeedbacks}
+      stats={{
+        completedTrades: completedTradeCount,
+        tradeVolumeUSD: totalVolumeUSD,
+        avgPayTimeSeconds: avgPayTimeSeconds,
+        avgReleaseTimeSeconds: avgReleaseTimeSeconds,
+        positiveFeedbacksCount,
+        negativeFeedbacksCount,
+        positiveRatio,
+        totalFeedbackCount,
+        blockedBy: Number(profile.blocked_by_count || 0),
+        hasBlocked: Number(profile.blocking_count || 0),
       }}
     />
-  )
+  );
 }
