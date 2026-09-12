@@ -102,11 +102,14 @@ export async function POST(req: NextRequest) {
 
     let savedFeedback: any = null;
 
+    const isPositive = rating === 'positive';
+
     if (existingFeedback?.id) {
       const { data: updated, error: updateErr } = await admin
         .from('feedback')
         .update({
           rating,
+          is_positive: isPositive,
           comment: comment.trim(),
           updated_at: new Date().toISOString(),
         })
@@ -125,6 +128,7 @@ export async function POST(req: NextRequest) {
           from_username: fromUsername,
           to_user: effectiveCounterpartId,
           rating,
+          is_positive: isPositive,
           comment: comment.trim(),
           created_at: new Date().toISOString(),
         })
@@ -138,12 +142,12 @@ export async function POST(req: NextRequest) {
     // 3. Update counterparty's profile stats (positive_feedback, negative_feedback, feedback_score)
     const { data: allFb } = await admin
       .from('feedback')
-      .select('rating')
+      .select('rating, is_positive')
       .eq('to_user', effectiveCounterpartId);
 
     if (allFb) {
-      const posCount = allFb.filter((f) => f.rating === 'positive').length;
-      const negCount = allFb.filter((f) => f.rating === 'negative').length;
+      const posCount = allFb.filter((f) => f.is_positive === true || f.is_positive === 'true' || f.rating === 'positive').length;
+      const negCount = allFb.filter((f) => f.is_positive === false || f.is_positive === 'false' || f.rating === 'negative').length;
       const total = posCount + negCount;
       const score = total > 0 ? Math.round((posCount / total) * 100) : 100;
 

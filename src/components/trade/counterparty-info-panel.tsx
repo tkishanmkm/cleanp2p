@@ -200,25 +200,20 @@ export function CounterpartyInfoPanel({
         // Fetch live feedback counts for this user directly from feedback table
         if (targetProfileId || targetId) {
           const effectiveId = targetProfileId || targetId;
-          const { count: posCount } = await supabase
+          const { data: fbData } = await supabase
             .from('feedback')
-            .select('*', { count: 'exact', head: true })
-            .eq('to_user', effectiveId)
-            .eq('rating', 'positive');
+            .select('rating, is_positive')
+            .eq('to_user', effectiveId);
 
-          const { count: negCount } = await supabase
-            .from('feedback')
-            .select('*', { count: 'exact', head: true })
-            .eq('to_user', effectiveId)
-            .eq('rating', 'negative');
-
-          if (posCount !== null || negCount !== null) {
+          if (fbData) {
+            const posCount = fbData.filter((f) => f.is_positive === true || f.is_positive === 'true' || f.rating === 'positive').length;
+            const negCount = fbData.filter((f) => f.is_positive === false || f.is_positive === 'false' || f.rating === 'negative').length;
             setProfileData((prev: any) => ({
               ...prev,
-              positive_feedback: posCount ?? prev?.positive_feedback ?? 0,
-              negative_feedback: negCount ?? prev?.negative_feedback ?? 0,
-              positiveFeedback: posCount ?? prev?.positiveFeedback ?? 0,
-              negativeFeedback: negCount ?? prev?.negativeFeedback ?? 0
+              positive_feedback: posCount,
+              negative_feedback: negCount,
+              positiveFeedback: posCount,
+              negativeFeedback: negCount
             }));
           }
         }

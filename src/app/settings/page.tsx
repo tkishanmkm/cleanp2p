@@ -909,18 +909,19 @@ export default function SettingsPage() {
     setSubmittingKyc(true);
     try {
       const fullAddress = `${kycStreet.trim()}, ${kycCity.trim()} ${kycPostalCode.trim()}`.trim();
+      const targetUserId = userId || profile?.id;
       const res = await fetch('/api/kyc/initiate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          userId: user?.id,
+          userId: targetUserId,
           country: kycCountry,
           address: fullAddress,
         }),
       });
 
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Failed to initiate Didit verification session');
+      if (!res.ok) throw new Error(data.error || 'Failed to initiate verification session');
 
       setIsKycSubmitted(true);
       setKycStatus('PENDING');
@@ -931,7 +932,7 @@ export default function SettingsPage() {
         address: fullAddress,
       }));
 
-      notify('success', 'Address saved. Launching Didit biometric identity verification...');
+      notify('success', 'Address saved. Launching biometric identity verification...');
 
       if (data.url) {
         window.location.href = data.url;
@@ -2753,10 +2754,10 @@ export default function SettingsPage() {
                       <div className="p-4 rounded-xl border border-primary/20 bg-primary/5 space-y-3">
                         <div className="flex items-center gap-2 text-xs font-bold text-foreground">
                           <ShieldCheck className="w-4 h-4 text-primary" />
-                          <span>Automated Biometric & ID Verification Powered by Didit</span>
+                          <span>Automated Biometric & ID Verification</span>
                         </div>
                         <p className="text-xs text-muted-foreground leading-relaxed">
-                          For bank-grade security and fraud prevention, PaxOnes does not store or process raw document file uploads on our servers. Your government-issued ID, 3D biometric liveness, and face match are verified live in an encrypted Didit verification session.
+                          For bank-grade security and fraud prevention, PaxOnes does not store or process raw document file uploads on our servers. Your government-issued ID, 3D biometric liveness, and face match are verified live in an encrypted verification session.
                         </p>
                         <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 pt-1">
                           <div className="p-2.5 rounded-lg border border-border bg-background flex items-center gap-2">
@@ -2778,7 +2779,7 @@ export default function SettingsPage() {
                       <div className="p-3.5 rounded-xl bg-secondary/60 border border-border flex items-start gap-2.5 text-xs text-foreground">
                         <Info className="w-4 h-4 shrink-0 text-primary mt-0.5" />
                         <span>
-                          <strong>Verification Policy:</strong> Submitting your residential address initiates your biometric verification. Once approved by Didit, your legal name and date of birth are permanently saved and locked for regulatory compliance.
+                          <strong>Verification Policy:</strong> Submitting your residential address initiates your biometric verification. Once approved, your legal name and date of birth are permanently saved and locked for regulatory compliance.
                         </span>
                       </div>
 
@@ -2794,7 +2795,7 @@ export default function SettingsPage() {
                           ) : (
                             <ShieldCheck className="w-4 h-4" />
                           )}
-                          <span>Save Address & Launch Biometric Verification</span>
+                          <span>Save Address & Start Verification</span>
                         </button>
                       </div>
                     </form>

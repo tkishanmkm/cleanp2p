@@ -744,6 +744,7 @@ function FeedbackForm({
             .from('feedback')
             .update({
               rating: values.rating,
+              is_positive: values.rating === 'positive',
               comment: values.comment,
               updated_at: new Date().toISOString()
             })
@@ -760,6 +761,7 @@ function FeedbackForm({
               from_username: currentUsername || 'Trader',
               to_user: opponentId,
               rating: values.rating,
+              is_positive: values.rating === 'positive',
               comment: values.comment,
               created_at: new Date().toISOString()
             }
@@ -771,12 +773,12 @@ function FeedbackForm({
         // Adjust counts in profiles table
         const { data: allFb } = await supabase
           .from('feedback')
-          .select('rating')
+          .select('rating, is_positive')
           .eq('to_user', opponentId);
 
         if (allFb) {
-          const positiveCount = allFb.filter((f) => f.rating === 'positive').length;
-          const negativeCount = allFb.filter((f) => f.rating === 'negative').length;
+          const positiveCount = allFb.filter((f) => f.is_positive === true || f.is_positive === 'true' || f.rating === 'positive').length;
+          const negativeCount = allFb.filter((f) => f.is_positive === false || f.is_positive === 'false' || f.rating === 'negative').length;
           const total = positiveCount + negativeCount;
           const score = total > 0 ? Math.round((positiveCount / total) * 100) : 100;
 

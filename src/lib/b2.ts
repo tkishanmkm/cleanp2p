@@ -1,14 +1,21 @@
 import { S3Client, PutObjectCommand, GetObjectCommand } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 
-const s3Client = new S3Client({
-  endpoint: process.env.B2_ENDPOINT || 'https://s3.us-east-005.backblazeb2.com',
-  region: process.env.B2_REGION || 'us-east-005',
-  credentials: {
-    accessKeyId: process.env.B2_KEY_ID || process.env.B2_ACCESS_KEY_ID || '',
-    secretAccessKey: process.env.B2_APPLICATION_KEY || process.env.B2_SECRET_ACCESS_KEY || '',
-  },
-});
+let _s3Client: S3Client | null = null;
+
+function getS3Client(): S3Client {
+  if (!_s3Client) {
+    _s3Client = new S3Client({
+      endpoint: process.env.B2_ENDPOINT || 'https://s3.us-east-005.backblazeb2.com',
+      region: process.env.B2_REGION || 'us-east-005',
+      credentials: {
+        accessKeyId: process.env.B2_KEY_ID || process.env.B2_ACCESS_KEY_ID || 'dummy-key-id',
+        secretAccessKey: process.env.B2_APPLICATION_KEY || process.env.B2_SECRET_ACCESS_KEY || 'dummy-secret-key',
+      },
+    });
+  }
+  return _s3Client;
+}
 
 export const B2_BUCKET = process.env.B2_BUCKET_NAME || 'thepax';
 
@@ -26,7 +33,7 @@ export async function getAvatarSignedUrl(username: string) {
     Bucket: B2_BUCKET,
     Key: `avatars/${username.toLowerCase()}.png`,
   });
-  return await getSignedUrl(s3Client, command, { expiresIn: 3600 });
+  return await getSignedUrl(getS3Client(), command, { expiresIn: 3600 });
 }
 
 /**
@@ -38,7 +45,7 @@ export async function getUploadPresignedUrl(key: string, contentType: string) {
     Key: key,
     ContentType: contentType,
   });
-  return await getSignedUrl(s3Client, command, { expiresIn: 900 });
+  return await getSignedUrl(getS3Client(), command, { expiresIn: 900 });
 }
 
 /**
@@ -56,7 +63,7 @@ export async function uploadToB2(
     ContentType: contentType,
   });
 
-  await s3Client.send(command);
+  await getS3Client().send(command);
   return key;
 }
 
@@ -69,7 +76,7 @@ export async function getPresignedDownloadUrl(key: string, expiresInSeconds = 90
     Key: key,
   });
 
-  return await getSignedUrl(s3Client, command, { expiresIn: expiresInSeconds });
+  return await getSignedUrl(getS3Client(), command, { expiresIn: expiresInSeconds });
 }
 
 /**
@@ -82,7 +89,7 @@ export async function downloadFromB2(key: string): Promise<{ buffer: Buffer; con
       Key: key,
     });
 
-    const response = await s3Client.send(command);
+    const response = await getS3Client().send(command);
     if (!response.Body) return null;
 
     const stream = response.Body as any;
@@ -99,3 +106,4 @@ export async function downloadFromB2(key: string): Promise<{ buffer: Buffer; con
     return null;
   }
 }
+

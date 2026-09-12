@@ -399,22 +399,17 @@ export function TradeChat({
     if (!oppId) return;
 
     const fetchCounts = async () => {
-      const { count: pos } = await supabase
+      const { data: fbData } = await supabase
         .from('feedback')
-        .select('*', { count: 'exact', head: true })
-        .eq('to_user', oppId)
-        .eq('rating', 'positive');
+        .select('rating, is_positive')
+        .eq('to_user', oppId);
 
-      const { count: neg } = await supabase
-        .from('feedback')
-        .select('*', { count: 'exact', head: true })
-        .eq('to_user', oppId)
-        .eq('rating', 'negative');
-
-      if (pos !== null || neg !== null) {
+      if (fbData) {
+        const pos = fbData.filter((f) => f.is_positive === true || f.is_positive === 'true' || f.rating === 'positive').length;
+        const neg = fbData.filter((f) => f.is_positive === false || f.is_positive === 'false' || f.rating === 'negative').length;
         setLiveOpponentFeedback({
-          positive: pos ?? 0,
-          negative: neg ?? 0
+          positive: pos,
+          negative: neg
         });
       }
     };

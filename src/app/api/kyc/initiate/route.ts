@@ -64,7 +64,21 @@ export async function POST(req: NextRequest) {
     }
 
     const session = await res.json();
-    return NextResponse.json({ url: session.url, session_id: session.session_id });
+    const sessionId = session.session_id || session.id || session.vendor_session_id;
+
+    if (sessionId) {
+      await supabase.from('profiles').update({
+        didit_session_id: sessionId,
+        kyc_vendor_session_id: sessionId,
+        updated_at: new Date().toISOString(),
+      }).eq('id', userId);
+    }
+
+    return NextResponse.json({
+      url: session.url,
+      session_id: sessionId,
+      didit_session_id: sessionId,
+    });
   } catch (err: any) {
     return NextResponse.json({ error: err.message }, { status: 500 });
   }

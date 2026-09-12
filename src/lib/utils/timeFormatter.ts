@@ -22,22 +22,21 @@ export function getDisplayUsername(ad: any): string {
 }
 
 /**
- * Checks if a user is online, active within 5 minutes, or returns precise relative last seen.
+ * Checks if a user is online (active within 120 seconds) or returns precise relative last seen when offline.
  */
 export function getUserPresenceStatus(lastSeen?: string | Date | null, isOnlineFlag?: boolean): {
   isOnline: boolean;
   statusText: string;
   dotColor: string;
 } {
-  if (isOnlineFlag === true) {
-    return {
-      isOnline: true,
-      statusText: 'Online',
-      dotColor: 'bg-emerald-500',
-    };
-  }
-
   if (!lastSeen) {
+    if (isOnlineFlag === true) {
+      return {
+        isOnline: true,
+        statusText: 'Online',
+        dotColor: 'bg-emerald-500',
+      };
+    }
     return {
       isOnline: false,
       statusText: 'Offline',
@@ -48,18 +47,20 @@ export function getUserPresenceStatus(lastSeen?: string | Date | null, isOnlineF
   const lastSeenDate = new Date(lastSeen);
   if (isNaN(lastSeenDate.getTime())) {
     return {
-      isOnline: false,
-      statusText: 'Offline',
-      dotColor: 'bg-slate-400 dark:bg-slate-500',
+      isOnline: isOnlineFlag === true,
+      statusText: isOnlineFlag ? 'Online' : 'Offline',
+      dotColor: isOnlineFlag ? 'bg-emerald-500' : 'bg-slate-400 dark:bg-slate-500',
     };
   }
 
   const diffMs = Date.now() - lastSeenDate.getTime();
-  const diffMinutes = Math.floor(diffMs / (1000 * 60));
+  const diffSeconds = Math.floor(diffMs / 1000);
+  const diffMinutes = Math.floor(diffSeconds / 60);
   const diffHours = Math.floor(diffMinutes / 60);
   const diffDays = Math.floor(diffHours / 24);
 
-  if (diffMinutes < 5) {
+  // Active within 120 seconds (2 minutes) is considered Online
+  if (diffSeconds <= 120) {
     return {
       isOnline: true,
       statusText: 'Online',
@@ -68,9 +69,10 @@ export function getUserPresenceStatus(lastSeen?: string | Date | null, isOnlineF
   }
 
   if (diffMinutes < 60) {
+    const mins = Math.max(1, diffMinutes);
     return {
       isOnline: false,
-      statusText: `Offline · Last seen ${diffMinutes} minute${diffMinutes === 1 ? '' : 's'} ago`,
+      statusText: `${mins} min${mins === 1 ? '' : 's'} ago`,
       dotColor: 'bg-slate-400 dark:bg-slate-500',
     };
   }
@@ -78,7 +80,7 @@ export function getUserPresenceStatus(lastSeen?: string | Date | null, isOnlineF
   if (diffHours < 24) {
     return {
       isOnline: false,
-      statusText: `Offline · Last seen ${diffHours} hour${diffHours === 1 ? '' : 's'} ago`,
+      statusText: `${diffHours} hr${diffHours === 1 ? '' : 's'} ago`,
       dotColor: 'bg-slate-400 dark:bg-slate-500',
     };
   }
@@ -86,14 +88,14 @@ export function getUserPresenceStatus(lastSeen?: string | Date | null, isOnlineF
   if (diffDays === 1) {
     return {
       isOnline: false,
-      statusText: 'Offline · Last seen yesterday',
+      statusText: 'Yesterday',
       dotColor: 'bg-slate-400 dark:bg-slate-500',
     };
   }
 
   return {
     isOnline: false,
-    statusText: `Offline · Last seen ${diffDays} days ago`,
+    statusText: `${diffDays} days ago`,
     dotColor: 'bg-slate-400 dark:bg-slate-500',
   };
 }

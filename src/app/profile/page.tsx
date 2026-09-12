@@ -459,7 +459,7 @@ export default function ProfilePage() {
             <div className="space-y-3">
               {displayedFeedbacks.map((fb) => {
                 const counterparty = feedbackTab === 'received' ? fb.reviewer : fb.reviewee;
-                const isPositive = fb.feedback_type === 'POSITIVE' || (fb.rating && fb.rating >= 4);
+                const isPositive = fb.is_positive === true || fb.is_positive === 'true' || fb.feedback_type === 'POSITIVE' || fb.rating === 'positive' || (typeof fb.rating === 'number' && fb.rating >= 4);
 
                 return (
                   <div

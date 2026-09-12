@@ -193,8 +193,13 @@ function P2PMarketplaceContent() {
       } catch (e) {
         console.error('Failed to load saved filters', e);
       }
+    } else if (!searchParams.get('fiat') && currentUserData) {
+      const pref = (currentUserData as any)?.preferred_currency || (currentUserData as any)?.preferredCurrency || (currentUserData as any)?.preferred_fiat;
+      if (pref && typeof pref === 'string') {
+        setSelectedFiat(pref.toUpperCase());
+      }
     }
-  }, []);
+  }, [currentUserData, searchParams]);
 
   const handleSaveFilters = useCallback(() => {
     if (rememberFilters) {
@@ -701,7 +706,7 @@ function P2PMarketplaceContent() {
                           asChild 
                           className={cn("bg-emerald-500 hover:bg-emerald-400 text-white border-0 shadow-md font-semibold transition-all duration-300", tourStep === 4 && "ring-4 ring-amber-400 scale-105 shadow-2xl z-50")}
                         >
-                            <Link href="/create-ad"><PlusCircle className="mr-2 h-4 w-4" /> Post Offer</Link>
+                            <Link href="/ads/create"><PlusCircle className="mr-2 h-4 w-4" /> Post Offer</Link>
                         </Button>
                         <Button 
                           id="tour-filter-btn"

@@ -67,7 +67,7 @@ export async function GET(
     try {
       const { data: fb } = await supabaseAdmin
         .from('trade_feedback')
-        .select('rating, comment, created_at')
+        .select('rating, is_positive, comment, created_at')
         .eq('target_user_id', profile.id);
       feedback = fb;
     } catch {
@@ -75,7 +75,7 @@ export async function GET(
     }
 
     const total = feedback?.length || 0;
-    const positive = feedback?.filter((f) => (f.rating || '').toUpperCase() === 'POSITIVE').length || 0;
+    const positive = feedback?.filter((f) => f.is_positive === true || f.is_positive === 'true' || (f.rating || '').toUpperCase() === 'POSITIVE' || (f.rating_type || '').toUpperCase() === 'POSITIVE').length || 0;
     const positiveRatio = total > 0 ? ((positive / total) * 100).toFixed(1) : '100.0';
     const negativeRatio = total > 0 ? ((100 - parseFloat(positiveRatio)).toFixed(1)) : '0.0';
 

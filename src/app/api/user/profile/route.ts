@@ -150,12 +150,12 @@ export async function GET(request: NextRequest) {
   try {
     const { data: fbList } = await supabase
       .from('trade_feedback')
-      .select('rating, feedback_type')
+      .select('rating, feedback_type, is_positive')
       .eq('reviewee_id', profile.id);
 
     if (fbList && fbList.length > 0) {
-      positive = fbList.filter(f => f.feedback_type === 'POSITIVE' || (f.rating && f.rating >= 4)).length;
-      negative = fbList.filter(f => f.feedback_type === 'NEGATIVE' || (f.rating && f.rating < 4)).length;
+      positive = fbList.filter(f => f.is_positive === true || f.is_positive === 'true' || f.feedback_type === 'POSITIVE' || f.rating === 'positive' || (typeof f.rating === 'number' && f.rating >= 4)).length;
+      negative = fbList.filter(f => f.is_positive === false || f.is_positive === 'false' || f.feedback_type === 'NEGATIVE' || f.rating === 'negative' || (typeof f.rating === 'number' && f.rating < 4)).length;
     }
   } catch (err) {
     console.warn('Feedback query warning:', err);
@@ -229,7 +229,7 @@ export async function GET(request: NextRequest) {
       avg_release_minutes: avgReleaseTimeSeconds ? Math.ceil(avgReleaseTimeSeconds / 60) : null,
       blocking_count: blockingCount,
       blocked_by_count: blockedByCount,
-      merchant_tier: profile.merchant_tier || 'NONE',
+      merchant_tier: profile?.merchant_tier || 'NONE',
       merchant_deposit_locked: profile.merchant_deposit_locked || 0,
       preferred_currency: profile.preferred_currency || profile.preferred_fiat || 'USD',
       preferred_fiat: profile.preferred_currency || profile.preferred_fiat || 'USD',
