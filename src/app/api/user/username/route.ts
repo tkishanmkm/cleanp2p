@@ -31,7 +31,7 @@ export async function POST(req: Request) {
     // 3. Fetch Current User Metadata
     const { data: profile } = await supabase
       .from('profiles')
-      .select('username_changes_remaining, username')
+      .select('username_changes_remaining, username_changed, username_changed_count, username')
       .eq('id', user.id)
       .single();
 
@@ -43,8 +43,12 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: 'New username must be different from current username.' }, { status: 400 });
     }
 
-    if (profile.username_changes_remaining <= 0) {
-      return NextResponse.json({ error: 'You have reached the maximum allowed username changes.' }, { status: 403 });
+    if (
+      profile.username_changed ||
+      (profile.username_changed_count && profile.username_changed_count >= 1) ||
+      (profile.username_changes_remaining !== undefined && profile.username_changes_remaining <= 0)
+    ) {
+      return NextResponse.json({ error: 'You have reached the maximum allowed username changes (1 time).' }, { status: 403 });
     }
 
     // 4. Duplicate Check
@@ -63,7 +67,9 @@ export async function POST(req: Request) {
       .from('profiles')
       .update({
         username: normalized,
-        username_changes_remaining: profile.username_changes_remaining - 1,
+        username_changed: true,
+        username_changed_count: 1,
+        username_changes_remaining: 0,
         updated_at: new Date().toISOString(),
       })
       .eq('id', user.id);

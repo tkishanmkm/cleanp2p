@@ -60,3 +60,27 @@ export function sanitizeUsername(rawInput: string): string {
 
   return sanitized || "user";
 }
+
+/**
+ * Calculates age in full years from a date of birth string (e.g. YYYY-MM-DD) or Date.
+ */
+export function calculateAge(dobInput: string | Date | null | undefined): number {
+  if (!dobInput) return 0;
+  const birthDate = typeof dobInput === 'string' ? new Date(dobInput) : dobInput;
+  if (isNaN(birthDate.getTime())) return 0;
+
+  const today = new Date();
+  let age = today.getFullYear() - birthDate.getFullYear();
+  const m = today.getMonth() - birthDate.getMonth();
+  if (m < 0 || (m === 0 && today.getDate() < birthDate.getDate())) {
+    age--;
+  }
+  return age;
+}
+
+/**
+ * Determines whether the user is at least 18 years old for platform child safety.
+ */
+export function isAtLeast18(dobInput: string | Date | null | undefined): boolean {
+  return calculateAge(dobInput) >= 18;
+}

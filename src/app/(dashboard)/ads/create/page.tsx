@@ -1,9 +1,11 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabaseClient';
 import { useWallet } from '@/context/wallet-context';
+import { usePrices } from '@/context/price-context';
+import { calculateMinimumFiatAmount, BASE_PLATFORM_USD_MINIMUM } from '@/lib/currency';
 import { CryptoCurrency } from '@/lib/types';
 import { toast } from 'sonner';
 import { 
@@ -220,10 +222,10 @@ const ALL_COUNTRIES = [
 ];
 
 const CRYPTO_OPTIONS = [
-  { code: 'BTC', name: 'Bitcoin', logo: 'https://cryptologos.cc/logos/bitcoin-btc-logo.svg?v=035' },
-  { code: 'USDT', name: 'Tether', logo: 'https://cryptologos.cc/logos/tether-usdt-logo.svg?v=035' },
-  { code: 'ETH', name: 'Ethereum', logo: 'https://cryptologos.cc/logos/ethereum-eth-logo.svg?v=035' },
-  { code: 'LTC', name: 'Litecoin', logo: 'https://cryptologos.cc/logos/litecoin-ltc-logo.svg?v=035' },
+  { code: 'USDT', name: 'Tether (USDT)', logo: 'https://cryptologos.cc/logos/tether-usdt-logo.svg?v=035' },
+  { code: 'BTC', name: 'Bitcoin (BTC)', logo: 'https://cryptologos.cc/logos/bitcoin-btc-logo.svg?v=035' },
+  { code: 'ETH', name: 'Ethereum (ETH)', logo: 'https://cryptologos.cc/logos/ethereum-eth-logo.svg?v=035' },
+  { code: 'LTC', name: 'Litecoin (LTC)', logo: 'https://cryptologos.cc/logos/litecoin-ltc-logo.svg?v=035' },
 ];
 
 const FIAT_CURRENCIES = [
@@ -367,9 +369,12 @@ export default function CreateP2PAdPage() {
     };
   }, []);
 
+  // --- Pricing Context ---
+  const { prices, fiatRates } = usePrices();
+
   // --- Form State ---
   const [adType, setAdType] = useState<'buy' | 'sell'>('buy');
-  const [crypto, setCrypto] = useState('BTC');
+  const [crypto, setCrypto] = useState('USDT');
   const [fiat, setFiat] = useState({ name: 'United States Dollar', code: 'USD', flag: 'us' });
   
   // Payment state & Payment search
@@ -379,62 +384,40 @@ export default function CreateP2PAdPage() {
   const [customMethod, setCustomMethod] = useState('');
 
   // Pricing state
-  const [currentMarketPrice, setCurrentMarketPrice] = useState<number>(89500);
+  const [currentMarketPrice, setCurrentMarketPrice] = useState<number>(1.0);
   const [rateType, setRateType] = useState<'market' | 'fixed'>('market');
   const [ratePercent, setRatePercent] = useState('1.5');
-  const [fixedPrice, setFixedPrice] = useState('90842.50');
-  const [minAmount, setMinAmount] = useState('100');
-  const [maxAmount, setMaxAmount] = useState('5000');
+  const [fixedPrice, setFixedPrice] = useState('1.015');
+  const [minAmount, setMinAmount] = useState('10');
+  const [maxAmount, setMaxAmount] = useState('1000');
   const [paymentWindow, setPaymentWindow] = useState('30');
 
-  // Compute base market price for any coin & fiat
-  const getBaseMarketPrice = (coinSymbol: string, fiatCode: string, dbPrice?: number | null): number => {
-    if (typeof dbPrice === 'number' && dbPrice > 0) {
-      return dbPrice;
-    }
+  // Dynamic $10 USD equivalent minimum limit for selected fiat
+  const dynamicMinLimit = useMemo(() => {
+    return calculateMinimumFiatAmount(10.00, fiat.code, fiatRates);
+  }, [fiat.code, fiatRates]);
 
-    const liveUsdPrices: Record<string, number> = {
-      BTC: 89500,
-      ETH: 2650,
-      LTC: 72,
-      USDT: 1.0,
-      BNB: 680,
-      MATIC: 0.45,
-      TRX: 0.15,
-    };
-
-    if (fiatCode === 'INR') {
-      if (coinSymbol === 'USDT') {
-        return 100.00; // 1 USDT = 100 INR base as requested
+  // Compute base market price for any coin & fiat using live context rates
+  const getBaseMarketPrice = useCallback(
+    (coinSymbol: string, fiatCode: string, dbPrice?: number | null): number => {
+      if (typeof dbPrice === 'number' && dbPrice > 0) {
+        return dbPrice;
       }
-      const usdVal = liveUsdPrices[coinSymbol] || 1.0;
-      return usdVal * 100.00; // In INR, 1 USD/USDT = 100 INR base
-    }
 
-    const fiatRates: Record<string, number> = {
-      USD: 1.0,
-      EUR: 0.92,
-      GBP: 0.78,
-      CAD: 1.38,
-      AUD: 1.52,
-      AED: 3.67,
-      SAR: 3.75,
-      JPY: 154.2,
-      CNY: 7.24,
-      SGD: 1.34,
-      RUB: 96.5,
-      TRY: 34.5,
-      NGN: 1550,
-      PKR: 278,
-      BDT: 120,
-    };
+      const coin = (coinSymbol || 'USDT').toUpperCase() as CryptoCurrency;
+      const fiatUpper = (fiatCode || 'USD').toUpperCase();
 
-    const usdVal = liveUsdPrices[coinSymbol] || 1.0;
-    const rate = fiatRates[fiatCode] || 1.0;
-    return usdVal * rate;
-  };
+      const liveUsdPrice = prices[coin] ?? (coin === 'USDT' ? 1.0 : coin === 'BTC' ? 89500 : coin === 'ETH' ? 2650 : 72);
+      const liveFiatRate = fiatRates[fiatUpper] ?? (fiatUpper === 'INR' ? 95.6 : fiatUpper === 'EUR' ? 0.92 : fiatUpper === 'GBP' ? 0.78 : 1.0);
 
-  // Fetch Live Market Price on Mount / change
+      const computed = liveUsdPrice * liveFiatRate;
+      return Number(computed.toFixed(coin === 'USDT' ? 2 : 4));
+    },
+    [prices, fiatRates]
+  );
+
+  // Fetch Live Market Price on Mount / change and poll periodically
+  // Note: fixedPrice remains completely static as specified and is NOT overwritten by market ticks!
   useEffect(() => {
     let isCancelled = false;
 
@@ -463,7 +446,7 @@ export default function CreateP2PAdPage() {
               .from('crypto_market_prices')
               .select('price')
               .eq('coin', crypto || 'USDT')
-              .eq('fiat', fiat.code || 'INR')
+              .eq('fiat', fiat.code || 'USD')
               .maybeSingle();
 
             if (data && typeof data.price === 'number' && data.price > 0) {
@@ -475,11 +458,14 @@ export default function CreateP2PAdPage() {
         const finalPrice = getBaseMarketPrice(crypto, fiat.code, fetchedPrice);
         if (!isCancelled) {
           setCurrentMarketPrice(finalPrice);
-
-          // If fixed rate or initial load, auto adjust fixed price based on 1.5% margin
-          const margin = parseFloat(ratePercent) || 1.5;
-          const adjustedFixed = (finalPrice * (1 + margin / 100)).toFixed(2);
-          setFixedPrice(adjustedFixed);
+          // If in fixed mode and fixedPrice has not been set yet, initialize it
+          setFixedPrice((prev) => {
+            if (!prev || prev === '0' || prev === '0.00') {
+              const margin = parseFloat(ratePercent) || 0;
+              return (finalPrice * (1 + margin / 100)).toFixed(2);
+            }
+            return prev;
+          });
         }
       } catch (err) {
         console.warn('Could not fetch market price:', err);
@@ -487,21 +473,44 @@ export default function CreateP2PAdPage() {
     };
 
     fetchMarketPrice();
+    const interval = setInterval(fetchMarketPrice, 6000);
 
     return () => {
       isCancelled = true;
+      clearInterval(interval);
     };
-  }, [crypto, fiat.code]);
+  }, [crypto, fiat.code, getBaseMarketPrice, ratePercent]);
+
+  // Adjust min and max trade amounts when fiat currency changes to ensure $10 USD equivalent minimum is met
+  useEffect(() => {
+    const requiredMin = calculateMinimumFiatAmount(10.00, fiat.code, fiatRates);
+    setMinAmount((prev) => {
+      const currentVal = parseFloat(prev);
+      if (isNaN(currentVal) || currentVal < requiredMin) {
+        return String(requiredMin);
+      }
+      return prev;
+    });
+    setMaxAmount((prev) => {
+      const currentVal = parseFloat(prev);
+      if (isNaN(currentVal) || currentVal < requiredMin) {
+        return String(requiredMin * 10);
+      }
+      return prev;
+    });
+  }, [fiat.code, fiatRates]);
 
   // Handler for Rate Type Switch (Market vs Fixed)
   const handleSelectRateType = (type: 'market' | 'fixed') => {
     setRateType(type);
     if (type === 'fixed') {
-      // Auto adjust fixed price with +1.5% (or current ratePercent)
-      const margin = parseFloat(ratePercent) || 1.5;
-      const base = currentMarketPrice || getBaseMarketPrice(crypto, fiat.code);
-      const autoAdjusted = (base * (1 + margin / 100)).toFixed(2);
-      setFixedPrice(autoAdjusted);
+      // If fixedPrice is empty, set default from current market price + margin
+      if (!fixedPrice || parseFloat(fixedPrice) <= 0) {
+        const margin = parseFloat(ratePercent) || 0;
+        const base = currentMarketPrice || getBaseMarketPrice(crypto, fiat.code);
+        const autoAdjusted = (base * (1 + margin / 100)).toFixed(2);
+        setFixedPrice(autoAdjusted);
+      }
     }
   };
 
@@ -593,7 +602,14 @@ export default function CreateP2PAdPage() {
       return;
     }
 
-    if (!minAmount || !maxAmount || parseFloat(minAmount) > parseFloat(maxAmount)) {
+    // Enforce dynamic $10 USD equivalent minimum trade limit
+    const minRequired = calculateMinimumFiatAmount(10.00, fiat.code, fiatRates);
+    if (!minAmount || parseFloat(minAmount) < minRequired) {
+      toast.error(`Minimum trade limit must be at least ${minRequired} ${fiat.code} (equivalent to $10.00 USD).`);
+      return;
+    }
+
+    if (!maxAmount || parseFloat(minAmount) > parseFloat(maxAmount)) {
       toast.error('Invalid trade limits: Minimum amount must be less than maximum amount.');
       return;
     }
@@ -601,7 +617,7 @@ export default function CreateP2PAdPage() {
     // BALANCE CHECK: If creating a Sell ad, verify available coin balance against minimum limit
     const activePricingType = rateType === 'fixed' ? 'FIXED' : 'FLOAT';
     const activeMarketPrice = currentMarketPrice || getBaseMarketPrice(crypto, fiat.code);
-    const activeMarginPercentage = Number(ratePercent || 1.5);
+    const activeMarginPercentage = isNaN(parseFloat(ratePercent)) ? 0 : parseFloat(ratePercent);
     const effectiveAdPrice = activePricingType === 'FLOAT'
       ? activeMarketPrice * (1 + (activeMarginPercentage / 100))
       : Number(fixedPrice || 1);
@@ -651,10 +667,14 @@ export default function CreateP2PAdPage() {
         activeUser.email?.split('@')[0] ||
         'Trader';
 
+      // Coin asset precision and fiat resolution
+      const coinSymbol = (crypto || 'USDT').toUpperCase();
+      const fiatSymbol = (fiat.code || 'USD').toUpperCase();
+
       // Safe calculation for market price & dynamic pricing
-      const pricingType = rateType === 'fixed' ? 'FIXED' : 'FLOAT';
-      const marketPrice = currentMarketPrice || getBaseMarketPrice(crypto, fiat.code);
-      const marginPercentage = Number(ratePercent || 1.5);
+      const pricingType = activePricingType;
+      const marketPrice = activeMarketPrice;
+      const marginPercentage = activeMarginPercentage;
 
       const calculatedPrice = pricingType === 'FLOAT'
         ? marketPrice * (1 + (marginPercentage / 100))
@@ -663,21 +683,31 @@ export default function CreateP2PAdPage() {
       const adPayload = {
         user_id: userId,
         type: adType.toUpperCase(), // 'BUY' or 'SELL'
-        coin: crypto || 'USDT',
-        fiat: fiat.code || 'INR',
+        side: adType.toUpperCase(),
+        coin: coinSymbol,
+        asset_symbol: coinSymbol,
+        crypto: coinSymbol,
+        crypto_currency: coinSymbol,
+        asset: coinSymbol,
+        fiat: fiatSymbol,
+        fiat_symbol: fiatSymbol,
+        fiat_currency: fiatSymbol,
         payment_methods: Array.isArray(selectedPaymentMethods) && selectedPaymentMethods.length > 0
           ? selectedPaymentMethods
           : ['Bank Transfer'],
         pricing_type: pricingType,
         price: calculatedPrice,
+        unit_price: calculatedPrice,
         min_amount: Number(minAmount),
         max_amount: Number(maxAmount),
+        min_limit: Number(minAmount),
+        max_limit: Number(maxAmount),
+        total_amount: Number(maxAmount),
+        available_amount: Number(maxAmount),
         status: 'active',
         user_display_name: displayName,
-        ad_type: adType,
-        crypto: crypto,
-        crypto_currency: crypto,
-        fiat_currency: fiat.code,
+        ad_type: adType.toLowerCase(),
+        trade_type: adType.toUpperCase(),
         rate_type: rateType,
         price_type: rateType,
         fixed_rate: rateType === 'fixed',
@@ -702,9 +732,12 @@ export default function CreateP2PAdPage() {
       const cleanPayload: Record<string, any> = {
         ...adPayload,
         price: adPayload.price ? Number(adPayload.price) : null,
+        unit_price: adPayload.unit_price ? Number(adPayload.unit_price) : null,
         margin: adPayload.margin ? Number(adPayload.margin) : null,
         min_amount: adPayload.min_amount ? Number(adPayload.min_amount) : null,
         max_amount: adPayload.max_amount ? Number(adPayload.max_amount) : null,
+        min_limit: adPayload.min_limit ? Number(adPayload.min_limit) : null,
+        max_limit: adPayload.max_limit ? Number(adPayload.max_limit) : null,
         is_fixed: Boolean(rateType === 'fixed'),
         require_full_name_verified: Boolean(requireFullNameVerified),
         require_verified_users: Boolean(requireVerifiedUsers),
@@ -768,7 +801,9 @@ export default function CreateP2PAdPage() {
       f.code.toLowerCase().includes(fiatSearch.toLowerCase())
   );
 
-  const calculatedOfferPrice = (currentMarketPrice || 1.0) * (1 + (parseFloat(ratePercent) || 1.5) / 100);
+  const calculatedOfferPrice = rateType === 'market'
+    ? (currentMarketPrice || 1.0) * (1 + (parseFloat(ratePercent) || 0) / 100)
+    : (parseFloat(fixedPrice) > 0 ? parseFloat(fixedPrice) : (currentMarketPrice || 1.0));
 
   return (
     <div className="min-h-screen bg-[#fafafa] dark:bg-[#0f0f12] text-gray-900 dark:text-gray-100 px-4 py-8 md:py-12 flex justify-center transition-colors">
@@ -1121,32 +1156,65 @@ export default function CreateP2PAdPage() {
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-2">
               <div>
-                <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">
-                  Minimum Trade Amount
-                </label>
-                <input
-                  type="number"
-                  value={minAmount}
-                  onChange={(e) => setMinAmount(e.target.value)}
-                  className="w-full px-3 py-2.5 border border-gray-200 dark:border-gray-700 bg-white dark:bg-[#202026] text-gray-900 dark:text-white rounded-lg text-sm focus:outline-none focus:ring-1 focus:ring-[#9273fc]"
-                />
-                <span className="text-[11px] text-gray-400 mt-1 block">
-                  In your selected fiat currency.
-                </span>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="block text-xs font-medium text-gray-700 dark:text-gray-300">
+                    Minimum Trade Amount
+                  </label>
+                  <span className="text-[11px] font-medium text-purple-600 dark:text-purple-400">
+                    Min: {dynamicMinLimit.toLocaleString()} {fiat.code} ($10 USD)
+                  </span>
+                </div>
+                <div className="relative">
+                  <input
+                    type="number"
+                    min={dynamicMinLimit}
+                    value={minAmount}
+                    onChange={(e) => setMinAmount(e.target.value)}
+                    className={`w-full pl-3 pr-12 py-2.5 border rounded-lg text-sm bg-white dark:bg-[#202026] text-gray-900 dark:text-white focus:outline-none focus:ring-1 focus:ring-[#9273fc] ${
+                      parseFloat(minAmount || '0') < dynamicMinLimit
+                        ? 'border-rose-400 dark:border-rose-700 ring-1 ring-rose-400 dark:ring-rose-800'
+                        : 'border-gray-200 dark:border-gray-700'
+                    }`}
+                  />
+                  <span className="absolute right-3 top-3 text-xs text-gray-400 font-semibold">
+                    {fiat.code}
+                  </span>
+                </div>
+                {parseFloat(minAmount || '0') < dynamicMinLimit ? (
+                  <div className="flex items-center justify-between mt-1 text-[11px] text-rose-500 font-medium">
+                    <span>Must be at least {dynamicMinLimit.toLocaleString()} {fiat.code} ($10.00 USD)</span>
+                    <button
+                      type="button"
+                      onClick={() => setMinAmount(String(dynamicMinLimit))}
+                      className="underline text-[#9273fc] hover:text-purple-600 cursor-pointer"
+                    >
+                      Set to Min
+                    </button>
+                  </div>
+                ) : (
+                  <span className="text-[11px] text-gray-400 mt-1 block">
+                    Equivalent to ≥ ${BASE_PLATFORM_USD_MINIMUM.toFixed(2)} USD in {fiat.code}.
+                  </span>
+                )}
               </div>
 
               <div>
                 <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">
                   Maximum Trade Amount
                 </label>
-                <input
-                  type="number"
-                  value={maxAmount}
-                  onChange={(e) => setMaxAmount(e.target.value)}
-                  className="w-full px-3 py-2.5 border border-gray-200 dark:border-gray-700 bg-white dark:bg-[#202026] text-gray-900 dark:text-white rounded-lg text-sm focus:outline-none focus:ring-1 focus:ring-[#9273fc]"
-                />
+                <div className="relative">
+                  <input
+                    type="number"
+                    value={maxAmount}
+                    onChange={(e) => setMaxAmount(e.target.value)}
+                    className="w-full pl-3 pr-12 py-2.5 border border-gray-200 dark:border-gray-700 bg-white dark:bg-[#202026] text-gray-900 dark:text-white rounded-lg text-sm focus:outline-none focus:ring-1 focus:ring-[#9273fc]"
+                  />
+                  <span className="absolute right-3 top-3 text-xs text-gray-400 font-semibold">
+                    {fiat.code}
+                  </span>
+                </div>
                 <span className="text-[11px] text-gray-400 mt-1 block">
-                  In your selected fiat currency.
+                  Maximum limit per individual trade order.
                 </span>
               </div>
             </div>

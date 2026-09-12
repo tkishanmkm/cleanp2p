@@ -3,6 +3,7 @@ import { cookies } from 'next/headers';
 import { NextResponse, type NextRequest } from 'next/server';
 import { getSupabaseAdminClient } from '@/utils/supabase/server';
 import { generateAdId } from '@/lib/id-generator';
+import { calculateMinimumFiatAmount } from '@/lib/currency';
 
 export const dynamic = 'force-dynamic';
 
@@ -120,6 +121,16 @@ export async function POST(request: NextRequest) {
 
     const requestedMax = Number(body.max_amount ?? body.max_limit ?? body.maxAmount ?? 5000);
     const requestedMin = Number(body.min_amount ?? body.min_limit ?? body.minAmount ?? 100);
+
+    // Enforce dynamic minimum limit equivalent to at least $10.00 USD
+    const dynamicMinThreshold = calculateMinimumFiatAmount(10.00, fiatType);
+    if (requestedMin < dynamicMinThreshold) {
+      return NextResponse.json({
+        error: `Minimum trade limit must be at least ${dynamicMinThreshold} ${fiatType} (equivalent to $10.00 USD).`,
+        code: 'MIN_LIMIT_TOO_LOW',
+      }, { status: 400 });
+    }
+
     const priceVal = body.price !== undefined && body.price !== null && body.price !== '' ? Number(body.price) : null;
     const marginVal = Number(body.margin ?? body.rate_percent ?? body.margin_percentage ?? body.price_margin ?? 0);
     const pricingType = body.pricing_type || (body.rate_type === 'fixed' || body.is_fixed ? 'FIXED' : 'FLOAT');
@@ -309,6 +320,26 @@ export async function POST(request: NextRequest) {
         }, 
         { status: 400 }
       );
+    }
+
+    if (data) {
+      try {
+        const admin = getSupabaseAdminClient();
+        const p2pRow = {
+          ...basePayload,
+          id: data.id || basePayload.id,
+          public_ad_id: uniqueAdId,
+          crypto: coinType,
+          fiat_currency: fiatType,
+          ad_type: adSide.toLowerCase(),
+          trade_type: adSide,
+          unit_price: priceVal,
+          status: 'ACTIVE',
+        };
+        await admin.from('p2p_ads').upsert(p2pRow, { onConflict: 'id', ignoreDuplicates: true });
+      } catch (p2pSyncErr) {
+        // Silently continue if p2p_ads is a view or non-updatable
+      }
     }
 
     return NextResponse.json({ success: true, data });

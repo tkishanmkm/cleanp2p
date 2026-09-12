@@ -34,8 +34,9 @@ interface AccountData {
   preferred_fiat: string;
   total_volume: number;
   completed_trades: number;
-  avg_payment_time: number;
-  avg_release_time: number;
+  avg_payment_time: number | null;
+  avg_release_time: number | null;
+  positive_rating_pct?: number | null;
   dob?: string;
   created_at?: string;
   is_2fa_enabled?: boolean;
@@ -72,15 +73,18 @@ export default function ProfilePage() {
         .eq('id', userId)
         .maybeSingle();
 
-      // 2. Fetch live trades for accurate fiat volume and completed trades count
+      // 2. Fetch live completed trades with full timestamp records for real calculations
       let completedTradesCount = profile?.completed_trades || 0;
       let totalVolumeFiat = profile?.total_trade_volume_usd || profile?.trade_volume || 0;
 
       const { data: userTrades } = await supabase
         .from('trades')
-        .select('id, fiat_amount, fiat_amount_usd, crypto_amount, status')
+        .select('id, buyer_id, seller_id, fiat_amount, fiat_amount_usd, crypto_amount, status, created_at, paid_at, payment_confirmed_at, released_at, completed_at')
         .or(`buyer_id.eq.${userId},seller_id.eq.${userId}`)
-        .in('status', ['completed', 'released']);
+        .in('status', ['completed', 'released', 'COMPLETED', 'RELEASED']);
+
+      const paymentTimes: number[] = [];
+      const releaseTimes: number[] = [];
 
       if (userTrades && userTrades.length > 0) {
         completedTradesCount = userTrades.length;
@@ -88,24 +92,45 @@ export default function ProfilePage() {
           const val = Number(t.fiat_amount || t.fiat_amount_usd || 0);
           return acc + (isNaN(val) ? 0 : val);
         }, 0);
+
+        for (const t of userTrades) {
+          // Average Paid Time: when user is buyer
+          if (t.buyer_id === userId) {
+            const paidTimeStr = t.paid_at || t.payment_confirmed_at;
+            if (paidTimeStr && t.created_at) {
+              const start = new Date(t.created_at).getTime();
+              const end = new Date(paidTimeStr).getTime();
+              const diffMin = (end - start) / (1000 * 60);
+              if (diffMin >= 0 && diffMin <= 300) {
+                paymentTimes.push(diffMin);
+              }
+            }
+          }
+
+          // Average Release Time: when user is seller
+          if (t.seller_id === userId) {
+            const releaseTimeStr = t.released_at || t.completed_at;
+            const paidTimeStr = t.paid_at || t.payment_confirmed_at || t.created_at;
+            if (releaseTimeStr && paidTimeStr) {
+              const start = new Date(paidTimeStr).getTime();
+              const end = new Date(releaseTimeStr).getTime();
+              const diffMin = (end - start) / (1000 * 60);
+              if (diffMin >= 0 && diffMin <= 300) {
+                releaseTimes.push(diffMin);
+              }
+            }
+          }
+        }
       }
 
-      setAccount({
-        id: userId,
-        full_name: profile?.full_name || (user as any)?.user_metadata?.full_name || profile?.username || 'Trader',
-        username: profile?.username || (user as any)?.user_metadata?.username || 'user',
-        email: user.email || profile?.email || '',
-        preferred_fiat: profile?.preferred_fiat || profile?.preferred_currency || 'USD',
-        total_volume: totalVolumeFiat,
-        completed_trades: completedTradesCount,
-        avg_payment_time: 4,
-        avg_release_time: 2,
-        dob: profile?.dob || 'Not provided',
-        created_at: profile?.created_at || user?.created_at,
-        is_2fa_enabled: Boolean(profile?.is_2fa_enabled || profile?.is_mfa_enabled),
-        kyc_status: profile?.kyc_status || 'NOT_SUBMITTED',
-        verification_tier: profile?.verification_tier || 1,
-      });
+      // Compute real database averages (no fake placeholders)
+      const realAvgPaymentTime = paymentTimes.length > 0
+        ? Math.max(1, Math.round(paymentTimes.reduce((a, b) => a + b, 0) / paymentTimes.length))
+        : (profile?.avg_payment_time != null ? Math.round(Number(profile.avg_payment_time)) : null);
+
+      const realAvgReleaseTime = releaseTimes.length > 0
+        ? Math.max(1, Math.round(releaseTimes.reduce((a, b) => a + b, 0) / releaseTimes.length))
+        : (profile?.avg_release_time != null ? Math.round(Number(profile.avg_release_time)) : null);
 
       // 3. Fetch Blocked Users
       const { data: blocks } = await supabase
@@ -146,9 +171,37 @@ export default function ProfilePage() {
         .or(`reviewee_id.eq.${userId},reviewer_id.eq.${userId}`)
         .order('created_at', { ascending: false });
 
+      let calculatedPositiveRatingPct: number | null = null;
       if (fb) {
         setFeedbacks(fb);
+        const received = fb.filter((f: any) => f.reviewee_id === userId);
+        if (received.length > 0) {
+          const positiveCount = received.filter((f: any) =>
+            f.feedback_type === 'positive' || (typeof f.rating === 'number' && f.rating >= 4)
+          ).length;
+          calculatedPositiveRatingPct = Math.round((positiveCount / received.length) * 100);
+        } else if (profile?.positive_rating != null) {
+          calculatedPositiveRatingPct = Math.round(Number(profile.positive_rating));
+        }
       }
+
+      setAccount({
+        id: userId,
+        full_name: profile?.full_name || (user as any)?.user_metadata?.full_name || profile?.username || 'Trader',
+        username: profile?.username || (user as any)?.user_metadata?.username || 'user',
+        email: user.email || profile?.email || '',
+        preferred_fiat: profile?.preferred_fiat || profile?.preferred_currency || 'USD',
+        total_volume: totalVolumeFiat,
+        completed_trades: completedTradesCount,
+        avg_payment_time: realAvgPaymentTime,
+        avg_release_time: realAvgReleaseTime,
+        positive_rating_pct: calculatedPositiveRatingPct,
+        dob: profile?.dob || profile?.date_of_birth || 'Not provided',
+        created_at: profile?.created_at || user?.created_at,
+        is_2fa_enabled: Boolean(profile?.is_2fa_enabled || profile?.is_mfa_enabled),
+        kyc_status: profile?.kyc_status || 'NOT_SUBMITTED',
+        verification_tier: profile?.verification_tier || 1,
+      });
     } catch (err) {
       console.error('Failed to load full private profile:', err);
     } finally {
@@ -355,16 +408,26 @@ export default function ProfilePage() {
               </div>
               <div className="flex justify-between py-1.5 border-b border-slate-100 dark:border-[#1e2640]">
                 <span className="text-slate-500">Avg. Payment Time</span>
-                <span className="font-medium text-slate-900 dark:text-white">{account.avg_payment_time} min</span>
+                <span className="font-medium text-slate-900 dark:text-white">
+                  {account.avg_payment_time !== null ? `${account.avg_payment_time} min` : '—'}
+                </span>
               </div>
               <div className="flex justify-between py-1.5 border-b border-slate-100 dark:border-[#1e2640]">
                 <span className="text-slate-500">Avg. Release Time</span>
-                <span className="font-medium text-slate-900 dark:text-white">{account.avg_release_time} min</span>
+                <span className="font-medium text-slate-900 dark:text-white">
+                  {account.avg_release_time !== null ? `${account.avg_release_time} min` : '—'}
+                </span>
+              </div>
+              <div className="flex justify-between py-1.5 border-b border-slate-100 dark:border-[#1e2640]">
+                <span className="text-slate-500">Positive Feedback</span>
+                <span className="font-semibold text-emerald-600 dark:text-emerald-400">
+                  {account.positive_rating_pct !== null && account.positive_rating_pct !== undefined ? `${account.positive_rating_pct}%` : '—'}
+                </span>
               </div>
               <div className="flex justify-between py-1.5">
                 <span className="text-slate-500">Verification Tier</span>
                 <span className="font-semibold text-emerald-600 dark:text-emerald-400">
-                  {account.kyc_status === 'VERIFIED' ? 'Tier 2 (Verified - No Limits)' : 'Tier 1 ($1,000 USD Limit)'}
+                  {account.kyc_status === 'VERIFIED' || account.kyc_status === 'approved' ? 'Tier 2 (Verified - No Limits)' : 'Tier 1 ($1,000 USD Limit)'}
                 </span>
               </div>
             </CardContent>

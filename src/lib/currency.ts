@@ -7,7 +7,7 @@ export interface ExchangeRates {
 // Default fallback exchange rates against USD if live rates are momentarily unavailable
 export const DEFAULT_EXCHANGE_RATES: ExchangeRates = {
   USD: 1,
-  INR: 86.5,
+  INR: 95.6,
   EUR: 0.92,
   GBP: 0.78,
   AED: 3.67,
@@ -24,19 +24,19 @@ export const DEFAULT_EXCHANGE_RATES: ExchangeRates = {
   PKR: 278.5,
 };
 
-// Platform default base minimum trade limit in USD set by admin
-export const BASE_PLATFORM_USD_MINIMUM = 5.00;
+// Platform default base minimum trade limit in USD set by admin ($10 USD equivalent minimum)
+export const BASE_PLATFORM_USD_MINIMUM = 10.00;
 
 /**
  * Calculates the dynamic minimum trade limit for any fiat currency.
- * Formula: Minimum Fiat Amount = USD Minimum * Current USD-to-Fiat Exchange Rate
+ * Formula: Minimum Fiat Amount = USD Minimum ($10.00) * Current USD-to-Fiat Exchange Rate
  *
  * Example:
- * Base USD = $5 USD
- * 1 USD = 100 INR -> INR Min = ₹500
- * 1 USD = 0.90 EUR -> EUR Min = €4.50
- * 1 USD = 0.75 GBP -> GBP Min = £3.75
- * 1 USD = 3.67 AED -> AED Min = 18.35 AED
+ * Base USD = $10.00 USD
+ * 1 USD = 95.6 INR -> INR Min = ₹956
+ * 1 USD = 0.92 EUR -> EUR Min = €9.20
+ * 1 USD = 0.78 GBP -> GBP Min = £7.80
+ * 1 USD = 3.67 AED -> AED Min = 36.70 AED
  */
 export function calculateMinimumFiatAmount(
   baseUsdMinimum: number = BASE_PLATFORM_USD_MINIMUM,

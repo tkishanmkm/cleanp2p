@@ -23,20 +23,36 @@ export default async function AdDetailPage({ params }: PageProps) {
     }
   )
 
-  // 1. Fetch Ad
-  let { data: ad } = await supabase
-    .from('ads')
-    .select('*')
-    .eq('id', adId)
-    .maybeSingle()
+  // 1. Fetch Ad safely handling both UUID and alphanumeric public IDs
+  const isUuid = /^[0-9a-fA-F-]{32,36}$/.test(adId)
+  let ad: any = null
+
+  try {
+    let adQuery = supabase.from('ads').select('*')
+    if (isUuid) {
+      adQuery = adQuery.eq('id', adId)
+    } else {
+      adQuery = adQuery.or(`public_id.eq.${adId},ad_id.eq.${adId}`)
+    }
+    const { data: foundAd } = await adQuery.maybeSingle()
+    ad = foundAd
+  } catch (err) {
+    console.warn('Error fetching from ads table:', err)
+  }
 
   if (!ad) {
-    const { data: p2pAd } = await supabase
-      .from('p2p_ads')
-      .select('*')
-      .eq('id', adId)
-      .maybeSingle()
-    ad = p2pAd
+    try {
+      let p2pQuery = supabase.from('p2p_ads').select('*')
+      if (isUuid) {
+        p2pQuery = p2pQuery.eq('id', adId)
+      } else {
+        p2pQuery = p2pQuery.or(`public_id.eq.${adId},public_ad_id.eq.${adId},id.eq.${adId}`)
+      }
+      const { data: p2pAd } = await p2pQuery.maybeSingle()
+      ad = p2pAd
+    } catch (err) {
+      console.warn('Error fetching from p2p_ads table:', err)
+    }
   }
 
   if (!ad) return notFound()

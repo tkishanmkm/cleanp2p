@@ -21,6 +21,25 @@ export async function POST(req: Request) {
 
     const cleanName = name.trim().toLowerCase();
     const cleanDob = dob.trim();
+
+    // Minor child safety check (18+ required)
+    const birthDate = new Date(cleanDob);
+    if (!isNaN(birthDate.getTime())) {
+      const today = new Date();
+      let age = today.getFullYear() - birthDate.getFullYear();
+      const m = today.getMonth() - birthDate.getMonth();
+      if (m < 0 || (m === 0 && today.getDate() < birthDate.getDate())) {
+        age--;
+      }
+      if (age < 18) {
+        return NextResponse.json({
+          error: 'Child Safety Policy: You must be at least 18 years old to use Paxones.',
+          isMinor: true,
+          code: 'UNDER_18_PROHIBITED'
+        }, { status: 403 });
+      }
+    }
+
     const currentUserId = session.user.id;
     const telemetry = extractClientTelemetry(req);
 

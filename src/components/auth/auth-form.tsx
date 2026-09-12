@@ -27,6 +27,8 @@ export function AuthForm({ mode }: AuthFormProps) {
   const [isSuspendedAlert, setIsSuspendedAlert] = useState(false);
   const [suspensionDetails, setSuspensionDetails] = useState('');
   const [signupSuccess, setSignupSuccess] = useState(false);
+  const [showMinorModal, setShowMinorModal] = useState(false);
+  const [isDeletingAccount, setIsDeletingAccount] = useState(false);
 
   // Dynamic URL helper for OAuth callback redirection
   const getURL = () => {
@@ -90,6 +92,22 @@ export function AuthForm({ mode }: AuthFormProps) {
         setErrorMsg('Please enter your date of birth');
         return;
       }
+
+      // 18+ Child Safety check
+      const birthDate = new Date(dob);
+      if (!isNaN(birthDate.getTime())) {
+        const today = new Date();
+        let age = today.getFullYear() - birthDate.getFullYear();
+        const m = today.getMonth() - birthDate.getMonth();
+        if (m < 0 || (m === 0 && today.getDate() < birthDate.getDate())) {
+          age--;
+        }
+        if (age < 18) {
+          setShowMinorModal(true);
+          return;
+        }
+      }
+
       if (password.length < 6) {
         setErrorMsg('Password must be at least 6 characters long');
         return;
@@ -550,6 +568,60 @@ export function AuthForm({ mode }: AuthFormProps) {
           </p>
         )}
       </div>
+
+      {/* Minor Safety Dialog (18+ Requirement) */}
+      {showMinorModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
+          <div className="w-full max-w-md bg-white dark:bg-[#0f1423] border border-rose-200 dark:border-rose-900/50 rounded-2xl shadow-2xl p-6 text-center space-y-4 animate-in fade-in zoom-in-95 duration-200">
+            <div className="mx-auto w-14 h-14 rounded-full bg-rose-100 dark:bg-rose-950/60 text-rose-600 flex items-center justify-center">
+              <AlertTriangle className="w-7 h-7" />
+            </div>
+            <div className="space-y-2">
+              <h3 className="text-xl font-bold text-slate-900 dark:text-white">
+                Age Requirement Notice (18+ Only)
+              </h3>
+              <p className="text-sm text-slate-600 dark:text-slate-300 leading-relaxed">
+                Paxones is a peer-to-peer cryptocurrency financial exchange and is strictly restricted to individuals 18 years of age or older for child safety and regulatory compliance.
+              </p>
+              <p className="text-xs text-rose-600 dark:text-rose-400 font-medium">
+                The date of birth you entered indicates you are under 18 years old.
+              </p>
+            </div>
+
+            <div className="pt-2 flex flex-col sm:flex-row gap-3">
+              <button
+                type="button"
+                onClick={() => setShowMinorModal(false)}
+                className="flex-1 py-2.5 px-4 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 font-semibold text-sm transition-colors"
+              >
+                Correct Date of Birth
+              </button>
+              <button
+                type="button"
+                disabled={isDeletingAccount}
+                onClick={async () => {
+                  setIsDeletingAccount(true);
+                  try {
+                    await fetch('/api/user/delete-account', { method: 'POST' }).catch(() => {});
+                    await supabase.auth.signOut().catch(() => {});
+                  } finally {
+                    setIsDeletingAccount(false);
+                    setShowMinorModal(false);
+                    setName('');
+                    setDob('');
+                    setEmail('');
+                    setPassword('');
+                    setConfirmPassword('');
+                  }
+                }}
+                className="flex-1 py-2.5 px-4 rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-semibold text-sm transition-colors disabled:opacity-50"
+              >
+                {isDeletingAccount ? 'Deleting...' : 'Delete Account / Cancel'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

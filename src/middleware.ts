@@ -33,6 +33,21 @@ export async function middleware(request: NextRequest) {
     const { data: { user } } = await supabase.auth.getUser();
 
     const url = request.nextUrl.clone();
+
+    // Check if user is banned across protected dashboard/wallet routes
+    if (user && !url.pathname.startsWith('/dashboard/banned') && !url.pathname.startsWith('/api/')) {
+      const { data: bannedCheck } = await supabase
+        .from('profiles')
+        .select('is_banned, status')
+        .eq('id', user.id)
+        .maybeSingle();
+
+      if (bannedCheck && (bannedCheck.is_banned || bannedCheck.status === 'banned')) {
+        url.pathname = '/dashboard/banned';
+        return NextResponse.redirect(url);
+      }
+    }
+
     const isAdminRoute = url.pathname.startsWith('/adminnarayan') && !url.pathname.startsWith('/adminnarayan/login');
 
     if (isAdminRoute) {

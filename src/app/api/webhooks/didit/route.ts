@@ -143,6 +143,39 @@ export async function POST(req: NextRequest) {
       const documentNumber = primaryId.document_number || primaryId.id_number || primaryId.documentNumber || null;
       const extractedCountry = primaryId.issuing_country || primaryId.nationality || primaryId.country || null;
 
+      // Child Safety Rule: Under 18 strictly prohibited - immediate permanent ban
+      if (extractedDob) {
+        const birthDate = new Date(extractedDob);
+        if (!isNaN(birthDate.getTime())) {
+          const today = new Date();
+          let age = today.getFullYear() - birthDate.getFullYear();
+          const m = today.getMonth() - birthDate.getMonth();
+          if (m < 0 || (m === 0 && today.getDate() < birthDate.getDate())) {
+            age--;
+          }
+          if (age < 18) {
+            console.error(`[DIDIT WEBHOOK] Under 18 minor detected in KYC for user ${userId}. Age: ${age}, DOB: ${extractedDob}`);
+
+            await supabase.from('profiles').update({
+              is_banned: true,
+              status: 'banned',
+              is_suspended: true,
+              kyc_status: 'banned',
+              suspension_reason: 'No minor allowed for minor safety',
+              updated_at: new Date().toISOString(),
+            }).eq('id', userId);
+
+            return new NextResponse(JSON.stringify({
+              status: 'banned',
+              message: 'No minor allowed for minor safety',
+            }), {
+              status: 200,
+              headers: { 'Content-Type': 'application/json' },
+            });
+          }
+        }
+      }
+
       // Duplicate Prevention Rule: Check if another account is already verified with this identity
       let duplicateQuery = supabase
         .from('profiles')

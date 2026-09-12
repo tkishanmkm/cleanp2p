@@ -32,8 +32,8 @@ const guides = [
   {
     icon: Gavel,
     title: 'Dispute Resolution',
-    description: 'Understand the dispute process and how our moderators ensure fair outcomes.',
-    href: '/dispute-resolution'
+    description: 'Understand the dispute process, evidence submission, and how our moderators ensure fair outcomes.',
+    href: '/guides/dispute-resolution'
   },
   {
     icon: Star,
