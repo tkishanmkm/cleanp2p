@@ -29,6 +29,11 @@ export async function POST(req: Request) {
 
     // Call atomic RPC function to check balance and lock escrow
     try {
+      console.log("=== API CONNECTION TRACE ===");
+      console.log("Supabase URL:", process.env.NEXT_PUBLIC_SUPABASE_URL);
+      console.log("Initiating User ID:", user.id);
+      console.log("Ad ID Passed:", adId);
+
       const { data, error } = await supabase.rpc('initiate_p2p_trade', {
         p_ad_id: adId,
         p_buyer_id: user.id,
@@ -100,43 +105,104 @@ export async function POST(req: Request) {
     }
 
     if (ad) {
-      const availableBalance = Number(ad.available_balance ?? ad.available_crypto ?? ad.availableBalance ?? 0);
-      if (availableBalance > 0 && numericCrypto > availableBalance) {
+      const isBuyAd = (ad.type || ad.ad_type || 'SELL').toUpperCase() === 'BUY';
+      const adOwnerId = ad.user_id || ad.seller_id || ad.advertiser_id || (ad.profiles && ad.profiles.id);
+      const sellerId = isBuyAd ? user.id : adOwnerId;
+      const buyerId = isBuyAd ? adOwnerId : user.id;
+      const unitPrice = Number(ad.fixed_rate ?? ad.price ?? 1);
+      const calculatedCrypto = !isNaN(numericCrypto) && numericCrypto > 0 ? numericCrypto : (unitPrice > 0 ? numericFiat / unitPrice : 0);
+
+      // Check seller balance in balances table or wallet_assets
+      const targetAsset = (ad.crypto || ad.asset || ad.asset_symbol || 'USDT').toUpperCase();
+      const requiredLock = calculatedCrypto * 1.015;
+
+      console.log("--- P2P DEBUG TRACE ---");
+      console.log("Session User ID:", user?.id);
+      console.log("Resolved Seller ID:", sellerId);
+      console.log("Target Asset:", targetAsset);
+      console.log("Required Lock:", requiredLock);
+
+      let balanceData: any = null;
+      let balanceError: any = null;
+
+      try {
+        const res = await supabase
+          .from('balances')
+          .select('*')
+          .eq('user_id', sellerId)
+          .ilike('asset', targetAsset)
+          .maybeSingle();
+        balanceData = res.data;
+        balanceError = res.error;
+
+        console.log("Fetched Balance Record:", balanceData);
+        console.log("Balance Query Error:", balanceError);
+
+        console.log("--- DEBUG TRACE ---");
+        console.log("Logged In User ID:", user.id);
+        console.log("Ad Owner ID:", adOwnerId);
+        console.log("Calculated Seller ID:", sellerId);
+        console.log("Target Asset:", targetAsset);
+        console.log("Required Lock:", requiredLock);
+        console.log("Balance Data Found:", balanceData);
+
+        if (!balanceData || Number(balanceData.available_balance || 0) < requiredLock) {
+          return NextResponse.json(
+            {
+              code: 'INSUFFICIENT_FUNDS',
+              message: `DEBUG TRACE -> Session User: ${user.id} | Resolved Seller: ${sellerId} | Found Balance: ${balanceData?.available_balance ?? 0} | Required: ${requiredLock} ${targetAsset}`,
+              error: `Insufficient wallet balance. You need ${requiredLock.toFixed(6)} ${targetAsset} (including 1.5% escrow fee) to initiate this trade.`
+            },
+            { status: 400 }
+          );
+        }
+
+        const avail = Number(balanceData.available_balance || 0);
+        const locked = Number(balanceData.locked_balance || 0);
+
+        // Atomically update balances (move requiredLock from available to locked)
+        await supabase
+          .from('balances')
+          .update({
+            available_balance: avail - requiredLock,
+            locked_balance: locked + requiredLock,
+            updated_at: new Date().toISOString(),
+          })
+          .eq('user_id', sellerId)
+          .eq('asset', targetAsset);
+
+      } catch (balErr: any) {
+        console.warn('Balance validation / escrow lock error:', balErr);
         return NextResponse.json(
           {
-            code: 'INSUFFICIENT_FUNDS',
-            error: `Advertiser only has ${availableBalance} ${ad.crypto || ad.asset || 'crypto'} available for escrow. Please lower your request.`,
+            code: 'BALANCE_QUERY_ERROR',
+            error: balErr.message || 'Error querying balances',
           },
           { status: 400 }
         );
       }
 
-      const isSellAd = (ad.type || ad.ad_type || 'SELL').toUpperCase() === 'SELL';
-      const adOwnerId = ad.user_id || ad.seller_id || ad.advertiser_id || (ad.profiles && ad.profiles.id);
-      const buyerId = isSellAd ? user.id : adOwnerId;
-      const sellerId = isSellAd ? adOwnerId : user.id;
-      const unitPrice = Number(ad.fixed_rate ?? ad.price ?? 1);
       const shortId = 'TRD-' + Math.random().toString(36).substring(2, 9).toUpperCase();
+
+      const computedFiatAmount = !isNaN(numericFiat) && numericFiat > 0 ? numericFiat : (calculatedCrypto * unitPrice);
 
       const tradePayload: Record<string, any> = {
         trade_id: shortId,
         public_id: shortId,
         buyer_id: buyerId,
         seller_id: sellerId,
-        crypto: ad.crypto || ad.asset || 'BTC',
-        amount: numericCrypto || (unitPrice > 0 ? numericFiat / unitPrice : 0),
+        crypto: targetAsset,
+        crypto_amount: calculatedCrypto,
+        amount: calculatedCrypto,
         fiat_currency: ad.fiat_currency || ad.fiat || 'USD',
-        fiat_amount: numericFiat,
-        amount_usd: numericFiat,
+        fiat_amount: computedFiatAmount,
+        amount_usd: computedFiatAmount,
         price: unitPrice,
         payment_method: Array.isArray(ad.payment_methods) ? ad.payment_methods[0] : 'Bank Transfer',
         status: 'pending',
         escrow_status: 'locked',
+        ad_id: validAdUuid || ad.id || adId,
       };
-
-      if (validAdUuid) {
-        tradePayload.ad_id = validAdUuid;
-      }
 
       const { data: tradeResult, error: insertError } = await supabase
         .from('trades')
@@ -147,21 +213,23 @@ export async function POST(req: Request) {
       if (!insertError && tradeResult) {
         return NextResponse.json({
           success: true,
-          tradeId: tradeResult.id,
+          tradeId: tradeResult.id || tradeResult.trade_id,
           message: 'Trade initiated successfully. Escrow locked.',
         });
       }
 
-      // Safe retry without ad_id
+      // Safe retry without ad_id if foreign key constraint fails
       const { data: fallbackTrade, error: fallbackError } = await supabase
         .from('trades')
         .insert({
           trade_id: shortId,
+          public_id: shortId,
           buyer_id: buyerId,
           seller_id: sellerId,
+          crypto: targetAsset,
           crypto_amount: calculatedCrypto,
           amount: calculatedCrypto,
-          fiat_amount: numericFiat,
+          fiat_amount: computedFiatAmount,
           price: unitPrice,
           status: 'pending',
         })
@@ -171,9 +239,14 @@ export async function POST(req: Request) {
       if (!fallbackError && fallbackTrade) {
         return NextResponse.json({
           success: true,
-          tradeId: fallbackTrade.id,
+          tradeId: fallbackTrade.id || fallbackTrade.trade_id,
           message: 'Trade initiated successfully. Escrow locked.',
         });
+      }
+
+      if (insertError) {
+        console.error('Trade insert error:', insertError);
+        return NextResponse.json({ error: insertError.message || 'Failed to create trade record' }, { status: 400 });
       }
     }
 

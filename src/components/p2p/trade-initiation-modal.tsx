@@ -51,13 +51,34 @@ export function TradeInitiationModal({ ad, isOpen, onClose }: TradeInitiationMod
   const [cryptoAmount, setCryptoAmount] = useState<string>("");
   const [loading, setLoading] = useState<boolean>(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [sellerAvailableBalance, setSellerAvailableBalance] = useState<number>(0);
 
-  // Reset inputs when modal opens with a new ad
+  // Reset inputs and fetch seller balance when modal opens with a new ad
   useEffect(() => {
-    if (isOpen) {
+    if (isOpen && ad) {
       setFiatAmount("");
       setCryptoAmount("");
       setErrorMsg(null);
+
+      const fetchSellerBalance = async () => {
+        try {
+          const { data: { user } } = await supabase.auth.getUser();
+          if (!user) return;
+          const targetUserId = (ad.type === "SELL") ? ad.user_id : user.id;
+          const { data: bal } = await supabase
+            .from('balances')
+            .select('available_balance')
+            .eq('user_id', targetUserId)
+            .eq('asset', ad.asset_symbol || 'USDT')
+            .maybeSingle();
+          if (bal) {
+            setSellerAvailableBalance(Number(bal.available_balance || 0));
+          }
+        } catch (err) {
+          console.warn('Error fetching seller balance:', err);
+        }
+      };
+      fetchSellerBalance();
     }
   }, [isOpen, ad?.id]);
 
@@ -253,9 +274,23 @@ export function TradeInitiationModal({ ad, isOpen, onClose }: TradeInitiationMod
           </div>
 
           <div className="space-y-1.5">
-            <label className="text-xs font-medium text-muted-foreground">
-              I will {isBuyModal ? "receive" : "pay"} ({ad.asset_symbol})
-            </label>
+            <div className="flex justify-between items-center">
+              <label className="text-xs font-medium text-muted-foreground">
+                I will {isBuyModal ? "receive" : "pay"} ({ad.asset_symbol})
+              </label>
+              <button
+                type="button"
+                onClick={() => {
+                  const maxFromBalance = sellerAvailableBalance > 0 ? sellerAvailableBalance / 1.015 : (ad.max_limit / (ad.price || 1));
+                  const maxAllowableFromAd = ad.max_limit / (ad.price || 1);
+                  const maxCrypto = Math.min(maxAllowableFromAd, maxFromBalance);
+                  handleCryptoChange(Math.max(0, maxCrypto).toFixed(4));
+                }}
+                className="text-[10px] font-semibold text-[#5D45F9] hover:underline"
+              >
+                MAX
+              </button>
+            </div>
             <div className="relative">
               <Input
                 type="number"
@@ -270,6 +305,28 @@ export function TradeInitiationModal({ ad, isOpen, onClose }: TradeInitiationMod
             </div>
           </div>
         </div>
+
+        {/* Escrow Fee & Breakdown */}
+        {cryptoAmount && parseFloat(cryptoAmount) > 0 && (
+          <div className="p-3 rounded-xl bg-muted/30 border text-xs space-y-1.5 my-2 font-mono">
+            <div className="flex justify-between text-muted-foreground">
+              <span>Trade Amount:</span>
+              <span>{parseFloat(cryptoAmount || '0').toFixed(4)} {ad.asset_symbol}</span>
+            </div>
+            <div className="flex justify-between text-muted-foreground">
+              <span>Escrow Fee (1.5%):</span>
+              <span>{(parseFloat(cryptoAmount || '0') * 0.015).toFixed(4)} {ad.asset_symbol}</span>
+            </div>
+            <div className="flex justify-between font-semibold text-foreground border-t pt-1">
+              <span>Total Locked from Wallet:</span>
+              <span>{(parseFloat(cryptoAmount || '0') * 1.015).toFixed(4)} {ad.asset_symbol}</span>
+            </div>
+            <div className="flex justify-between text-emerald-600 dark:text-emerald-400 font-medium pt-0.5">
+              <span>Net Received by Buyer:</span>
+              <span>{parseFloat(cryptoAmount || '0').toFixed(4)} {ad.asset_symbol}</span>
+            </div>
+          </div>
+        )}
 
         {/* Error Messaging */}
         {errorMsg && (

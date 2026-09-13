@@ -107,7 +107,8 @@ export default function AdDetailClient({ ad, advertiser, stats }: AdDetailClient
   // Dynamic Escrow Calculations
   const cryptoNum = parseFloat(cryptoInput) || 0
   const escrowFeeCrypto = cryptoNum * ESCROW_FEE_RATE
-  const netReceivedCrypto = Math.max(0, cryptoNum - escrowFeeCrypto)
+  const netReceivedCrypto = cryptoNum
+  const totalSellerLock = cryptoNum * (1 + ESCROW_FEE_RATE)
 
   // Feedback Metrics
   const totalFeedbacks = (stats.positiveFeedbacks || 0) + (stats.negativeFeedbacks || 0)
@@ -302,14 +303,22 @@ export default function AdDetailClient({ ad, advertiser, stats }: AdDetailClient
               </div>
 
               {/* Escrow Fee Breakdown */}
-              <div className="p-4 bg-blue-50/60 dark:bg-blue-950/30 border border-blue-200/60 dark:border-blue-900/40 rounded-xl text-xs space-y-2">
-                <div className="flex justify-between font-medium text-blue-900 dark:text-blue-300">
-                  <span>Escrow Fee (1.5%):</span>
-                  <span className="font-mono font-bold">{escrowFeeCrypto.toFixed(6)} {asset}</span>
+              <div className="p-4 bg-blue-50/60 dark:bg-blue-950/30 border border-blue-200/60 dark:border-blue-900/40 rounded-xl text-xs space-y-2 font-mono">
+                <div className="flex justify-between text-neutral-700 dark:text-neutral-300">
+                  <span>Trade Amount:</span>
+                  <span className="font-bold">{cryptoNum.toFixed(4)} {asset}</span>
                 </div>
                 <div className="flex justify-between text-neutral-700 dark:text-neutral-300">
-                  <span>Net Amount to Buyer:</span>
-                  <span className="font-mono font-bold">{netReceivedCrypto.toFixed(6)} {asset}</span>
+                  <span>Escrow Fee (1.5%):</span>
+                  <span className="font-bold">{escrowFeeCrypto.toFixed(4)} {asset}</span>
+                </div>
+                <div className="flex justify-between font-semibold text-blue-900 dark:text-blue-300 border-t pt-1">
+                  <span>Total Locked from Wallet:</span>
+                  <span className="font-bold">{totalSellerLock.toFixed(4)} {asset}</span>
+                </div>
+                <div className="flex justify-between text-emerald-600 dark:text-emerald-400 font-medium pt-0.5">
+                  <span>Net Received by Buyer:</span>
+                  <span className="font-bold">{netReceivedCrypto.toFixed(4)} {asset}</span>
                 </div>
               </div>
 
