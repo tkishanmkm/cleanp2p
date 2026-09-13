@@ -39,6 +39,36 @@ export async function getUserWalletBalances(
 
   if (!userId) return balanceMap;
 
+  // 0. Query balances table directly
+  try {
+    const { data: balancesData, error: balancesError } = await supabase
+      .from('balances')
+      .select('*')
+      .eq('user_id', userId);
+
+    if (!balancesError && balancesData && balancesData.length > 0) {
+      balancesData.forEach((row: any) => {
+        const rawSym = String(row.asset || row.asset_symbol || row.symbol || '').toUpperCase();
+        const symbol = (['BTC', 'ETH', 'LTC', 'USDT'].includes(rawSym) ? rawSym : null) as CryptoCurrency | null;
+        const spendable = Number(row.available_balance ?? row.available ?? row.balance ?? 0);
+        const lockedAmount = Number(row.locked_balance ?? row.locked ?? 0);
+
+        if (symbol) {
+          balanceMap[symbol] = {
+            balance: isNaN(spendable) ? 0 : spendable,
+            lockedBalance: isNaN(lockedAmount) ? 0 : lockedAmount,
+          };
+        }
+      });
+      // Return if we found non-zero balances or successfully queried
+      if (Object.values(balanceMap).some(b => b.balance > 0)) {
+        return balanceMap;
+      }
+    }
+  } catch (err) {
+    console.warn("balances table query error:", err);
+  }
+
   // 1. Direct query from wallet_assets using select('*')
   try {
     const { data: walletAssets, error: assetsError } = await supabase

@@ -609,12 +609,12 @@ export default function WalletPage() {
               <div className="flex justify-between pt-2">
                 <span className="text-muted-foreground">Amount:</span>
                 <span className="font-semibold font-mono">
-                  {selectedTx.amount} {selectedTx.crypto}
+                  {selectedTx.amount} {selectedTx.crypto || (selectedTx as any).asset || (selectedTx as any).coin || (selectedTx as any).asset_code || 'USDT'}
                 </span>
               </div>
               <div className="flex justify-between pt-2">
                 <span className="text-muted-foreground">Coin:</span>
-                <span className="font-medium">{selectedTx.crypto} ({selectedTx.chain})</span>
+                <span className="font-medium">{selectedTx.crypto || (selectedTx as any).asset || (selectedTx as any).coin || (selectedTx as any).asset_code || 'USDT'} ({selectedTx.chain || (selectedTx as any).network || 'Mainnet'})</span>
               </div>
               <div className="flex justify-between pt-2">
                 <span className="text-muted-foreground">Gas Fee:</span>

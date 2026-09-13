@@ -69,6 +69,36 @@ export async function GET(request: Request) {
       };
     };
 
+    // 1.5 Fetch from balances table (user_id, asset, available_balance, locked_balance, total_balance)
+    try {
+      const { data: balancesTableData } = await supabaseAdmin
+        .from('balances')
+        .select('*')
+        .eq('user_id', effectiveUserId);
+
+      if (balancesTableData && balancesTableData.length > 0) {
+        balancesTableData.forEach((row: any) => {
+          rawRecords.push(row);
+          const rawSymbol = String(row.asset || row.asset_symbol || row.symbol || '').toUpperCase();
+          const symbol = (['BTC', 'ETH', 'LTC', 'USDT'].includes(rawSymbol) ? rawSymbol : null) as CryptoCurrency | null;
+          if (!symbol) return;
+
+          const avail = Number(row.available_balance ?? row.available ?? row.balance ?? 0);
+          const escrow = Number(row.locked_balance ?? row.locked ?? row.in_escrow ?? 0);
+          const withdraw = Number(row.locked_withdrawal ?? 0);
+
+          balanceMap[symbol] = {
+            available: Math.max(balanceMap[symbol].available, isNaN(avail) ? 0 : avail),
+            inEscrow: Math.max(balanceMap[symbol].inEscrow, isNaN(escrow) ? 0 : escrow),
+            inWithdrawal: Math.max(balanceMap[symbol].inWithdrawal, isNaN(withdraw) ? 0 : withdraw),
+            total: Math.max(balanceMap[symbol].total, avail + escrow + withdraw),
+          };
+        });
+      }
+    } catch (err) {
+      console.warn('balances table query error:', err);
+    }
+
     // 2. Fetch from wallet_assets by user_id
     try {
       const { data: assetsByUserId } = await supabaseAdmin
