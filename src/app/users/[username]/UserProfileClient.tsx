@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
 import Image from 'next/image';
 import {
@@ -22,7 +22,8 @@ import {
   Zap,
 } from 'lucide-react';
 import UserAvatar from '@/components/common/UserAvatar';
-import { getPresenceStatus, formatJoinedDate } from '@/lib/presence';
+import { getPresenceStatus, formatJoinedDate, usePresenceStatus } from '@/lib/presence';
+import { createClient } from '@/utils/supabase/client';
 import { countries } from '@/lib/countries';
 
 interface UserProfileClientProps {
@@ -188,17 +189,85 @@ function parsePaymentMethods(methods: any): string[] {
 }
 
 export default function UserProfileClient({
-  profile,
+  profile: initialProfile,
   buyAds,
   sellAds,
   receivedFeedbacks,
   givenFeedbacks,
   stats,
 }: UserProfileClientProps) {
+  const [profile, setProfile] = useState(initialProfile);
   const [activeTab, setActiveTab] = useState<'buy_ads' | 'sell_ads' | 'received' | 'given'>('buy_ads');
   const [feedbackFilter, setFeedbackFilter] = useState<'all' | 'positive' | 'negative'>('all');
 
-  const presence = getPresenceStatus(profile.last_seen_at || profile.last_seen);
+  // Keep live profile updated with Supabase realtime & on mount refresh
+  useEffect(() => {
+    if (!initialProfile?.id) return;
+    const supabase = createClient();
+
+    // 1. Fetch latest profile immediately on mount to prevent stale SSR cache
+    const fetchLatestProfile = async () => {
+      try {
+        const { data: latest } = await supabase
+          .from('profiles')
+          .select('*')
+          .eq('id', initialProfile.id)
+          .maybeSingle();
+
+        if (latest) {
+          setProfile((prev) => ({
+            ...prev,
+            ...latest,
+            last_seen: latest.last_seen || latest.last_seen_at || latest.last_active || prev.last_seen,
+            last_seen_at: latest.last_seen_at || latest.last_seen || prev.last_seen_at,
+            last_active: latest.last_active || latest.last_seen || prev.last_active,
+            is_online: latest.is_online ?? prev.is_online,
+          }));
+        }
+      } catch (err) {
+        console.warn('Realtime profile refresh notice:', err);
+      }
+    };
+
+    fetchLatestProfile();
+
+    // 2. Poll every 15 seconds to ensure active heartbeats show in real-time
+    const pollInterval = setInterval(fetchLatestProfile, 15000);
+
+    // 3. Supabase Realtime channel subscription for instant update when heartbeat is written
+    const channel = supabase
+      .channel(`public:profiles:presence:${initialProfile.id}`)
+      .on(
+        'postgres_changes',
+        {
+          event: 'UPDATE',
+          schema: 'public',
+          table: 'profiles',
+          filter: `id=eq.${initialProfile.id}`,
+        },
+        (payload) => {
+          if (payload.new) {
+            const updated = payload.new as any;
+            setProfile((prev) => ({
+              ...prev,
+              ...updated,
+              last_seen: updated.last_seen || updated.last_seen_at || updated.last_active || prev.last_seen,
+              last_seen_at: updated.last_seen_at || updated.last_seen || prev.last_seen_at,
+              last_active: updated.last_active || updated.last_seen || prev.last_active,
+              is_online: updated.is_online ?? prev.is_online,
+            }));
+          }
+        }
+      )
+      .subscribe();
+
+    return () => {
+      clearInterval(pollInterval);
+      supabase.removeChannel(channel);
+    };
+  }, [initialProfile?.id]);
+
+  const presence = usePresenceStatus(profile, 15000);
   const countryInfo = getCountryDetails(profile.country);
 
   const cleanUsername = (profile.username || 'User').replace(/^@/, '');

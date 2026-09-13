@@ -2,6 +2,8 @@
 
 import React, { useState } from 'react';
 import { Search, ChevronDown, Check, Building2, Wallet, Smartphone, Banknote, Gift } from 'lucide-react';
+import { usePrices } from '@/context/price-context';
+import type { CryptoCurrency } from '@/lib/types';
 
 // --- DATA STRUCTURES ---
 export const CRYPTO_OPTIONS = [
@@ -130,6 +132,7 @@ interface FilterBarProps {
 }
 
 export default function MarketplaceFilterBar({ initialSide, btcPrice = 78932.04, onFilterChange }: FilterBarProps) {
+  const { prices, fiatRates } = usePrices();
   const [side, setSide] = useState<'BUY' | 'SELL'>(initialSide);
   const [selectedCoin, setSelectedCoin] = useState('BTC');
   const [selectedFiat, setSelectedFiat] = useState(FIAT_CURRENCIES[0]);
@@ -140,6 +143,12 @@ export default function MarketplaceFilterBar({ initialSide, btcPrice = 78932.04,
   const [showPaymentDropdown, setShowPaymentDropdown] = useState(false);
   const [fiatSearch, setFiatSearch] = useState('');
   const [paymentSearch, setPaymentSearch] = useState('');
+
+  const activeCoinSym: CryptoCurrency = (selectedCoin === 'ALL' ? 'BTC' : selectedCoin) as CryptoCurrency;
+  const activeFiatCode = selectedFiat.code === 'ALL' ? 'USD' : selectedFiat.code;
+  const coinUsdPrice = prices[activeCoinSym] || (activeCoinSym === 'BTC' ? btcPrice : 0);
+  const fiatMultiplier = fiatRates[activeFiatCode] || 1;
+  const displayCoinPrice = coinUsdPrice * fiatMultiplier;
 
   const notifyChange = (override: Partial<FilterState> = {}) => {
     onFilterChange({
@@ -187,7 +196,7 @@ export default function MarketplaceFilterBar({ initialSide, btcPrice = 78932.04,
             {side === 'BUY' ? 'Buy' : 'Sell'} {selectedCoin === 'ALL' ? 'Crypto' : selectedCoin} - Find Offers from {side === 'BUY' ? 'Sellers' : 'Buyers'}
           </h1>
           <p className="text-sm text-slate-400 mt-1">
-            1 BTC ≈ ${btcPrice.toLocaleString('en-US', { minimumFractionDigits: 2 })}
+            1 {activeCoinSym} ≈ {displayCoinPrice > 0 ? displayCoinPrice.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '...'} {activeFiatCode}
           </p>
         </div>
         <div className="flex items-center gap-3">

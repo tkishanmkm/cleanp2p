@@ -48,24 +48,34 @@ export default function TradePage() {
       }
       setCurrentUser(user);
 
-      // 2. Fetch trade details
-      const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(tradeIdParam);
-      let tradeQuery = supabase.from('trades').select('*');
-      if (isUuid) {
-        tradeQuery = tradeQuery.or(`id.eq.${tradeIdParam},trade_id.eq.${tradeIdParam},public_id.eq.${tradeIdParam}`);
-      } else {
-        tradeQuery = tradeQuery.or(`trade_id.eq.${tradeIdParam},public_id.eq.${tradeIdParam}`);
-      }
-      let { data: tradeData, error: tradeErr } = await tradeQuery.maybeSingle();
+      // 2. Fetch trade details defensively
+      const cleanParam = (tradeIdParam || '').trim();
+      const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(cleanParam);
+      let tradeData: any = null;
 
-      if (!tradeData && tradeErr) {
-        setError('Trade record not found or access denied.');
-        setLoading(false);
-        return;
+      if (isUuid) {
+        try {
+          const { data } = await supabase.from('trades').select('*').eq('id', cleanParam).maybeSingle();
+          if (data) tradeData = data;
+        } catch {}
       }
 
       if (!tradeData) {
-        setError('Trade record not found.');
+        try {
+          const { data } = await supabase.from('trades').select('*').eq('trade_id', cleanParam).maybeSingle();
+          if (data) tradeData = data;
+        } catch {}
+      }
+
+      if (!tradeData && !isUuid) {
+        try {
+          const { data } = await supabase.from('trades').select('*').eq('public_id', cleanParam).maybeSingle();
+          if (data) tradeData = data;
+        } catch {}
+      }
+
+      if (!tradeData) {
+        setError('Trade record not found or you do not have permission to view it.');
         setLoading(false);
         return;
       }
@@ -86,6 +96,7 @@ export default function TradePage() {
 
         if (opponentProfile) {
           setOpponent({
+            ...opponentProfile,
             id: opponentProfile.id,
             userId: opponentProfile.username || opponentProfile.id?.substring(0, 8),
             username: opponentProfile.username,
@@ -93,14 +104,20 @@ export default function TradePage() {
             dob: opponentProfile.dob,
             country: opponentProfile.country,
             ipBasedCountry: opponentProfile.ip_based_country,
-            photoURL: opponentProfile.photo_url,
+            photoURL: opponentProfile.photo_url || opponentProfile.avatar_url,
+            photo_url: opponentProfile.photo_url || opponentProfile.avatar_url,
             feedbackScore: opponentProfile.feedback_score,
             positiveFeedback: opponentProfile.positive_feedback,
             negativeFeedback: opponentProfile.negative_feedback,
             completedTrades: opponentProfile.completed_trades,
             blockedUsers: opponentProfile.blocked_users,
             createdAt: opponentProfile.created_at,
-            lastActive: opponentProfile.last_active
+            merchant_tier: opponentProfile.merchant_tier,
+            is_online: opponentProfile.is_online,
+            last_seen: opponentProfile.last_seen,
+            last_seen_at: opponentProfile.last_seen_at,
+            last_active: opponentProfile.last_active,
+            lastActive: opponentProfile.last_seen || opponentProfile.last_seen_at || opponentProfile.last_active || opponentProfile.updated_at
           });
         } else {
           setOpponent({

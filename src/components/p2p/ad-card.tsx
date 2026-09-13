@@ -11,10 +11,11 @@ import { usePrices } from '@/context/price-context';
 import { ThumbsUp, ThumbsDown, Info, Award, Clock, CheckCircle } from 'lucide-react';
 import { cn, toDate } from '@/lib/utils';
 import { BtcLogo, EthLogo, LtcLogo, UsdtLogo, DefaultAvatar } from '@/components/icons';
+import { CurrencyIcon } from '@/components/CurrencyIcon';
 import { FlagIcon } from '../ui/flag-icon';
 import { MerchantBadge } from '@/components/merchant/merchant-badge';
 import { formatDistanceToNow } from 'date-fns';
-import { getPresenceStatus, formatJoinedDate } from '@/lib/presence';
+import { getPresenceStatus, formatJoinedDate, usePresenceStatus, resolveUserLastSeen } from '@/lib/presence';
 import {
   Dialog,
   DialogContent,
@@ -25,13 +26,22 @@ import {
 } from "@/components/ui/dialog";
 import { ScrollArea } from '../ui/scroll-area';
 
-const CryptoLogo = ({ crypto, className }: { crypto: CryptoCurrency; className?: string }) => {
-  switch (crypto) {
+// 1. App-Specific Supported Cryptos (BTC, USDT, LTC, ETH)
+const SUPPORTED_CRYPTO_ICONS: Record<string, string> = {
+  BTC: '/icons/btc.svg',
+  USDT: '/icons/usdt.svg',
+  LTC: '/icons/ltc.svg',
+  ETH: '/icons/eth.svg',
+};
+
+const CryptoLogo = ({ crypto, className }: { crypto: CryptoCurrency | string; className?: string }) => {
+  const sym = String(crypto || 'LTC').toUpperCase();
+  switch (sym) {
     case 'BTC': return <BtcLogo className={className} />;
     case 'ETH': return <EthLogo className={className} />;
     case 'LTC': return <LtcLogo className={className} />;
     case 'USDT': return <UsdtLogo className={className} />;
-    default: return null;
+    default: return <CurrencyIcon symbol={sym} size="sm" showCode={false} />;
   }
 };
 
@@ -43,20 +53,45 @@ const DetailRow = ({ label, value }: { label: string; value: React.ReactNode }) 
 );
 
 interface AdCardProps {
-  ad: P2PAd;
+  ad: P2PAd | any;
+  marketPriceUsd?: number;
+  fiatExchangeRate?: number;
+  onActionClick?: () => void;
 }
 
-export function AdCard({ ad }: AdCardProps) {
+export function AdCard({ ad, marketPriceUsd: propMarketPriceUsd, fiatExchangeRate: propFiatExchangeRate, onActionClick }: AdCardProps) {
   const { prices, fiatRates } = usePrices();
-  const adCreator = ad.user || ({} as any);
+  const adCreator = ad.user || ad.profiles || ({} as any);
 
-  const marketPriceUsd = prices[ad.crypto] || 0;
-  const exchangeRate = fiatRates[ad.fiatCurrency] || 1;
+  // 1. Dynamic fiat & crypto currency resolution from Supabase fields
+  const adFiat = (
+    ad.fiat || 
+    ad.fiatCurrency || 
+    ad.fiat_currency || 
+    ad.currency || 
+    ad.fiat_symbol || 
+    'PKR'
+  ).toUpperCase();
+  
+  const adCrypto = (
+    ad.crypto || 
+    ad.cryptoSymbol || 
+    ad.crypto_symbol || 
+    ad.coin || 
+    ad.asset || 
+    ad.asset_symbol || 
+    ad.crypto_currency || 
+    'LTC'
+  ).toUpperCase() as CryptoCurrency;
+
+  // 2. Dynamic market price & pair-specific margin calculation (eliminating false -99.91% issues)
+  const marketPriceUsd = propMarketPriceUsd ?? prices[adCrypto] ?? 0;
+  const exchangeRate = propFiatExchangeRate ?? fiatRates[adFiat] ?? 1;
   const marketPriceInFiat = marketPriceUsd * exchangeRate;
 
-  // Unit price set by seller/buyer fetched from backend (or calculated with rate margin above market)
-  const rawPrice = Number((ad as any).price ?? (ad as any).unit_price ?? ad.fixedRate ?? 0);
-  const marginPercent = Number(ad.ratePercent ?? (ad as any).margin_percentage ?? (ad as any).price_margin_percent ?? 0);
+  // Unit price set by seller/buyer fetched from Supabase
+  const rawPrice = Number(ad.rate ?? ad.price ?? ad.unit_price ?? ad.customUnitPrice ?? ad.fixedRate ?? 0);
+  const marginPercent = Number(ad.ratePercent ?? ad.margin_percentage ?? ad.price_margin_percent ?? 0);
 
   const adPrice = rawPrice > 0 
     ? rawPrice 
@@ -68,34 +103,29 @@ export function AdCard({ ad }: AdCardProps) {
     ? (adPrice - marketPriceInFiat) / marketPriceInFiat 
     : 0;
   
-  const isForBuyingPage = ad.adType === 'sell';
+  const isAdTypeBuy = String(ad.adType || ad.type || ad.ad_type || 'SELL').toUpperCase() === 'BUY';
+  const isForBuyingPage = !isAdTypeBuy;
   
-  const priceBadgeClass = isForBuyingPage 
-    ? (pricePremium >= 0 ? 'bg-red-100 text-red-700' : 'bg-green-100 text-green-700') 
-    : (pricePremium >= 0 ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700');
+  const marginBadgeText = marketPriceInFiat > 0 && adPrice > 0
+    ? `${pricePremium >= 0 ? '+' : ''}${(pricePremium * 100).toFixed(2)}%`
+    : null;
 
-  const buttonLabel = ad.adType === 'buy' ? 'Sell' : 'Buy';
+  const priceBadgeClass = pricePremium >= 0 
+    ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/50 dark:text-emerald-300' 
+    : 'bg-amber-100 text-amber-800 dark:bg-amber-950/50 dark:text-amber-300';
+
+  const buttonLabel = isAdTypeBuy ? 'Sell' : 'Buy';
   const buttonColorClass = buttonLabel === 'Buy'
     ? 'bg-green-600 hover:bg-green-700 text-white'
     : 'bg-red-600 hover:bg-red-700 text-white';
 
-  const adCreatorLastActive = adCreator?.lastActive ? toDate(adCreator.lastActive) : null;
-  let activity = { text: 'Offline', dotClass: 'bg-gray-500', textClass: 'text-muted-foreground' };
+  // 3. Online Status / Last Seen formatting from Supabase
+  const userLastSeen = resolveUserLastSeen(adCreator);
+  const userCreatedAt = adCreator?.created_at || adCreator?.createdAt;
+  const presence = usePresenceStatus(userLastSeen, 15000);
+  const joinedText = formatJoinedDate(userCreatedAt);
 
-  if (adCreatorLastActive) {
-    const diffMinutes = (new Date().getTime() - adCreatorLastActive.getTime()) / (1000 * 60);
-    const formattedDistance = formatDistanceToNow(adCreatorLastActive);
-
-    if (diffMinutes < 5) {
-      activity = { text: 'Active now', dotClass: 'bg-green-500', textClass: 'text-green-600' };
-    } else if (diffMinutes < 60) {
-      activity = { text: `${formattedDistance} ago`, dotClass: 'bg-green-500', textClass: 'text-green-600' };
-    } else if (diffMinutes < 24 * 60) {
-      activity = { text: `${formattedDistance} ago`, dotClass: 'bg-yellow-600', textClass: 'text-yellow-600' };
-    } else {
-      activity = { text: `${formattedDistance} ago`, dotClass: 'bg-gray-500', textClass: 'text-muted-foreground' };
-    }
-  }
+  const isUserOnline = presence.isOnline;
   
   const userBadges = (adCreator?.badges || []);
   const displayedBadges = userBadges.slice(0, 3);
@@ -123,17 +153,35 @@ export function AdCard({ ad }: AdCardProps) {
     (ad as any).paymentWindow ?? 
     30
   ) || 30;
-  const maxLimit = ad.maxAmount || 0;
-  const minLimit = ad.minAmount || 0;
-  const rawAdvertiserBalanceUSD = Number((ad as any).advertiserBalanceUSD ?? (ad as any).creator_crypto_balance_fiat ?? 0);
-  const advertiserBalanceUSD = rawAdvertiserBalanceUSD > 0 ? rawAdvertiserBalanceUSD : (maxLimit || 1000);
-  const effectiveMaxLimit = Math.min(maxLimit, advertiserBalanceUSD);
-  const isAvailable = advertiserBalanceUSD >= minLimit;
 
-  const userLastSeen = adCreator?.last_seen || adCreator?.last_seen_at || adCreator?.lastActive || adCreator?.last_active;
-  const userCreatedAt = adCreator?.created_at || adCreator?.createdAt;
-  const presence = getPresenceStatus(userLastSeen);
-  const joinedText = formatJoinedDate(userCreatedAt);
+  // Limits calculation with explicit inventory-to-fiat conversion
+  const minLimit = Number(ad.minAmount ?? (ad as any).minLimit ?? (ad as any).min_amount ?? (ad as any).min_limit ?? 0);
+  const maxLimit = Number(ad.maxAmount ?? (ad as any).maxLimit ?? (ad as any).max_amount ?? (ad as any).max_limit ?? 0);
+
+  // If available crypto inventory is passed (token amount), calculate available fiat using unit price:
+  // Max Limit (Fiat) = Available Crypto * Unit Price
+  let availableFiatFromInventory = Infinity;
+  const rawAvailableCrypto = (ad as any).available_crypto ?? (ad as any).availableCrypto ?? (ad as any).available_tokens ?? (ad as any).crypto_inventory;
+  if (rawAvailableCrypto !== undefined && rawAvailableCrypto !== null && Number(rawAvailableCrypto) >= 0) {
+    const availCryptoNum = Number(rawAvailableCrypto);
+    availableFiatFromInventory = availCryptoNum * (adPrice > 0 ? adPrice : 1);
+  } else if (adCreator?.cryptoBalances && adCreator.cryptoBalances[adCrypto] !== undefined) {
+    const availCryptoNum = Number(adCreator.cryptoBalances[adCrypto]);
+    availableFiatFromInventory = availCryptoNum * (adPrice > 0 ? adPrice : 1);
+  }
+
+  // Check if advertiser balance was given in fiat or USD
+  const rawAdvertiserBalanceUSD = Number((ad as any).advertiserBalanceUSD ?? (ad as any).creator_crypto_balance_fiat ?? 0);
+  const advertiserBalanceInFiat = rawAdvertiserBalanceUSD > 0
+    ? rawAdvertiserBalanceUSD * (adFiat === 'USD' ? 1 : (fiatRates[adFiat] || 1))
+    : (availableFiatFromInventory < Infinity ? availableFiatFromInventory : maxLimit);
+
+  // Effective max limit is capped by available inventory/balance
+  const effectiveMaxLimit = maxLimit > 0
+    ? (advertiserBalanceInFiat > 0 ? Math.min(maxLimit, advertiserBalanceInFiat) : maxLimit)
+    : (advertiserBalanceInFiat > 0 ? advertiserBalanceInFiat : 0);
+
+  const isAvailable = (effectiveMaxLimit >= minLimit) && (effectiveMaxLimit > 0 || maxLimit === 0);
 
   return (
     <Card className="hover:shadow-md transition-shadow">
@@ -142,7 +190,7 @@ export function AdCard({ ad }: AdCardProps) {
         <div className="flex-grow space-y-3">
           <div className="flex items-center gap-3">
             <Avatar className="h-10 w-10">
-              <AvatarImage src={adCreator?.photoURL} />
+              <AvatarImage src={adCreator?.photoURL || adCreator?.avatar_url} />
               <AvatarFallback><DefaultAvatar /></AvatarFallback>
             </Avatar>
             <div>
@@ -164,7 +212,7 @@ export function AdCard({ ad }: AdCardProps) {
                 {hiddenBadgesCount > 0 && <Badge variant="secondary">+{hiddenBadgesCount} more</Badge>}
               </div>
               <div className="text-xs text-muted-foreground flex items-center gap-3 flex-wrap">
-                <span>{adCreator?.completedTrades || 0} Trades</span>
+                <span>{adCreator?.total_completed_trades ?? adCreator?.completedTrades ?? adCreator?.completed_trades ?? adCreator?.tradesCount ?? 0} Trades</span>
                 <div className="flex items-center gap-1">
                   <ThumbsUp className="h-3 w-3 text-green-500" /> {adCreator?.positiveFeedback || 0}
                 </div>
@@ -213,12 +261,13 @@ export function AdCard({ ad }: AdCardProps) {
         <div className="w-full sm:w-auto flex flex-col items-start sm:items-end gap-2">
           <div>
             <p className="text-xs text-muted-foreground">Price</p>
+            {/* Dynamic Price Display */}
             <div className="flex items-center gap-2">
-              <CryptoLogo crypto={ad.crypto as CryptoCurrency} className="h-5 w-5" />
-              <p className="font-bold text-lg">
-                {adPrice.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                <span className="text-sm text-muted-foreground ml-1">{ad.fiatCurrency}</span>
-              </p>
+              <CryptoLogo crypto={adCrypto} className="h-5 w-5" />
+              <div className="text-lg font-bold">
+                {adPrice.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}{' '}
+                <span className="text-sm font-normal text-muted-foreground">{adFiat} / {adCrypto}</span>
+              </div>
               {marketPriceInFiat > 0 && (
                 <Badge className={cn('font-semibold', priceBadgeClass)}>
                   {pricePremium >= 0 ? '+' : ''}{(pricePremium * 100).toFixed(2)}%
@@ -228,11 +277,11 @@ export function AdCard({ ad }: AdCardProps) {
           </div>
 
           <div>
-            <p className="text-xs text-muted-foreground">Limits</p>
+            {/* Dynamic Limits Display */}
             {isAvailable ? (
-              <p className="font-medium text-sm">
-                {minLimit.toLocaleString()} - {effectiveMaxLimit.toLocaleString()} {ad.fiatCurrency}
-              </p>
+              <div className="text-sm text-muted-foreground">
+                Limits: <span className="font-medium text-foreground">{minLimit.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} - {effectiveMaxLimit.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} {adFiat}</span>
+              </div>
             ) : (
               <p className="font-semibold text-xs text-red-500">
                 Insufficient Advertiser Balance
@@ -249,9 +298,11 @@ export function AdCard({ ad }: AdCardProps) {
               </DialogTrigger>
               <DialogContent className="sm:max-w-md">
                 <DialogHeader>
-                  <DialogTitle>Trade Details</DialogTitle>
+                  <DialogTitle className="text-xl font-bold">
+                    {isAdTypeBuy ? `Sell Ad to ${adCreator?.username || 'Trader'}` : `Buy Ad from ${adCreator?.username || 'Trader'}`}
+                  </DialogTitle>
                   <DialogDescription>
-                    {ad.adType === 'buy' ? 'Buy' : 'Sell'} ad from {adCreator?.username || 'Trader'}
+                    {isAdTypeBuy ? `Sell to ${adCreator?.username || 'Trader'}` : `Buy from ${adCreator?.username || 'Trader'}`}
                   </DialogDescription>
                 </DialogHeader>
                 <ScrollArea className="max-h-[70vh]">
@@ -261,22 +312,25 @@ export function AdCard({ ad }: AdCardProps) {
                       <div className="space-y-2 text-sm p-3 border rounded-md bg-secondary/50">
                         <div className="flex items-center gap-3">
                           <Avatar className="h-10 w-10">
-                            <AvatarImage src={adCreator?.photoURL} />
+                            <AvatarImage src={adCreator?.photoURL || adCreator?.avatar_url} />
                             <AvatarFallback><DefaultAvatar /></AvatarFallback>
                           </Avatar>
                           <div>
                             <p className="font-semibold">{adCreator?.username || 'Trader'}</p>
-                            <p className="text-xs text-muted-foreground">{formatJoinedDate(adCreator?.createdAt)}</p>
+                            <p className="text-xs text-muted-foreground">{formatJoinedDate(adCreator?.created_at || adCreator?.createdAt)}</p>
                           </div>
                         </div>
                         <div className="grid grid-cols-2 gap-y-2 gap-x-4 pt-2">
-                          <div className="flex items-center gap-2"><CheckCircle className="h-4 w-4 text-muted-foreground" /> <span>{adCreator?.total_completed_trades ?? adCreator?.completedTrades ?? adCreator?.completed_trades ?? 0} Trades</span></div>
+                          <div className="flex items-center gap-2">
+                            <CheckCircle className="h-4 w-4 text-muted-foreground" /> 
+                            <span>{adCreator?.total_completed_trades ?? adCreator?.completedTrades ?? adCreator?.completed_trades ?? adCreator?.tradesCount ?? 0} Trades</span>
+                          </div>
                           <div className="flex items-center gap-2"><ThumbsUp className="h-4 w-4 text-green-500" /> <span>{adCreator?.positiveFeedback || 0}</span></div>
                           <div className="flex items-center gap-2"><ThumbsDown className="h-4 w-4 text-red-500" /> <span>{adCreator?.negativeFeedback || 0}</span></div>
                           <div className="flex items-center gap-2">
                             <Clock className="h-4 w-4 text-muted-foreground" />
                             <span>
-                              {ad.adType === 'buy'
+                              {isAdTypeBuy
                                 ? (hasValidPayTime ? `${rawPayTime.toFixed(1)}m pay` : 'N/A')
                                 : (hasValidReleaseTime ? `${rawReleaseTime.toFixed(1)}m release` : 'N/A')}
                             </span>
@@ -287,8 +341,8 @@ export function AdCard({ ad }: AdCardProps) {
                     <div>
                       <h4 className="font-semibold text-base mb-2">Ad Info</h4>
                       <div className="space-y-3 text-sm p-3 border rounded-md bg-secondary/50">
-                        <DetailRow label="Price" value={<div className="flex items-center gap-2">{adPrice.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}<span className="text-muted-foreground">{ad.fiatCurrency} / {ad.crypto}</span></div>} />
-                        <DetailRow label="Limits" value={`${(ad.minAmount || 0).toLocaleString()} - ${(ad.maxAmount || 0).toLocaleString()} ${ad.fiatCurrency}`} />
+                        <DetailRow label="Price" value={<div className="flex items-center gap-2">{adPrice.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}<span className="text-muted-foreground">{adFiat} / {adCrypto}</span></div>} />
+                        <DetailRow label="Limits" value={`${minLimit.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} - ${effectiveMaxLimit.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ${adFiat}`} />
                         <DetailRow label="Payment Window" value={`${configuredPaymentWindow} minutes`} />
                         <DetailRow label="Payment Methods" value={<div className="flex flex-wrap gap-1 justify-end">{(ad.paymentMethods || []).map(pm => <Badge key={pm} variant="outline">{pm}</Badge>)}</div>} />
                       </div>
@@ -308,11 +362,17 @@ export function AdCard({ ad }: AdCardProps) {
               </DialogContent>
             </Dialog>
 
-            <Button asChild className={cn(buttonColorClass, "gap-2")}>
-              <Link href={`/ad/${ad.id}`}>
-                {buttonLabel} <CryptoLogo crypto={ad.crypto as CryptoCurrency} className="h-4 w-4" />
-              </Link>
-            </Button>
+            {onActionClick ? (
+              <Button onClick={onActionClick} className={cn(buttonColorClass, "gap-2")}>
+                {buttonLabel} <CryptoLogo crypto={adCrypto} className="h-4 w-4" />
+              </Button>
+            ) : (
+              <Button asChild className={cn(buttonColorClass, "gap-2")}>
+                <Link href={`/ad/${ad.id}`}>
+                  {buttonLabel} <CryptoLogo crypto={adCrypto} className="h-4 w-4" />
+                </Link>
+              </Button>
+            )}
           </div>
         </div>
       </div>

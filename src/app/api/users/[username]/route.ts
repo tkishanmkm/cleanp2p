@@ -95,7 +95,10 @@ export async function GET(
       is_email_verified: isEmailVerified,
       is_id_verified: isIdVerified,
       kyc_status: kycStatus || (isIdVerified ? 'VERIFIED' : 'UNVERIFIED'),
-      last_seen_at: profile.last_seen_at || profile.last_active || null,
+      last_seen: profile.last_seen || profile.last_seen_at || profile.last_active || profile.updated_at || null,
+      last_seen_at: profile.last_seen || profile.last_seen_at || profile.last_active || profile.updated_at || null,
+      last_active: profile.last_seen || profile.last_seen_at || profile.last_active || profile.updated_at || null,
+      is_online: profile.is_online ?? false,
       joined_at: profile.created_at || null,
       stats: {
         completed_trades: profile.completed_trades || 0,

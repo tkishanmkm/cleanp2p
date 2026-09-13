@@ -148,7 +148,7 @@ export function AdFeed({ type }: { type?: "BUY" | "SELL" }) {
                 <span className="font-semibold text-base font-mono">
                   @{sellerProfile?.username || "trader"}
                 </span>
-                <UserStatusIndicator lastActive={sellerProfile?.last_active} />
+                <UserStatusIndicator user={sellerProfile} />
               </div>
               <p className="text-xs text-muted-foreground">
                 Ad #{ad.id}

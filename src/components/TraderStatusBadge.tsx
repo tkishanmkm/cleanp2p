@@ -1,34 +1,22 @@
 "use client";
 
-import React from 'react';
+import React from "react";
+import { usePresenceStatus, resolveUserLastSeen } from "@/lib/presence";
 
-export default function TraderStatusBadge({ presence, lastActive }: { presence?: string; lastActive?: string | Date | null }) {
-  let status = presence;
-  if (!status && lastActive) {
-    const now = Date.now();
-    const d = typeof lastActive === 'string' ? new Date(lastActive).getTime() : lastActive instanceof Date ? lastActive.getTime() : 0;
-    if (d > 0) {
-      const diffSeconds = Math.max(0, Math.floor((now - d) / 1000));
-      const diffMinutes = Math.floor(diffSeconds / 60);
-      if (diffSeconds <= 120) {
-        status = 'Online';
-      } else if (diffMinutes < 60) {
-        const mins = Math.max(1, diffMinutes);
-        status = `${mins} min${mins === 1 ? '' : 's'} ago`;
-      } else {
-        const diffHours = Math.floor(diffMinutes / 60);
-        if (diffHours < 24) {
-          status = `${diffHours} hr${diffHours === 1 ? '' : 's'} ago`;
-        } else {
-          status = 'Offline';
-        }
-      }
-    }
-  }
-  if (!status) status = 'Offline';
+export interface TraderStatusBadgeProps {
+  user?: any;
+  presence?: string;
+  lastActive?: string | Date | null;
+  last_seen?: string | Date | null;
+}
 
-  const isOnline = status === 'Online';
-  const isRecent = status.includes('min') || status.includes('hr');
+export default function TraderStatusBadge({ user, presence: customPresence, lastActive, last_seen }: TraderStatusBadgeProps) {
+  const target = user || last_seen || lastActive;
+  const statusInfo = usePresenceStatus(target, 15000);
+
+  const status = customPresence || statusInfo.label;
+  const isOnline = status === 'Online' || statusInfo.isOnline;
+  const isRecent = status.includes('min') || status.includes('hr') || status.includes('m ago') || status.includes('h ago');
 
   return (
     <div className="flex items-center gap-1.5 text-xs font-semibold">
@@ -57,4 +45,5 @@ export default function TraderStatusBadge({ presence, lastActive }: { presence?:
 }
 
 export { TraderStatusBadge };
+
 

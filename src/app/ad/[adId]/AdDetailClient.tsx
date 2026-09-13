@@ -1,10 +1,10 @@
 'use client'
 
-import React, { useState } from 'react'
+import React, { useState, useEffect } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import UserAvatar from '@/components/common/UserAvatar'
-import { getPresenceStatus, formatJoinedDate } from '@/lib/presence'
+import { getPresenceStatus, formatJoinedDate, usePresenceStatus, resolveUserLastSeen } from '@/lib/presence'
 import { createTradeOrderWithEscrow } from '@/app/ad/actions'
 
 interface AdDetailClientProps {
@@ -24,8 +24,15 @@ interface AdDetailClientProps {
 const ASSET_ICONS: Record<string, string> = {
   BTC: 'https://assets.coingecko.com/coins/images/1/small/bitcoin.png',
   USDT: 'https://assets.coingecko.com/coins/images/325/small/Tether.png',
+  USDC: 'https://assets.coingecko.com/coins/images/6319/small/usdc.png',
   ETH: 'https://assets.coingecko.com/coins/images/279/small/ethereum.png',
   LTC: 'https://assets.coingecko.com/coins/images/2/small/litecoin.png',
+  SOL: 'https://assets.coingecko.com/coins/images/4128/small/solana.png',
+  BNB: 'https://assets.coingecko.com/coins/images/825/small/bnb-icon2_2x.png',
+  TRX: 'https://assets.coingecko.com/coins/images/1094/small/tron-logo.png',
+  MATIC: 'https://assets.coingecko.com/coins/images/4713/small/polygon.png',
+  DOGE: 'https://assets.coingecko.com/coins/images/5/small/dogecoin.png',
+  XRP: 'https://assets.coingecko.com/coins/images/44/small/xrp-symbol-white-128.png',
 }
 
 const FIAT_COUNTRY_CODES: Record<string, string> = {
@@ -82,13 +89,14 @@ export default function AdDetailClient({ ad, advertiser, stats }: AdDetailClient
   const [errorMsg, setErrorMsg] = useState<string | null>(null)
 
   // Asset & Currency Normalization
-  const asset = (ad.asset || ad.asset_symbol || ad.crypto || 'BTC').toUpperCase()
-  const fiatCurrency = (ad.fiat_currency || ad.fiat_symbol || ad.fiat || 'USD').toUpperCase()
-  const unitPrice = parseFloat(ad.price || ad.unit_price || '0')
-  const isAdvertiserBuyer = (ad.type || ad.ad_type || 'SELL').toUpperCase() === 'BUY'
+  const asset = (ad.asset_symbol || ad.asset || ad.crypto || ad.crypto_symbol || ad.cryptoSymbol || ad.coin || ad.crypto_currency || 'BTC').toUpperCase()
+  const fiatCurrency = (ad.fiat_symbol || ad.fiat_currency || ad.fiatCurrency || ad.fiat || ad.currency || 'USD').toUpperCase()
+  const unitPrice = parseFloat(ad.price || ad.unit_price || ad.fixed_rate || ad.fixedRate || '0')
+  const rawSide = String(ad.type || ad.side || ad.ad_type || ad.adType || 'SELL').toUpperCase()
+  const isAdvertiserBuyer = rawSide.includes('BUY')
   const ESCROW_FEE_RATE = 0.015 // 1.5% Escrow Fee
 
-  const presence = getPresenceStatus(advertiser?.last_seen)
+  const presence = usePresenceStatus(advertiser, 15000)
 
   const paymentMethods: string[] = Array.isArray(ad.payment_methods)
     ? ad.payment_methods

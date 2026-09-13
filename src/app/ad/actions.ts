@@ -3,6 +3,7 @@
 import { createClient } from '@/lib/supabase/server';
 import { getSupabaseAdminClient } from '@/lib/supabase/server';
 import { generateTradeId } from '@/lib/id-generator';
+import { findAdById } from '@/lib/ad-lookup';
 
 export interface ActionResponse<T> {
   data: T | null;
@@ -506,52 +507,16 @@ export async function createTradeOrderWithEscrow(input: {
       };
     }
 
-    // 2. Fetch Ad details safely (from 'p2p_ads' or 'ads')
+    // 2. Fetch Ad details safely using universal resolver
     const cleanAdId = String(input.adId || '').replace(/^#/, '').trim();
-    const isAdIdUUID = isValidUUID(cleanAdId);
     let ad: any = null;
     let validAdUuid: string | null = null;
 
-    // A. Check p2p_ads first
-    try {
-      let p2pQuery = adminClient.from('p2p_ads').select('*');
-      if (isAdIdUUID) {
-        p2pQuery = p2pQuery.or(`id.eq.${cleanAdId},public_ad_id.eq.${cleanAdId},public_id.eq.${cleanAdId}`);
-      } else {
-        p2pQuery = p2pQuery.or(`public_ad_id.eq.${cleanAdId},public_id.eq.${cleanAdId}`);
-      }
-      const { data: p2pAd } = await p2pQuery.maybeSingle();
-      if (p2pAd) {
-        ad = p2pAd;
-        if (isValidUUID(p2pAd.id)) {
-          const { data: adExists } = await adminClient.from('ads').select('id').eq('id', p2pAd.id).maybeSingle();
-          if (adExists?.id) {
-            validAdUuid = adExists.id;
-          }
-        }
-      }
-    } catch (err) {
-      console.warn('[createTradeOrderWithEscrow] p2p_ads query notice:', err);
-    }
-
-    // B. Check ads table
-    if (!ad) {
-      try {
-        let adsQuery = adminClient.from('ads').select('*');
-        if (isAdIdUUID) {
-          adsQuery = adsQuery.eq('id', cleanAdId);
-        } else {
-          adsQuery = adsQuery.or(`public_id.eq.${cleanAdId},public_ad_id.eq.${cleanAdId}`);
-        }
-        const { data: primaryAd } = await adsQuery.maybeSingle();
-        if (primaryAd) {
-          ad = primaryAd;
-          if (isValidUUID(primaryAd.id)) {
-            validAdUuid = primaryAd.id;
-          }
-        }
-      } catch (err) {
-        console.warn('[createTradeOrderWithEscrow] ads query notice:', err);
+    const resolved = await findAdById(cleanAdId);
+    if (resolved?.ad) {
+      ad = resolved.ad;
+      if (isValidUUID(ad.id)) {
+        validAdUuid = ad.id;
       }
     }
 

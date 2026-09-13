@@ -248,6 +248,10 @@ export default async function UserProfilePage({ params }: PageProps) {
     <UserProfileClient
       profile={{
         ...profile,
+        last_seen: profile.last_seen || profile.last_seen_at || profile.last_active || profile.updated_at || null,
+        last_seen_at: profile.last_seen || profile.last_seen_at || profile.last_active || profile.updated_at || null,
+        last_active: profile.last_seen || profile.last_seen_at || profile.last_active || profile.updated_at || null,
+        is_online: profile.is_online ?? false,
         username: profile.username || username,
         is_email_verified: isEmailVerified,
         is_id_verified: isIdVerified,

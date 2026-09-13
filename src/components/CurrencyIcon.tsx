@@ -12,9 +12,13 @@ const CRYPTO_ICONS: Record<string, { symbolChar: string; bg: string; text: strin
   BTC: { symbolChar: '₿', bg: 'bg-amber-500/15 dark:bg-amber-500/20', text: 'text-amber-600 dark:text-amber-400', border: 'border-amber-500/30', name: 'Bitcoin' },
   ETH: { symbolChar: 'Ξ', bg: 'bg-indigo-500/15 dark:bg-indigo-500/20', text: 'text-indigo-600 dark:text-indigo-400', border: 'border-indigo-500/30', name: 'Ethereum' },
   USDT: { symbolChar: '₮', bg: 'bg-emerald-500/15 dark:bg-emerald-500/20', text: 'text-emerald-600 dark:text-emerald-400', border: 'border-emerald-500/30', name: 'Tether' },
-  LTC: { symbolChar: 'Ł', bg: 'bg-blue-500/15 dark:bg-blue-500/20', text: 'text-blue-600 dark:text-blue-400', border: 'border-blue-500/30', name: 'Litecoin' },
+  USDC: { symbolChar: '$', bg: 'bg-blue-500/15 dark:bg-blue-500/20', text: 'text-blue-600 dark:text-blue-400', border: 'border-blue-500/30', name: 'USD Coin' },
+  LTC: { symbolChar: 'Ł', bg: 'bg-sky-500/15 dark:bg-sky-500/20', text: 'text-sky-600 dark:text-sky-400', border: 'border-sky-500/30', name: 'Litecoin' },
   SOL: { symbolChar: '◎', bg: 'bg-purple-500/15 dark:bg-purple-500/20', text: 'text-purple-600 dark:text-purple-400', border: 'border-purple-500/30', name: 'Solana' },
   BNB: { symbolChar: '🔶', bg: 'bg-yellow-500/15 dark:bg-yellow-500/20', text: 'text-yellow-600 dark:text-yellow-400', border: 'border-yellow-500/30', name: 'BNB' },
+  TRX: { symbolChar: '⚡', bg: 'bg-red-500/15 dark:bg-red-500/20', text: 'text-red-600 dark:text-red-400', border: 'border-red-500/30', name: 'TRON' },
+  MATIC: { symbolChar: '⬡', bg: 'bg-violet-500/15 dark:bg-violet-500/20', text: 'text-violet-600 dark:text-violet-400', border: 'border-violet-500/30', name: 'Polygon' },
+  DOGE: { symbolChar: 'Ð', bg: 'bg-amber-600/15 dark:bg-amber-600/20', text: 'text-amber-700 dark:text-amber-500', border: 'border-amber-600/30', name: 'Dogecoin' },
   XRP: { symbolChar: '✕', bg: 'bg-cyan-500/15 dark:bg-cyan-500/20', text: 'text-cyan-600 dark:text-cyan-400', border: 'border-cyan-500/30', name: 'Ripple' },
 };
 

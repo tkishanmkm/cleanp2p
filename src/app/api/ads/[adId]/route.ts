@@ -1,6 +1,7 @@
 import { createClient, getSupabaseAdminClient } from '@/utils/supabase/server';
 import { NextRequest, NextResponse } from 'next/server';
 import { revalidatePath } from 'next/cache';
+import { findAdById } from '@/lib/ad-lookup';
 
 export const dynamic = 'force-dynamic';
 
@@ -21,58 +22,10 @@ export async function GET(
 ) {
   try {
     const rawParams = await Promise.resolve(context.params);
-    const adId = rawParams.adId;
-    const supabase = await createClient();
+    const adId = (rawParams.adId || '').trim();
 
-    const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(adId);
-
-    // Query Supabase p2p_ads table
-    let ad: any = null;
-
-    if (isUuid) {
-      const { data } = await supabase
-        .from('p2p_ads')
-        .select('*')
-        .eq('id', adId)
-        .maybeSingle();
-      ad = data;
-    }
-
-    if (!ad) {
-      if (isUuid) {
-        const { data } = await supabase
-          .from('p2p_ads')
-          .select('*')
-          .or(`public_ad_id.eq.${adId},public_id.eq.${adId},id.eq.${adId}`)
-          .maybeSingle();
-        ad = data;
-      } else {
-        const { data } = await supabase
-          .from('p2p_ads')
-          .select('*')
-          .or(`public_ad_id.eq.${adId},public_id.eq.${adId}`)
-          .maybeSingle();
-        ad = data;
-      }
-    }
-
-    if (!ad) {
-      if (isUuid) {
-        const { data: fallbackAd } = await supabase
-          .from('ads')
-          .select('*')
-          .eq('id', adId)
-          .maybeSingle();
-        ad = fallbackAd;
-      } else {
-        const { data: fallbackAd } = await supabase
-          .from('ads')
-          .select('*')
-          .or(`public_id.eq.${adId},public_ad_id.eq.${adId}`)
-          .maybeSingle();
-        ad = fallbackAd;
-      }
-    }
+    const resolved = await findAdById(adId);
+    let ad = resolved?.ad || null;
 
     if (!ad) {
       // Fallback dummy ad object for mock/dev previews
@@ -119,8 +72,9 @@ export async function GET(
         .maybeSingle();
       if (profile) {
         profileData = profile;
-        if (profile.last_seen_at || profile.last_active) {
-          presence = formatPresence(profile.last_seen_at || profile.last_active);
+        const lastSeen = profile.last_seen || profile.last_seen_at || profile.last_active;
+        if (lastSeen) {
+          presence = formatPresence(lastSeen);
         }
       }
     }
@@ -168,7 +122,8 @@ export async function GET(
         avg_release_minutes: profileData.avg_release_minutes,
         avg_pay_time: profileData.avg_pay_time || 'N/A',
         avg_payment_minutes: profileData.avg_payment_minutes,
-        last_seen_at: profileData.last_seen_at,
+        last_seen: profileData.last_seen || profileData.last_seen_at || profileData.last_active,
+        last_seen_at: profileData.last_seen_at || profileData.last_seen || profileData.last_active,
       } : {
         id: ad.user_id,
         username: ad.user_display_name || 'Trader',

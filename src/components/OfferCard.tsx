@@ -2,6 +2,7 @@
 
 import React from 'react';
 import Link from 'next/link';
+import { usePresenceStatus, resolveUserLastSeen } from '@/lib/presence';
 
 export interface OfferCardProps {
   offer: {
@@ -21,6 +22,8 @@ export interface OfferCardProps {
       username?: string;
       is_online?: boolean;
       last_seen?: string;
+      last_seen_at?: string;
+      last_active?: string;
       completed_trades_count?: number;
     };
   };
@@ -30,25 +33,13 @@ export default function OfferCard({ offer }: OfferCardProps) {
   const isSellerAd = offer.type === 'sell';
   const username = offer.seller_username || offer.profiles?.username || 'unnamed_trader';
 
-  // Dynamic status calculation (active within last 5 minutes = online)
-  const lastSeen = offer.seller_last_seen || offer.profiles?.last_seen;
-  const isRecentlyActive = lastSeen
-    ? new Date().getTime() - new Date(lastSeen).getTime() < 5 * 60 * 1000
-    : false;
-  const isOnline = Boolean(offer.seller_is_online || offer.profiles?.is_online || isRecentlyActive);
-
-  // Format dynamic relative time for Last Seen
-  const formatLastSeen = (timestamp?: string) => {
-    if (!timestamp) return 'Recently';
-    const diffInMinutes = Math.floor(
-      (new Date().getTime() - new Date(timestamp).getTime()) / (1000 * 60)
-    );
-    if (diffInMinutes < 1) return 'Just now';
-    if (diffInMinutes < 60) return `${diffInMinutes}m ago`;
-    const diffInHours = Math.floor(diffInMinutes / 60);
-    if (diffInHours < 24) return `${diffInHours}h ago`;
-    return `${Math.floor(diffInHours / 24)}d ago`;
+  // Dynamic presence status calculation using unified hook
+  const targetUser = offer.profiles || {
+    last_seen: offer.seller_last_seen,
+    is_online: offer.seller_is_online
   };
+  const presence = usePresenceStatus(targetUser, 15000);
+  const isOnline = presence.isOnline;
 
   const formatCurrency = (val: number, currencySymbol: string) => {
     try {
@@ -75,7 +66,7 @@ export default function OfferCard({ offer }: OfferCardProps) {
             }`}
           />
           <Link
-            href={`/user/${username}`}
+            href={`/users/${username}`}
             className="font-bold text-foreground hover:underline text-base"
           >
             @{username}
@@ -89,11 +80,11 @@ export default function OfferCard({ offer }: OfferCardProps) {
           <span
             className={`px-2 py-0.5 rounded font-semibold text-xs ${
               isOnline
-                ? 'bg-emerald-500/10 text-emerald-600'
+                ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400'
                 : 'bg-muted text-muted-foreground'
             }`}
           >
-            {isOnline ? 'Online' : `Seen ${formatLastSeen(lastSeen)}`}
+            {presence.label}
           </span>
         </div>
 

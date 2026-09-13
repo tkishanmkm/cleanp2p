@@ -1,5 +1,7 @@
-'use client';
+import { redirect } from 'next/navigation';
 
-import TradePage from '@/app/trade/[id]/page';
-
-export default TradePage;
+export default async function TradeRedirectPage({ params }: { params: any }) {
+  const resolvedParams = await params;
+  const tradeId = resolvedParams?.tradeId;
+  redirect(`/trade/${encodeURIComponent(tradeId || '')}`);
+}

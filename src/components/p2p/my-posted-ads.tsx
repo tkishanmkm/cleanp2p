@@ -45,7 +45,8 @@ function normalizeUserAd(raw: any): P2PAd {
       completedTrades: profile.completed_trades ?? 0,
       photoURL: profile.photo_url || profile.photoURL || raw.photo_url,
       badges: profile.badges || [],
-      lastActive: profile.last_active || profile.lastActive,
+      lastActive: profile.last_seen || profile.last_seen_at || profile.last_active || profile.lastActive,
+      last_seen: profile.last_seen || profile.last_seen_at || profile.last_active,
       isVerified: profile.is_verified ?? false,
     },
   };

@@ -57,6 +57,7 @@ import {
   ImageIcon
 } from 'lucide-react';
 import { formatDistanceToNow } from 'date-fns';
+import { usePresenceStatus, resolveUserLastSeen } from '@/lib/presence';
 
 function CoinInsignia({ symbol, className = 'h-4 w-4' }: { symbol: string; className?: string }) {
   const s = (symbol || '').toUpperCase();
@@ -771,19 +772,14 @@ export function TradeChat({
   const positiveFeedback = Number(opponent?.positiveFeedback ?? opponent?.positive_feedback ?? 0);
   const negativeFeedback = Number(opponent?.negativeFeedback ?? opponent?.negative_feedback ?? 0);
 
-  const opponentLastActive = opponent?.lastActive ? toDate(opponent.lastActive) : opponent?.last_active ? toDate(opponent.last_active) : null;
-  let activity = { text: 'Offline', dotClass: 'bg-gray-500', textClass: 'text-muted-foreground' };
-
-  if (opponentLastActive) {
-    const diffMinutes = (new Date().getTime() - opponentLastActive.getTime()) / (1000 * 60);
-    const formattedDistance = formatDistanceToNow(opponentLastActive);
-
-    if (diffMinutes < 5) {
-      activity = { text: 'Active now', dotClass: 'bg-emerald-500', textClass: 'text-emerald-600 dark:text-emerald-400' };
-    } else {
-      activity = { text: `${formattedDistance} ago`, dotClass: 'bg-emerald-500', textClass: 'text-emerald-600 dark:text-emerald-400' };
-    }
-  }
+  const opponentPresence = usePresenceStatus(opponent, 15000);
+  const opponentLastActive = resolveUserLastSeen(opponent);
+  
+  let activity = {
+    text: opponentPresence.label,
+    dotClass: opponentPresence.isOnline ? 'bg-emerald-500 ring-2 ring-emerald-500/20' : 'bg-gray-400',
+    textClass: opponentPresence.isOnline ? 'text-emerald-600 dark:text-emerald-400 font-semibold' : 'text-muted-foreground'
+  };
 
   return (
     <Card className="flex flex-col h-full shadow-none border-0 rounded-none bg-card text-card-foreground">

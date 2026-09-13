@@ -2,6 +2,7 @@ import { createServerClient } from '@supabase/ssr';
 import { createClient } from '@supabase/supabase-js';
 import { cookies } from 'next/headers';
 import { NextResponse, type NextRequest } from 'next/server';
+import { findAdById } from '@/lib/ad-lookup';
 
 export const dynamic = 'force-dynamic';
 
@@ -12,25 +13,18 @@ export async function GET(
 ) {
   try {
     const resolvedParams = await Promise.resolve(params);
-    const { id } = resolvedParams;
+    const id = (resolvedParams.id || '').trim();
 
     const supabaseAdmin = createClient(
       process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL || 'https://placeholder.supabase.co',
       process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'placeholder-anon-key'
     );
 
-    const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id);
+    // 1. Fetch ad by id, public_ad_id, public_id, or ad_id using universal resolver
+    const resolved = await findAdById(id);
+    const ad = resolved?.ad || null;
 
-    // 1. Fetch ad by id or public_ad_id safely
-    let p2pQuery = supabaseAdmin.from('p2p_ads').select('*');
-    if (isUuid) {
-      p2pQuery = p2pQuery.or(`id.eq.${id},public_ad_id.eq.${id}`);
-    } else {
-      p2pQuery = p2pQuery.or(`public_ad_id.eq.${id},public_id.eq.${id},id.eq.${id}`);
-    }
-    const { data: ad, error: adError } = await p2pQuery.maybeSingle();
-
-    if (adError || !ad) {
+    if (!ad) {
       return NextResponse.json({ error: 'Advertisement not found' }, { status: 404 });
     }
 
@@ -89,7 +83,7 @@ export async function GET(
 
     // STRICT USERNAME ENFORCEMENT: lowercase letters, numbers, dot, underscore only
     const username = creatorProfile?.username || ad.user_display_name || 'trader';
-    const lastActive = creatorProfile?.last_active || creatorProfile?.last_seen_at || creatorProfile?.updated_at || null;
+    const lastActive = creatorProfile?.last_seen || creatorProfile?.last_seen_at || creatorProfile?.last_active || creatorProfile?.updated_at || null;
 
     return NextResponse.json({
       ad: {

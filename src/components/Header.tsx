@@ -44,7 +44,7 @@ export default function Header() {
         )}
       </Avatar>
       <Link 
-        href={`/user/${profileHandle.replace('@', '')}`}
+        href={`/users/${profileHandle.replace('@', '')}`}
         className="font-bold text-sm text-foreground hover:underline"
       >
         {profileHandle}

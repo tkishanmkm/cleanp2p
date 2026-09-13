@@ -209,7 +209,7 @@ export function TradeInitiationModal({ ad, isOpen, onClose }: TradeInitiationMod
               @{traderProfile?.username || "trader"}
             </p>
           </div>
-          <UserStatusIndicator lastActive={traderProfile?.last_active} />
+          <UserStatusIndicator user={traderProfile} />
         </div>
 
         {/* Pricing & Limits */}
@@ -217,7 +217,7 @@ export function TradeInitiationModal({ ad, isOpen, onClose }: TradeInitiationMod
           <div>
             <span className="text-xs text-muted-foreground">Unit Price</span>
             <p className="font-bold text-foreground">
-              {ad.price} {ad.fiat_symbol}
+              {ad.price} {ad.fiat_symbol} / {ad.asset_symbol}
             </p>
           </div>
           <div>

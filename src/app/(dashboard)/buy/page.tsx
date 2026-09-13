@@ -15,7 +15,7 @@ import {
 import { 
   Wallet, Landmark, CreditCard, Smartphone, Car, Search, 
   Loader2, ArrowDown, ArrowUp, PlusCircle, SlidersHorizontal, 
-  RefreshCw, BookOpen, HelpCircle, Globe, ChevronRight, ChevronDown, Check, ShieldCheck, Clock, X, Compass
+  RefreshCw, Globe, ChevronRight, ChevronDown, Check, ShieldCheck, Clock, X, Compass
 } from "lucide-react";
 import { AD_TAGS } from "@/lib/constants";
 import { ALL_FIATS, getCurrencyCountryCode } from "@/lib/currencies";
@@ -55,15 +55,6 @@ const COIN_CONFIG: Record<ExtendedCoinOption, { label: string; fullName: string;
   LTC: { label: 'Litecoin (LTC)', fullName: 'Litecoin', badgeClass: 'bg-sky-400/20 text-sky-200 border-sky-300/30', textClass: 'text-sky-200' },
 };
 
-// Map Currency Codes to 2-letter ISO Country Codes for accurate flag icons
-const CURRENCY_TO_COUNTRY: Record<string, string> = {
-  USD: 'US', EUR: 'EU', GBP: 'GB', INR: 'IN', CAD: 'CA', AUD: 'AU', JPY: 'JP',
-  CNY: 'CN', BRL: 'BR', RUB: 'RU', TRY: 'TR', AED: 'AE', SAR: 'SA', ZAR: 'ZA',
-  NGN: 'NG', KES: 'KE', GHS: 'GH', EGP: 'EG', PKR: 'PK', BDT: 'BD', VND: 'VN',
-  THB: 'TH', IDR: 'ID', MYR: 'MY', PHP: 'PH', SGD: 'SG', MXN: 'MX', ARS: 'AR',
-  CLP: 'CL', COP: 'CO', PEN: 'PE', KRW: 'KR', PLN: 'PL', SEK: 'SE', NOK: 'NO'
-};
-
 const getCountryCodeForCurrency = (currencyCode: string): string => {
   return getCurrencyCountryCode(currencyCode);
 };
@@ -86,20 +77,23 @@ function normalizeAd(raw: any): P2PAd {
   const rawRatePercent = Number(raw.rate_percent ?? raw.ratePercent ?? raw.price_margin_percent ?? raw.margin ?? raw.margin_percentage ?? 0);
   const rateType = raw.rate_type || raw.rateType || (raw.pricing_type === 'FLOAT' ? 'floating' : (rawPrice > 0 ? 'fixed' : 'market'));
 
+  const resolvedCrypto = ((raw.asset_symbol || raw.asset || raw.crypto || raw.crypto_symbol || raw.cryptoSymbol || raw.coin || raw.crypto_currency || 'BTC') as string).toUpperCase() as CryptoCurrency;
+  const resolvedFiat = ((raw.fiat_symbol || raw.fiat_currency || raw.fiatCurrency || raw.fiat || raw.currency || 'USD') as string).toUpperCase();
+
   return {
     id: raw.id,
     userId: raw.user_id || raw.userId,
     publicAdId: raw.public_ad_id || raw.publicAdId || raw.id,
     adType: adType,
-    crypto: ((raw.crypto || raw.coin || raw.asset || raw.crypto_currency || 'BTC') as string).toUpperCase() as CryptoCurrency,
-    fiatCurrency: ((raw.fiat_currency || raw.fiatCurrency || raw.fiat || 'USD') as string).toUpperCase(),
+    crypto: resolvedCrypto,
+    fiatCurrency: resolvedFiat,
     rateType: rateType as 'fixed' | 'floating' | 'market',
     price: rawPrice > 0 ? rawPrice : undefined,
     unit_price: rawPrice > 0 ? rawPrice : undefined,
     fixedRate: rawPrice > 0 ? rawPrice : undefined,
     ratePercent: rawRatePercent,
-    minAmount: Number(raw.min_amount ?? raw.minAmount ?? raw.min_limit ?? 0),
-    maxAmount: Number(raw.max_amount ?? raw.maxAmount ?? raw.max_limit ?? 0),
+    minAmount: Number(raw.min_amount ?? raw.minAmount ?? raw.min_limit ?? raw.minLimit ?? 0),
+    maxAmount: Number(raw.max_amount ?? raw.maxAmount ?? raw.max_limit ?? raw.maxLimit ?? 0),
     paymentMethods: Array.isArray(raw.payment_methods)
       ? raw.payment_methods
       : Array.isArray(raw.paymentMethods)
@@ -116,6 +110,12 @@ function normalizeAd(raw: any): P2PAd {
     blockedCountries: raw.blocked_countries || raw.blockedCountries || [],
     minCompletedTrades: Number(raw.min_completed_trades ?? raw.minCompletedTrades ?? 0),
     createdAt: raw.created_at || raw.createdAt,
+    ...raw,
+    minLimit: Number(raw.min_amount ?? raw.minAmount ?? raw.min_limit ?? raw.minLimit ?? 0),
+    maxLimit: Number(raw.max_amount ?? raw.maxAmount ?? raw.max_limit ?? raw.maxLimit ?? 0),
+    fiat: resolvedFiat,
+    crypto: resolvedCrypto,
+    rate: rawPrice > 0 ? rawPrice : undefined,
     user: raw.user || {
       username: raw.user_display_name || raw.username || 'Trader',
       country: raw.country,
@@ -331,7 +331,9 @@ function P2PMarketplaceContent() {
               avgPayTime: Number(p.avg_payment_minutes || p.avg_pay_time) || 0,
               photoURL: p.avatar_url || p.photo_url || `/api/media/avatar/${p.id}`,
               badges: p.badges || [],
-              lastActive: p.last_seen_at || p.last_active || p.updated_at,
+              lastActive: p.last_seen || p.last_seen_at || p.last_active || p.updated_at,
+              last_seen: p.last_seen || p.last_seen_at || p.last_active,
+              last_seen_at: p.last_seen_at || p.last_seen || p.last_active,
               createdAt: p.created_at,
               blockedUsers: p.blocked_users || [],
               isVerified: p.is_verified ?? (p.kyc_status === 'VERIFIED') ?? false,
@@ -410,32 +412,35 @@ function P2PMarketplaceContent() {
       const fRate = fiatRates[ad.fiatCurrency] || 1;
       const unitPrice = ad.rateType === 'fixed' && ad.fixedRate
         ? ad.fixedRate
-        : marketUsd * fRate * (1 + (ad.ratePercent || 0) / 100);
+        : (marketUsd > 0 ? marketUsd * fRate * (1 + (ad.ratePercent || 0) / 100) : (ad.unit_price || ad.price || 0));
 
       let adjustedMax = ad.maxAmount;
       let isBalanceSufficient = true;
 
       // Check balance rule for SELL ads (where creator sells crypto)
-      if (ad.adType === 'sell' && liveCreatorData?.cryptoBalances && ad.crypto) {
-        const coinSym = ad.crypto.toUpperCase();
-        if (liveCreatorData.cryptoBalances[coinSym] !== undefined) {
-          const availCrypto = Number(liveCreatorData.cryptoBalances[coinSym]);
-          const availFiat = availCrypto * (unitPrice > 0 ? unitPrice : 1);
+      const availCryptoFromAd = (ad as any).available_crypto !== undefined && (ad as any).available_crypto !== null
+        ? Number((ad as any).available_crypto)
+        : (liveCreatorData?.cryptoBalances?.[ad.crypto.toUpperCase()] !== undefined ? Number(liveCreatorData.cryptoBalances[ad.crypto.toUpperCase()]) : undefined);
 
-          // If the viewer is the ad creator themselves, NEVER hide their own ad
-          if (isOwnAd) {
-            isBalanceSufficient = true;
-          } else if (availFiat < ad.minAmount) {
-            isBalanceSufficient = false;
-          } else if (availFiat < ad.maxAmount) {
-            adjustedMax = Math.floor(availFiat * 100) / 100;
-          }
+      if (ad.adType === 'sell' && availCryptoFromAd !== undefined) {
+        const availFiat = availCryptoFromAd * (unitPrice > 0 ? unitPrice : 1);
+        if (isOwnAd) {
+          isBalanceSufficient = true;
+        } else if (availFiat < ad.minAmount) {
+          isBalanceSufficient = false;
+        } else if (availFiat < ad.maxAmount) {
+          adjustedMax = Math.floor(availFiat * 100) / 100;
         }
       }
 
       return {
         ...ad,
         maxAmount: adjustedMax,
+        minLimit: ad.minAmount,
+        maxLimit: adjustedMax,
+        rate: unitPrice > 0 ? unitPrice : ad.price,
+        fiat: ad.fiatCurrency,
+        crypto: ad.crypto,
         isBalanceSufficient,
         isOwnAd,
         user: mergedUser,
