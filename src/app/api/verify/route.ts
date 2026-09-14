@@ -52,9 +52,14 @@ export async function POST(req: Request) {
     }
 
     // 3. Initiate Didit Session
+    const rawBaseUrl = process.env.DIDIT_API_URL || 'https://verification.didit.me/v3';
+    const diditBase = rawBaseUrl.replace(/\/+$/, '');
+    const targetUrl = `${diditBase}/session/`;
+
+    const workflowId = process.env.DIDIT_WORKFLOW_ID || WORKFLOW_ID;
     const callbackUrl = process.env.NEXT_PUBLIC_APP_URL
-      ? `${process.env.NEXT_PUBLIC_APP_URL}/p2p/verification-callback`
-      : "https://myapp.com/p2p/verification-callback";
+      ? `${process.env.NEXT_PUBLIC_APP_URL.replace(/\/+$/, '')}/p2p/verification-callback`
+      : "https://paxones.com/p2p/verification-callback";
 
     const apiKey = process.env.DIDIT_API_KEY;
     if (!apiKey) {
@@ -64,21 +69,31 @@ export async function POST(req: Request) {
       );
     }
 
-    const res = await fetch("https://verification.didit.me/v3/session/", {
-      method: "POST",
-      headers: {
-        "x-api-key": apiKey,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        workflow_id: WORKFLOW_ID,
-        vendor_data: userId,
-        callback: callbackUrl,
-      }),
-    });
+    console.log('[DEBUG] Fetching URL:', targetUrl);
+
+    let res: Response;
+    try {
+      res = await fetch(targetUrl, {
+        method: "POST",
+        headers: {
+          "x-api-key": apiKey,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          workflow_id: workflowId,
+          vendor_data: userId,
+          callback: callbackUrl,
+        }),
+      });
+    } catch (fetchErr: any) {
+      console.error('[DEBUG] Failed Fetch Target:', targetUrl);
+      console.error(fetchErr);
+      return NextResponse.json({ error: "session_create_failed", detail: fetchErr.message }, { status: 502 });
+    }
 
     if (!res.ok) {
       const detail = await res.text();
+      console.error('[DEBUG] Didit API error response:', res.status, detail);
       return NextResponse.json(
         { error: "session_create_failed", detail },
         { status: 502 }

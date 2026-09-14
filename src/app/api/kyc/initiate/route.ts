@@ -42,24 +42,44 @@ export async function POST(req: NextRequest) {
     await supabase.from('profiles').update({ country, address, kyc_status: 'pending' }).eq('id', userId);
 
     // 3. Request session from Didit
-    const diditBase = process.env.DIDIT_API_URL || 'https://api.didit.me';
-    const siteUrl = (process.env.NEXT_PUBLIC_SITE_URL || 'https://paxones.com').replace(/\/+$/, '');
+    const rawBaseUrl = process.env.DIDIT_API_URL || 'https://verification.didit.me/v3';
+    const diditBase = rawBaseUrl.replace(/\/+$/, '');
+    const targetUrl = `${diditBase}/session/`;
 
-    const res = await fetch(`${diditBase}/session/`, {
-      method: 'POST',
-      headers: {
-        'x-api-key': process.env.DIDIT_API_KEY!,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        workflow_id: process.env.DIDIT_WORKFLOW_ID,
-        vendor_data: userId,
-        callback: `${siteUrl}/dashboard/kyc/callback`,
-      }),
-    });
+    const apiKey = process.env.DIDIT_API_KEY;
+    const workflowId = process.env.DIDIT_WORKFLOW_ID || 'b36ac1aa-29fc-4272-8939-c1d184d072fd';
+    const siteUrl = (process.env.NEXT_PUBLIC_SITE_URL || 'https://paxones.com').replace(/\/+$/, '');
+    const callbackUrl = `${siteUrl}/dashboard/kyc/callback`;
+
+    if (!apiKey) {
+      return NextResponse.json({ error: 'DIDIT_API_KEY is not configured' }, { status: 500 });
+    }
+
+    console.log('[DEBUG] Fetching URL:', targetUrl);
+
+    let res: Response;
+    try {
+      res = await fetch(targetUrl, {
+        method: 'POST',
+        headers: {
+          'x-api-key': apiKey,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          workflow_id: workflowId,
+          vendor_data: userId,
+          callback: callbackUrl,
+        }),
+      });
+    } catch (fetchErr: any) {
+      console.error('[DEBUG] Failed Fetch Target:', targetUrl);
+      console.error(fetchErr);
+      return NextResponse.json({ error: 'Didit network connection failed', detail: fetchErr.message }, { status: 502 });
+    }
 
     if (!res.ok) {
       const detail = await res.text();
+      console.error('[DEBUG] Didit API error response:', res.status, detail);
       return NextResponse.json({ error: 'Failed to create Didit session', detail }, { status: 502 });
     }
 
