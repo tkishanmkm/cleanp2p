@@ -2,16 +2,17 @@
 
 import { supabase } from '@/lib/supabase/client';
 import { Button } from '@/components/ui/button';
+import { getURL } from '@/utils/get-url';
 
 export function DiscordAuthButton() {
   const handleDiscordLogin = async () => {
     try {
-      const origin = typeof window !== 'undefined' ? window.location.origin : 'https://paxones.com';
+      const url = getURL();
 
       const { data, error } = await supabase.auth.signInWithOAuth({
         provider: 'discord',
         options: {
-          redirectTo: `${origin}/auth/callback`,
+          redirectTo: `${url}/auth/callback`,
           skipBrowserRedirect: true,
         },
       });

@@ -7,6 +7,7 @@ import Link from 'next/link';
 import { Logo } from '@/components/logo';
 import { Mail, Lock, User, Calendar, ArrowRight, AlertTriangle, ShieldCheck, Loader2 } from 'lucide-react';
 import { generateUniqueUsername } from '@/lib/auth';
+import { getURL } from '@/utils/get-url';
 
 interface AuthFormProps {
   mode: 'login' | 'signup';
@@ -37,12 +38,12 @@ export function AuthForm({ mode }: AuthFormProps) {
     setLoadingOAuth(provider);
 
     try {
-      const origin = typeof window !== 'undefined' ? window.location.origin : 'https://paxones.com';
+      const url = getURL();
 
       const { data, error } = await supabase.auth.signInWithOAuth({
         provider,
         options: {
-          redirectTo: `${origin}/auth/callback`,
+          redirectTo: `${url}/auth/callback`,
         },
       });
 
@@ -161,7 +162,7 @@ export function AuthForm({ mode }: AuthFormProps) {
               dob: dob.trim(),
               date_of_birth: dob.trim(),
             },
-            emailRedirectTo: `${getURL()}auth/callback`,
+            emailRedirectTo: `${getURL()}/auth/callback`,
           },
         });
 
