@@ -2,8 +2,7 @@
 
 import React, { useState } from 'react';
 import Link from 'next/link';
-import { Mail, User, KeyRound, ShieldAlert, CheckCircle2, Loader2, ArrowLeft } from 'lucide-react';
-import { Button } from '@/components/ui/button';
+import { User, KeyRound, ShieldAlert, CheckCircle2, Loader2, ArrowLeft } from 'lucide-react';
 import { UNIVERSAL_SECURITY_QUESTIONS } from '@/lib/settings-constants';
 
 export function ForgotPasswordForm() {
@@ -71,7 +70,7 @@ export function ForgotPasswordForm() {
         <div className="pt-3">
           <Link
             href="/login"
-            className="inline-flex items-center justify-center gap-2 w-full bg-slate-900 hover:bg-slate-800 dark:bg-white dark:hover:bg-slate-100 text-white dark:text-slate-900 font-semibold py-2.5 px-4 rounded-xl text-xs transition shadow-sm"
+            className="inline-flex items-center justify-center gap-2 w-full bg-blue-600 hover:bg-blue-700 text-white font-semibold py-3 px-4 rounded-xl text-sm transition shadow-md duration-200"
           >
             Return to Login
           </Link>
@@ -102,7 +101,7 @@ export function ForgotPasswordForm() {
             value={identifier}
             onChange={(e) => setIdentifier(e.target.value)}
             placeholder="e.g. trader_name or you@example.com"
-            className="w-full bg-slate-50 dark:bg-[#07090e] border border-slate-200 dark:border-[#1e2640] rounded-xl pl-10 pr-3.5 py-2.5 text-xs text-slate-900 dark:text-white placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-amber-500/30 focus:border-amber-500 transition"
+            className="w-full bg-slate-50 dark:bg-[#07090e] border border-slate-200 dark:border-[#1e2640] rounded-xl pl-10 pr-3.5 py-2.5 text-xs text-slate-900 dark:text-white placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500/30 focus:border-blue-500 transition"
           />
         </div>
       </div>
@@ -115,7 +114,7 @@ export function ForgotPasswordForm() {
         <select
           value={securityQuestion}
           onChange={(e) => setSecurityQuestion(e.target.value)}
-          className="w-full bg-slate-50 dark:bg-[#07090e] border border-slate-200 dark:border-[#1e2640] rounded-xl px-3.5 py-2.5 text-xs text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-amber-500/30 focus:border-amber-500 transition"
+          className="w-full bg-slate-50 dark:bg-[#07090e] border border-slate-200 dark:border-[#1e2640] rounded-xl px-3.5 py-2.5 text-xs text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500/30 focus:border-blue-500 transition"
         >
           {UNIVERSAL_SECURITY_QUESTIONS.map((q, idx) => (
             <option key={idx} value={q} className="bg-white dark:bg-[#0f1423]">
@@ -138,7 +137,7 @@ export function ForgotPasswordForm() {
             value={securityAnswer}
             onChange={(e) => setSecurityAnswer(e.target.value)}
             placeholder="Enter your confidential security answer"
-            className="w-full bg-slate-50 dark:bg-[#07090e] border border-slate-200 dark:border-[#1e2640] rounded-xl pl-10 pr-3.5 py-2.5 text-xs text-slate-900 dark:text-white placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-amber-500/30 focus:border-amber-500 transition"
+            className="w-full bg-slate-50 dark:bg-[#07090e] border border-slate-200 dark:border-[#1e2640] rounded-xl pl-10 pr-3.5 py-2.5 text-xs text-slate-900 dark:text-white placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500/30 focus:border-blue-500 transition"
           />
         </div>
         <p className="text-[10px] text-slate-400 mt-1">
@@ -146,10 +145,10 @@ export function ForgotPasswordForm() {
         </p>
       </div>
 
-      <Button
+      <button
         type="submit"
         disabled={loading}
-        className="w-full bg-slate-900 hover:bg-slate-800 dark:bg-white dark:hover:bg-slate-100 text-white dark:text-slate-900 font-bold py-2.5 rounded-xl text-xs transition shadow-sm cursor-pointer"
+        className="w-full py-3 px-4 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-xl shadow-md transition-colors duration-200 mt-2 disabled:opacity-50 cursor-pointer text-sm flex items-center justify-center gap-2"
       >
         {loading ? (
           <span className="flex items-center justify-center gap-2">
@@ -159,7 +158,7 @@ export function ForgotPasswordForm() {
         ) : (
           'Send Password Reset Link'
         )}
-      </Button>
+      </button>
 
       <div className="text-center pt-2">
         <Link

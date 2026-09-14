@@ -30,12 +30,6 @@ export function AuthForm({ mode }: AuthFormProps) {
   const [showMinorModal, setShowMinorModal] = useState(false);
   const [isDeletingAccount, setIsDeletingAccount] = useState(false);
 
-  // Dynamic URL helper for OAuth callback redirection
-  const getURL = () => {
-    let url = process.env.NEXT_PUBLIC_SITE_URL ?? 'https://paxones.com';
-    return url.endsWith('/') ? url : `${url}/`;
-  };
-
   // Social OAuth Handler (Google & Discord)
   const handleOAuthSignIn = async (provider: 'google' | 'discord') => {
     setErrorMsg('');
@@ -43,10 +37,12 @@ export function AuthForm({ mode }: AuthFormProps) {
     setLoadingOAuth(provider);
 
     try {
+      const origin = typeof window !== 'undefined' ? window.location.origin : 'https://paxones.com';
+
       const { data, error } = await supabase.auth.signInWithOAuth({
         provider,
         options: {
-          redirectTo: `${getURL()}auth/callback`,
+          redirectTo: `${origin}/auth/callback`,
         },
       });
 

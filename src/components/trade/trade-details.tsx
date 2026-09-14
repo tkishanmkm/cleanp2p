@@ -21,7 +21,7 @@ import {
   cancelTrade,
   disputeTrade
 } from '@/lib/wallet';
-import { insertPaxonesSystemMessage } from '@/lib/trade-system-messages';
+import { insertPaxonesSystemMessage, formatCryptoAmount } from '@/lib/trade-system-messages';
 import { cn, toDate } from '@/lib/utils';
 import { MerchantBadge } from '@/components/merchant/merchant-badge';
 import type { Trade, P2PAd, Dispute, Feedback } from '@/lib/types';
@@ -80,6 +80,7 @@ import {
   AlertTriangle,
   FileText,
   UserCheck,
+  Check,
   Tag
 } from 'lucide-react';
 import { BtcLogo, EthLogo, LtcLogo, UsdtLogo } from '@/components/icons';
@@ -267,6 +268,22 @@ export function ReportIssueDialog({
   const [selectedIssue, setSelectedIssue] = useState<string>('');
   const [details, setDetails] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [hasUserReported, setHasUserReported] = useState(false);
+
+  useEffect(() => {
+    if (!trade?.id || !currentUserId) return;
+    const checkReport = async () => {
+      const { data } = await supabase
+        .from('disputes')
+        .select('id, opened_by')
+        .eq('trade_id', trade.id);
+
+      if (data && data.some((d: any) => d.opened_by === currentUserId || (currentUsername && d.opened_by === currentUsername))) {
+        setHasUserReported(true);
+      }
+    };
+    checkReport();
+  }, [trade?.id, currentUserId, currentUsername, supabase]);
 
   const handleSubmitIssue = async () => {
     if (!selectedIssue) {
@@ -293,16 +310,13 @@ export function ReportIssueDialog({
       ]);
 
       // 2. Post as system message into trade_messages
-      await supabase.from('trade_messages').insert([
-        {
-          trade_id: trade.id,
-          sender_id: 'system',
-          sender_username: 'System',
-          message: `⚠️ Issue Reported by @${currentUsername || 'Trader'}:\nCategory: ${selectedIssue}\nDetails: ${details.trim()}`,
-          is_moderator: true,
-          created_at: new Date().toISOString()
-        }
-      ]);
+      await insertPaxonesSystemMessage(supabase, {
+        tradeId: trade.id,
+        type: 'ISSUE_REPORTED',
+        openerUsername: currentUsername || 'Trader',
+        issueCategory: selectedIssue,
+        issueDetails: details.trim()
+      });
 
       // 3. Create notification for opponent
       if (counterpartId) {
@@ -321,6 +335,7 @@ export function ReportIssueDialog({
         title: 'Issue Reported',
         description: 'Our moderation team has received your report and logged it to the trade room.'
       });
+      setHasUserReported(true);
       setIsOpen(false);
       setSelectedIssue('');
       setDetails('');
@@ -330,6 +345,18 @@ export function ReportIssueDialog({
       setIsSubmitting(false);
     }
   };
+
+  if (hasUserReported) {
+    return (
+      <Button
+        disabled
+        className="w-full py-2.5 bg-muted/80 text-muted-foreground font-bold text-xs sm:text-sm rounded-xl border border-border/80 shadow-none flex items-center justify-center gap-2 cursor-not-allowed opacity-90"
+      >
+        <UserCheck className="h-4 w-4 text-emerald-500" />
+        <span>Reported</span>
+      </Button>
+    );
+  }
 
   return (
     <Dialog open={isOpen} onOpenChange={setIsOpen}>
@@ -492,50 +519,73 @@ const ActionButtons = ({
   const isBuyer = currentUserRole === 'buy';
 
   const [didNotPayChecked, setDidNotPayChecked] = useState(false);
-  const [cancelInput, setCancelInput] = useState('');
   const [isPaidConfirmOpen, setIsPaidConfirmOpen] = useState(false);
   const [isReleaseConfirmOpen, setIsReleaseConfirmOpen] = useState(false);
+  const [isSubmittingAction, setIsSubmittingAction] = useState(false);
 
-  const canMarkPaid = isBuyer && tradeStatus === 'active';
+  const canMarkPaid = isBuyer && (tradeStatus === 'active' || tradeStatus === 'pending');
   // CRITICAL ESCROW RULE: The Release Escrow button MUST strictly render ONLY when trade status is PAID / buyer_marked_paid
   const canRelease = !isBuyer && (tradeStatus === 'paid' || tradeStatus === 'buyer_marked_paid' || tradeStatus === 'payment_sent');
-  const canBuyerCancel = isBuyer && tradeStatus === 'active';
-
-  const paidAtDate = trade?.paidAt || trade?.paid_at ? new Date(trade?.paidAt || trade?.paid_at) : null;
-  const disputeAvailableTime = paidAtDate ? new Date(paidAtDate.getTime() + 10 * 60 * 1000) : new Date(0);
-  const disputeCountdown = useCountdown(disputeAvailableTime);
-  const isDisputeWaiting = tradeStatus === 'paid' && !disputeCountdown.isFinished;
+  const canBuyerCancel = isBuyer && (tradeStatus === 'active' || tradeStatus === 'pending');
 
   const handleMarkAsPaid = async () => {
+    setIsSubmittingAction(true);
     try {
-      await markTradeAsPaid(trade);
-      toast({ title: 'Trade marked as paid', description: 'The seller has been notified to release coin.' });
+      const res = await fetch(`/api/trades/${trade.id}/actions`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'MARK_PAID' })
+      });
+      const data = await res.json();
+      if (!res.ok || data.error) throw new Error(data.error || 'Failed to mark as paid');
+
+      toast({ title: 'Trade Marked as Paid', description: 'The seller has been notified to verify payment and release coin.' });
       setIsPaidConfirmOpen(false);
     } catch (e: any) {
       toast({ variant: 'destructive', title: 'Error', description: e.message });
+    } finally {
+      setIsSubmittingAction(false);
     }
   };
 
   const handleReleaseCrypto = async () => {
+    setIsSubmittingAction(true);
     try {
-      await releaseFundsFromEscrow(trade.id);
-      toast({ title: 'Coin Released', description: 'Funds successfully transferred to buyer.' });
+      const res = await fetch(`/api/trades/${trade.id}/actions`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'RELEASE_ESCROW' })
+      });
+      const data = await res.json();
+      if (!res.ok || data.error) throw new Error(data.error || 'Failed to release escrow');
+
+      toast({ title: 'Escrow Released', description: 'Funds successfully transferred to buyer wallet.' });
       setIsReleaseConfirmOpen(false);
     } catch (e: any) {
       toast({ variant: 'destructive', title: 'Error', description: e.message });
+    } finally {
+      setIsSubmittingAction(false);
     }
   };
 
   const handleCancelTrade = async () => {
+    setIsSubmittingAction(true);
     try {
-      await cancelTrade(trade, 'Cancelled by buyer');
-      toast({ title: 'Trade Cancelled', description: 'Escrow deposit returned.' });
+      const res = await fetch(`/api/trades/${trade.id}/actions`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'CANCEL_TRADE', reason: 'Cancelled by buyer (confirmed no payment sent)' })
+      });
+      const data = await res.json();
+      if (!res.ok || data.error) throw new Error(data.error || 'Failed to cancel trade');
+
+      toast({ title: 'Trade Cancelled', description: 'Escrow deposit returned to seller.' });
     } catch (e: any) {
       toast({ variant: 'destructive', title: 'Error', description: e.message });
+    } finally {
+      setIsSubmittingAction(false);
     }
   };
-
-  const isCancelAllowed = didNotPayChecked || cancelInput.trim().toUpperCase() === 'I DID NOT PAID' || cancelInput.trim().toUpperCase() === 'I DID NOT PAY';
 
   return (
     <div className="space-y-2">
@@ -556,7 +606,10 @@ const ActionButtons = ({
               </AlertDialogHeader>
               <AlertDialogFooter>
                 <AlertDialogCancel>Go Back</AlertDialogCancel>
-                <AlertDialogAction onClick={handleMarkAsPaid}>Confirm Paid</AlertDialogAction>
+                <AlertDialogAction onClick={handleMarkAsPaid} disabled={isSubmittingAction}>
+                  {isSubmittingAction && <Loader2 className="h-4 w-4 animate-spin mr-1.5" />}
+                  Confirm Paid
+                </AlertDialogAction>
               </AlertDialogFooter>
             </AlertDialogContent>
           </AlertDialog>
@@ -565,8 +618,8 @@ const ActionButtons = ({
         {canRelease && (
           <AlertDialog open={isReleaseConfirmOpen} onOpenChange={setIsReleaseConfirmOpen}>
             <AlertDialogTrigger asChild>
-              <Button className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold">
-                Release Coin
+              <Button className="w-full bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white font-bold py-2.5 text-sm shadow-md">
+                Release Escrow
               </Button>
             </AlertDialogTrigger>
             <AlertDialogContent>
@@ -578,7 +631,10 @@ const ActionButtons = ({
               </AlertDialogHeader>
               <AlertDialogFooter>
                 <AlertDialogCancel>Cancel</AlertDialogCancel>
-                <AlertDialogAction onClick={handleReleaseCrypto}>Confirm & Release</AlertDialogAction>
+                <AlertDialogAction onClick={handleReleaseCrypto} disabled={isSubmittingAction} className="bg-emerald-600 hover:bg-emerald-700 text-white">
+                  {isSubmittingAction && <Loader2 className="h-4 w-4 animate-spin mr-1.5" />}
+                  Confirm & Release Escrow
+                </AlertDialogAction>
               </AlertDialogFooter>
             </AlertDialogContent>
           </AlertDialog>
@@ -612,7 +668,7 @@ const ActionButtons = ({
                     className="mt-0.5"
                   />
                   <Label htmlFor="did-not-pay-check" className="text-xs font-semibold leading-snug cursor-pointer">
-                    I did not pay (I confirm I have not sent any money to the seller)
+                    I confirm that I have not sent payment
                   </Label>
                 </div>
               </div>
@@ -620,9 +676,10 @@ const ActionButtons = ({
                 <AlertDialogCancel>Keep Trade</AlertDialogCancel>
                 <AlertDialogAction
                   onClick={handleCancelTrade}
-                  disabled={!isCancelAllowed}
+                  disabled={!didNotPayChecked || isSubmittingAction}
                   className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
                 >
+                  {isSubmittingAction && <Loader2 className="h-4 w-4 animate-spin mr-1.5" />}
                   Confirm Cancellation
                 </AlertDialogAction>
               </AlertDialogFooter>
@@ -635,21 +692,10 @@ const ActionButtons = ({
             trade={trade}
             currentUserId={currentUserId}
             currentUsername={currentUsername || 'user'}
-            disabled={isDisputeWaiting}
+            disabled={false}
           />
         )}
       </div>
-
-      {isDisputeWaiting && (
-        <div className="text-center p-3 border rounded-lg bg-muted/30">
-          <p className="text-xs font-semibold mb-1 text-muted-foreground">Dispute available in:</p>
-          <div className="flex justify-center gap-1.5">
-            <span className="font-mono font-bold text-destructive text-sm">
-              {String(disputeCountdown.minutes).padStart(2, '0')}:{String(disputeCountdown.seconds).padStart(2, '0')}
-            </span>
-          </div>
-        </div>
-      )}
     </div>
   );
 };
@@ -1174,35 +1220,70 @@ export function TradeDetails({
     }
   }, [trade?.id, buyerId, sellerId, supabase]);
 
-  const expiresDate = trade?.expiresAt || trade?.expires_at ? new Date(trade?.expiresAt || trade?.expires_at) : new Date(Date.now() + 900000);
-  const paymentTimeRemaining = useCountdown(tradeStatus === 'active' || tradeStatus === 'pending' ? expiresDate : new Date(0));
+  // Dynamic payment countdown window (e.g. 30 mins from ad or trade configuration)
+  const paymentWindowMinutes = Number(trade?.payment_window_minutes || ad?.payment_window_minutes || 30);
+  const createdAtTime = trade?.created_at ? new Date(trade.created_at).getTime() : Date.now();
+  const dynamicExpiresDate = trade?.expiresAt || trade?.expires_at 
+    ? new Date(trade?.expiresAt || trade?.expires_at) 
+    : new Date(createdAtTime + paymentWindowMinutes * 60 * 1000);
+
+  const isCountdownActive = tradeStatus === 'active' || tradeStatus === 'pending';
+  const paymentTimeRemaining = useCountdown(isCountdownActive ? dynamicExpiresDate : new Date(0));
 
   useEffect(() => {
+    let isMounted = true;
     const expireTrade = async () => {
-      if ((tradeStatus === 'active' || tradeStatus === 'pending') && paymentTimeRemaining.isFinished) {
+      if (isCountdownActive && paymentTimeRemaining.isFinished && trade?.id) {
         try {
-          const reason = 'Trade expired: Payment window timed out.';
-          await cancelTrade(trade, reason);
+          await fetch(`/api/trades/${trade.id}/actions`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ action: 'EXPIRE_TRADE' })
+          });
         } catch (e) {
           console.error('Failed to auto-expire trade:', e);
         }
       }
     };
     expireTrade();
-  }, [paymentTimeRemaining.isFinished, tradeStatus, trade]);
+    return () => {
+      isMounted = false;
+    };
+  }, [paymentTimeRemaining.isFinished, isCountdownActive, trade?.id]);
 
   const showFeedbackSection = tradeStatus === 'released' || tradeStatus === 'completed';
-  const showActions = ['active', 'paid', 'pending'].includes(tradeStatus);
+  const showActions = ['active', 'paid', 'pending', 'buyer_marked_paid', 'payment_sent'].includes(tradeStatus);
 
-  const coinAmount = Number(trade?.amount ?? trade?.crypto_amount ?? 0).toFixed(8);
-  const coinSymbol = trade?.crypto ?? trade?.asset_symbol ?? 'BTC';
-  const priceFormatted = Number(trade?.price ?? 0).toLocaleString();
-  const fiatAmount = Number(trade?.fiatAmount ?? trade?.fiat_amount ?? trade?.amount_usd ?? 0).toLocaleString();
-  const fiatCurrency = trade?.fiatCurrency ?? trade?.fiat_currency ?? trade?.fiat_symbol ?? 'USD';
+  const coinSymbol = trade?.crypto ?? trade?.asset_symbol ?? 'USDT';
+  const rawCryptoAmount = Number(trade?.crypto_amount ?? trade?.cryptoAmount ?? trade?.amount ?? 0);
+  const rawRate = Number(trade?.rate ?? trade?.price ?? ad?.price ?? 0);
+  const rawEscrowFee = Number(trade?.escrow_fee ?? trade?.escrowFee ?? (rawCryptoAmount * 0.015));
+  
+  // Robust fiat amount computation: use total_fiat / fiat_amount, or calculate crypto * rate if valid
+  const rawFiatAmount = Number(
+    trade?.total_fiat ?? 
+    trade?.totalFiat ?? 
+    trade?.fiat_amount ?? 
+    trade?.fiatAmount ?? 
+    trade?.amount_usd ?? 
+    (rawCryptoAmount > 0 && rawRate > 0 ? rawCryptoAmount * rawRate : 0)
+  );
+  
+  // If fiat amount was provided directly (e.g. 8400 INR) but crypto amount is missing or miscalculated, derive crypto amount
+  const effectiveCryptoAmount = rawCryptoAmount > 0 
+    ? rawCryptoAmount 
+    : (rawFiatAmount > 0 && rawRate > 0 ? rawFiatAmount / rawRate : 0);
 
-  // Escrow Fee 1.5%
-  const escrowFeeRate = 0.015;
-  const escrowFeeCoin = (Number(trade?.amount ?? trade?.crypto_amount ?? 0) * escrowFeeRate).toFixed(8);
+  const effectiveFiatAmount = rawFiatAmount > 0 
+    ? rawFiatAmount 
+    : (effectiveCryptoAmount > 0 && rawRate > 0 ? effectiveCryptoAmount * rawRate : 0);
+
+  const fiatCurrency = trade?.fiat_currency || trade?.fiatCurrency || trade?.fiat_symbol || ad?.fiat_symbol || 'INR';
+
+  const coinAmount = `${effectiveCryptoAmount.toFixed(2)} ${coinSymbol}`;
+  const priceFormatted = rawRate.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const fiatAmount = effectiveFiatAmount.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const escrowFeeCoin = `${(effectiveCryptoAmount * 0.015).toFixed(2)} ${coinSymbol}`;
 
   const offerTags: string[] = (ad?.tags && ad.tags.length > 0) ? ad.tags : ((ad?.offer_tags && ad.offer_tags.length > 0) ? ad.offer_tags : []);
 
@@ -1326,12 +1407,12 @@ export function TradeDetails({
             <ParticipantRow
               label="Buyer"
               userId={buyerId}
-              fallbackUsername={trade?.buyer_username || 'Buyer'}
+              fallbackUsername={trade?.buyer?.username || trade?.buyer_username || (buyerId ? `user_${buyerId.substring(0, 6)}` : 'forcehui4819')}
             />
             <ParticipantRow
               label="Seller"
               userId={sellerId}
-              fallbackUsername={trade?.seller_username || 'Seller'}
+              fallbackUsername={trade?.seller?.username || trade?.seller_username || (sellerId ? `user_${sellerId.substring(0, 6)}` : 'Seller')}
             />
             {(trade?.paymentMethod || trade?.payment_method) && (
               <DetailRow label="Payment Method" value={trade.paymentMethod || trade.payment_method} />

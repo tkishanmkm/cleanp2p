@@ -1,72 +1,37 @@
-import { createClient } from '@/utils/supabase/server';
 import { NextResponse } from 'next/server';
+import { createClient } from '@/utils/supabase/server';
 
-export const dynamic = 'force-dynamic';
-
-export async function POST(request: Request) {
+export async function POST(req: Request) {
   try {
-    const supabase = await createClient();
+    const supabase = createClient();
+    const authHeader = req.headers.get('authorization');
+    const webhookSecret = process.env.BLOCKCHAIN_WEBHOOK_SECRET;
 
-    // 1. Authenticate user
-    const {
-      data: { user },
-      error: authError,
-    } = await supabase.auth.getUser();
-
-    if (authError || !user) {
-      return NextResponse.json({ success: false, error: 'Unauthorized' }, { status: 401 });
+    if (webhookSecret && authHeader !== `Bearer ${webhookSecret}`) {
+      return NextResponse.json({ error: 'Unauthorized webhook' }, { status: 401 });
     }
 
-    const body = await request.json();
-    const assetSymbol = (body.assetSymbol || body.asset || 'USDT').toUpperCase();
-    const amount = Number(body.amount);
+    const body = await req.json();
+    const { userId, assetCode, networkCode, amount, txHash } = body;
 
-    if (isNaN(amount) || amount <= 0) {
-      return NextResponse.json({ success: false, error: 'Valid positive amount is required' }, { status: 400 });
+    if (!userId || !assetCode || !amount || !txHash) {
+      return NextResponse.json({ error: 'Missing deposit payload fields' }, { status: 400 });
     }
 
-    // 2. Fetch or create user wallet and credit balance
-    const { data: existingWallet } = await supabase
-      .from('user_wallets')
-      .select('*')
-      .eq('user_id', user.id)
-      .eq('asset_symbol', assetSymbol)
-      .maybeSingle();
+    const { data, error } = await supabase.rpc('credit_onchain_deposit', {
+      p_user_id: userId,
+      p_asset_code: assetCode,
+      p_network_code: networkCode || 'MAINNET',
+      p_amount: Number(amount),
+      p_tx_hash: txHash
+    });
 
-    if (existingWallet) {
-      const newBalance = Number(existingWallet.balance || 0) + amount;
-      const { data, error } = await supabase
-        .from('user_wallets')
-        .update({ balance: newBalance, updated_at: new Date().toISOString() })
-        .eq('id', existingWallet.id)
-        .select()
-        .single();
-
-      if (error) {
-        return NextResponse.json({ success: false, error: error.message }, { status: 400 });
-      }
-      return NextResponse.json({ success: true, wallet: data });
-    } else {
-      const { data, error } = await supabase
-        .from('user_wallets')
-        .insert({
-          user_id: user.id,
-          asset_symbol: assetSymbol,
-          balance: amount,
-          locked_balance: 0,
-        })
-        .select()
-        .single();
-
-      if (error) {
-        return NextResponse.json({ success: false, error: error.message }, { status: 400 });
-      }
-      return NextResponse.json({ success: true, wallet: data });
+    if (error) {
+      return NextResponse.json({ error: error.message }, { status: 400 });
     }
+
+    return NextResponse.json(data);
   } catch (err: any) {
-    return NextResponse.json(
-      { success: false, error: err.message || 'Internal server error' },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: err.message }, { status: 500 });
   }
 }

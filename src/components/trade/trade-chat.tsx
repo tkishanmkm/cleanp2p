@@ -11,7 +11,7 @@ import { TradeChatTimer } from '@/components/trade-chat-timer';
 import { addReceiptToTrade, claimFundsForTrade } from '@/lib/wallet';
 import { compressImage } from '@/lib/media-compression';
 import { cn, toDate } from '@/lib/utils';
-import { insertPaxonesSystemMessage, checkOffPlatformMessage, extractUrls } from '@/lib/trade-system-messages';
+import { insertPaxonesSystemMessage, checkOffPlatformMessage, extractUrls, formatCryptoAmount } from '@/lib/trade-system-messages';
 import type { Trade, User } from '@/lib/types';
 
 import { Card, CardContent, CardHeader, CardFooter } from '@/components/ui/card';
@@ -95,26 +95,39 @@ function CoinInsignia({ symbol, className = 'h-4 w-4' }: { symbol: string; class
   }
 }
 
-function TradeInstructions({ trade, isBuyer }: { trade: Trade | any; isBuyer: boolean }) {
-  const coinAmount = Number(trade?.amount ?? trade?.crypto_amount ?? 0).toFixed(8);
-  const coinSymbol = trade?.crypto ?? trade?.asset_symbol ?? 'BTC';
-  const fiatAmount = Number(trade?.fiatAmount ?? trade?.fiat_amount ?? trade?.amount_usd ?? 0).toLocaleString();
-  const fiatCurrency = trade?.fiatCurrency ?? trade?.fiat_currency ?? trade?.fiat_symbol ?? 'USD';
+function TradeInstructions({
+  trade,
+  isBuyer,
+  opponentUsername,
+}: {
+  trade: Trade | any;
+  isBuyer: boolean;
+  opponentUsername?: string;
+}) {
+  const coinSymbol = trade?.crypto ?? trade?.asset_symbol ?? 'USDT';
+  const rawCrypto = Number(trade?.crypto_amount ?? trade?.cryptoAmount ?? trade?.amount ?? 0);
+  const rawFiat = Number(trade?.total_fiat ?? trade?.totalFiat ?? trade?.fiat_amount ?? trade?.fiatAmount ?? trade?.amount_usd ?? 0);
+  const fiatCurrency = trade?.fiat_currency || trade?.fiatCurrency || trade?.fiat_symbol || 'INR';
+
+  const coinAmount = rawCrypto > 0 ? rawCrypto.toFixed(2) : '0.00';
+  const fiatAmount = rawFiat > 0 ? rawFiat.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '0.00';
+
+  const partnerName = opponentUsername ? `@${opponentUsername}` : (isBuyer ? '@Seller' : '@Buyer');
 
   const title = isBuyer
     ? `You're buying ${coinAmount} ${coinSymbol} for ${fiatAmount} ${fiatCurrency}.`
     : `You're selling ${coinAmount} ${coinSymbol} for ${fiatAmount} ${fiatCurrency}.`;
 
   const buyerInstructions = [
-    'Wait for the seller to provide their payment details in the chat.',
+    `Wait for the seller (${partnerName}) to provide their payment details in the chat.`,
     'Make your payment using the details provided.',
     "Mark the trade as 'Paid' and upload proof of payment if requested.",
-    'Wait for your trade partner to confirm receipt in their account.',
+    `Wait for ${partnerName} to confirm receipt in their account.`,
     'Your trade partner will release the coin from escrow.'
   ];
   const sellerInstructions = [
     'Share your payment instructions in the chat.',
-    'Wait for the buyer to make the payment.',
+    `Wait for ${partnerName} to make the payment.`,
     'Once payment is received in your account, release the coin.',
     'Do not release funds based on payment proof alone. Always check your bank/wallet.',
     "If the buyer doesn't pay within the countdown, the trade will automatically expire."
@@ -123,18 +136,85 @@ function TradeInstructions({ trade, isBuyer }: { trade: Trade | any; isBuyer: bo
   const instructions = isBuyer ? buyerInstructions : sellerInstructions;
 
   return (
-    <Alert className="bg-amber-500/10 border-amber-500/30 text-amber-900 dark:text-amber-200">
-      <InfoIcon className="h-4 w-4 text-amber-600 dark:text-amber-400" />
-      <AlertTitle className="font-bold text-xs sm:text-sm">{title}</AlertTitle>
-      <AlertDescription className="text-xs mt-1">
-        <p className="font-medium">Coin deposit is locked securely in Escrow.</p>
-        <ol className="list-decimal list-inside space-y-0.5 text-[11px] sm:text-xs mt-1.5 opacity-90">
-          {instructions.map((step, i) => (
-            <li key={i}>{step}</li>
-          ))}
-        </ol>
-      </AlertDescription>
-    </Alert>
+    <div className="p-4 bg-slate-50 dark:bg-slate-800/80 rounded-2xl border border-slate-200 dark:border-slate-800 mb-4 text-sm space-y-2.5">
+      <p className="font-semibold text-slate-900 dark:text-slate-100">
+        {isBuyer ? "You're buying " : "You're selling "}
+        <strong className="text-emerald-600 dark:text-emerald-400 font-bold">{coinAmount} {coinSymbol}</strong> for{' '}
+        <strong className="text-emerald-600 dark:text-emerald-400 font-bold">{fiatAmount} {fiatCurrency}</strong>.
+      </p>
+      <ul className="list-disc list-inside text-xs text-slate-600 dark:text-slate-400 space-y-1">
+        <li>Coin deposit ({coinAmount} {coinSymbol} + 1.5% Fee) is locked securely in Escrow.</li>
+        {instructions.map((step, i) => (
+          <li key={i}>{step}</li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+function PostTradeCompletionCard({
+  trade,
+  isBuyer,
+  opponentUsername,
+  onOpenExternalLink
+}: {
+  trade: Trade | any;
+  isBuyer: boolean;
+  opponentUsername: string;
+  onOpenExternalLink: (url: string) => void;
+}) {
+  const coinSymbol = trade?.crypto ?? trade?.asset_symbol ?? 'USDT';
+  const rawCrypto = Number(trade?.crypto_amount ?? trade?.cryptoAmount ?? trade?.amount ?? 0);
+  const rawFiat = Number(trade?.total_fiat ?? trade?.totalFiat ?? trade?.fiat_amount ?? trade?.fiatAmount ?? trade?.amount_usd ?? 0);
+  const rawRate = Number(trade?.rate ?? trade?.price ?? 0);
+  const fiatCurrency = trade?.fiat_currency || trade?.fiatCurrency || trade?.fiat_symbol || 'INR';
+
+  const coinAmount = rawCrypto > 0 ? rawCrypto.toFixed(2) : '0.00';
+  const fiatAmount = rawFiat > 0 ? rawFiat.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '0.00';
+  const priceFormatted = rawRate.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+  return (
+    <div className="rounded-2xl border border-emerald-500/30 bg-gradient-to-br from-emerald-500/10 via-emerald-500/5 to-background p-4 sm:p-5 my-3 shadow-md text-foreground">
+      <div className="flex items-center gap-2.5 mb-3">
+        <div className="h-9 w-9 rounded-full bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 flex items-center justify-center font-bold">
+          <CheckCircle2 className="h-5 w-5" />
+        </div>
+        <div>
+          <h3 className="font-bold text-sm sm:text-base text-foreground">Trade Successfully Completed!</h3>
+          <p className="text-xs text-muted-foreground">
+            {isBuyer
+              ? `You received ${coinAmount} ${coinSymbol} in your Paxones wallet.`
+              : `You sold ${coinAmount} ${coinSymbol} to @${opponentUsername}.`}
+          </p>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-2 gap-2 my-3 p-3 rounded-xl bg-background/60 border border-border/60 text-xs">
+        <div>
+          <span className="text-muted-foreground text-[11px] block">Amount Transferred</span>
+          <span className="font-bold text-foreground font-mono">{coinAmount} {coinSymbol}</span>
+        </div>
+        <div>
+          <span className="text-muted-foreground text-[11px] block">Total Fiat</span>
+          <span className="font-bold text-foreground font-mono">{fiatAmount} {fiatCurrency}</span>
+        </div>
+        <div className="col-span-2 pt-1.5 border-t border-border/40 flex justify-between text-[11px]">
+          <span className="text-muted-foreground">Exchange Rate</span>
+          <span className="font-semibold text-foreground">1 {coinSymbol} = {priceFormatted} {fiatCurrency}</span>
+        </div>
+      </div>
+
+      <div className="flex flex-col sm:flex-row gap-2 pt-1">
+        <Button
+          size="sm"
+          className="w-full bg-[#00b67a] hover:bg-[#009b67] text-white font-bold text-xs gap-1.5 shadow-sm"
+          onClick={() => onOpenExternalLink('https://www.trustpilot.com/review/paxones.com')}
+        >
+          <span>★ Rate Us on Trustpilot</span>
+          <ExternalLink className="h-3.5 w-3.5" />
+        </Button>
+      </div>
+    </div>
   );
 }
 
@@ -322,8 +402,8 @@ const TradeSummaryBar = ({ trade, currentUserRole }: { trade: Trade | any; curre
   const isBuyer = currentUserRole === 'buy';
   const roleText = isBuyer ? 'Buying' : 'Selling';
 
-  const coinAmount = Number(trade?.amount ?? trade?.crypto_amount ?? 0).toFixed(8);
-  const coinSymbol = trade?.crypto ?? trade?.asset_symbol ?? 'BTC';
+  const coinSymbol = trade?.crypto ?? trade?.asset_symbol ?? 'USDT';
+  const coinAmount = formatCryptoAmount(trade?.amount ?? trade?.crypto_amount ?? 0, coinSymbol);
   const fiatAmount = Number(trade?.fiatAmount ?? trade?.fiat_amount ?? trade?.amount_usd ?? 0).toLocaleString();
   const fiatCurrency = trade?.fiatCurrency ?? trade?.fiat_currency ?? trade?.fiat_symbol ?? 'USD';
 
@@ -854,7 +934,7 @@ export function TradeChat({
       <CardContent className="flex-1 overflow-hidden p-4 min-h-0">
         <ScrollArea className="h-full pr-3" ref={scrollAreaRef}>
           <div className="space-y-4">
-            <TradeInstructions trade={trade} isBuyer={isBuyer} />
+            <TradeInstructions trade={trade} isBuyer={isBuyer} opponentUsername={opponentUsername} />
 
             {sellerTerms && (
               <div className="rounded-xl border border-border/80 bg-muted/40 p-3 text-xs">
@@ -974,6 +1054,16 @@ export function TradeChat({
                     </div>
                   );
                 })}
+
+                {/* Interactive Post-Trade Completion Card rendered inside chat upon release/completion */}
+                {(tradeStatus === 'released' || tradeStatus === 'completed') && (
+                  <PostTradeCompletionCard
+                    trade={trade}
+                    isBuyer={isBuyer}
+                    opponentUsername={opponentUsername}
+                    onOpenExternalLink={(url) => setSelectedExternalUrl(url)}
+                  />
+                )}
               </div>
             )}
           </div>

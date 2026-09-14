@@ -86,7 +86,63 @@ export async function POST(
         sellerUsername: sellerName
       });
 
+      // Notification for seller
+      if (trade?.seller_id) {
+        await supabase.from('notifications').insert({
+          user_id: trade.seller_id,
+          title: 'Payment Marked as Paid',
+          message: `Buyer @${buyerName} has marked trade as paid. Please verify receiving account before releasing.`,
+          link: `/trade/${actualTradeId}`,
+          is_read: false,
+          created_at: now
+        }).select().maybeSingle();
+      }
+
       return NextResponse.json({ success: true, message: 'Payment marked successfully.' });
+    }
+
+    if (action === 'EXPIRE_TRADE') {
+      const now = new Date().toISOString();
+      let updateQuery = supabase
+        .from('trades')
+        .update({
+          status: 'EXPIRED',
+          escrow_status: 'expired',
+          cancelled_at: now
+        });
+
+      if (isActualUuid) {
+        updateQuery = updateQuery.eq('id', actualTradeId);
+      } else {
+        updateQuery = updateQuery.eq('trade_id', tradeId);
+      }
+
+      const { error } = await updateQuery;
+      if (error) {
+        return NextResponse.json({ error: error.message }, { status: 400 });
+      }
+
+      await insertPaxonesSystemMessage(supabase, {
+        tradeId: actualTradeId,
+        type: 'TRADE_EXPIRED',
+        buyerUsername: buyerName,
+        sellerUsername: sellerName
+      });
+
+      // Notify both parties
+      const userIds = [trade?.buyer_id, trade?.seller_id].filter(Boolean);
+      for (const uid of userIds) {
+        await supabase.from('notifications').insert({
+          user_id: uid,
+          title: 'Trade Expired',
+          message: `Trade has expired. If funds were transferred, reopen or contact support immediately.`,
+          link: `/trade/${actualTradeId}`,
+          is_read: false,
+          created_at: now
+        }).select().maybeSingle();
+      }
+
+      return NextResponse.json({ success: true, message: 'Trade marked as expired.' });
     }
 
     if (action === 'RELEASE_ESCROW') {
@@ -177,10 +233,22 @@ export async function POST(
         coinSymbol
       });
 
+      if (trade?.buyer_id) {
+        await supabase.from('notifications').insert({
+          user_id: trade.buyer_id,
+          title: 'Escrow Released',
+          message: `@${sellerName} released ${coinAmount} ${coinSymbol} to your wallet.`,
+          link: `/trade/${actualTradeId}`,
+          is_read: false,
+          created_at: now
+        }).select().maybeSingle();
+      }
+
       return NextResponse.json({ success: true, message: 'Escrow released successfully.' });
     }
 
     if (action === 'CANCEL_TRADE') {
+      const now = new Date().toISOString();
       let rpcSucceeded = false;
       let rpcResult: any = null;
 
@@ -217,6 +285,7 @@ export async function POST(
           status: 'CANCELLED',
           escrow_status: 'refunded',
           cancellation_reason: reason || 'Cancelled by user',
+          cancelled_at: now
         });
 
       if (isActualUuid) {
@@ -236,6 +305,18 @@ export async function POST(
         tradeId: actualTradeId,
         type: 'TRADE_CANCELLED'
       });
+
+      const counterpartyId = user.id === trade?.buyer_id ? trade?.seller_id : trade?.buyer_id;
+      if (counterpartyId) {
+        await supabase.from('notifications').insert({
+          user_id: counterpartyId,
+          title: 'Trade Cancelled',
+          message: `Trade has been cancelled. Any locked escrow has been refunded.`,
+          link: `/trade/${actualTradeId}`,
+          is_read: false,
+          created_at: now
+        }).select().maybeSingle();
+      }
 
       return NextResponse.json({ success: true, message: 'Trade cancelled successfully.' });
     }

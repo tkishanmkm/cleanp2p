@@ -124,118 +124,6 @@ async function fetchOnChainConfirmations(
 }
 
 /**
- * Fallback credit logic if stored procedure process_confirmed_deposit is not yet loaded in Postgres
- */
-async function fallbackCreditConfirmedDeposit(
-  userId: string,
-  amount: number,
-  txHash: string,
-  assetSymbol: string,
-  network: string
-) {
-  const assetCode = assetSymbol.toUpperCase().trim();
-
-  // 1. Resolve or create user's wallet container
-  let walletId: string | null = null;
-  const { data: wallet } = await supabaseAdmin
-    .from('wallets')
-    .select('id')
-    .eq('user_id', userId)
-    .maybeSingle();
-
-  if (wallet?.id) {
-    walletId = wallet.id;
-  } else {
-    const { data: newWallet } = await supabaseAdmin
-      .from('wallets')
-      .insert({
-        user_id: userId,
-        status: 'active',
-        provisioning_status: 'completed',
-      })
-      .select('id')
-      .single();
-    walletId = newWallet?.id || null;
-  }
-
-  if (!walletId) {
-    throw new Error(`Failed to resolve or create wallet for user ${userId}`);
-  }
-
-  // 2. Fetch or create wallet_assets row
-  const { data: currentAsset } = await supabaseAdmin
-    .from('wallet_assets')
-    .select('available, locked_escrow, locked_withdrawal')
-    .eq('wallet_id', walletId)
-    .eq('asset_code', assetCode)
-    .maybeSingle();
-
-  const currentAvailable = Number(currentAsset?.available || 0);
-  const currentLocked = Number(currentAsset?.locked_escrow || 0) + Number(currentAsset?.locked_withdrawal || 0);
-  const newAvailable = currentAvailable + amount;
-
-  if (!currentAsset) {
-    await supabaseAdmin.from('wallet_assets').insert({
-      wallet_id: walletId,
-      asset_code: assetCode,
-      available: amount,
-      locked_escrow: 0,
-      locked_withdrawal: 0,
-    });
-  } else {
-    await supabaseAdmin
-      .from('wallet_assets')
-      .update({
-        available: newAvailable,
-        updated_at: new Date().toISOString(),
-      })
-      .eq('wallet_id', walletId)
-      .eq('asset_code', assetCode);
-  }
-
-  // 3. Write immutable ledger entry
-  const idempotencyKey = `dep_cw_${txHash}_${assetCode}`;
-  await supabaseAdmin
-    .from('ledger_entries')
-    .insert({
-      wallet_id: walletId,
-      user_id: userId,
-      asset_code: assetCode,
-      delta_available: amount,
-      delta_locked: 0,
-      available_after: newAvailable,
-      locked_after: currentLocked,
-      entry_type: 'deposit_credit',
-      ref_table: 'onchain_deposits',
-      ref_id: txHash,
-      idempotency_key: idempotencyKey,
-    })
-    .catch((err: any) => console.warn('Ledger entry notice:', err.message));
-
-  // 4. Upsert standard deposits table
-  await supabaseAdmin
-    .from('deposits')
-    .upsert(
-      {
-        user_id: userId,
-        wallet_id: walletId,
-        asset_code: assetCode,
-        network_code: network,
-        amount: amount,
-        txid: txHash,
-        confirmations: 12,
-        status: 'credited',
-        credited_at: new Date().toISOString(),
-        idempotency_key: `dep_tbl_${idempotencyKey}`,
-      },
-      { onConflict: 'idempotency_key' }
-    )
-    .catch((err: any) => console.warn('Deposits table notice:', err.message));
-
-  return { walletId, newBalance: newAvailable };
-}
-
-/**
  * Main worker logic: Polling and ingestion processor for pending deposits
  */
 export async function runConfirmationsWorker(): Promise<ConfirmationWorkerResult> {
@@ -289,53 +177,22 @@ export async function runConfirmationsWorker(): Promise<ConfirmationWorkerResult
         const isNowConfirmed = currentConfirmations >= requiredConfs;
 
         if (isNowConfirmed) {
-          // Attempt RPC execution first
-          let rpcSuccess = false;
+          // Strictly invoke PostgreSQL RPC credit_confirmed_deposit
+          const { data: rpcData, error: rpcErr } = await supabaseAdmin.rpc('credit_confirmed_deposit', {
+            p_tx_hash: deposit.tx_hash,
+            p_log_index: Number(deposit.log_index || 0),
+            p_network: deposit.network,
+            p_user_id: deposit.user_id,
+            p_asset: deposit.asset_symbol?.toUpperCase()?.trim(),
+            p_amount: Number(deposit.amount),
+          });
 
-          try {
-            // Attempt overload with deposit ID
-            const { data: rpcData, error: rpcErr } = await supabaseAdmin.rpc('process_confirmed_deposit', {
-              p_deposit_id: deposit.id,
-            });
-
-            if (!rpcErr && rpcData?.success) {
-              rpcSuccess = true;
-            }
-          } catch (rpcEx) {
-            console.warn(`RPC process_confirmed_deposit by ID notice for ${deposit.tx_hash}:`, rpcEx);
+          if (rpcErr) {
+            console.error(`RPC credit_confirmed_deposit failed for ${deposit.tx_hash}:`, rpcErr);
+            throw new Error(`RPC credit_confirmed_deposit failed: ${rpcErr.message}`);
           }
 
-          if (!rpcSuccess) {
-            try {
-              // Attempt parameter overload
-              const { data: rpcData2, error: rpcErr2 } = await supabaseAdmin.rpc('process_confirmed_deposit', {
-                p_user_id: deposit.user_id,
-                p_amount: deposit.amount,
-                p_tx_hash: deposit.tx_hash,
-                p_asset: deposit.asset_symbol,
-                p_network: deposit.network,
-              });
-
-              if (!rpcErr2 && rpcData2?.success) {
-                rpcSuccess = true;
-              }
-            } catch (rpcEx2) {
-              console.warn(`RPC process_confirmed_deposit by params notice for ${deposit.tx_hash}:`, rpcEx2);
-            }
-          }
-
-          // If RPC not provisioned, invoke TypeScript fallback
-          if (!rpcSuccess) {
-            await fallbackCreditConfirmedDeposit(
-              deposit.user_id,
-              Number(deposit.amount),
-              deposit.tx_hash,
-              deposit.asset_symbol,
-              deposit.network
-            );
-          }
-
-          // Mark onchain_deposits record as CREDITED
+          // Mark onchain_deposits record as CREDITED / confirmed
           await supabaseAdmin
             .from('onchain_deposits')
             .update({

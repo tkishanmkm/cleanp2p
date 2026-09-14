@@ -1,47 +1,43 @@
-import { NextRequest, NextResponse } from 'next/server';
-import { getSupabaseAdminClient, createClient } from '@/lib/supabase/server';
+import { NextResponse } from 'next/server';
+import { createClient } from '@/utils/supabase/server';
 
-export const dynamic = 'force-dynamic';
-
-export async function GET(req: NextRequest) {
+export async function POST(req: Request) {
   try {
-    const authSupabase = await createClient();
-    const adminSupabase = getSupabaseAdminClient();
+    const supabase = createClient();
+    const { data: { user }, error: authError } = await supabase.auth.getUser();
 
-    const {
-      data: { session },
-      error: authError,
-    } = await authSupabase.auth.getSession();
-
-    const user = session?.user;
     if (authError || !user) {
-      return NextResponse.json({ trades: [] }, { status: 200 });
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    const { searchParams } = new URL(req.url);
-    const statusParam = searchParams.get('status');
+    const body = await req.json();
+    const { adId, buyerId, sellerId, cryptoAmount, cryptoSymbol, rate, fiatCurrency, paymentMethod } = body;
 
-    let query = adminSupabase
-      .from('trades')
-      .select('*')
-      .or(`buyer_id.eq.${user.id},seller_id.eq.${user.id}`)
-      .order('created_at', { ascending: false });
-
-    if (statusParam) {
-      const statuses = statusParam.split(',').map((s) => s.trim());
-      query = query.in('status', statuses);
+    if (!adId || !buyerId || !sellerId || !cryptoSymbol) {
+      return NextResponse.json({ error: 'Missing required trade parameters' }, { status: 400 });
     }
 
-    const { data: trades, error } = await query;
+    // Call atomic initiate_p2p_trade RPC
+    const { data, error } = await supabase.rpc('initiate_p2p_trade', {
+      p_ad_id: adId,
+      p_buyer_id: buyerId,
+      p_seller_id: sellerId,
+      p_crypto_amount: Number(cryptoAmount || 0),
+      p_crypto_symbol: cryptoSymbol,
+      p_rate: Number(rate || 0),
+      p_fiat_amount: Number(cryptoAmount || 0) * Number(rate || 1),
+      p_fiat_currency: fiatCurrency || 'INR',
+      p_payment_method: paymentMethod || 'Bank Transfer'
+    });
 
     if (error) {
-      console.warn('Error fetching trades via admin client:', error);
-      return NextResponse.json({ trades: [], error: error.message }, { status: 200 });
+      console.error('RPC initiate_p2p_trade error:', error);
+      return NextResponse.json({ error: error.message }, { status: 400 });
     }
 
-    return NextResponse.json({ trades: trades || [] });
+    return NextResponse.json({ success: true, trade: data });
   } catch (err: any) {
-    console.error('Error in /api/trades:', err);
-    return NextResponse.json({ trades: [], error: err.message }, { status: 500 });
+    console.error('Trade creation API error:', err);
+    return NextResponse.json({ error: err.message || 'Internal server error' }, { status: 500 });
   }
 }

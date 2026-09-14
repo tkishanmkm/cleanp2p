@@ -77,6 +77,7 @@ import { ScrollArea } from '../ui/scroll-area';
 import { useState, useEffect } from 'react';
 import { statusColors } from '@/lib/status-colors';
 import { supabase } from '@/lib/supabase/client';
+import { NavbarWallet } from '@/components/dashboard/NavbarWallet';
 
 type NavItem = {
   href: string;
@@ -430,7 +431,7 @@ export function DashboardHeader() {
                 </div>
                 {/* User Quick Balance Summary in Drawer */}
                 <div className="mt-4 p-3 rounded-xl bg-slate-100 dark:bg-slate-900 border border-slate-200 dark:border-slate-800">
-                  <span className="text-[11px] font-bold text-muted-foreground uppercase tracking-wider">Estimated Total Balance</span>
+                  <span className="text-[11px] font-bold text-muted-foreground uppercase tracking-wider">Estimated Available Balance</span>
                   <div className="text-xl font-extrabold text-foreground mt-0.5 tracking-tight">
                     {totalWalletValueConverted.toLocaleString('en-US', {
                       style: 'currency',

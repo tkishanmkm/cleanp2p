@@ -1,16 +1,12 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   /* config options here */
-  transpilePackages: ['aria-hidden', 'get-nonce'],
+  transpilePackages: ['aria-hidden', 'get-nonce', '@floating-ui/react', '@floating-ui/dom', '@floating-ui/core', '@floating-ui/utils'],
   typescript: {
     ignoreBuildErrors: true,
   },
   eslint: {
     ignoreDuringBuilds: true,
-  },
-  experimental: {
-    cpus: 1,
-    workerThreads: false,
   },
   images: {
     remotePatterns: [

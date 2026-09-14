@@ -29,7 +29,7 @@ export function HomeSignupForm() {
           type="email"
           required
           placeholder="Enter your email address"
-          className="h-12 pl-11 text-base bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 rounded-xl focus-visible:ring-[#6347ea] shadow-sm"
+          className="h-12 pl-11 text-base bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 rounded-xl focus-visible:ring-blue-600 shadow-sm"
           value={email}
           onChange={(e) => setEmail(e.target.value)}
         />
@@ -37,7 +37,7 @@ export function HomeSignupForm() {
       <Button 
         type="submit" 
         size="lg" 
-        className="h-12 text-base font-bold px-7 rounded-xl bg-[#6347ea] hover:bg-[#5238d6] text-white shadow-md shadow-[#6347ea]/25 transition-all shrink-0 cursor-pointer"
+        className="h-12 text-base font-bold px-7 rounded-xl bg-blue-600 hover:bg-blue-700 text-white shadow-md shadow-blue-600/25 transition-all shrink-0 cursor-pointer"
       >
         <span>Get Started</span>
         <ArrowRight className="ml-2 h-4 w-4" />

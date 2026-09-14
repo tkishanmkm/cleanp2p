@@ -11,6 +11,22 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
+    const admin = getSupabaseAdminClient();
+
+    // 0. Withdrawal Queue Freeze Check
+    const { count: pendingWithdrawals } = await admin
+      .from('hot_wallet_withdrawals')
+      .select('*', { count: 'exact', head: true })
+      .eq('user_id', user.id)
+      .in('status', ['PENDING', 'PROCESSING', 'QUEUED']);
+
+    if (pendingWithdrawals && pendingWithdrawals > 0) {
+      return NextResponse.json(
+        { error: 'ACCOUNT_RESTRICTED: You have an active withdrawal in progress. Internal transfers are disabled until completed.' },
+        { status: 403 }
+      );
+    }
+
     const { recipientUsername, asset, crypto, amount, totpCode } = await req.json();
     const coinSymbol = String(asset || crypto || '').toUpperCase().trim();
     const numericAmount = Number(amount);
@@ -18,8 +34,6 @@ export async function POST(req: NextRequest) {
     if (!recipientUsername || !coinSymbol || isNaN(numericAmount) || numericAmount <= 0) {
       return NextResponse.json({ error: 'Invalid transfer payload. Amount must be positive.' }, { status: 400 });
     }
-
-    const admin = getSupabaseAdminClient();
 
     // 1. Fetch sender profile
     const { data: senderProfile } = await admin
@@ -48,7 +62,7 @@ export async function POST(req: NextRequest) {
     const cleanRecipient = recipientUsername.trim().replace(/^@/, '');
     const { data: recipientProfile, error: recipientErr } = await admin
       .from('profiles')
-      .select('id, username')
+      .select('id, username, is_banned, account_status')
       .or(`username.ilike.${cleanRecipient},id.eq.${cleanRecipient}`)
       .maybeSingle();
 
@@ -56,65 +70,39 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: `Recipient user "${recipientUsername}" not found.` }, { status: 404 });
     }
 
+    if (recipientProfile.is_banned || recipientProfile.account_status === 'suspended') {
+      return NextResponse.json({ error: 'Recipient account is restricted and cannot receive funds.' }, { status: 400 });
+    }
+
     if (recipientProfile.id === user.id) {
       return NextResponse.json({ error: 'You cannot transfer coins to yourself.' }, { status: 400 });
     }
 
-    // 4. Check sender balance in wallet_assets
-    const { data: senderAsset } = await admin
-      .from('wallet_assets')
-      .select('*')
-      .eq('user_id', user.id)
-      .eq('asset_symbol', coinSymbol)
-      .maybeSingle();
+    // 4. Calculate 1.5% Fee
+    const feeAmount = Number((numericAmount * 0.015).toFixed(8));
+    const totalDeduction = Number((numericAmount + feeAmount).toFixed(8));
 
-    const senderAvailable = Number(senderAsset?.available ?? senderAsset?.balance ?? 0);
+    // 5. Execute PostgreSQL Atomic RPC
+    const { data: rpcData, error: rpcError } = await admin.rpc('execute_internal_transfer', {
+      p_sender_id: user.id,
+      p_recipient_id: recipientProfile.id,
+      p_asset: coinSymbol,
+      p_net_amount: numericAmount,
+      p_fee_amount: feeAmount,
+      p_total_deduction: totalDeduction,
+    });
 
-    if (senderAvailable < numericAmount) {
-      return NextResponse.json({
-        error: `Insufficient available ${coinSymbol} balance. Available: ${senderAvailable.toFixed(8)} ${coinSymbol}`,
-      }, { status: 400 });
+    if (rpcError) {
+      console.error('RPC execute_internal_transfer error:', rpcError);
+      return NextResponse.json({ error: rpcError.message || 'Transfer failed' }, { status: 400 });
     }
 
-    // 5. Debit sender available balance
-    const newSenderAvailable = senderAvailable - numericAmount;
-    await admin
-      .from('wallet_assets')
-      .upsert({
-        user_id: user.id,
-        asset_symbol: coinSymbol,
-        available: newSenderAvailable,
-        locked: Number(senderAsset?.locked ?? 0),
-        updated_at: new Date().toISOString(),
-      }, { onConflict: 'user_id,asset_symbol' });
-
-    // 6. Credit recipient available balance
-    const { data: recipientAsset } = await admin
-      .from('wallet_assets')
-      .select('*')
-      .eq('user_id', recipientProfile.id)
-      .eq('asset_symbol', coinSymbol)
-      .maybeSingle();
-
-    const recipientAvailable = Number(recipientAsset?.available ?? recipientAsset?.balance ?? 0);
-    const newRecipientAvailable = recipientAvailable + numericAmount;
-
-    await admin
-      .from('wallet_assets')
-      .upsert({
-        user_id: recipientProfile.id,
-        asset_symbol: coinSymbol,
-        available: newRecipientAvailable,
-        locked: Number(recipientAsset?.locked ?? 0),
-        updated_at: new Date().toISOString(),
-      }, { onConflict: 'user_id,asset_symbol' });
-
-    // 7. Record transaction in transfers table
+    // 6. Record transaction in transfers table
     const publicId = `TX-${Math.random().toString(36).substring(2, 10).toUpperCase()}`;
     const senderName = senderProfile?.username || 'Trader';
     const recipientName = recipientProfile?.username || 'Trader';
 
-    const { data: transferRecord, error: transferInsertErr } = await admin
+    const { error: transferInsertErr } = await admin
       .from('transfers')
       .insert({
         public_id: publicId,
@@ -124,11 +112,10 @@ export async function POST(req: NextRequest) {
         recipient_username: recipientName,
         crypto: coinSymbol,
         amount: numericAmount,
+        fee_amount: feeAmount,
         status: 'completed',
         created_at: new Date().toISOString(),
-      })
-      .select()
-      .maybeSingle();
+      });
 
     if (transferInsertErr) {
       console.warn('Transfer record insert notice:', transferInsertErr);
@@ -138,10 +125,11 @@ export async function POST(req: NextRequest) {
       success: true,
       transferId: publicId,
       amount: numericAmount,
+      feeAmount,
       crypto: coinSymbol,
       senderUsername: senderName,
       recipientUsername: recipientName,
-      message: `Successfully sent ${numericAmount} ${coinSymbol} to @${recipientName}`,
+      message: `Successfully transferred ${numericAmount} ${coinSymbol} to @${recipientName} (Fee: ${feeAmount} ${coinSymbol})`,
     }, { status: 200 });
   } catch (err: any) {
     console.error('Transfer route error:', err);

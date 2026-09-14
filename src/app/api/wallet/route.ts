@@ -17,7 +17,7 @@ export async function GET() {
     // 2. Fetch Wallet Balances
     const { data: wallet, error: walletErr } = await supabase
       .from('wallets')
-      .select('user_id, currency, balance, reserved_balance, updated_at')
+      .select('user_id, currency, balance, reserved_balance, locked_balance, available_balance, updated_at')
       .eq('user_id', user.id)
       .single();
 
@@ -25,15 +25,18 @@ export async function GET() {
       return NextResponse.json({ error: walletErr.message }, { status: 500 });
     }
 
-    // 3. Return Balance Summary
+    const total = Number(wallet?.balance || 0);
+    const locked = Number(wallet?.locked_balance ?? wallet?.reserved_balance ?? 0);
+    const availableBalance = Number(wallet?.available_balance ?? (total - locked));
+    const assetSymbol = wallet?.currency || 'USDT';
+
+    // 3. Return Sanitized Available Balance to Frontend
     return NextResponse.json({
       userId: user.id,
-      currency: wallet?.currency || 'USDT',
-      availableBalance: wallet?.balance || '0.00000000',
-      lockedBalance: wallet?.reserved_balance || '0.00000000',
-      totalBalance: (
-        parseFloat(wallet?.balance || '0') + parseFloat(wallet?.reserved_balance || '0')
-      ).toFixed(8),
+      asset_symbol: assetSymbol,
+      currency: assetSymbol,
+      balance: Math.max(0, availableBalance),
+      availableBalance: Math.max(0, availableBalance).toFixed(8),
       lastUpdated: wallet?.updated_at || null,
     });
   } catch (error: any) {

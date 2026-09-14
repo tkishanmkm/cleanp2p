@@ -122,61 +122,20 @@ export async function POST(req: Request) {
       console.log("Target Asset:", targetAsset);
       console.log("Required Lock:", requiredLock);
 
-      let balanceData: any = null;
-      let balanceError: any = null;
+      // Lock seller escrow balance atomically via RPC
+      const { data: rpcData, error: rpcError } = await adminClient.rpc('lock_seller_escrow', {
+        p_seller_id: sellerId,
+        p_asset: targetAsset,
+        p_crypto_amount: tradeAmount,
+        p_escrow_fee: escrowFee,
+      });
 
-      try {
-        const res = await supabase
-          .from('balances')
-          .select('*')
-          .eq('user_id', sellerId)
-          .ilike('asset', targetAsset)
-          .maybeSingle();
-        balanceData = res.data;
-        balanceError = res.error;
-
-        console.log("Fetched Balance Record:", balanceData);
-        console.log("Balance Query Error:", balanceError);
-
-        console.log("--- DEBUG TRACE ---");
-        console.log("Logged In User ID:", user.id);
-        console.log("Ad Owner ID:", adOwnerId);
-        console.log("Calculated Seller ID:", sellerId);
-        console.log("Target Asset:", targetAsset);
-        console.log("Required Lock:", requiredLock);
-        console.log("Balance Data Found:", balanceData);
-
-        if (!balanceData || Number(balanceData.available_balance || 0) < requiredLock) {
-          return NextResponse.json(
-            {
-              code: 'INSUFFICIENT_FUNDS',
-              message: `DEBUG TRACE -> Session User: ${user.id} | Resolved Seller: ${sellerId} | Found Balance: ${balanceData?.available_balance ?? 0} | Required: ${requiredLock} ${targetAsset}`,
-              error: `Insufficient wallet balance. You need ${requiredLock.toFixed(6)} ${targetAsset} (including 1.5% escrow fee) to initiate this trade.`
-            },
-            { status: 400 }
-          );
-        }
-
-        const avail = Number(balanceData.available_balance || 0);
-        const locked = Number(balanceData.locked_balance || 0);
-
-        // Atomically update balances (move requiredLock from available to locked)
-        await supabase
-          .from('balances')
-          .update({
-            available_balance: avail - requiredLock,
-            locked_balance: locked + requiredLock,
-            updated_at: new Date().toISOString(),
-          })
-          .eq('user_id', sellerId)
-          .eq('asset', targetAsset);
-
-      } catch (balErr: any) {
-        console.warn('Balance validation / escrow lock error:', balErr);
+      if (rpcError) {
+        console.error('RPC lock_seller_escrow error:', rpcError);
         return NextResponse.json(
           {
-            code: 'BALANCE_QUERY_ERROR',
-            error: balErr.message || 'Error querying balances',
+            code: 'INSUFFICIENT_FUNDS_OR_ESCROW_ERROR',
+            error: rpcError.message || `Insufficient available balance to lock ${requiredLock.toFixed(6)} ${targetAsset} for escrow.`,
           },
           { status: 400 }
         );

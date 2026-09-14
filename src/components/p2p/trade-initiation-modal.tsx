@@ -154,52 +154,88 @@ export function TradeInitiationModal({ ad, isOpen, onClose }: TradeInitiationMod
         ? ad.payment_methods[0]
         : "Bank Transfer";
 
-      // Try inserting with comprehensive trade fields
-      let { data: trade, error: tradeError } = await supabase
-        .from("trades")
-        .insert({
-          ad_id: ad.id,
-          buyer_id: buyerId,
-          seller_id: sellerId,
-          crypto: ad.asset_symbol,
-          amount: numericCrypto,
-          fiat_currency: ad.fiat_symbol,
-          fiat_amount: numericFiat,
-          amount_usd: numericFiat,
-          price: ad.price,
-          payment_method: paymentMethod,
-          status: "pending",
-        })
-        .select("id")
-        .single();
+      // 1. First attempt trade creation via secure backend API route
+      let tradeId: string | null = null;
+      try {
+        const response = await fetch('/api/trades', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            adId: ad.id,
+            buyerId,
+            sellerId,
+            cryptoAmount: numericCrypto,
+            cryptoSymbol: ad.asset_symbol,
+            rate: ad.price,
+            fiatCurrency: ad.fiat_symbol || 'INR',
+            paymentMethod,
+          }),
+        });
 
-      // Fallback if schema only accepts basic fields
-      if (tradeError) {
-        console.warn("Retrying trade insertion with minimal schema...", tradeError);
-        const { data: fallbackTrade, error: fallbackError } = await supabase
+        if (response.ok) {
+          const resData = await response.json();
+          if (resData?.trade?.id) {
+            tradeId = resData.trade.id;
+          }
+        }
+      } catch (apiErr) {
+        console.warn('Trade API route creation warning, falling back to direct insert:', apiErr);
+      }
+
+      // 2. Direct insert fallback if API route did not return ID
+      if (!tradeId) {
+        const escrowFee = numericCrypto * 0.015;
+        let { data: trade, error: tradeError } = await supabase
           .from("trades")
           .insert({
+            ad_id: ad.id,
             buyer_id: buyerId,
             seller_id: sellerId,
+            crypto: ad.asset_symbol,
+            crypto_amount: numericCrypto,
+            amount: numericCrypto,
+            escrow_fee: escrowFee,
+            fiat_currency: ad.fiat_symbol || 'INR',
+            fiat_amount: numericFiat,
+            total_fiat: numericFiat,
+            rate: ad.price,
+            price: ad.price,
             amount_usd: numericFiat,
+            payment_method: paymentMethod,
             status: "pending",
           })
           .select("id")
           .single();
 
-        if (fallbackError) {
-          throw fallbackError;
+        if (tradeError) {
+          console.warn("Retrying trade insertion with minimal schema...", tradeError);
+          const { data: fallbackTrade, error: fallbackError } = await supabase
+            .from("trades")
+            .insert({
+              buyer_id: buyerId,
+              seller_id: sellerId,
+              amount_usd: numericFiat,
+              status: "pending",
+            })
+            .select("id")
+            .single();
+
+          if (fallbackError) {
+            throw fallbackError;
+          }
+          tradeId = fallbackTrade?.id;
+        } else {
+          tradeId = trade?.id;
         }
-        trade = fallbackTrade;
       }
 
-      if (!trade || !trade.id) {
+      if (!tradeId) {
         throw new Error("Trade creation returned no ID.");
       }
 
       // Redirect to trade execution page
       onClose();
-      router.push(`/trade/${trade.id}`);
+      router.push(`/trade/${tradeId}`);
     } catch (err: any) {
       console.error("Trade creation failed:", err);
       setErrorMsg(err.message || "Failed to initiate trade. Please try again.");

@@ -77,42 +77,40 @@ export async function POST(request: NextRequest) {
     if (activeTradeId) {
       const blockerName = blockerProfile?.username || 'Trader';
       let blockedName = 'Counterpart';
+      let blockerRole = 'Buyer';
+      let targetRole = 'Seller';
+
       try {
+        const { data: trade } = await admin
+          .from('trades')
+          .select('buyer_id, seller_id')
+          .or(`id.eq.${activeTradeId},trade_id.eq.${activeTradeId}`)
+          .maybeSingle();
+
+        if (trade) {
+          const isBlockerBuyer = trade.buyer_id === user.id;
+          blockerRole = isBlockerBuyer ? 'Buyer' : 'Seller';
+          targetRole = isBlockerBuyer ? 'Seller' : 'Buyer';
+        }
+
         const { data: targetProfile } = await admin
           .from('profiles')
           .select('username')
           .eq('id', targetUserId)
           .maybeSingle();
         if (targetProfile?.username) blockedName = targetProfile.username;
-      } catch {}
-
-      const systemMessage = `@${blockerName} blocked @${blockedName}.\nImportant: This trade is still active. If you have already made a payment, do not cancel the trade. Keep your payment evidence and follow the trade/dispute instructions.`;
-
-      try {
-        await admin.from('trade_messages').insert({
-          trade_id: activeTradeId,
-          sender_id: 'system',
-          sender_username: 'Paxones System',
-          message: systemMessage,
-          is_system: true,
-          is_moderator: true,
-          created_at: new Date().toISOString(),
-        });
-      } catch (err) {
-        console.warn('Notice inserting into trade_messages:', err);
+      } catch (e) {
+        console.warn('Error resolving roles for block notification:', e);
       }
 
-      try {
-        await admin.from('trade_chat_messages').insert({
-          trade_id: activeTradeId,
-          sender_id: '00000000-0000-0000-0000-000000000000',
-          message: systemMessage,
-          is_system_message: true,
-          created_at: new Date().toISOString(),
-        });
-      } catch (err) {
-        // optional table
-      }
+      await insertPaxonesSystemMessage(admin, {
+        tradeId: activeTradeId,
+        type: 'USER_BLOCKED',
+        openerUsername: blockerName,
+        blockedUsername: blockedName,
+        initiatorRole: blockerRole,
+        targetRole: targetRole,
+      });
     }
 
     return NextResponse.json({ success: true, message: 'User blocked.' });

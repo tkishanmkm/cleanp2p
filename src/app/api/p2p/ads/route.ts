@@ -185,6 +185,10 @@ export async function POST(request: NextRequest) {
 
     const uniqueAdId = generateAdId();
 
+    const resolvedTerms = body.terms || body.terms_conditions || body.termsAndConditions || '';
+    const resolvedLabel = body.offer_label || body.label || body.offerLabel || '';
+    const resolvedTags = Array.isArray(body.ad_tags) ? body.ad_tags : (Array.isArray(body.tags) ? body.tags : []);
+
     // Standard base table payload for `public.ads` and `public.p2p_ads`
     const basePayload: Record<string, any> = {
       ad_id: uniqueAdId,
@@ -194,6 +198,7 @@ export async function POST(request: NextRequest) {
       asset_symbol: coinType,
       fiat_symbol: fiatType,
       price: priceVal,
+      unit_price: priceVal,
       pricing_type: pricingType,
       margin: marginVal,
       min_limit: requestedMin,
@@ -202,8 +207,15 @@ export async function POST(request: NextRequest) {
       available_amount: requestedMax,
       payment_methods: paymentMethods,
       payment_window: paymentWindow,
-      terms: body.terms || body.terms_conditions || '',
-      auto_reply: body.auto_reply || '',
+      
+      // Mapped fields for both schema naming conventions
+      terms: resolvedTerms,
+      offer_label: resolvedLabel,
+      label: resolvedLabel,
+      ad_tags: resolvedTags,
+      tags: resolvedTags,
+      auto_reply: body.auto_reply || body.autoReply || '',
+      
       is_active: true,
       active: true,
       status: 'active',
@@ -247,6 +259,11 @@ export async function POST(request: NextRequest) {
           max_limit: requestedMax,
           payment_methods: paymentMethods,
           is_active: true,
+          terms: resolvedTerms,
+          offer_label: resolvedLabel,
+          label: resolvedLabel,
+          ad_tags: resolvedTags,
+          tags: resolvedTags,
         };
 
         const { data: minResult, error: minError } = await supabase
@@ -288,6 +305,11 @@ export async function POST(request: NextRequest) {
               max_limit: requestedMax,
               payment_methods: paymentMethods,
               is_active: true,
+              terms: resolvedTerms,
+              offer_label: resolvedLabel,
+              label: resolvedLabel,
+              ad_tags: resolvedTags,
+              tags: resolvedTags,
             };
             const { data: minAdminRes, error: minAdminErr } = await admin
               .from('ads')

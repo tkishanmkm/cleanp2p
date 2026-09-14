@@ -195,7 +195,7 @@ function FormContent({ type }: { type: 'buy' | 'sell' }) {
               value={fiatAmount}
               onChange={handleFiatChange}
               placeholder={t('buySellForm.amountPlaceholder') || 'Enter amount'}
-              className="bg-slate-50 dark:bg-slate-800 border-slate-200 dark:border-slate-700 h-12 text-base rounded-l-xl rounded-r-none focus-visible:ring-[#6347ea]"
+              className="bg-slate-50 dark:bg-slate-800 border-slate-200 dark:border-slate-700 h-12 text-base rounded-l-xl rounded-r-none focus-visible:ring-blue-600"
             />
             <Button
               type="button"
@@ -213,7 +213,7 @@ function FormContent({ type }: { type: 'buy' | 'sell' }) {
           {cryptoAmount && (
             <p className="text-xs text-slate-500 dark:text-slate-400 mt-1.5 flex items-center gap-1 font-medium">
               <span>{type === 'buy' ? t('buySellForm.getApprox') || 'You will receive ~' : t('buySellForm.payApprox') || 'You will give ~'}</span>
-              <span className="text-[#6347ea] dark:text-indigo-400 font-bold">{cryptoAmount} {crypto}</span>
+              <span className="text-blue-600 dark:text-blue-400 font-bold">{cryptoAmount} {crypto}</span>
             </p>
           )}
         </div>
@@ -230,7 +230,7 @@ function FormContent({ type }: { type: 'buy' | 'sell' }) {
             onClick={() => setIsPaymentModalOpen(true)}
           >
             <div className="flex items-center gap-2.5 truncate">
-              <CreditCard className="h-4 w-4 text-[#6347ea] shrink-0" />
+              <CreditCard className="h-4 w-4 text-blue-600 dark:text-blue-400 shrink-0" />
               <span className="font-medium text-slate-900 dark:text-white truncate">
                 {paymentMethod || t('buySellForm.allPaymentMethods') || 'All Payment Methods'}
               </span>
@@ -243,7 +243,7 @@ function FormContent({ type }: { type: 'buy' | 'sell' }) {
         <div className="pt-2">
           <Button
             type="submit"
-            className="w-full h-12 text-base font-bold rounded-xl shadow-lg text-white transition-all duration-200 flex items-center justify-center gap-2 group cursor-pointer bg-[#6347ea] hover:bg-[#5238d6] shadow-[#6347ea]/30"
+            className="w-full h-12 text-base font-bold rounded-xl shadow-lg text-white transition-all duration-200 flex items-center justify-center gap-2 group cursor-pointer bg-blue-600 hover:bg-blue-700 shadow-blue-600/30"
             size="lg"
           >
             <HdMarketSearchIcon className="h-5 w-5 transition-transform group-hover:scale-110" />
@@ -254,10 +254,10 @@ function FormContent({ type }: { type: 'buy' | 'sell' }) {
 
       {/* CENTERED MODAL: Fiat Currency Selection */}
       <Dialog open={isFiatModalOpen} onOpenChange={setIsFiatModalOpen}>
-        <DialogContent className="sm:max-w-lg max-h-[85vh] flex flex-col p-6 rounded-2xl border border-[#6347ea]/25 shadow-2xl bg-white dark:bg-[#151518] overflow-hidden">
+        <DialogContent className="sm:max-w-lg max-h-[85vh] flex flex-col p-6 rounded-2xl border border-blue-500/25 shadow-2xl bg-white dark:bg-[#151518] overflow-hidden">
           <DialogHeader className="space-y-1 text-left pb-2 shrink-0">
             <DialogTitle className="text-xl font-bold flex items-center gap-2.5 text-slate-900 dark:text-white">
-              <div className="w-8 h-8 rounded-lg bg-[#6347ea]/10 dark:bg-[#6347ea]/20 flex items-center justify-center text-[#6347ea]">
+              <div className="w-8 h-8 rounded-lg bg-blue-600/10 dark:bg-blue-600/20 flex items-center justify-center text-blue-600 dark:text-blue-400">
                 <Globe className="w-4 h-4" />
               </div>
               <span>Select Fiat Currency</span>
@@ -274,7 +274,7 @@ function FormContent({ type }: { type: 'buy' | 'sell' }) {
               placeholder="Search by currency name or code (e.g. USD, EUR, INR)..."
               value={fiatSearch}
               onChange={(e) => setFiatSearch(e.target.value)}
-              className="pl-10 h-11 bg-slate-50 dark:bg-slate-800 border-slate-200 dark:border-slate-700 rounded-xl text-sm focus-visible:ring-[#6347ea]"
+              className="pl-10 h-11 bg-slate-50 dark:bg-slate-800 border-slate-200 dark:border-slate-700 rounded-xl text-sm focus-visible:ring-blue-600"
             />
             {fiatSearch && (
               <button
@@ -304,7 +304,7 @@ function FormContent({ type }: { type: 'buy' | 'sell' }) {
                     className={cn(
                       'text-xs px-2.5 py-1 rounded-lg border font-semibold transition-all flex items-center gap-1.5 cursor-pointer',
                       isSelected
-                        ? 'bg-[#6347ea] text-white border-[#6347ea] shadow-xs'
+                        ? 'bg-blue-600 text-white border-blue-600 shadow-xs'
                         : 'bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-700'
                     )}
                   >
@@ -333,7 +333,7 @@ function FormContent({ type }: { type: 'buy' | 'sell' }) {
                   className={cn(
                     'w-full flex items-center justify-between p-3 rounded-xl transition-all text-left border cursor-pointer',
                     isSelected
-                      ? 'bg-[#6347ea]/10 dark:bg-[#6347ea]/20 border-[#6347ea]/40 text-foreground shadow-xs'
+                      ? 'bg-blue-600/10 dark:bg-blue-600/20 border-blue-600/40 text-foreground shadow-xs'
                       : 'hover:bg-slate-50 dark:hover:bg-slate-800/60 text-foreground border-transparent'
                   )}
                 >
@@ -355,7 +355,7 @@ function FormContent({ type }: { type: 'buy' | 'sell' }) {
                   </div>
 
                   {isSelected && (
-                    <div className="w-6 h-6 rounded-full bg-[#6347ea] text-white flex items-center justify-center shrink-0 shadow-xs">
+                    <div className="w-6 h-6 rounded-full bg-blue-600 text-white flex items-center justify-center shrink-0 shadow-xs">
                       <Check className="w-3.5 h-3.5 stroke-[3]" />
                     </div>
                   )}
@@ -373,10 +373,10 @@ function FormContent({ type }: { type: 'buy' | 'sell' }) {
 
       {/* CENTERED MODAL: Payment Method Selection */}
       <Dialog open={isPaymentModalOpen} onOpenChange={setIsPaymentModalOpen}>
-        <DialogContent className="sm:max-w-xl max-h-[85vh] flex flex-col p-6 rounded-2xl border border-[#6347ea]/25 shadow-2xl bg-white dark:bg-[#151518] overflow-hidden">
+        <DialogContent className="sm:max-w-xl max-h-[85vh] flex flex-col p-6 rounded-2xl border border-blue-500/25 shadow-2xl bg-white dark:bg-[#151518] overflow-hidden">
           <DialogHeader className="space-y-1 text-left pb-2 shrink-0">
             <DialogTitle className="text-xl font-bold flex items-center gap-2.5 text-slate-900 dark:text-white">
-              <div className="w-8 h-8 rounded-lg bg-[#6347ea]/10 dark:bg-[#6347ea]/20 flex items-center justify-center text-[#6347ea]">
+              <div className="w-8 h-8 rounded-lg bg-blue-600/10 dark:bg-blue-600/20 flex items-center justify-center text-blue-600 dark:text-blue-400">
                 <CreditCard className="w-4 h-4" />
               </div>
               <span>Select Payment Method</span>
@@ -393,7 +393,7 @@ function FormContent({ type }: { type: 'buy' | 'sell' }) {
               placeholder="Search payment methods (e.g. Bank Transfer, Revolut, UPI, Zelle)..."
               value={paymentSearch}
               onChange={(e) => setPaymentSearch(e.target.value)}
-              className="pl-10 h-11 bg-slate-50 dark:bg-slate-800 border-slate-200 dark:border-slate-700 rounded-xl text-sm focus-visible:ring-[#6347ea]"
+              className="pl-10 h-11 bg-slate-50 dark:bg-slate-800 border-slate-200 dark:border-slate-700 rounded-xl text-sm focus-visible:ring-blue-600"
             />
             {paymentSearch && (
               <button
@@ -417,7 +417,7 @@ function FormContent({ type }: { type: 'buy' | 'sell' }) {
               className={cn(
                 'w-full flex items-center justify-between p-3.5 rounded-xl border transition-all text-left cursor-pointer',
                 !paymentMethod
-                  ? 'bg-[#6347ea] text-white border-transparent shadow-md shadow-[#6347ea]/20'
+                  ? 'bg-blue-600 text-white border-transparent shadow-md shadow-blue-600/20'
                   : 'bg-slate-50 dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-750 border-slate-200 dark:border-slate-700 text-foreground'
               )}
             >
@@ -425,7 +425,7 @@ function FormContent({ type }: { type: 'buy' | 'sell' }) {
                 <div
                   className={cn(
                     'w-9 h-9 rounded-lg flex items-center justify-center shrink-0',
-                    !paymentMethod ? 'bg-white/20 text-white' : 'bg-[#6347ea]/10 text-[#6347ea]'
+                    !paymentMethod ? 'bg-white/20 text-white' : 'bg-blue-600/10 text-blue-600 dark:text-blue-400'
                   )}
                 >
                   <Layers className="w-5 h-5" />
@@ -452,7 +452,7 @@ function FormContent({ type }: { type: 'buy' | 'sell' }) {
               return (
                 <div key={category} className="rounded-xl border border-slate-200 dark:border-slate-800 overflow-hidden bg-slate-50/50 dark:bg-slate-900/40">
                   <div className="px-3.5 py-2.5 bg-slate-100/70 dark:bg-slate-800/60 flex items-center gap-2 text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider border-b border-slate-200/80 dark:border-slate-800/80">
-                    <Icon className="w-3.5 h-3.5 text-[#6347ea]" />
+                    <Icon className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
                     <span>{category}</span>
                     <span className="ml-auto text-[11px] text-muted-foreground font-normal lowercase">
                       ({filteredMethods.length})
@@ -472,7 +472,7 @@ function FormContent({ type }: { type: 'buy' | 'sell' }) {
                           className={cn(
                             'flex items-center justify-between px-3 py-2 rounded-lg text-xs font-medium transition-all text-left border cursor-pointer',
                             isSelected
-                              ? 'bg-[#6347ea] text-white border-[#6347ea] shadow-xs'
+                              ? 'bg-blue-600 text-white border-blue-600 shadow-xs'
                               : 'bg-white dark:bg-slate-800/80 hover:bg-slate-100 dark:hover:bg-slate-750 text-slate-800 dark:text-slate-200 border-slate-200/60 dark:border-slate-700/60'
                           )}
                         >
@@ -490,7 +490,7 @@ function FormContent({ type }: { type: 'buy' | 'sell' }) {
               <div className="pt-2">
                 <Button
                   type="button"
-                  className="w-full bg-[#6347ea] hover:bg-[#5238d6] text-white rounded-xl cursor-pointer"
+                  className="w-full bg-blue-600 hover:bg-blue-700 text-white rounded-xl cursor-pointer"
                   onClick={() => {
                     setPaymentMethod(paymentSearch.trim());
                     setIsPaymentModalOpen(false);
