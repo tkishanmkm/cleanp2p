@@ -36,7 +36,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     const activity = payload.event?.activity?.[0];
 
     if (!activity) {
-      return NextResponse.json({ message: 'No activity found' }, { status: 200 });
+      return NextResponse.json({ error: 'No activity data found' }, { status: 400 });
     }
 
     const toAddress = activity.toAddress.toLowerCase();
@@ -44,18 +44,56 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     const asset = activity.asset;
     const txHash = activity.hash;
 
-    const { data: profile, error: profileError } = await supabaseAdmin
+    // Address-to-User Lookup (supports profiles, user_deposit_addresses, and deposit_addresses)
+    let userId: string | null = null;
+    let walletIndex = 0;
+
+    // 1. Check profiles table
+    const { data: profile } = await supabaseAdmin
       .from('profiles')
-      .select('id, wallet_index')
-      .filter('evm_deposit_address', 'ilike', toAddress)
+      .select('id, wallet_index, evm_deposit_address, tron_deposit_address, btc_deposit_address, ltc_deposit_address')
+      .or(`evm_deposit_address.ilike.${toAddress},tron_deposit_address.ilike.${toAddress},btc_deposit_address.ilike.${toAddress},ltc_deposit_address.ilike.${toAddress}`)
       .maybeSingle();
 
-    if (profileError || !profile) {
-      return NextResponse.json({ message: 'Address does not belong to platform user' }, { status: 200 });
+    if (profile?.id) {
+      userId = profile.id;
+      walletIndex = profile.wallet_index ?? 0;
     }
 
+    // 2. Fallback to user_deposit_addresses
+    if (!userId) {
+      const { data: depositAddr } = await supabaseAdmin
+        .from('user_deposit_addresses')
+        .select('user_id, derivation_index')
+        .filter('address', 'ilike', toAddress)
+        .maybeSingle();
+
+      if (depositAddr?.user_id) {
+        userId = depositAddr.user_id;
+        walletIndex = depositAddr.derivation_index ?? 0;
+      }
+    }
+
+    // 3. Fallback to legacy deposit_addresses
+    if (!userId) {
+      const { data: legacyAddr } = await supabaseAdmin
+        .from('deposit_addresses')
+        .select('user_id')
+        .filter('address', 'ilike', toAddress)
+        .maybeSingle();
+
+      if (legacyAddr?.user_id) {
+        userId = legacyAddr.user_id;
+      }
+    }
+
+    if (!userId) {
+      return NextResponse.json({ error: 'Address does not belong to platform user' }, { status: 400 });
+    }
+
+    // Process deposit credit
     const { error: creditError } = await supabaseAdmin.rpc('process_user_deposit', {
-      p_user_id: profile.id,
+      p_user_id: userId,
       p_amount: amount,
       p_asset: asset,
       p_tx_hash: txHash,
@@ -63,9 +101,10 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
     if (creditError) throw creditError;
 
+    // Enqueue for automated sweeping
     await supabaseAdmin.from('sweep_queue').insert({
-      user_id: profile.id,
-      wallet_index: profile.wallet_index ?? 0,
+      user_id: userId,
+      wallet_index: walletIndex,
       asset,
       deposit_address: toAddress,
       amount,
@@ -73,19 +112,15 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       status: asset === 'ETH' ? 'GAS_FUNDED' : 'PENDING_GAS',
     });
 
-    return NextResponse.json({ success: true, message: 'Deposit credited & queued for sweeping' });
-  } catch (err: unknown) {
-    console.error('Webhook processing failed:', err);
-    const anyErr = err as Record<string, unknown> | null;
-    const errorMessage = err instanceof Error ? err.message : (anyErr?.message as string) || 'Internal server error';
-    const errorDetails = anyErr?.hint || anyErr?.details || (err instanceof Error ? err.stack : String(err));
-    const errorCode = anyErr?.code;
-
+    return NextResponse.json({ success: true, message: 'Deposit processed' });
+  } catch (err: any) {
+    console.error('Webhook processing failed raw:', err);
     return NextResponse.json(
       {
-        error: errorMessage,
-        details: errorDetails,
-        code: errorCode,
+        success: false,
+        error: err?.message || String(err),
+        stack: err?.stack,
+        raw: JSON.stringify(err, Object.getOwnPropertyNames(err)),
       },
       { status: 500 }
     );
