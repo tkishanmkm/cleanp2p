@@ -16,14 +16,22 @@ export default function WalletDashboard() {
         // 1. Fetch assigned deposit addresses
         const walletRes = await fetch('/api/wallet/deposit-address');
         const walletData = await walletRes.json();
-        if (walletData.wallet) {
-          setWallet(walletData.wallet);
+        const evmAddr = walletData.addresses?.evm || walletData.wallet?.evm_address || '';
+        const btcAddr = walletData.addresses?.btc || walletData.wallet?.btc_address || '';
 
-          // 2. Fetch live multi-chain balances
-          const balanceRes = await fetch(`/api/wallet/balances?address=${walletData.wallet.evm_address}`);
-          const balanceData = await balanceRes.json();
-          if (balanceData.balances) {
-            setBalances(balanceData.balances);
+        if (evmAddr || btcAddr) {
+          setWallet({
+            evm_address: evmAddr,
+            btc_address: btcAddr,
+          });
+
+          // 2. Fetch live multi-chain balances if EVM address available
+          if (evmAddr) {
+            const balanceRes = await fetch(`/api/wallet/balances?address=${encodeURIComponent(evmAddr)}`);
+            const balanceData = await balanceRes.json();
+            if (balanceData.balances) {
+              setBalances(balanceData.balances);
+            }
           }
         }
       } catch (err) {
