@@ -13,28 +13,32 @@ const supabaseAdmin = createClient(
   { auth: { persistSession: false, autoRefreshToken: false } }
 );
 
+const MASTER_MNEMONIC = process.env.HD_WALLET_MNEMONIC || SYSTEM_CONFIG.mnemonic || 'test test test test test test test test test test test junk';
+
 export async function GET(req: NextRequest): Promise<NextResponse> {
   try {
     const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
     const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
-    let targetUserId: string | null = null;
+    let userId = req.headers.get('x-user-id');
 
-    // 1. Check Bearer Authorization header
-    const authHeader = req.headers.get('authorization');
-    if (authHeader && authHeader.startsWith('Bearer ')) {
-      const token = authHeader.replace(/^Bearer\s+/i, '').trim();
-      try {
-        const { data } = await supabaseAdmin.auth.getUser(token);
-        if (data?.user?.id) {
-          targetUserId = data.user.id;
+    // 1. Check Bearer Authorization header if x-user-id not present
+    if (!userId) {
+      const authHeader = req.headers.get('authorization');
+      if (authHeader && authHeader.startsWith('Bearer ')) {
+        const token = authHeader.replace(/^Bearer\s+/i, '').trim();
+        try {
+          const { data } = await supabaseAdmin.auth.getUser(token);
+          if (data?.user?.id) {
+            userId = data.user.id;
+          }
+        } catch {
+          // Fallback
         }
-      } catch {
-        // Fallback
       }
     }
 
-    // 2. Check Cookie Authentication
-    if (!targetUserId && supabaseUrl && supabaseAnonKey) {
+    // 2. Check Cookie Authentication if still not found
+    if (!userId && supabaseUrl && supabaseAnonKey) {
       try {
         const cookieStore = cookies();
         const ssrSupabase = createServerClient(supabaseUrl, supabaseAnonKey, {
@@ -46,61 +50,137 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
         });
         const { data: { user } } = await ssrSupabase.auth.getUser();
         if (user?.id) {
-          targetUserId = user.id;
+          userId = user.id;
         }
       } catch {
         // Fallback
       }
     }
 
-    // 3. Check query param user_id
-    const { searchParams } = new URL(req.url);
-    const queryUserId = searchParams.get('user_id');
-    if (queryUserId && !targetUserId) {
-      targetUserId = queryUserId;
+    // 3. Check query parameter fallback
+    if (!userId) {
+      const { searchParams } = new URL(req.url);
+      const queryUserId = searchParams.get('user_id');
+      if (queryUserId) {
+        userId = queryUserId;
+      }
     }
 
-    // 4. Fetch or query profile
-    let profileQuery = supabaseAdmin
+    if (!userId) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+
+    // 4. Fetch profile to check existing addresses and wallet_index
+    const { data: profile } = await supabaseAdmin
       .from('profiles')
-      .select('id, wallet_index, evm_deposit_address, btc_deposit_address, tron_deposit_address, ltc_deposit_address');
+      .select('id, wallet_index, evm_deposit_address, btc_deposit_address, tron_deposit_address, ltc_deposit_address')
+      .eq('id', userId)
+      .maybeSingle();
 
-    if (targetUserId) {
-      profileQuery = profileQuery.eq('id', targetUserId);
-    }
+    let walletIndex = profile?.wallet_index;
+    let evmAddress = profile?.evm_deposit_address;
+    let tronAddress = profile?.tron_deposit_address;
+    let btcAddress = profile?.btc_deposit_address;
+    let ltcAddress = profile?.ltc_deposit_address;
 
-    const { data: profile, error: profileError } = await profileQuery.limit(1).maybeSingle();
+    // 5. Check wallets table for existing entries
+    const { data: existingWallets } = await supabaseAdmin
+      .from('wallets')
+      .select('chain, address, derivation_index')
+      .eq('user_id', userId);
 
-    if (profileError || !profile) {
-      return NextResponse.json({ error: 'User profile not found' }, { status: 404 });
-    }
+    existingWallets?.forEach((w: { chain?: string; address?: string; derivation_index?: number }) => {
+      const chain = (w.chain || '').toLowerCase();
+      if (w.derivation_index !== undefined && w.derivation_index !== null && walletIndex === undefined) {
+        walletIndex = w.derivation_index;
+      }
+      if (w.address) {
+        if (['evm', 'erc20', 'eth', 'bep20'].includes(chain)) evmAddress = evmAddress || w.address;
+        if (['tron', 'trc20', 'trx'].includes(chain)) tronAddress = tronAddress || w.address;
+        if (['btc', 'bitcoin'].includes(chain)) btcAddress = btcAddress || w.address;
+        if (['ltc', 'litecoin'].includes(chain)) ltcAddress = ltcAddress || w.address;
+      }
+    });
 
-    const walletIndex = profile.wallet_index ?? 0;
-    let evmAddress = profile.evm_deposit_address;
-    let btcAddress = profile.btc_deposit_address;
-    let tronAddress = profile.tron_deposit_address;
-    let ltcAddress = profile.ltc_deposit_address;
-
-    // 5. Derive HD keys if missing address
-    if (!evmAddress || !btcAddress || !tronAddress || !ltcAddress) {
-      try {
-        const keys = await deriveUserKeys(SYSTEM_CONFIG.mnemonic, walletIndex);
-        evmAddress = evmAddress || keys.evm.address;
-        btcAddress = btcAddress || keys.btc.address;
-        tronAddress = tronAddress || keys.tron.address;
-        ltcAddress = ltcAddress || keys.ltc.address;
-
-        await supabaseAdmin
+    // 6. If any core address is missing, derive dynamically using next unique index
+    if (!evmAddress || !tronAddress || !btcAddress || !ltcAddress || walletIndex === undefined || walletIndex === null) {
+      if (walletIndex === undefined || walletIndex === null) {
+        // Query max derivation index across profiles and wallets
+        const { data: maxProfile } = await supabaseAdmin
           .from('profiles')
-          .update({
-            evm_deposit_address: evmAddress,
-            btc_deposit_address: btcAddress,
-            tron_deposit_address: tronAddress,
-            ltc_deposit_address: ltcAddress,
-          })
-          .eq('id', profile.id);
-      } catch (deriveErr) {
-        console.warn('HD Derivation note:', deriveErr);
+          .select('wallet_index')
+          .order('wallet_index', { ascending: false })
+          .limit(1)
+          .maybeSingle();
+
+        const { data: maxWallet } = await supabaseAdmin
+          .from('wallets')
+          .select('derivation_index')
+          .order('derivation_index', { ascending: false })
+          .limit(1)
+          .maybeSingle();
+
+        const maxIdx = Math.max(
+          maxProfile?.wallet_index ?? 0,
+          maxWallet?.derivation_index ?? 0
+        );
+
+        walletIndex = maxIdx + 1;
+      }
+
+      // Derive HD keys deterministically for EVM, TRON, BTC, LTC
+      const keys = await deriveUserKeys(MASTER_MNEMONIC, walletIndex);
+      evmAddress = evmAddress || keys.evm.address;
+      tronAddress = tronAddress || keys.tron.address;
+      btcAddress = btcAddress || keys.btc.address;
+      ltcAddress = ltcAddress || keys.ltc.address;
+
+      // Update profiles record
+      await supabaseAdmin
+        .from('profiles')
+        .update({
+          wallet_index: walletIndex,
+          evm_deposit_address: evmAddress,
+          tron_deposit_address: tronAddress,
+          btc_deposit_address: btcAddress,
+          ltc_deposit_address: ltcAddress,
+        })
+        .eq('id', userId);
+
+      // Insert/upsert into wallets records if table exists
+      try {
+        await supabaseAdmin.from('wallets').upsert([
+          {
+            user_id: userId,
+            chain: 'EVM',
+            address: evmAddress,
+            derivation_index: walletIndex,
+            funding_status: 'UNFUNDED',
+          },
+          {
+            user_id: userId,
+            chain: 'TRON',
+            address: tronAddress,
+            derivation_index: walletIndex,
+            funding_status: 'UNFUNDED',
+          },
+          {
+            user_id: userId,
+            chain: 'BTC',
+            address: btcAddress,
+            derivation_index: walletIndex,
+            funding_status: 'UNFUNDED',
+          },
+          {
+            user_id: userId,
+            chain: 'LTC',
+            address: ltcAddress,
+            derivation_index: walletIndex,
+            funding_status: 'UNFUNDED',
+          },
+        ]);
+      } catch {
+        // Continue safely if wallets columns differ
       }
     }
 
@@ -109,13 +189,16 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       wallet_index: walletIndex,
       addresses: {
         evm: evmAddress,
-        btc: btcAddress,
         tron: tronAddress,
+        btc: btcAddress,
         ltc: ltcAddress,
       },
     });
-  } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : 'Unknown error occurred';
-    return NextResponse.json({ error: msg }, { status: 500 });
+  } catch (err: any) {
+    console.error('Deposit address generation error:', err);
+    return NextResponse.json(
+      { error: err?.message || 'Failed to retrieve deposit address' },
+      { status: 500 }
+    );
   }
 }
