@@ -67,6 +67,15 @@ export function deriveTronAddressFromPrivateKey(privateKeyHex: string, uncompres
   return bs58.encode(Buffer.concat([tronRawAddress, checksum]));
 }
 
+/**
+ * Dynamic EVM derivation matching BIP-44 path m/44'/60'/0'/0/${index}
+ */
+export function deriveEvmAddress(mnemonic: string, index: number): string {
+  const hdNode = ethers.HDNodeWallet.fromPhrase(mnemonic.trim());
+  const derivedWallet = hdNode.derivePath(`m/44'/60'/0'/0/${index}`);
+  return derivedWallet.address;
+}
+
 export async function deriveUserKeys(mnemonic: string, index: number) {
   if (!mnemonic || !mnemonic.trim()) {
     throw new Error('DEPOSIT_HD_MNEMONIC is not configured');
