@@ -44,6 +44,22 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     const asset = activity.asset;
     const txHash = activity.hash;
 
+    // Idempotency: Pre-check for duplicate transaction hash
+    if (txHash) {
+      const { data: existingSweep } = await supabaseAdmin
+        .from('sweep_queue')
+        .select('id')
+        .eq('tx_hash', txHash)
+        .maybeSingle();
+
+      if (existingSweep) {
+        return NextResponse.json(
+          { success: false, error: 'Duplicate transaction hash' },
+          { status: 400 }
+        );
+      }
+    }
+
     // Address-to-User Lookup (supports profiles, user_deposit_addresses, and deposit_addresses)
     let userId: string | null = null;
     let walletIndex = 0;
@@ -99,7 +115,20 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       p_tx_hash: txHash,
     });
 
-    if (creditError) throw creditError;
+    if (creditError) {
+      if (
+        creditError.code === '23505' ||
+        creditError.message?.toLowerCase().includes('duplicate') ||
+        creditError.message?.toLowerCase().includes('unique') ||
+        creditError.message?.includes('Duplicate transaction hash')
+      ) {
+        return NextResponse.json(
+          { success: false, error: 'Duplicate transaction hash' },
+          { status: 400 }
+        );
+      }
+      throw creditError;
+    }
 
     // Enqueue for automated sweeping
     await supabaseAdmin.from('sweep_queue').insert({
@@ -114,14 +143,9 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
     return NextResponse.json({ success: true, message: 'Deposit processed' });
   } catch (err: any) {
-    console.error('Webhook processing failed raw:', err);
+    console.error('Webhook processing error:', err);
     return NextResponse.json(
-      {
-        success: false,
-        error: err?.message || String(err),
-        stack: err?.stack,
-        raw: JSON.stringify(err, Object.getOwnPropertyNames(err)),
-      },
+      { success: false, error: 'Internal server error' },
       { status: 500 }
     );
   }
