@@ -102,7 +102,7 @@ function getTronAddressFromPrivateKey(privKey: string): string {
     return encoded;
   } catch (err) {
     console.error("Deposit address error: failed to derive Tron address from private key:", err);
-    return process.env.TRON_HOT_WALLET_ADDRESS || 'TYpQk9hPmsfWk1uLNxk1iW6dNm3rZJ4yTx';
+    return process.env.TRON_HOT_WALLET_ADDRESS || '';
   }
 }
 
@@ -140,7 +140,7 @@ function getBtcSegwitAddressFromPrivateKey(privKey: string): string {
     return encodeBech32('bc1', ripemd160Hash);
   } catch (err) {
     console.error("Deposit address error: failed to derive BTC SegWit address from private key:", err);
-    return process.env.BTC_HOT_WALLET_ADDRESS || 'bc1qxy2kgdygjrsqtzq2n0yrf2493p83kkfjhx0wlh';
+    return process.env.BTC_HOT_WALLET_ADDRESS || '';
   }
 }
 
@@ -157,7 +157,7 @@ function getEvmAddressFromPrivateKey(privKey: string): string {
     return wallet.address;
   } catch (err) {
     console.error("Deposit address error: failed to derive EVM address from private key:", err);
-    return process.env.EVM_HOT_WALLET_ADDRESS || '0x71C8F7E41e467d583C1c33c3e80E9e67d264fE08';
+    return process.env.EVM_HOT_WALLET_ADDRESS || '';
   }
 }
 
@@ -301,7 +301,7 @@ async function deriveDepositAddress(
         derivationIndex
       );
       return {
-        address: address || '0x71C8F7E41e467d583C1c33c3e80E9e67d264fE08',
+        address: address || '',
         network,
         derivationPath: path,
       };
@@ -311,7 +311,7 @@ async function deriveDepositAddress(
         return { address: getEvmAddressFromPrivateKey(process.env.EVM_HOT_WALLET_PRIVATE_KEY), network };
       }
       return {
-        address: process.env.EVM_HOT_WALLET_ADDRESS || '0x71C8F7E41e467d583C1c33c3e80E9e67d264fE08',
+        address: process.env.EVM_HOT_WALLET_ADDRESS || '',
         network,
       };
     }
@@ -350,7 +350,7 @@ async function deriveDepositAddress(
       console.error("Deposit address error in BTC derivation:", err);
     }
     return {
-      address: process.env.BTC_HOT_WALLET_ADDRESS || 'bc1qxy2kgdygjrsqtzq2n0yrf2493p83kkfjhx0wlh',
+      address: process.env.BTC_HOT_WALLET_ADDRESS || '',
       network: 'BTC',
     };
   }
@@ -388,7 +388,7 @@ async function deriveDepositAddress(
       console.error("Deposit address error in Tron derivation:", err);
     }
     return {
-      address: process.env.TRON_HOT_WALLET_ADDRESS || 'TYpQk9hPmsfWk1uLNxk1iW6dNm3rZJ4yTx',
+      address: process.env.TRON_HOT_WALLET_ADDRESS || '',
       network: network || 'TRC20',
     };
   }
@@ -443,7 +443,7 @@ async function deriveDepositAddress(
       console.error("Deposit address error in LTC derivation:", err);
     }
     return {
-      address: process.env.LTC_HOT_WALLET_ADDRESS || 'ltc1q7z92p23x262f270n7x5t89z4v5a7g3k5z6q7w8',
+      address: process.env.LTC_HOT_WALLET_ADDRESS || '',
       network: 'LTC',
     };
   }
@@ -551,6 +551,7 @@ async function handleDepositAddressRequest(req: NextRequest) {
           .insert({
             user_id: user.id,
             status: 'active',
+            provisioning_status: 'completed',
           })
           .select('id')
           .maybeSingle();
