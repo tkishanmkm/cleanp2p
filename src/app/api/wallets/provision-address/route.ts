@@ -568,10 +568,9 @@ async function handleProvisioning(req: NextRequest) {
           .insert({
             user_id: user.id,
             status: 'active',
-            provisioning_status: 'completed',
           })
           .select('id')
-          .single();
+          .maybeSingle();
 
         walletId = newWallet?.id || null;
       }

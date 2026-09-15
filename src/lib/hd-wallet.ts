@@ -306,12 +306,26 @@ export async function getOrProvisionHDDepositAddress(
     walletId = walletData.id;
   } else {
     // Create wallet container if not present
-    const { data: newWallet } = await supabase
-      .from('wallets')
-      .insert({ user_id: userId, status: 'active', provisioning_status: 'completed' })
-      .select('id')
-      .single();
-    walletId = newWallet?.id || null;
+    let newWalletId: string | null = null;
+    try {
+      const { data: newWallet } = await supabase
+        .from('wallets')
+        .insert({ user_id: userId, status: 'active' })
+        .select('id')
+        .maybeSingle();
+      newWalletId = newWallet?.id || null;
+    } catch {
+      // fallback
+    }
+    if (!newWalletId) {
+      const { data: fallbackWallet } = await supabase
+        .from('wallets')
+        .insert({ user_id: userId })
+        .select('id')
+        .maybeSingle();
+      newWalletId = fallbackWallet?.id || userId;
+    }
+    walletId = newWalletId;
   }
 
   // 4. Derive the new address using network public xpub

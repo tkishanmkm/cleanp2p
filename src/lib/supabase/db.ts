@@ -299,13 +299,9 @@ export interface AdminWalletMetrics {
 export async function getAdminWalletOverview(): Promise<RpcResponse<AdminWalletMetrics>> {
   try {
     // 1. Query wallets
-    const { data: walletsData, error: walletsError } = await supabase
+    const { data: walletsData } = await supabase
       .from('wallets')
-      .select('id, user_id, status, provisioning_status');
-
-    if (walletsError) {
-      return { data: null, error: new Error(walletsError.message) };
-    }
+      .select('id, user_id, status');
 
     const totalWallets = (walletsData || []).length;
 
@@ -343,11 +339,11 @@ export async function getAdminWalletOverview(): Promise<RpcResponse<AdminWalletM
       provisioned_wallets: 0,
     };
 
-    (walletsData || []).forEach(w => {
-      const status = w.provisioning_status || 'pending';
+    (walletsData || []).forEach((w: any) => {
+      const status = w.status || 'completed';
       if (status === 'pending') queueStats.queued++;
       else if (status === 'in_progress') queueStats.processing++;
-      else if (status === 'completed') {
+      else if (status === 'active' || status === 'completed') {
         queueStats.completed++;
         queueStats.provisioned_wallets++;
       } else if (status === 'failed') queueStats.failed++;

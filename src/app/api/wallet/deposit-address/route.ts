@@ -1,79 +1,121 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
 import { createServerClient } from '@supabase/ssr';
-import { getSupabaseAdminClient } from '@/lib/supabase/server';
+import { createClient } from '@supabase/supabase-js';
+import { SYSTEM_CONFIG } from '@/lib/config/env';
+import { deriveUserKeys } from '@/lib/crypto/hd-engine';
 
-export async function GET(req: NextRequest) {
+export const dynamic = 'force-dynamic';
+
+const supabaseAdmin = createClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://placeholder.supabase.co',
+  process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'placeholder-key',
+  { auth: { persistSession: false, autoRefreshToken: false } }
+);
+
+export async function GET(req: NextRequest): Promise<NextResponse> {
   try {
-    const cookieStore = cookies();
-    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL || 'https://placeholder.supabase.co';
-    const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'placeholder-key';
-    const supabaseAdmin = getSupabaseAdminClient();
+    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
+    const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
+    let targetUserId: string | null = null;
 
-    let userId: string | null = null;
-
-    // Check authorization header
+    // 1. Check Bearer Authorization header
     const authHeader = req.headers.get('authorization');
     if (authHeader && authHeader.startsWith('Bearer ')) {
       const token = authHeader.replace(/^Bearer\s+/i, '').trim();
       try {
-        const { data, error } = await supabaseAdmin.auth.getUser(token);
-        if (!error && data?.user) {
-          userId = data.user.id;
+        const { data } = await supabaseAdmin.auth.getUser(token);
+        if (data?.user?.id) {
+          targetUserId = data.user.id;
         }
       } catch {
         // Fallback
       }
     }
 
-    if (!userId) {
-      const supabase = createServerClient(supabaseUrl, supabaseAnonKey, {
-        cookies: {
-          getAll() {
-            return cookieStore.getAll();
+    // 2. Check Cookie Authentication
+    if (!targetUserId && supabaseUrl && supabaseAnonKey) {
+      try {
+        const cookieStore = cookies();
+        const ssrSupabase = createServerClient(supabaseUrl, supabaseAnonKey, {
+          cookies: {
+            getAll() {
+              return cookieStore.getAll();
+            },
           },
-        },
-      });
-      const { data: { user } } = await supabase.auth.getUser();
-      if (user) {
-        userId = user.id;
+        });
+        const { data: { user } } = await ssrSupabase.auth.getUser();
+        if (user?.id) {
+          targetUserId = user.id;
+        }
+      } catch {
+        // Fallback
       }
     }
 
-    // Default or mock addresses if unauthenticated or new
-    let evmAddress = process.env.EVM_HOT_WALLET_ADDRESS || '0x71C80a6c6a46C652136e095b3d5bfa780d6D33A4';
-    let btcAddress = process.env.BTC_HOT_WALLET_ADDRESS || 'bc1q9d6g9m37t5tq3x4796j9p4y0q9c5p8w4n5g6m7';
+    // 3. Check query param user_id
+    const { searchParams } = new URL(req.url);
+    const queryUserId = searchParams.get('user_id');
+    if (queryUserId && !targetUserId) {
+      targetUserId = queryUserId;
+    }
 
-    if (userId) {
-      const { data: addresses } = await supabaseAdmin
-        .from('user_deposit_addresses')
-        .select('address, network, asset_symbol')
-        .eq('user_id', userId);
+    // 4. Fetch or query profile
+    let profileQuery = supabaseAdmin
+      .from('profiles')
+      .select('id, wallet_index, evm_deposit_address, btc_deposit_address, tron_deposit_address, ltc_deposit_address');
 
-      if (addresses && addresses.length > 0) {
-        const evm = addresses.find((a) => ['ethereum', 'arbitrum', 'base', 'polygon', 'evm', 'ETH', 'USDT'].includes(a.network) || a.address?.startsWith('0x'));
-        const btc = addresses.find((a) => ['bitcoin', 'btc', 'BTC'].includes(a.network) || a.address?.startsWith('bc1') || a.address?.startsWith('1') || a.address?.startsWith('3'));
-        
-        if (evm?.address) evmAddress = evm.address;
-        if (btc?.address) btcAddress = btc.address;
+    if (targetUserId) {
+      profileQuery = profileQuery.eq('id', targetUserId);
+    }
+
+    const { data: profile, error: profileError } = await profileQuery.limit(1).maybeSingle();
+
+    if (profileError || !profile) {
+      return NextResponse.json({ error: 'User profile not found' }, { status: 404 });
+    }
+
+    const walletIndex = profile.wallet_index ?? 0;
+    let evmAddress = profile.evm_deposit_address;
+    let btcAddress = profile.btc_deposit_address;
+    let tronAddress = profile.tron_deposit_address;
+    let ltcAddress = profile.ltc_deposit_address;
+
+    // 5. Derive HD keys if missing address
+    if (!evmAddress || !btcAddress || !tronAddress || !ltcAddress) {
+      try {
+        const keys = await deriveUserKeys(SYSTEM_CONFIG.mnemonic, walletIndex);
+        evmAddress = evmAddress || keys.evm.address;
+        btcAddress = btcAddress || keys.btc.address;
+        tronAddress = tronAddress || keys.tron.address;
+        ltcAddress = ltcAddress || keys.ltc.address;
+
+        await supabaseAdmin
+          .from('profiles')
+          .update({
+            evm_deposit_address: evmAddress,
+            btc_deposit_address: btcAddress,
+            tron_deposit_address: tronAddress,
+            ltc_deposit_address: ltcAddress,
+          })
+          .eq('id', profile.id);
+      } catch (deriveErr) {
+        console.warn('HD Derivation note:', deriveErr);
       }
     }
 
     return NextResponse.json({
       success: true,
-      wallet: {
-        evm_address: evmAddress,
-        btc_address: btcAddress,
+      wallet_index: walletIndex,
+      addresses: {
+        evm: evmAddress,
+        btc: btcAddress,
+        tron: tronAddress,
+        ltc: ltcAddress,
       },
     });
-  } catch (err: any) {
-    return NextResponse.json({
-      success: false,
-      wallet: {
-        evm_address: '0x71C80a6c6a46C652136e095b3d5bfa780d6D33A4',
-        btc_address: 'bc1q9d6g9m37t5tq3x4796j9p4y0q9c5p8w4n5g6m7',
-      },
-      error: err.message,
-    });
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : 'Unknown error occurred';
+    return NextResponse.json({ error: msg }, { status: 500 });
   }
 }

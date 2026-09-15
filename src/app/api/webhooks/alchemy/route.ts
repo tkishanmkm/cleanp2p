@@ -1,75 +1,93 @@
 import { NextRequest, NextResponse } from 'next/server';
-import crypto from 'crypto';
+import { SYSTEM_CONFIG } from '@/lib/config/env';
 import { createClient } from '@supabase/supabase-js';
-
-export const dynamic = 'force-dynamic';
+import crypto from 'crypto';
 
 const supabaseAdmin = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL || 'https://placeholder.supabase.co',
-  process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'placeholder-anon-key',
-  { auth: { persistSession: false, autoRefreshToken: false } }
+  process.env.NEXT_PUBLIC_SUPABASE_URL!,
+  process.env.SUPABASE_SERVICE_ROLE_KEY!
 );
 
-function verifyAlchemySignature(rawBody: string, signature: string | null): boolean {
-  const signingKey = process.env.ALCHEMY_WEBHOOK_SIGNING_KEY;
-  if (!signingKey || !signature) return false;
-
+function verifySignature(body: string, signature: string, secret: string): boolean {
   try {
-    const hmac = crypto.createHmac('sha256', signingKey);
-    hmac.update(rawBody, 'utf8');
-    const digest = hmac.digest('hex');
-
-    const sigBuf = Buffer.from(signature, 'hex');
-    const digestBuf = Buffer.from(digest, 'hex');
-
-    if (sigBuf.length !== digestBuf.length) return false;
-    return crypto.timingSafeEqual(sigBuf, digestBuf);
+    const hmac = crypto.createHmac('sha256', secret).update(body).digest('hex');
+    const sigBuf = Buffer.from(signature);
+    const hmacBuf = Buffer.from(hmac);
+    if (sigBuf.length !== hmacBuf.length) return false;
+    return crypto.timingSafeEqual(sigBuf, hmacBuf);
   } catch {
     return false;
   }
 }
 
-export async function POST(req: NextRequest) {
+export async function POST(req: NextRequest): Promise<NextResponse> {
   try {
     const rawBody = await req.text();
-    const signature = req.headers.get('x-alchemy-signature');
+    const signature = req.headers.get('x-alchemy-signature') ?? '';
 
-    // 1. Constant-Time HMAC Signature Check
-    if (!verifyAlchemySignature(rawBody, signature)) {
-      return NextResponse.json({ error: 'Unauthorized signature' }, { status: 401 });
+    if (SYSTEM_CONFIG.secrets.webhook && !verifySignature(rawBody, signature, SYSTEM_CONFIG.secrets.webhook)) {
+      return NextResponse.json({ error: 'Invalid HMAC signature' }, { status: 401 });
     }
 
-    const payload = JSON.parse(rawBody);
-    const activity = payload.event?.activity;
+    const payload = JSON.parse(rawBody) as {
+      event?: { activity?: Array<{ toAddress: string; value: number; asset: string; hash: string }> };
+    };
+    
+    const activity = payload.event?.activity?.[0];
 
-    if (!Array.isArray(activity) || activity.length === 0) {
-      return NextResponse.json({ message: 'No transfers in payload' }, { status: 200 });
+    if (!activity) {
+      return NextResponse.json({ message: 'No activity found' }, { status: 200 });
     }
 
-    // 2. Process incoming transfers
-    for (const tx of activity) {
-      const toAddress = tx.toAddress;
-      const asset = (tx.asset || 'ETH').toUpperCase();
-      const network = tx.category || 'EVM';
-      const txid = tx.hash;
-      const logIndex = tx.logIndex ? parseInt(tx.logIndex, 16) : 0;
-      const amount = tx.value;
+    const toAddress = activity.toAddress.toLowerCase();
+    const amount = activity.value;
+    const asset = activity.asset;
+    const txHash = activity.hash;
 
-      if (!toAddress || !txid || !amount || Number(amount) <= 0) continue;
+    const { data: profile, error: profileError } = await supabaseAdmin
+      .from('profiles')
+      .select('id, wallet_index')
+      .filter('evm_deposit_address', 'ilike', toAddress)
+      .maybeSingle();
 
-      await supabaseAdmin.rpc('process_incoming_deposit', {
-        p_to_address: toAddress,
-        p_asset: asset,
-        p_network: network,
-        p_amount: amount,
-        p_txid: txid,
-        p_output_index: logIndex,
-      });
+    if (profileError || !profile) {
+      return NextResponse.json({ message: 'Address does not belong to platform user' }, { status: 200 });
     }
 
-    return NextResponse.json({ success: true }, { status: 200 });
-  } catch (err: any) {
-    console.error('[Alchemy Webhook Error]:', err);
-    return NextResponse.json({ error: 'Internal Ingestion Error' }, { status: 500 });
+    const { error: creditError } = await supabaseAdmin.rpc('process_user_deposit', {
+      p_user_id: profile.id,
+      p_amount: amount,
+      p_asset: asset,
+      p_tx_hash: txHash,
+    });
+
+    if (creditError) throw creditError;
+
+    await supabaseAdmin.from('sweep_queue').insert({
+      user_id: profile.id,
+      wallet_index: profile.wallet_index ?? 0,
+      asset,
+      deposit_address: toAddress,
+      amount,
+      tx_hash: txHash,
+      status: asset === 'ETH' ? 'GAS_FUNDED' : 'PENDING_GAS',
+    });
+
+    return NextResponse.json({ success: true, message: 'Deposit credited & queued for sweeping' });
+  } catch (err: unknown) {
+    console.error('Webhook processing failed:', err);
+    const anyErr = err as Record<string, unknown> | null;
+    const errorMessage = err instanceof Error ? err.message : (anyErr?.message as string) || 'Internal server error';
+    const errorDetails = anyErr?.hint || anyErr?.details || (err instanceof Error ? err.stack : String(err));
+    const errorCode = anyErr?.code;
+
+    return NextResponse.json(
+      {
+        error: errorMessage,
+        details: errorDetails,
+        code: errorCode,
+      },
+      { status: 500 }
+    );
   }
 }

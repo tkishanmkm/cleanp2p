@@ -76,10 +76,9 @@ async function fallbackCreditWallet(
         .insert({
           user_id: userId,
           status: 'active',
-          provisioning_status: 'completed',
         })
         .select('id')
-        .single();
+        .maybeSingle();
       resolvedWalletId = newWallet?.id;
     }
   }
