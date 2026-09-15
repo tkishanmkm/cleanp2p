@@ -39,7 +39,36 @@ export function useUserWallets(userId: string | undefined): UseUserWalletsReturn
     setError(null);
 
     try {
-      // 1. Fetch current wallet records directly from public.wallets table
+      // 1. Fetch authoritative derived addresses from API
+      const { data: sessionData } = await supabase.auth.getSession();
+      const token = sessionData?.session?.access_token;
+
+      const headers: Record<string, string> = {
+        'Content-Type': 'application/json',
+      };
+      if (token) headers['Authorization'] = `Bearer ${token}`;
+      headers['x-user-id'] = userId;
+
+      const res = await fetch(`/api/wallet/deposit-address?user_id=${encodeURIComponent(userId)}`, {
+        headers,
+        credentials: 'same-origin',
+      });
+
+      if (res.ok) {
+        const data = await res.json();
+        if (data?.success && data?.addresses) {
+          setWallets({
+            BTC: data.addresses.btc || data.addresses.BTC || '',
+            EVM: data.addresses.evm || data.addresses.ETH || '',
+            TRON: data.addresses.tron || data.addresses.USDT_TRC20 || '',
+            LTC: data.addresses.ltc || data.addresses.LTC || '',
+          });
+          setLoading(false);
+          return;
+        }
+      }
+
+      // 2. Fallback check from public.wallets table
       const { data: dbWallets, error: fetchError } = await supabase
         .from('wallets')
         .select('chain, address')
@@ -49,35 +78,11 @@ export function useUserWallets(userId: string | undefined): UseUserWalletsReturn
         throw fetchError;
       }
 
-      // 2. Map existing records into a key-value object
       const walletMap: Record<string, string> = {};
       if (dbWallets) {
         dbWallets.forEach((item: { chain: string; address: string }) => {
           walletMap[item.chain] = item.address;
         });
-      }
-
-      // 3. Check for missing required chains
-      const missingChains = REQUIRED_CHAINS.filter(
-        (chain) => !walletMap[chain] || walletMap[chain].trim() === ''
-      );
-
-      // 4. Fallback auto-provisioning via API if any chain is unprovisioned
-      if (missingChains.length > 0) {
-        for (const chain of missingChains) {
-          const res = await fetch('/api/wallet/deposit-address', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ userId, chain }),
-          });
-
-          if (res.ok) {
-            const data = await res.json();
-            if (data?.address) {
-              walletMap[chain] = data.address;
-            }
-          }
-        }
       }
 
       setWallets({

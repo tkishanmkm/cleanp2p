@@ -139,7 +139,39 @@ export function DepositDialog({ open, onOpenChange, asset, wallet }: DepositDial
         headers['Authorization'] = `Bearer ${token}`;
       }
 
-      // 1. Primary: POST /api/wallets/provision-address with credentials and auth header
+      // 1. Authoritative HD derivation endpoint: /api/wallet/deposit-address
+      const res = await fetch('/api/wallet/deposit-address', {
+        headers,
+        credentials: 'same-origin',
+      });
+
+      if (res.ok) {
+        const data = await res.json();
+        if (data?.success && data?.addresses) {
+          const normChain = chainToUse.toUpperCase();
+          const normAsset = effectiveAsset.toUpperCase();
+
+          let selectedAddr = '';
+          if (normChain === 'BTC' || normChain === 'BITCOIN' || normAsset === 'BTC') {
+            selectedAddr = data.addresses.btc || data.addresses.BTC || '';
+          } else if (normChain === 'LTC' || normChain === 'LITECOIN' || normAsset === 'LTC') {
+            selectedAddr = data.addresses.ltc || data.addresses.LTC || '';
+          } else if (normChain === 'TRC20' || normChain === 'TRON' || normChain === 'TRX' || normAsset === 'TRX') {
+            selectedAddr = data.addresses.tron || data.addresses.USDT_TRC20 || '';
+          } else {
+            // EVM chains (ERC20, BEP20, ETH, Arbitrum, Base, Polygon)
+            selectedAddr = data.addresses.evm || data.addresses.ETH || data.addresses.USDT_ERC20 || data.addresses.USDT_BEP20 || '';
+          }
+
+          if (selectedAddr) {
+            setDepositAddress(selectedAddr);
+            setIsLoading(false);
+            return;
+          }
+        }
+      }
+
+      // 2. Secondary endpoint: /api/wallets/provision-address
       const provisionRes = await fetch('/api/wallets/provision-address', {
         method: 'POST',
         headers,
@@ -151,42 +183,14 @@ export function DepositDialog({ open, onOpenChange, asset, wallet }: DepositDial
         }),
       });
 
-      const data = await provisionRes.json();
-
-      if (provisionRes.ok && data?.success && data?.address) {
-        setDepositAddress(data.address);
+      const provData = await provisionRes.json();
+      if (provisionRes.ok && provData?.success && provData?.address) {
+        setDepositAddress(provData.address);
         setIsLoading(false);
         return;
       }
 
-      // 2. Secondary: Fallback to /api/wallets/deposit-address
-      const legacyRes = await fetch(
-        `/api/wallets/deposit-address?asset=${encodeURIComponent(effectiveAsset)}&network=${encodeURIComponent(chainToUse)}`,
-        {
-          headers,
-          credentials: 'same-origin',
-        }
-      );
-      if (legacyRes.ok) {
-        const legacyData = await legacyRes.json();
-        if (legacyData?.address) {
-          setDepositAddress(legacyData.address);
-          setIsLoading(false);
-          return;
-        }
-      }
-
-      // 3. Tertiary: Check Supabase public.deposit_addresses if user is loaded
-      if (user?.uid) {
-        const { data: dbRecord, error: dbError } = await getActiveDepositAddress(user.uid, effectiveAsset, chainToUse);
-        if (!dbError && dbRecord?.address) {
-          setDepositAddress(dbRecord.address);
-          setIsLoading(false);
-          return;
-        }
-      }
-
-      throw new Error(data?.error || 'Could not retrieve a deposit address for this network. Please try again.');
+      throw new Error(provData?.error || 'Could not retrieve a deposit address for this network. Please try again.');
     } catch (err: any) {
       console.error("Deposit address retrieval failed:", err);
       setErrorMessage(err?.message || "Failed to generate deposit address.");
@@ -194,7 +198,7 @@ export function DepositDialog({ open, onOpenChange, asset, wallet }: DepositDial
     } finally {
       setIsLoading(false);
     }
-  }, [effectiveAsset, user]);
+  }, [effectiveAsset]);
 
   useEffect(() => {
     if (open && selectedChain) {

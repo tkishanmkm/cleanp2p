@@ -402,13 +402,7 @@ export async function getOrDeriveUserDepositAddresses(
 ): Promise<UserDepositAddressesResult> {
   const supabase = getAdminClient();
 
-  // 1. Check if addresses already exist in public.user_deposit_addresses
-  const { data: existingAddrs } = await supabase
-    .from('user_deposit_addresses')
-    .select('user_id, asset_symbol, chain, network, asset_code, network_code, address, derivation_path, derivation_index')
-    .eq('user_id', userId);
-
-  // 2. Fetch user profile
+  // 1. Fetch user profile
   const { data: profileData } = await supabase
     .from('profiles')
     .select('*')
@@ -417,64 +411,18 @@ export async function getOrDeriveUserDepositAddresses(
 
   let profile: UserProfileRecord | null = profileData || null;
 
-  // Check if we have existing address entries
-  const hasExistingComplete =
-    existingAddrs &&
-    existingAddrs.length >= 5 &&
-    existingAddrs.some((r) => r.network === 'bitcoin' || r.asset_symbol === 'BTC') &&
-    existingAddrs.some((r) => (r.network === 'ethereum' || r.network === 'ERC20') && r.asset_symbol === 'ETH') &&
-    existingAddrs.some((r) => r.network === 'ERC20' && r.asset_symbol === 'USDT') &&
-    existingAddrs.some((r) => r.network === 'BEP20' && r.asset_symbol === 'USDT') &&
-    existingAddrs.some((r) => r.network === 'TRC20' && r.asset_symbol === 'USDT');
+  // 2. Fetch existing user_deposit_addresses
+  const { data: existingAddrs } = await supabase
+    .from('user_deposit_addresses')
+    .select('user_id, asset_symbol, chain, network, asset_code, network_code, address, derivation_path, derivation_index')
+    .eq('user_id', userId);
 
-  if (hasExistingComplete && profile?.evm_deposit_address && profile?.tron_deposit_address) {
-    const btcRow = existingAddrs.find((r) => r.asset_symbol === 'BTC' || r.network === 'bitcoin');
-    const ethRow = existingAddrs.find((r) => r.asset_symbol === 'ETH' && (r.network === 'ethereum' || r.network === 'ERC20'));
-    const usdtErc20Row = existingAddrs.find((r) => r.asset_symbol === 'USDT' && r.network === 'ERC20');
-    const usdtBep20Row = existingAddrs.find((r) => r.asset_symbol === 'USDT' && r.network === 'BEP20');
-    const usdtTrc20Row = existingAddrs.find((r) => r.asset_symbol === 'USDT' && r.network === 'TRC20');
-
-    const walletIndex =
-      profile.wallet_index ||
-      existingAddrs[0]?.derivation_index ||
-      1;
-
-    const addresses: CryptoDepositAddresses = {
-      BTC: btcRow?.address || profile.btc_deposit_address || '',
-      ETH: ethRow?.address || profile.evm_deposit_address || '',
-      LTC: profile.ltc_deposit_address || deriveLitecoinNativeSegwitAddress(getMasterHDKeySync(), walletIndex),
-      USDT_ERC20: usdtErc20Row?.address || profile.evm_deposit_address || '',
-      USDT_BEP20: usdtBep20Row?.address || profile.evm_deposit_address || '',
-      USDT_TRC20: usdtTrc20Row?.address || profile.tron_deposit_address || '',
-    };
-
-    return {
-      userId,
-      walletIndex,
-      addresses,
-      records: existingAddrs as UserDepositAddressesRecord[],
-      profile,
-      metadata: {
-        btcDerivationPath: `${BIP_PATHS.BTC}/${walletIndex}`,
-        ethDerivationPath: `${BIP_PATHS.ETH}/${walletIndex}`,
-        ltcDerivationPath: `${BIP_PATHS.LTC}/${walletIndex}`,
-        tronDerivationPath: `${BIP_PATHS.TRON}/${walletIndex}`,
-        evmAddressReusedFor: ['ETH', 'USDT_ERC20', 'USDT_BEP20'],
-        allowedChainNetworks: ['ethereum', 'arbitrum', 'base', 'polygon', 'bitcoin', 'ERC20', 'BEP20', 'TRC20'],
-        derivedAt: new Date().toISOString(),
-      },
-    };
-  }
-
-  // --- MISSING ADDRESSES: PROCEED WITH DETERMINISTIC DERIVATION & DB SYNC ---
-
-  // a. Fetch user's wallet_index from public.profiles
+  // 3. Resolve wallet_index
   let walletIndex: number | null = null;
   if (profile && typeof profile.wallet_index === 'number' && profile.wallet_index > 0) {
     walletIndex = profile.wallet_index;
   }
 
-  // Check if derivation index exists on any existing rows
   if (walletIndex === null && existingAddrs && existingAddrs.length > 0) {
     const existingWithIdx = existingAddrs.find((r) => typeof r.derivation_index === 'number' && r.derivation_index > 0);
     if (existingWithIdx) {
@@ -506,11 +454,10 @@ export async function getOrDeriveUserDepositAddresses(
     }
   }
 
-  // b. Derive addresses for BTC (BIP-84), ETH/EVM (BIP-44), LTC (BIP-84), TRON (BIP-44)
+  // 4. Derive authoritative addresses for this walletIndex
   const addresses = await deriveAllAddressesAsync(walletIndex);
 
-  // c. Build asset rows matching exact database enum values for chain_network dynamically:
-  // Allowed: 'ethereum', 'arbitrum', 'base', 'polygon', 'bitcoin', 'ERC20', 'BEP20', 'TRC20'
+  // 5. Build raw asset records
   const rawAssets: Array<{
     symbol: SupportedAssetSymbol;
     network: SupportedNetwork;
@@ -552,7 +499,7 @@ export async function getOrDeriveUserDepositAddresses(
   const records: UserDepositAddressesRecord[] = rawAssets.map((asset) => ({
     user_id: userId,
     asset_symbol: asset.symbol,
-    chain: getChainEnum(asset.network), // Dynamically mapped ('TRC20' for TRC20, 'bitcoin' for BTC, 'ethereum' for ERC20/BEP20/ETH)
+    chain: getChainEnum(asset.network),
     network: asset.network,
     asset_code: asset.symbol,
     network_code: asset.network,
@@ -560,7 +507,31 @@ export async function getOrDeriveUserDepositAddresses(
     derivation_path: asset.path,
   }));
 
-  // UPSERT asset rows into public.user_deposit_addresses
+  // 6. Synchronize public.profiles if addresses are missing or mismatched
+  const needsProfileUpdate =
+    !profile ||
+    profile.wallet_index !== walletIndex ||
+    profile.evm_deposit_address !== addresses.ETH ||
+    profile.tron_deposit_address !== addresses.USDT_TRC20 ||
+    profile.btc_deposit_address !== addresses.BTC ||
+    profile.ltc_deposit_address !== addresses.LTC;
+
+  if (needsProfileUpdate) {
+    try {
+      await supabase.from('profiles').update({
+        wallet_index: walletIndex,
+        evm_deposit_address: addresses.ETH,
+        tron_deposit_address: addresses.USDT_TRC20,
+        btc_deposit_address: addresses.BTC,
+        ltc_deposit_address: addresses.LTC,
+        updated_at: new Date().toISOString(),
+      }).eq('id', userId);
+    } catch (profErr) {
+      console.warn('[hd-derivation-engine] profile update warning:', profErr);
+    }
+  }
+
+  // 7. Upsert asset rows into public.user_deposit_addresses
   try {
     await supabase
       .from('user_deposit_addresses')
@@ -574,7 +545,6 @@ export async function getOrDeriveUserDepositAddresses(
       );
   } catch (upsertErr) {
     console.warn('[hd-derivation-engine] upsert user_deposit_addresses warning:', upsertErr);
-    // Non-blocking fallback for row-by-row resilience
     for (const r of records) {
       try {
         await supabase
@@ -588,38 +558,15 @@ export async function getOrDeriveUserDepositAddresses(
     }
   }
 
-  // d. UPDATE public.profiles with derived addresses
-  const profileUpdates: Record<string, any> = {
-    wallet_index: walletIndex,
-    evm_deposit_address: addresses.ETH,
-    tron_deposit_address: addresses.USDT_TRC20,
-    btc_deposit_address: addresses.BTC,
-    ltc_deposit_address: addresses.LTC,
-    updated_at: new Date().toISOString(),
-  };
-
+  // 8. Synchronize public.wallets table
   try {
-    const { data: updatedProfile } = await supabase
-      .from('profiles')
-      .update(profileUpdates)
-      .eq('id', userId)
-      .select('*')
-      .maybeSingle();
-
-    if (updatedProfile) {
-      profile = updatedProfile;
-    } else if (profile) {
-      profile = {
-        ...profile,
-        ...profileUpdates,
-      };
-    }
-  } catch (profErr) {
-    console.warn('[hd-derivation-engine] profile update warning:', profErr);
-    if (profile) {
-      profile = { ...profile, ...profileUpdates };
-    }
-  }
+    await supabase.from('wallets').upsert([
+      { user_id: userId, chain: 'EVM', address: addresses.ETH, derivation_index: walletIndex, funding_status: 'UNFUNDED' },
+      { user_id: userId, chain: 'TRON', address: addresses.USDT_TRC20, derivation_index: walletIndex, funding_status: 'UNFUNDED' },
+      { user_id: userId, chain: 'BTC', address: addresses.BTC, derivation_index: walletIndex, funding_status: 'UNFUNDED' },
+      { user_id: userId, chain: 'LTC', address: addresses.LTC, derivation_index: walletIndex, funding_status: 'UNFUNDED' },
+    ], { onConflict: 'user_id,chain' });
+  } catch (_) {}
 
   return {
     userId,
