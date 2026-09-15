@@ -60,9 +60,9 @@ export default function AcademyPage() {
       title: 'Anti-Phishing & Fraud Prevention Rules for P2P Traders',
       category: 'safety',
       readTime: '5 min read',
-      excerpt: 'Crucial rules to identify fraudulent triangle schemes, third-party payment scams, and fake SMS payment notifications.',
+      excerpt: 'Crucial rules to identify fraudulent triangle schemes, unverified payment scams, and fake SMS payment notifications.',
       content: [
-        'Third-Party Payments Prohibited: The name on the bank account sending funds MUST match the verified legal name on the trader\'s PaxOnes profile.',
+        'Payment Account Verification: Always double check payment reference numbers and verify sender payment confirmations directly within your banking portal.',
         'Fake Receipt Detection: Never rely solely on screenshots or SMS notifications. Always log directly into your banking app to verify balance updates.',
         'Strictly No Off-Platform Chat: Never communicate via Telegram, WhatsApp, or email. Trades conducted outside PaxOnes chat forfeit escrow coverage.'
       ]

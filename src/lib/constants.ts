@@ -67,7 +67,7 @@ export const SECURITY_QUESTIONS = [
 export const BLOCK_LIMIT = 10000;
 
 export const AD_TAGS = [
-  "No third party",
+  "Instant release",
   "No receipt required",
   "No verification",
   "Invoice accepted",

@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient, getSupabaseAdminClient } from '@/utils/supabase/server';
-import { uploadToB2 } from '@/lib/b2';
-import sharp from 'sharp';
+import { uploadToB2, compressAvatar } from '@/lib/b2';
 
 export const dynamic = 'force-dynamic';
 
@@ -34,30 +33,17 @@ export async function POST(req: NextRequest) {
     const rawArrayBuffer = await file.arrayBuffer();
     const rawBuffer = Buffer.from(rawArrayBuffer);
 
-    // Compress & resize image with Sharp for ultra-fast loading
-    let compressedBuffer: Buffer;
-    let mimeType = 'image/webp';
-    let fileExt = 'webp';
-
-    try {
-      compressedBuffer = await sharp(rawBuffer)
-        .resize(256, 256, { fit: 'cover' })
-        .webp({ quality: 80 })
-        .toBuffer();
-    } catch (sharpErr) {
-      console.warn('Sharp compression failed, using original buffer:', sharpErr);
-      compressedBuffer = rawBuffer;
-      mimeType = file.type;
-      fileExt = file.name.split('.').pop() || 'jpg';
-    }
+    // Compress & resize DP (Avatar) with sharp (512x512 WebP / JPEG)
+    const { buffer: compressedBuffer, contentType: mimeType, extension: fileExt } =
+      await compressAvatar(rawBuffer);
 
     const objectKey = `avatars/${user.id}.${fileExt}`;
     let avatarUrl = '';
     const admin = getSupabaseAdminClient();
 
-    // Upload to Backblaze B2
+    // Upload compressed DP directly to Backblaze B2
     try {
-      await uploadToB2(objectKey, compressedBuffer, mimeType);
+      const b2Result = await uploadToB2(objectKey, compressedBuffer, mimeType);
       avatarUrl = `/api/media/avatar/${user.id}?v=${Date.now()}`;
     } catch (b2Err) {
       console.warn('B2 upload failed or unconfigured, falling back to data URI:', b2Err);
@@ -97,7 +83,7 @@ export async function POST(req: NextRequest) {
       success: true,
       avatarUrl,
       avatar_url: avatarUrl,
-      message: 'Profile picture updated and compressed successfully.'
+      message: 'Profile picture (DP) compressed and saved to Backblaze B2 successfully.',
     });
   } catch (err: any) {
     console.error('Error uploading avatar:', err);

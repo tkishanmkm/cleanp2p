@@ -871,7 +871,7 @@ export function CreateAdForm({ ad }: CreateAdFormProps) {
                   <FormLabel>Terms & Conditions</FormLabel>
                   <FormControl>
                     <Textarea
-                      placeholder="e.g., Payment must be made from an account with your name. No third-party payments..."
+                      placeholder="e.g., Fast release upon payment receipt. Please include the reference number..."
                       className="min-h-[120px]"
                       {...field}
                     />

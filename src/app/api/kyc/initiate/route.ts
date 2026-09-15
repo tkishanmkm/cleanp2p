@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
+import { saveKycAddressToB2 } from '@/lib/b2';
 
 export const dynamic = 'force-dynamic';
 
@@ -10,7 +11,8 @@ const supabase = createClient(
 
 export async function POST(req: NextRequest) {
   try {
-    const { userId, country, address } = await req.json();
+    const { userId, country, address, street, city, postalCode, docType, docNumber } =
+      await req.json();
 
     if (!userId) {
       return NextResponse.json({ error: 'userId is required' }, { status: 400 });
@@ -38,10 +40,39 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Re-verification attempt detected. Account banned.' }, { status: 403 });
     }
 
-    // 2. Save user address details in profiles
-    await supabase.from('profiles').update({ country, address, kyc_status: 'pending' }).eq('id', userId);
+    // 2. Compress and save KYC address details directly into Backblaze B2 (Private compliance document)
+    let b2Key = '';
+    try {
+      const b2Res = await saveKycAddressToB2(userId, {
+        userId,
+        country,
+        address,
+        street,
+        city,
+        postalCode,
+        docType,
+        docNumber,
+        submittedAt: new Date().toISOString(),
+      });
+      if (b2Res.success) {
+        b2Key = b2Res.key;
+      }
+    } catch (b2Err) {
+      console.warn('Non-fatal: Failed to save KYC address to B2:', b2Err);
+    }
 
-    // 3. Request session from Didit
+    // 3. Save user address details in profiles table
+    await supabase
+      .from('profiles')
+      .update({
+        country,
+        address,
+        kyc_status: 'pending',
+        ...(b2Key ? { kyc_documents_b2_key: b2Key } : {}),
+      })
+      .eq('id', userId);
+
+    // 4. Request session from Didit
     const rawBaseUrl = process.env.DIDIT_API_URL || 'https://verification.didit.me/v3';
     const diditBase = rawBaseUrl.replace(/\/+$/, '');
     const targetUrl = `${diditBase}/session/`;
@@ -98,6 +129,7 @@ export async function POST(req: NextRequest) {
       url: session.url,
       session_id: sessionId,
       didit_session_id: sessionId,
+      b2_key: b2Key,
     });
   } catch (err: any) {
     return NextResponse.json({ error: err.message }, { status: 500 });

@@ -155,194 +155,193 @@ export function OnboardingModal() {
     <>
     <Dialog open={isOpen} onOpenChange={() => {}}>
       <DialogContent className="sm:max-w-lg [&>button]:hidden">
-        <DialogHeader className="space-y-2">
-          <div className="flex items-center gap-2 text-primary font-bold text-sm">
-            <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center">
-              <Shield className="w-4 h-4 text-primary" />
+        {showMinorModal ? (
+          <div className="text-center space-y-4 py-3 animate-in fade-in zoom-in-95 duration-200">
+            <div className="mx-auto w-14 h-14 rounded-full bg-rose-100 dark:bg-rose-950/60 text-rose-600 flex items-center justify-center">
+              <AlertTriangle className="w-7 h-7" />
             </div>
-            <span>First-Time Security Profile Setup</span>
-          </div>
-          <DialogTitle className="text-xl font-bold">Complete Your Identity &amp; Security</DialogTitle>
-          <DialogDescription className="text-xs text-muted-foreground">
-            To ensure account protection and secure P2P trading, please confirm your full name, email, date of birth, and setup your security question.
-          </DialogDescription>
-        </DialogHeader>
+            <div className="space-y-2">
+              <DialogTitle className="text-xl font-bold text-slate-900 dark:text-white">
+                Age Requirement Notice (18+ Only)
+              </DialogTitle>
+              <DialogDescription className="text-sm text-slate-600 dark:text-slate-300 leading-relaxed">
+                Paxones is a peer-to-peer cryptocurrency financial exchange and is strictly restricted to individuals 18 years of age or older for child safety and regulatory compliance.
+              </DialogDescription>
+              <p className="text-xs text-rose-600 dark:text-rose-400 font-semibold pt-1">
+                The date of birth you entered indicates you are under 18 years old.
+              </p>
+            </div>
 
-        {suspendedError ? (
-          <div className="p-4 bg-rose-500/10 border border-rose-500/30 rounded-xl text-rose-600 dark:text-rose-400 space-y-2 my-2">
-            <div className="flex items-center gap-2 font-bold text-xs">
-              <AlertTriangle className="w-4 h-4" />
-              <span>Identity Verification Violation</span>
+            <div className="pt-4 flex flex-col sm:flex-row gap-3">
+              <button
+                type="button"
+                onClick={() => {
+                  setShowMinorModal(false);
+                }}
+                className="w-full sm:flex-1 min-h-[48px] px-4 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700 active:scale-[0.98] text-slate-800 dark:text-slate-200 font-semibold text-sm transition-all touch-manipulation cursor-pointer flex items-center justify-center select-none shadow-xs"
+              >
+                Correct Date of Birth
+              </button>
+              <button
+                type="button"
+                disabled={isDeletingAccount}
+                onClick={async () => {
+                  setIsDeletingAccount(true);
+                  try {
+                    await fetch('/api/user/delete-account', { method: 'POST' }).catch(() => {});
+                    await supabase.auth.signOut().catch(() => {});
+                    toast({
+                      title: 'Account Deleted',
+                      description: 'Your account was deleted due to child safety age requirements.',
+                    });
+                    window.location.href = '/';
+                  } catch (e: any) {
+                    toast({ variant: 'destructive', title: 'Error', description: 'Failed to delete account.' });
+                  } finally {
+                    setIsDeletingAccount(false);
+                  }
+                }}
+                className="w-full sm:flex-1 min-h-[48px] px-4 rounded-xl bg-rose-600 hover:bg-rose-700 active:scale-[0.98] text-white font-semibold text-sm transition-all touch-manipulation cursor-pointer flex items-center justify-center select-none disabled:opacity-50 shadow-md shadow-rose-600/20"
+              >
+                {isDeletingAccount ? 'Deleting...' : 'Delete Account / Cancel'}
+              </button>
             </div>
-            <p className="text-xs leading-relaxed">{suspendedError}</p>
           </div>
         ) : (
-          <form onSubmit={handleSubmit} className="space-y-4 py-2">
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              {/* Full Name */}
-              <div className="space-y-1.5">
-                <Label htmlFor="onboardingFullName" className="text-xs font-semibold flex items-center gap-1.5">
-                  <User className="w-3.5 h-3.5 text-muted-foreground" />
-                  <span>Legal Full Name</span>
-                  <span className="text-rose-500">*</span>
-                </Label>
-                <Input
-                  id="onboardingFullName"
-                  value={fullName}
-                  onChange={(e) => setFullName(e.target.value)}
-                  placeholder="e.g. John Doe"
-                  className="rounded-xl text-sm"
-                  required
-                />
+          <>
+            <DialogHeader className="space-y-2">
+              <div className="flex items-center gap-2 text-primary font-bold text-sm">
+                <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center">
+                  <Shield className="w-4 h-4 text-primary" />
+                </div>
+                <span>First-Time Security Profile Setup</span>
               </div>
+              <DialogTitle className="text-xl font-bold">Complete Your Identity &amp; Security</DialogTitle>
+              <DialogDescription className="text-xs text-muted-foreground">
+                To ensure account protection and secure P2P trading, please confirm your full name, email, date of birth, and setup your security question.
+              </DialogDescription>
+            </DialogHeader>
 
-              {/* Email (Read-only / Display) */}
-              <div className="space-y-1.5">
-                <Label htmlFor="onboardingEmail" className="text-xs font-semibold flex items-center gap-1.5">
-                  <Mail className="w-3.5 h-3.5 text-muted-foreground" />
-                  <span>Email Address</span>
-                </Label>
-                <Input
-                  id="onboardingEmail"
-                  type="email"
-                  value={email}
-                  readOnly
-                  disabled
-                  className="rounded-xl text-sm bg-muted/50 cursor-not-allowed opacity-80"
-                />
+            {suspendedError ? (
+              <div className="p-4 bg-rose-500/10 border border-rose-500/30 rounded-xl text-rose-600 dark:text-rose-400 space-y-2 my-2">
+                <div className="flex items-center gap-2 font-bold text-xs">
+                  <AlertTriangle className="w-4 h-4" />
+                  <span>Identity Verification Violation</span>
+                </div>
+                <p className="text-xs leading-relaxed">{suspendedError}</p>
               </div>
-            </div>
+            ) : (
+              <form onSubmit={handleSubmit} className="space-y-4 py-2">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  {/* Full Name */}
+                  <div className="space-y-1.5">
+                    <Label htmlFor="onboardingFullName" className="text-xs font-semibold flex items-center gap-1.5">
+                      <User className="w-3.5 h-3.5 text-muted-foreground" />
+                      <span>Legal Full Name</span>
+                      <span className="text-rose-500">*</span>
+                    </Label>
+                    <Input
+                      id="onboardingFullName"
+                      value={fullName}
+                      onChange={(e) => setFullName(e.target.value)}
+                      placeholder="e.g. John Doe"
+                      className="rounded-xl text-sm"
+                      required
+                    />
+                  </div>
 
-            {/* Date of Birth */}
-            <div className="space-y-1.5">
-              <Label htmlFor="onboardingDob" className="text-xs font-semibold flex items-center gap-1.5">
-                <Calendar className="w-3.5 h-3.5 text-muted-foreground" />
-                <span>Date of Birth (DOB)</span>
-                <span className="text-rose-500">*</span>
-              </Label>
-              <Input
-                id="onboardingDob"
-                type="date"
-                value={dob}
-                onChange={(e) => setDob(e.target.value)}
-                className="rounded-xl text-sm"
-                required
-              />
-              <p className="text-[11px] text-muted-foreground">
-                Required for regulatory compliance and identity verification.
-              </p>
-            </div>
+                  {/* Email (Read-only / Display) */}
+                  <div className="space-y-1.5">
+                    <Label htmlFor="onboardingEmail" className="text-xs font-semibold flex items-center gap-1.5">
+                      <Mail className="w-3.5 h-3.5 text-muted-foreground" />
+                      <span>Email Address</span>
+                    </Label>
+                    <Input
+                      id="onboardingEmail"
+                      type="email"
+                      value={email}
+                      readOnly
+                      disabled
+                      className="rounded-xl text-sm bg-muted/50 cursor-not-allowed opacity-80"
+                    />
+                  </div>
+                </div>
 
-            {/* Security Question Selection */}
-            <div className="space-y-1.5">
-              <Label className="text-xs font-semibold flex items-center gap-1.5">
-                <HelpCircle className="w-3.5 h-3.5 text-muted-foreground" />
-                <span>Security Question</span>
-                <span className="text-rose-500">*</span>
-              </Label>
-              <Select value={securityQuestion} onValueChange={setSecurityQuestion}>
-                <SelectTrigger className="rounded-xl text-xs sm:text-sm">
-                  <SelectValue placeholder="Select security question" />
-                </SelectTrigger>
-                <SelectContent className="max-h-60">
-                  <SelectItem value="first_pet">What was the name of your first pet?</SelectItem>
-                  <SelectItem value="mother_maiden">What is your mother&apos;s maiden name?</SelectItem>
-                  <SelectItem value="first_school">What was the name of your first school?</SelectItem>
-                  <SelectItem value="birth_city">In what city or town were you born?</SelectItem>
-                  <SelectItem value="childhood_nickname">What was your childhood nickname?</SelectItem>
-                  <SelectItem value="first_car">What was the make of your first car?</SelectItem>
-                  <SelectItem value="favorite_teacher">What was the last name of your favorite teacher?</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
+                {/* Date of Birth */}
+                <div className="space-y-1.5">
+                  <Label htmlFor="onboardingDob" className="text-xs font-semibold flex items-center gap-1.5">
+                    <Calendar className="w-3.5 h-3.5 text-muted-foreground" />
+                    <span>Date of Birth (DOB)</span>
+                    <span className="text-rose-500">*</span>
+                  </Label>
+                  <Input
+                    id="onboardingDob"
+                    type="date"
+                    value={dob}
+                    onChange={(e) => setDob(e.target.value)}
+                    className="rounded-xl text-sm"
+                    required
+                  />
+                  <p className="text-[11px] text-muted-foreground">
+                    Required for regulatory compliance and identity verification (18+ only).
+                  </p>
+                </div>
 
-            {/* Security Answer */}
-            <div className="space-y-1.5">
-              <Label htmlFor="onboardingSecurityAnswer" className="text-xs font-semibold flex items-center gap-1.5">
-                <Lock className="w-3.5 h-3.5 text-muted-foreground" />
-                <span>Security Answer</span>
-                <span className="text-rose-500">*</span>
-              </Label>
-              <Input
-                id="onboardingSecurityAnswer"
-                type="password"
-                value={securityAnswer}
-                onChange={(e) => setSecurityAnswer(e.target.value)}
-                placeholder="Enter secret answer"
-                className="rounded-xl text-sm"
-                required
-              />
-              <p className="text-[11px] text-muted-foreground">
-                This answer will be used to verify high-security actions or account recovery.
-              </p>
-            </div>
+                {/* Security Question Selection */}
+                <div className="space-y-1.5">
+                  <Label className="text-xs font-semibold flex items-center gap-1.5">
+                    <HelpCircle className="w-3.5 h-3.5 text-muted-foreground" />
+                    <span>Security Question</span>
+                    <span className="text-rose-500">*</span>
+                  </Label>
+                  <Select value={securityQuestion} onValueChange={setSecurityQuestion}>
+                    <SelectTrigger className="rounded-xl text-xs sm:text-sm">
+                      <SelectValue placeholder="Select security question" />
+                    </SelectTrigger>
+                    <SelectContent className="max-h-60">
+                      <SelectItem value="first_pet">What was the name of your first pet?</SelectItem>
+                      <SelectItem value="mother_maiden">What is your mother&apos;s maiden name?</SelectItem>
+                      <SelectItem value="first_school">What was the name of your first school?</SelectItem>
+                      <SelectItem value="birth_city">In what city or town were you born?</SelectItem>
+                      <SelectItem value="childhood_nickname">What was your childhood nickname?</SelectItem>
+                      <SelectItem value="first_car">What was the make of your first car?</SelectItem>
+                      <SelectItem value="favorite_teacher">What was the last name of your favorite teacher?</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
 
-            <DialogFooter className="pt-3">
-              <Button type="submit" className="w-full rounded-xl font-bold py-2.5" disabled={loading}>
-                {loading ? 'Validating & Saving to Database...' : 'Save & Complete Setup'}
-              </Button>
-            </DialogFooter>
-          </form>
+                {/* Security Answer */}
+                <div className="space-y-1.5">
+                  <Label htmlFor="onboardingSecurityAnswer" className="text-xs font-semibold flex items-center gap-1.5">
+                    <Lock className="w-3.5 h-3.5 text-muted-foreground" />
+                    <span>Security Answer</span>
+                    <span className="text-rose-500">*</span>
+                  </Label>
+                  <Input
+                    id="onboardingSecurityAnswer"
+                    type="password"
+                    value={securityAnswer}
+                    onChange={(e) => setSecurityAnswer(e.target.value)}
+                    placeholder="Enter secret answer"
+                    className="rounded-xl text-sm"
+                    required
+                  />
+                  <p className="text-[11px] text-muted-foreground">
+                    This answer will be used to verify high-security actions or account recovery.
+                  </p>
+                </div>
+
+                <DialogFooter className="pt-3">
+                  <Button type="submit" className="w-full rounded-xl font-bold min-h-[44px] py-2.5 touch-manipulation cursor-pointer" disabled={loading}>
+                    {loading ? 'Validating & Saving to Database...' : 'Save & Complete Setup'}
+                  </Button>
+                </DialogFooter>
+              </form>
+            )}
+          </>
         )}
       </DialogContent>
     </Dialog>
-
-    {/* Minor Safety Dialog (18+ Requirement) */}
-    {showMinorModal && (
-      <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/75 backdrop-blur-sm p-4">
-        <div className="w-full max-w-md bg-white dark:bg-[#0f1423] border border-rose-200 dark:border-rose-900/50 rounded-2xl shadow-2xl p-6 text-center space-y-4 animate-in fade-in zoom-in-95 duration-200">
-          <div className="mx-auto w-14 h-14 rounded-full bg-rose-100 dark:bg-rose-950/60 text-rose-600 flex items-center justify-center">
-            <AlertTriangle className="w-7 h-7" />
-          </div>
-          <div className="space-y-2">
-            <h3 className="text-xl font-bold text-slate-900 dark:text-white">
-              Age Requirement Notice (18+ Only)
-            </h3>
-            <p className="text-sm text-slate-600 dark:text-slate-300 leading-relaxed">
-              Paxones is a peer-to-peer financial exchange and is strictly restricted to individuals 18 years of age or older for child safety and regulatory compliance.
-            </p>
-            <p className="text-xs text-rose-600 dark:text-rose-400 font-medium">
-              The date of birth you entered indicates you are under 18 years old.
-            </p>
-          </div>
-
-          <div className="pt-2 flex flex-col sm:flex-row gap-3">
-            <Button
-              type="button"
-              variant="outline"
-              onClick={() => setShowMinorModal(false)}
-              className="flex-1 rounded-xl font-semibold text-sm"
-            >
-              Correct Date of Birth
-            </Button>
-            <Button
-              type="button"
-              variant="destructive"
-              disabled={isDeletingAccount}
-              onClick={async () => {
-                setIsDeletingAccount(true);
-                try {
-                  await fetch('/api/user/delete-account', { method: 'POST' }).catch(() => {});
-                  await supabase.auth.signOut().catch(() => {});
-                  toast({
-                    title: 'Account Deleted',
-                    description: 'Your account was deleted due to child safety age requirements.',
-                  });
-                  window.location.href = '/';
-                } catch (e: any) {
-                  toast({ variant: 'destructive', title: 'Error', description: 'Failed to delete account.' });
-                } finally {
-                  setIsDeletingAccount(false);
-                }
-              }}
-              className="flex-1 rounded-xl font-semibold text-sm bg-rose-600 hover:bg-rose-700 text-white"
-            >
-              {isDeletingAccount ? 'Deleting...' : 'Delete Account'}
-            </Button>
-          </div>
-        </div>
-      </div>
-    )}
   </>
   );
 }

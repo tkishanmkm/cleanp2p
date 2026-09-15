@@ -15,6 +15,44 @@ export async function GET(request: NextRequest) {
       const { data, error } = await supabase.auth.exchangeCodeForSession(code);
 
       if (!error && data?.user) {
+        const user = data.user;
+
+        // Check if profile exists; if not, create with username_changed = false
+        try {
+          const { data: profile } = await supabase
+            .from('profiles')
+            .select('id, username_changed')
+            .eq('id', user.id)
+            .maybeSingle();
+
+          if (!profile) {
+            const shortId = user.id.replace(/-/g, '').slice(0, 8);
+            const generatedUsername = `user_${shortId}`;
+            const meta = user.user_metadata || {};
+            const fullName = meta.full_name || meta.name || '';
+            const avatarUrl = meta.avatar_url || meta.picture || null;
+
+            await supabase.from('profiles').insert({
+              id: user.id,
+              email: user.email,
+              username: generatedUsername,
+              full_name: fullName,
+              display_name: fullName || generatedUsername,
+              avatar_url: avatarUrl,
+              photo_url: avatarUrl,
+              username_changed: false, // Ensure 1-time change option is granted
+              username_changes_remaining: 1,
+              username_changed_count: 0,
+              role: 'user',
+              status: 'active',
+              created_at: new Date().toISOString(),
+              updated_at: new Date().toISOString(),
+            });
+          }
+        } catch (profileErr) {
+          console.error('[Auth Callback] Error checking/creating OAuth profile:', profileErr);
+        }
+
         // Provision deposit addresses asynchronously in the background
         try {
           fetch(`${origin}/api/auth/provision-wallets`, {

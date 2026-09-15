@@ -51,7 +51,7 @@ export default function DisputeResolutionGuidePage() {
               <h4 className="font-bold text-slate-900 dark:text-white text-sm">For Sellers:</h4>
               <ul className="text-xs space-y-1.5 text-slate-600 dark:text-slate-400 mt-2 list-disc list-inside">
                 <li>The buyer clicked 'I have paid' but no funds have arrived in your account.</li>
-                <li>The payment arrived from a third party whose name doesn't match the buyer.</li>
+                <li>The payment arrived with conflicting or unverified reference details.</li>
                 <li>The payment was underpaid or received through an unapproved method.</li>
               </ul>
             </div>

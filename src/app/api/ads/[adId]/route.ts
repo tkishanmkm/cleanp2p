@@ -43,8 +43,8 @@ export async function GET(
         max_limit: 5000,
         available_amount: 0.5,
         payment_methods: ['Bank Transfer', 'Wise', 'PayPal'],
-        offer_tags: ['Fast release', 'No third party', 'Instant verification'],
-        terms_conditions: 'Please make payment from your own verified account only. Release takes less than 5 minutes once payment is verified.',
+        offer_tags: ['Fast release', 'Instant release', 'Instant verification'],
+        terms_conditions: 'Please make payment accurately as per trade terms. Release takes less than 5 minutes once payment is verified.',
         trader_presence: 'Online',
         // backward compatibility
         adType: 'sell',
@@ -55,8 +55,8 @@ export async function GET(
         minAmount: 100,
         maxAmount: 5000,
         offerLabel: 'Fast & Secure Release',
-        terms: 'Please make payment from your own verified account only.',
-        tags: ['Fast release', 'No third party'],
+        terms: 'Please make payment accurately as per trade terms.',
+        tags: ['Fast release', 'Instant release'],
       };
       return NextResponse.json({ ...fallbackObj, ad: fallbackObj });
     }

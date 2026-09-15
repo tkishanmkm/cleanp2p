@@ -1,26 +1,16 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { S3Client, GetObjectCommand } from '@aws-sdk/client-s3';
+import { GetObjectCommand } from '@aws-sdk/client-s3';
+import { getB2Client, getB2Config } from '@/lib/b2';
+import zlib from 'zlib';
 
 export const dynamic = 'force-dynamic';
 
-const b2Endpoint = process.env.B2_ENDPOINT || 'https://s3.us-east-005.backblazeb2.com';
-const b2Region = process.env.B2_REGION || 'us-east-005';
-const b2AccessKeyId = process.env.B2_ACCESS_KEY_ID || process.env.B2_KEY_ID || '';
-const b2SecretAccessKey = process.env.B2_SECRET_ACCESS_KEY || process.env.B2_APP_KEY || process.env.B2_APPLICATION_KEY || '';
-const b2Bucket = process.env.B2_BUCKET_NAME || '';
-
-const s3Client = new S3Client({
-  endpoint: b2Endpoint,
-  region: b2Region,
-  credentials: {
-    accessKeyId: b2AccessKeyId,
-    secretAccessKey: b2SecretAccessKey,
-  },
-  forcePathStyle: true,
-});
-
 export async function GET(req: NextRequest) {
   try {
+    const config = getB2Config();
+    const b2Bucket = config.bucketName;
+    const s3Client = getB2Client();
+
     const { searchParams } = new URL(req.url);
     let key = searchParams.get('key');
     const urlParam = searchParams.get('url');
@@ -62,16 +52,22 @@ export async function GET(req: NextRequest) {
     const contentType = response.ContentType || 'application/octet-stream';
     const filename = key.split('/').pop() || 'trade-media';
 
-    // Convert stream to array buffer
-    const streamToBuffer = async (stream: any): Promise<Buffer> => {
-      const chunks: Buffer[] = [];
-      for await (const chunk of stream) {
-        chunks.push(typeof chunk === 'string' ? Buffer.from(chunk) : chunk);
-      }
-      return Buffer.concat(chunks);
-    };
+    // Convert stream to buffer
+    const stream = response.Body as any;
+    const chunks: Buffer[] = [];
+    for await (const chunk of stream) {
+      chunks.push(typeof chunk === 'string' ? Buffer.from(chunk) : chunk);
+    }
+    let buffer = Buffer.concat(chunks);
 
-    const buffer = await streamToBuffer(response.Body);
+    // Auto-decompress if stored as gzipped and requested as standard preview
+    if (response.ContentEncoding === 'gzip' || key.endsWith('.gz')) {
+      try {
+        buffer = zlib.gunzipSync(buffer);
+      } catch (gunzipErr) {
+        console.warn('Gunzip error during proxy stream:', gunzipErr);
+      }
+    }
 
     const headers: Record<string, string> = {
       'Content-Type': contentType,

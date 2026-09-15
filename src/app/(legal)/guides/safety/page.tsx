@@ -56,7 +56,7 @@ export default function TradeSafetyGuidePage() {
                 <li><strong>NEVER</strong> release crypto based on an SMS notification or email screenshot alone (these can be spoofed).</li>
                 <li><strong>NEVER</strong> cancel a trade after you have already sent money to the seller.</li>
                 <li><strong>NEVER</strong> move communication to Telegram, WhatsApp, or phone calls.</li>
-                <li><strong>NEVER</strong> accept third-party payments from an unverified bank account.</li>
+                <li><strong>NEVER</strong> release crypto before confirming actual receipt in your own banking ledger.</li>
               </ul>
             </div>
           </div>

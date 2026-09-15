@@ -103,7 +103,7 @@ export default function ReputationGuidePage() {
               <CheckCircle2 className="h-5 w-5 text-emerald-600 shrink-0 mt-0.5" />
               <div>
                 <h4 className="font-bold text-slate-900 dark:text-white text-sm">3. Write Transparent Ad Terms</h4>
-                <p className="text-xs text-slate-600 dark:text-slate-400 mt-0.5">Clearly disclose your requirements (e.g., 'No third-party accounts, bank screenshot required') before the trade begins.</p>
+                <p className="text-xs text-slate-600 dark:text-slate-400 mt-0.5">Clearly disclose your requirements (e.g., 'Bank screenshot required, fast release') before the trade begins.</p>
               </div>
             </div>
 

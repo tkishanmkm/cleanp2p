@@ -1,95 +1,295 @@
-import { S3Client, PutObjectCommand, GetObjectCommand } from '@aws-sdk/client-s3';
+import { S3Client, PutObjectCommand, GetObjectCommand, DeleteObjectCommand } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
+import sharp from 'sharp';
+import zlib from 'zlib';
 
-let _s3Client: S3Client | null = null;
+/**
+ * Directly fetch Backblaze B2 credentials and endpoints from environment variables at runtime.
+ * Supports standard Backblaze B2 environment variable naming:
+ * - B2_APPLICATION_KEY_ID (aliases: B2_ACCESS_KEY_ID, B2_KEY_ID)
+ * - B2_APPLICATION_KEY (aliases: B2_SECRET_ACCESS_KEY, B2_APP_KEY)
+ * - B2_BUCKET_NAME
+ * - B2_BUCKET_REGION (alias: B2_REGION)
+ * - B2_ENDPOINT
+ */
+export function getB2Config() {
+  const keyId =
+    process.env.B2_APPLICATION_KEY_ID ||
+    process.env.B2_ACCESS_KEY_ID ||
+    process.env.B2_KEY_ID ||
+    '';
 
-function getS3Client(): S3Client {
-  if (!_s3Client) {
-    _s3Client = new S3Client({
-      endpoint: process.env.B2_ENDPOINT || 'https://s3.us-east-005.backblazeb2.com',
-      region: process.env.B2_REGION || 'us-east-005',
-      credentials: {
-        accessKeyId: process.env.B2_KEY_ID || process.env.B2_ACCESS_KEY_ID || 'dummy-key-id',
-        secretAccessKey: process.env.B2_APPLICATION_KEY || process.env.B2_SECRET_ACCESS_KEY || 'dummy-secret-key',
-      },
-    });
-  }
-  return _s3Client;
+  const applicationKey =
+    process.env.B2_APPLICATION_KEY ||
+    process.env.B2_SECRET_ACCESS_KEY ||
+    process.env.B2_APP_KEY ||
+    '';
+
+  const bucketName = process.env.B2_BUCKET_NAME || 'thepax';
+  const region = process.env.B2_BUCKET_REGION || process.env.B2_REGION || 'us-east-005';
+  const rawEndpoint = process.env.B2_ENDPOINT || 'https://s3.us-east-005.backblazeb2.com';
+  const endpoint = rawEndpoint.startsWith('http') ? rawEndpoint : `https://${rawEndpoint}`;
+
+  return {
+    keyId,
+    applicationKey,
+    bucketName,
+    region,
+    endpoint,
+    isConfigured: Boolean(keyId && applicationKey && bucketName),
+  };
 }
 
+/**
+ * Returns an instantiated S3Client for Backblaze B2 using runtime env values.
+ */
+export function getB2Client(): S3Client {
+  const config = getB2Config();
+
+  return new S3Client({
+    endpoint: config.endpoint,
+    region: config.region,
+    credentials: {
+      accessKeyId: config.keyId || 'dummy-key-id',
+      secretAccessKey: config.applicationKey || 'dummy-app-key',
+    },
+    forcePathStyle: true,
+  });
+}
+
+export const isB2Configured = () => getB2Config().isConfigured;
 export const B2_BUCKET = process.env.B2_BUCKET_NAME || 'thepax';
 
-export function isB2Configured(): boolean {
-  const keyId = process.env.B2_KEY_ID || process.env.B2_ACCESS_KEY_ID;
-  const appKey = process.env.B2_APPLICATION_KEY || process.env.B2_SECRET_ACCESS_KEY;
-  return Boolean(keyId && appKey && B2_BUCKET);
-}
+// ==========================================
+// COMPRESSION ENGINES
+// ==========================================
 
 /**
- * Returns a presigned GET url for an avatar by public username
+ * Compresses and resizes Display Pictures (DP / Avatars)
+ * Converts to high-efficiency WebP, 80% quality, max 512x512 resolution.
  */
-export async function getAvatarSignedUrl(username: string) {
-  const command = new GetObjectCommand({
-    Bucket: B2_BUCKET,
-    Key: `avatars/${username.toLowerCase()}.png`,
-  });
-  return await getSignedUrl(getS3Client(), command, { expiresIn: 3600 });
+export async function compressAvatar(buffer: Buffer): Promise<{
+  buffer: Buffer;
+  contentType: string;
+  extension: string;
+}> {
+  try {
+    const compressed = await sharp(buffer)
+      .resize(512, 512, {
+        fit: 'cover',
+        withoutEnlargement: true,
+      })
+      .webp({ quality: 80, effort: 4 })
+      .toBuffer();
+
+    return {
+      buffer: compressed,
+      contentType: 'image/webp',
+      extension: 'webp',
+    };
+  } catch (err) {
+    console.warn('Sharp avatar compression failed, falling back to original buffer:', err);
+    return {
+      buffer,
+      contentType: 'image/jpeg',
+      extension: 'jpg',
+    };
+  }
 }
 
 /**
- * Generates presigned PUT url for direct client uploads
+ * Compresses Trade Chat Media (Images, Photos, Screenshots, Documents)
  */
-export async function getUploadPresignedUrl(key: string, contentType: string) {
-  const command = new PutObjectCommand({
-    Bucket: B2_BUCKET,
-    Key: key,
-    ContentType: contentType,
-  });
-  return await getSignedUrl(getS3Client(), command, { expiresIn: 900 });
+export async function compressTradeMedia(
+  buffer: Buffer,
+  mimeType: string,
+  fileName: string
+): Promise<{
+  buffer: Buffer;
+  contentType: string;
+  fileName: string;
+  isCompressed: boolean;
+}> {
+  // If image: compress via sharp
+  if (mimeType.startsWith('image/')) {
+    try {
+      const metadata = await sharp(buffer).metadata();
+      const isAnimated = (metadata.pages || 1) > 1;
+
+      // If animated gif or webp with multiple frames, optimize without breaking animation
+      if (isAnimated) {
+        return {
+          buffer,
+          contentType: mimeType,
+          fileName,
+          isCompressed: false,
+        };
+      }
+
+      const compressed = await sharp(buffer)
+        .resize({
+          width: 1920,
+          height: 1920,
+          fit: 'inside',
+          withoutEnlargement: true,
+        })
+        .webp({ quality: 80, effort: 4 })
+        .toBuffer();
+
+      const baseName = fileName.replace(/\.[^/.]+$/, '');
+      return {
+        buffer: compressed,
+        contentType: 'image/webp',
+        fileName: `${baseName}.webp`,
+        isCompressed: true,
+      };
+    } catch (sharpErr) {
+      console.warn('Trade image compression failed, using original:', sharpErr);
+      return { buffer, contentType: mimeType, fileName, isCompressed: false };
+    }
+  }
+
+  // If text document (JSON, TXT, CSV, LOG, HTML)
+  const isTextDoc =
+    mimeType.startsWith('text/') ||
+    mimeType === 'application/json' ||
+    mimeType === 'application/xml' ||
+    fileName.endsWith('.txt') ||
+    fileName.endsWith('.csv') ||
+    fileName.endsWith('.json');
+
+  if (isTextDoc && buffer.length > 512) {
+    try {
+      const gzipped = zlib.gzipSync(buffer, { level: 9 });
+      return {
+        buffer: gzipped,
+        contentType: mimeType,
+        fileName,
+        isCompressed: true,
+      };
+    } catch (gzipErr) {
+      console.warn('Document compression fallback:', gzipErr);
+    }
+  }
+
+  // Default binary files (PDFs, Videos, etc.)
+  return {
+    buffer,
+    contentType: mimeType || 'application/octet-stream',
+    fileName,
+    isCompressed: false,
+  };
 }
 
 /**
- * Uploads raw buffer to Backblaze B2
+ * Compresses KYC Document / Address details JSON to Backblaze B2
+ */
+export async function compressKycData(data: Record<string, any>): Promise<Buffer> {
+  const jsonStr = JSON.stringify({
+    ...data,
+    _timestamp: new Date().toISOString(),
+  });
+  return zlib.gzipSync(Buffer.from(jsonStr, 'utf-8'), { level: 9 });
+}
+
+// ==========================================
+// BACKBLAZE B2 OPERATIONS
+// ==========================================
+
+/**
+ * Uploads any buffer directly to Backblaze B2 using runtime env credentials
  */
 export async function uploadToB2(
   key: string,
   buffer: Buffer,
-  contentType: string
-): Promise<string> {
+  contentType: string,
+  contentEncoding?: string
+): Promise<{ key: string; publicUrl: string; bucket: string }> {
+  const config = getB2Config();
+  const client = getB2Client();
+
   const command = new PutObjectCommand({
-    Bucket: B2_BUCKET,
+    Bucket: config.bucketName,
     Key: key,
     Body: buffer,
     ContentType: contentType,
+    ContentEncoding: contentEncoding,
   });
 
-  await getS3Client().send(command);
-  return key;
+  await client.send(command);
+
+  const publicUrl = `${config.endpoint.replace(/\/+$/, '')}/${config.bucketName}/${key}`;
+
+  return {
+    key,
+    publicUrl,
+    bucket: config.bucketName,
+  };
 }
 
 /**
- * Generates a short-lived presigned download URL for private files/attachments
+ * Saves compressed KYC details (e.g. Address, Country, ID info) directly into Backblaze B2
  */
-export async function getPresignedDownloadUrl(key: string, expiresInSeconds = 900): Promise<string> {
+export async function saveKycAddressToB2(
+  userId: string,
+  kycDetails: {
+    country?: string;
+    address?: string;
+    street?: string;
+    city?: string;
+    postalCode?: string;
+    docType?: string;
+    docNumber?: string;
+    [key: string]: any;
+  }
+): Promise<{ key: string; success: boolean }> {
+  try {
+    const compressedBuffer = await compressKycData(kycDetails);
+    const key = `kyc-documents/${userId}/address_data_${Date.now()}.json.gz`;
+
+    await uploadToB2(key, compressedBuffer, 'application/json', 'gzip');
+
+    return { key, success: true };
+  } catch (err) {
+    console.error('Failed to save KYC address to B2:', err);
+    return { key: '', success: false };
+  }
+}
+
+/**
+ * Generates short-lived presigned download URL for private KYC / Trade documents
+ */
+export async function getPresignedDownloadUrl(
+  key: string,
+  expiresInSeconds = 900
+): Promise<string> {
+  const config = getB2Config();
+  const client = getB2Client();
+
   const command = new GetObjectCommand({
-    Bucket: B2_BUCKET,
+    Bucket: config.bucketName,
     Key: key,
   });
 
-  return await getSignedUrl(getS3Client(), command, { expiresIn: expiresInSeconds });
+  return await getSignedUrl(client, command, { expiresIn: expiresInSeconds });
 }
 
 /**
- * Downloads object from Backblaze B2 as a Buffer
+ * Downloads object from Backblaze B2 as a Buffer with automatic Gzip decompression
  */
-export async function downloadFromB2(key: string): Promise<{ buffer: Buffer; contentType?: string } | null> {
+export async function downloadFromB2(
+  key: string
+): Promise<{ buffer: Buffer; contentType?: string; contentEncoding?: string } | null> {
   try {
+    const config = getB2Config();
+    const client = getB2Client();
+
     const command = new GetObjectCommand({
-      Bucket: B2_BUCKET,
+      Bucket: config.bucketName,
       Key: key,
     });
 
-    const response = await getS3Client().send(command);
+    const response = await client.send(command);
     if (!response.Body) return null;
 
     const stream = response.Body as any;
@@ -97,13 +297,25 @@ export async function downloadFromB2(key: string): Promise<{ buffer: Buffer; con
     for await (const chunk of stream) {
       chunks.push(typeof chunk === 'string' ? Buffer.from(chunk) : chunk);
     }
+
+    let buffer = Buffer.concat(chunks);
+
+    // If gzipped, decompress
+    if (response.ContentEncoding === 'gzip' || key.endsWith('.gz')) {
+      try {
+        buffer = zlib.gunzipSync(buffer);
+      } catch (gunzipErr) {
+        console.warn('Gunzip decompression error, returning raw buffer:', gunzipErr);
+      }
+    }
+
     return {
-      buffer: Buffer.concat(chunks),
+      buffer,
       contentType: response.ContentType,
+      contentEncoding: response.ContentEncoding,
     };
   } catch (err) {
     console.error('downloadFromB2 error:', err);
     return null;
   }
 }
-

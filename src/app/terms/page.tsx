@@ -297,10 +297,10 @@ export default function TermsPage() {
             </section>
 
             <section className="pt-6">
-              <h2 className="text-base font-bold text-slate-900 dark:text-white mb-3">15. FIRST-PARTY PAYMENTS</h2>
-              <p className="mb-2">Unless an offer expressly permits otherwise, payments must be made from a payment account belonging to the verified buyer and received into a payment account belonging to the verified seller.</p>
-              <p className="mb-2">Third-party payments are strictly prohibited. You must not pay using another person&apos;s account, ask another to pay on your behalf, receive payment into another&apos;s account, use stolen payment accounts, or disguise the source/recipient.</p>
-              <p>A transaction may be cancelled or resolved against a user when the payment violates these requirements.</p>
+              <h2 className="text-base font-bold text-slate-900 dark:text-white mb-3">15. PAYMENT VERIFICATION</h2>
+              <p className="mb-2">Unless an offer expressly specifies custom payment settlement instructions, payments should be confirmed and received as agreed in the trade terms.</p>
+              <p className="mb-2">You must ensure that all funds transferred originate from authorized accounts, that transaction details match the agreed specifications, and that no stolen payment instruments or fraudulent chargebacks are utilized.</p>
+              <p>A transaction may be subject to dispute review or cancelled if payment settlement cannot be verified by the recipient.</p>
             </section>
 
             <section className="pt-6">

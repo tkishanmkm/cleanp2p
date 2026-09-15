@@ -17,6 +17,42 @@ export async function GET(request: Request) {
       const supabase = await createClient();
       const { data, error: exchangeErr } = await supabase.auth.exchangeCodeForSession(code);
       if (!exchangeErr && data?.user) {
+        const user = data.user;
+        try {
+          const { data: profile } = await supabase
+            .from('profiles')
+            .select('id, username_changed')
+            .eq('id', user.id)
+            .maybeSingle();
+
+          if (!profile) {
+            const shortId = user.id.replace(/-/g, '').slice(0, 8);
+            const generatedUsername = `user_${shortId}`;
+            const meta = user.user_metadata || {};
+            const fullName = meta.full_name || meta.name || '';
+            const avatarUrl = meta.avatar_url || meta.picture || null;
+
+            await supabase.from('profiles').insert({
+              id: user.id,
+              email: user.email,
+              username: generatedUsername,
+              full_name: fullName,
+              display_name: fullName || generatedUsername,
+              avatar_url: avatarUrl,
+              photo_url: avatarUrl,
+              username_changed: false, // Ensure 1-time change option is granted
+              username_changes_remaining: 1,
+              username_changed_count: 0,
+              role: 'user',
+              status: 'active',
+              created_at: new Date().toISOString(),
+              updated_at: new Date().toISOString(),
+            });
+          }
+        } catch (profileErr) {
+          console.error('[OAuth Callback] Error checking/creating OAuth profile:', profileErr);
+        }
+
         try {
           await fetch(`${requestUrl.origin}/api/auth/provision-wallets`, {
             method: 'POST',

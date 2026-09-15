@@ -1350,7 +1350,7 @@ export default function CreateP2PAdPage() {
                 rows={3}
                 value={terms}
                 onChange={(e) => setTerms(e.target.value)}
-                placeholder="e.g., Payment must be made from an account with your name. No third-party payments..."
+                placeholder="e.g., Fast release upon payment receipt. Please leave reference note..."
                 className="w-full px-3 py-2 border border-gray-200 dark:border-gray-700 bg-white dark:bg-[#202026] text-gray-900 dark:text-white rounded-lg text-xs focus:outline-none focus:ring-1 focus:ring-[#9273fc] resize-none"
               />
             </div>
@@ -1379,7 +1379,7 @@ export default function CreateP2PAdPage() {
               <p className="text-[11px] text-gray-400 mb-2">Select tags that apply to your ad.</p>
               <div className="grid grid-cols-2 gap-2">
                 {[
-                  'No third party',
+                  'Instant release',
                   'No receipt required',
                   'No verification',
                   'Invoice accepted',

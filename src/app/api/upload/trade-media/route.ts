@@ -1,22 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3';
 import { createClient } from '@/lib/supabase/server';
+import { uploadToB2, compressTradeMedia } from '@/lib/b2';
 
-const b2Endpoint = process.env.B2_ENDPOINT || 'https://s3.us-east-005.backblazeb2.com';
-const b2Region = process.env.B2_REGION || 'us-east-005';
-const b2AccessKeyId = process.env.B2_ACCESS_KEY_ID || process.env.B2_KEY_ID || '';
-const b2SecretAccessKey = process.env.B2_SECRET_ACCESS_KEY || process.env.B2_APP_KEY || process.env.B2_APPLICATION_KEY || '';
-const b2Bucket = process.env.B2_BUCKET_NAME || '';
-
-const s3Client = new S3Client({
-  endpoint: b2Endpoint,
-  region: b2Region,
-  credentials: {
-    accessKeyId: b2AccessKeyId,
-    secretAccessKey: b2SecretAccessKey,
-  },
-  forcePathStyle: true,
-});
+export const dynamic = 'force-dynamic';
 
 export async function POST(req: NextRequest) {
   try {
@@ -75,36 +61,40 @@ export async function POST(req: NextRequest) {
     }
 
     const arrayBuffer = await file.arrayBuffer();
-    const buffer = Buffer.from(arrayBuffer);
+    const rawBuffer = Buffer.from(arrayBuffer);
+
+    // Compress Trade Media (Images & Documents)
+    const {
+      buffer: finalBuffer,
+      contentType: finalContentType,
+      fileName: finalFileName,
+      isCompressed,
+    } = await compressTradeMedia(rawBuffer, fileType || 'application/octet-stream', file.name);
 
     // Sanitize file name
-    const sanitizedName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_');
+    const sanitizedName = finalFileName.replace(/[^a-zA-Z0-9._-]/g, '_');
     const key = `trades/${tradeId}/${Date.now()}_${sanitizedName}`;
 
-    // Upload to Backblaze B2
-    const uploadCommand = new PutObjectCommand({
-      Bucket: b2Bucket,
-      Key: key,
-      Body: buffer,
-      ContentType: fileType || 'application/octet-stream',
-    });
+    // Upload directly to Backblaze B2
+    const b2Upload = await uploadToB2(key, finalBuffer, finalContentType);
 
-    await s3Client.send(uploadCommand);
-
-    // Construct public / direct B2 URL
-    const publicUrl = `${b2Endpoint}/${b2Bucket}/${key}`;
+    // Provide proxied stream URL or B2 direct URL
+    const proxyUrl = `/api/trade/media?key=${encodeURIComponent(key)}`;
 
     return NextResponse.json({
       success: true,
-      url: publicUrl,
+      url: proxyUrl,
+      publicUrl: b2Upload.publicUrl,
       key,
       mediaType,
-      fileName: file.name,
-      fileSize: file.size,
+      fileName: finalFileName,
+      originalSize: file.size,
+      compressedSize: finalBuffer.length,
+      isCompressed,
       visibility,
     });
   } catch (err: any) {
-    console.error('B2 upload error:', err);
+    console.error('B2 trade media upload error:', err);
     return NextResponse.json(
       { error: err.message || 'Failed to upload media to Backblaze B2' },
       { status: 500 }

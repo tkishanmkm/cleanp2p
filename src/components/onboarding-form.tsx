@@ -304,8 +304,8 @@ export default function OnboardingForm({ user }: OnboardingProps) {
 
     {/* Minor Safety Dialog (18+ Requirement) */}
     {showMinorModal && (
-      <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/75 backdrop-blur-sm p-4">
-        <div className="w-full max-w-md bg-white dark:bg-[#0f1423] border border-rose-200 dark:border-rose-900/50 rounded-2xl shadow-2xl p-6 text-center space-y-4 animate-in fade-in zoom-in-95 duration-200">
+      <div className="fixed inset-0 z-[999] flex items-center justify-center bg-black/75 backdrop-blur-sm p-4 overflow-y-auto">
+        <div className="w-full max-w-md bg-white dark:bg-[#0f1423] border border-rose-200 dark:border-rose-900/50 rounded-2xl shadow-2xl p-6 text-center space-y-4 animate-in fade-in zoom-in-95 duration-200 relative">
           <div className="mx-auto w-14 h-14 rounded-full bg-rose-100 dark:bg-rose-950/60 text-rose-600 flex items-center justify-center">
             <AlertTriangle className="w-7 h-7" />
           </div>
@@ -316,23 +316,21 @@ export default function OnboardingForm({ user }: OnboardingProps) {
             <p className="text-sm text-slate-600 dark:text-slate-300 leading-relaxed">
               Paxones is a peer-to-peer cryptocurrency financial exchange and is strictly restricted to individuals 18 years of age or older for child safety and regulatory compliance.
             </p>
-            <p className="text-xs text-rose-600 dark:text-rose-400 font-medium">
+            <p className="text-xs text-rose-600 dark:text-rose-400 font-semibold pt-1">
               The date of birth you entered indicates you are under 18 years old.
             </p>
           </div>
 
-          <div className="pt-2 flex flex-col sm:flex-row gap-3">
-            <Button
+          <div className="pt-3 flex flex-col sm:flex-row gap-3">
+            <button
               type="button"
-              variant="outline"
               onClick={() => setShowMinorModal(false)}
-              className="flex-1 rounded-xl font-semibold text-sm"
+              className="w-full sm:flex-1 min-h-[48px] px-4 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700 active:scale-[0.98] text-slate-800 dark:text-slate-200 font-semibold text-sm transition-all touch-manipulation cursor-pointer flex items-center justify-center select-none shadow-xs"
             >
               Correct Date of Birth
-            </Button>
-            <Button
+            </button>
+            <button
               type="button"
-              variant="destructive"
               disabled={isDeletingAccount}
               onClick={async () => {
                 setIsDeletingAccount(true);
@@ -350,10 +348,10 @@ export default function OnboardingForm({ user }: OnboardingProps) {
                   setIsDeletingAccount(false);
                 }
               }}
-              className="flex-1 rounded-xl font-semibold text-sm bg-rose-600 hover:bg-rose-700 text-white"
+              className="w-full sm:flex-1 min-h-[48px] px-4 rounded-xl bg-rose-600 hover:bg-rose-700 active:scale-[0.98] text-white font-semibold text-sm transition-all touch-manipulation cursor-pointer flex items-center justify-center select-none disabled:opacity-50 shadow-md shadow-rose-600/20"
             >
-              {isDeletingAccount ? 'Deleting...' : 'Delete Account'}
-            </Button>
+              {isDeletingAccount ? 'Deleting...' : 'Delete Account / Cancel'}
+            </button>
           </div>
         </div>
       </div>
