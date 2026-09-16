@@ -1,16 +1,26 @@
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import { runDepositSweeper } from '@/jobs/sweeperWorker';
 
 export const dynamic = 'force-dynamic';
 
-export async function GET(req: Request) {
-  try {
-    const authHeader = req.headers.get('authorization');
-    const isValidSecret =
-      authHeader === `Bearer ${process.env.WORKER_SECRET}` ||
-      (Boolean(process.env.CRON_SECRET) && authHeader === `Bearer ${process.env.CRON_SECRET}`);
+function isAuthorized(req: NextRequest): boolean {
+  const secretKey =
+    process.env.CRON_SECRET_KEY?.trim() ||
+    process.env.CRON_SECRET?.trim() ||
+    process.env.WORKER_SECRET?.trim();
+  if (!secretKey) return true;
 
-    if (!isValidSecret) {
+  const authHeader = req.headers.get('authorization');
+  const token = authHeader?.replace(/^Bearer\s+/i, '').trim();
+  const urlKey = req.nextUrl.searchParams.get('key');
+  const serviceKey = req.headers.get('x-service-key') || req.headers.get('x-worker-secret');
+
+  return token === secretKey || urlKey === secretKey || serviceKey === secretKey;
+}
+
+export async function GET(req: NextRequest) {
+  try {
+    if (!isAuthorized(req)) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
@@ -23,3 +33,8 @@ export async function GET(req: Request) {
     return NextResponse.json({ error: err.message }, { status: 500 });
   }
 }
+
+export async function POST(req: NextRequest) {
+  return GET(req);
+}
+

@@ -21,8 +21,20 @@ const supabaseAdmin = createClient(
 );
 
 export async function POST(req: NextRequest): Promise<NextResponse> {
+  const secretKey =
+    process.env.CRON_SECRET_KEY?.trim() ||
+    process.env.CRON_SECRET?.trim() ||
+    process.env.DEPOSIT_WORKER_SECRET?.trim() ||
+    SYSTEM_CONFIG.secrets.cron;
+
   const authHeader = req.headers.get('authorization');
-  if (SYSTEM_CONFIG.secrets.cron && authHeader !== `Bearer ${SYSTEM_CONFIG.secrets.cron}`) {
+  const token = authHeader?.replace(/^Bearer\s+/i, '').trim();
+  const urlKey = req.nextUrl.searchParams.get('key');
+  const serviceKey = req.headers.get('x-service-key') || req.headers.get('x-worker-secret');
+
+  const isAuthed = !secretKey || token === secretKey || urlKey === secretKey || serviceKey === secretKey;
+
+  if (!isAuthed) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
