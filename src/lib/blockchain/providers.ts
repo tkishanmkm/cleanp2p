@@ -100,10 +100,19 @@ export const SUPPORTED_EVM_CHAINS: Record<string, ChainConfig> = {
 
 // Map shorthand aliases to standard network keys
 export function normalizeNetworkCode(network: string): string {
-  const norm = network.toUpperCase().trim();
+  const norm = (network || '').toUpperCase().trim();
+  const isSepolia = Boolean(
+    process.env.ETH_SEPOLIA_RPC_URL ||
+    process.env.SEPOLIA_RPC_URL ||
+    process.env.NEXT_PUBLIC_ENABLE_TESTNET === 'true'
+  );
+
   const aliasMap: Record<string, string> = {
-    ETH: 'ERC20',
-    ETHEREUM: 'ERC20',
+    ETH: isSepolia ? 'SEPOLIA' : 'ERC20',
+    ETHEREUM: isSepolia ? 'SEPOLIA' : 'ERC20',
+    SEPOLIA: 'SEPOLIA',
+    ETH_SEPOLIA: 'SEPOLIA',
+    SEPOLIA_ETH: 'SEPOLIA',
     MAINNET: 'ERC20',
     BSC: 'BEP20',
     BINANCE: 'BEP20',

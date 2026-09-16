@@ -9,6 +9,14 @@ import { deriveUserKeys, LTC_NETWORK } from '../lib/crypto/hd-engine';
 
 const ECPair = ECPairFactory(ecc);
 
+function getTronWebInstance(fullHost: string, privateKey?: string) {
+  const TronWebClass = (TronWeb as any)?.TronWeb || (TronWeb as any)?.default || TronWeb;
+  return new TronWebClass({
+    fullHost: fullHost || 'https://api.trongrid.io',
+    privateKey: privateKey ? privateKey.replace(/^0x/, '') : undefined,
+  });
+}
+
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL || 'https://placeholder.supabase.co';
 const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'placeholder-key';
 
@@ -189,10 +197,10 @@ export async function fundTronGasForAddress(targetAddress: string, amountSun: nu
     return;
   }
 
-  const tronWeb = new (TronWeb as any)({
-    fullHost: process.env.TRON_RPC_URL || 'https://api.trongrid.io',
-    privateKey: tronPrivKey,
-  });
+  const tronWeb = getTronWebInstance(
+    process.env.TRON_RPC_URL || 'https://api.trongrid.io',
+    tronPrivKey
+  );
 
   const tx = await tronWeb.trx.sendTransaction(targetAddress, amountSun);
   console.log(`[Tron Gas] Funded ${amountSun / 1_000_000} TRX gas to ${targetAddress}. TxID: ${tx?.txid || tx?.transaction?.txID}`);
@@ -217,10 +225,7 @@ export async function sweepTronDepositAddress(
     const childTronAddress = userKeys.tron.address;
 
     const tronHost = process.env.TRON_RPC_URL || 'https://api.trongrid.io';
-    const tronWeb = new (TronWeb as any)({
-      fullHost: tronHost,
-      privateKey: childTronPrivKey,
-    });
+    const tronWeb = getTronWebInstance(tronHost, childTronPrivKey);
 
     const usdtContractAddress = process.env.USDT_CONTRACT_TRC20 || 'TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t';
     const contract = await tronWeb.contract().at(usdtContractAddress);
@@ -772,6 +777,19 @@ export async function runAutomatedSweeperJob(): Promise<SweepResult[]> {
 
       if (profileRecord && typeof profileRecord.wallet_index === 'number') {
         derivationIndex = profileRecord.wallet_index;
+      }
+    }
+
+    // 4. Check wallets table using address or user_id
+    if (derivationIndex === null) {
+      const { data: walletRecord } = await supabaseAdmin
+        .from('wallets')
+        .select('derivation_index')
+        .ilike('address', depositAddress)
+        .maybeSingle();
+
+      if (walletRecord && typeof walletRecord.derivation_index === 'number') {
+        derivationIndex = walletRecord.derivation_index;
       }
     }
 

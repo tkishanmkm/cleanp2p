@@ -1,3 +1,4 @@
+import { ethers } from 'ethers';
 import type { CryptoCurrency, SupportedCrypto, Language } from './types';
 
 export const APP_NAME = 'Paxones';
@@ -106,12 +107,25 @@ export function getUsdtConfig(network: string): TokenConfig {
     BINANCE: 'BEP20',
     TRON: 'TRC20',
     MATIC: 'POLYGON',
+    SEPOLIA: 'ERC20',
+    ETH_SEPOLIA: 'ERC20',
   };
   const resolvedKey = aliasMap[norm] || norm;
   const config = USDT_CONFIGS[resolvedKey];
   if (!config) {
     throw new Error(`Unsupported network for USDT: ${network}`);
   }
-  return config;
+
+  let contractAddress = config.contractAddress.trim();
+  if (contractAddress.startsWith('0x')) {
+    try {
+      contractAddress = ethers.getAddress(contractAddress.toLowerCase());
+    } catch (_) {}
+  }
+
+  return {
+    ...config,
+    contractAddress,
+  };
 }
 
