@@ -34,23 +34,33 @@ export interface IngestionResult {
 export async function getMonitoredAddresses(): Promise<{
   evmAddresses: Set<string>;
   tronAddresses: Set<string>;
+  btcAddresses: Set<string>;
+  ltcAddresses: Set<string>;
 }> {
   const evmAddresses = new Set<string>();
   const tronAddresses = new Set<string>();
+  const btcAddresses = new Set<string>();
+  const ltcAddresses = new Set<string>();
 
   try {
     // 1. Fetch from deposit_addresses
     const { data: primaryAddresses, error: pErr } = await supabaseAdmin
       .from('deposit_addresses')
-      .select('address, network_code');
+      .select('address, network_code, asset_code');
 
     if (!pErr && primaryAddresses) {
       for (const row of primaryAddresses) {
         if (!row.address) continue;
         const clean = row.address.trim();
         const normNet = normalizeNetworkCode(row.network_code || '');
+        const normAsset = (row.asset_code || '').toUpperCase().trim();
+
         if (normNet === 'TRC20' || isValidTronAddress(clean)) {
           tronAddresses.add(clean);
+        } else if (normNet === 'BTC' || normAsset === 'BTC' || clean.startsWith('bc1') || clean.startsWith('1') || clean.startsWith('3')) {
+          btcAddresses.add(clean);
+        } else if (normNet === 'LTC' || normAsset === 'LTC' || clean.startsWith('ltc1') || clean.startsWith('L') || clean.startsWith('M')) {
+          ltcAddresses.add(clean);
         } else if (clean.startsWith('0x')) {
           evmAddresses.add(clean.toLowerCase());
         }
@@ -60,15 +70,21 @@ export async function getMonitoredAddresses(): Promise<{
     // 2. Fetch from user_deposit_addresses
     const { data: fallbackAddresses, error: fErr } = await supabaseAdmin
       .from('user_deposit_addresses')
-      .select('address, network');
+      .select('address, network, coin');
 
     if (!fErr && fallbackAddresses) {
       for (const row of fallbackAddresses) {
         if (!row.address) continue;
         const clean = row.address.trim();
         const normNet = normalizeNetworkCode(row.network || '');
+        const normCoin = (row.coin || '').toUpperCase().trim();
+
         if (normNet === 'TRC20' || isValidTronAddress(clean)) {
           tronAddresses.add(clean);
+        } else if (normNet === 'BTC' || normCoin === 'BTC' || clean.startsWith('bc1') || clean.startsWith('1') || clean.startsWith('3')) {
+          btcAddresses.add(clean);
+        } else if (normNet === 'LTC' || normCoin === 'LTC' || clean.startsWith('ltc1') || clean.startsWith('L') || clean.startsWith('M')) {
+          ltcAddresses.add(clean);
         } else if (clean.startsWith('0x')) {
           evmAddresses.add(clean.toLowerCase());
         }
@@ -78,7 +94,7 @@ export async function getMonitoredAddresses(): Promise<{
     console.error('[Deposit Ingestion] Error querying monitored deposit addresses:', err);
   }
 
-  return { evmAddresses, tronAddresses };
+  return { evmAddresses, tronAddresses, btcAddresses, ltcAddresses };
 }
 
 /**
@@ -319,6 +335,145 @@ async function scanTronDeposits(
 }
 
 /**
+ * Scans Bitcoin (BTC Native SegWit / Bech32) UTXO deposits for monitored addresses
+ */
+async function scanBtcDeposits(
+  monitoredBtcAddresses: Set<string>
+): Promise<{ detected: number; credited: number; errors: string[] }> {
+  let detected = 0;
+  let credited = 0;
+  const errors: string[] = [];
+
+  if (monitoredBtcAddresses.size === 0) {
+    return { detected: 0, credited: 0, errors: [] };
+  }
+
+  const btcApiBase = process.env.BTC_MEMPOOL_API || 'https://mempool.space/api';
+
+  for (const btcAddr of Array.from(monitoredBtcAddresses)) {
+    try {
+      const res = await fetch(`${btcApiBase}/address/${btcAddr}/txs`);
+      if (!res.ok) continue;
+
+      const txs = await res.json();
+      if (!Array.isArray(txs)) continue;
+
+      for (const tx of txs) {
+        let outputAmountSat = 0;
+        let voutIndex = 0;
+
+        for (let i = 0; i < (tx.vout || []).length; i++) {
+          const out = tx.vout[i];
+          if (out.scriptpubkey_address === btcAddr) {
+            outputAmountSat += out.value || 0;
+            voutIndex = i;
+          }
+        }
+
+        if (outputAmountSat > 0) {
+          detected++;
+          const btcAmount = outputAmountSat / 100_000_000;
+          const isConfirmed = tx.status?.confirmed === true;
+          const blockHeight = tx.status?.block_height;
+          let confirmations = isConfirmed ? 2 : 0;
+
+          const { error } = await supabaseAdmin.rpc('ingest_and_credit_deposit', {
+            p_tx_hash: tx.txid,
+            p_log_index: voutIndex,
+            p_network: 'BTC',
+            p_to_address: btcAddr,
+            p_amount: btcAmount,
+            p_asset_symbol: 'BTC',
+            p_confirmations: confirmations,
+          });
+
+          if (error) {
+            errors.push(`RPC error for BTC deposit ${tx.txid}: ${error.message}`);
+          } else {
+            if (confirmations >= 2) {
+              credited++;
+            }
+          }
+        }
+      }
+    } catch (err: any) {
+      errors.push(`Failed scanning BTC for ${btcAddr}: ${err?.message}`);
+    }
+  }
+
+  return { detected, credited, errors };
+}
+
+/**
+ * Scans Litecoin (LTC Native SegWit / Bech32) UTXO deposits for monitored addresses
+ */
+async function scanLtcDeposits(
+  monitoredLtcAddresses: Set<string>
+): Promise<{ detected: number; credited: number; errors: string[] }> {
+  let detected = 0;
+  let credited = 0;
+  const errors: string[] = [];
+
+  if (monitoredLtcAddresses.size === 0) {
+    return { detected: 0, credited: 0, errors: [] };
+  }
+
+  const ltcApiBase = process.env.LTC_MEMPOOL_API || 'https://litecoinspace.org/api';
+
+  for (const ltcAddr of Array.from(monitoredLtcAddresses)) {
+    try {
+      const res = await fetch(`${ltcApiBase}/address/${ltcAddr}/txs`);
+      if (!res.ok) continue;
+
+      const txs = await res.json();
+      if (!Array.isArray(txs)) continue;
+
+      for (const tx of txs) {
+        let outputAmountLit = 0;
+        let voutIndex = 0;
+
+        for (let i = 0; i < (tx.vout || []).length; i++) {
+          const out = tx.vout[i];
+          if (out.scriptpubkey_address === ltcAddr) {
+            outputAmountLit += out.value || 0;
+            voutIndex = i;
+          }
+        }
+
+        if (outputAmountLit > 0) {
+          detected++;
+          const ltcAmount = outputAmountLit / 100_000_000;
+          const isConfirmed = tx.status?.confirmed === true;
+          let confirmations = isConfirmed ? 6 : 0;
+
+          const { error } = await supabaseAdmin.rpc('ingest_and_credit_deposit', {
+            p_tx_hash: tx.txid,
+            p_log_index: voutIndex,
+            p_network: 'LTC',
+            p_to_address: ltcAddr,
+            p_amount: ltcAmount,
+            p_asset_symbol: 'LTC',
+            p_confirmations: confirmations,
+          });
+
+          if (error) {
+            errors.push(`RPC error for LTC deposit ${tx.txid}: ${error.message}`);
+          } else {
+            if (confirmations >= 6) {
+              credited++;
+            }
+          }
+        }
+      }
+    } catch (err: any) {
+      errors.push(`Failed scanning LTC for ${ltcAddr}: ${err?.message}`);
+    }
+  }
+
+  return { detected, credited, errors };
+}
+
+/**
  * Re-scans previously pending deposits in the database to credit them once required confirmations are reached
  */
 export async function refreshPendingDepositConfirmations(): Promise<{
@@ -406,7 +561,7 @@ export async function runDepositIngestion(): Promise<{
   results: IngestionResult[];
   pendingRecheck: { checked: number; newlyCredited: number };
 }> {
-  const { evmAddresses, tronAddresses } = await getMonitoredAddresses();
+  const { evmAddresses, tronAddresses, btcAddresses, ltcAddresses } = await getMonitoredAddresses();
   const results: IngestionResult[] = [];
 
   // 1. Scan EVM Chains
@@ -463,7 +618,39 @@ export async function runDepositIngestion(): Promise<{
   }
   results.push(tronResult);
 
-  // 3. Recheck previously PENDING deposits
+  // 3. Scan Bitcoin (BTC)
+  const btcResult: IngestionResult = {
+    network: 'BTC',
+    depositsDetected: 0,
+    depositsCredited: 0,
+    errors: [],
+  };
+
+  if (btcAddresses.size > 0) {
+    const bRes = await scanBtcDeposits(btcAddresses);
+    btcResult.depositsDetected += bRes.detected;
+    btcResult.depositsCredited += bRes.credited;
+    btcResult.errors.push(...bRes.errors);
+  }
+  results.push(btcResult);
+
+  // 4. Scan Litecoin (LTC)
+  const ltcResult: IngestionResult = {
+    network: 'LTC',
+    depositsDetected: 0,
+    depositsCredited: 0,
+    errors: [],
+  };
+
+  if (ltcAddresses.size > 0) {
+    const lRes = await scanLtcDeposits(ltcAddresses);
+    ltcResult.depositsDetected += lRes.detected;
+    ltcResult.depositsCredited += lRes.credited;
+    ltcResult.errors.push(...lRes.errors);
+  }
+  results.push(ltcResult);
+
+  // 5. Recheck previously PENDING deposits
   const pendingRecheck = await refreshPendingDepositConfirmations();
 
   return { results, pendingRecheck };

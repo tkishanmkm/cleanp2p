@@ -214,12 +214,6 @@ export function Header() {
                     </Link>
                   </DropdownMenuItem>
                   <DropdownMenuItem asChild>
-                    <Link href="/merchants" className="flex items-center gap-2">
-                      <HdSecurityShieldIcon className="h-4 w-4 text-[#9273FC]" />
-                      Merchant Program
-                    </Link>
-                  </DropdownMenuItem>
-                  <DropdownMenuItem asChild>
                     <Link href="/faq" className="flex items-center gap-2">
                       <HdSupportIcon className="h-4 w-4 text-[#9273FC]" />
                       FAQ

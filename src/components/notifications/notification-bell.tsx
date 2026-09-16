@@ -128,26 +128,38 @@ export function NotificationBell() {
   }, [userId]);
 
   const getStatusBadge = (status: string) => {
-    switch (status) {
-      case 'completed':
-      case 'released':
-        return 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/30';
+    const s = (status || '').toLowerCase();
+    switch (s) {
+      case 'active':
+        return 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border-emerald-500/30';
+      case 'pending':
+      case 'awaiting_confirmation':
+        return 'bg-amber-500/15 text-amber-600 dark:text-amber-400 border-amber-500/30';
       case 'paid':
-        return 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/30';
+      case 'mark_paid':
+      case 'payment_sent':
+        return 'bg-orange-500/15 text-orange-600 dark:text-orange-400 border-orange-500/30';
       case 'disputed':
       case 'dispute':
-        return 'bg-rose-500/10 text-rose-600 dark:text-rose-400 border-rose-500/30';
+        return 'bg-rose-600/15 text-rose-600 dark:text-rose-400 border-rose-600/30';
       case 'cancelled':
+      case 'canceled':
+        return 'bg-rose-400/15 text-rose-500 dark:text-rose-300 border-rose-400/30';
       case 'expired':
-        return 'bg-slate-500/10 text-slate-600 dark:text-slate-400 border-slate-500/30';
+        return 'bg-slate-500/15 text-slate-600 dark:text-slate-400 border-slate-500/30';
+      case 'completed':
+      case 'released':
+      case 'credited':
+      case 'confirmed':
+        return 'bg-lime-500/15 text-lime-700 dark:text-lime-400 border-lime-500/30';
       default:
-        return 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/30';
+        return 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border-emerald-500/30';
     }
   };
 
   const formatShortId = (id: string) => {
     const clean = (id || '').replace(/[^a-zA-Z0-9]/g, '');
-    return clean.slice(0, 8).toUpperCase();
+    return clean.slice(0, 12).toUpperCase();
   };
 
   return (

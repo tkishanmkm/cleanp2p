@@ -218,6 +218,71 @@ export async function POST(req: NextRequest) {
       throw new Error('Failed to create trade record.');
     }
 
+    const actualTradeId = tradeResult.id;
+    const nowIso = new Date().toISOString();
+
+    // 5. Send Auto-Reply Message if configured (ad auto_reply or profile auto_reply_message)
+    try {
+      const autoReplyText = ad.auto_reply?.trim();
+      let sellerAutoReply = autoReplyText;
+      let sellerUsername = 'Trader';
+
+      const { data: sellerProf } = await supabase
+        .from('profiles')
+        .select('username, auto_reply_message')
+        .eq('id', sellerId)
+        .maybeSingle();
+
+      if (sellerProf) {
+        if (sellerProf.username) sellerUsername = sellerProf.username;
+        if (!sellerAutoReply && sellerProf.auto_reply_message?.trim()) {
+          sellerAutoReply = sellerProf.auto_reply_message.trim();
+        }
+      }
+
+      if (sellerAutoReply && sellerAutoReply.length > 0) {
+        await supabase.from('trade_messages').insert({
+          trade_id: actualTradeId,
+          sender_id: sellerId,
+          sender_username: sellerUsername,
+          message: sellerAutoReply,
+          visibility: 'all',
+          created_at: nowIso,
+        });
+      }
+    } catch (autoReplyErr) {
+      console.warn('Auto-reply message creation notice:', autoReplyErr);
+    }
+
+    // 6. Send Activity Center & Trade Request Notifications
+    try {
+      const formattedCoin = (ad.crypto || 'BTC').toUpperCase();
+      // Notify Seller of Trade Request
+      if (sellerId) {
+        await supabase.from('notifications').insert({
+          user_id: sellerId,
+          title: 'Trade Request Initiated',
+          message: `New trade request #${shortId} opened: ${calculatedCrypto.toFixed(4)} ${formattedCoin} for ${numericFiat.toFixed(2)} ${ad.fiat_currency || 'USD'}.`,
+          link: `/trade/${actualTradeId}`,
+          is_read: false,
+          created_at: nowIso,
+        });
+      }
+      // Notify Buyer
+      if (buyerId && buyerId !== sellerId) {
+        await supabase.from('notifications').insert({
+          user_id: buyerId,
+          title: 'Trade Request Initiated',
+          message: `Trade #${shortId} opened successfully. Awaiting payment/escrow confirmation.`,
+          link: `/trade/${actualTradeId}`,
+          is_read: false,
+          created_at: nowIso,
+        });
+      }
+    } catch (notifErr) {
+      console.warn('Trade notification creation notice:', notifErr);
+    }
+
     return NextResponse.json({
       success: true,
       trade_id: tradeResult.id,

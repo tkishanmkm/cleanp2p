@@ -58,6 +58,7 @@ export interface DisplayTransfer {
   recipientUsername: string;
   crypto: CryptoCurrency;
   amount: number;
+  fee: number;
   status: string;
   createdAt: string | Date | null;
   isSent: boolean;
@@ -65,11 +66,12 @@ export interface DisplayTransfer {
 
 interface TransferHistoryListProps {
   userId: string;
-  onRowClick?: (transfer: DisplayTransfer) => void;
+  type?: 'all' | 'sent' | 'received';
+  onRowClick?: (transfer: any) => void;
 }
 
-export function TransferHistoryList({ userId, onRowClick }: TransferHistoryListProps) {
-  const [transfers, setTransfers] = useState<DisplayTransfer[] | null>(null);
+export function TransferHistoryList({ userId, type = 'all', onRowClick }: TransferHistoryListProps) {
+  const [allTransfers, setAllTransfers] = useState<DisplayTransfer[] | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [selectedTransfer, setSelectedTransfer] = useState<DisplayTransfer | null>(null);
   const [isDialogOpen, setIsDialogOpen] = useState(false);
@@ -79,7 +81,47 @@ export function TransferHistoryList({ userId, onRowClick }: TransferHistoryListP
     if (!userId) return;
     setIsLoading(true);
     try {
-      // Query both sent and received transfers for this user
+      // 1. Try fetching from server-side history endpoint (bypasses RLS)
+      try {
+        const res = await fetch('/api/wallet/history/transfers?limit=50');
+        if (res.ok) {
+          const json = await res.json();
+          if (json?.data && Array.isArray(json.data) && json.data.length > 0) {
+            const mapped: DisplayTransfer[] = json.data.map((t: any) => {
+              const isSent = t.type === 'SENT' || t.sender_id === userId;
+              const formattedId = formatTransferId(t.public_id || t.transferId || t.id, t.created_at);
+              const resolvedSender = t.sender_username && !t.sender_username.startsWith('User_')
+                ? t.sender_username
+                : (isSent ? 'You' : (t.sender_username || 'Trader'));
+              const resolvedRecipient = t.recipient_username && !t.recipient_username.startsWith('User_')
+                ? t.recipient_username
+                : (!isSent ? 'You' : (t.recipient_username || 'Trader'));
+
+              return {
+                id: t.id,
+                transferId: formattedId,
+                senderId: t.sender_id,
+                senderUsername: resolvedSender,
+                recipientId: t.recipient_id,
+                recipientUsername: resolvedRecipient,
+                crypto: (t.crypto || t.asset_symbol || 'USDT') as CryptoCurrency,
+                amount: Number(t.amount || 0),
+                fee: Number(t.fee != null ? t.fee : (t.fee_amount != null ? t.fee_amount : (Number(t.amount || 0) * 0.015).toFixed(8))),
+                status: (t.status || 'completed').toLowerCase(),
+                createdAt: t.created_at,
+                isSent,
+              };
+            });
+            setAllTransfers(mapped);
+            setIsLoading(false);
+            return;
+          }
+        }
+      } catch (apiErr) {
+        console.warn('API history fetch notice, falling back to direct Supabase query:', apiErr);
+      }
+
+      // 2. Direct query fallback
       const { data, error } = await supabase
         .from('transfers')
         .select('*')
@@ -115,9 +157,9 @@ export function TransferHistoryList({ userId, onRowClick }: TransferHistoryListP
 
       const mapped: DisplayTransfer[] = (data || []).map((t: any) => {
         const isSent = t.sender_id === userId;
-        const formattedId = formatTransferId(t.public_id || t.id, t.created_at);
-        const resolvedSender = t.sender_username || profileMap[t.sender_id] || (isSent ? 'You' : 'User_' + String(t.sender_id).substring(0, 6));
-        const resolvedRecipient = t.recipient_username || profileMap[t.recipient_id] || (!isSent ? 'You' : 'User_' + String(t.recipient_id).substring(0, 6));
+        const formattedId = formatTransferId(t.public_id || t.transfer_id || t.id, t.created_at);
+        const resolvedSender = profileMap[t.sender_id] || (t.sender_username && !t.sender_username.startsWith('User_') ? t.sender_username : (isSent ? 'You' : 'Trader'));
+        const resolvedRecipient = profileMap[t.recipient_id] || (t.recipient_username && !t.recipient_username.startsWith('User_') ? t.recipient_username : (!isSent ? 'You' : 'Trader'));
         
         return {
           id: t.id,
@@ -126,21 +168,29 @@ export function TransferHistoryList({ userId, onRowClick }: TransferHistoryListP
           senderUsername: resolvedSender,
           recipientId: t.recipient_id,
           recipientUsername: resolvedRecipient,
-          crypto: (t.crypto || 'USDT') as CryptoCurrency,
+          crypto: (t.crypto || t.asset_symbol || t.coin || 'USDT') as CryptoCurrency,
           amount: Number(t.amount || 0),
+          fee: Number(t.fee != null ? t.fee : (t.fee_amount != null ? t.fee_amount : (Number(t.amount || 0) * 0.015).toFixed(8))),
           status: (t.status || 'completed').toLowerCase(),
           createdAt: t.created_at,
           isSent,
         };
       });
 
-      setTransfers(mapped);
+      setAllTransfers(mapped);
     } catch (err) {
       console.warn('Could not fetch Supabase transfers:', err);
+      setAllTransfers([]);
     } finally {
       setIsLoading(false);
     }
   }, [userId]);
+
+  const transfers = (allTransfers || []).filter((t) => {
+    if (type === 'sent') return t.isSent;
+    if (type === 'received') return !t.isSent;
+    return true;
+  });
 
   useEffect(() => {
     fetchTransfers();
@@ -391,7 +441,7 @@ export function TransferHistoryList({ userId, onRowClick }: TransferHistoryListP
             <div className="space-y-3.5 text-sm divide-y divide-border/50 py-1">
               {/* Amount */}
               <div className="flex justify-between items-center pt-2">
-                <span className="text-xs font-medium text-muted-foreground">Amount:</span>
+                <span className="text-xs font-medium text-muted-foreground">Transfer Amount:</span>
                 <span className={cn(
                   'font-mono font-bold text-base',
                   selectedTransfer.isSent ? 'text-amber-600 dark:text-amber-400' : 'text-emerald-600 dark:text-emerald-400'
@@ -399,6 +449,28 @@ export function TransferHistoryList({ userId, onRowClick }: TransferHistoryListP
                   {selectedTransfer.isSent ? '-' : '+'}{selectedTransfer.amount} {selectedTransfer.crypto}
                 </span>
               </div>
+
+              {/* Fee (1.5%) */}
+              {selectedTransfer.isSent && (
+                <>
+                  <div className="flex justify-between items-center pt-3">
+                    <span className="text-xs font-medium text-muted-foreground flex items-center gap-1.5">
+                      <span>PaxOnes Fee:</span>
+                      <span className="text-[10px] font-bold bg-primary/10 text-primary px-1.5 py-0.5 rounded border border-primary/20">1.5%</span>
+                    </span>
+                    <span className="font-mono text-xs font-semibold text-amber-600 dark:text-amber-400">
+                      {selectedTransfer.fee} {selectedTransfer.crypto}
+                    </span>
+                  </div>
+
+                  <div className="flex justify-between items-center pt-3">
+                    <span className="text-xs font-bold text-foreground">Total Deducted:</span>
+                    <span className="font-mono font-bold text-xs text-foreground">
+                      {(selectedTransfer.amount + selectedTransfer.fee).toFixed(8)} {selectedTransfer.crypto}
+                    </span>
+                  </div>
+                </>
+              )}
 
               {/* Status */}
               <div className="flex justify-between items-center pt-3">
@@ -474,3 +546,8 @@ export function TransferHistoryList({ userId, onRowClick }: TransferHistoryListP
     </>
   );
 }
+
+// Export TransferHistoryTable alias for backward compatibility with existing pages
+export const TransferHistoryTable = TransferHistoryList;
+export default TransferHistoryList;
+

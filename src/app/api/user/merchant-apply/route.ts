@@ -33,12 +33,69 @@ export async function POST(req: NextRequest) {
 
     const tierConfig = MERCHANT_TIERS[targetTier as MerchantTier];
 
-    // Submit or record application
+    // 1. ELIGIBILITY CHECK: Check user trading volume
+    let tradeVolumeUsd = Number(profile.total_volume_usd || 0);
+    const { data: completedTrades } = await admin
+      .from('trades')
+      .select('fiat_amount')
+      .or(`buyer_id.eq.${user.id},seller_id.eq.${user.id}`)
+      .eq('status', 'COMPLETED');
+
+    if (completedTrades && completedTrades.length > 0) {
+      for (const t of completedTrades) {
+        tradeVolumeUsd += Number(t.fiat_amount || 0);
+      }
+    }
+
+    if (tradeVolumeUsd < tierConfig.requiredVolumeUsd) {
+      return NextResponse.json({
+        error: `Eligibility requirement not met: A minimum 30-day trading volume of $${tierConfig.requiredVolumeUsd.toLocaleString()} USD is required for ${tierConfig.label}. Your current volume is $${Math.round(tradeVolumeUsd).toLocaleString()} USD. Complete more trades to unlock eligibility.`
+      }, { status: 400 });
+    }
+
+    // 2. LOCKING USDT FOR MERCHANT TAG
+    const requiredDeposit = tierConfig.requiredDepositUsdt;
+    const { data: usdtAsset } = await admin
+      .from('wallet_assets')
+      .select('id, balance, locked_balance')
+      .eq('user_id', user.id)
+      .eq('asset_symbol', 'USDT')
+      .maybeSingle();
+
+    const availableBalance = Number(usdtAsset?.balance || 0);
+    const lockedBalance = Number(usdtAsset?.locked_balance || 0);
+
+    if (availableBalance < requiredDeposit) {
+      return NextResponse.json({
+        error: `Insufficient available USDT balance. You need at least ${requiredDeposit.toLocaleString()} USDT available in your wallet to lock as a merchant security deposit bond. Current available balance: ${availableBalance.toFixed(2)} USDT.`
+      }, { status: 400 });
+    }
+
+    // Deduct from available balance and add to locked_balance in wallet_assets
+    if (usdtAsset?.id) {
+      const { error: lockErr } = await admin
+        .from('wallet_assets')
+        .update({
+          balance: Number((availableBalance - requiredDeposit).toFixed(8)),
+          locked_balance: Number((lockedBalance + requiredDeposit).toFixed(8)),
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', usdtAsset.id);
+
+      if (lockErr) {
+        console.error('Error locking merchant USDT deposit:', lockErr);
+        return NextResponse.json({ error: 'Failed to lock USDT security deposit. Please try again.' }, { status: 500 });
+      }
+    }
+
+    // Update profile to activate merchant tier and record locked deposit
     const { error: updateErr } = await admin
       .from('profiles')
       .update({
+        merchant_tier: targetTier,
         merchant_applied_tier: targetTier,
-        merchant_status: 'PENDING',
+        merchant_status: 'ACTIVE',
+        merchant_deposit_usdt: requiredDeposit,
         updated_at: new Date().toISOString(),
       })
       .eq('id', user.id);
@@ -51,7 +108,7 @@ export async function POST(req: NextRequest) {
     await admin.from('notifications').insert([
       {
         user_id: user.id,
-        message: `Your application for ${tierConfig.name} (${tierConfig.depositUSDT.toLocaleString()} USDT deposit) is under review.`,
+        message: `Congratulations! ${requiredDeposit.toLocaleString()} USDT has been locked as security deposit. Your ${tierConfig.label} badge is now active!`,
         link: '/merchants',
         is_read: false,
         created_at: new Date().toISOString(),
@@ -60,7 +117,9 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({
       success: true,
-      message: `Your application for ${tierConfig.name} has been submitted to Paxones compliance.`,
+      message: `Congratulations! ${requiredDeposit.toLocaleString()} USDT has been locked as security deposit. Your ${tierConfig.label} badge is now active!`,
+      tier: targetTier,
+      depositLocked: requiredDeposit,
     });
   } catch (err: any) {
     console.error('POST /api/user/merchant-apply error:', err);

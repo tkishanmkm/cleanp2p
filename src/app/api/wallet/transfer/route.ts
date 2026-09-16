@@ -62,21 +62,48 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // 3. Resolve recipient: Can be username, profile ID, or user's deposit address
+    // 3. Resolve recipient: Can be username, profile ID, user's email, or user's deposit address
     let recipientProfile: { id: string; username: string; is_banned?: boolean; is_restricted?: boolean; account_status?: string } | null = null;
-    const cleanTarget = targetIdentifier.replace(/^@/, '');
+    const cleanTarget = targetIdentifier.replace(/^@/, '').trim();
+    const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(cleanTarget);
 
-    // Check by username or UUID in profiles
-    const { data: prof } = await admin
+    // 3a. Check by exact / case-insensitive username in profiles
+    const { data: profByUsername } = await admin
       .from('profiles')
       .select('id, username, is_banned, is_restricted, account_status')
-      .or(`username.ilike.${cleanTarget},id.eq.${cleanTarget}`)
+      .ilike('username', cleanTarget)
       .maybeSingle();
 
-    if (prof) {
-      recipientProfile = prof;
-    } else {
-      // Check if targetIdentifier is a deposit address of another platform user
+    if (profByUsername) {
+      recipientProfile = profByUsername;
+    }
+
+    // 3b. Check if cleanTarget is a valid UUID and matches id
+    if (!recipientProfile && isUuid) {
+      const { data: profById } = await admin
+        .from('profiles')
+        .select('id, username, is_banned, is_restricted, account_status')
+        .eq('id', cleanTarget)
+        .maybeSingle();
+      if (profById) {
+        recipientProfile = profById;
+      }
+    }
+
+    // 3c. Check by email or full_name in profiles if still not found
+    if (!recipientProfile) {
+      const { data: profByEmail } = await admin
+        .from('profiles')
+        .select('id, username, is_banned, is_restricted, account_status')
+        .or(`email.ilike.${cleanTarget},full_name.ilike.${cleanTarget}`)
+        .maybeSingle();
+      if (profByEmail) {
+        recipientProfile = profByEmail;
+      }
+    }
+
+    // 3d. Check if targetIdentifier is a deposit address of another platform user
+    if (!recipientProfile) {
       const { data: depAddr } = await admin
         .from('deposit_addresses')
         .select('user_id')
@@ -92,6 +119,59 @@ export async function POST(req: NextRequest) {
         if (profByAddr) {
           recipientProfile = profByAddr;
         }
+      }
+    }
+
+    // 3e. If still not found, check Supabase Auth admin to see if user exists in auth.users by email or username
+    if (!recipientProfile) {
+      try {
+        const { data: authData } = await admin.auth.admin.listUsers();
+        if (authData?.users) {
+          const matchedAuthUser = authData.users.find((u) => {
+            const email = u.email?.toLowerCase() || '';
+            const emailPrefix = email.split('@')[0];
+            const metaUsername = (u.user_metadata?.username || '').toLowerCase();
+            const targetLower = cleanTarget.toLowerCase();
+            return (
+              email === targetLower ||
+              emailPrefix === targetLower ||
+              metaUsername === targetLower ||
+              u.id === cleanTarget
+            );
+          });
+
+          if (matchedAuthUser) {
+            // Find or insert profile for this user
+            const { data: existingProf } = await admin
+              .from('profiles')
+              .select('id, username, is_banned, is_restricted, account_status')
+              .eq('id', matchedAuthUser.id)
+              .maybeSingle();
+
+            if (existingProf) {
+              recipientProfile = existingProf;
+            } else {
+              // Auto-create/upsert basic profile so transfer succeeds seamlessly
+              const fallbackUsername = matchedAuthUser.user_metadata?.username || matchedAuthUser.email?.split('@')[0] || `user_${matchedAuthUser.id.slice(0, 6)}`;
+              const { data: newProf } = await admin
+                .from('profiles')
+                .upsert({
+                  id: matchedAuthUser.id,
+                  username: fallbackUsername,
+                  email: matchedAuthUser.email,
+                  account_status: 'ACTIVE',
+                })
+                .select('id, username, is_banned, is_restricted, account_status')
+                .single();
+
+              if (newProf) {
+                recipientProfile = newProf;
+              }
+            }
+          }
+        }
+      } catch (authLookupErr) {
+        console.warn('Auth user search fallback notice in transfer:', authLookupErr);
       }
     }
 
@@ -187,24 +267,62 @@ export async function POST(req: NextRequest) {
     const senderName = senderProfile?.username || 'Trader';
     const recipientName = recipientProfile.username || 'Trader';
 
-    // 8. Record in transfers table (using 'confirmed' enum status)
-    const { error: transferInsertErr } = await admin
-      .from('transfers')
-      .insert({
+    // 8. Record in transfers table (resilient multi-payload fallback)
+    let transferInsertErr: any = null;
+
+    // Try primary insert with all standard fields
+    const primaryPayload: any = {
+      public_id: publicId,
+      sender_id: user.id,
+      sender_username: senderName,
+      recipient_id: recipientProfile.id,
+      recipient_username: recipientName,
+      crypto: coinSymbol,
+      amount: numericAmount,
+      fee: feeAmount,
+      status: 'confirmed',
+      created_at: new Date().toISOString(),
+    };
+
+    const res1 = await admin.from('transfers').insert(primaryPayload);
+    transferInsertErr = res1.error;
+
+    if (transferInsertErr) {
+      console.warn('Transfers primary insert failed, attempting fallback with fee_amount/asset_symbol:', transferInsertErr);
+      
+      const fallbackPayload1: any = {
         public_id: publicId,
         sender_id: user.id,
         sender_username: senderName,
         recipient_id: recipientProfile.id,
         recipient_username: recipientName,
         crypto: coinSymbol,
+        asset_symbol: coinSymbol,
         amount: numericAmount,
-        fee: feeAmount,
+        fee_amount: feeAmount,
         status: 'confirmed',
         created_at: new Date().toISOString(),
-      });
+      };
+      const res2 = await admin.from('transfers').insert(fallbackPayload1);
+      transferInsertErr = res2.error;
+
+      // If still error, try core minimal fields
+      if (transferInsertErr) {
+        console.warn('Transfers fallback 1 failed, trying core minimal fields:', transferInsertErr);
+        const fallbackPayload2: any = {
+          sender_id: user.id,
+          recipient_id: recipientProfile.id,
+          crypto: coinSymbol,
+          amount: numericAmount,
+          created_at: new Date().toISOString(),
+        };
+        const res3 = await admin.from('transfers').insert(fallbackPayload2);
+        transferInsertErr = res3.error;
+      }
+    }
 
     if (transferInsertErr) {
-      console.warn('Transfer record insertion notice:', transferInsertErr);
+      console.error('Final transfer record insertion failure:', transferInsertErr);
     }
 
     return NextResponse.json({

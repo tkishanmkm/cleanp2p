@@ -45,7 +45,7 @@ export async function GET(req: NextRequest) {
 
     let query = admin
       .from('transfers')
-      .select('id, public_id, sender_id, recipient_id, sender_username, recipient_username, amount, fee_amount, crypto, asset_symbol, status, created_at', { count: 'exact' })
+      .select('*', { count: 'exact' })
       .or(`sender_id.eq.${user.id},recipient_id.eq.${user.id}`);
 
     if (statusParam) {
@@ -70,23 +70,77 @@ export async function GET(req: NextRequest) {
     const totalCount = count ?? 0;
     const totalPages = Math.ceil(totalCount / limit);
 
-    const formattedData = (data || []).map((transfer) => {
+    // Extract all unique user IDs to fetch their real profile.username from profiles table
+    const userIdsToFetch = new Set<string>();
+    (data || []).forEach((t: any) => {
+      if (t.sender_id) userIdsToFetch.add(t.sender_id);
+      if (t.recipient_id) userIdsToFetch.add(t.recipient_id);
+    });
+
+    const profileMap: Record<string, string> = {};
+    if (userIdsToFetch.size > 0) {
+      try {
+        const { data: profs } = await admin
+          .from('profiles')
+          .select('id, username')
+          .in('id', Array.from(userIdsToFetch));
+
+        if (profs) {
+          profs.forEach((p: any) => {
+            if (p.id && p.username) {
+              profileMap[p.id] = p.username;
+            }
+          });
+        }
+
+        // Check any missing users directly from auth.admin
+        const missingIds = Array.from(userIdsToFetch).filter((id) => !profileMap[id]);
+        if (missingIds.length > 0) {
+          try {
+            const { data: authData } = await admin.auth.admin.listUsers();
+            if (authData?.users) {
+              for (const u of authData.users) {
+                if (missingIds.includes(u.id)) {
+                  const resolvedUName = u.user_metadata?.username || u.email?.split('@')[0] || `user_${u.id.slice(0, 6)}`;
+                  profileMap[u.id] = resolvedUName;
+                  // Auto-heal profile record in background
+                  admin.from('profiles').upsert({ id: u.id, username: resolvedUName, email: u.email }).then();
+                }
+              }
+            }
+          } catch (authErr) {
+            console.warn('Auth fallback for profiles notice:', authErr);
+          }
+        }
+      } catch (profErr) {
+        console.warn('Error batch-resolving profiles for transfers:', profErr);
+      }
+    }
+
+    const formattedData = (data || []).map((transfer: any) => {
       const isSender = transfer.sender_id === user.id;
       const type: 'SENT' | 'RECEIVED' = isSender ? 'SENT' : 'RECEIVED';
       const amountStr = transfer.amount != null ? String(transfer.amount) : '0';
-      const feeStr = transfer.fee_amount != null ? String(transfer.fee_amount) : '0';
-      const assetSymbol = (transfer.crypto || transfer.asset_symbol || '').toUpperCase();
+      const feeVal = transfer.fee != null ? transfer.fee : (transfer.fee_amount != null ? transfer.fee_amount : (Number(transfer.amount || 0) * 0.015));
+      const feeStr = String(feeVal);
+      const assetSymbol = (transfer.crypto || transfer.asset_symbol || transfer.coin || 'USDT').toUpperCase();
+
+      // Strictly resolve usernames from profiles table map
+      const senderUsername = profileMap[transfer.sender_id] || transfer.sender_username || (isSender ? 'You' : 'Trader');
+      const recipientUsername = profileMap[transfer.recipient_id] || transfer.recipient_username || (!isSender ? 'You' : 'Trader');
 
       return {
         id: transfer.id,
-        public_id: transfer.public_id || null,
+        public_id: transfer.public_id || transfer.transfer_id || transfer.id,
+        transferId: transfer.public_id || transfer.transfer_id || transfer.id,
         type,
         sender_id: transfer.sender_id,
         recipient_id: transfer.recipient_id,
-        sender_username: transfer.sender_username || null,
-        recipient_username: transfer.recipient_username || null,
+        sender_username: senderUsername,
+        recipient_username: recipientUsername,
         amount: amountStr,
         fee_amount: feeStr,
+        fee: Number(feeVal),
         crypto: assetSymbol,
         asset_symbol: assetSymbol,
         status: (transfer.status || 'completed').toLowerCase(),

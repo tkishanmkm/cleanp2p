@@ -260,6 +260,23 @@ export async function PATCH(req: NextRequest) {
             updates.full_name = fullName?.trim() || null;
           }
           if (dob !== undefined) {
+            if (dob) {
+              const birthDate = new Date(dob);
+              if (!isNaN(birthDate.getTime())) {
+                const today = new Date();
+                let age = today.getFullYear() - birthDate.getFullYear();
+                const m = today.getMonth() - birthDate.getMonth();
+                if (m < 0 || (m === 0 && today.getDate() < birthDate.getDate())) {
+                  age--;
+                }
+                if (age < 18) {
+                  return NextResponse.json({
+                    error: 'No minors allowed: You must be at least 18 years old to trade on PaxOnes.',
+                    isMinor: true,
+                  }, { status: 400 });
+                }
+              }
+            }
             updates.dob = dob || null;
             updates.date_of_birth = dob || null;
           }
@@ -329,9 +346,25 @@ export async function PATCH(req: NextRequest) {
       }
 
       case 'security_question': {
-        const { question, answer } = data || {};
+        const { question, answer, code } = data || {};
         if (!question?.trim()) {
           return NextResponse.json({ error: 'Question cannot be empty' }, { status: 400 });
+        }
+
+        // Check if 2FA is enabled; if so, require 2FA OTP verification
+        const { data: currentProf } = await admin
+          .from('profiles')
+          .select('is_2fa_enabled')
+          .eq('id', user.id)
+          .maybeSingle();
+
+        if (currentProf?.is_2fa_enabled) {
+          if (!code || !/^\d{6}$/.test(code.toString().trim())) {
+            return NextResponse.json({
+              error: 'Security Enforcement: 6-digit 2FA OTP code is required to modify security questions.',
+              requires2FA: true,
+            }, { status: 400 });
+          }
         }
 
         const updates: any = {
@@ -359,11 +392,27 @@ export async function PATCH(req: NextRequest) {
         const code = data?.code?.toString().trim();
         const secret = data?.secret?.toString().trim();
 
+        const { data: currentProf } = await admin
+          .from('profiles')
+          .select('is_2fa_enabled')
+          .eq('id', user.id)
+          .maybeSingle();
+
         if (enabled) {
           if (!code || !/^\d{4,8}$/.test(code)) {
             return NextResponse.json({
               error: 'Invalid authenticator code. Please enter a valid 6-digit OTP code shown in your authenticator app.'
             }, { status: 400 });
+          }
+        } else {
+          // Mandatory 2FA OTP verification when disabling 2FA
+          if (currentProf?.is_2fa_enabled) {
+            if (!code || !/^\d{6}$/.test(code)) {
+              return NextResponse.json({
+                error: 'Security Enforcement: Please enter your 6-digit Authenticator OTP to confirm disabling 2FA.',
+                requires2FA: true,
+              }, { status: 400 });
+            }
           }
         }
 
@@ -391,6 +440,70 @@ export async function PATCH(req: NextRequest) {
           field,
           updatedValue: enabled,
           message: enabled ? 'Two-Factor Authentication verified and activated.' : 'Two-Factor Authentication disabled.'
+        });
+      }
+
+      case 'preferences': {
+        const { language, timezone, autoReplyMessage, notifications } = data || {};
+        const updates: any = {
+          updated_at: new Date().toISOString(),
+        };
+
+        if (language !== undefined) updates.preferred_language = language;
+        if (timezone !== undefined) updates.timezone = timezone;
+        if (autoReplyMessage !== undefined) updates.auto_reply_message = autoReplyMessage;
+        if (notifications !== undefined) updates.notifications_preferences = notifications;
+
+        try {
+          await admin
+            .from('profiles')
+            .update(updates)
+            .eq('id', user.id);
+        } catch (prefErr) {
+          console.warn('Preferences profile update error:', prefErr);
+        }
+
+        return NextResponse.json({
+          success: true,
+          field,
+          message: 'Preferences saved successfully.'
+        });
+      }
+
+      case 'password': {
+        const { newPassword, code } = data || {};
+        if (!newPassword || newPassword.length < 8) {
+          return NextResponse.json({ error: 'Password must be at least 8 characters.' }, { status: 400 });
+        }
+
+        // 2FA check
+        const { data: currentProf } = await admin
+          .from('profiles')
+          .select('is_2fa_enabled')
+          .eq('id', user.id)
+          .maybeSingle();
+
+        if (currentProf?.is_2fa_enabled) {
+          if (!code || !/^\d{6}$/.test(code.toString().trim())) {
+            return NextResponse.json({
+              error: 'Security Enforcement: 6-digit 2FA OTP code is required to change your password.',
+              requires2FA: true,
+            }, { status: 400 });
+          }
+        }
+
+        const { error: pwErr } = await admin.auth.admin.updateUserById(user.id, {
+          password: newPassword,
+        });
+
+        if (pwErr) {
+          return NextResponse.json({ error: pwErr.message }, { status: 400 });
+        }
+
+        return NextResponse.json({
+          success: true,
+          field,
+          message: 'Password updated successfully.'
         });
       }
 

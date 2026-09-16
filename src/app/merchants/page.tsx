@@ -198,12 +198,12 @@ export default function MerchantsProgramPage() {
                     <Button 
                       onClick={() => handleApply(key)}
                       disabled={applyingTier === key}
-                      className="w-full bg-amber-500 hover:bg-amber-600 text-slate-950 font-bold shadow-md cursor-pointer"
+                      className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold shadow-md cursor-pointer transition-colors"
                     >
                       {applyingTier === key ? (
-                        <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Submitting...</>
+                        <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Locking Deposit & Applying...</>
                       ) : (
-                        <>Apply for {info.label} <ArrowRight className="ml-1.5 h-4 w-4" /></>
+                        <>Lock {info.requiredDepositUsdt} USDT & Activate {info.label} <ArrowRight className="ml-1.5 h-4 w-4" /></>
                       )}
                     </Button>
                   )}
