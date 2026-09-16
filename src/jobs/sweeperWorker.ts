@@ -705,7 +705,7 @@ export async function runAutomatedSweeperJob(): Promise<SweepResult[]> {
 
   const { data: deposits, error } = await supabaseAdmin
     .from('onchain_deposits')
-    .select('id, address, to_address, network, user_id')
+    .select('id, address, to_address, network, user_id, asset_symbol, amount')
     .eq('status', 'CONFIRMED')
     .eq('is_swept', false)
     .limit(20);
@@ -716,7 +716,7 @@ export async function runAutomatedSweeperJob(): Promise<SweepResult[]> {
     // Fallback query if 'address' or 'is_swept' column is conditionally resolved
     const { data: fallbackDeposits } = await supabaseAdmin
       .from('onchain_deposits')
-      .select('id, to_address, network, user_id')
+      .select('id, to_address, network, user_id, asset_symbol, amount')
       .eq('status', 'CONFIRMED')
       .limit(20);
     unsweptDeposits = fallbackDeposits || [];

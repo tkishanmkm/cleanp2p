@@ -27,13 +27,9 @@ export function TransactionHistory() {
       const { data: { session } } = await supabase.auth.getSession();
       if (!session) return;
 
-      // Fetch both deposits and withdrawals for the user
+      // Fetch deposits from history API (includes onchain_deposits + legacy deposits) and withdrawals
       const [depositsRes, withdrawalsRes] = await Promise.all([
-        supabase
-          .from('deposits')
-          .select('*')
-          .eq('user_id', session.user.id)
-          .order('created_at', { ascending: false }),
+        fetch('/api/wallet/history/deposits').then((r) => r.json()).catch(() => ({ deposits: [] })),
         supabase
           .from('withdrawals')
           .select('*')
@@ -41,24 +37,24 @@ export function TransactionHistory() {
           .order('created_at', { ascending: false }),
       ]);
 
-      const formattedDeposits: Transaction[] = (depositsRes.data || []).map((d) => ({
-        id: d.id,
+      const formattedDeposits: Transaction[] = (depositsRes.deposits || []).map((d: any) => ({
+        id: d.id || d.tx_hash,
         type: 'deposit',
-        asset: d.asset || d.asset_code,
-        chain: d.chain || d.network_code,
-        amount: d.amount,
-        status: d.status,
-        destination_address: d.deposit_address || d.wallet_address || d.address,
+        asset: d.asset_symbol || d.asset || d.asset_code || 'ETH',
+        chain: d.network || d.chain || d.network_code || 'SEPOLIA',
+        amount: Number(d.amount || 0),
+        status: (d.status === 'credited' || d.status === 'confirmed' || d.status === 'CONFIRMED') ? 'completed' : 'pending',
+        destination_address: d.address || d.to_address || d.deposit_address,
         tx_hash: d.tx_hash || d.txid,
-        created_at: d.created_at,
+        created_at: d.created_at || new Date().toISOString(),
       }));
 
       const formattedWithdrawals: Transaction[] = (withdrawalsRes.data || []).map((w) => ({
         id: w.id,
         type: 'withdrawal',
-        asset: w.asset || w.asset_code,
-        chain: w.chain || w.network_code,
-        amount: w.amount,
+        asset: w.asset || w.asset_code || 'ETH',
+        chain: w.chain || w.network_code || 'EVM',
+        amount: Number(w.amount || 0),
         status: w.status,
         destination_address: w.destination_address || w.to_address || w.address,
         network_fee: w.network_fee ?? w.estimated_gas_fee ?? 0,

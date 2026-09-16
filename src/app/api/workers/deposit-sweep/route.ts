@@ -9,6 +9,33 @@ const supabase = createClient(
   process.env.SUPABASE_SERVICE_ROLE_KEY!
 );
 
+export const dynamic = 'force-dynamic';
+
+export async function GET(req: NextRequest) {
+  try {
+    const authHeader = req.headers.get('authorization');
+    const token = authHeader?.replace(/^Bearer\s+/i, '').trim();
+    const urlKey = req.nextUrl.searchParams.get('key');
+    const expectedSecret =
+      process.env.CRON_SECRET_KEY?.trim() ||
+      process.env.CRON_SECRET?.trim() ||
+      process.env.DEPOSIT_WORKER_SECRET?.trim() ||
+      SYSTEM_CONFIG.secrets.depositWorker ||
+      SYSTEM_CONFIG.secrets.cron;
+
+    if (expectedSecret && token !== expectedSecret && urlKey !== expectedSecret) {
+      return NextResponse.json({ error: 'Unauthorized: Invalid worker secret' }, { status: 401 });
+    }
+
+    const { runDepositSweeper } = await import('@/jobs/sweeperWorker');
+    const result = await runDepositSweeper();
+    return NextResponse.json({ success: true, mode: 'automated_queue', timestamp: new Date().toISOString(), result });
+  } catch (err: any) {
+    console.error('Deposit sweep GET error:', err);
+    return NextResponse.json({ error: err.message || 'Internal server error' }, { status: 500 });
+  }
+}
+
 export async function POST(req: NextRequest) {
   try {
     const authHeader = req.headers.get('authorization');
