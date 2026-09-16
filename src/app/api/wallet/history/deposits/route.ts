@@ -26,18 +26,21 @@ function mapStatusToDbValues(statusInput: string): string[] {
 export async function GET(req: NextRequest) {
   try {
     const supabase = await createClient();
-    const { data: { user }, error: authError } = await supabase.auth.getUser();
+    const { data: { user } } = await supabase.auth.getUser();
 
-    if (authError || !user) {
+    const { searchParams } = new URL(req.url);
+    const requestedUserId = searchParams.get('user_id');
+    const targetUserId = user?.id || requestedUserId;
+
+    if (!targetUserId) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    const { searchParams } = new URL(req.url);
     const rawPage = parseInt(searchParams.get('page') || '1', 10);
-    const rawLimit = parseInt(searchParams.get('limit') || '20', 10);
+    const rawLimit = parseInt(searchParams.get('limit') || '50', 10);
 
     const page = Math.max(1, isNaN(rawPage) ? 1 : rawPage);
-    const limit = Math.min(100, Math.max(1, isNaN(rawLimit) ? 20 : rawLimit));
+    const limit = Math.min(100, Math.max(1, isNaN(rawLimit) ? 50 : rawLimit));
     const offset = (page - 1) * limit;
 
     const statusParam = searchParams.get('status');
@@ -45,55 +48,89 @@ export async function GET(req: NextRequest) {
 
     const admin = getSupabaseAdminClient();
 
-    let query = admin
+    // Query both onchain_deposits and deposits tables using admin client
+    let onchainQuery = admin
       .from('onchain_deposits')
-      .select('id, user_id, tx_hash, network, address, to_address, amount, asset_symbol, confirmations, status, created_at, credited_at', { count: 'exact' })
-      .eq('user_id', user.id);
+      .select('*')
+      .eq('user_id', targetUserId);
+
+    let depositsQuery = admin
+      .from('deposits')
+      .select('*')
+      .eq('user_id', targetUserId);
 
     if (statusParam) {
       const allowedStatuses = mapStatusToDbValues(statusParam);
-      query = query.in('status', allowedStatuses);
+      onchainQuery = onchainQuery.in('status', allowedStatuses);
+      depositsQuery = depositsQuery.in('status', allowedStatuses);
     }
 
+    const [onchainRes, legacyDepositsRes] = await Promise.all([
+      onchainQuery.order('created_at', { ascending: false }).limit(limit),
+      depositsQuery.order('created_at', { ascending: false }).limit(limit)
+    ]);
+
+    const records: Array<any> = [];
+    const seenHashes = new Set<string>();
+
+    if (onchainRes.data) {
+      for (const d of onchainRes.data) {
+        const key = d.tx_hash || d.txid || d.id;
+        seenHashes.add(key);
+        records.push({
+          id: d.id,
+          user_id: d.user_id,
+          tx_hash: d.tx_hash || d.txid || '',
+          network: d.network || d.network_code || 'EVM',
+          address: d.address || d.to_address || '',
+          amount: d.amount != null ? String(d.amount) : '0',
+          asset_symbol: (d.asset_symbol || d.asset || 'USDT').toUpperCase(),
+          confirmations: d.confirmations ?? 0,
+          status: (d.status || 'pending').toLowerCase(),
+          created_at: d.created_at || new Date().toISOString(),
+          credited_at: d.credited_at || null,
+        });
+      }
+    }
+
+    if (legacyDepositsRes.data) {
+      for (const d of legacyDepositsRes.data) {
+        const key = d.tx_hash || d.txid || d.id;
+        if (!seenHashes.has(key)) {
+          seenHashes.add(key);
+          records.push({
+            id: d.id,
+            user_id: d.user_id,
+            tx_hash: d.tx_hash || d.txid || '',
+            network: d.chain || d.network || 'EVM',
+            address: d.to_address || d.address || '',
+            amount: d.amount != null ? String(d.amount) : '0',
+            asset_symbol: (d.token_symbol || d.asset || 'USDT').toUpperCase(),
+            confirmations: 12,
+            status: (d.status || 'confirmed').toLowerCase(),
+            created_at: d.created_at || new Date().toISOString(),
+            credited_at: d.created_at || null,
+          });
+        }
+      }
+    }
+
+    let filtered = records;
     if (assetParam) {
-      query = query.ilike('asset_symbol', assetParam.trim());
+      const assetUpper = assetParam.trim().toUpperCase();
+      filtered = filtered.filter((r) => r.asset_symbol === assetUpper);
     }
 
-    const { data, count, error } = await query
-      .order('created_at', { ascending: false })
-      .range(offset, offset + limit - 1);
+    filtered.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
 
-    if (error) {
-      console.error('Error fetching deposit history:', error);
-      return NextResponse.json({ error: error.message || 'Failed to fetch deposit history' }, { status: 500 });
-    }
-
-    const totalCount = count ?? 0;
-    const totalPages = Math.ceil(totalCount / limit);
-
-    const formattedData = (data || []).map((deposit) => {
-      const amountStr = deposit.amount != null ? String(deposit.amount) : '0';
-      return {
-        id: deposit.id,
-        user_id: deposit.user_id,
-        tx_hash: deposit.tx_hash,
-        network: deposit.network,
-        address: deposit.address || deposit.to_address || '',
-        amount: amountStr,
-        asset_symbol: (deposit.asset_symbol || '').toUpperCase(),
-        confirmations: deposit.confirmations ?? 0,
-        status: (deposit.status || 'pending').toLowerCase(),
-        created_at: deposit.created_at || new Date().toISOString(),
-        credited_at: deposit.credited_at || null,
-      };
-    });
+    const paginated = filtered.slice(offset, offset + limit);
 
     return NextResponse.json({
-      data: formattedData,
+      data: paginated,
       page,
       limit,
-      total_count: totalCount,
-      total_pages: totalPages,
+      total_count: filtered.length,
+      total_pages: Math.ceil(filtered.length / limit),
     });
   } catch (err: any) {
     console.error('Unexpected error in deposit history API:', err);

@@ -135,12 +135,10 @@ export default function DashboardPage() {
   const unifiedWallets = useMemo(() => {
     return SUPPORTED_CRYPTOS.map((crypto) => {
       const coin = crypto.name;
-      const walletData = reactiveBalances?.[coin] || { available: 0, inEscrow: 0, inWithdrawal: 0, fiatValue: 0 };
+      const walletData = reactiveBalances?.[coin] || { available: 0, fiatValue: 0 };
       return {
         crypto: coin,
         balance: typeof walletData.available === 'number' ? walletData.available : 0,
-        lockedBalance: typeof walletData.inEscrow === 'number' ? walletData.inEscrow : 0,
-        inWithdrawal: typeof walletData.inWithdrawal === 'number' ? walletData.inWithdrawal : 0,
         fiatValue: typeof walletData.fiatValue === 'number' ? walletData.fiatValue : 0,
       };
     });
@@ -148,7 +146,7 @@ export default function DashboardPage() {
 
   // For the dashboard table, show active wallets or all supported cryptos
   const walletsToShow = useMemo(() => {
-    const active = unifiedWallets.filter((w) => (w?.balance || 0) > 0 || (w?.lockedBalance || 0) > 0 || (w?.inWithdrawal || 0) > 0);
+    const active = unifiedWallets.filter((w) => (w?.balance || 0) > 0);
     return active.length > 0 ? active : unifiedWallets;
   }, [unifiedWallets]);
 
@@ -216,8 +214,7 @@ export default function DashboardPage() {
                     <TableHeader>
                       <TableRow>
                         <TableHead>Asset</TableHead>
-                        <TableHead>Available</TableHead>
-                        <TableHead>In Escrow</TableHead>
+                        <TableHead>Available Balance</TableHead>
                         <TableHead className="text-right">{preferredCurrency} Value</TableHead>
                       </TableRow>
                     </TableHeader>
@@ -233,11 +230,8 @@ export default function DashboardPage() {
                                 <span className="font-medium">{wallet.crypto}</span>
                               </div>
                             </TableCell>
-                            <TableCell>{(wallet.balance || 0).toFixed(8)}</TableCell>
-                            <TableCell className="text-muted-foreground">
-                              {(wallet.lockedBalance || 0).toFixed(8)}
-                            </TableCell>
-                            <TableCell className="text-right">
+                            <TableCell className="font-mono font-medium">{(wallet.balance || 0).toFixed(8)}</TableCell>
+                            <TableCell className="text-right font-medium">
                               {valueConverted.toLocaleString(undefined, {
                                 style: 'currency',
                                 currency: preferredCurrency,
@@ -249,7 +243,7 @@ export default function DashboardPage() {
                       })}
                       {(!walletsToShow || walletsToShow.length === 0) && (
                         <TableRow>
-                          <TableCell colSpan={4} className="text-center text-muted-foreground py-10">
+                          <TableCell colSpan={3} className="text-center text-muted-foreground py-10">
                             No funds detected. Deposit crypto to start trading.
                           </TableCell>
                         </TableRow>
@@ -276,13 +270,9 @@ export default function DashboardPage() {
                             </div>
                           </CardHeader>
                           <CardContent className="space-y-1 text-sm">
-                            <div className="flex justify-between">
+                            <div className="flex justify-between items-center">
                               <span className="text-muted-foreground">Available</span>
-                              <span>{(wallet.balance || 0).toFixed(8)}</span>
-                            </div>
-                            <div className="flex justify-between">
-                              <span className="text-muted-foreground">In Escrow</span>
-                              <span>{(wallet.lockedBalance || 0).toFixed(8)}</span>
+                              <span className="font-mono font-medium">{(wallet.balance || 0).toFixed(8)}</span>
                             </div>
                           </CardContent>
                         </Card>

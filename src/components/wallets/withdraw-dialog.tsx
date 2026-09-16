@@ -17,6 +17,7 @@ import { FIXED_WITHDRAWAL_FEES_USD, SUPPORTED_CRYPTOS } from '@/lib/constants';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select';
 import { useAuth } from '@/components/providers/auth-provider';
 import { getCachedGasFees, type NetworkGasFee } from '@/lib/gas-oracle';
+import { supabase } from '@/lib/supabase/client';
 
 const withdrawSchema = z.object({
   address: z.string().min(1, "Recipient address is required."),
@@ -163,22 +164,58 @@ export function WithdrawDialog({ open, onOpenChange, asset, userWallets }: Withd
   async function onSubmit(values: WithdrawFormValues) {
     if (!user || !asset) return;
 
+    const targetAddress = values.address.trim();
     const withdrawAmt = Number(values.amount);
-    const totalRequired = withdrawAmt + Number(feeInCrypto || 0);
-
-    if (totalRequired > availableBalance) {
-      form.setError("amount", {
-        message: `Insufficient balance to cover withdrawal (${withdrawAmt} ${asset}) + network gas fee (${feeInCrypto.toFixed(6)} ${asset}).`,
-      });
-      return;
-    }
 
     setIsLoading(true);
     try {
+      // Check if the destination address belongs to another registered user on the platform
+      const { data: internalDep } = await supabase
+        .from('deposit_addresses')
+        .select('user_id')
+        .eq('address', targetAddress)
+        .maybeSingle();
+
+      if (internalDep?.user_id && internalDep.user_id !== user.uid) {
+        // Internal transfer detected! Execute instantly via internal transfer API
+        const transferRes = await fetch('/api/wallet/transfer', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            recipientInput: targetAddress,
+            asset,
+            amount: withdrawAmt,
+          }),
+        });
+
+        const transferData = await transferRes.json();
+        if (!transferRes.ok || transferData.error) {
+          throw new Error(transferData.error || 'Failed to complete internal transfer');
+        }
+
+        toast({
+          title: 'Internal Transfer Completed!',
+          description: `Address belongs to @${transferData.recipientUsername}. Processed instantly as an internal transfer (1.5% Fee: ${transferData.fee} ${asset}).`,
+        });
+
+        await refreshBalances();
+        onOpenChange(false);
+        return;
+      }
+
+      // Standard On-chain withdrawal
+      const totalRequired = withdrawAmt + Number(feeInCrypto || 0);
+      if (totalRequired > availableBalance) {
+        form.setError("amount", {
+          message: `Insufficient balance to cover withdrawal (${withdrawAmt} ${asset}) + network gas fee (${feeInCrypto.toFixed(6)} ${asset}).`,
+        });
+        return;
+      }
+
       await requestWithdrawal(
         asset,
         values.chain,
-        values.address.trim(),
+        targetAddress,
         withdrawAmt,
         feeInCrypto
       );

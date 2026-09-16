@@ -6,16 +6,17 @@ import { useAuth } from '@/components/providers/auth-provider';
 import type { CoinTransfer, CryptoCurrency } from '@/lib/types';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Loader2, ArrowDown, ArrowUp, Eye } from 'lucide-react';
+import { Loader2, ArrowDown, ArrowUp, Send, Eye, ExternalLink, Clock, Copy, Check } from 'lucide-react';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
 import { useToast } from '@/hooks/use-toast';
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { Skeleton } from '@/components/ui/skeleton';
 import { DepositDialog } from '@/components/wallets/deposit-dialog';
 import { WithdrawDialog } from '@/components/wallets/withdraw-dialog';
+import { TransferDialog } from '@/components/wallets/transfer-dialog';
 import { BtcLogo, EthLogo, LtcLogo, UsdtLogo } from '@/components/icons';
 import { getUserWalletBalances } from '@/lib/wallet';
 import { getUserDeposits, getUserWithdrawals, type DepositRecord, type WithdrawalRecord } from '@/lib/supabase/db';
@@ -25,7 +26,8 @@ import { usePrices } from '@/context/price-context';
 import { useWallet } from '@/context/wallet-context';
 import { statusColors } from '@/lib/status-colors';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { TransferHistoryTable } from '@/components/wallets/transfer-history-table';
+import { TransferHistoryList } from '@/components/wallets/transfer-history-table';
+import { getTxExplorerUrl, getAddressExplorerUrl } from '@/lib/explorer';
 
 const depositStatusText: Record<string, string> = {
   pending: 'Confirming on Blockchain',
@@ -33,11 +35,34 @@ const depositStatusText: Record<string, string> = {
   confirmed: 'Confirmed',
   credited: 'Credited',
   approved: 'Credited',
+  completed: 'Confirmed',
   rejected: 'Rejected',
   declined: 'Cancelled',
   expired: 'Expired',
   awaiting_confirmation: 'Waiting for Confirmations',
 };
+
+export function CoinBadgeLogo({ coin, className = "h-5 w-5" }: { coin: string; className?: string }) {
+  const norm = (coin || '').toUpperCase();
+  switch (norm) {
+    case 'BTC':
+    case 'BITCOIN':
+      return <BtcLogo className={className} />;
+    case 'ETH':
+    case 'ETHEREUM':
+      return <EthLogo className={className} />;
+    case 'LTC':
+    case 'LITECOIN':
+      return <LtcLogo className={className} />;
+    case 'USDT':
+    case 'USDT-ERC20':
+    case 'USDT-TRC20':
+    case 'USDT-BEP20':
+      return <UsdtLogo className={className} />;
+    default:
+      return <UsdtLogo className={className} />;
+  }
+}
 
 interface DisplayDeposit {
   id: string;
@@ -72,14 +97,15 @@ function DepositsHistory({ userId, onRowClick }: { userId: string; onRowClick: (
     try {
       const { data, error } = await getUserDeposits(userId);
       if (!error && data) {
-        const mapped: DisplayDeposit[] = data.map((d: DepositRecord) => ({
+        const mapped: DisplayDeposit[] = data.map((d: any) => ({
           id: d.id,
-          crypto: d.asset_code as CryptoCurrency,
-          chain: d.network_code,
-          amount: Number(d.amount),
-          status: d.status,
+          crypto: (d.asset_code || d.asset_symbol || d.asset || d.token_symbol || 'USDT') as CryptoCurrency,
+          chain: d.network_code || d.network || d.chain || 'Mainnet',
+          amount: Number(d.amount || 0),
+          status: (d.status || 'confirmed').toLowerCase(),
           createdAt: d.created_at,
-          txid: d.txid,
+          walletAddress: d.deposit_address_id || d.address || d.to_address,
+          txid: d.txid || d.tx_hash,
         }));
         setDeposits(mapped);
       }
@@ -96,72 +122,195 @@ function DepositsHistory({ userId, onRowClick }: { userId: string; onRowClick: (
 
   if (isLoading)
     return (
-      <div className="space-y-2">
-        <Skeleton className="h-24 w-full" />
-        <Skeleton className="h-24 w-full" />
+      <div className="space-y-3 p-2">
+        <Skeleton className="h-16 w-full rounded-xl" />
+        <Skeleton className="h-16 w-full rounded-xl" />
+        <Skeleton className="h-16 w-full rounded-xl" />
       </div>
     );
-  if (!deposits?.length) return <p className="text-center text-muted-foreground py-4">No deposit history.</p>;
+  if (!deposits?.length) return <p className="text-center text-muted-foreground py-8 text-sm">No deposit history found.</p>;
 
   return (
-    <ScrollArea className="h-72">
-      <Table className="hidden md:table">
-        <TableHeader>
-          <TableRow>
-            <TableHead>Asset</TableHead>
-            <TableHead>Amount</TableHead>
-            <TableHead>Status</TableHead>
-            <TableHead>Date</TableHead>
-            <TableHead className="text-right">Action</TableHead>
-          </TableRow>
-        </TableHeader>
-        <TableBody>
-          {deposits.map((d) => {
-            const displayStatus = depositStatusText[d.status] || d.status;
-            const dateStr = d.createdAt ? new Date(d.createdAt).toLocaleDateString() : 'N/A';
-            return (
-              <TableRow key={d.id} onClick={() => onRowClick(d)} className="cursor-pointer hover:bg-muted/50">
-                <TableCell>
-                  {d.crypto} <span className="text-muted-foreground text-xs">({d.chain})</span>
-                </TableCell>
-                <TableCell className="font-medium">{d.amount}</TableCell>
-                <TableCell>
+    <div className="space-y-4">
+      {/* Desktop Table View */}
+      <div className="hidden md:block rounded-xl border border-blue-500/20 bg-card/60 overflow-hidden shadow-sm">
+        <Table>
+          <TableHeader className="bg-blue-500/5 dark:bg-blue-950/20">
+            <TableRow className="hover:bg-transparent border-blue-500/10">
+              <TableHead className="text-blue-600 dark:text-blue-400 font-semibold">Asset</TableHead>
+              <TableHead className="text-blue-600 dark:text-blue-400 font-semibold">Amount</TableHead>
+              <TableHead className="text-blue-600 dark:text-blue-400 font-semibold">Status</TableHead>
+              <TableHead className="text-blue-600 dark:text-blue-400 font-semibold">Date & Time</TableHead>
+              <TableHead className="text-blue-600 dark:text-blue-400 font-semibold">Transaction Hash</TableHead>
+              <TableHead className="text-right text-blue-600 dark:text-blue-400 font-semibold">Action</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {deposits.map((d) => {
+              const displayStatus = depositStatusText[d.status.toLowerCase()] || d.status;
+              const dateObj = d.createdAt ? new Date(d.createdAt) : null;
+              const dateStr = dateObj ? dateObj.toLocaleDateString() : 'N/A';
+              const timeStr = dateObj ? dateObj.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }) : '';
+              const explorerUrl = getTxExplorerUrl(d.txid, d.chain || d.crypto);
+
+              return (
+                <TableRow 
+                  key={d.id} 
+                  onClick={() => onRowClick(d)} 
+                  className="cursor-pointer hover:bg-blue-50/50 dark:hover:bg-blue-950/30 transition-colors border-blue-500/10"
+                >
+                  <TableCell className="py-3.5">
+                    <div className="flex items-center gap-2.5">
+                      <CoinBadgeLogo coin={d.crypto} className="h-6 w-6 shrink-0" />
+                      <div>
+                        <div className="font-semibold text-sm text-foreground flex items-center gap-1.5">
+                          {d.crypto}
+                          <span className="text-[11px] px-1.5 py-0.5 rounded bg-blue-500/10 text-blue-600 dark:text-blue-400 font-medium">
+                            {d.chain}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                  </TableCell>
+                  <TableCell className="font-mono font-bold text-sm text-emerald-600 dark:text-emerald-400">
+                    +{d.amount} {d.crypto}
+                  </TableCell>
+                  <TableCell>
+                    <Badge
+                      variant="outline"
+                      className={cn('capitalize text-xs font-medium', statusColors[d.status as keyof typeof statusColors] || 'bg-muted text-muted-foreground')}
+                    >
+                      {displayStatus}
+                    </Badge>
+                  </TableCell>
+                  <TableCell>
+                    <div className="text-xs flex flex-col">
+                      <span className="font-medium text-foreground">{dateStr}</span>
+                      <span className="text-muted-foreground text-[11px]">{timeStr}</span>
+                    </div>
+                  </TableCell>
+                  <TableCell onClick={(e) => e.stopPropagation()}>
+                    {d.txid ? (
+                      explorerUrl ? (
+                        <a
+                          href={explorerUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-flex items-center gap-1.5 font-mono text-xs text-blue-600 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-300 hover:underline bg-blue-50 dark:bg-blue-950/40 px-2 py-1 rounded-md transition"
+                        >
+                          <span className="max-w-[120px] truncate">{d.txid}</span>
+                          <ExternalLink className="h-3 w-3 shrink-0" />
+                        </a>
+                      ) : (
+                        <span className="font-mono text-xs text-muted-foreground max-w-[120px] truncate block">
+                          {d.txid}
+                        </span>
+                      )
+                    ) : (
+                      <span className="text-xs text-muted-foreground italic">Pending</span>
+                    )}
+                  </TableCell>
+                  <TableCell className="text-right" onClick={(e) => { e.stopPropagation(); onRowClick(d); }}>
+                    <Button 
+                      variant="outline" 
+                      size="sm"
+                      className="h-8 gap-1 border-blue-500/30 text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-950/50"
+                    >
+                      <Eye className="h-3.5 w-3.5" />
+                      <span>View</span>
+                    </Button>
+                  </TableCell>
+                </TableRow>
+              );
+            })}
+          </TableBody>
+        </Table>
+      </div>
+
+      {/* Mobile Card View */}
+      <div className="grid gap-3 md:hidden">
+        {deposits.map((d) => {
+          const displayStatus = depositStatusText[d.status.toLowerCase()] || d.status;
+          const dateObj = d.createdAt ? new Date(d.createdAt) : null;
+          const dateStr = dateObj ? dateObj.toLocaleDateString() : 'N/A';
+          const timeStr = dateObj ? dateObj.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '';
+          const explorerUrl = getTxExplorerUrl(d.txid, d.chain || d.crypto);
+
+          return (
+            <div
+              key={d.id}
+              onClick={() => onRowClick(d)}
+              className="p-4 rounded-xl border border-blue-500/20 bg-card hover:bg-blue-50/40 dark:hover:bg-blue-950/20 transition shadow-sm space-y-3"
+            >
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2.5">
+                  <CoinBadgeLogo coin={d.crypto} className="h-7 w-7 shrink-0" />
+                  <div>
+                    <div className="font-bold text-sm text-foreground flex items-center gap-1.5">
+                      {d.crypto}
+                      <span className="text-[10px] px-1.5 py-0.5 rounded bg-blue-500/10 text-blue-600 dark:text-blue-400 font-medium">
+                        {d.chain}
+                      </span>
+                    </div>
+                    <div className="text-[11px] text-muted-foreground flex items-center gap-1 mt-0.5">
+                      <Clock className="h-3 w-3" />
+                      <span>{dateStr} {timeStr}</span>
+                    </div>
+                  </div>
+                </div>
+                <div className="text-right">
+                  <div className="font-mono font-bold text-sm text-emerald-600 dark:text-emerald-400">
+                    +{d.amount} {d.crypto}
+                  </div>
                   <Badge
                     variant="outline"
-                    className={cn('capitalize text-xs', statusColors[d.status] || 'bg-muted text-muted-foreground')}
+                    className={cn('capitalize text-[10px] font-medium mt-1', statusColors[d.status as keyof typeof statusColors] || 'bg-muted text-muted-foreground')}
                   >
                     {displayStatus}
                   </Badge>
-                </TableCell>
-                <TableCell>{dateStr}</TableCell>
-                <TableCell className="text-right">
-                  <Button variant="ghost" size="icon">
-                    <Eye className="h-4 w-4" />
-                  </Button>
-                </TableCell>
-              </TableRow>
-            );
-          })}
-        </TableBody>
-      </Table>
-      <div className="grid gap-4 md:hidden p-2">
-        {deposits.map((d) => (
-          <Card key={d.id} onClick={() => onRowClick(d)} className="cursor-pointer">
-            <CardHeader className="p-4">
-              <div className="flex justify-between items-start">
-                <CardTitle className="text-base">
-                  {d.amount} {d.crypto}
-                </CardTitle>
-                <Badge variant="outline" className="text-[10px]">
-                  {d.status}
-                </Badge>
+                </div>
               </div>
-              <CardDescription className="text-xs">{d.chain}</CardDescription>
-            </CardHeader>
-          </Card>
-        ))}
+
+              {d.txid && (
+                <div 
+                  className="pt-2 border-t border-border/40 flex items-center justify-between text-xs"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <span className="text-muted-foreground text-[11px]">Tx Hash:</span>
+                  {explorerUrl ? (
+                    <a
+                      href={explorerUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center gap-1 font-mono text-[11px] text-blue-600 dark:text-blue-400 hover:underline max-w-[190px] truncate"
+                    >
+                      <span className="truncate">{d.txid}</span>
+                      <ExternalLink className="h-3 w-3 shrink-0" />
+                    </a>
+                  ) : (
+                    <span className="font-mono text-[11px] text-muted-foreground max-w-[190px] truncate">
+                      {d.txid}
+                    </span>
+                  )}
+                </div>
+              )}
+
+              <div className="pt-1 flex justify-end">
+                <Button 
+                  variant="outline" 
+                  size="sm"
+                  className="w-full h-8 gap-1.5 text-xs border-blue-500/30 text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-950/50"
+                  onClick={(e) => { e.stopPropagation(); onRowClick(d); }}
+                >
+                  <Eye className="h-3.5 w-3.5" />
+                  <span>View Details</span>
+                </Button>
+              </div>
+            </div>
+          );
+        })}
       </div>
-    </ScrollArea>
+    </div>
   );
 }
 
@@ -181,16 +330,16 @@ function WithdrawalsHistory({
     try {
       const { data, error } = await getUserWithdrawals(userId);
       if (!error && data) {
-        const mapped: DisplayWithdrawal[] = data.map((w: WithdrawalRecord) => ({
+        const mapped: DisplayWithdrawal[] = data.map((w: any) => ({
           id: w.id,
-          crypto: w.asset_code as CryptoCurrency,
-          chain: w.network_code,
-          amount: Number(w.amount),
-          gasFee: Number(w.network_fee ?? 0),
-          status: w.status,
+          crypto: (w.token_symbol || w.asset_code || w.crypto || 'ETH') as CryptoCurrency,
+          chain: w.chain || w.network_code || 'Sepolia',
+          amount: Number(w.amount || 0),
+          gasFee: Number(w.gas_fee ?? w.fee ?? w.network_fee ?? 0),
+          status: String(w.status || 'CONFIRMED').toLowerCase(),
           createdAt: w.created_at,
-          address: w.destination_address,
-          txid: w.txid || undefined,
+          address: w.to_address || w.destination_address || w.address || '',
+          txid: w.tx_hash || w.txid || undefined,
         }));
         setWithdrawals(mapped);
       }
@@ -207,69 +356,190 @@ function WithdrawalsHistory({
 
   if (isLoading)
     return (
-      <div className="space-y-2">
-        <Skeleton className="h-24 w-full" />
+      <div className="space-y-3 p-2">
+        <Skeleton className="h-16 w-full rounded-xl" />
+        <Skeleton className="h-16 w-full rounded-xl" />
       </div>
     );
-  if (!withdrawals?.length) return <p className="text-center text-muted-foreground py-4">No withdrawal history.</p>;
+  if (!withdrawals?.length) return <p className="text-center text-muted-foreground py-8 text-sm">No withdrawal history found.</p>;
 
   return (
-    <ScrollArea className="h-72">
-      <Table className="hidden md:table">
-        <TableHeader>
-          <TableRow>
-            <TableHead>Asset</TableHead>
-            <TableHead>Amount</TableHead>
-            <TableHead>Status</TableHead>
-            <TableHead>Date</TableHead>
-            <TableHead className="text-right">Action</TableHead>
-          </TableRow>
-        </TableHeader>
-        <TableBody>
-          {withdrawals.map((w) => {
-            const dateStr = w.createdAt ? new Date(w.createdAt).toLocaleDateString() : 'N/A';
-            return (
-              <TableRow key={w.id} onClick={() => onRowClick(w)} className="cursor-pointer hover:bg-muted/50">
-                <TableCell>
-                  {w.crypto} <span className="text-muted-foreground text-xs">({w.chain})</span>
-                </TableCell>
-                <TableCell className="font-medium">{w.amount}</TableCell>
-                <TableCell>
+    <div className="space-y-4">
+      <div className="hidden md:block rounded-xl border border-blue-500/20 bg-card/60 overflow-hidden shadow-sm">
+        <Table>
+          <TableHeader className="bg-blue-500/5 dark:bg-blue-950/20">
+            <TableRow className="hover:bg-transparent border-blue-500/10">
+              <TableHead className="text-blue-600 dark:text-blue-400 font-semibold">Asset</TableHead>
+              <TableHead className="text-blue-600 dark:text-blue-400 font-semibold">Amount</TableHead>
+              <TableHead className="text-blue-600 dark:text-blue-400 font-semibold">Status</TableHead>
+              <TableHead className="text-blue-600 dark:text-blue-400 font-semibold">Date & Time</TableHead>
+              <TableHead className="text-blue-600 dark:text-blue-400 font-semibold">Transaction Hash</TableHead>
+              <TableHead className="text-right text-blue-600 dark:text-blue-400 font-semibold">Action</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {withdrawals.map((w) => {
+              const dateObj = w.createdAt ? new Date(w.createdAt) : null;
+              const dateStr = dateObj ? dateObj.toLocaleDateString() : 'N/A';
+              const timeStr = dateObj ? dateObj.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }) : '';
+              const explorerUrl = getTxExplorerUrl(w.txid, w.chain || w.crypto);
+
+              return (
+                <TableRow 
+                  key={w.id} 
+                  onClick={() => onRowClick(w)} 
+                  className="cursor-pointer hover:bg-blue-50/50 dark:hover:bg-blue-950/30 transition-colors border-blue-500/10"
+                >
+                  <TableCell className="py-3.5">
+                    <div className="flex items-center gap-2.5">
+                      <CoinBadgeLogo coin={w.crypto} className="h-6 w-6 shrink-0" />
+                      <div>
+                        <div className="font-semibold text-sm text-foreground flex items-center gap-1.5">
+                          {w.crypto}
+                          <span className="text-[11px] px-1.5 py-0.5 rounded bg-blue-500/10 text-blue-600 dark:text-blue-400 font-medium">
+                            {w.chain}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                  </TableCell>
+                  <TableCell className="font-mono font-bold text-sm text-amber-600 dark:text-amber-400">
+                    -{w.amount} {w.crypto}
+                  </TableCell>
+                  <TableCell>
+                    <Badge
+                      variant="outline"
+                      className={cn('capitalize text-xs font-medium', statusColors[w.status as keyof typeof statusColors] || 'bg-muted text-muted-foreground')}
+                    >
+                      {w.status}
+                    </Badge>
+                  </TableCell>
+                  <TableCell>
+                    <div className="text-xs flex flex-col">
+                      <span className="font-medium text-foreground">{dateStr}</span>
+                      <span className="text-muted-foreground text-[11px]">{timeStr}</span>
+                    </div>
+                  </TableCell>
+                  <TableCell onClick={(e) => e.stopPropagation()}>
+                    {w.txid ? (
+                      explorerUrl ? (
+                        <a
+                          href={explorerUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-flex items-center gap-1.5 font-mono text-xs text-blue-600 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-300 hover:underline bg-blue-50 dark:bg-blue-950/40 px-2 py-1 rounded-md transition"
+                        >
+                          <span className="max-w-[120px] truncate">{w.txid}</span>
+                          <ExternalLink className="h-3 w-3 shrink-0" />
+                        </a>
+                      ) : (
+                        <span className="font-mono text-xs text-muted-foreground max-w-[120px] truncate block">
+                          {w.txid}
+                        </span>
+                      )
+                    ) : (
+                      <span className="text-xs text-muted-foreground italic">Processing</span>
+                    )}
+                  </TableCell>
+                  <TableCell className="text-right" onClick={(e) => { e.stopPropagation(); onRowClick(w); }}>
+                    <Button 
+                      variant="outline" 
+                      size="sm"
+                      className="h-8 gap-1 border-blue-500/30 text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-950/50"
+                    >
+                      <Eye className="h-3.5 w-3.5" />
+                      <span>View</span>
+                    </Button>
+                  </TableCell>
+                </TableRow>
+              );
+            })}
+          </TableBody>
+        </Table>
+      </div>
+
+      <div className="grid gap-3 md:hidden">
+        {withdrawals.map((w) => {
+          const dateObj = w.createdAt ? new Date(w.createdAt) : null;
+          const dateStr = dateObj ? dateObj.toLocaleDateString() : 'N/A';
+          const timeStr = dateObj ? dateObj.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '';
+          const explorerUrl = getTxExplorerUrl(w.txid, w.chain || w.crypto);
+
+          return (
+            <div
+              key={w.id}
+              onClick={() => onRowClick(w)}
+              className="p-4 rounded-xl border border-blue-500/20 bg-card hover:bg-blue-50/40 dark:hover:bg-blue-950/20 transition shadow-sm space-y-3"
+            >
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2.5">
+                  <CoinBadgeLogo coin={w.crypto} className="h-7 w-7 shrink-0" />
+                  <div>
+                    <div className="font-bold text-sm text-foreground flex items-center gap-1.5">
+                      {w.crypto}
+                      <span className="text-[10px] px-1.5 py-0.5 rounded bg-blue-500/10 text-blue-600 dark:text-blue-400 font-medium">
+                        {w.chain}
+                      </span>
+                    </div>
+                    <div className="text-[11px] text-muted-foreground flex items-center gap-1 mt-0.5">
+                      <Clock className="h-3 w-3" />
+                      <span>{dateStr} {timeStr}</span>
+                    </div>
+                  </div>
+                </div>
+                <div className="text-right">
+                  <div className="font-mono font-bold text-sm text-amber-600 dark:text-amber-400">
+                    -{w.amount} {w.crypto}
+                  </div>
                   <Badge
                     variant="outline"
-                    className={cn('capitalize text-xs', statusColors[w.status] || 'bg-muted text-muted-foreground')}
+                    className={cn('capitalize text-[10px] font-medium mt-1', statusColors[w.status as keyof typeof statusColors] || 'bg-muted text-muted-foreground')}
                   >
                     {w.status}
                   </Badge>
-                </TableCell>
-                <TableCell>{dateStr}</TableCell>
-                <TableCell className="text-right">
-                  <Button variant="ghost" size="icon">
-                    <Eye className="h-4 w-4" />
-                  </Button>
-                </TableCell>
-              </TableRow>
-            );
-          })}
-        </TableBody>
-      </Table>
-      <div className="grid gap-4 md:hidden p-2">
-        {withdrawals.map((w) => (
-          <Card key={w.id} onClick={() => onRowClick(w)} className="cursor-pointer">
-            <CardHeader className="p-4">
-              <div className="flex justify-between items-start">
-                <CardTitle className="text-base">
-                  {w.amount} {w.crypto}
-                </CardTitle>
-                <Badge variant="outline" className="text-[10px]">
-                  {w.status}
-                </Badge>
+                </div>
               </div>
-            </CardHeader>
-          </Card>
-        ))}
+
+              {w.txid && (
+                <div 
+                  className="pt-2 border-t border-border/40 flex items-center justify-between text-xs"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <span className="text-muted-foreground text-[11px]">Tx Hash:</span>
+                  {explorerUrl ? (
+                    <a
+                      href={explorerUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center gap-1 font-mono text-[11px] text-blue-600 dark:text-blue-400 hover:underline max-w-[190px] truncate"
+                    >
+                      <span className="truncate">{w.txid}</span>
+                      <ExternalLink className="h-3 w-3 shrink-0" />
+                    </a>
+                  ) : (
+                    <span className="font-mono text-[11px] text-muted-foreground max-w-[190px] truncate">
+                      {w.txid}
+                    </span>
+                  )}
+                </div>
+              )}
+
+              <div className="pt-1 flex justify-end">
+                <Button 
+                  variant="outline" 
+                  size="sm"
+                  className="w-full h-8 gap-1.5 text-xs border-blue-500/30 text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-950/50"
+                  onClick={(e) => { e.stopPropagation(); onRowClick(w); }}
+                >
+                  <Eye className="h-3.5 w-3.5" />
+                  <span>View Details</span>
+                </Button>
+              </div>
+            </div>
+          );
+        })}
       </div>
-    </ScrollArea>
+    </div>
   );
 }
 
@@ -296,6 +566,7 @@ export default function WalletPage() {
   const [isDetailsOpen, setIsDetailsOpen] = useState(false);
   const [isDepositOpen, setIsDepositOpen] = useState(false);
   const [isWithdrawOpen, setIsWithdrawOpen] = useState(false);
+  const [isTransferOpen, setIsTransferOpen] = useState(false);
 
   // Fetch real-time balances from Supabase
   const loadBalances = useCallback(async () => {
@@ -423,6 +694,11 @@ export default function WalletPage() {
     setIsWithdrawOpen(true);
   };
 
+  const handleTransferClick = (coin: CryptoCurrency) => {
+    setActiveDialogAsset(coin);
+    setIsTransferOpen(true);
+  };
+
   const handleHistoryRowClick = (tx: DisplayDeposit | DisplayWithdrawal) => {
     setSelectedTx(tx);
     setIsDetailsOpen(true);
@@ -482,6 +758,14 @@ export default function WalletPage() {
         asset={activeDialogAsset}
         userWallets={userWalletsFormatted as any}
       />
+      <TransferDialog
+        open={isTransferOpen}
+        onOpenChange={(isOpen) => {
+          setIsTransferOpen(isOpen);
+          if (!isOpen) setActiveDialogAsset(null);
+        }}
+        asset={activeDialogAsset}
+      />
 
       <div className="flex items-center justify-between mb-6">
         <h1 className="text-lg font-semibold md:text-2xl">Unified Wallets</h1>
@@ -536,18 +820,27 @@ export default function WalletPage() {
                 )}
               </div>
             </CardContent>
-            <CardFooter className="flex gap-2">
-              <Button size="sm" className="flex-1" onClick={() => handleDepositClick(data.coin as CryptoCurrency)}>
-                <ArrowDown className="mr-1 h-4 w-4" />
+            <CardFooter className="grid grid-cols-3 gap-1.5 pt-2">
+              <Button size="sm" variant="default" className="px-2" onClick={() => handleDepositClick(data.coin as CryptoCurrency)}>
+                <ArrowDown className="mr-1 h-3.5 w-3.5" />
                 Deposit
               </Button>
               <Button
                 size="sm"
                 variant="outline"
-                className="flex-1"
+                className="px-2 border-blue-500/30 text-blue-600 dark:text-blue-400 hover:bg-blue-500/10"
+                onClick={() => handleTransferClick(data.coin as CryptoCurrency)}
+              >
+                <Send className="mr-1 h-3.5 w-3.5" />
+                Transfer
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                className="px-2"
                 onClick={() => handleWithdrawClick(data.coin as CryptoCurrency)}
               >
-                <ArrowUp className="mr-1 h-4 w-4" />
+                <ArrowUp className="mr-1 h-3.5 w-3.5" />
                 Withdraw
               </Button>
             </CardFooter>
@@ -573,80 +866,163 @@ export default function WalletPage() {
               <WithdrawalsHistory userId={user.uid} onRowClick={handleHistoryRowClick} />
             </TabsContent>
             <TabsContent value="transfers" className="mt-4">
-              <TransferHistoryTable
-                userId={user.uid}
-                type="received"
-                onRowClick={(t) => {
-                  setSelectedTransfer(t);
-                }}
-              />
+              <TransferHistoryList userId={user.uid} />
             </TabsContent>
           </Tabs>
         </CardContent>
       </Card>
 
       <Dialog open={isDetailsOpen} onOpenChange={setIsDetailsOpen}>
-        <DialogContent className="max-w-md">
+        <DialogContent className="max-w-md border border-blue-500/20 bg-background/95 backdrop-blur-sm shadow-xl">
           <DialogHeader>
-            <DialogTitle>Transaction Details</DialogTitle>
+            <div className="flex items-center gap-3">
+              {selectedTx && (
+                <div className="p-2 rounded-xl bg-blue-500/10 border border-blue-500/20 shrink-0">
+                  <CoinBadgeLogo coin={selectedTx.crypto || (selectedTx as any).asset || 'USDT'} className="h-6 w-6" />
+                </div>
+              )}
+              <div>
+                <DialogTitle className="text-lg font-bold text-foreground">
+                  {'walletAddress' in (selectedTx || {}) ? 'Deposit Details' : 'Withdrawal Details'}
+                </DialogTitle>
+                <DialogDescription className="text-xs text-muted-foreground">
+                  {selectedTx && (selectedTx.crypto || (selectedTx as any).asset || 'Crypto')} on {selectedTx?.chain || 'Mainnet'}
+                </DialogDescription>
+              </div>
+            </div>
           </DialogHeader>
+
           {selectedTx && (
-            <div className="space-y-3 text-sm divide-y divide-border/60">
-              <div className="flex justify-between pt-1">
-                <span className="text-muted-foreground">Receipt Address:</span>
-                <span className="font-mono text-xs break-all text-right max-w-[220px]">
+            <div className="space-y-3.5 text-sm divide-y divide-border/50 py-1">
+              {/* Amount */}
+              <div className="flex justify-between items-center pt-2">
+                <span className="text-xs font-medium text-muted-foreground">Amount:</span>
+                <span className="font-mono font-bold text-base text-emerald-600 dark:text-emerald-400">
+                  {'walletAddress' in selectedTx ? '+' : '-'}{selectedTx.amount} {selectedTx.crypto || (selectedTx as any).asset || 'USDT'}
+                </span>
+              </div>
+
+              {/* Status */}
+              <div className="flex justify-between items-center pt-3">
+                <span className="text-xs font-medium text-muted-foreground">Status:</span>
+                <Badge
+                  variant="outline"
+                  className={cn('capitalize text-xs font-medium', statusColors[selectedTx.status as keyof typeof statusColors] || 'bg-muted text-muted-foreground')}
+                >
+                  {depositStatusText[selectedTx.status.toLowerCase()] || selectedTx.status}
+                </Badge>
+              </div>
+
+              {/* Date & Time */}
+              <div className="flex justify-between items-center pt-3">
+                <span className="text-xs font-medium text-muted-foreground">Date & Time:</span>
+                <span className="text-xs font-medium text-foreground">
+                  {selectedTx.createdAt ? new Date(selectedTx.createdAt).toLocaleString(undefined, {
+                    dateStyle: 'medium',
+                    timeStyle: 'medium',
+                  }) : 'N/A'}
+                </span>
+              </div>
+
+              {/* Network / Chain */}
+              <div className="flex justify-between items-center pt-3">
+                <span className="text-xs font-medium text-muted-foreground">Network / Chain:</span>
+                <span className="text-xs font-semibold px-2 py-0.5 rounded bg-blue-500/10 text-blue-600 dark:text-blue-400">
+                  {selectedTx.chain || 'Mainnet'}
+                </span>
+              </div>
+
+              {/* Destination / Deposit Address */}
+              <div className="flex flex-col gap-1.5 pt-3">
+                <div className="flex justify-between items-center">
+                  <span className="text-xs font-medium text-muted-foreground">
+                    {'walletAddress' in selectedTx ? 'Deposit Address:' : 'Destination Address:'}
+                  </span>
+                  {('walletAddress' in selectedTx ? selectedTx.walletAddress : (selectedTx as DisplayWithdrawal).address) && (
+                    (() => {
+                      const addr = 'walletAddress' in selectedTx ? selectedTx.walletAddress : (selectedTx as DisplayWithdrawal).address;
+                      const addrExpUrl = getAddressExplorerUrl(addr, selectedTx.chain || selectedTx.crypto);
+                      return addrExpUrl ? (
+                        <a
+                          href={addrExpUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-[11px] text-blue-600 dark:text-blue-400 hover:underline flex items-center gap-1"
+                        >
+                          <span>Explorer</span>
+                          <ExternalLink className="h-3 w-3" />
+                        </a>
+                      ) : null;
+                    })()
+                  )}
+                </div>
+                <div className="p-2.5 rounded-lg bg-muted/50 border border-border/60 font-mono text-xs break-all text-foreground select-all">
                   {'walletAddress' in selectedTx
                     ? selectedTx.walletAddress || 'N/A'
                     : (selectedTx as DisplayWithdrawal).address || 'N/A'}
-                </span>
+                </div>
               </div>
-              <div className="flex justify-between pt-2">
-                <span className="text-muted-foreground">Time:</span>
-                <span className="text-xs">
-                  {selectedTx.createdAt ? new Date(selectedTx.createdAt).toLocaleString() : 'N/A'}
-                </span>
-              </div>
-              <div className="flex justify-between pt-2">
-                <span className="text-muted-foreground">Amount:</span>
-                <span className="font-semibold font-mono">
-                  {selectedTx.amount} {selectedTx.crypto || (selectedTx as any).asset || (selectedTx as any).coin || (selectedTx as any).asset_code || 'USDT'}
-                </span>
-              </div>
-              <div className="flex justify-between pt-2">
-                <span className="text-muted-foreground">Coin:</span>
-                <span className="font-medium">{selectedTx.crypto || (selectedTx as any).asset || (selectedTx as any).coin || (selectedTx as any).asset_code || 'USDT'} ({selectedTx.chain || (selectedTx as any).network || 'Mainnet'})</span>
-              </div>
-              <div className="flex justify-between pt-2">
-                <span className="text-muted-foreground">Gas Fee:</span>
-                <span className="font-mono">
-                  {'gasFee' in selectedTx
-                    ? `${(selectedTx as DisplayWithdrawal).gasFee} ${selectedTx.crypto}`
-                    : 'Network Included'}
-                </span>
-              </div>
-              <div className="flex justify-between pt-2">
-                <span className="text-muted-foreground">Status:</span>
-                <Badge
-                  variant="outline"
-                  className={cn('capitalize text-xs', statusColors[selectedTx.status] || 'bg-muted text-muted-foreground')}
-                >
-                  {depositStatusText[selectedTx.status] || selectedTx.status}
-                </Badge>
-              </div>
-              {selectedTx.txid && (
-                <div className="flex justify-between pt-2">
-                  <span className="text-muted-foreground">TxID:</span>
-                  <span className="font-mono text-xs break-all text-right max-w-[220px] text-muted-foreground">
-                    {selectedTx.txid}
+
+              {/* Gas Fee / Network Fee - ONLY shown for withdrawals */}
+              {'gasFee' in selectedTx && (
+                <div className="flex justify-between items-center pt-3">
+                  <span className="text-xs font-medium text-muted-foreground">Gas / Network Fee:</span>
+                  <span className="font-mono text-xs font-semibold text-foreground px-2 py-0.5 rounded bg-muted">
+                    {(selectedTx as DisplayWithdrawal).gasFee} {selectedTx.crypto}
                   </span>
+                </div>
+              )}
+
+              {/* Transaction Hash */}
+              {selectedTx.txid && (
+                <div className="flex flex-col gap-1.5 pt-3">
+                  <div className="flex justify-between items-center">
+                    <span className="text-xs font-medium text-muted-foreground">Transaction Hash (TxID):</span>
+                    {(() => {
+                      const expUrl = getTxExplorerUrl(selectedTx.txid, selectedTx.chain || selectedTx.crypto);
+                      return expUrl ? (
+                        <a
+                          href={expUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-[11px] text-blue-600 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-300 hover:underline flex items-center gap-1 font-semibold"
+                        >
+                          <span>View on Explorer</span>
+                          <ExternalLink className="h-3 w-3" />
+                        </a>
+                      ) : null;
+                    })()}
+                  </div>
+                  <div className="p-2.5 rounded-lg bg-blue-50/50 dark:bg-blue-950/30 border border-blue-500/20 font-mono text-xs break-all text-blue-700 dark:text-blue-300 select-all">
+                    {selectedTx.txid}
+                  </div>
                 </div>
               )}
             </div>
           )}
-          <div className="mt-4 flex justify-end">
+
+          <div className="mt-5 flex gap-2">
+            {selectedTx?.txid && getTxExplorerUrl(selectedTx.txid, selectedTx.chain || selectedTx.crypto) && (
+              <Button
+                asChild
+                className="flex-1 bg-blue-600 hover:bg-blue-700 text-white gap-1.5 text-xs h-9"
+              >
+                <a
+                  href={getTxExplorerUrl(selectedTx.txid, selectedTx.chain || selectedTx.crypto)!}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
+                  <ExternalLink className="h-3.5 w-3.5" />
+                  <span>Open in Explorer</span>
+                </a>
+              </Button>
+            )}
             <Button
               variant="outline"
-              className="w-full"
+              className={cn(
+                "h-9 text-xs border-border/80",
+                selectedTx?.txid && getTxExplorerUrl(selectedTx.txid, selectedTx.chain || selectedTx.crypto) ? "w-28" : "w-full"
+              )}
               onClick={() => setIsDetailsOpen(false)}
             >
               Close

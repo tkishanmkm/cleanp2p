@@ -10,6 +10,16 @@ export async function GET(request: NextRequest) {
     const next = requestUrl.searchParams.get('next') ?? '/dashboard';
     const origin = requestUrl.origin;
 
+    const errorCode = requestUrl.searchParams.get('error');
+    const errorDescription = requestUrl.searchParams.get('error_description');
+
+    if (errorCode || errorDescription) {
+      const errorRedirect = new URL(`${origin}/auth/auth-code-error`);
+      if (errorCode) errorRedirect.searchParams.set('error', errorCode);
+      if (errorDescription) errorRedirect.searchParams.set('error_description', errorDescription);
+      return NextResponse.redirect(errorRedirect.toString());
+    }
+
     if (code) {
       const supabase = await createClient();
       const { data, error } = await supabase.auth.exchangeCodeForSession(code);

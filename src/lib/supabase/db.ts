@@ -199,17 +199,101 @@ export async function getUserWallets(userId: string): Promise<RpcResponse<UserWa
  */
 export async function getUserDeposits(userId: string): Promise<RpcResponse<DepositRecord[]>> {
   try {
-    const { data, error } = await supabase
-      .from('deposits')
-      .select('*')
-      .eq('user_id', userId)
-      .order('created_at', { ascending: false });
-
-    if (error) {
-      return { data: null, error: new Error(error.message) };
+    // 1. Try server-side API first for complete historical merge
+    if (typeof window !== 'undefined') {
+      try {
+        const res = await fetch(`/api/wallet/history/deposits?user_id=${encodeURIComponent(userId)}&limit=50`);
+        if (res.ok) {
+          const json = await res.json();
+          if (json.data && Array.isArray(json.data)) {
+            const mapped: DepositRecord[] = json.data.map((d: any) => ({
+              id: d.id,
+              user_id: d.user_id,
+              wallet_id: d.wallet_id || '',
+              asset_code: d.asset_symbol || d.asset_code || d.asset || 'USDT',
+              network_code: d.network || d.network_code || d.chain || 'EVM',
+              deposit_address_id: d.address || d.to_address || null,
+              amount: Number(d.amount || 0),
+              txid: d.tx_hash || d.txid || '',
+              output_index: d.output_index || 0,
+              confirmations: d.confirmations || 0,
+              status: d.status || 'confirmed',
+              credited_at: d.credited_at || null,
+              idempotency_key: d.idempotency_key || '',
+              created_at: d.created_at,
+              updated_at: d.updated_at || d.created_at,
+            }));
+            return { data: mapped, error: null };
+          }
+        }
+      } catch (apiErr) {
+        console.warn('API fetch failed, falling back to direct supabase query:', apiErr);
+      }
     }
 
-    return { data: data || [], error: null };
+    // 2. Direct Supabase query (onchain_deposits + deposits)
+    const [onchainRes, depositsRes] = await Promise.all([
+      supabase.from('onchain_deposits').select('*').eq('user_id', userId).order('created_at', { ascending: false }),
+      supabase.from('deposits').select('*').eq('user_id', userId).order('created_at', { ascending: false })
+    ]);
+
+    const combined: DepositRecord[] = [];
+    const seenHashes = new Set<string>();
+
+    if (onchainRes.data) {
+      for (const d of onchainRes.data) {
+        const tx = d.tx_hash || d.txid || d.id;
+        seenHashes.add(tx);
+        combined.push({
+          id: d.id,
+          user_id: d.user_id,
+          wallet_id: d.wallet_id || '',
+          asset_code: (d.asset_symbol || d.asset || d.asset_code || 'USDT').toUpperCase(),
+          network_code: (d.network || d.network_code || d.chain || 'EVM').toUpperCase(),
+          deposit_address_id: d.address || d.to_address || null,
+          amount: Number(d.amount || 0),
+          txid: d.tx_hash || d.txid || '',
+          output_index: d.output_index || 0,
+          confirmations: d.confirmations || 0,
+          status: (d.status || 'confirmed').toLowerCase() as any,
+          credited_at: d.credited_at || null,
+          idempotency_key: d.idempotency_key || '',
+          created_at: d.created_at,
+          updated_at: d.updated_at || d.created_at,
+        });
+      }
+    }
+
+    if (depositsRes.data) {
+      for (const d of depositsRes.data) {
+        const tx = d.tx_hash || d.txid || d.id;
+        if (!seenHashes.has(tx)) {
+          seenHashes.add(tx);
+          combined.push({
+            id: d.id,
+            user_id: d.user_id,
+            wallet_id: d.wallet_id || '',
+            asset_code: (d.token_symbol || d.asset || d.asset_code || 'USDT').toUpperCase(),
+            network_code: (d.chain || d.network || d.network_code || 'EVM').toUpperCase(),
+            deposit_address_id: d.to_address || d.address || null,
+            amount: Number(d.amount || 0),
+            txid: d.tx_hash || d.txid || '',
+            output_index: d.output_index || 0,
+            confirmations: 12,
+            status: (d.status || 'confirmed').toLowerCase() as any,
+            credited_at: d.created_at || null,
+            idempotency_key: d.idempotency_key || '',
+            created_at: d.created_at,
+            updated_at: d.updated_at || d.created_at,
+          });
+        }
+      }
+    }
+
+    // Sort descending by created_at
+    combined.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+
+    return { data: combined, error: null };
   } catch (err: unknown) {
     return { data: null, error: err instanceof Error ? err : new Error(String(err)) };
   }
