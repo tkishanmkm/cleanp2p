@@ -377,8 +377,7 @@ function PaxonesSystemMessageBubble({
         })}
       </div>
 
-      <div className="flex items-center justify-between mt-2 pt-1 border-t border-current/10 text-[10px] opacity-75 font-mono">
-        <span>Verified Automated Event</span>
+      <div className="flex items-center justify-end mt-2 pt-1 border-t border-current/10 text-[10px] opacity-75 font-mono">
         <span title={formatUtcDateTime(timestamp)} className="font-[Arial,Helvetica,sans-serif]">{timeString}</span>
       </div>
     </div>

@@ -434,18 +434,33 @@ function OpenDisputeDialog({
 }) {
   const { toast } = useToast();
   const [isOpen, setIsOpen] = useState(false);
-  const [reason, setReason] = useState('Payment Issue');
+  const [selectedReason, setSelectedReason] = useState('Payment Issue');
+  const [customReason, setCustomReason] = useState('');
   const [explanation, setExplanation] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
 
+  const disputeReasons = [
+    'Payment Issue',
+    'Intentional coin locking',
+    'Buyer not paid and marked paid',
+    'Seller is not releasing',
+    'Trade partner unresponsive',
+    'Custom'
+  ];
+
   const handleSubmit = async () => {
+    const finalReason = selectedReason === 'Custom' ? (customReason.trim() || 'Custom Reason') : selectedReason;
     if (!explanation.trim()) {
       toast({ variant: 'destructive', title: 'Explanation required', description: 'Please provide dispute details.' });
       return;
     }
+    if (selectedReason === 'Custom' && !customReason.trim()) {
+      toast({ variant: 'destructive', title: 'Custom reason required', description: 'Please specify your custom dispute reason.' });
+      return;
+    }
     setIsSubmitting(true);
     try {
-      await disputeTrade(trade, reason, explanation, currentUserId, currentUsername);
+      await disputeTrade(trade, finalReason, explanation, currentUserId, currentUsername);
       toast({ title: 'Dispute Opened', description: 'A moderator has been assigned to this trade.' });
       setIsOpen(false);
     } catch (err: any) {
@@ -472,8 +487,30 @@ function OpenDisputeDialog({
         <div className="space-y-3 py-2">
           <div>
             <Label className="text-xs">Dispute Reason</Label>
-            <Input value={reason} onChange={(e) => setReason(e.target.value)} className="text-xs mt-1" />
+            <Select value={selectedReason} onValueChange={setSelectedReason}>
+              <SelectTrigger className="text-xs mt-1">
+                <SelectValue placeholder="Select dispute reason" />
+              </SelectTrigger>
+              <SelectContent>
+                {disputeReasons.map((r) => (
+                  <SelectItem key={r} value={r} className="text-xs">
+                    {r}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </div>
+          {selectedReason === 'Custom' && (
+            <div>
+              <Label className="text-xs">Custom Reason</Label>
+              <Input
+                value={customReason}
+                onChange={(e) => setCustomReason(e.target.value)}
+                placeholder="Enter custom dispute reason..."
+                className="text-xs mt-1"
+              />
+            </div>
+          )}
           <div>
             <Label className="text-xs">Explanation</Label>
             <Textarea
@@ -1514,6 +1551,24 @@ export function TradeDetails({
       {/* Independent Scrollable Area for Trade Details */}
       <ScrollArea className="flex-1 min-h-0 p-4">
         <div className="space-y-4 pr-3">
+          {effectiveTradeStatus === 'paid' && (
+            <div className={cn(
+              "rounded-xl border p-3.5 text-xs font-medium space-y-1",
+              isBuying
+                ? "bg-blue-500/10 border-blue-500/30 text-blue-950 dark:text-blue-200"
+                : "bg-amber-500/10 border-amber-500/30 text-amber-950 dark:text-amber-200"
+            )}>
+              <div className="font-bold flex items-center gap-1.5">
+                <span>⚠️ Payment Marked as Paid</span>
+              </div>
+              <p>
+                {isBuying
+                  ? "You marked this trade as paid. Kindly wait until the seller verifies your payment and releases your trade. Do not cancel this trade."
+                  : "Buyer has marked as paid. Please check your account directly, confirm payment, and release."}
+              </p>
+            </div>
+          )}
+
           {/* Main Trade Values Card */}
           <div className="space-y-2.5 rounded-xl border border-border/60 p-4 bg-muted/20">
             <div className="flex justify-between items-center text-xs sm:text-sm py-1 border-b border-border/40">

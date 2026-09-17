@@ -1513,14 +1513,14 @@ export async function sendTradeSystemMessage(
 
     case 'MARKED_PAID':
       messageText =
-        `💳 PAYMENT MARKED AS COMPLETE BY BUYER (@${metadata.buyerUsername})\n` +
-        `• Payment Method: ${methodName}\n` +
+        `💳 PAYMENT MARKED AS PAID\n` +
         `----------------------------------------\n` +
-        `⚠️ ATTENTION SELLER (@${metadata.sellerUsername}) - VERIFICATION:\n` +
-        `${sellerSteps.join('\n')}\n` +
-        `----------------------------------------\n` +
-        `📁 EVIDENCE:\n` +
-        `Upload the official receipt/statement in this trade when required. Do not rely on public file links containing unnecessary personal data.`;
+        `📥 FOR BUYER (@${metadata.buyerUsername}):\n` +
+        `• You marked this trade as paid. Kindly wait until the seller verifies your payment and releases the escrow. Do not cancel this trade.\n\n` +
+        `⚠️ FOR SELLER (@${metadata.sellerUsername}):\n` +
+        `• Buyer @${metadata.buyerUsername} has marked this trade as paid.\n` +
+        `• Please check your bank or payment account directly to confirm the payment has arrived.\n` +
+        `• Do NOT rely solely on buyer screenshots. Verify funds in your actual account before releasing crypto.`;
       break;
 
     case 'TRADE_RELEASED':
