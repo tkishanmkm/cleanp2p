@@ -57,8 +57,38 @@ export function TransferDialog({ open, onOpenChange, asset }: TransferDialogProp
   const [isLoading, setIsLoading] = useState(false);
   const [resolvedRecipient, setResolvedRecipient] = useState<RecipientInfo | null>(null);
   const [isResolving, setIsResolving] = useState(false);
+  const [is2faEnabledState, setIs2faEnabledState] = useState<boolean | null>(null);
 
   const coin = asset || 'USDT';
+
+  // Actively check 2FA status from Supabase profiles table when dialog opens
+  useEffect(() => {
+    if (open && (user?.uid || user?.id)) {
+      const uid = user.uid || user.id;
+      const check2FA = async () => {
+        try {
+          const { data } = await supabase
+            .from('profiles')
+            .select('is_2fa_enabled, is_mfa_enabled, two_factor_secret')
+            .or(`id.eq.${uid},user_id.eq.${uid}`)
+            .maybeSingle();
+          if (data) {
+            const has2fa = Boolean(
+              data.is_2fa_enabled === true ||
+              data.is_2fa_enabled === 'true' ||
+              data.is_mfa_enabled === true ||
+              data.is_mfa_enabled === 'true' ||
+              Boolean(data.two_factor_secret && String(data.two_factor_secret).trim().length > 0)
+            );
+            setIs2faEnabledState(has2fa);
+          }
+        } catch (e) {
+          console.warn('TransferDialog 2FA check error:', e);
+        }
+      };
+      check2FA();
+    }
+  }, [open, user]);
 
   const isSenderRestricted = useMemo(() => {
     if (!senderProfile) return false;
@@ -72,8 +102,10 @@ export function TransferDialog({ open, onOpenChange, asset }: TransferDialogProp
   }, [senderProfile]);
 
   const is2faActive = useMemo(() => {
-    return Boolean(senderProfile?.is_2fa_enabled || (senderProfile as any)?.is_mfa_enabled);
-  }, [senderProfile]);
+    return Boolean(
+      is2faEnabledState ?? (senderProfile?.is_2fa_enabled || (senderProfile as any)?.is_mfa_enabled)
+    );
+  }, [is2faEnabledState, senderProfile]);
 
   const form = useForm<TransferFormValues>({
     resolver: zodResolver(transferSchema),
@@ -266,10 +298,14 @@ export function TransferDialog({ open, onOpenChange, asset }: TransferDialogProp
       await refreshBalances();
       onOpenChange(false);
     } catch (err: any) {
+      const msg = err.message || 'Could not process internal transfer.';
+      if (msg.toLowerCase().includes('totp') || msg.toLowerCase().includes('2fa') || msg.toLowerCase().includes('authenticator')) {
+        setIs2faEnabledState(true);
+      }
       toast({
         variant: 'destructive',
         title: 'Transfer Failed',
-        description: err.message || 'Could not process internal transfer.',
+        description: msg,
       });
     } finally {
       setIsLoading(false);
@@ -445,6 +481,7 @@ export function TransferDialog({ open, onOpenChange, asset }: TransferDialogProp
             )}
 
             <Button
+              id="submit-wallet-transfer-btn"
               type="submit"
               disabled={
                 isLoading ||
@@ -452,9 +489,10 @@ export function TransferDialog({ open, onOpenChange, asset }: TransferDialogProp
                 isRecipientRestricted ||
                 !numericWatchedAmount ||
                 numericWatchedAmount <= 0 ||
-                isInsufficient
+                isInsufficient ||
+                (is2faActive && (!form.watch('totpCode') || form.watch('totpCode')!.trim().length < 4))
               }
-              className="w-full bg-blue-600 hover:bg-blue-700 text-white font-semibold h-10 shadow-sm"
+              className="w-full bg-blue-600 hover:bg-blue-700 text-white font-semibold h-10 shadow-sm cursor-pointer"
             >
               {isLoading ? (
                 <>

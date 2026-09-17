@@ -52,14 +52,27 @@ export function WithdrawDialog({ open, onOpenChange, asset, userWallets }: Withd
   // Check 2FA state from database on open
   useEffect(() => {
     if (open && (user?.uid || user?.id)) {
+      const uid = user.uid || user.id;
       const check2FA = async () => {
-        const { data } = await supabase
-          .from('profiles')
-          .select('is_2fa_enabled, is_mfa_enabled')
-          .eq('id', user.uid || user.id)
-          .maybeSingle();
-        if (data) {
-          setIs2faEnabledState(Boolean(data.is_2fa_enabled || data.is_mfa_enabled));
+        try {
+          const { data } = await supabase
+            .from('profiles')
+            .select('is_2fa_enabled, is_mfa_enabled, two_factor_secret')
+            .or(`id.eq.${uid},user_id.eq.${uid}`)
+            .maybeSingle();
+          if (data) {
+            setIs2faEnabledState(
+              Boolean(
+                data.is_2fa_enabled === true ||
+                data.is_2fa_enabled === 'true' ||
+                data.is_mfa_enabled === true ||
+                data.is_mfa_enabled === 'true' ||
+                Boolean(data.two_factor_secret && String(data.two_factor_secret).trim().length > 0)
+              )
+            );
+          }
+        } catch (e) {
+          console.warn('WithdrawDialog 2FA check error:', e);
         }
       };
       check2FA();
@@ -266,6 +279,14 @@ export function WithdrawDialog({ open, onOpenChange, asset, userWallets }: Withd
       onOpenChange(false);
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : "Failed to process withdrawal.";
+      if (
+        message.toLowerCase().includes('totp') ||
+        message.toLowerCase().includes('2fa') ||
+        message.toLowerCase().includes('authenticator') ||
+        message.toLowerCase().includes('two_factor')
+      ) {
+        setIs2faEnabledState(true);
+      }
       toast({
         variant: 'destructive',
         title: "Withdrawal Failed",
@@ -436,6 +457,7 @@ export function WithdrawDialog({ open, onOpenChange, asset, userWallets }: Withd
                     </FormLabel>
                     <FormControl>
                       <Input
+                        id="withdraw-totp-input"
                         type="text"
                         inputMode="numeric"
                         autoComplete="one-time-code"
@@ -453,6 +475,7 @@ export function WithdrawDialog({ open, onOpenChange, asset, userWallets }: Withd
             )}
 
             <Button
+              id="confirm-withdrawal-button"
               type="submit"
               disabled={
                 isLoading ||

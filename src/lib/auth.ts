@@ -15,6 +15,14 @@ export interface UserProfile {
   role: 'user' | 'admin' | 'moderator';
   is_admin: boolean;
   status: 'active' | 'suspended' | 'banned';
+  is_2fa_enabled?: boolean;
+  is_mfa_enabled?: boolean;
+  two_factor_enabled?: boolean;
+  has_2fa?: boolean;
+  two_factor_secret?: string | null;
+  is_banned?: boolean;
+  is_restricted?: boolean;
+  account_status?: string;
   btc_balance?: number;
   eth_balance?: number;
   usdt_balance?: number;
@@ -491,6 +499,15 @@ export async function getUserProfile(userId: string): Promise<UserProfile | null
     const usdtVal = Number(data.usdt_balance ?? data.usdtBalance ?? data.wallets?.USDT?.balance ?? 0);
     const ltcVal = Number(data.ltc_balance ?? data.ltcBalance ?? data.wallets?.LTC?.balance ?? 0);
 
+    const is2fa = Boolean(
+      data.is_2fa_enabled === true ||
+      data.is_2fa_enabled === 'true' ||
+      data.is_mfa_enabled === true ||
+      data.is_mfa_enabled === 'true' ||
+      data.two_factor_enabled === true ||
+      Boolean(data.two_factor_secret && String(data.two_factor_secret).trim().length > 0)
+    );
+
     return {
       id: data.id || data.user_id,
       username: data.username,
@@ -503,6 +520,14 @@ export async function getUserProfile(userId: string): Promise<UserProfile | null
       role: data.role || (data.is_admin ? 'admin' : 'user'),
       is_admin: Boolean(data.is_admin || data.role === 'admin'),
       status: data.status || 'active',
+      is_2fa_enabled: is2fa,
+      is_mfa_enabled: is2fa,
+      two_factor_enabled: is2fa,
+      has_2fa: is2fa,
+      two_factor_secret: data.two_factor_secret || null,
+      is_banned: Boolean(data.is_banned),
+      is_restricted: Boolean(data.is_restricted),
+      account_status: data.account_status || data.status || 'active',
       btc_balance: btcVal,
       eth_balance: ethVal,
       usdt_balance: usdtVal,

@@ -496,12 +496,60 @@ function OpenDisputeDialog({
   );
 }
 
+export function resolveTradeStatus(t: any): string {
+  if (!t) return 'active';
+  const raw = String(t.status || '').toLowerCase();
+  
+  if (
+    t.released_at ||
+    t.completed_at ||
+    String(t.escrow_status || '').toUpperCase() === 'RELEASED' ||
+    raw === 'released' ||
+    raw === 'completed'
+  ) {
+    return 'released';
+  }
+
+  if (
+    t.is_disputed ||
+    t.disputed_at ||
+    String(t.escrow_status || '').toUpperCase() === 'DISPUTED' ||
+    raw === 'disputed'
+  ) {
+    return 'disputed';
+  }
+
+  if (
+    t.cancelled_at ||
+    String(t.escrow_status || '').toUpperCase() === 'CANCELLED' ||
+    String(t.escrow_status || '').toUpperCase() === 'REFUNDED' ||
+    raw === 'cancelled'
+  ) {
+    return 'cancelled';
+  }
+
+  if (
+    t.paid_at ||
+    t.marked_paid_at ||
+    t.payment_confirmed_at ||
+    String(t.escrow_status || '').toUpperCase() === 'PAID' ||
+    raw === 'paid' ||
+    raw === 'buyer_marked_paid' ||
+    raw === 'payment_sent'
+  ) {
+    return 'paid';
+  }
+
+  return raw || 'active';
+}
+
 const ActionButtons = ({
   trade,
   currentUserRole,
   currentUserId,
   currentUsername,
-  counterpartId
+  counterpartId,
+  isExpired
 }: {
   trade: Trade | any;
   currentUserRole: 'buy' | 'sell';
@@ -511,9 +559,9 @@ const ActionButtons = ({
   isExpired?: boolean;
 }) => {
   const { toast } = useToast();
-  const tradeStatus = (trade?.status || '').toLowerCase();
+  const tradeStatus = resolveTradeStatus(trade);
   const isBuyer = currentUserRole === 'buy';
-  const isTradeExpired = isExpired || tradeStatus === 'expired';
+  const isTradeExpired = Boolean(isExpired || tradeStatus === 'expired');
 
   const [didNotPayChecked, setDidNotPayChecked] = useState(false);
   const [isPaidConfirmOpen, setIsPaidConfirmOpen] = useState(false);
@@ -529,11 +577,19 @@ const ActionButtons = ({
           const supabase = createClient();
           const { data } = await supabase
             .from('profiles')
-            .select('is_2fa_enabled, is_mfa_enabled')
-            .eq('id', currentUserId)
+            .select('is_2fa_enabled, is_mfa_enabled, two_factor_secret')
+            .or(`id.eq.${currentUserId},user_id.eq.${currentUserId}`)
             .maybeSingle();
           if (data) {
-            setIs2faActive(Boolean(data.is_2fa_enabled || data.is_mfa_enabled));
+            setIs2faActive(
+              Boolean(
+                data.is_2fa_enabled === true ||
+                data.is_2fa_enabled === 'true' ||
+                data.is_mfa_enabled === true ||
+                data.is_mfa_enabled === 'true' ||
+                Boolean(data.two_factor_secret && String(data.two_factor_secret).trim().length > 0)
+              )
+            );
           }
         } catch (err) {
           console.warn('Failed to check 2FA status:', err);
@@ -558,6 +614,29 @@ const ActionButtons = ({
       });
       const data = await res.json();
       if (!res.ok || data.error) throw new Error(data.error || 'Failed to mark as paid');
+
+      const nowIso = new Date().toISOString();
+      if (trade) {
+        trade.marked_paid_at = nowIso;
+        trade.paid_at = nowIso;
+        trade.payment_confirmed_at = nowIso;
+        trade.escrow_status = 'PAID';
+        trade.status = 'paid';
+      }
+
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(
+          new CustomEvent('trade-updated', {
+            detail: {
+              marked_paid_at: nowIso,
+              paid_at: nowIso,
+              payment_confirmed_at: nowIso,
+              escrow_status: 'PAID',
+              status: 'paid',
+            },
+          })
+        );
+      }
 
       toast({ title: 'Trade Marked as Paid', description: 'The seller has been notified to verify payment and release coin.' });
       setIsPaidConfirmOpen(false);
@@ -588,6 +667,27 @@ const ActionButtons = ({
       const data = await res.json();
       if (!res.ok || data.error) throw new Error(data.error || 'Failed to release escrow');
 
+      const nowIso = new Date().toISOString();
+      if (trade) {
+        trade.released_at = nowIso;
+        trade.completed_at = nowIso;
+        trade.escrow_status = 'RELEASED';
+        trade.status = 'released';
+      }
+
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(
+          new CustomEvent('trade-updated', {
+            detail: {
+              released_at: nowIso,
+              completed_at: nowIso,
+              escrow_status: 'RELEASED',
+              status: 'released',
+            },
+          })
+        );
+      }
+
       toast({ title: 'Escrow Released', description: 'Funds successfully transferred to buyer wallet.' });
       setIsReleaseConfirmOpen(false);
       setTotpCode('');
@@ -608,6 +708,25 @@ const ActionButtons = ({
       });
       const data = await res.json();
       if (!res.ok || data.error) throw new Error(data.error || 'Failed to cancel trade');
+
+      const nowIso = new Date().toISOString();
+      if (trade) {
+        trade.cancelled_at = nowIso;
+        trade.escrow_status = 'CANCELLED';
+        trade.status = 'cancelled';
+      }
+
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(
+          new CustomEvent('trade-updated', {
+            detail: {
+              cancelled_at: nowIso,
+              escrow_status: 'CANCELLED',
+              status: 'cancelled',
+            },
+          })
+        );
+      }
 
       toast({ title: 'Trade Cancelled', description: 'Escrow deposit returned to seller.' });
     } catch (e: any) {
@@ -1122,7 +1241,7 @@ function AdminTradeActions({ trade, adminUserId }: { trade: Trade | any; adminUs
     }
   };
 
-  const tradeStatus = (trade?.status || '').toLowerCase();
+  const tradeStatus = resolveTradeStatus(trade);
 
   return (
     <>
@@ -1181,7 +1300,7 @@ export function TradeDetails({
   const supabase = createClient();
   const { timezone } = useUserTimezone();
   const isBuying = currentUserRole === 'buy';
-  const tradeStatus = (trade?.status || 'active').toLowerCase();
+  const tradeStatus = resolveTradeStatus(trade);
   const { isAdmin } = useAdminStatus();
 
   const [currentUser, setCurrentUser] = useState<any>(null);

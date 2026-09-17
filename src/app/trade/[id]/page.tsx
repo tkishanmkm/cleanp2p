@@ -249,17 +249,36 @@ export default function TradePage() {
       .channel(pageTopic)
       .on(
         'postgres_changes',
-        { event: 'UPDATE', schema: 'public', table: 'trades', filter: `id=eq.${tradeIdParam}` },
+        { event: 'UPDATE', schema: 'public', table: 'trades' },
         (payload) => {
-          setTrade((prev: any) => ({ ...prev, ...payload.new }));
+          if (
+            payload.new?.id === tradeIdParam ||
+            payload.new?.trade_id === tradeIdParam ||
+            payload.new?.public_id === tradeIdParam ||
+            (trade?.id && payload.new?.id === trade.id)
+          ) {
+            setTrade((prev: any) => ({ ...prev, ...payload.new }));
+          }
         }
       )
       .subscribe();
 
+    const handleTradeUpdated = (e: any) => {
+      if (e?.detail) {
+        setTrade((prev: any) => (prev ? { ...prev, ...e.detail } : prev));
+      }
+    };
+    if (typeof window !== 'undefined') {
+      window.addEventListener('trade-updated', handleTradeUpdated);
+    }
+
     return () => {
       supabase.removeChannel(tradeChannel);
+      if (typeof window !== 'undefined') {
+        window.removeEventListener('trade-updated', handleTradeUpdated);
+      }
     };
-  }, [tradeIdParam, loadTradeData, supabase]);
+  }, [tradeIdParam, loadTradeData, supabase, trade?.id]);
 
   if (loading) {
     return (

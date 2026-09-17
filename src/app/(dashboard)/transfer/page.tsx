@@ -62,8 +62,39 @@ export default function TransferPage() {
   const [, setSelectedTransfer] = useState<CoinTransfer | null>(null);
   const [, setIsDetailsOpen] = useState(false);
   const [historyKey, setHistoryKey] = useState(0);
+  const [is2faEnabledState, setIs2faEnabledState] = useState<boolean | null>(null);
 
-  const is2faActive = Boolean(profile?.is_2fa_enabled || profile?.is_mfa_enabled);
+  // Directly check 2FA status from Supabase profiles table
+  useEffect(() => {
+    if (authUser?.uid) {
+      const check2FA = async () => {
+        try {
+          const { data } = await supabase
+            .from('profiles')
+            .select('is_2fa_enabled, is_mfa_enabled, two_factor_secret')
+            .or(`id.eq.${authUser.uid},user_id.eq.${authUser.uid}`)
+            .maybeSingle();
+          if (data) {
+            const has2fa = Boolean(
+              data.is_2fa_enabled === true ||
+              data.is_2fa_enabled === 'true' ||
+              data.is_mfa_enabled === true ||
+              data.is_mfa_enabled === 'true' ||
+              Boolean(data.two_factor_secret && String(data.two_factor_secret).trim().length > 0)
+            );
+            setIs2faEnabledState(has2fa);
+          }
+        } catch (e) {
+          console.warn('Transfer page 2FA check error:', e);
+        }
+      };
+      check2FA();
+    }
+  }, [authUser?.uid]);
+
+  const is2faActive = Boolean(
+    is2faEnabledState ?? (profile?.is_2fa_enabled || profile?.is_mfa_enabled)
+  );
   const isSenderRestricted = Boolean(
     profile?.is_banned ||
     profile?.is_restricted ||
@@ -166,8 +197,8 @@ export default function TransferPage() {
       return;
     }
 
-    if (is2faActive && (!values.totpCode || values.totpCode.trim().length < 6)) {
-      form.setError('totpCode', { message: 'Please enter your 6-digit Authenticator code.' });
+    if (is2faActive && (!values.totpCode || values.totpCode.trim().length < 4 || values.totpCode.trim().length > 8)) {
+      form.setError('totpCode', { message: 'Please enter your 4-8 digit Authenticator OTP code.' });
       setIsProcessing(false);
       return;
     }
@@ -178,7 +209,7 @@ export default function TransferPage() {
         values.recipientUsername,
         values.crypto as CryptoCurrency,
         values.amount,
-        values.totpCode
+        values.totpCode?.trim()
       );
 
       toast({
@@ -191,10 +222,14 @@ export default function TransferPage() {
       await loadBalances();
       setHistoryKey((prev) => prev + 1);
     } catch (error: any) {
+      const msg = error.message || 'Could not complete transfer.';
+      if (msg.toLowerCase().includes('totp') || msg.toLowerCase().includes('2fa') || msg.toLowerCase().includes('authenticator')) {
+        setIs2faEnabledState(true);
+      }
       toast({
         variant: 'destructive',
         title: 'Transfer Failed',
-        description: error.message || 'Could not complete transfer.',
+        description: msg,
       });
     } finally {
       setIsProcessing(false);
@@ -421,21 +456,23 @@ export default function TransferPage() {
                       <FormItem className="pt-1">
                         <FormLabel className="text-xs font-semibold flex items-center gap-1.5 text-primary">
                           <ShieldCheck className="w-3.5 h-3.5 text-primary" />
-                          <span>Authenticator 6-Digit Code</span>
+                          <span>Authenticator Two-Factor Code</span>
                         </FormLabel>
                         <FormControl>
                           <Input
                             id="transfer-totp-input"
                             type="text"
                             inputMode="numeric"
-                            maxLength={6}
-                            placeholder="Enter 6-digit TOTP code"
+                            autoComplete="one-time-code"
+                            maxLength={8}
+                            placeholder="Enter 4-8 digit authenticator OTP"
                             {...field}
-                            className="font-mono text-center text-base tracking-widest"
+                            value={field.value || ''}
+                            className="font-mono text-center text-base tracking-widest bg-background"
                           />
                         </FormControl>
                         <FormDescription className="text-[11px]">
-                          Your account has 2FA enabled. Enter the code from your Authenticator app.
+                          Two-factor authentication is active on your account. Enter the code from your authenticator app to authorize transfer.
                         </FormDescription>
                         <FormMessage />
                       </FormItem>
@@ -447,7 +484,10 @@ export default function TransferPage() {
                   id="submit-transfer-btn"
                   type="submit"
                   className="w-full font-bold text-xs h-10 mt-2 cursor-pointer"
-                  disabled={isProcessing}
+                  disabled={
+                    isProcessing ||
+                    (is2faActive && (!form.watch('totpCode') || form.watch('totpCode')!.trim().length < 4))
+                  }
                 >
                   {isProcessing ? (
                     <Loader2 className="mr-2 h-4 w-4 animate-spin" />

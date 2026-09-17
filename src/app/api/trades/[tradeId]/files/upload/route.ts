@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/utils/supabase/server';
-import { uploadToB2 } from '@/lib/b2';
+import { getSupabaseAdminClient } from '@/lib/supabase/server';
+import { uploadToB2, isB2Configured } from '@/lib/b2';
 import sharp from 'sharp';
 
 export const dynamic = 'force-dynamic';
@@ -14,6 +15,7 @@ export async function POST(
     const tradeId = rawParams.tradeId;
 
     const supabase = await createClient();
+    const adminSupabase = getSupabaseAdminClient();
     const {
       data: { user },
     } = await supabase.auth.getUser();
@@ -24,25 +26,49 @@ export async function POST(
 
     const userId = user.id;
 
-    // Verify participant in p2p_trades or trades
-    let { data: trade } = await supabase
-      .from('p2p_trades')
-      .select('id, buyer_id, seller_id')
-      .eq('id', tradeId)
-      .maybeSingle();
+    // Verify participant in trades or p2p_trades
+    const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(tradeId);
+    let trade: any = null;
 
-    if (!trade) {
-      const { data: altTrade } = await supabase
+    if (isUuid) {
+      const { data } = await adminSupabase
         .from('trades')
         .select('id, buyer_id, seller_id')
         .eq('id', tradeId)
         .maybeSingle();
-      trade = altTrade;
+      trade = data;
     }
 
-    if (!trade || (trade.buyer_id !== userId && trade.seller_id !== userId)) {
+    if (!trade) {
+      const { data } = await adminSupabase
+        .from('trades')
+        .select('id, buyer_id, seller_id')
+        .or(`trade_id.eq.${tradeId},public_id.eq.${tradeId}`)
+        .maybeSingle();
+      trade = data;
+    }
+
+    if (!trade && isUuid) {
+      const { data } = await adminSupabase
+        .from('p2p_trades')
+        .select('id, buyer_id, seller_id')
+        .eq('id', tradeId)
+        .maybeSingle();
+      trade = data;
+    }
+
+    const { data: profile } = await adminSupabase
+      .from('profiles')
+      .select('role')
+      .eq('id', userId)
+      .maybeSingle();
+    const isAdmin = profile?.role === 'admin' || profile?.role === 'moderator';
+
+    if (!trade || (!isAdmin && trade.buyer_id !== userId && trade.seller_id !== userId)) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
     }
+
+    const actualTradeId = trade.id;
 
     const formData = await req.formData();
     const file = formData.get('file') as File | null;
@@ -59,10 +85,10 @@ export async function POST(
         );
       }
 
-      const { data: newLink, error } = await supabase
+      const { data: newLink, error } = await adminSupabase
         .from('trade_files')
         .insert({
-          trade_id: tradeId,
+          trade_id: actualTradeId,
           uploaded_by: userId,
           file_type: 'document',
           file_name: 'External Cloud Link',
@@ -79,13 +105,14 @@ export async function POST(
         console.warn('trade_files table insert error:', error);
       }
 
-      // Also record message in trade_messages/trade_chat_messages if possible
+      // Record message in trade_messages
       try {
-        await supabase.from('trade_messages').insert({
-          trade_id: tradeId,
+        await adminSupabase.from('trade_messages').insert({
+          trade_id: actualTradeId,
           sender_id: userId,
           message: `Shared cloud link: ${externalUrl}`,
           file_url: externalUrl,
+          attachment_url: externalUrl,
         });
       } catch (msgErr) {
         // non-fatal
@@ -94,7 +121,7 @@ export async function POST(
       return NextResponse.json({
         success: true,
         file: newLink || {
-          trade_id: tradeId,
+          trade_id: actualTradeId,
           uploaded_by: userId,
           file_type: 'document',
           file_name: 'External Cloud Link',
@@ -125,116 +152,125 @@ export async function POST(
       );
     }
 
-    if (fileType === 'image' && file.size > 5 * 1024 * 1024) {
+    if (fileType === 'image' && file.size > 10 * 1024 * 1024) {
       return NextResponse.json(
         {
-          error: 'Image exceeds 5 MB limit. Please select a smaller photo or screenshot.',
+          error: 'Image exceeds 10 MB limit. Please select a smaller photo or screenshot.',
         },
         { status: 400 }
       );
     }
 
-    if (fileType === 'document' && file.size > 5 * 1024 * 1024) {
+    if (fileType === 'document' && file.size > 10 * 1024 * 1024) {
       return NextResponse.json(
         {
-          error: 'Document exceeds 5 MB limit. Please upload a smaller document.',
+          error: 'Document exceeds 10 MB limit. Please upload a smaller document.',
         },
         { status: 400 }
       );
     }
 
-    // Quota verification: Check existing count
-    const { count } = await supabase
+    // Quota verification: Check existing count (allow generous limit)
+    const { count } = await adminSupabase
       .from('trade_files')
       .select('*', { count: 'exact', head: true })
-      .eq('trade_id', tradeId)
+      .eq('trade_id', actualTradeId)
       .eq('uploaded_by', userId)
       .eq('file_type', fileType);
 
-    if ((count || 0) >= 3) {
+    if ((count || 0) >= 10) {
       return NextResponse.json(
         {
           error: 'LIMIT_REACHED',
-          message: `Your upload limit for ${fileType}s (3/3) has been reached. You can share your file using a Dropbox/Cloud Storage or Google Drive link instead.`,
+          message: `Your upload limit for ${fileType}s (10/10) has been reached. You can share your file using a Dropbox or Google Drive link instead.`,
         },
         { status: 429 }
       );
     }
 
-    // Generate path structure: trades/{trade_id}/chat/{type}s/msg_{timestamp}.{ext}
     let fileExt = file.name.split('.').pop() || 'bin';
     let mimeType = file.type;
 
     const arrayBuffer = await file.arrayBuffer();
     let uploadBuffer = Buffer.from(arrayBuffer);
 
-    // Apply SVG Watermark Overlay via Sharp for images
+    // Watermark processing for images
     if (fileType === 'image') {
       try {
         const timestamp = new Date().toISOString();
         const watermarkSvg = `
-          <svg width="800" height="200" xmlns="http://www.w3.org/2000/svg">
+          <svg width="800" height="160" xmlns="http://www.w3.org/2000/svg">
             <style>
-              .title { fill: rgba(239, 68, 68, 0.85); font-size: 28px; font-weight: bold; font-family: sans-serif; }
-              .sub { fill: rgba(255, 255, 255, 0.9); font-size: 18px; font-family: sans-serif; }
+              .title { fill: rgba(239, 68, 68, 0.9); font-size: 24px; font-weight: bold; font-family: sans-serif; }
+              .sub { fill: rgba(255, 255, 255, 0.9); font-size: 16px; font-family: sans-serif; }
             </style>
-            <rect width="100%" height="100%" fill="rgba(0,0,0,0.45)" rx="8" />
-            <text x="20" y="50" class="title">OFFICIAL ESCROW PROOF ATTACHMENT</text>
-            <text x="20" y="90" class="sub">Trade ID: ${tradeId}</text>
-            <text x="20" y="120" class="sub">Uploader UID: ${userId}</text>
-            <text x="20" y="150" class="sub">Stamped At: ${timestamp}</text>
+            <rect width="100%" height="100%" fill="rgba(0,0,0,0.5)" rx="6" />
+            <text x="20" y="45" class="title">PAXONES TRADE PROOF</text>
+            <text x="20" y="85" class="sub">Trade ID: ${tradeId}</text>
+            <text x="20" y="120" class="sub">Time: ${timestamp}</text>
           </svg>
         `;
 
         uploadBuffer = await sharp(uploadBuffer)
-          .resize(1200, 1200, { fit: 'inside', withoutEnlargement: true })
+          .resize(1600, 1600, { fit: 'inside', withoutEnlargement: true })
           .composite([{ input: Buffer.from(watermarkSvg), gravity: 'southeast' }])
-          .jpeg({ quality: 85 })
+          .jpeg({ quality: 88 })
           .toBuffer();
 
         fileExt = 'jpg';
         mimeType = 'image/jpeg';
       } catch (watermarkErr) {
-        console.warn('Watermark processing failed, uploading original buffer:', watermarkErr);
+        console.warn('Watermark processing bypassed:', watermarkErr);
       }
     }
 
-    const objectKey = `trades/${tradeId}/chat/${fileType}s/msg_${Date.now()}.${fileExt}`;
-
-    // Upload to Backblaze B2 (and fallback Supabase storage if needed)
+    const objectKey = `trades/${actualTradeId}/${fileType}s/proof_${Date.now()}.${fileExt}`;
     let publicUrl: string | null = null;
-    try {
-      await uploadToB2(objectKey, uploadBuffer, mimeType);
-    } catch (b2Err: any) {
-      console.warn('B2 upload failed, attempting Supabase storage fallback:', b2Err);
+
+    // 1. If Backblaze B2 is configured, upload to B2
+    if (isB2Configured()) {
       try {
-        const fallbackPath = `${tradeId}/${userId}_${Date.now()}.${fileExt}`;
-        const { error: sbStorageErr } = await supabase.storage
-          .from('trade-attachments')
-          .upload(fallbackPath, uploadBuffer, {
-            contentType: mimeType,
-            upsert: true,
-          });
-        if (!sbStorageErr) {
-          const { data: pubData } = supabase.storage.from('trade-attachments').getPublicUrl(fallbackPath);
-          publicUrl = pubData.publicUrl;
-        }
-      } catch (sbErr) {
-        console.error('Supabase storage fallback error:', sbErr);
+        await uploadToB2(objectKey, uploadBuffer, mimeType);
+      } catch (b2Err) {
+        console.warn('B2 upload skipped:', b2Err);
       }
     }
 
-    // Save metadata in trade_files
-    const { data: savedFile, error: dbError } = await supabase
+    // 2. Upload to Supabase Storage 'trade-attachments'
+    try {
+      const storagePath = `${actualTradeId}/${userId}_${Date.now()}.${fileExt}`;
+      const { error: sbStorageErr } = await adminSupabase.storage
+        .from('trade-attachments')
+        .upload(storagePath, uploadBuffer, {
+          contentType: mimeType,
+          upsert: true,
+        });
+
+      if (!sbStorageErr) {
+        const { data: pubData } = adminSupabase.storage.from('trade-attachments').getPublicUrl(storagePath);
+        publicUrl = pubData.publicUrl;
+      } else {
+        console.warn('Supabase storage upload warning:', sbStorageErr);
+      }
+    } catch (sbErr) {
+      console.error('Supabase storage upload error:', sbErr);
+    }
+
+    // Fallback URL if public URL not yet generated
+    const fileAccessUrl = publicUrl || `/api/trades/${actualTradeId}/files/latest`;
+
+    // 3. Save metadata in trade_files
+    const { data: savedFile, error: dbError } = await adminSupabase
       .from('trade_files')
       .insert({
-        trade_id: tradeId,
+        trade_id: actualTradeId,
         uploaded_by: userId,
         file_type: fileType,
         file_name: file.name,
         object_key: objectKey,
-        file_size: file.size,
-        mime_type: file.type,
+        file_size: uploadBuffer.length,
+        mime_type: mimeType,
+        external_url: publicUrl || null,
       })
       .select()
       .maybeSingle();
@@ -243,16 +279,14 @@ export async function POST(
       console.warn('trade_files insert warning:', dbError);
     }
 
-    // Post to trade chat messages as well so participants see the attached file in real time
-    const fileAccessUrl = publicUrl || `/api/trades/${tradeId}/files/${savedFile?.id || 'latest'}`;
+    // 4. Post to trade chat messages so both buyer and seller see it in real-time
     try {
-      await supabase.from('trade_messages').insert({
-        trade_id: tradeId,
+      await adminSupabase.from('trade_messages').insert({
+        trade_id: actualTradeId,
         sender_id: userId,
-        content: `📎 Uploaded verified ${fileType} proof attachment.`,
-        message: `Uploaded ${fileType}: ${file.name}`,
+        message: `📎 Uploaded payment proof attachment: ${file.name}`,
         file_url: fileAccessUrl,
-        is_system_message: false,
+        attachment_url: fileAccessUrl,
       });
     } catch (chatErr) {
       // non-fatal
@@ -262,7 +296,7 @@ export async function POST(
       success: true,
       file_url: fileAccessUrl,
       file: savedFile || {
-        trade_id: tradeId,
+        trade_id: actualTradeId,
         uploaded_by: userId,
         file_type: fileType,
         file_name: file.name,
