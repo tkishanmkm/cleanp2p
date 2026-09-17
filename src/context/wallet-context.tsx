@@ -35,7 +35,8 @@ interface WalletContextType {
     chain: string,
     toAddress: string,
     amount: number,
-    fee?: number
+    fee?: number,
+    totpCode?: string
   ) => Promise<{ success: boolean; withdrawal_id?: string }>;
 }
 
@@ -432,7 +433,8 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
       chain: string,
       toAddress: string,
       amount: number,
-      fee: number = 0
+      fee: number = 0,
+      totpCode?: string
     ) => {
       if (!userId) {
         throw new Error('Authentication required');
@@ -462,20 +464,26 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
       });
 
       try {
-        const { data, error: rpcError } = await supabase.rpc('request_withdrawal', {
-          p_asset_code: asset,
-          p_network_code: chain,
-          p_destination_address: toAddress,
-          p_amount: amount,
-          p_idempotency_key: `wd_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`,
+        const res = await fetch('/api/withdraw', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            asset,
+            chain,
+            destinationAddress: toAddress,
+            amount,
+            fee,
+            totpCode: totpCode || '',
+          }),
         });
 
-        if (rpcError) {
-          throw new Error(rpcError.message);
+        const resData = await res.json();
+        if (!res.ok) {
+          throw new Error(resData.error || 'Withdrawal request failed');
         }
 
         await fetchBalances();
-        return { success: true, withdrawal_id: data?.withdrawal_id };
+        return { success: true, withdrawal_id: resData?.withdrawalId || resData?.withdrawal_id };
       } catch (err: any) {
         // Rollback optimistic update
         await fetchBalances();

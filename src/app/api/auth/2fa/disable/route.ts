@@ -22,19 +22,20 @@ export async function POST(req: Request) {
     const adminClient = getSupabaseAdminClient();
     const { data: profile } = await adminClient
       .from('profiles')
-      .select('two_factor_secret, is_2fa_enabled, is_mfa_enabled')
+      .select('two_factor_secret, security_answer_hash, is_2fa_enabled, is_mfa_enabled')
       .eq('id', user.id)
-      .single();
+      .maybeSingle();
 
     const is2FAEnabled = Boolean(profile?.is_2fa_enabled || profile?.is_mfa_enabled);
+    const secret = profile?.two_factor_secret || profile?.security_answer_hash;
 
-    if (!is2FAEnabled || !profile?.two_factor_secret) {
+    if (!is2FAEnabled || !secret) {
       return NextResponse.json({ error: '2FA is not currently enabled' }, { status: 400 });
     }
 
-    const cleanToken = rawToken.toString().replace(/\s+/g, '').trim();
+    const cleanToken = rawToken.toString().replace(/[\s-]+/g, '').trim();
 
-    const isVerified = verify2FAOTP(profile.two_factor_secret, cleanToken, true);
+    const isVerified = verify2FAOTP(secret, cleanToken, true);
 
     if (!isVerified) {
       return NextResponse.json({ error: 'Invalid authenticator code' }, { status: 400 });

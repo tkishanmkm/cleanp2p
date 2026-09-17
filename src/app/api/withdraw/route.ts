@@ -31,15 +31,7 @@ export async function POST(request: Request) {
     const totpCode = body.totpCode || body.totp_code || body.code;
     const idempotencyKey = request.headers.get('x-idempotency-key') || body.idempotencyKey;
 
-    // 2. Check 2FA TOTP enforcement (HTTP 403 on missing 2FA TOTP)
-    if (!totpCode) {
-      return NextResponse.json(
-        { error: 'TWO_FACTOR_REQUIRED: Valid 2FA TOTP code is required to execute a withdrawal.' },
-        { status: 403 }
-      );
-    }
-
-    // 3. Authenticated session check
+    // 2. Authenticated session check
     const supabase = await createClient();
     let user: any = null;
 
@@ -67,7 +59,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    // Verify 2FA TOTP code for sensitive withdrawal operation
+    // 3. Check 2FA TOTP enforcement for sensitive withdrawal operation
     const { data: userProfile } = await supabaseAdmin
       .from('profiles')
       .select('is_2fa_enabled, is_mfa_enabled, two_factor_secret, security_answer_hash')
@@ -78,9 +70,15 @@ export async function POST(request: Request) {
     const secret = userProfile?.two_factor_secret || userProfile?.security_answer_hash;
 
     if (is2faActive) {
+      if (!totpCode || typeof totpCode !== 'string' || totpCode.trim().length < 4) {
+        return NextResponse.json(
+          { error: 'TWO_FACTOR_REQUIRED: Valid 4-8 digit 2FA TOTP code is required to execute a withdrawal.' },
+          { status: 403 }
+        );
+      }
       const isValidTotp = verify2FAOTP(secret, String(totpCode).trim(), is2faActive);
       if (!isValidTotp) {
-        return NextResponse.json({ error: 'Invalid 2FA authentication code' }, { status: 401 });
+        return NextResponse.json({ error: 'Invalid 2FA authentication code.' }, { status: 401 });
       }
     }
 

@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { createClient, getSupabaseAdminClient } from '@/utils/supabase/server';
+import { verify2FAOTP } from '@/lib/2fa';
 
 const RESERVED_USERNAMES = ['admin', 'support', 'help', 'system', 'official', 'security', 'p2p', 'moderator'];
 
@@ -354,16 +355,28 @@ export async function PATCH(req: NextRequest) {
         // Check if 2FA is enabled; if so, require 2FA OTP verification
         const { data: currentProf } = await admin
           .from('profiles')
-          .select('is_2fa_enabled')
+          .select('is_2fa_enabled, is_mfa_enabled, two_factor_secret, security_answer_hash')
           .eq('id', user.id)
           .maybeSingle();
 
-        if (currentProf?.is_2fa_enabled) {
-          if (!code || !/^\d{6}$/.test(code.toString().trim())) {
+        const is2faActive = Boolean(currentProf?.is_2fa_enabled || currentProf?.is_mfa_enabled);
+        const userSecret = currentProf?.two_factor_secret || currentProf?.security_answer_hash;
+
+        if (is2faActive) {
+          const cleanCode = code ? code.toString().trim() : '';
+          if (!cleanCode || !/^\d{4,8}$/.test(cleanCode)) {
             return NextResponse.json({
-              error: 'Security Enforcement: 6-digit 2FA OTP code is required to modify security questions.',
+              error: 'Security Enforcement: 4-8 digit 2FA OTP code is required to modify security questions.',
               requires2FA: true,
             }, { status: 400 });
+          }
+
+          const isValid = verify2FAOTP(userSecret, cleanCode, true);
+          if (!isValid) {
+            return NextResponse.json({
+              error: 'Invalid 2FA authentication code.',
+              requires2FA: true,
+            }, { status: 401 });
           }
         }
 
@@ -394,24 +407,45 @@ export async function PATCH(req: NextRequest) {
 
         const { data: currentProf } = await admin
           .from('profiles')
-          .select('is_2fa_enabled')
+          .select('is_2fa_enabled, is_mfa_enabled, two_factor_secret, security_answer_hash')
           .eq('id', user.id)
           .maybeSingle();
+
+        const is2faActive = Boolean(currentProf?.is_2fa_enabled || currentProf?.is_mfa_enabled);
+        const existingSecret = currentProf?.two_factor_secret || currentProf?.security_answer_hash;
 
         if (enabled) {
           if (!code || !/^\d{4,8}$/.test(code)) {
             return NextResponse.json({
-              error: 'Invalid authenticator code. Please enter a valid 6-digit OTP code shown in your authenticator app.'
+              error: 'Invalid authenticator code. Please enter a valid 4-8 digit OTP code shown in your authenticator app.'
             }, { status: 400 });
+          }
+          const validSecret = secret || existingSecret;
+          if (validSecret) {
+            const isValid = verify2FAOTP(validSecret, code, true);
+            if (!isValid) {
+              return NextResponse.json({
+                error: 'Invalid authenticator code. Please check the time on your device and try again.'
+              }, { status: 400 });
+            }
           }
         } else {
           // Mandatory 2FA OTP verification when disabling 2FA
-          if (currentProf?.is_2fa_enabled) {
-            if (!code || !/^\d{6}$/.test(code)) {
+          if (is2faActive) {
+            if (!code || !/^\d{4,8}$/.test(code)) {
               return NextResponse.json({
-                error: 'Security Enforcement: Please enter your 6-digit Authenticator OTP to confirm disabling 2FA.',
+                error: 'Security Enforcement: Please enter your 4-8 digit Authenticator OTP to confirm disabling 2FA.',
                 requires2FA: true,
               }, { status: 400 });
+            }
+            if (existingSecret) {
+              const isValid = verify2FAOTP(existingSecret, code, true);
+              if (!isValid) {
+                return NextResponse.json({
+                  error: 'Invalid authenticator OTP code.',
+                  requires2FA: true,
+                }, { status: 401 });
+              }
             }
           }
         }

@@ -10,7 +10,7 @@ import { Input } from '@/components/ui/input';
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from '@/components/ui/form';
 import { User, CryptoCurrency } from "@/lib/types";
 import { useToast } from '@/hooks/use-toast';
-import { Loader2, Fuel, AlertCircle } from 'lucide-react';
+import { Loader2, Fuel, AlertCircle, ShieldCheck } from 'lucide-react';
 import { usePrices } from '@/context/price-context';
 import { useWallet } from '@/context/wallet-context';
 import { FIXED_WITHDRAWAL_FEES_USD, SUPPORTED_CRYPTOS } from '@/lib/constants';
@@ -23,6 +23,7 @@ const withdrawSchema = z.object({
   address: z.string().min(1, "Recipient address is required."),
   amount: z.coerce.number().positive("Amount must be a positive number."),
   chain: z.string().min(1, "Please select a network."),
+  totpCode: z.string().optional(),
 });
 
 type WithdrawFormValues = z.infer<typeof withdrawSchema>;
@@ -35,13 +36,35 @@ interface WithdrawDialogProps {
 }
 
 export function WithdrawDialog({ open, onOpenChange, asset, userWallets }: WithdrawDialogProps) {
-  const { user } = useAuth();
+  const { user, profile } = useAuth();
   const { toast } = useToast();
   const { requestWithdrawal, refreshBalances, balances } = useWallet();
   const [isLoading, setIsLoading] = useState(false);
   const [isGasLoading, setIsGasLoading] = useState(false);
   const [gasFeeData, setGasFeeData] = useState<NetworkGasFee | null>(null);
+  const [is2faEnabledState, setIs2faEnabledState] = useState(false);
   const { prices } = usePrices();
+
+  const is2faActive = useMemo(() => {
+    return Boolean(is2faEnabledState || profile?.is_2fa_enabled || profile?.is_mfa_enabled);
+  }, [is2faEnabledState, profile]);
+
+  // Check 2FA state from database on open
+  useEffect(() => {
+    if (open && (user?.uid || user?.id)) {
+      const check2FA = async () => {
+        const { data } = await supabase
+          .from('profiles')
+          .select('is_2fa_enabled, is_mfa_enabled')
+          .eq('id', user.uid || user.id)
+          .maybeSingle();
+        if (data) {
+          setIs2faEnabledState(Boolean(data.is_2fa_enabled || data.is_mfa_enabled));
+        }
+      };
+      check2FA();
+    }
+  }, [open, user]);
 
   const availableChains = useMemo(() => {
     if (!asset) return [];
@@ -54,6 +77,7 @@ export function WithdrawDialog({ open, onOpenChange, asset, userWallets }: Withd
       address: '',
       amount: '' as any,
       chain: '',
+      totpCode: '',
     },
   });
 
@@ -169,6 +193,18 @@ export function WithdrawDialog({ open, onOpenChange, asset, userWallets }: Withd
 
     setIsLoading(true);
     try {
+      // If 2FA is active, validate that TOTP code is provided
+      if (is2faActive) {
+        const cleanTotp = (values.totpCode || '').trim();
+        if (!cleanTotp || cleanTotp.length < 4 || cleanTotp.length > 8) {
+          form.setError('totpCode', {
+            message: 'Please enter your 4-8 digit authenticator OTP code.',
+          });
+          setIsLoading(false);
+          return;
+        }
+      }
+
       // Check if the destination address belongs to another registered user on the platform
       const { data: internalDep } = await supabase
         .from('deposit_addresses')
@@ -185,6 +221,7 @@ export function WithdrawDialog({ open, onOpenChange, asset, userWallets }: Withd
             recipientInput: targetAddress,
             asset,
             amount: withdrawAmt,
+            totpCode: values.totpCode?.trim() || '',
           }),
         });
 
@@ -217,7 +254,8 @@ export function WithdrawDialog({ open, onOpenChange, asset, userWallets }: Withd
         values.chain,
         targetAddress,
         withdrawAmt,
-        feeInCrypto
+        feeInCrypto,
+        values.totpCode?.trim()
       );
 
       toast({
@@ -386,9 +424,44 @@ export function WithdrawDialog({ open, onOpenChange, asset, userWallets }: Withd
               </div>
             )}
 
+            {is2faActive && (
+              <FormField
+                control={form.control}
+                name="totpCode"
+                render={({ field }) => (
+                  <FormItem className="rounded-lg border border-amber-500/20 bg-amber-500/5 p-3 space-y-1.5">
+                    <FormLabel className="flex items-center gap-1.5 text-xs font-semibold text-amber-700 dark:text-amber-400">
+                      <ShieldCheck className="h-4 w-4" />
+                      Two-Factor Authentication (2FA)
+                    </FormLabel>
+                    <FormControl>
+                      <Input
+                        type="text"
+                        inputMode="numeric"
+                        autoComplete="one-time-code"
+                        maxLength={8}
+                        placeholder="Enter 4-8 digit authenticator code"
+                        className="font-mono text-center tracking-widest bg-background"
+                        {...field}
+                        value={field.value || ''}
+                      />
+                    </FormControl>
+                    <FormMessage className="text-[11px]" />
+                  </FormItem>
+                )}
+              />
+            )}
+
             <Button
               type="submit"
-              disabled={isLoading || isInsufficientBalance || !numericWatchedAmount || numericWatchedAmount <= 0 || !watchedChain}
+              disabled={
+                isLoading ||
+                isInsufficientBalance ||
+                !numericWatchedAmount ||
+                numericWatchedAmount <= 0 ||
+                !watchedChain ||
+                (is2faActive && (!form.watch('totpCode') || form.watch('totpCode')!.trim().length < 4))
+              }
               className="w-full"
             >
               {isLoading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
