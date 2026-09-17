@@ -74,12 +74,12 @@ export default function TradeChatTimer({
   };
 
   return (
-    <div className="flex items-center gap-3 sm:gap-4 bg-gray-900 text-white px-3 sm:px-4 py-1.5 sm:py-2 rounded-lg shadow border border-gray-800">
+    <div className="flex items-center gap-2.5 sm:gap-3.5 bg-background/95 dark:bg-slate-900/95 text-foreground px-3 sm:px-3.5 py-1.5 sm:py-2 rounded-xl shadow-xs border border-border/80 dark:border-slate-800">
       {/* 1. Reverse Countdown Timer */}
       {!isTradeStopped && (
-        <div className="flex flex-col border-r border-gray-700 pr-3 sm:pr-4">
-          <span className="text-[10px] sm:text-xs text-gray-400">Payment Window</span>
-          <span className={`text-xs sm:text-sm font-bold font-mono ${remaining < 300 ? 'text-red-500 animate-pulse' : 'text-amber-400'}`}>
+        <div className="flex flex-col border-r border-border/80 dark:border-slate-700/80 pr-2.5 sm:pr-3.5">
+          <span className="text-[10px] sm:text-xs text-muted-foreground font-medium leading-tight">Payment Window</span>
+          <span className={`text-xs sm:text-sm font-bold font-mono tabular-nums leading-tight ${remaining < 300 ? 'text-destructive animate-pulse' : 'text-amber-600 dark:text-amber-400'}`}>
             {formatMS(remaining)}
           </span>
         </div>
@@ -87,10 +87,10 @@ export default function TradeChatTimer({
 
       {/* 2. Straight Stopwatch Count-up */}
       <div className="flex flex-col">
-        <span className="text-[10px] sm:text-xs text-gray-400">
+        <span className="text-[10px] sm:text-xs text-muted-foreground font-medium leading-tight">
           {isTradeStopped ? 'Total Trade Time' : 'Elapsed Time'}
         </span>
-        <span className="text-xs sm:text-sm font-bold font-mono text-emerald-400">
+        <span className="text-xs sm:text-sm font-bold font-mono tabular-nums text-emerald-600 dark:text-emerald-400 leading-tight">
           {formatHMS(elapsed)}
         </span>
       </div>

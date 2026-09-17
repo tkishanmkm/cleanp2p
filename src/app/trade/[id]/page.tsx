@@ -80,7 +80,37 @@ export default function TradePage() {
         return;
       }
 
-      setTrade(tradeData);
+      if (tradeData) {
+        setTrade(tradeData);
+
+        // If accessed via UUID or legacy ID, canonicalize browser URL to 12-char trade ID seamlessly
+        const canonicalTradeId = tradeData.trade_id || tradeData.public_id;
+        if (canonicalTradeId && cleanParam !== canonicalTradeId && typeof window !== 'undefined') {
+          window.history.replaceState(null, '', `/trade/${canonicalTradeId}`);
+        }
+
+        // Auto-expire check on load if timer has passed
+        const curStatus = (tradeData.status || '').toLowerCase();
+        if (curStatus === 'active' || curStatus === 'pending') {
+          const createdAtMs = tradeData.created_at ? new Date(tradeData.created_at).getTime() : Date.now();
+          const windowMins = Number(tradeData.payment_window_minutes || 30);
+          const expiresMs = tradeData.expires_at || tradeData.expiresAt 
+            ? new Date(tradeData.expires_at || tradeData.expiresAt).getTime() 
+            : createdAtMs + (windowMins * 60 * 1000);
+
+          if (Date.now() >= expiresMs) {
+            // Expire immediately in background
+            const tradeIdent = tradeData.id || canonicalTradeId;
+            fetch(`/api/trades/${tradeIdent}/actions`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ action: 'EXPIRE_TRADE' })
+            }).then(() => {
+              setTrade((prev: any) => prev ? { ...prev, status: 'EXPIRED' } : prev);
+            }).catch(console.warn);
+          }
+        }
+      }
 
       // 3. Determine counterparty & role
       const isBuyer = user.id === (tradeData.buyer_id || tradeData.buyerId);
@@ -139,18 +169,63 @@ export default function TradePage() {
         }
       }
 
-      // 5. Fetch Ad details if ad_id is present
-      const adId = tradeData.ad_id || tradeData.adId;
-      if (adId) {
-        const { data: adData } = await supabase
-          .from('ads')
-          .select('*')
-          .eq('id', adId)
-          .maybeSingle();
+      // 5. Fetch Ad details defensively across tables and fallback references
+      const rawAdRef = tradeData.ad_id || tradeData.adId || tradeData.public_ad_id;
+      let adResult: any = null;
 
-        if (adData) {
-          setAd(adData);
+      if (rawAdRef) {
+        const isAdUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(String(rawAdRef));
+
+        if (isAdUuid) {
+          const { data } = await supabase.from('ads').select('*').eq('id', rawAdRef).maybeSingle();
+          if (data) adResult = data;
         }
+
+        if (!adResult) {
+          const { data } = await supabase.from('ads').select('*').eq('public_id', rawAdRef).maybeSingle();
+          if (data) adResult = data;
+        }
+
+        if (!adResult) {
+          const { data } = await supabase.from('ads').select('*').eq('public_ad_id', rawAdRef).maybeSingle();
+          if (data) adResult = data;
+        }
+
+        if (!adResult) {
+          const { data } = await supabase.from('ads').select('*').eq('ad_id', rawAdRef).maybeSingle();
+          if (data) adResult = data;
+        }
+      }
+
+      // Fallback: If ad still not found by direct ID, search seller's recent ad matching the trade crypto & fiat
+      if (!adResult && tradeData.seller_id) {
+        try {
+          const cryptoSym = tradeData.crypto || tradeData.asset_symbol || tradeData.coin || 'BTC';
+          const { data: sellerAd } = await supabase
+            .from('ads')
+            .select('*')
+            .eq('user_id', tradeData.seller_id)
+            .ilike('asset_symbol', cryptoSym)
+            .order('created_at', { ascending: false })
+            .limit(1)
+            .maybeSingle();
+
+          if (sellerAd) adResult = sellerAd;
+        } catch {}
+      }
+
+      if (adResult) {
+        setAd(adResult);
+      } else if (tradeData.terms || tradeData.seller_terms || tradeData.tags) {
+        // Construct ad metadata from trade record
+        setAd({
+          id: tradeData.ad_id || tradeData.public_ad_id || 'AD-DIRECT',
+          public_id: tradeData.public_ad_id || tradeData.ad_id || 'AD-DIRECT',
+          terms: tradeData.terms || tradeData.seller_terms || '',
+          tags: tradeData.tags || tradeData.ad_tags || [],
+          ad_tags: tradeData.tags || tradeData.ad_tags || [],
+          payment_methods: tradeData.payment_methods || tradeData.payment_method ? [tradeData.payment_method] : [],
+        });
       }
     } catch (err: any) {
       console.error('Error loading trade:', err);

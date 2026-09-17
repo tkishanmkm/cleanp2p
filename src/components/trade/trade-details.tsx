@@ -81,6 +81,9 @@ import {
   FileText,
   UserCheck,
   Check,
+  CheckCircle2,
+  ShieldCheck,
+  XCircle,
   Tag
 } from 'lucide-react';
 import { BtcLogo, EthLogo, LtcLogo, UsdtLogo } from '@/components/icons';
@@ -626,20 +629,20 @@ const ActionButtons = ({
         {canMarkPaid && (
           <AlertDialog open={isPaidConfirmOpen} onOpenChange={setIsPaidConfirmOpen}>
             <AlertDialogTrigger asChild>
-              <Button className="w-full bg-primary hover:bg-primary/90 text-primary-foreground font-bold">
-                I Have Paid
+              <Button className="w-full bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white font-bold py-2.5 text-sm shadow-md transition-all">
+                <CheckCircle2 className="mr-1.5 h-4 w-4" /> I Have Paid
               </Button>
             </AlertDialogTrigger>
-            <AlertDialogContent>
+            <AlertDialogContent className="bg-card text-card-foreground border-border">
               <AlertDialogHeader>
-                <AlertDialogTitle>Confirm Payment Sent</AlertDialogTitle>
-                <AlertDialogDescription>
+                <AlertDialogTitle className="text-foreground">Confirm Payment Sent</AlertDialogTitle>
+                <AlertDialogDescription className="text-muted-foreground">
                   Ensure you have transferred exact fiat to the seller&apos;s payment account before confirming.
                 </AlertDialogDescription>
               </AlertDialogHeader>
               <AlertDialogFooter>
                 <AlertDialogCancel>Go Back</AlertDialogCancel>
-                <AlertDialogAction onClick={handleMarkAsPaid} disabled={isSubmittingAction}>
+                <AlertDialogAction onClick={handleMarkAsPaid} disabled={isSubmittingAction} className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold">
                   {isSubmittingAction && <Loader2 className="h-4 w-4 animate-spin mr-1.5" />}
                   Confirm Paid
                 </AlertDialogAction>
@@ -657,14 +660,14 @@ const ActionButtons = ({
             }}
           >
             <AlertDialogTrigger asChild>
-              <Button className="w-full bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white font-bold py-2.5 text-sm shadow-md">
-                Release Escrow
+              <Button className="w-full bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white font-bold py-2.5 text-sm shadow-md transition-all">
+                <ShieldCheck className="mr-1.5 h-4 w-4" /> Release Escrow
               </Button>
             </AlertDialogTrigger>
-            <AlertDialogContent className="sm:max-w-md">
+            <AlertDialogContent className="sm:max-w-md bg-card text-card-foreground border-border">
               <AlertDialogHeader>
-                <AlertDialogTitle>Release Escrow Coin?</AlertDialogTitle>
-                <AlertDialogDescription>
+                <AlertDialogTitle className="text-foreground">Release Escrow Coin?</AlertDialogTitle>
+                <AlertDialogDescription className="text-muted-foreground">
                   WARNING: This action is irreversible. Only release after verifying full payment in your bank/wallet account.
                 </AlertDialogDescription>
               </AlertDialogHeader>
@@ -699,7 +702,7 @@ const ActionButtons = ({
                 <AlertDialogAction
                   onClick={handleReleaseCrypto}
                   disabled={isSubmittingAction || (is2faActive && totpCode.trim().length < 4)}
-                  className="bg-emerald-600 hover:bg-emerald-700 text-white"
+                  className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold"
                 >
                   {isSubmittingAction && <Loader2 className="h-4 w-4 animate-spin mr-1.5" />}
                   Confirm & Release Escrow
@@ -712,8 +715,8 @@ const ActionButtons = ({
         {canBuyerCancel && (
           <AlertDialog>
             <AlertDialogTrigger asChild>
-              <Button variant="outline" size="sm" className="w-full text-xs text-destructive hover:bg-destructive/10">
-                Cancel Trade
+              <Button variant="outline" size="sm" className="w-full text-xs font-bold text-destructive border-destructive/30 hover:bg-destructive/10">
+                <XCircle className="mr-1.5 h-3.5 w-3.5" /> Cancel Trade
               </Button>
             </AlertDialogTrigger>
             <AlertDialogContent className="sm:max-w-md">
@@ -1323,40 +1326,59 @@ export function TradeDetails({
   const showFeedbackSection = tradeStatus === 'released' || tradeStatus === 'completed';
   const showActions = ['active', 'paid', 'pending', 'buyer_marked_paid', 'payment_sent'].includes(tradeStatus);
 
-  const coinSymbol = trade?.crypto ?? trade?.asset_symbol ?? 'USDT';
-  const rawCryptoAmount = Number(trade?.crypto_amount ?? trade?.cryptoAmount ?? trade?.amount ?? 0);
-  const rawRate = Number(trade?.rate ?? trade?.price ?? ad?.price ?? 0);
-  const rawEscrowFee = Number(trade?.escrow_fee ?? trade?.escrowFee ?? (rawCryptoAmount * 0.015));
-  
-  // Robust fiat amount computation: use total_fiat / fiat_amount, or calculate crypto * rate if valid
-  const rawFiatAmount = Number(
-    trade?.total_fiat ?? 
-    trade?.totalFiat ?? 
-    trade?.fiat_amount ?? 
-    trade?.fiatAmount ?? 
-    trade?.amount_usd ?? 
-    (rawCryptoAmount > 0 && rawRate > 0 ? rawCryptoAmount * rawRate : 0)
-  );
-  
-  // If fiat amount was provided directly (e.g. 8400 INR) but crypto amount is missing or miscalculated, derive crypto amount
+  const getPositiveNumber = (...values: any[]): number => {
+    for (const v of values) {
+      if (v !== null && v !== undefined && v !== '') {
+        const num = Number(v);
+        if (!isNaN(num) && num > 0) return num;
+      }
+    }
+    return 0;
+  };
+
+  const coinSymbol = trade?.crypto ?? trade?.asset_symbol ?? trade?.coin ?? trade?.asset ?? 'USDT';
+  const rawCryptoAmount = getPositiveNumber(trade?.crypto_amount, trade?.cryptoAmount, trade?.amount, trade?.amount_crypto);
+  const rawRate = getPositiveNumber(trade?.rate, trade?.price, trade?.unit_price, trade?.fixed_rate, ad?.price, ad?.fixed_rate, ad?.fixedRate);
+  let rawFiatAmount = getPositiveNumber(trade?.fiat_amount, trade?.fiatAmount, trade?.amount_usd, trade?.total_fiat, trade?.totalFiat, trade?.fiat);
+
+  // If rate and crypto are present but fiat is 0
+  if (rawFiatAmount <= 0 && rawCryptoAmount > 0 && rawRate > 0) {
+    rawFiatAmount = rawCryptoAmount * rawRate;
+  }
+  // If fiat and rate are present but crypto is 0
   const effectiveCryptoAmount = rawCryptoAmount > 0 
     ? rawCryptoAmount 
     : (rawFiatAmount > 0 && rawRate > 0 ? rawFiatAmount / rawRate : 0);
 
+  // If fiat is present and crypto is present but rate is 0
+  const effectiveRate = rawRate > 0
+    ? rawRate
+    : (rawFiatAmount > 0 && effectiveCryptoAmount > 0 ? rawFiatAmount / effectiveCryptoAmount : 0);
+
   const effectiveFiatAmount = rawFiatAmount > 0 
     ? rawFiatAmount 
-    : (effectiveCryptoAmount > 0 && rawRate > 0 ? effectiveCryptoAmount * rawRate : 0);
+    : (effectiveCryptoAmount > 0 && effectiveRate > 0 ? effectiveCryptoAmount * effectiveRate : 0);
 
-  const fiatCurrency = trade?.fiat_currency || trade?.fiatCurrency || trade?.fiat_symbol || ad?.fiat_symbol || 'INR';
+  const fiatCurrency = trade?.fiat_currency || trade?.fiatCurrency || trade?.fiat_symbol || trade?.fiat || ad?.fiat_symbol || ad?.fiat_currency || ad?.fiat || 'USD';
 
-  const coinAmount = `${effectiveCryptoAmount.toFixed(2)} ${coinSymbol}`;
-  const priceFormatted = rawRate.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-  const fiatAmount = effectiveFiatAmount.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const coinAmount = `${effectiveCryptoAmount < 0.01 && effectiveCryptoAmount > 0 ? effectiveCryptoAmount.toFixed(6) : effectiveCryptoAmount.toFixed(2)} ${coinSymbol}`;
+  const priceFormatted = effectiveRate.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const fiatAmount = effectiveFiatAmount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   const escrowFeeCoin = `${(effectiveCryptoAmount * 0.015).toFixed(2)} ${coinSymbol}`;
 
-  const offerTags: string[] = (ad?.tags && ad.tags.length > 0) ? ad.tags : ((ad?.offer_tags && ad.offer_tags.length > 0) ? ad.offer_tags : []);
+  const offerTags: string[] = (ad?.tags && Array.isArray(ad.tags) && ad.tags.length > 0) 
+    ? ad.tags 
+    : ((ad?.offer_tags && Array.isArray(ad.offer_tags) && ad.offer_tags.length > 0) 
+      ? ad.offer_tags 
+      : ((ad?.ad_tags && Array.isArray(ad.ad_tags) && ad.ad_tags.length > 0)
+        ? ad.ad_tags
+        : ((trade?.tags && Array.isArray(trade.tags) && trade.tags.length > 0) ? trade.tags : [])));
 
-  const publicTradeId = trade?.tradeId || formatTradeId(trade?.id);
+  const rawAdRef = ad?.public_ad_id || ad?.public_id || ad?.publicAdId || ad?.ad_id || ad?.id || trade?.ad_id || trade?.adId || trade?.public_ad_id;
+  const publicAdDisplayId = rawAdRef ? (String(rawAdRef).replace(/^#/, '')) : '';
+  const sellerOfferTerms = ad?.terms || ad?.terms_conditions || ad?.termsAndConditions || trade?.terms || trade?.seller_terms || '';
+
+  const publicTradeId = trade?.trade_id || trade?.public_id || trade?.tradeId || formatTradeId(trade?.id);
   const badgeStatusClass = statusColors[tradeStatus as keyof typeof statusColors] || 'border-primary/40 text-primary bg-primary/10';
 
   return (
@@ -1418,19 +1440,32 @@ export function TradeDetails({
             </div>
           </div>
 
-          {/* Offer Tags */}
+          {/* Offer Tags (Only display real custom tags from ad) */}
           {offerTags && offerTags.length > 0 && (
             <div className="flex flex-wrap gap-1.5 py-0.5">
               {offerTags.map((tag, idx) => (
                 <Badge
                   key={idx}
                   variant="secondary"
-                  className="text-[11px] font-medium gap-1 px-2 py-0.5 bg-primary/10 text-primary border-primary/20"
+                  className="text-[11px] font-medium gap-1 px-2.5 py-1 bg-amber-500/10 text-amber-700 dark:text-amber-300 border border-amber-500/30"
                 >
                   <Tag className="h-3 w-3" />
                   {tag}
                 </Badge>
               ))}
+            </div>
+          )}
+
+          {/* Buyer Safety Instructions Banner */}
+          {isBuying && (tradeStatus === 'active' || tradeStatus === 'pending') && (
+            <div className="p-3.5 rounded-xl border border-blue-500/30 bg-blue-500/10 text-blue-900 dark:text-blue-200 text-xs space-y-1.5 shadow-xs">
+              <div className="flex items-center gap-1.5 font-bold text-blue-700 dark:text-blue-300">
+                <Shield className="h-4 w-4 shrink-0 text-blue-600 dark:text-blue-400" />
+                <span>Important Buyer Safety Rule</span>
+              </div>
+              <p className="leading-relaxed">
+                After making the payment, <strong>don&apos;t forget to click &quot;I Have Paid&quot;</strong> before the timer expires. Otherwise, this trade will be automatically cancelled by the system to protect both parties.
+              </p>
             </div>
           )}
 
@@ -1446,13 +1481,14 @@ export function TradeDetails({
             </div>
           )}
 
+          {/* High-Contrast Clear Payment Countdown in both Light & Dark themes */}
           {(tradeStatus === 'active' || tradeStatus === 'pending') && (
-            <div className="flex items-center justify-between p-3 rounded-xl border border-amber-500/30 bg-amber-500/10 text-amber-900 dark:text-amber-200">
+            <div className="flex items-center justify-between p-3.5 rounded-xl border-2 border-amber-500/50 dark:border-amber-400/60 bg-amber-500/15 dark:bg-slate-900/90 text-amber-950 dark:text-amber-100 shadow-sm">
               <div className="flex items-center gap-2">
-                <Clock className="h-4 w-4 text-amber-600 dark:text-amber-400" />
-                <span className="text-xs font-semibold">Payment Countdown:</span>
+                <Clock className="h-4.5 w-4.5 text-amber-600 dark:text-amber-400 shrink-0" />
+                <span className="text-xs sm:text-sm font-bold text-amber-900 dark:text-amber-200">Payment Countdown:</span>
               </div>
-              <span className="font-mono font-bold text-destructive text-sm">
+              <span className="font-mono font-extrabold text-amber-600 dark:text-amber-400 text-sm sm:text-base tabular-nums tracking-wider px-2 py-0.5 rounded-md bg-amber-500/10 dark:bg-amber-400/10 border border-amber-500/30 dark:border-amber-400/30">
                 {`${String(paymentTimeRemaining.hours).padStart(2, '0')}:${String(paymentTimeRemaining.minutes).padStart(2, '0')}:${String(paymentTimeRemaining.seconds).padStart(2, '0')}`}
               </span>
             </div>
@@ -1544,34 +1580,33 @@ export function TradeDetails({
             </div>
           )}
 
-          {/* Ad Reference */}
-          <div className="space-y-1 rounded-xl border border-border/60 p-3 bg-muted/10">
-            <h4 className="text-xs font-bold text-foreground uppercase tracking-wider mb-2">
-              Offer Terms
+          {/* Ad Reference & Offer Terms */}
+          <div className="space-y-2 rounded-xl border border-border/60 p-3 bg-muted/10">
+            <h4 className="text-xs font-bold text-foreground uppercase tracking-wider mb-1">
+              Offer Terms &amp; Ad Info
             </h4>
-            {(ad?.publicAdId || ad?.ad_id || trade?.adId || trade?.ad_id) && (
-              <DetailRow
-                label="Ad Reference"
-                boldLabel
-                value={ad?.publicAdId || ad?.ad_id || trade?.adId || trade?.ad_id}
-                isLink
-                href={`/ad/${ad?.id || trade?.adId || trade?.ad_id}`}
-              />
-            )}
-            {(ad?.terms || trade?.terms || trade?.seller_terms) && (
-              <div className="pt-2">
-                <p className="text-xs text-muted-foreground mb-1">Seller Terms:</p>
-                <div className="text-xs p-2.5 bg-muted/40 rounded-lg text-foreground whitespace-pre-wrap">
-                  {ad?.terms || trade?.terms || trade?.seller_terms}
-                </div>
+            <DetailRow
+              label="Ad ID"
+              boldLabel
+              value={`#${publicAdDisplayId || (ad?.id ? formatTradeId(ad.id) : (trade?.trade_id || formatTradeId(trade?.id)))}`}
+              isLink={Boolean(ad?.id || trade?.ad_id || trade?.adId || publicAdDisplayId)}
+              href={`/ad/${ad?.id || trade?.adId || trade?.ad_id || publicAdDisplayId}`}
+            />
+            <div className="pt-1 border-t border-border/40">
+              <p className="text-xs font-semibold text-muted-foreground mb-1.5 flex items-center gap-1.5">
+                <FileText className="h-3.5 w-3.5 text-primary" />
+                <span>Seller Terms &amp; Instructions:</span>
+              </p>
+              <div className="text-xs p-3 bg-muted/40 dark:bg-muted/20 rounded-xl text-foreground whitespace-pre-wrap leading-relaxed border border-border/40">
+                {sellerOfferTerms || "No special conditions specified by seller. Standard Paxones Escrow rules apply."}
               </div>
-            )}
+            </div>
           </div>
 
           {/* Reopen Action for cancelled trades */}
           {showReopen && (
             <Button asChild variant="outline" className="w-full text-xs font-bold">
-              <Link href={`/ad/${trade.adId || trade.ad_id}`}>
+              <Link href={`/ad/${trade.adId || trade.ad_id || publicAdDisplayId}`}>
                 <RefreshCw className="mr-2 h-4 w-4" /> Start New Trade With Offer
               </Link>
             </Button>

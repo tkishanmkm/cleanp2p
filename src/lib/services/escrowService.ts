@@ -63,57 +63,43 @@ export async function createTradeWithEscrow({
 
   // 2. Create trade entry with dynamic fiat rate, expires_at, and user relations
   const totalFiat = cryptoAmount * rate;
-  const expiresAt = new Date(Date.now() + 15 * 60 * 1000).toISOString(); // 15 mins payment window
+
+  const tradePayload = {
+    seller_id: String(sellerId),
+    buyer_id: buyerId ? String(buyerId) : null,
+    crypto: cryptoSymbol,
+    coin: cryptoSymbol,
+    asset: cryptoSymbol,
+    amount: cryptoAmount,
+    crypto_amount: cryptoAmount,
+    escrow_fee: escrowFee,
+    fiat_currency: fiatCurrency,
+    price: rate,
+    unit_price: rate,
+    fiat_amount: totalFiat,
+    amount_usd: totalFiat,
+    status: 'PENDING',
+  };
 
   const { data: trade, error: tradeError } = await supabase
     .from('trades')
-    .insert([
-      {
-        seller_id: sellerId,
-        buyer_id: buyerId || null,
-        crypto: cryptoSymbol,
-        amount: cryptoAmount,
-        crypto_amount: cryptoAmount,
-        escrow_fee: escrowFee,
-        fiat_currency: fiatCurrency,
-        rate: rate,
-        price: rate,
-        fiat_amount: totalFiat,
-        total_fiat: totalFiat,
-        amount_usd: totalFiat,
-        payment_method: paymentMethod,
-        status: 'pending',
-        expires_at: expiresAt,
-      },
-    ])
-    .select(`
-      *,
-      buyer:profiles!buyer_id(id, username, avatar_url),
-      seller:profiles!seller_id(id, username, avatar_url)
-    `)
+    .insert([tradePayload])
+    .select('*')
     .single();
 
   if (tradeError) {
-    // If relation-syntax select fails, fallback to simple select
+    // If insert fails, fallback to bare minimal columns guaranteed to exist
     const { data: simpleTrade, error: simpleError } = await supabase
       .from('trades')
       .insert([
         {
-          seller_id: sellerId,
-          buyer_id: buyerId || null,
+          seller_id: String(sellerId),
+          buyer_id: buyerId ? String(buyerId) : null,
           crypto: cryptoSymbol,
           amount: cryptoAmount,
-          crypto_amount: cryptoAmount,
-          escrow_fee: escrowFee,
-          fiat_currency: fiatCurrency,
-          rate: rate,
-          price: rate,
           fiat_amount: totalFiat,
-          total_fiat: totalFiat,
-          amount_usd: totalFiat,
-          payment_method: paymentMethod,
-          status: 'pending',
-          expires_at: expiresAt,
+          price: rate,
+          status: 'PENDING',
         },
       ])
       .select('*')

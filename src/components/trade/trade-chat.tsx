@@ -95,6 +95,16 @@ function CoinInsignia({ symbol, className = 'h-4 w-4' }: { symbol: string; class
   }
 }
 
+function getPositiveVal(...values: any[]): number {
+  for (const v of values) {
+    if (v !== null && v !== undefined && v !== '') {
+      const num = Number(v);
+      if (!isNaN(num) && num > 0) return num;
+    }
+  }
+  return 0;
+}
+
 function TradeInstructions({
   trade,
   isBuyer,
@@ -104,24 +114,26 @@ function TradeInstructions({
   isBuyer: boolean;
   opponentUsername?: string;
 }) {
-  const coinSymbol = trade?.crypto ?? trade?.asset_symbol ?? 'USDT';
-  const rawCrypto = Number(trade?.crypto_amount ?? trade?.cryptoAmount ?? trade?.amount ?? 0);
-  const rawFiat = Number(trade?.total_fiat ?? trade?.totalFiat ?? trade?.fiat_amount ?? trade?.fiatAmount ?? trade?.amount_usd ?? 0);
-  const fiatCurrency = trade?.fiat_currency || trade?.fiatCurrency || trade?.fiat_symbol || 'INR';
+  const coinSymbol = trade?.crypto ?? trade?.asset_symbol ?? trade?.asset ?? 'USDT';
+  const rawCrypto = getPositiveVal(trade?.crypto_amount, trade?.cryptoAmount, trade?.amount);
+  const rawRate = getPositiveVal(trade?.rate, trade?.price, trade?.unit_price);
+  
+  let rawFiat = getPositiveVal(trade?.fiat_amount, trade?.fiatAmount, trade?.amount_usd, trade?.total_fiat, trade?.totalFiat);
+  if (rawFiat <= 0 && rawCrypto > 0 && rawRate > 0) {
+    rawFiat = rawCrypto * rawRate;
+  }
+  
+  const fiatCurrency = trade?.fiat_currency || trade?.fiatCurrency || trade?.fiat_symbol || trade?.fiat || 'USD';
 
-  const coinAmount = rawCrypto > 0 ? rawCrypto.toFixed(2) : '0.00';
-  const fiatAmount = rawFiat > 0 ? rawFiat.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '0.00';
+  const coinAmount = rawCrypto > 0 ? (rawCrypto < 0.01 ? rawCrypto.toFixed(6) : rawCrypto.toFixed(2)) : '0.00';
+  const fiatAmount = rawFiat > 0 ? rawFiat.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '0.00';
 
   const partnerName = opponentUsername ? `@${opponentUsername}` : (isBuyer ? '@Seller' : '@Buyer');
-
-  const title = isBuyer
-    ? `You're buying ${coinAmount} ${coinSymbol} for ${fiatAmount} ${fiatCurrency}.`
-    : `You're selling ${coinAmount} ${coinSymbol} for ${fiatAmount} ${fiatCurrency}.`;
 
   const buyerInstructions = [
     `Wait for the seller (${partnerName}) to provide their payment details in the chat.`,
     'Make your payment using the details provided.',
-    "Mark the trade as 'Paid' and upload proof of payment if requested.",
+    "Mark the trade as 'Paid' by clicking 'I Have Paid' before the countdown ends.",
     `Wait for ${partnerName} to confirm receipt in their account.`,
     'Your trade partner will release the coin from escrow.'
   ];
@@ -136,13 +148,13 @@ function TradeInstructions({
   const instructions = isBuyer ? buyerInstructions : sellerInstructions;
 
   return (
-    <div className="p-4 bg-slate-50 dark:bg-slate-800/80 rounded-2xl border border-slate-200 dark:border-slate-800 mb-4 text-sm space-y-2.5">
-      <p className="font-semibold text-slate-900 dark:text-slate-100">
+    <div className="p-4 bg-muted/50 dark:bg-slate-800/80 rounded-2xl border border-border/80 dark:border-slate-800 mb-4 text-sm space-y-2.5">
+      <p className="font-semibold text-foreground">
         {isBuyer ? "You're buying " : "You're selling "}
         <strong className="text-emerald-600 dark:text-emerald-400 font-bold">{coinAmount} {coinSymbol}</strong> for{' '}
         <strong className="text-emerald-600 dark:text-emerald-400 font-bold">{fiatAmount} {fiatCurrency}</strong>.
       </p>
-      <ul className="list-disc list-inside text-xs text-slate-600 dark:text-slate-400 space-y-1">
+      <ul className="list-disc list-inside text-xs text-muted-foreground space-y-1">
         <li>Coin deposit ({coinAmount} {coinSymbol} + 1.5% Fee) is locked securely in Escrow.</li>
         {instructions.map((step, i) => (
           <li key={i}>{step}</li>
@@ -163,15 +175,22 @@ function PostTradeCompletionCard({
   opponentUsername: string;
   onOpenExternalLink: (url: string) => void;
 }) {
-  const coinSymbol = trade?.crypto ?? trade?.asset_symbol ?? 'USDT';
-  const rawCrypto = Number(trade?.crypto_amount ?? trade?.cryptoAmount ?? trade?.amount ?? 0);
-  const rawFiat = Number(trade?.total_fiat ?? trade?.totalFiat ?? trade?.fiat_amount ?? trade?.fiatAmount ?? trade?.amount_usd ?? 0);
-  const rawRate = Number(trade?.rate ?? trade?.price ?? 0);
-  const fiatCurrency = trade?.fiat_currency || trade?.fiatCurrency || trade?.fiat_symbol || 'INR';
+  const coinSymbol = trade?.crypto ?? trade?.asset_symbol ?? trade?.asset ?? 'USDT';
+  const rawCrypto = getPositiveVal(trade?.crypto_amount, trade?.cryptoAmount, trade?.amount);
+  const rawRate = getPositiveVal(trade?.rate, trade?.price, trade?.unit_price);
+  
+  let rawFiat = getPositiveVal(trade?.fiat_amount, trade?.fiatAmount, trade?.amount_usd, trade?.total_fiat, trade?.totalFiat);
+  if (rawFiat <= 0 && rawCrypto > 0 && rawRate > 0) {
+    rawFiat = rawCrypto * rawRate;
+  }
+  
+  const fiatCurrency = trade?.fiat_currency || trade?.fiatCurrency || trade?.fiat_symbol || trade?.fiat || 'USD';
 
-  const coinAmount = rawCrypto > 0 ? rawCrypto.toFixed(2) : '0.00';
-  const fiatAmount = rawFiat > 0 ? rawFiat.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '0.00';
-  const priceFormatted = rawRate.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const coinAmount = rawCrypto > 0 ? (rawCrypto < 0.01 ? rawCrypto.toFixed(6) : rawCrypto.toFixed(2)) : '0.00';
+  const fiatAmount = rawFiat > 0 ? rawFiat.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '0.00';
+  const priceFormatted = rawRate > 0 
+    ? rawRate.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+    : (rawFiat > 0 && rawCrypto > 0 ? (rawFiat / rawCrypto).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '0.00');
 
   return (
     <div className="rounded-2xl border border-emerald-500/30 bg-gradient-to-br from-emerald-500/10 via-emerald-500/5 to-background p-4 sm:p-5 my-3 shadow-md text-foreground">
@@ -402,10 +421,18 @@ const TradeSummaryBar = ({ trade, currentUserRole }: { trade: Trade | any; curre
   const isBuyer = currentUserRole === 'buy';
   const roleText = isBuyer ? 'Buying' : 'Selling';
 
-  const coinSymbol = trade?.crypto ?? trade?.asset_symbol ?? 'USDT';
-  const coinAmount = formatCryptoAmount(trade?.amount ?? trade?.crypto_amount ?? 0, coinSymbol);
-  const fiatAmount = Number(trade?.fiatAmount ?? trade?.fiat_amount ?? trade?.amount_usd ?? 0).toLocaleString();
-  const fiatCurrency = trade?.fiatCurrency ?? trade?.fiat_currency ?? trade?.fiat_symbol ?? 'USD';
+  const coinSymbol = trade?.crypto ?? trade?.asset_symbol ?? trade?.asset ?? 'USDT';
+  const rawCrypto = getPositiveVal(trade?.crypto_amount, trade?.cryptoAmount, trade?.amount);
+  const rawRate = getPositiveVal(trade?.rate, trade?.price, trade?.unit_price);
+  
+  let rawFiat = getPositiveVal(trade?.fiat_amount, trade?.fiatAmount, trade?.amount_usd, trade?.total_fiat, trade?.totalFiat);
+  if (rawFiat <= 0 && rawCrypto > 0 && rawRate > 0) {
+    rawFiat = rawCrypto * rawRate;
+  }
+
+  const coinAmount = formatCryptoAmount(rawCrypto, coinSymbol);
+  const fiatAmount = rawFiat.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const fiatCurrency = trade?.fiat_currency || trade?.fiatCurrency || trade?.fiat_symbol || trade?.fiat || 'USD';
 
   return (
     <div

@@ -152,23 +152,29 @@ export async function POST(req: NextRequest) {
     const tradePayload: Record<string, any> = {
       trade_id: shortId,
       public_id: shortId,
-      buyer_id: buyerId,
-      seller_id: sellerId,
-      crypto: ad.crypto || ad.asset || 'BTC',
+      buyer_id: String(buyerId),
+      seller_id: String(sellerId),
+      crypto: (ad.crypto || ad.asset || 'BTC').toUpperCase(),
+      coin: (ad.crypto || ad.asset || 'BTC').toUpperCase(),
+      asset: (ad.crypto || ad.asset || 'BTC').toUpperCase(),
       amount: calculatedCrypto,
+      crypto_amount: calculatedCrypto,
       fiat_currency: ad.fiat_currency || ad.fiat || 'USD',
       fiat_amount: numericFiat,
       amount_usd: numericFiat,
       price: unitPrice,
-      payment_method: paymentMethod,
-      status: 'pending',
+      status: 'PENDING',
+      payment_window_minutes: ad.payment_window || ad.payment_window_minutes || 30,
+      terms: ad.terms || ad.terms_conditions || '',
+      tags: Array.isArray(ad.tags) ? ad.tags : (Array.isArray(ad.ad_tags) ? ad.ad_tags : []),
+      public_ad_id: ad.public_ad_id || ad.public_id || ad.ad_id || validAdUuid || String(ad.id),
     };
 
     if (validAdUuid) {
       tradePayload.ad_id = validAdUuid;
     }
 
-    // Full schema attempt
+    // Attempt insert with standard table columns
     const { data: insertedTrade, error: insertError } = await supabase
       .from('trades')
       .insert(tradePayload)
@@ -177,37 +183,26 @@ export async function POST(req: NextRequest) {
 
     if (insertError) {
       console.warn('Full trade insertion failed, trying safe fallback:', insertError);
-      // Clean fallback without ad_id to prevent fkey or uuid errors
+      // Clean fallback with minimal essential columns
       const { data: fallbackTrade, error: fallbackError } = await supabase
         .from('trades')
         .insert({
           trade_id: shortId,
-          buyer_id: buyerId,
-          seller_id: sellerId,
-          crypto_amount: calculatedCrypto,
+          public_id: shortId,
+          buyer_id: String(buyerId),
+          seller_id: String(sellerId),
+          crypto: (ad.crypto || ad.asset || 'BTC').toUpperCase(),
           amount: calculatedCrypto,
           fiat_amount: numericFiat,
           price: unitPrice,
-          status: 'pending',
+          status: 'PENDING',
         })
         .select('*')
         .single();
 
       if (fallbackError) {
-        // Minimal fallback
-        const { data: ultraMinimal, error: ultraError } = await supabase
-          .from('trades')
-          .insert({
-            buyer_id: buyerId,
-            seller_id: sellerId,
-            amount_usd: numericFiat,
-            status: 'pending',
-          })
-          .select('*')
-          .single();
-
-        if (ultraError) throw ultraError;
-        tradeResult = ultraMinimal;
+        console.error('Safe fallback trade insert error:', fallbackError);
+        throw fallbackError;
       } else {
         tradeResult = fallbackTrade;
       }

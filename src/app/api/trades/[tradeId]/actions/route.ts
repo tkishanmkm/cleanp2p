@@ -57,45 +57,72 @@ export async function POST(
 
     if (action === 'MARK_PAID') {
       const now = new Date().toISOString();
-      let updateQuery = supabase
-        .from('trades')
-        .update({
+      let updateError: any = null;
+
+      // Primary attempt: update status and paid_at / payment_confirmed_at
+      try {
+        let q = supabase.from('trades').update({
           status: 'PAID',
-          payment_confirmed_at: now,
           paid_at: now,
+          updated_at: now,
         });
-
-      if (isActualUuid) {
-        updateQuery = updateQuery.eq('id', actualTradeId);
-      } else {
-        updateQuery = updateQuery.eq('trade_id', tradeId);
+        if (isActualUuid) q = q.eq('id', actualTradeId);
+        else q = q.eq('trade_id', tradeId);
+        q = q.eq('buyer_id', user.id);
+        const { error } = await q;
+        if (error) updateError = error;
+      } catch (err: any) {
+        updateError = err;
       }
-      updateQuery = updateQuery.eq('buyer_id', user.id);
 
-      const { error } = await updateQuery;
+      // If failed due to column missing (e.g. paid_at or updated_at), try clean status-only update
+      if (updateError) {
+        console.warn('Initial MARK_PAID update failed, falling back to minimal status update:', updateError.message);
+        let q2 = supabase.from('trades').update({ status: 'PAID' });
+        if (isActualUuid) q2 = q2.eq('id', actualTradeId);
+        else q2 = q2.eq('trade_id', tradeId);
+        q2 = q2.eq('buyer_id', user.id);
+        const { error: err2 } = await q2;
 
-      if (error) {
-        return NextResponse.json({ error: error.message }, { status: 400 });
+        if (err2) {
+          // Try lowercase 'paid'
+          let q3 = supabase.from('trades').update({ status: 'paid' });
+          if (isActualUuid) q3 = q3.eq('id', actualTradeId);
+          else q3 = q3.eq('trade_id', tradeId);
+          q3 = q3.eq('buyer_id', user.id);
+          const { error: err3 } = await q3;
+          if (err3) {
+            return NextResponse.json({ error: err3.message || 'Failed to update trade status to paid.' }, { status: 400 });
+          }
+        }
       }
 
       // Post official Paxones system announcement
-      await insertPaxonesSystemMessage(supabase, {
-        tradeId: actualTradeId,
-        type: 'MARKED_PAID',
-        buyerUsername: buyerName,
-        sellerUsername: sellerName
-      });
+      try {
+        await insertPaxonesSystemMessage(supabase, {
+          tradeId: actualTradeId,
+          type: 'MARKED_PAID',
+          buyerUsername: buyerName,
+          sellerUsername: sellerName
+        });
+      } catch (sysErr) {
+        console.warn('System message insert warning:', sysErr);
+      }
 
       // Notification for seller
       if (trade?.seller_id) {
-        await supabase.from('notifications').insert({
-          user_id: trade.seller_id,
-          title: 'Payment Marked as Paid',
-          message: `Buyer @${buyerName} has marked trade as paid. Please verify receiving account before releasing.`,
-          link: `/trade/${actualTradeId}`,
-          is_read: false,
-          created_at: now
-        }).select().maybeSingle();
+        try {
+          await supabase.from('notifications').insert({
+            user_id: trade.seller_id,
+            title: 'Payment Marked as Paid',
+            message: `Buyer @${buyerName} has marked trade as paid. Please verify receiving account before releasing.`,
+            link: `/trade/${actualTradeId}`,
+            is_read: false,
+            created_at: now
+          }).select().maybeSingle();
+        } catch (notifErr) {
+          console.warn('Notification insert warning:', notifErr);
+        }
       }
 
       return NextResponse.json({ success: true, message: 'Payment marked successfully.' });
@@ -103,43 +130,88 @@ export async function POST(
 
     if (action === 'EXPIRE_TRADE') {
       const now = new Date().toISOString();
-      let updateQuery = supabase
-        .from('trades')
-        .update({
+      let updateError: any = null;
+
+      // 1. Update trade status to EXPIRED
+      try {
+        let q = supabase.from('trades').update({
           status: 'EXPIRED',
-          escrow_status: 'expired',
-          cancelled_at: now
+          updated_at: now,
         });
-
-      if (isActualUuid) {
-        updateQuery = updateQuery.eq('id', actualTradeId);
-      } else {
-        updateQuery = updateQuery.eq('trade_id', tradeId);
+        if (isActualUuid) q = q.eq('id', actualTradeId);
+        else q = q.eq('trade_id', tradeId);
+        const { error } = await q;
+        if (error) updateError = error;
+      } catch (err: any) {
+        updateError = err;
       }
 
-      const { error } = await updateQuery;
-      if (error) {
-        return NextResponse.json({ error: error.message }, { status: 400 });
+      if (updateError) {
+        console.warn('Primary EXPIRE_TRADE failed, trying fallback:', updateError.message);
+        let q2 = supabase.from('trades').update({ status: 'expired' });
+        if (isActualUuid) q2 = q2.eq('id', actualTradeId);
+        else q2 = q2.eq('trade_id', tradeId);
+        const { error: err2 } = await q2;
+        if (err2) {
+          return NextResponse.json({ error: err2.message || 'Failed to expire trade.' }, { status: 400 });
+        }
       }
 
-      await insertPaxonesSystemMessage(supabase, {
-        tradeId: actualTradeId,
-        type: 'TRADE_EXPIRED',
-        buyerUsername: buyerName,
-        sellerUsername: sellerName
-      });
+      // 2. Unlock/Refund seller escrow balance safely if seller_id is present
+      try {
+        const cryptoSym = (trade?.crypto || trade?.asset_symbol || trade?.coin || 'USDT').toUpperCase();
+        const cryptoAmt = Number(trade?.crypto_amount ?? trade?.amount ?? 0);
+        if (trade?.seller_id && cryptoAmt > 0) {
+          // Unlock seller balance back to available
+          const { data: sellerAsset } = await supabase
+            .from('wallet_assets')
+            .select('*')
+            .eq('user_id', trade.seller_id)
+            .ilike('asset_symbol', cryptoSym)
+            .maybeSingle();
+
+          if (sellerAsset) {
+            const curLocked = Number(sellerAsset.locked_escrow ?? sellerAsset.locked_balance ?? 0);
+            const curAvail = Number(sellerAsset.available ?? sellerAsset.balance ?? 0);
+            const newLocked = Math.max(0, curLocked - cryptoAmt);
+            const newAvail = curAvail + cryptoAmt;
+
+            await supabase
+              .from('wallet_assets')
+              .update({
+                available: newAvail,
+                locked_escrow: newLocked,
+                updated_at: now
+              })
+              .eq('id', sellerAsset.id);
+          }
+        }
+      } catch (refundErr) {
+        console.warn('Escrow refund on expiration warning:', refundErr);
+      }
+
+      try {
+        await insertPaxonesSystemMessage(supabase, {
+          tradeId: actualTradeId,
+          type: 'TRADE_EXPIRED',
+          buyerUsername: buyerName,
+          sellerUsername: sellerName
+        });
+      } catch {}
 
       // Notify both parties
       const userIds = [trade?.buyer_id, trade?.seller_id].filter(Boolean);
       for (const uid of userIds) {
-        await supabase.from('notifications').insert({
-          user_id: uid,
-          title: 'Trade Expired',
-          message: `Trade has expired. If funds were transferred, reopen or contact support immediately.`,
-          link: `/trade/${actualTradeId}`,
-          is_read: false,
-          created_at: now
-        }).select().maybeSingle();
+        try {
+          await supabase.from('notifications').insert({
+            user_id: uid,
+            title: 'Trade Expired',
+            message: `Trade has expired because payment was not confirmed within the countdown window.`,
+            link: `/trade/${actualTradeId}`,
+            is_read: false,
+            created_at: now
+          }).select().maybeSingle();
+        } catch {}
       }
 
       return NextResponse.json({ success: true, message: 'Trade marked as expired.' });

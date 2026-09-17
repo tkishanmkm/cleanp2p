@@ -730,34 +730,31 @@ export async function createTradeOrderWithEscrow(input: {
       console.warn('[Escrow Lock Warning]:', lockErr);
     }
 
-    // 8. Insert Trade Record (Defensive foreign-key and UUID safe logic)
+    // 8. Insert Trade Record (Defensive schema-compliant logic)
     const shortTradeId = generateTradeId();
-    const paymentMethods = Array.isArray(ad.payment_methods)
-      ? ad.payment_methods
-      : typeof ad.payment_methods === 'string'
-      ? JSON.parse(ad.payment_methods || '["Bank Transfer"]')
-      : ['Bank Transfer'];
 
-    // Standard primary payload
+    // Standard primary payload matching verified database columns
     const tradePayload: Record<string, any> = {
       trade_id: shortTradeId,
       public_id: shortTradeId,
-      buyer_id: buyerId,
-      seller_id: sellerId,
-      price: price,
-      unit_price: price,
+      buyer_id: String(buyerId),
+      seller_id: String(sellerId),
+      crypto: assetSymbol,
+      coin: assetSymbol,
+      asset: assetSymbol,
+      crypto_currency: assetSymbol,
+      amount: baseCryptoAmount,
+      crypto_amount: baseCryptoAmount,
+      amount_crypto: baseCryptoAmount,
+      fiat_currency: fiatSymbol,
       fiat_amount: fiatAmount,
       amount_usd: fiatAmount,
-      amount: baseCryptoAmount,
-      escrow_fee_percent: escrowFeePercent,
-      asset_symbol: assetSymbol,
-      crypto: assetSymbol,
-      crypto_currency: assetSymbol,
-      asset_code: assetSymbol,
-      fiat_symbol: fiatSymbol,
-      fiat_currency: fiatSymbol,
-      payment_method: paymentMethods[0] || 'Bank Transfer',
-      status: 'pending',
+      total_amount: fiatAmount,
+      price: price,
+      unit_price: price,
+      total_price: fiatAmount,
+      escrow_fee: escrowFeeCrypto,
+      status: 'PENDING',
       escrow_status: 'locked',
     };
 
@@ -781,18 +778,23 @@ export async function createTradeOrderWithEscrow(input: {
     } else {
       console.warn('[Trade Insert Full Failed, trying safe payload without foreign key]:', orderError?.message || orderError);
       
-      // Attempt 2: Clean payload without ad_id or non-standard columns (avoids foreign key, UUID syntax, and schema mismatch issues)
+      // Attempt 2: Clean payload without ad_id
       const cleanPayload: Record<string, any> = {
         trade_id: shortTradeId,
-        buyer_id: buyerId,
-        seller_id: sellerId,
-        price: price,
+        public_id: shortTradeId,
+        buyer_id: String(buyerId),
+        seller_id: String(sellerId),
+        crypto: assetSymbol,
+        coin: assetSymbol,
+        asset: assetSymbol,
         amount: baseCryptoAmount,
         crypto_amount: baseCryptoAmount,
         fiat_amount: fiatAmount,
-        crypto: assetSymbol,
-        status: 'pending',
-        payment_method: paymentMethods[0] || 'Bank Transfer',
+        fiat_currency: fiatSymbol,
+        price: price,
+        unit_price: price,
+        status: 'PENDING',
+        escrow_status: 'locked',
       };
 
       const { data: fbOrder, error: fbError } = await adminClient
@@ -806,12 +808,17 @@ export async function createTradeOrderWithEscrow(input: {
       } else {
         console.warn('[Trade Clean Insert Failed, trying ultra-safe minimal]:', fbError?.message || fbError);
 
-        // Attempt 3: Ultra-minimal insert (buyer_id, seller_id, amount_usd, status)
+        // Attempt 3: Ultra-minimal insert (trade_id, buyer_id, seller_id, crypto, amount, fiat_amount, price, status)
         const ultraMinimalPayload: Record<string, any> = {
-          buyer_id: buyerId,
-          seller_id: sellerId,
-          amount_usd: fiatAmount,
-          status: 'pending',
+          trade_id: shortTradeId,
+          public_id: shortTradeId,
+          buyer_id: String(buyerId),
+          seller_id: String(sellerId),
+          crypto: assetSymbol,
+          amount: baseCryptoAmount,
+          fiat_amount: fiatAmount,
+          price: price,
+          status: 'PENDING',
         };
 
         const { data: ultraOrder, error: ultraError } = await adminClient
