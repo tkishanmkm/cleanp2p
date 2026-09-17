@@ -70,7 +70,7 @@ export async function GET(
       const curr = (w.currency || "USDT").toUpperCase();
       const addrInfo = addressMap.get(curr);
       const balance = parseFloat(w.balance) || 0;
-      const reserved = parseFloat(w.reserved_balance) || 0;
+      const reserved = parseFloat(w.locked_balance || w.reserved_balance || 0) || 0;
       return {
         ...w,
         currency: curr,

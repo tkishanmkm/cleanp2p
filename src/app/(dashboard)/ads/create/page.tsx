@@ -623,8 +623,24 @@ export default function CreateP2PAdPage() {
       : Number(fixedPrice || 1);
 
     if (adType === 'sell') {
-      const availableBalance = balances[crypto as CryptoCurrency]?.available || 0;
+      let availableBalance = balances[crypto as CryptoCurrency]?.available || 0;
       const minCoinRequired = (parseFloat(minAmount || '0') || 0) / (effectiveAdPrice || 1);
+
+      if (availableBalance < minCoinRequired) {
+        // Attempt fresh fetch from /api/wallet/balance in case state was stale
+        try {
+          const freshRes = await fetch('/api/wallet/balance');
+          if (freshRes.ok) {
+            const freshJson = await freshRes.json();
+            const fetchedAvail = Number(freshJson?.balances?.[crypto]?.available ?? 0);
+            if (fetchedAvail >= minCoinRequired) {
+              availableBalance = fetchedAvail;
+            }
+          }
+        } catch {
+          // ignore network failure
+        }
+      }
 
       if (availableBalance < minCoinRequired) {
         toast.error(`Insufficient ${crypto} balance. You need at least ${minCoinRequired.toFixed(6)} ${crypto} to set a minimum limit of ${minAmount} ${fiat.code}. Available: ${availableBalance.toFixed(6)} ${crypto}.`);

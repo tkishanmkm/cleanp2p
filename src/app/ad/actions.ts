@@ -682,6 +682,8 @@ export async function createTradeOrderWithEscrow(input: {
         await adminClient
           .from('wallet_assets')
           .update({
+            balance: newAvail,
+            locked_balance: newLocked,
             available: newAvail,
             locked_escrow: newLocked,
             updated_at: new Date().toISOString(),
@@ -693,10 +695,26 @@ export async function createTradeOrderWithEscrow(input: {
           .upsert({
             user_id: sellerId,
             asset_symbol: assetSymbol,
+            balance: newAvail,
+            locked_balance: newLocked,
             available: newAvail,
             locked_escrow: newLocked,
             updated_at: new Date().toISOString(),
           });
+      }
+
+      try {
+        await adminClient
+          .from('user_wallets')
+          .upsert({
+            user_id: sellerId,
+            asset_symbol: assetSymbol,
+            balance: newAvail,
+            locked_balance: newLocked,
+            updated_at: new Date().toISOString(),
+          });
+      } catch (uwErr) {
+        console.warn('user_wallets lock sync warning:', uwErr);
       }
 
       if (assetSymbol === 'BTC') {

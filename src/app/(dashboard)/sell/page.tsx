@@ -81,12 +81,16 @@ function normalizeAd(raw: any): P2PAd {
   const resolvedFiat = ((raw.fiat_symbol || raw.fiat_currency || raw.fiatCurrency || raw.fiat || raw.currency || 'USD') as string).toUpperCase();
 
   return {
+    ...raw,
     id: raw.id,
     userId: raw.user_id || raw.userId,
-    publicAdId: raw.public_ad_id || raw.publicAdId || raw.id,
+    publicAdId: raw.public_ad_id || raw.publicAdId || raw.public_id || raw.id,
     adType: adType,
     crypto: resolvedCrypto,
     fiatCurrency: resolvedFiat,
+    fiat: resolvedFiat,
+    fiat_symbol: resolvedFiat,
+    fiat_currency: resolvedFiat,
     rateType: rateType as 'fixed' | 'floating' | 'market',
     price: rawPrice > 0 ? rawPrice : undefined,
     unit_price: rawPrice > 0 ? rawPrice : undefined,
@@ -94,6 +98,8 @@ function normalizeAd(raw: any): P2PAd {
     ratePercent: rawRatePercent,
     minAmount: Number(raw.min_amount ?? raw.minAmount ?? raw.min_limit ?? raw.minLimit ?? 0),
     maxAmount: Number(raw.max_amount ?? raw.maxAmount ?? raw.max_limit ?? raw.maxLimit ?? 0),
+    minLimit: Number(raw.min_amount ?? raw.minAmount ?? raw.min_limit ?? raw.minLimit ?? 0),
+    maxLimit: Number(raw.max_amount ?? raw.maxAmount ?? raw.max_limit ?? raw.maxLimit ?? 0),
     paymentMethods: Array.isArray(raw.payment_methods)
       ? raw.payment_methods
       : Array.isArray(raw.paymentMethods)
@@ -101,20 +107,15 @@ function normalizeAd(raw: any): P2PAd {
       : typeof raw.payment_methods === 'string'
       ? (raw.payment_methods.startsWith('[') ? JSON.parse(raw.payment_methods) : [raw.payment_methods])
       : ['Bank Transfer'],
-    offerLabel: raw.offer_label || raw.offerLabel,
+    offerLabel: raw.offer_label || raw.offerLabel || raw.label,
     tags: Array.isArray(raw.tags) ? raw.tags : Array.isArray(raw.offer_tags) ? raw.offer_tags : Array.isArray(raw.ad_tags) ? raw.ad_tags : [],
     terms: raw.terms_conditions || raw.terms || '',
     paymentTimeLimit: Number(raw.payment_time_limit ?? raw.paymentTimeLimit ?? raw.payment_window ?? raw.paymentWindow ?? raw.time_limit ?? 30),
-    active: raw.active !== false && raw.status !== 'inactive' && raw.status !== 'INACTIVE' && raw.status !== 'DELETED' && raw.status !== 'draft' && raw.status !== 'DRAFT',
+    active: raw.active !== false && raw.is_active !== false && raw.status !== 'inactive' && raw.status !== 'INACTIVE' && raw.status !== 'DELETED' && raw.status !== 'draft' && raw.status !== 'DRAFT',
     targetedCountries: raw.targeted_countries || raw.targetedCountries || [],
     blockedCountries: raw.blocked_countries || raw.blockedCountries || [],
     minCompletedTrades: Number(raw.min_completed_trades ?? raw.minCompletedTrades ?? 0),
     createdAt: raw.created_at || raw.createdAt,
-    ...raw,
-    minLimit: Number(raw.min_amount ?? raw.minAmount ?? raw.min_limit ?? raw.minLimit ?? 0),
-    maxLimit: Number(raw.max_amount ?? raw.maxAmount ?? raw.max_limit ?? raw.maxLimit ?? 0),
-    fiat: resolvedFiat,
-    crypto: resolvedCrypto,
     rate: rawPrice > 0 ? rawPrice : undefined,
     user: raw.user || {
       username: raw.user_display_name || raw.username || 'Trader',
@@ -346,22 +347,67 @@ function P2PMarketplaceContent() {
             };
           });
 
-          // Fetch user_wallets to get live available balances
+          // Fetch wallet_assets & user_wallets to get live available balances
           try {
-            const { data: wallets } = await supabase
-              .from('user_wallets')
-              .select('user_id, asset_symbol, balance, locked_balance, available_balance')
-              .in('user_id', creatorIds);
+            const [
+              { data: walletAssets },
+              { data: userWallets },
+              { data: chainWallets }
+            ] = await Promise.all([
+              supabase
+                .from('wallet_assets')
+                .select('*')
+                .in('user_id', creatorIds),
+              supabase
+                .from('user_wallets')
+                .select('user_id, asset_symbol, balance, locked_balance, available_balance')
+                .in('user_id', creatorIds),
+              supabase
+                .from('wallets')
+                .select('user_id, currency, chain, balance, available_balance')
+                .in('user_id', creatorIds),
+            ]);
 
-            if (wallets) {
-              wallets.forEach((w) => {
-                if (map[w.user_id]) {
-                  const coin = (w.asset_symbol || '').toUpperCase();
+            if (walletAssets && walletAssets.length > 0) {
+              walletAssets.forEach((wa: any) => {
+                const uId = wa.user_id;
+                if (map[uId]) {
+                  const coin = String(wa.asset_symbol || wa.asset_code || wa.symbol || '').toUpperCase();
+                  const avail = Number(wa.available ?? wa.balance ?? 0) - Number(wa.locked_escrow ?? wa.locked_balance ?? 0);
+                  if (coin) {
+                    if (!map[uId].cryptoBalances) map[uId].cryptoBalances = {};
+                    map[uId].cryptoBalances[coin] = Math.max(map[uId].cryptoBalances[coin] || 0, isNaN(avail) ? 0 : Math.max(0, avail));
+                  }
+                }
+              });
+            }
+
+            if (userWallets && userWallets.length > 0) {
+              userWallets.forEach((w: any) => {
+                const uId = w.user_id;
+                if (map[uId]) {
+                  const coin = String(w.asset_symbol || '').toUpperCase();
                   const avail = Number(
                     w.available_balance ?? (Number(w.balance || 0) - Number(w.locked_balance || 0))
                   );
-                  if (!map[w.user_id].cryptoBalances) map[w.user_id].cryptoBalances = {};
-                  map[w.user_id].cryptoBalances[coin] = Math.max(0, avail);
+                  if (coin) {
+                    if (!map[uId].cryptoBalances) map[uId].cryptoBalances = {};
+                    map[uId].cryptoBalances[coin] = Math.max(map[uId].cryptoBalances[coin] || 0, isNaN(avail) ? 0 : Math.max(0, avail));
+                  }
+                }
+              });
+            }
+
+            if (chainWallets && chainWallets.length > 0) {
+              chainWallets.forEach((cw: any) => {
+                const uId = cw.user_id;
+                if (map[uId]) {
+                  const coin = String(cw.currency || cw.chain || '').toUpperCase();
+                  const avail = Number(cw.available_balance ?? cw.balance ?? 0);
+                  if (coin) {
+                    if (!map[uId].cryptoBalances) map[uId].cryptoBalances = {};
+                    map[uId].cryptoBalances[coin] = Math.max(map[uId].cryptoBalances[coin] || 0, isNaN(avail) ? 0 : Math.max(0, avail));
+                  }
                 }
               });
             }
@@ -422,13 +468,9 @@ function P2PMarketplaceContent() {
         ? Number((ad as any).available_crypto)
         : (liveCreatorData?.cryptoBalances?.[ad.crypto.toUpperCase()] !== undefined ? Number(liveCreatorData.cryptoBalances[ad.crypto.toUpperCase()]) : undefined);
 
-      if (ad.adType === 'sell' && availCryptoFromAd !== undefined) {
+      if (ad.adType === 'sell' && availCryptoFromAd !== undefined && availCryptoFromAd > 0) {
         const availFiat = availCryptoFromAd * (unitPrice > 0 ? unitPrice : 1);
-        if (isOwnAd) {
-          isBalanceSufficient = true;
-        } else if (availFiat < ad.minAmount) {
-          isBalanceSufficient = false;
-        } else if (availFiat < ad.maxAmount) {
+        if (availFiat < ad.maxAmount && availFiat >= ad.minAmount) {
           adjustedMax = Math.floor(availFiat * 100) / 100;
         }
       }
@@ -441,11 +483,11 @@ function P2PMarketplaceContent() {
         rate: unitPrice > 0 ? unitPrice : ad.price,
         fiat: ad.fiatCurrency,
         crypto: ad.crypto,
-        isBalanceSufficient,
+        isBalanceSufficient: true,
         isOwnAd,
         user: mergedUser,
       };
-    }).filter(ad => ad.isBalanceSufficient !== false || (ad as any).isOwnAd);
+    });
 
     const activeFiat = selectedFiat || 'USD';
     const exchangeRate = fiatRates[activeFiat] || 1;
@@ -475,9 +517,9 @@ function P2PMarketplaceContent() {
         if (adFiat !== selectedFiat.toUpperCase()) return false;
       }
       if (selectedCountry && selectedCountry !== 'ALL') {
-        const adCountry = ((ad.user?.country || (ad as any).country || (adCreators[ad.userId]?.country) || '') as string).toUpperCase();
+        const adCountry = ((ad.user?.country || (ad as any).country_code || (ad as any).country || (adCreators[ad.userId]?.country) || '') as string).toUpperCase();
         const targeted = Array.isArray(ad.targetedCountries) ? ad.targetedCountries.map((c: string) => String(c).toUpperCase()) : [];
-        const isMatchedCountry = adCountry === selectedCountry.toUpperCase() || targeted.includes(selectedCountry.toUpperCase()) || targeted.includes('ALL');
+        const isMatchedCountry = !adCountry || adCountry === 'GLOBAL' || adCountry === 'ALL' || adCountry === selectedCountry.toUpperCase() || targeted.length === 0 || targeted.includes(selectedCountry.toUpperCase()) || targeted.includes('ALL');
         if (!isMatchedCountry) return false;
       }
       if (showTopRated && !ad.user?.badges?.includes('power')) return false;
@@ -993,6 +1035,17 @@ function P2PMarketplaceContent() {
           </div>
           <ScrollArea className="max-h-[350px] pr-2">
             <div className="space-y-1">
+              <Button 
+                variant="ghost" 
+                className="w-full justify-start font-normal h-auto py-2 text-foreground hover:bg-muted flex items-center justify-between" 
+                onClick={() => { setSelectedFiat('ALL'); setIsFiatModalOpen(false); }}
+              >
+                <div className="flex items-center gap-3">
+                  <Globe className="h-4 w-4 text-primary flex-shrink-0" />
+                  <span className="text-sm font-semibold">All Currencies</span>
+                </div>
+                <span className="font-bold text-xs text-primary bg-primary/10 px-2 py-0.5 rounded">ALL</span>
+              </Button>
               {filteredFiats.map(c => {
                 const countryCode = getCountryCodeForCurrency(c.code);
                 return (

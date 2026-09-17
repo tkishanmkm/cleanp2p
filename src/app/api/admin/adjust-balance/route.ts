@@ -98,7 +98,6 @@ export async function POST(req: NextRequest) {
           user_id: userId,
           currency: cleanCurrency,
           balance: newBalance,
-          reserved_balance: 0,
         });
       }
     }

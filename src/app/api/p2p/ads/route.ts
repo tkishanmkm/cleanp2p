@@ -145,6 +145,26 @@ export async function POST(request: NextRequest) {
       let availableBalance = 0;
 
       try {
+        // 1. Check wallet_assets directly by user_id
+        const { data: directAssets } = await adminClient
+          .from('wallet_assets')
+          .select('*')
+          .eq('user_id', user.id);
+
+        if (directAssets && directAssets.length > 0) {
+          const match = directAssets.find((a: any) => {
+            const sym = String(a.asset_symbol || a.asset_code || a.symbol || a.crypto || '').toUpperCase();
+            return sym === coinType.toUpperCase();
+          });
+          if (match) {
+            const avail = Number(match.available ?? match.balance ?? match.amount ?? 0);
+            const locked = Number(match.locked_escrow ?? match.locked ?? match.locked_balance ?? 0);
+            const net = Math.max(0, avail - locked);
+            if (net > availableBalance) availableBalance = net;
+          }
+        }
+
+        // 2. Check user_wallets table
         const { data: walletData } = await adminClient
           .from('user_wallets')
           .select('available_balance, balance, locked_balance')
@@ -153,19 +173,38 @@ export async function POST(request: NextRequest) {
           .maybeSingle();
 
         if (walletData) {
-          availableBalance = Number(walletData.available_balance ?? (Number(walletData.balance || 0) - Number(walletData.locked_balance || 0)));
-        } else {
-          // Check profiles table column fallback (e.g. usdt_balance, btc_balance)
-          const { data: prof } = await adminClient
-            .from('profiles')
-            .select('*')
-            .eq('id', user.id)
-            .maybeSingle();
-          if (prof) {
-            const col = `${coinType.toLowerCase()}_balance`;
-            if (prof[col] !== undefined) {
-              availableBalance = Number(prof[col] || 0);
-            }
+          const net = Number(walletData.available_balance ?? (Number(walletData.balance || 0) - Number(walletData.locked_balance || 0)));
+          if (net > availableBalance) availableBalance = net;
+        }
+
+        // 3. Check wallets table
+        const { data: chainWallets } = await adminClient
+          .from('wallets')
+          .select('balance, available_balance, currency, chain')
+          .eq('user_id', user.id);
+
+        if (chainWallets && chainWallets.length > 0) {
+          const matchingWallets = chainWallets.filter((w: any) => 
+            String(w.currency || w.chain || '').toUpperCase() === coinType.toUpperCase()
+          );
+          matchingWallets.forEach((w: any) => {
+            const val = Number(w.available_balance ?? w.balance ?? 0);
+            if (val > availableBalance) availableBalance = val;
+          });
+        }
+
+        // 4. Check profiles table fallback
+        const { data: prof } = await adminClient
+          .from('profiles')
+          .select('*')
+          .eq('id', user.id)
+          .maybeSingle();
+
+        if (prof) {
+          const col = `${coinType.toLowerCase()}_balance`;
+          if (prof[col] !== undefined) {
+            const val = Number(prof[col] || 0);
+            if (val > availableBalance) availableBalance = val;
           }
         }
       } catch (balErr) {
