@@ -174,26 +174,31 @@ export default function TradePage() {
       let adResult: any = null;
 
       if (rawAdRef) {
-        const isAdUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(String(rawAdRef));
-
-        if (isAdUuid) {
-          const { data } = await supabase.from('ads').select('*').eq('id', rawAdRef).maybeSingle();
+        // First, check by primary id (can be slug like per9yeeotd4k or uuid)
+        try {
+          const { data } = await supabase.from('ads').select('*').eq('id', String(rawAdRef)).maybeSingle();
           if (data) adResult = data;
+        } catch {}
+
+        if (!adResult) {
+          try {
+            const { data } = await supabase.from('ads').select('*').eq('public_id', String(rawAdRef)).maybeSingle();
+            if (data) adResult = data;
+          } catch {}
         }
 
         if (!adResult) {
-          const { data } = await supabase.from('ads').select('*').eq('public_id', rawAdRef).maybeSingle();
-          if (data) adResult = data;
+          try {
+            const { data } = await supabase.from('ads').select('*').eq('public_ad_id', String(rawAdRef)).maybeSingle();
+            if (data) adResult = data;
+          } catch {}
         }
 
         if (!adResult) {
-          const { data } = await supabase.from('ads').select('*').eq('public_ad_id', rawAdRef).maybeSingle();
-          if (data) adResult = data;
-        }
-
-        if (!adResult) {
-          const { data } = await supabase.from('ads').select('*').eq('ad_id', rawAdRef).maybeSingle();
-          if (data) adResult = data;
+          try {
+            const { data } = await supabase.from('ads').select('*').eq('ad_id', String(rawAdRef)).maybeSingle();
+            if (data) adResult = data;
+          } catch {}
         }
       }
 

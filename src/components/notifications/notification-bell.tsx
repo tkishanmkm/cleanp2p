@@ -82,10 +82,20 @@ export function NotificationBell() {
           .select(`
             id,
             crypto_currency,
+            crypto,
             fiat_currency,
             crypto_amount,
+            amount,
             fiat_amount,
             status,
+            is_disputed,
+            paid_at,
+            marked_paid_at,
+            released_at,
+            cancelled_at,
+            expires_at,
+            payment_window_minutes,
+            payment_window,
             created_at,
             buyer_id,
             seller_id,
@@ -100,13 +110,58 @@ export function NotificationBell() {
           const formatted: RecentTradeItem[] = trades.map((t: any) => {
             const isBuyer = t.buyer_id === userId;
             const counterparty = isBuyer ? t.seller : t.buyer;
+            const rawStatus = (t.status || 'pending').toLowerCase();
+
+            // Calculate precise, real-time effective status
+            let effectiveStatus = rawStatus;
+
+            if (t.is_disputed || rawStatus === 'disputed' || rawStatus === 'dispute') {
+              effectiveStatus = 'disputed';
+            } else if (rawStatus === 'released' || rawStatus === 'completed' || t.released_at) {
+              effectiveStatus = 'completed';
+            } else if (rawStatus === 'cancelled' || rawStatus === 'canceled' || t.cancelled_at) {
+              effectiveStatus = 'cancelled';
+            } else if (
+              rawStatus === 'paid' ||
+              rawStatus === 'mark_paid' ||
+              rawStatus === 'buyer_marked_paid' ||
+              rawStatus === 'payment_sent' ||
+              t.paid_at ||
+              t.marked_paid_at
+            ) {
+              effectiveStatus = 'paid';
+            } else if (rawStatus === 'expired') {
+              effectiveStatus = 'expired';
+            } else if (['pending', 'active', 'escrow_locked', 'awaiting_confirmation'].includes(rawStatus)) {
+              // Check expiration time
+              const createdAtMs = t.created_at ? new Date(t.created_at).getTime() : 0;
+              const winMin = Number(t.payment_window_minutes || t.payment_window || 30);
+              const expiresAtMs = t.expires_at
+                ? new Date(t.expires_at).getTime()
+                : (createdAtMs > 0 ? createdAtMs + winMin * 60 * 1000 : 0);
+
+              if (expiresAtMs > 0 && Date.now() > expiresAtMs) {
+                effectiveStatus = 'expired';
+                // Trigger background expiration sync
+                if (rawStatus !== 'expired') {
+                  fetch(`/api/trades/${t.id}/actions`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ action: 'EXPIRE_TRADE' })
+                  }).catch(() => {});
+                }
+              } else {
+                effectiveStatus = 'pending';
+              }
+            }
+
             return {
               id: t.id,
-              crypto_currency: t.crypto_currency || 'USDT',
-              fiat_currency: t.fiat_currency || 'INR',
-              crypto_amount: Number(t.crypto_amount || 0),
+              crypto_currency: (t.crypto_currency || t.crypto || 'USDT').toUpperCase(),
+              fiat_currency: (t.fiat_currency || 'INR').toUpperCase(),
+              crypto_amount: Number(t.crypto_amount ?? t.amount ?? 0),
               fiat_amount: Number(t.fiat_amount || 0),
-              status: (t.status || 'active').toLowerCase(),
+              status: effectiveStatus,
               created_at: t.created_at,
               buyer_id: t.buyer_id,
               seller_id: t.seller_id,
@@ -146,7 +201,7 @@ export function NotificationBell() {
       case 'canceled':
         return 'bg-rose-400/15 text-rose-500 dark:text-rose-300 border-rose-400/30';
       case 'expired':
-        return 'bg-slate-500/15 text-slate-600 dark:text-slate-400 border-slate-500/30';
+        return 'bg-rose-500/15 text-rose-600 dark:text-rose-400 border-rose-500/30 font-bold';
       case 'completed':
       case 'released':
       case 'credited':

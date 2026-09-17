@@ -130,39 +130,62 @@ export async function POST(
 
     if (action === 'EXPIRE_TRADE') {
       const now = new Date().toISOString();
-      let updateError: any = null;
 
-      // 1. Update trade status to EXPIRED
-      try {
-        let q = supabase.from('trades').update({
+      // 1. Update trade status to 'expired' (valid PostgreSQL enum value)
+      let q = supabase.from('trades').update({
+        status: 'expired',
+        updated_at: now,
+      });
+      if (isActualUuid) q = q.eq('id', actualTradeId);
+      else q = q.eq('trade_id', tradeId);
+      let { error: updateError } = await q;
+
+      // Defensive fallback if enum in Postgres is uppercase 'EXPIRED'
+      if (updateError && (updateError.message?.includes('enum') || updateError.code === '22P02')) {
+        let qUpper = supabase.from('trades').update({
           status: 'EXPIRED',
           updated_at: now,
         });
-        if (isActualUuid) q = q.eq('id', actualTradeId);
-        else q = q.eq('trade_id', tradeId);
-        const { error } = await q;
-        if (error) updateError = error;
-      } catch (err: any) {
-        updateError = err;
-      }
-
-      if (updateError) {
-        console.warn('Primary EXPIRE_TRADE failed, trying fallback:', updateError.message);
-        let q2 = supabase.from('trades').update({ status: 'expired' });
-        if (isActualUuid) q2 = q2.eq('id', actualTradeId);
-        else q2 = q2.eq('trade_id', tradeId);
-        const { error: err2 } = await q2;
-        if (err2) {
-          return NextResponse.json({ error: err2.message || 'Failed to expire trade.' }, { status: 400 });
+        if (isActualUuid) qUpper = qUpper.eq('id', actualTradeId);
+        else qUpper = qUpper.eq('trade_id', tradeId);
+        const resUpper = await qUpper;
+        if (!resUpper.error) {
+          updateError = null;
         }
       }
 
-      // 2. Unlock/Refund seller escrow balance safely if seller_id is present
+      if (updateError) {
+        console.error('Failed to update trade status to expired:', updateError);
+        return NextResponse.json({ error: updateError.message || 'Failed to expire trade.' }, { status: 400 });
+      }
+
+      // 2. Unlock/Refund seller escrow balance safely across all balance tables if seller_id is present
       try {
         const cryptoSym = (trade?.crypto || trade?.asset_symbol || trade?.coin || 'USDT').toUpperCase();
         const cryptoAmt = Number(trade?.crypto_amount ?? trade?.amount ?? 0);
         if (trade?.seller_id && cryptoAmt > 0) {
-          // Unlock seller balance back to available
+          // 2a. Update user_wallets
+          const { data: uWallet } = await supabase
+            .from('user_wallets')
+            .select('*')
+            .eq('user_id', trade.seller_id)
+            .ilike('asset_symbol', cryptoSym)
+            .maybeSingle();
+
+          if (uWallet) {
+            const curLocked = Number(uWallet.locked_balance || 0);
+            const curReserved = Number(uWallet.reserved_balance || 0);
+            await supabase
+              .from('user_wallets')
+              .update({
+                locked_balance: Math.max(0, curLocked - cryptoAmt),
+                reserved_balance: Math.max(0, curReserved - cryptoAmt),
+                updated_at: now
+              })
+              .eq('id', uWallet.id);
+          }
+
+          // 2b. Update wallet_assets
           const { data: sellerAsset } = await supabase
             .from('wallet_assets')
             .select('*')
@@ -172,34 +195,70 @@ export async function POST(
 
           if (sellerAsset) {
             const curLocked = Number(sellerAsset.locked_escrow ?? sellerAsset.locked_balance ?? 0);
+            const curReserved = Number(sellerAsset.reserved_balance ?? 0);
             const curAvail = Number(sellerAsset.available ?? sellerAsset.balance ?? 0);
-            const newLocked = Math.max(0, curLocked - cryptoAmt);
-            const newAvail = curAvail + cryptoAmt;
-
             await supabase
               .from('wallet_assets')
               .update({
-                available: newAvail,
-                locked_escrow: newLocked,
+                available: curAvail + cryptoAmt,
+                locked_escrow: Math.max(0, curLocked - cryptoAmt),
+                reserved_balance: Math.max(0, curReserved - cryptoAmt),
                 updated_at: now
               })
               .eq('id', sellerAsset.id);
+          }
+
+          // 2c. Update wallets (chain-level)
+          const { data: mainWallet } = await supabase
+            .from('wallets')
+            .select('*')
+            .eq('user_id', trade.seller_id)
+            .maybeSingle();
+
+          if (mainWallet) {
+            const curLocked = Number(mainWallet.locked_balance || 0);
+            const curAvail = Number(mainWallet.available_balance || 0);
+            const curReserved = Number(mainWallet.reserved_balance || 0);
+            await supabase
+              .from('wallets')
+              .update({
+                available_balance: curAvail + cryptoAmt,
+                locked_balance: Math.max(0, curLocked - cryptoAmt),
+                reserved_balance: Math.max(0, curReserved - cryptoAmt),
+                updated_at: now
+              })
+              .eq('id', mainWallet.id);
           }
         }
       } catch (refundErr) {
         console.warn('Escrow refund on expiration warning:', refundErr);
       }
 
+      // 3. Post official system message in trade chat if not already present
       try {
-        await insertPaxonesSystemMessage(supabase, {
-          tradeId: actualTradeId,
-          type: 'TRADE_EXPIRED',
-          buyerUsername: buyerName,
-          sellerUsername: sellerName
-        });
-      } catch {}
+        const { data: existingMsg } = await supabase
+          .from('trade_messages')
+          .select('id')
+          .eq('trade_id', actualTradeId)
+          .ilike('message', '%TRADE EXPIRED%')
+          .limit(1)
+          .maybeSingle();
 
-      // Notify both parties
+        if (!existingMsg) {
+          await insertPaxonesSystemMessage(supabase, {
+            tradeId: actualTradeId,
+            type: 'TRADE_EXPIRED',
+            buyerUsername: buyerName,
+            sellerUsername: sellerName,
+            coinAmount: trade?.crypto_amount || trade?.amount,
+            coinSymbol: trade?.crypto || trade?.asset_symbol || 'USDT'
+          });
+        }
+      } catch (sysMsgErr) {
+        console.warn('Error inserting expired system message:', sysMsgErr);
+      }
+
+      // 4. Notify both parties
       const userIds = [trade?.buyer_id, trade?.seller_id].filter(Boolean);
       for (const uid of userIds) {
         try {

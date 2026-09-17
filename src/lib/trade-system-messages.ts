@@ -1543,11 +1543,11 @@ export async function sendTradeSystemMessage(
 
     case 'TRADE_EXPIRED':
       messageText =
-        `⏳ TRADE EXPIRED (TIMED OUT)\n` +
+        `⚠️ TRADE EXPIRED (PAYMENT TIME EXCEEDED)\n` +
         `----------------------------------------\n` +
-        `The ${windowMins}-minute payment window elapsed without confirmed payment.\n` +
-        `• Follow the platform's escrow-expiry rules.\n` +
-        `• IF YOU ALREADY PAID: do NOT start a new trade for the same payment. Open a dispute and provide proof.`;
+        `This trade has expired because the payment timer elapsed without confirmed payment.\n` +
+        `• DO NOT MAKE PAYMENT: Coin is no longer held in escrow.\n` +
+        `• IF YOU ALREADY PAID: Do not make another payment. Open a new trade again immediately with this seller or contact Paxones Support with your payment proof.`;
       break;
 
     case 'TRADE_DISPUTED':
@@ -1631,6 +1631,9 @@ export function isSupportedPaymentMethod(methodName: string): boolean {
 export interface SystemMessagePayload {
   tradeId: string;
   type:
+    | 'TRADE_INITIATED'
+    | 'TRADE_STARTED'
+    | 'ESCROW_LOCKED'
     | 'TRADE_COMPLETED'
     | 'TRADE_RELEASED'
     | 'TRADE_CANCELLED'
@@ -1642,7 +1645,8 @@ export interface SystemMessagePayload {
     | 'ISSUE_REPORTED'
     | 'MARKED_PAID'
     | 'MESSAGE_BLOCKED'
-    | 'SECURITY_REMINDER';
+    | 'SECURITY_REMINDER'
+    | 'CUSTOM';
   sellerUsername?: string;
   buyerUsername?: string;
   openerUsername?: string;
@@ -1705,6 +1709,18 @@ export function formatSystemMessageContent(
     .slice(0, 100);
 
   switch (type) {
+    case 'TRADE_INITIATED':
+    case 'TRADE_STARTED':
+    case 'ESCROW_LOCKED':
+      return (
+        `🔒 PAXONES ESCROW SECURED\n` +
+        `------------------------\n` +
+        `• ${formattedAmount} ${cleanCoin} is safely held in Paxones Escrow.\n` +
+        `• Buyer (@${buyerUsername}): Please transfer payment according to the seller's payment instructions before the timer expires, then click "I have paid".\n` +
+        `• Seller (@${sellerUsername}): Do NOT release escrow until you have verified incoming funds in your own account/statement.\n` +
+        `• Security: Never share passwords, OTPs, or communicate off-platform.`
+      );
+
     case 'TRADE_COMPLETED':
     case 'TRADE_RELEASED':
       return (
@@ -1716,7 +1732,13 @@ export function formatSystemMessageContent(
       return `Trade cancelled. Do not send or pay for this trade. If you have already made a payment, do not cancel or abandon the situation. Open a new trade immediately and contact Paxones Support if assistance is required.`;
 
     case 'TRADE_EXPIRED':
-      return `Trade has expired. If you have already transferred funds, please reopen this trade or contact support immediately.`;
+      return (
+        `⚠️ TRADE EXPIRED (PAYMENT TIME EXCEEDED)\n` +
+        `----------------------------------------\n` +
+        `This trade has expired because the payment timer elapsed without confirmed payment.\n` +
+        `• DO NOT MAKE PAYMENT: Coin is no longer held in escrow.\n` +
+        `• IF YOU ALREADY PAID: Do not make another payment. Open a new trade again immediately with this seller or contact Paxones Support with your payment proof.`
+      );
 
     case 'TRADE_DISPUTED': {
       let instructions = '';
@@ -1813,6 +1835,8 @@ export function formatSystemMessageContent(
 
 /**
  * Inserts an official Paxones System Message into the database.
+ * If in the browser, dispatches via the secure /api/trades/[tradeId]/system-message route
+ * to guarantee administrative insertion and Realtime synchronization.
  */
 export async function insertPaxonesSystemMessage(
   supabase: SupabaseClient<any, any, any>,
@@ -1820,12 +1844,32 @@ export async function insertPaxonesSystemMessage(
 ): Promise<void> {
   const text = formatSystemMessageContent(payload);
   const now = new Date().toISOString();
+  const systemUuid = '00000000-0000-0000-0000-000000000000';
 
+  // 1. In browser environment: dispatch to server route for authorized service-role insertion
+  if (typeof window !== 'undefined' && payload.tradeId) {
+    try {
+      const res = await fetch(`/api/trades/${encodeURIComponent(payload.tradeId)}/system-message`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          type: payload.type,
+          metadata: payload,
+          customText: payload.customText
+        })
+      });
+      if (res.ok) return;
+    } catch (e) {
+      console.warn('System message API route dispatch failed, falling back to direct client attempt:', e);
+    }
+  }
+
+  // 2. Direct database insertion (server-side context or fallback)
   try {
     const { error } = await supabase.from('trade_messages').insert([
       {
         trade_id: payload.tradeId,
-        sender_id: 'system',
+        sender_id: systemUuid,
         sender_username: 'Paxones System',
         message: text,
         is_moderator: true,
@@ -1835,7 +1879,18 @@ export async function insertPaxonesSystemMessage(
     ]);
 
     if (error) {
-      console.warn('Error inserting into trade_messages:', error);
+      // If extra columns do not exist in database schema, fallback to core schema
+      const baseFallback = await supabase.from('trade_messages').insert([
+        {
+          trade_id: payload.tradeId,
+          sender_id: systemUuid,
+          message: text,
+          created_at: now
+        }
+      ]);
+      if (baseFallback.error) {
+        console.warn('Error inserting into trade_messages:', baseFallback.error);
+      }
     }
   } catch (err) {
     console.warn('Error inserting into trade_messages:', err);
@@ -1847,7 +1902,7 @@ export async function insertPaxonesSystemMessage(
       .insert([
         {
           trade_id: payload.tradeId,
-          sender_id: '00000000-0000-0000-0000-000000000000',
+          sender_id: systemUuid,
           message: text,
           is_system_message: true,
           created_at: now

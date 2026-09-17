@@ -23,6 +23,8 @@ import {
 } from '@/lib/wallet';
 import { insertPaxonesSystemMessage, formatCryptoAmount } from '@/lib/trade-system-messages';
 import { cn, toDate } from '@/lib/utils';
+import { formatUserDateTimeArial, formatUtcDateTime } from '@/lib/date-utils';
+import { useUserTimezone } from '@/hooks/use-user-timezone';
 import { MerchantBadge } from '@/components/merchant/merchant-badge';
 import type { Trade, P2PAd, Dispute, Feedback } from '@/lib/types';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -141,21 +143,11 @@ const statusColors = {
   disputed: 'border-destructive/40 text-destructive bg-destructive/10',
   dispute: 'border-destructive/40 text-destructive bg-destructive/10',
   cancelled: 'border-muted-foreground/40 text-muted-foreground bg-muted',
-  expired: 'border-muted-foreground/40 text-muted-foreground bg-muted'
+  expired: 'border-rose-500/40 text-rose-600 bg-rose-500/10 dark:text-rose-400 font-bold'
 };
 
-const formatDateArial = (dateVal: any): string => {
-  const d = toDate(dateVal);
-  if (!d) return 'N/A';
-  const month = String(d.getMonth() + 1).padStart(2, '0');
-  const day = String(d.getDate()).padStart(2, '0');
-  const year = String(d.getFullYear()).slice(-2);
-  let hours = d.getHours();
-  const minutes = String(d.getMinutes()).padStart(2, '0');
-  const ampm = hours >= 12 ? 'pm' : 'am';
-  hours = hours % 12;
-  hours = hours ? hours : 12;
-  return `${month}/${day}/${year}, ${hours}:${minutes} ${ampm}`;
+const formatDateArial = (dateVal: any, customTz?: string): string => {
+  return formatUserDateTimeArial(dateVal, customTz);
 };
 
 const DetailRow = ({
@@ -516,10 +508,12 @@ const ActionButtons = ({
   currentUserId?: string;
   currentUsername?: string;
   counterpartId?: string;
+  isExpired?: boolean;
 }) => {
   const { toast } = useToast();
   const tradeStatus = (trade?.status || '').toLowerCase();
   const isBuyer = currentUserRole === 'buy';
+  const isTradeExpired = isExpired || tradeStatus === 'expired';
 
   const [didNotPayChecked, setDidNotPayChecked] = useState(false);
   const [isPaidConfirmOpen, setIsPaidConfirmOpen] = useState(false);
@@ -549,10 +543,10 @@ const ActionButtons = ({
     }
   }, [isReleaseConfirmOpen, currentUserId]);
 
-  const canMarkPaid = isBuyer && (tradeStatus === 'active' || tradeStatus === 'pending');
+  const canMarkPaid = !isTradeExpired && isBuyer && (tradeStatus === 'active' || tradeStatus === 'pending');
   // CRITICAL ESCROW RULE: The Release Escrow button MUST strictly render ONLY when trade status is PAID / buyer_marked_paid
   const canRelease = !isBuyer && (tradeStatus === 'paid' || tradeStatus === 'buyer_marked_paid' || tradeStatus === 'payment_sent');
-  const canBuyerCancel = isBuyer && (tradeStatus === 'active' || tradeStatus === 'pending');
+  const canBuyerCancel = !isTradeExpired && isBuyer && (tradeStatus === 'active' || tradeStatus === 'pending');
 
   const handleMarkAsPaid = async () => {
     setIsSubmittingAction(true);
@@ -1185,9 +1179,9 @@ export function TradeDetails({
   currentUserRole: 'buy' | 'sell';
 }) {
   const supabase = createClient();
+  const { timezone } = useUserTimezone();
   const isBuying = currentUserRole === 'buy';
   const tradeStatus = (trade?.status || 'active').toLowerCase();
-  const showReopen = ['cancelled', 'expired'].includes(tradeStatus);
   const { isAdmin } = useAdminStatus();
 
   const [currentUser, setCurrentUser] = useState<any>(null);
@@ -1301,11 +1295,14 @@ export function TradeDetails({
 
   const isCountdownActive = tradeStatus === 'active' || tradeStatus === 'pending';
   const paymentTimeRemaining = useCountdown(isCountdownActive ? dynamicExpiresDate : new Date(0));
+  const isExpired = tradeStatus === 'expired' || (isCountdownActive && (paymentTimeRemaining.isFinished || (dynamicExpiresDate.getTime() > 0 && dynamicExpiresDate.getTime() <= Date.now())));
+  const effectiveTradeStatus = isExpired ? 'expired' : tradeStatus;
+  const showReopen = ['cancelled', 'expired'].includes(effectiveTradeStatus);
 
   useEffect(() => {
     let isMounted = true;
     const expireTrade = async () => {
-      if (isCountdownActive && paymentTimeRemaining.isFinished && trade?.id) {
+      if (isExpired && tradeStatus !== 'expired' && trade?.id) {
         try {
           await fetch(`/api/trades/${trade.id}/actions`, {
             method: 'POST',
@@ -1321,10 +1318,10 @@ export function TradeDetails({
     return () => {
       isMounted = false;
     };
-  }, [paymentTimeRemaining.isFinished, isCountdownActive, trade?.id]);
+  }, [isExpired, tradeStatus, trade?.id]);
 
-  const showFeedbackSection = tradeStatus === 'released' || tradeStatus === 'completed';
-  const showActions = ['active', 'paid', 'pending', 'buyer_marked_paid', 'payment_sent'].includes(tradeStatus);
+  const showFeedbackSection = effectiveTradeStatus === 'released' || effectiveTradeStatus === 'completed';
+  const showActions = !isExpired && ['active', 'paid', 'pending', 'buyer_marked_paid', 'payment_sent'].includes(tradeStatus);
 
   const getPositiveNumber = (...values: any[]): number => {
     for (const v of values) {
@@ -1366,20 +1363,18 @@ export function TradeDetails({
   const fiatAmount = effectiveFiatAmount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   const escrowFeeCoin = `${(effectiveCryptoAmount * 0.015).toFixed(2)} ${coinSymbol}`;
 
-  const offerTags: string[] = (ad?.tags && Array.isArray(ad.tags) && ad.tags.length > 0) 
-    ? ad.tags 
-    : ((ad?.offer_tags && Array.isArray(ad.offer_tags) && ad.offer_tags.length > 0) 
-      ? ad.offer_tags 
-      : ((ad?.ad_tags && Array.isArray(ad.ad_tags) && ad.ad_tags.length > 0)
-        ? ad.ad_tags
-        : ((trade?.tags && Array.isArray(trade.tags) && trade.tags.length > 0) ? trade.tags : [])));
+  // Offer Tag and Ad Tags extraction
+  const offerLabel = (ad?.offer_label || ad?.label || trade?.offer_label || trade?.label || '').trim();
+  const rawAdTags = ad?.tags || ad?.ad_tags || trade?.tags || trade?.ad_tags || [];
+  const adTags: string[] = (Array.isArray(rawAdTags) ? rawAdTags : [rawAdTags]).filter(Boolean).map(String);
 
-  const rawAdRef = ad?.public_ad_id || ad?.public_id || ad?.publicAdId || ad?.ad_id || ad?.id || trade?.ad_id || trade?.adId || trade?.public_ad_id;
+  // Prioritize ad.id (e.g. per9yeeotd4k) over generated system IDs
+  const rawAdRef = ad?.id || trade?.ad_id || trade?.adId || ad?.public_id || ad?.public_ad_id || trade?.public_ad_id;
   const publicAdDisplayId = rawAdRef ? (String(rawAdRef).replace(/^#/, '')) : '';
   const sellerOfferTerms = ad?.terms || ad?.terms_conditions || ad?.termsAndConditions || trade?.terms || trade?.seller_terms || '';
 
   const publicTradeId = trade?.trade_id || trade?.public_id || trade?.tradeId || formatTradeId(trade?.id);
-  const badgeStatusClass = statusColors[tradeStatus as keyof typeof statusColors] || 'border-primary/40 text-primary bg-primary/10';
+  const badgeStatusClass = statusColors[effectiveTradeStatus as keyof typeof statusColors] || statusColors.expired;
 
   return (
     <Card className="flex flex-col h-full shadow-none border-0 rounded-none bg-card text-card-foreground">
@@ -1392,7 +1387,7 @@ export function TradeDetails({
             </CardDescription>
           </div>
           <Badge variant="outline" className={cn('capitalize font-mono font-bold text-xs', badgeStatusClass)}>
-            {trade?.status || 'unknown'}
+            {effectiveTradeStatus}
           </Badge>
         </div>
       </CardHeader>
@@ -1440,24 +1435,60 @@ export function TradeDetails({
             </div>
           </div>
 
-          {/* Offer Tags (Only display real custom tags from ad) */}
-          {offerTags && offerTags.length > 0 && (
-            <div className="flex flex-wrap gap-1.5 py-0.5">
-              {offerTags.map((tag, idx) => (
+          {/* Offer Tag and Ad Tags (both clearly displayed) */}
+          {(offerLabel || (adTags && adTags.length > 0)) && (
+            <div className="flex flex-wrap items-center gap-1.5 py-0.5">
+              {offerLabel && (
+                <Badge
+                  variant="secondary"
+                  className="text-[11px] font-bold gap-1 px-2.5 py-1 bg-amber-500/15 text-amber-800 dark:text-amber-200 border border-amber-500/30"
+                >
+                  <Tag className="h-3 w-3 text-amber-600 dark:text-amber-400" />
+                  <span>Offer Tag: {offerLabel}</span>
+                </Badge>
+              )}
+              {adTags.map((tag, idx) => (
                 <Badge
                   key={idx}
-                  variant="secondary"
-                  className="text-[11px] font-medium gap-1 px-2.5 py-1 bg-amber-500/10 text-amber-700 dark:text-amber-300 border border-amber-500/30"
+                  variant="outline"
+                  className="text-[11px] font-medium gap-1 px-2 py-0.5 bg-muted/40 text-muted-foreground border-border/60"
                 >
-                  <Tag className="h-3 w-3" />
-                  {tag}
+                  <span>Ad Tag: #{tag}</span>
                 </Badge>
               ))}
             </div>
           )}
 
-          {/* Buyer Safety Instructions Banner */}
-          {isBuying && (tradeStatus === 'active' || tradeStatus === 'pending') && (
+          {/* Expired Trade Notice and Instructions */}
+          {isExpired && (
+            <div className="p-3.5 rounded-xl border-2 border-rose-500/40 bg-rose-500/10 text-rose-950 dark:text-rose-100 space-y-2 shadow-xs">
+              <div className="flex items-center gap-1.5 font-bold text-rose-700 dark:text-rose-400 text-xs sm:text-sm">
+                <AlertTriangle className="h-4 w-4 shrink-0 text-rose-600 dark:text-rose-400" />
+                <span>Trade Expired</span>
+              </div>
+              <p className="text-xs font-semibold leading-relaxed text-rose-900 dark:text-rose-200">
+                This trade is expired, <strong>don&apos;t make payment</strong>. Crypto is no longer held in escrow.
+              </p>
+              <p className="text-xs text-rose-800/90 dark:text-rose-300/90 leading-relaxed">
+                If you make payment, <strong>open trade again</strong> or <strong>contact support</strong>.
+              </p>
+              <div className="flex flex-wrap items-center gap-2 pt-1">
+                <Button asChild size="sm" variant="default" className="text-xs bg-rose-600 hover:bg-rose-700 text-white font-semibold">
+                  <Link href={`/ad/${publicAdDisplayId || ad?.id || trade?.ad_id || trade?.adId}`}>
+                    <RefreshCw className="mr-1.5 h-3.5 w-3.5" /> Open Trade Again
+                  </Link>
+                </Button>
+                <Button asChild size="sm" variant="outline" className="text-xs border-rose-500/40 text-rose-700 dark:text-rose-300 hover:bg-rose-500/10">
+                  <Link href="/support">
+                    Contact Support
+                  </Link>
+                </Button>
+              </div>
+            </div>
+          )}
+
+          {/* Buyer Safety Instructions Banner (Only when trade is actively ongoing) */}
+          {!isExpired && isBuying && (tradeStatus === 'active' || tradeStatus === 'pending') && (
             <div className="p-3.5 rounded-xl border border-blue-500/30 bg-blue-500/10 text-blue-900 dark:text-blue-200 text-xs space-y-1.5 shadow-xs">
               <div className="flex items-center gap-1.5 font-bold text-blue-700 dark:text-blue-300">
                 <Shield className="h-4 w-4 shrink-0 text-blue-600 dark:text-blue-400" />
@@ -1469,7 +1500,8 @@ export function TradeDetails({
             </div>
           )}
 
-          {showActions && !isAdmin && (
+          {/* Action Buttons (Only for non-expired active/paid states) */}
+          {!isExpired && showActions && !isAdmin && (
             <div className="pt-1">
               <ActionButtons
                 trade={trade}
@@ -1477,12 +1509,13 @@ export function TradeDetails({
                 currentUserId={currentUser?.id}
                 currentUsername={currentUser?.user_metadata?.username || currentUser?.email?.split('@')[0]}
                 counterpartId={opponentId}
+                isExpired={isExpired}
               />
             </div>
           )}
 
           {/* High-Contrast Clear Payment Countdown in both Light & Dark themes */}
-          {(tradeStatus === 'active' || tradeStatus === 'pending') && (
+          {!isExpired && (tradeStatus === 'active' || tradeStatus === 'pending') && (
             <div className="flex items-center justify-between p-3.5 rounded-xl border-2 border-amber-500/50 dark:border-amber-400/60 bg-amber-500/15 dark:bg-slate-900/90 text-amber-950 dark:text-amber-100 shadow-sm">
               <div className="flex items-center gap-2">
                 <Clock className="h-4.5 w-4.5 text-amber-600 dark:text-amber-400 shrink-0" />
@@ -1524,7 +1557,7 @@ export function TradeDetails({
             )}
           </div>
 
-          {/* Timestamps */}
+          {/* Timestamps in User Timezone with GMT hover tooltip */}
           <div className="space-y-1 rounded-xl border border-border/60 p-3 bg-muted/10">
             <h4 className="text-xs font-bold text-foreground uppercase tracking-wider mb-2">
               Timeline
@@ -1533,8 +1566,8 @@ export function TradeDetails({
               label="Created"
               boldLabel
               value={
-                <span className="font-[Arial,Helvetica,sans-serif] text-xs font-medium text-foreground">
-                  {formatDateArial(trade?.createdAt || trade?.created_at)}
+                <span className="font-[Arial,Helvetica,sans-serif] text-xs font-medium text-foreground" title={formatUtcDateTime(trade?.createdAt || trade?.created_at)}>
+                  {formatDateArial(trade?.createdAt || trade?.created_at, timezone)}
                 </span>
               }
             />
@@ -1543,8 +1576,8 @@ export function TradeDetails({
                 label="Marked Paid"
                 boldLabel
                 value={
-                  <span className="font-[Arial,Helvetica,sans-serif] text-xs font-medium text-foreground">
-                    {formatDateArial(trade.paidAt || trade.paid_at)}
+                  <span className="font-[Arial,Helvetica,sans-serif] text-xs font-medium text-foreground" title={formatUtcDateTime(trade.paidAt || trade.paid_at)}>
+                    {formatDateArial(trade.paidAt || trade.paid_at, timezone)}
                   </span>
                 }
               />
@@ -1554,8 +1587,19 @@ export function TradeDetails({
                 label="Released"
                 boldLabel
                 value={
-                  <span className="font-[Arial,Helvetica,sans-serif] text-xs font-medium text-foreground">
-                    {formatDateArial(trade.releasedAt || trade.released_at)}
+                  <span className="font-[Arial,Helvetica,sans-serif] text-xs font-medium text-foreground" title={formatUtcDateTime(trade.releasedAt || trade.released_at)}>
+                    {formatDateArial(trade.releasedAt || trade.released_at, timezone)}
+                  </span>
+                }
+              />
+            )}
+            {(isExpired || tradeStatus === 'expired') && (
+              <DetailRow
+                label="Expired"
+                boldLabel
+                value={
+                  <span className="font-[Arial,Helvetica,sans-serif] text-xs font-medium text-rose-600 dark:text-rose-400" title={formatUtcDateTime(trade?.expires_at || dynamicExpiresDate)}>
+                    {formatDateArial(trade?.expires_at || dynamicExpiresDate, timezone)}
                   </span>
                 }
               />
@@ -1588,10 +1632,36 @@ export function TradeDetails({
             <DetailRow
               label="Ad ID"
               boldLabel
-              value={`#${publicAdDisplayId || (ad?.id ? formatTradeId(ad.id) : (trade?.trade_id || formatTradeId(trade?.id)))}`}
-              isLink={Boolean(ad?.id || trade?.ad_id || trade?.adId || publicAdDisplayId)}
-              href={`/ad/${ad?.id || trade?.adId || trade?.ad_id || publicAdDisplayId}`}
+              value={`#${publicAdDisplayId}`}
+              isLink={Boolean(publicAdDisplayId)}
+              href={`/ad/${publicAdDisplayId}`}
             />
+            {offerLabel && (
+              <DetailRow
+                label="Offer Tag"
+                boldLabel
+                value={
+                  <Badge variant="secondary" className="text-[11px] font-bold px-2 py-0.5 bg-amber-500/15 text-amber-800 dark:text-amber-200 border border-amber-500/30">
+                    {offerLabel}
+                  </Badge>
+                }
+              />
+            )}
+            {adTags && adTags.length > 0 && (
+              <DetailRow
+                label="Ad Tags"
+                boldLabel
+                value={
+                  <div className="flex flex-wrap gap-1">
+                    {adTags.map((tag, idx) => (
+                      <Badge key={idx} variant="outline" className="text-[10px] px-1.5 py-0">
+                        #{tag}
+                      </Badge>
+                    ))}
+                  </div>
+                }
+              />
+            )}
             <div className="pt-1 border-t border-border/40">
               <p className="text-xs font-semibold text-muted-foreground mb-1.5 flex items-center gap-1.5">
                 <FileText className="h-3.5 w-3.5 text-primary" />

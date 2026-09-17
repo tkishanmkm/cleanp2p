@@ -7,6 +7,8 @@ import { createClient } from '@/lib/supabase/client';
 import { useToast } from '@/hooks/use-toast';
 import { useStopwatch } from '@/hooks/use-stopwatch';
 import { useCountdown } from '@/hooks/use-countdown';
+import { useUserTimezone } from '@/hooks/use-user-timezone';
+import { formatUserDateTimeArial, formatUserChatTime, formatUtcDateTime } from '@/lib/date-utils';
 import { TradeChatTimer } from '@/components/trade-chat-timer';
 import { addReceiptToTrade, claimFundsForTrade } from '@/lib/wallet';
 import { compressImage } from '@/lib/media-compression';
@@ -243,18 +245,22 @@ function PostTradeCompletionCard({
  */
 function PaxonesSystemMessageBubble({
   msg,
-  onOpenExternalLink
+  onOpenExternalLink,
+  timezone
 }: {
   msg: any;
   onOpenExternalLink: (url: string) => void;
+  timezone?: string;
 }) {
   const text = msg.message || '';
-  const timestamp = msg.createdAt;
-  const timeString = toDate(timestamp)?.toLocaleString('default', { dateStyle: 'short', timeStyle: 'short' }) || '';
+  const timestamp = msg.createdAt || msg.created_at;
+  const timeString = formatUserDateTimeArial(timestamp, timezone) || '';
 
   // Determine system message category
-  const isCompleted = text.includes('sold') && text.includes('successfully') || text.includes('bought') && text.includes('successfully') || text.includes('Trade Completed') || text.includes('released');
-  const isCancelled = text.toLowerCase().includes('trade cancelled') || text.toLowerCase().includes('trade has expired') || text.toLowerCase().includes('cancelled.');
+  const isInitiated = text.includes('PAXONES ESCROW SECURED') || text.includes('safely held in Paxones Escrow') || text.includes('Escrow Secured');
+  const isExpired = text.toLowerCase().includes('expired') || text.toLowerCase().includes('coin is no longer held');
+  const isCompleted = !isExpired && ((text.includes('sold') && text.includes('successfully')) || (text.includes('bought') && text.includes('successfully')) || text.includes('Trade Completed') || text.includes('released'));
+  const isCancelled = !isExpired && (text.toLowerCase().includes('trade cancelled') || text.toLowerCase().includes('cancelled.'));
   const isDispute = text.includes('in dispute') || text.includes('DISPUTE') || text.includes('Dispute Assistant') || text.includes('Dispute Notice');
   const isBlockedUser = text.includes('blocked @') || text.includes('User Blocked');
   const isPositiveFeedback = text.includes('positive feedback');
@@ -269,13 +275,23 @@ function PaxonesSystemMessageBubble({
   let containerClass = 'bg-muted/60 border-border/80 text-foreground';
   let IconComponent = ShieldCheck;
 
-  if (isCompleted) {
+  if (isInitiated) {
+    title = 'Escrow Secured';
+    badgeClass = 'bg-primary/20 text-primary border-primary/40 font-bold';
+    containerClass = 'bg-primary/10 border-primary/30 text-foreground';
+    IconComponent = ShieldCheck;
+  } else if (isExpired) {
+    title = 'Trade Expired';
+    badgeClass = 'bg-rose-500/20 text-rose-700 dark:text-rose-300 border-rose-500/40 font-bold';
+    containerClass = 'bg-rose-500/10 border-rose-500/35 text-rose-950 dark:text-rose-100';
+    IconComponent = AlertTriangle;
+  } else if (isCompleted) {
     title = 'Trade Completed';
     badgeClass = 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border-emerald-500/30';
     containerClass = 'bg-emerald-500/10 border-emerald-500/30 text-emerald-950 dark:text-emerald-100';
     IconComponent = CheckCircle2;
   } else if (isCancelled) {
-    title = text.toLowerCase().includes('expired') ? 'Trade Expired' : 'Trade Cancelled';
+    title = 'Trade Cancelled';
     badgeClass = 'bg-destructive/15 text-destructive border-destructive/30';
     containerClass = 'bg-destructive/10 border-destructive/30 text-destructive dark:text-rose-200';
     IconComponent = XCircle;
@@ -345,7 +361,7 @@ function PaxonesSystemMessageBubble({
           const parts = line.split(/(@\w+)/g);
 
           return (
-            <p key={i} className={cn(trimmed.startsWith('Important:') || trimmed.startsWith('Reason:') ? 'font-semibold' : '')}>
+            <p key={i} className={cn(trimmed.startsWith('Important:') || trimmed.startsWith('Reason:') || trimmed.startsWith('• DO NOT') ? 'font-semibold' : '')}>
               {parts.map((part, pIdx) => {
                 if (part.startsWith('@')) {
                   return (
@@ -363,7 +379,7 @@ function PaxonesSystemMessageBubble({
 
       <div className="flex items-center justify-between mt-2 pt-1 border-t border-current/10 text-[10px] opacity-75 font-mono">
         <span>Verified Automated Event</span>
-        <span>{timeString}</span>
+        <span title={formatUtcDateTime(timestamp)} className="font-[Arial,Helvetica,sans-serif]">{timeString}</span>
       </div>
     </div>
   );
@@ -591,6 +607,7 @@ export function TradeChat({
     return url;
   };
 
+  const { timezone } = useUserTimezone();
   const tradeStatus = (trade?.status || 'active').toLowerCase();
   const isTradeStopped = ['released', 'cancelled', 'expired', 'completed'].includes(tradeStatus);
   const isDisputed = ['disputed', 'dispute'].includes(tradeStatus);
@@ -601,27 +618,69 @@ export function TradeChat({
 
   // Reverse countdown timer based on ad's time limit
   const timeLimitMinutes = Number(
+    trade?.payment_window_minutes ??
     trade?.payment_time_limit ??
     trade?.time_limit ??
+    trade?.ad?.payment_window_minutes ??
     trade?.ad?.payment_window ??
     trade?.ad?.payment_time_limit ??
     30
   );
 
   const expiresDate = useMemo(() => {
+    if (trade?.expires_at || trade?.expiresAt) {
+      return new Date(trade?.expires_at || trade?.expiresAt);
+    }
     const start = new Date(trade?.createdAt || trade?.created_at || Date.now()).getTime();
     return new Date(start + timeLimitMinutes * 60 * 1000);
-  }, [trade?.createdAt, trade?.created_at, timeLimitMinutes]);
+  }, [trade?.createdAt, trade?.created_at, trade?.expires_at, trade?.expiresAt, timeLimitMinutes]);
 
-  const countdown = useCountdown(
-    !isTradeStopped && (tradeStatus === 'active' || tradeStatus === 'pending')
-      ? expiresDate
-      : new Date(0)
-  );
+  const isCountdownActive = !isTradeStopped && (tradeStatus === 'active' || tradeStatus === 'pending');
+  const countdown = useCountdown(isCountdownActive ? expiresDate : new Date(0));
+  const isExpired = tradeStatus === 'expired' || (isCountdownActive && (countdown.isFinished || (expiresDate.getTime() > 0 && expiresDate.getTime() <= Date.now())));
+  const effectiveTradeStatus = isExpired ? 'expired' : tradeStatus;
 
   const tradeId = trade?.id;
   const isBuyer = currentUserId === (trade?.buyerId || trade?.buyer_id);
   const userRoleLabel = isBuyer ? 'Buyer' : 'Seller';
+
+  // Auto-expire trade and post system message if timer is finished
+  useEffect(() => {
+    let isMounted = true;
+    const triggerExpire = async () => {
+      if (isExpired && tradeStatus !== 'expired' && tradeId) {
+        try {
+          // Post official system message for expiration
+          await fetch(`/api/trades/${encodeURIComponent(tradeId)}/system-message`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              type: 'TRADE_EXPIRED',
+              metadata: {
+                buyerUsername: isBuyer ? 'You' : (opponent?.username || 'Buyer'),
+                sellerUsername: isBuyer ? (opponent?.username || 'Seller') : 'You',
+                coinAmount: trade?.crypto_amount || trade?.amount,
+                coinSymbol: trade?.crypto || trade?.asset_symbol || 'USDT'
+              }
+            })
+          }).catch(() => {});
+
+          // Trigger trade status update and backend expiration handler
+          await fetch(`/api/trades/${encodeURIComponent(tradeId)}/actions`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ action: 'EXPIRE_TRADE' })
+          });
+        } catch (e) {
+          console.error('Failed to auto-expire trade in chat:', e);
+        }
+      }
+    };
+    triggerExpire();
+    return () => {
+      isMounted = false;
+    };
+  }, [isExpired, tradeStatus, tradeId, isBuyer, opponent?.username, trade?.crypto_amount, trade?.amount, trade?.crypto, trade?.asset_symbol]);
 
   // Persist duration_seconds to trade record upon completion
   useEffect(() => {
@@ -655,20 +714,44 @@ export function TradeChat({
       if (error) {
         toast({ variant: 'destructive', title: 'Error loading messages', description: error.message });
       } else {
-        setMessages(
-          (data || []).map((m: any) => ({
-            id: m.id,
-            tradeId: m.trade_id,
-            senderId: m.sender_id,
-            senderUsername: m.sender_username,
-            message: m.message,
-            mediaUrl: m.media_url,
-            mediaType: m.media_type,
-            visibility: m.visibility || 'all',
-            isModerator: Boolean(m.is_moderator),
-            createdAt: m.created_at
-          }))
+        const mapped = (data || []).map((m: any) => ({
+          id: m.id,
+          tradeId: m.trade_id,
+          senderId: m.sender_id,
+          senderUsername: m.sender_username,
+          message: m.message,
+          mediaUrl: m.media_url,
+          mediaType: m.media_type,
+          visibility: m.visibility || 'all',
+          isModerator: Boolean(m.is_moderator),
+          createdAt: m.created_at
+        }));
+        setMessages(mapped);
+
+        // Automated System Message Implant: Ensure Escrow Secured notice exists for active trade
+        const hasInitiatedMsg = mapped.some((m: any) =>
+          typeof m.message === 'string' &&
+          (m.message.includes('PAXONES ESCROW SECURED') || m.message.includes('safely held in Paxones Escrow'))
         );
+
+        if (!hasInitiatedMsg && (tradeStatus === 'active' || tradeStatus === 'pending')) {
+          fetch(`/api/trades/${encodeURIComponent(tradeId)}/system-message`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              type: 'TRADE_INITIATED',
+              metadata: {
+                buyerUsername: isBuyer ? 'You' : (opponent?.username || 'Buyer'),
+                sellerUsername: isBuyer ? (opponent?.username || 'Seller') : 'You',
+                coinAmount: trade?.crypto_amount || trade?.amount,
+                coinSymbol: trade?.crypto || trade?.asset_symbol || 'USDT',
+                fiatAmount: trade?.fiat_amount || trade?.fiatAmount,
+                fiatCurrency: trade?.fiat_currency || trade?.fiatCurrency,
+                paymentMethod: trade?.payment_method || trade?.ad?.payment_method_name || trade?.ad?.payment_method
+              }
+            })
+          }).catch((err) => console.warn('Automated system initiation message dispatch warning:', err));
+        }
       }
       setAreMessagesLoading(false);
     };
@@ -941,7 +1024,7 @@ export function TradeChat({
             <div className="mt-1">
               <TradeChatTimer
                 createdAt={trade?.createdAt || trade?.created_at || new Date().toISOString()}
-                status={tradeStatus?.toUpperCase() || (isTradeStopped ? 'COMPLETED' : 'PENDING')}
+                status={effectiveTradeStatus.toUpperCase()}
                 durationSeconds={trade?.duration_seconds}
                 paymentWindowMinutes={timeLimitMinutes}
               />
@@ -984,12 +1067,31 @@ export function TradeChat({
             ) : (
               <div className="space-y-3">
                 {displayMessages.map((msg) => {
-                  if (msg.senderId === 'system') {
+                  const isSystemMsg =
+                    msg.senderId === 'system' ||
+                    msg.senderId === '00000000-0000-0000-0000-000000000000' ||
+                    msg.senderUsername === 'Paxones System' ||
+                    msg.senderUsername === 'System' ||
+                    Boolean(msg.isModerator && msg.senderUsername?.toLowerCase().includes('system')) ||
+                    Boolean(msg.isSystemMessage) ||
+                    Boolean(msg.is_system_message) ||
+                    (typeof msg.message === 'string' && (
+                      msg.message.includes('PAXONES ESCROW SECURED') ||
+                      msg.message.includes('TRADE EXPIRED') ||
+                      msg.message.includes('Paxones Security Reminder') ||
+                      msg.message.includes('Message blocked:') ||
+                      (msg.message.includes('sold') && msg.message.includes('successfully to @')) ||
+                      msg.message.includes('Trade is now in dispute.') ||
+                      msg.message.includes('Trade cancelled.')
+                    ));
+
+                  if (isSystemMsg) {
                     return (
                       <PaxonesSystemMessageBubble
                         key={msg.id}
                         msg={msg}
                         onOpenExternalLink={(url) => setSelectedExternalUrl(url)}
+                        timezone={timezone}
                       />
                     );
                   }
@@ -1077,8 +1179,8 @@ export function TradeChat({
                           </div>
                         )}
 
-                        <p className="text-[10px] font-mono opacity-70 text-right w-full mt-0.5">
-                          {toDate(msg.createdAt)?.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                        <p className="text-[10px] font-mono opacity-70 text-right w-full mt-0.5" title={formatUtcDateTime(msg.createdAt)}>
+                          {formatUserChatTime(msg.createdAt, timezone)}
                         </p>
                       </div>
                     </div>

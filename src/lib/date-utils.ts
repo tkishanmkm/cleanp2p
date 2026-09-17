@@ -110,11 +110,23 @@ export function setUserTimezonePreference(tz: string): void {
 
 /**
  * Parses a UTC offset string (e.g., "UTC+05:30", "UTC-04:00", "UTC±00:00", "UTC+08:00")
- * and returns the offset in minutes.
+ * or region name (e.g., "India", "IST", "Asia/Kolkata") and returns the offset in minutes.
  */
 export function parseUtcOffsetMinutes(tzString?: string | null): number {
   if (!tzString) return 0;
-  const match = tzString.match(/UTC([+-±])(\d{1,2})(?::(\d{2}))?/i);
+  const str = String(tzString).trim();
+
+  // Check for common regional strings like India
+  if (
+    str.toLowerCase().includes('india') ||
+    str.toUpperCase().includes('IST') ||
+    str.toLowerCase().includes('kolkata') ||
+    str.toLowerCase().includes('calcutta')
+  ) {
+    return 330; // UTC+05:30 = 330 minutes
+  }
+
+  const match = str.match(/UTC([+-±])(\d{1,2})(?::(\d{2}))?/i);
   if (!match) return 0;
   const sign = match[1];
   if (sign === '±') return 0;
@@ -122,6 +134,23 @@ export function parseUtcOffsetMinutes(tzString?: string | null): number {
   const minutes = parseInt(match[3] || '0', 10) || 0;
   const total = hours * 60 + minutes;
   return sign === '-' ? -total : total;
+}
+
+/**
+ * Returns a human-friendly display tag for the timezone (e.g., "IST (UTC+05:30)", "UTC±00:00")
+ */
+export function getFriendlyTzTag(tzString?: string | null): string {
+  const tz = tzString || getUserTimezonePreference();
+  if (
+    tz.toLowerCase().includes('india') ||
+    tz.toUpperCase().includes('IST') ||
+    tz.toLowerCase().includes('kolkata') ||
+    tz === 'UTC+05:30'
+  ) {
+    return 'IST (UTC+05:30)';
+  }
+  const match = tz.match(/UTC[+-±]\d{1,2}(?::\d{2})?/i);
+  return match ? match[0] : 'GMT';
 }
 
 /**
@@ -153,7 +182,7 @@ export function formatUserDateTime(
     const minutes = String(adjustedTime.getUTCMinutes()).padStart(2, '0');
     const seconds = String(adjustedTime.getUTCSeconds()).padStart(2, '0');
 
-    const tzTag = tz.startsWith('UTC') ? tz.split(' ')[0] : 'UTC';
+    const tzTag = getFriendlyTzTag(tz);
 
     if (compact) {
       return `${day} ${month}, ${hours}:${minutes} (${tzTag})`;
@@ -161,6 +190,70 @@ export function formatUserDateTime(
     return `${day} ${month} ${year}, ${hours}:${minutes}:${seconds} (${tzTag})`;
   } catch {
     return '—';
+  }
+}
+
+/**
+ * Formats date strictly using the clean Arial style in trade details
+ * Example: "09/17/26, 9:30 pm (IST)"
+ */
+export function formatUserDateTimeArial(
+  dateInput?: string | number | Date | null,
+  customTz?: string | null
+): string {
+  if (!dateInput) return 'N/A';
+  try {
+    const d = new Date(dateInput);
+    if (isNaN(d.getTime())) return 'N/A';
+
+    const tz = customTz || getUserTimezonePreference();
+    const offsetMinutes = parseUtcOffsetMinutes(tz);
+
+    const adjusted = new Date(d.getTime() + offsetMinutes * 60 * 1000);
+    const month = String(adjusted.getUTCMonth() + 1).padStart(2, '0');
+    const day = String(adjusted.getUTCDate()).padStart(2, '0');
+    const year = String(adjusted.getUTCFullYear()).slice(-2);
+
+    let hours = adjusted.getUTCHours();
+    const minutes = String(adjusted.getUTCMinutes()).padStart(2, '0');
+    const ampm = hours >= 12 ? 'pm' : 'am';
+    hours = hours % 12;
+    hours = hours ? hours : 12;
+
+    const tzTag = getFriendlyTzTag(tz);
+    return `${month}/${day}/${year}, ${hours}:${minutes} ${ampm} (${tzTag})`;
+  } catch {
+    return 'N/A';
+  }
+}
+
+/**
+ * Formats time for chat bubbles according to user timezone preference
+ * Example: "09:30 PM (IST)" or "21:30 (IST)"
+ */
+export function formatUserChatTime(
+  dateInput?: string | number | Date | null,
+  customTz?: string | null
+): string {
+  if (!dateInput) return '';
+  try {
+    const d = new Date(dateInput);
+    if (isNaN(d.getTime())) return '';
+
+    const tz = customTz || getUserTimezonePreference();
+    const offsetMinutes = parseUtcOffsetMinutes(tz);
+
+    const adjusted = new Date(d.getTime() + offsetMinutes * 60 * 1000);
+    let hours = adjusted.getUTCHours();
+    const minutes = String(adjusted.getUTCMinutes()).padStart(2, '0');
+    const ampm = hours >= 12 ? 'PM' : 'AM';
+    hours = hours % 12;
+    hours = hours ? hours : 12;
+
+    const tzTag = getFriendlyTzTag(tz);
+    return `${hours}:${minutes} ${ampm} (${tzTag})`;
+  } catch {
+    return '';
   }
 }
 
