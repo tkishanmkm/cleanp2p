@@ -865,8 +865,8 @@ export default function SettingsPage() {
     }
 
     if (is2faEnabled) {
-      if (!password2faOtp || password2faOtp.length < 6) {
-        notify('error', 'Mandatory 6-digit 2FA code is required to change password.');
+      if (!password2faOtp || password2faOtp.length < 4 || password2faOtp.length > 8) {
+        notify('error', 'Mandatory 4-8 digit 2FA code is required to change password.');
         return;
       }
       const verifyRes = await fetch('/api/auth/2fa/verify', {
@@ -876,7 +876,7 @@ export default function SettingsPage() {
       });
       const verifyData = await verifyRes.json();
       if (!verifyRes.ok || !verifyData.success) {
-        notify('error', verifyData.error || 'Invalid 6-digit 2FA code.');
+        notify('error', verifyData.error || 'Invalid 2FA authentication code.');
         return;
       }
     }
@@ -1003,7 +1003,7 @@ export default function SettingsPage() {
   // Disable 2FA & unenroll factors (Enforce mandatory OTP verification)
   const handleDisable2fa = async (codeToUse?: string) => {
     const otp = (codeToUse || disable2faOtp).replace(/\s+/g, '').trim();
-    if (!otp || otp.length < 6) {
+    if (!otp || otp.length < 4 || otp.length > 8) {
       setIsDisable2faModalOpen(true);
       return;
     }
@@ -1058,8 +1058,8 @@ export default function SettingsPage() {
     }
 
     if (is2faEnabled) {
-      if (!secQuestionOtp || secQuestionOtp.length < 6) {
-        notify('error', 'Mandatory 6-digit 2FA code is required to modify security questions.');
+      if (!secQuestionOtp || secQuestionOtp.length < 4 || secQuestionOtp.length > 8) {
+        notify('error', 'Mandatory 4-8 digit 2FA code is required to modify security questions.');
         return;
       }
       const verifyRes = await fetch('/api/auth/2fa/verify', {
@@ -1069,7 +1069,7 @@ export default function SettingsPage() {
       });
       const verifyData = await verifyRes.json();
       if (!verifyRes.ok || !verifyData.success) {
-        notify('error', verifyData.error || 'Invalid 6-digit 2FA code.');
+        notify('error', verifyData.error || 'Invalid 2FA authentication code.');
         return;
       }
     }
@@ -2258,9 +2258,9 @@ export default function SettingsPage() {
                               type="text"
                               id="input-password-2fa-otp"
                               value={password2faOtp}
-                              onChange={(e) => setPassword2faOtp(e.target.value.replace(/\D/g, '').slice(0, 6))}
-                              placeholder="Enter 6-digit OTP from Authenticator"
-                              maxLength={6}
+                              onChange={(e) => setPassword2faOtp(e.target.value.replace(/\D/g, '').slice(0, 8))}
+                              placeholder="Enter 4-8 digit OTP from Authenticator"
+                              maxLength={8}
                               className="w-full px-3.5 py-2.5 rounded-xl border border-input bg-background text-sm font-mono tracking-widest focus:ring-2 focus:ring-primary focus:border-primary focus:outline-none"
                               required
                             />
@@ -2623,9 +2623,9 @@ export default function SettingsPage() {
                               type="text"
                               id="input-sec-question-2fa-otp"
                               value={secQuestionOtp}
-                              onChange={(e) => setSecQuestionOtp(e.target.value.replace(/\D/g, '').slice(0, 6))}
-                              placeholder="Enter 6-digit OTP from Authenticator"
-                              maxLength={6}
+                              onChange={(e) => setSecQuestionOtp(e.target.value.replace(/\D/g, '').slice(0, 8))}
+                              placeholder="Enter 4-8 digit OTP from Authenticator"
+                              maxLength={8}
                               className="w-full px-3.5 py-2.5 rounded-xl border border-input bg-background text-sm font-mono tracking-widest focus:ring-2 focus:ring-primary focus:border-primary focus:outline-none"
                               required
                             />
@@ -3445,7 +3445,7 @@ export default function SettingsPage() {
               Security Verification Required
             </DialogTitle>
             <DialogDescription className="text-xs text-muted-foreground leading-relaxed pt-1">
-              To disable Two-Factor Authentication, enter the current 6-digit verification code from your authenticator app to verify ownership.
+              To disable Two-Factor Authentication, enter the current 4-8 digit verification code from your authenticator app to verify ownership.
             </DialogDescription>
           </DialogHeader>
 
@@ -3458,9 +3458,9 @@ export default function SettingsPage() {
                 type="text"
                 id="input-modal-disable-2fa-otp"
                 value={disable2faOtp}
-                onChange={(e) => setDisable2faOtp(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                onChange={(e) => setDisable2faOtp(e.target.value.replace(/\D/g, '').slice(0, 8))}
                 placeholder="000000"
-                maxLength={6}
+                maxLength={8}
                 autoFocus
                 className="w-full px-4 py-3 rounded-xl border border-input bg-background text-center text-lg font-mono tracking-widest font-bold focus:ring-2 focus:ring-primary focus:border-primary focus:outline-none"
               />
@@ -3485,7 +3485,7 @@ export default function SettingsPage() {
             <Button
               type="button"
               variant="destructive"
-              disabled={savingField === '2fa' || disable2faOtp.trim().length < 6}
+              disabled={savingField === '2fa' || disable2faOtp.trim().length < 4}
               onClick={() => handleDisable2fa(disable2faOtp)}
               className="flex-1 text-xs font-bold bg-rose-600 hover:bg-rose-700 text-white"
             >

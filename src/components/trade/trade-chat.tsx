@@ -555,7 +555,10 @@ export function TradeChat({
 
   const getMediaDisplayUrl = (url?: string) => {
     if (!url) return '';
-    if (url.includes('backblazeb2.com') || url.includes('/trades/')) {
+    if (url.startsWith('/api/') || url.startsWith('data:') || url.startsWith('blob:')) {
+      return url;
+    }
+    if (url.includes('backblazeb2.com') || url.startsWith('trades/')) {
       return `/api/trade/media?url=${encodeURIComponent(url)}`;
     }
     return url;

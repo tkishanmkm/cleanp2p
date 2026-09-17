@@ -115,11 +115,29 @@ export async function POST(
     else if (file.type.startsWith('video/')) fileType = 'video';
     else fileType = 'document';
 
-    // Video limit check
+    // Size limit checks
     if (fileType === 'video' && file.size > 30 * 1024 * 1024) {
       return NextResponse.json(
         {
           error: 'Video exceeds 30 MB limit. Compress your file or share via Google Drive/Dropbox.',
+        },
+        { status: 400 }
+      );
+    }
+
+    if (fileType === 'image' && file.size > 5 * 1024 * 1024) {
+      return NextResponse.json(
+        {
+          error: 'Image exceeds 5 MB limit. Please select a smaller photo or screenshot.',
+        },
+        { status: 400 }
+      );
+    }
+
+    if (fileType === 'document' && file.size > 5 * 1024 * 1024) {
+      return NextResponse.json(
+        {
+          error: 'Document exceeds 5 MB limit. Please upload a smaller document.',
         },
         { status: 400 }
       );

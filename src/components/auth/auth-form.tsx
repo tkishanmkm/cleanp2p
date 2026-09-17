@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
 import Link from 'next/link';
 import { Logo } from '@/components/logo';
-import { Mail, Lock, User, Calendar, ArrowRight, AlertTriangle, ShieldCheck, Loader2 } from 'lucide-react';
+import { Mail, Lock, User, Calendar, ArrowRight, AlertTriangle, ShieldCheck, Loader2, Shield } from 'lucide-react';
 import { generateUniqueUsername } from '@/lib/auth';
 import { getURL } from '@/utils/get-url';
 
@@ -30,6 +30,12 @@ export function AuthForm({ mode }: AuthFormProps) {
   const [signupSuccess, setSignupSuccess] = useState(false);
   const [showMinorModal, setShowMinorModal] = useState(false);
   const [isDeletingAccount, setIsDeletingAccount] = useState(false);
+
+  // 2FA Challenge States during login
+  const [show2FAStep, setShow2FAStep] = useState(false);
+  const [twoFaCode, setTwoFaCode] = useState('');
+  const [verifying2FA, setVerifying2FA] = useState(false);
+  const [pendingUserId, setPendingUserId] = useState<string | null>(null);
 
   // Social OAuth Handler (Google & Discord)
   const handleOAuthSignIn = async (provider: 'google' | 'discord') => {
@@ -206,11 +212,11 @@ export function AuthForm({ mode }: AuthFormProps) {
           return;
         }
 
-        // Check if account has been suspended
+        // Check if account has been suspended or requires 2FA
         if (data.user) {
           const { data: profile } = await supabase
             .from('profiles')
-            .select('status, is_suspended, suspension_reason')
+            .select('status, is_suspended, suspension_reason, is_2fa_enabled, is_mfa_enabled')
             .eq('id', data.user.id)
             .maybeSingle();
 
@@ -221,6 +227,13 @@ export function AuthForm({ mode }: AuthFormProps) {
               profile.suspension_reason ||
                 'This account has been suspended due to duplicate identity or terms violation.'
             );
+            return;
+          }
+
+          if (profile?.is_2fa_enabled || profile?.is_mfa_enabled) {
+            setShow2FAStep(true);
+            setPendingUserId(data.user.id);
+            setLoading(false);
             return;
           }
         }
@@ -236,6 +249,114 @@ export function AuthForm({ mode }: AuthFormProps) {
     } finally {
       setLoading(false);
     }
+  }
+
+  const handleVerifyLogin2FA = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const cleanCode = twoFaCode.replace(/[\s-]+/g, '').trim();
+    if (!cleanCode || cleanCode.length < 4 || cleanCode.length > 8) {
+      setErrorMsg('Please enter a valid 4-8 digit OTP code from your authenticator app.');
+      return;
+    }
+
+    setVerifying2FA(true);
+    setErrorMsg('');
+    try {
+      const res = await fetch('/api/auth/2fa/verify', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          code: cleanCode,
+          userId: pendingUserId,
+        }),
+      });
+      const resJson = await res.json();
+      if (!res.ok || !resJson.success) {
+        throw new Error(resJson.error || 'Invalid 2FA authentication code. Please check your authenticator and try again.');
+      }
+
+      window.location.href = '/buy';
+    } catch (err: any) {
+      setErrorMsg(err.message || '2FA verification failed.');
+    } finally {
+      setVerifying2FA(false);
+    }
+  };
+
+  const handleCancel2FA = async () => {
+    await supabase.auth.signOut().catch(() => {});
+    setShow2FAStep(false);
+    setTwoFaCode('');
+    setPendingUserId(null);
+    setErrorMsg('');
+  };
+
+  if (show2FAStep) {
+    return (
+      <div className="w-full max-w-md mx-auto p-6 sm:p-8 bg-white dark:bg-[#0f1423] border border-slate-200 dark:border-[#1e2640] rounded-2xl text-slate-900 dark:text-slate-100 shadow-xl dark:shadow-2xl">
+        <div className="flex flex-col items-center justify-center text-center mb-6">
+          <div className="w-14 h-14 rounded-full bg-blue-500/10 text-blue-600 dark:text-blue-400 flex items-center justify-center mx-auto mb-3 border border-blue-500/20">
+            <Shield className="w-7 h-7" />
+          </div>
+          <h2 className="text-xl font-bold text-slate-900 dark:text-white">Two-Factor Authentication</h2>
+          <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
+            Open your authenticator app and enter your 4-8 digit OTP code to complete sign in.
+          </p>
+        </div>
+
+        {errorMsg && (
+          <div className="mb-4 p-3 bg-red-50 dark:bg-red-500/10 border border-red-200 dark:border-red-500/30 rounded-xl text-red-600 dark:text-red-400 text-xs">
+            {errorMsg}
+          </div>
+        )}
+
+        <form onSubmit={handleVerifyLogin2FA} className="space-y-4">
+          <div>
+            <label htmlFor="login-2fa-otp" className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5">
+              Authenticator OTP Code
+            </label>
+            <input
+              id="login-2fa-otp"
+              type="text"
+              inputMode="numeric"
+              autoComplete="one-time-code"
+              autoFocus
+              maxLength={8}
+              placeholder="e.g. 123456"
+              value={twoFaCode}
+              onChange={(e) => setTwoFaCode(e.target.value)}
+              className="w-full bg-slate-50 dark:bg-[#07090e] border border-slate-200 dark:border-[#1e2640] rounded-xl px-4 py-3 text-center text-xl font-mono tracking-widest text-slate-900 dark:text-white placeholder:text-slate-400 dark:placeholder:text-slate-600 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition font-bold"
+            />
+          </div>
+
+          <button
+            type="submit"
+            disabled={verifying2FA || twoFaCode.trim().length < 4}
+            className="w-full py-3 px-4 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-xl shadow-md transition-colors duration-200 disabled:opacity-50 cursor-pointer text-sm flex items-center justify-center gap-2"
+          >
+            {verifying2FA ? (
+              <>
+                <Loader2 className="w-4 h-4 animate-spin" />
+                <span>Verifying Code...</span>
+              </>
+            ) : (
+              <>
+                <ShieldCheck className="w-4 h-4" />
+                <span>Verify &amp; Log In</span>
+              </>
+            )}
+          </button>
+
+          <button
+            type="button"
+            onClick={handleCancel2FA}
+            className="w-full py-2.5 px-4 text-xs font-medium text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white transition-colors cursor-pointer"
+          >
+            Cancel and Return to Sign In
+          </button>
+        </form>
+      </div>
+    );
   }
 
   if (signupSuccess) {

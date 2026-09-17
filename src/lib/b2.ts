@@ -66,7 +66,7 @@ export const B2_BUCKET = process.env.B2_BUCKET_NAME || 'thepax';
 
 /**
  * Compresses and resizes Display Pictures (DP / Avatars)
- * Converts to high-efficiency WebP, 80% quality, max 512x512 resolution.
+ * Converts to ultra-efficient WebP, 75% quality, max 256x256 resolution (approx 10-25 KB).
  */
 export async function compressAvatar(buffer: Buffer): Promise<{
   buffer: Buffer;
@@ -75,11 +75,11 @@ export async function compressAvatar(buffer: Buffer): Promise<{
 }> {
   try {
     const compressed = await sharp(buffer)
-      .resize(512, 512, {
+      .resize(256, 256, {
         fit: 'cover',
         withoutEnlargement: true,
       })
-      .webp({ quality: 80, effort: 4 })
+      .webp({ quality: 75, effort: 6 })
       .toBuffer();
 
     return {

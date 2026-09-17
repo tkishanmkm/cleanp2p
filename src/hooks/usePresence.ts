@@ -1,10 +1,10 @@
 'use client';
 
 import { useEffect } from 'react';
-import { createClientComponentClient } from '@supabase/auth-helpers-nextjs';
+import { createClient } from '@/lib/supabase/client';
 
 export function usePresence(userId?: string) {
-  const supabase = createClientComponentClient();
+  const supabase = createClient();
 
   useEffect(() => {
     if (!userId) return;

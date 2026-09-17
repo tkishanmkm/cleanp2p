@@ -23,7 +23,7 @@ import {
 } from '@/components/ui/form';
 import { CryptoCurrency } from '@/lib/types';
 import { useToast } from '@/hooks/use-toast';
-import { Loader2, ArrowRight, UserCheck, Sparkles, Percent, Ban, AlertCircle } from 'lucide-react';
+import { Loader2, ArrowRight, UserCheck, Sparkles, Percent, Ban, AlertCircle, Shield } from 'lucide-react';
 import { useWallet } from '@/context/wallet-context';
 import { useAuth } from '@/components/providers/auth-provider';
 import { supabase } from '@/lib/supabase/client';
@@ -69,6 +69,10 @@ export function TransferDialog({ open, onOpenChange, asset }: TransferDialogProp
       (senderProfile as any).account_status === 'banned' ||
       (senderProfile as any).account_status === 'restricted'
     );
+  }, [senderProfile]);
+
+  const is2faActive = useMemo(() => {
+    return Boolean(senderProfile?.is_2fa_enabled || (senderProfile as any)?.is_mfa_enabled);
   }, [senderProfile]);
 
   const form = useForm<TransferFormValues>({
@@ -224,6 +228,16 @@ export function TransferDialog({ open, onOpenChange, asset }: TransferDialogProp
         message: `Insufficient balance. Total deduction with 1.5% fee is ${totalDeduction} ${asset}, but available is ${availableBalance} ${asset}.`,
       });
       return;
+    }
+
+    if (is2faActive) {
+      const otp = (values.totpCode || '').trim();
+      if (!otp || otp.length < 4 || otp.length > 8) {
+        form.setError('totpCode', {
+          message: 'Valid 4-8 digit authenticator OTP code is required for transfers.',
+        });
+        return;
+      }
     }
 
     setIsLoading(true);
@@ -400,6 +414,35 @@ export function TransferDialog({ open, onOpenChange, asset }: TransferDialogProp
                 </p>
               )}
             </div>
+
+            {/* 2FA OTP Field when Two-Factor Authentication is enabled */}
+            {is2faActive && (
+              <FormField
+                control={form.control}
+                name="totpCode"
+                render={({ field }) => (
+                  <FormItem className="space-y-1.5 p-3 rounded-xl border border-amber-500/20 bg-amber-500/5">
+                    <FormLabel className="text-xs font-semibold flex items-center gap-1.5 text-amber-700 dark:text-amber-400">
+                      <Shield className="h-3.5 w-3.5" />
+                      Two-Factor Authentication (2FA) OTP
+                    </FormLabel>
+                    <FormControl>
+                      <Input
+                        id="transfer-totp-input"
+                        type="text"
+                        inputMode="numeric"
+                        autoComplete="one-time-code"
+                        maxLength={8}
+                        placeholder="Enter 4-8 digit authenticator OTP"
+                        {...field}
+                        className="font-mono text-center tracking-widest bg-background"
+                      />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+            )}
 
             <Button
               type="submit"

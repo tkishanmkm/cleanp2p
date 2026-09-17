@@ -26,11 +26,28 @@ export async function POST(req: NextRequest) {
     else if (fileType.startsWith('video/')) mediaType = 'video';
     else mediaType = 'document';
 
-    // Rule: Max video size 30 MB
+    // Rule: File size limits (30 MB video, 5 MB image/picture, 5 MB doc)
     const MAX_VIDEO_SIZE = 30 * 1024 * 1024; // 30 MB
+    const MAX_IMAGE_SIZE = 5 * 1024 * 1024;  // 5 MB
+    const MAX_DOC_SIZE = 5 * 1024 * 1024;    // 5 MB
+
     if (mediaType === 'video' && file.size > MAX_VIDEO_SIZE) {
       return NextResponse.json(
-        { error: 'Video size exceeds the 30 MB limit. Please compress or trim the video.' },
+        { error: 'Video size exceeds the 30 MB limit. Please compress or trim your video.' },
+        { status: 400 }
+      );
+    }
+
+    if (mediaType === 'image' && file.size > MAX_IMAGE_SIZE) {
+      return NextResponse.json(
+        { error: 'Image size exceeds the 5 MB limit. Please choose a smaller photo or screenshot.' },
+        { status: 400 }
+      );
+    }
+
+    if (mediaType === 'document' && file.size > MAX_DOC_SIZE) {
+      return NextResponse.json(
+        { error: 'Document size exceeds the 5 MB limit. Please upload a smaller document.' },
         { status: 400 }
       );
     }

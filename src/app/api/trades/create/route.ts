@@ -1,5 +1,6 @@
 import { createClient } from '@/utils/supabase/server';
 import { NextRequest, NextResponse } from 'next/server';
+import { generateTradeId } from '@/lib/id-generator';
 
 export const dynamic = 'force-dynamic';
 
@@ -143,7 +144,7 @@ export async function POST(req: NextRequest) {
       : ['Bank Transfer'];
     const paymentMethod = paymentMethods[0] || 'Bank Transfer';
 
-    const shortId = 'TRD-' + Math.random().toString(36).substring(2, 9).toUpperCase();
+    const shortId = generateTradeId();
 
     // 4. Insert Trade into database safely
     let tradeResult: any = null;

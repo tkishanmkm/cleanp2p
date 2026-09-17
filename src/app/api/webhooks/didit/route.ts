@@ -176,12 +176,11 @@ export async function POST(req: NextRequest) {
         }
       }
 
-      // Duplicate Prevention Rule: Check if another account is already verified with this identity
+      // Duplicate Prevention Rule: Check if identity belongs to ANY other account (approved, banned, or existing)
       let duplicateQuery = supabase
         .from('profiles')
-        .select('id, email, username, full_name, date_of_birth, id_document_number')
-        .neq('id', userId)
-        .eq('kyc_status', 'approved');
+        .select('id, email, username, full_name, date_of_birth, id_document_number, kyc_status, is_banned')
+        .neq('id', userId);
 
       const orConditions: string[] = [];
       if (documentNumber) {
@@ -195,7 +194,7 @@ export async function POST(req: NextRequest) {
         const { data: existingMatches } = await duplicateQuery.or(orConditions.join(','));
 
         if (existingMatches && existingMatches.length > 0) {
-          console.error(`[DIDIT WEBHOOK] Duplicate identity detected for user ${userId}. Matching existing verified user(s):`, existingMatches);
+          console.error(`[DIDIT WEBHOOK] Duplicate identity detected for user ${userId}. Matching existing user(s):`, existingMatches);
 
           // DUPLICATE DETECTED: Ban the user immediately with explicit reason
           await supabase.from('profiles').update({
@@ -203,13 +202,13 @@ export async function POST(req: NextRequest) {
             status: 'banned',
             is_suspended: true,
             kyc_status: 'banned',
-            suspension_reason: 'Duplicate identity detected: An approved verified identity with matching government ID or legal name and date of birth is already registered on PaxOnes.',
+            suspension_reason: 'Multi-account violation: Attempting KYC with a government ID or legal identity already associated with another PaxOnes account.',
             updated_at: new Date().toISOString(),
           }).eq('id', userId);
 
           return new NextResponse(JSON.stringify({
             status: 'banned',
-            message: 'Duplicate identity detected. User banned.',
+            message: 'Duplicate identity detected across multiple accounts. Account permanently banned.',
           }), {
             status: 200,
             headers: { 'Content-Type': 'application/json' },
@@ -222,6 +221,7 @@ export async function POST(req: NextRequest) {
         kyc_status: 'approved',
         is_kyc_locked: true,
         id_verified: true,
+        kyc_retry_count: 0,
         updated_at: new Date().toISOString(),
       };
 
@@ -252,10 +252,37 @@ export async function POST(req: NextRequest) {
 
       console.log(`[DIDIT WEBHOOK] KYC successfully approved and locked for user ${userId}`);
     } else if (overallStatus === 'declined' || overallStatus === 'rejected') {
-      await supabase.from('profiles').update({
-        kyc_status: 'declined',
-        updated_at: new Date().toISOString(),
-      }).eq('id', userId);
+      // 3-Attempt Retry Logic
+      const { data: userProfile } = await supabase
+        .from('profiles')
+        .select('kyc_retry_count, kyc_attempts')
+        .eq('id', userId)
+        .maybeSingle();
+
+      const currentRetries = Number(userProfile?.kyc_retry_count || userProfile?.kyc_attempts || 0);
+      const newRetries = currentRetries + 1;
+
+      if (newRetries >= 3) {
+        await supabase.from('profiles').update({
+          kyc_status: 'permanently_rejected',
+          kyc_retry_count: newRetries,
+          kyc_attempts: newRetries,
+          is_kyc_locked: true,
+          suspension_reason: 'KYC failed 3 consecutive times. Identity verification is permanently locked.',
+          updated_at: new Date().toISOString(),
+        }).eq('id', userId);
+
+        console.warn(`[DIDIT WEBHOOK] User ${userId} exceeded 3 KYC attempts. Verification permanently locked.`);
+      } else {
+        await supabase.from('profiles').update({
+          kyc_status: 'rejected',
+          kyc_retry_count: newRetries,
+          kyc_attempts: newRetries,
+          updated_at: new Date().toISOString(),
+        }).eq('id', userId);
+
+        console.log(`[DIDIT WEBHOOK] User ${userId} KYC rejected. Attempt ${newRetries}/3 recorded.`);
+      }
     }
 
     return new NextResponse(JSON.stringify({ received: true, status: overallStatus }), {

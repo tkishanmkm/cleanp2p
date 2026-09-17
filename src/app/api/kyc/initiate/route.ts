@@ -21,7 +21,7 @@ export async function POST(req: NextRequest) {
     // 1. Fetch user status
     const { data: profile, error } = await supabase
       .from('profiles')
-      .select('kyc_status, is_banned')
+      .select('kyc_status, is_banned, kyc_retry_count, kyc_attempts')
       .eq('id', userId)
       .single();
 
@@ -29,9 +29,18 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'User profile not found' }, { status: 404 });
     }
 
-    // Rule: Immediately reject if already banned or approved
+    // Rule: Immediately reject if already banned
     if (profile.is_banned || profile.kyc_status === 'banned') {
       return NextResponse.json({ error: 'Account is banned from performing KYC' }, { status: 403 });
+    }
+
+    // Rule: Reject if 3 retries exceeded or permanently rejected
+    const retryCount = Number(profile.kyc_retry_count || profile.kyc_attempts || 0);
+    if (profile.kyc_status === 'permanently_rejected' || retryCount >= 3) {
+      return NextResponse.json({
+        error: 'KYC_LIMIT_REACHED',
+        message: 'Maximum KYC retry attempts (3/3) exceeded. Your verification is permanently locked. Please contact support.',
+      }, { status: 403 });
     }
 
     if (profile.kyc_status === 'approved') {

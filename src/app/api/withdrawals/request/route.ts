@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
 import { createClient } from '@/lib/supabase/server';
+import { verify2FAOTP } from '@/lib/2fa';
 
 export const dynamic = 'force-dynamic';
 
@@ -96,8 +97,12 @@ export async function POST(req: Request) {
     if (profile?.is_2fa_enabled) {
       if (!totpCode || typeof totpCode !== 'string' || !/^\d{4,8}$/.test(totpCode.trim())) {
         return NextResponse.json({
-          error: 'TWO_FACTOR_REQUIRED: Valid 2FA TOTP code is required to execute a withdrawal.'
+          error: 'TWO_FACTOR_REQUIRED: Valid 4-8 digit 2FA TOTP code is required to execute a withdrawal.'
         }, { status: 403 });
+      }
+      const isValidTotp = verify2FAOTP(profile.two_factor_secret, totpCode.trim(), true);
+      if (!isValidTotp) {
+        return NextResponse.json({ error: 'Invalid 2FA authentication code.' }, { status: 401 });
       }
     }
 

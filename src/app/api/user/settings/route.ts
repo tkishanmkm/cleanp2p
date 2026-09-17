@@ -513,16 +513,30 @@ export async function PATCH(req: NextRequest) {
         // 2FA check
         const { data: currentProf } = await admin
           .from('profiles')
-          .select('is_2fa_enabled')
+          .select('is_2fa_enabled, is_mfa_enabled, two_factor_secret, security_answer_hash')
           .eq('id', user.id)
           .maybeSingle();
 
-        if (currentProf?.is_2fa_enabled) {
-          if (!code || !/^\d{6}$/.test(code.toString().trim())) {
+        const is2faActive = Boolean(currentProf?.is_2fa_enabled || currentProf?.is_mfa_enabled);
+        const userSecret = currentProf?.two_factor_secret || currentProf?.security_answer_hash;
+
+        if (is2faActive) {
+          const cleanCode = code ? code.toString().trim() : '';
+          if (!cleanCode || !/^\d{4,8}$/.test(cleanCode)) {
             return NextResponse.json({
-              error: 'Security Enforcement: 6-digit 2FA OTP code is required to change your password.',
+              error: 'Security Enforcement: 4-8 digit 2FA OTP code is required to change your password.',
               requires2FA: true,
             }, { status: 400 });
+          }
+
+          if (userSecret) {
+            const isValid = verify2FAOTP(userSecret, cleanCode, true);
+            if (!isValid) {
+              return NextResponse.json({
+                error: 'Invalid 2FA authentication code.',
+                requires2FA: true,
+              }, { status: 401 });
+            }
           }
         }
 
