@@ -180,23 +180,21 @@ export default function IdentitySettingsPage() {
               <KYCVerifyButton
                 userId={profile?.id || ''}
                 initialStatus={profile?.kyc_status || 'NOT_STARTED'}
-                initialAttempts={profile?.kyc_attempts ?? 0}
+                initialAttempts={profile?.kyc_attempts ?? profile?.kyc_retry_count ?? 0}
                 onSuccess={() => {
                   loadProfile();
-                  setToastMessage({ type: 'success', text: 'Verification completed! Processing status...' });
+                  setToastMessage({ type: 'success', text: 'Verification submitted! Processing status...' });
                 }}
               />
-              <a
-                href={`${DIDIT_URL}?client_reference_id=${profile?.id}`}
-                target="_blank"
-                rel="noopener noreferrer"
+              <Link
+                href="/support?reason=kyc_help"
                 className="inline-flex items-center gap-1.5 px-4 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 font-semibold text-xs rounded-lg border border-slate-700 transition"
               >
-                Open in new tab <ExternalLink className="w-3.5 h-3.5 text-slate-400" />
-              </a>
+                Contact Support
+              </Link>
             </div>
             <p className="text-[11px] text-slate-400">
-              Unverified accounts are limited to $1,000 in total cumulative trades. Verification is instant and unlocks unlimited volume.
+              Unverified accounts are limited to $1,000 in total cumulative trades. Verification is processed via Didit. If rejected, you have 3 attempts per 24 hours before needing support assistance.
             </p>
           </div>
         )}

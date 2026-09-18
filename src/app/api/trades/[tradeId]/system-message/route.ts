@@ -119,6 +119,18 @@ export async function POST(
         return NextResponse.json({ success: true, message: 'Initiation message already present', id: existingInit.id });
       }
     } else if (type === 'TRADE_EXPIRED') {
+      // Guard: Do not generate an Expired system message if trade is already paid, completed, or disputed
+      const isPaidOrCompleted = Boolean(
+        trade.paid_at ||
+        trade.marked_paid_at ||
+        trade.payment_confirmed_at ||
+        trade.escrow_status === 'PAID' ||
+        ['paid', 'buyer_marked_paid', 'payment_sent', 'released', 'completed', 'disputed'].includes((trade.status || '').toLowerCase())
+      );
+      if (isPaidOrCompleted) {
+        return NextResponse.json({ success: true, message: 'Trade is paid or completed. Expiration message suppressed.' });
+      }
+
       const { data: existingExp } = await supabaseAdmin
         .from('trade_messages')
         .select('id')

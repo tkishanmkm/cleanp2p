@@ -53,7 +53,7 @@ export default function AdminMainWalletPage() {
       if (userIds.length > 0) {
         const { data: profs } = await supabase
           .from("profiles")
-          .select("id, email, user_custom_id")
+          .select("id, email, username")
           .in("id", userIds);
 
         const profMap = new Map((profs || []).map((p: any) => [p.id, p]));
@@ -69,7 +69,7 @@ export default function AdminMainWalletPage() {
       address: qw.address || qw.destination_address || "—",
       profiles: qw.profiles || {
         email: "user@example.com",
-        user_custom_id: qw.user_id ? String(qw.user_id).slice(0, 8) : "UNKNOWN",
+        username: qw.user_id ? String(qw.user_id).slice(0, 8) : "UNKNOWN",
       },
     }));
 
@@ -137,7 +137,7 @@ export default function AdminMainWalletPage() {
                 ) : (
                   queuedWithdrawals.map((qw) => (
                     <tr key={qw.id} className="border-t">
-                      <td className="p-3 font-mono">{qw.profiles?.user_custom_id}</td>
+                      <td className="p-3 font-mono">@{qw.profiles?.username}</td>
                       <td className="p-3 uppercase">{qw.currency}</td>
                       <td className="p-3">{qw.amount}</td>
                       <td className="p-3 font-mono text-xs">{qw.address}</td>

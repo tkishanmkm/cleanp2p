@@ -134,32 +134,71 @@ export async function POST(
     if (action === 'EXPIRE_TRADE') {
       const now = new Date().toISOString();
 
-      // 1. Update trade status to 'expired' (valid PostgreSQL enum value)
-      let q = supabase.from('trades').update({
-        status: 'expired',
-        updated_at: now,
-      });
-      if (isActualUuid) q = q.eq('id', actualTradeId);
-      else q = q.eq('trade_id', tradeId);
-      let { error: updateError } = await q;
-
-      // Defensive fallback if enum in Postgres is uppercase 'EXPIRED'
-      if (updateError && (updateError.message?.includes('enum') || updateError.code === '22P02')) {
-        let qUpper = supabase.from('trades').update({
-          status: 'EXPIRED',
-          updated_at: now,
-        });
-        if (isActualUuid) qUpper = qUpper.eq('id', actualTradeId);
-        else qUpper = qUpper.eq('trade_id', tradeId);
-        const resUpper = await qUpper;
-        if (!resUpper.error) {
-          updateError = null;
-        }
+      // Guard: If trade is already marked paid, released, completed, or disputed, DO NOT expire
+      const isAlreadyPaid = Boolean(
+        trade?.paid_at ||
+        trade?.marked_paid_at ||
+        trade?.payment_confirmed_at ||
+        trade?.escrow_status === 'PAID' ||
+        ['paid', 'buyer_marked_paid', 'payment_sent'].includes((trade?.status || '').toLowerCase())
+      );
+      if (isAlreadyPaid) {
+        return NextResponse.json(
+          { success: false, message: 'Trade was marked as paid and cannot be expired.' },
+          { status: 400 }
+        );
       }
 
-      if (updateError) {
-        console.error('Failed to update trade status to expired:', updateError);
-        return NextResponse.json({ error: updateError.message || 'Failed to expire trade.' }, { status: 400 });
+      if (['completed', 'released', 'disputed', 'cancelled', 'expired'].includes((trade?.status || '').toLowerCase())) {
+        return NextResponse.json(
+          { success: false, message: `Trade is already ${trade.status} and cannot be expired.` },
+          { status: 400 }
+        );
+      }
+
+      // Try RPC first
+      let rpcSucceeded = false;
+      try {
+        const { data: rpcData, error: rpcError } = await supabase.rpc('expire_p2p_trade', {
+          p_trade_id: actualTradeId,
+        });
+        if (!rpcError && rpcData?.success) {
+          rpcSucceeded = true;
+        }
+      } catch (e) {
+        console.warn('expire_p2p_trade RPC call warning:', e);
+      }
+
+      if (!rpcSucceeded) {
+        // 1. Update trade status to 'expired' (valid PostgreSQL enum value)
+        let q = supabase.from('trades').update({
+          status: 'expired',
+          escrow_status: 'EXPIRED',
+          updated_at: now,
+        });
+        if (isActualUuid) q = q.eq('id', actualTradeId);
+        else q = q.eq('trade_id', tradeId);
+        let { error: updateError } = await q;
+
+        // Defensive fallback if enum in Postgres is uppercase 'EXPIRED'
+        if (updateError && (updateError.message?.includes('enum') || updateError.code === '22P02')) {
+          let qUpper = supabase.from('trades').update({
+            status: 'EXPIRED',
+            escrow_status: 'EXPIRED',
+            updated_at: now,
+          });
+          if (isActualUuid) qUpper = qUpper.eq('id', actualTradeId);
+          else qUpper = qUpper.eq('trade_id', tradeId);
+          const resUpper = await qUpper;
+          if (!resUpper.error) {
+            updateError = null;
+          }
+        }
+
+        if (updateError) {
+          console.error('Failed to update trade status to expired:', updateError);
+          return NextResponse.json({ error: updateError.message || 'Failed to expire trade.' }, { status: 400 });
+        }
       }
 
       // 2. Unlock/Refund seller escrow balance safely across all balance tables if seller_id is present
@@ -376,7 +415,112 @@ export async function POST(
       }
 
       const coinAmount = Number(trade?.amount ?? trade?.crypto_amount ?? 0);
-      const coinSymbol = trade?.crypto ?? trade?.asset_symbol ?? 'BTC';
+      const coinSymbol = (trade?.crypto ?? trade?.asset_symbol ?? 'USDT').toUpperCase();
+      const feeAmount = Number(trade?.escrow_fee ?? trade?.platform_fee ?? 0);
+      const totalSellerDeduct = coinAmount + feeAmount;
+
+      // 1. Deduct seller locked escrow across tables
+      try {
+        if (trade?.seller_id && totalSellerDeduct > 0) {
+          const { data: sUW } = await supabase
+            .from('user_wallets')
+            .select('*')
+            .eq('user_id', trade.seller_id)
+            .ilike('asset_symbol', coinSymbol)
+            .maybeSingle();
+
+          if (sUW) {
+            await supabase
+              .from('user_wallets')
+              .update({
+                locked_balance: Math.max(0, Number(sUW.locked_balance || 0) - totalSellerDeduct),
+                reserved_balance: Math.max(0, Number(sUW.reserved_balance || 0) - totalSellerDeduct),
+                updated_at: now
+              })
+              .eq('id', sUW.id);
+          }
+
+          const { data: sWA } = await supabase
+            .from('wallet_assets')
+            .select('*')
+            .eq('user_id', trade.seller_id)
+            .ilike('asset_symbol', coinSymbol)
+            .maybeSingle();
+
+          if (sWA) {
+            await supabase
+              .from('wallet_assets')
+              .update({
+                locked_escrow: Math.max(0, Number(sWA.locked_escrow ?? sWA.locked_balance ?? 0) - totalSellerDeduct),
+                reserved_balance: Math.max(0, Number(sWA.reserved_balance ?? 0) - totalSellerDeduct),
+                updated_at: now
+              })
+              .eq('id', sWA.id);
+          }
+        }
+
+        // 2. Credit buyer available balance across tables
+        if (trade?.buyer_id && coinAmount > 0) {
+          const { data: bUW } = await supabase
+            .from('user_wallets')
+            .select('*')
+            .eq('user_id', trade.buyer_id)
+            .ilike('asset_symbol', coinSymbol)
+            .maybeSingle();
+
+          if (bUW) {
+            await supabase
+              .from('user_wallets')
+              .update({
+                available_balance: Number(bUW.available_balance || 0) + coinAmount,
+                balance: Number(bUW.balance || 0) + coinAmount,
+                updated_at: now
+              })
+              .eq('id', bUW.id);
+          } else {
+            await supabase
+              .from('user_wallets')
+              .insert({
+                user_id: trade.buyer_id,
+                asset_symbol: coinSymbol,
+                available_balance: coinAmount,
+                locked_balance: 0,
+                balance: coinAmount,
+                created_at: now,
+                updated_at: now
+              });
+          }
+
+          const { data: bWA } = await supabase
+            .from('wallet_assets')
+            .select('*')
+            .eq('user_id', trade.buyer_id)
+            .ilike('asset_symbol', coinSymbol)
+            .maybeSingle();
+
+          if (bWA) {
+            await supabase
+              .from('wallet_assets')
+              .update({
+                available: Number(bWA.available ?? bWA.balance ?? 0) + coinAmount,
+                updated_at: now
+              })
+              .eq('id', bWA.id);
+          }
+        }
+
+        // 3. Increment completed_trades in profiles
+        if (trade?.seller_id) {
+          const { data: sP } = await supabase.from('profiles').select('completed_trades').eq('id', trade.seller_id).maybeSingle();
+          await supabase.from('profiles').update({ completed_trades: (sP?.completed_trades || 0) + 1 }).eq('id', trade.seller_id);
+        }
+        if (trade?.buyer_id) {
+          const { data: bP } = await supabase.from('profiles').select('completed_trades').eq('id', trade.buyer_id).maybeSingle();
+          await supabase.from('profiles').update({ completed_trades: (bP?.completed_trades || 0) + 1 }).eq('id', trade.buyer_id);
+        }
+      } catch (balErr) {
+        console.warn('Balance sync on escrow release warning:', balErr);
+      }
 
       await insertPaxonesSystemMessage(supabase, {
         tradeId: actualTradeId,

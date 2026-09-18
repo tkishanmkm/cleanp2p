@@ -76,7 +76,8 @@ export async function POST(req: NextRequest) {
       .update({
         country,
         address,
-        kyc_status: 'pending',
+        kyc_status: 'in_review',
+        kyc_submitted_at: new Date().toISOString(),
         ...(b2Key ? { kyc_documents_b2_key: b2Key } : {}),
       })
       .eq('id', userId);
@@ -88,7 +89,7 @@ export async function POST(req: NextRequest) {
 
     const apiKey = process.env.DIDIT_API_KEY;
     const workflowId = process.env.DIDIT_WORKFLOW_ID || 'b36ac1aa-29fc-4272-8939-c1d184d072fd';
-    const siteUrl = (process.env.NEXT_PUBLIC_SITE_URL || 'https://paxones.com').replace(/\/+$/, '');
+    const siteUrl = (process.env.NEXT_PUBLIC_SITE_URL || process.env.NEXT_PUBLIC_APP_URL || 'https://paxones.com').replace(/\/+$/, '');
     const callbackUrl = `${siteUrl}/dashboard/kyc/callback`;
 
     if (!apiKey) {
@@ -128,16 +129,33 @@ export async function POST(req: NextRequest) {
 
     if (sessionId) {
       await supabase.from('profiles').update({
+        kyc_status: 'in_review',
         didit_session_id: sessionId,
         kyc_vendor_session_id: sessionId,
+        kyc_submitted_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
       }).eq('id', userId);
+
+      try {
+        await supabase.from('kyc_verifications').insert({
+          user_id: userId,
+          session_id: sessionId,
+          status: 'PENDING_REVIEW',
+          vendor_data: { userId, workflowId, country, address, initiatedAt: new Date().toISOString() },
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        });
+      } catch (insertErr) {
+        console.warn('Non-fatal: kyc_verifications insert:', insertErr);
+      }
     }
 
     return NextResponse.json({
+      success: true,
       url: session.url,
       session_id: sessionId,
       didit_session_id: sessionId,
+      status: 'in_review',
       b2_key: b2Key,
     });
   } catch (err: any) {

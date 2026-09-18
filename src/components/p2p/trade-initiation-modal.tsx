@@ -15,6 +15,7 @@ import { Input } from "@/components/input";
 import { UserStatusIndicator } from "@/components/user-status";
 import { Loader2, ArrowRightLeft, ShieldCheck } from "lucide-react";
 import { calculateMinimumFiatAmount, BASE_PLATFORM_USD_MINIMUM } from "@/lib/currency";
+import { playTradeBeep } from "@/lib/utils";
 
 export interface AdData {
   id: string;
@@ -233,7 +234,10 @@ export function TradeInitiationModal({ ad, isOpen, onClose }: TradeInitiationMod
         throw new Error("Trade creation returned no ID.");
       }
 
-      // Redirect to trade execution page
+      // Sound feedback and redirect to trade execution page
+      try {
+        playTradeBeep();
+      } catch {}
       onClose();
       router.push(`/trade/${tradeId}`);
     } catch (err: any) {

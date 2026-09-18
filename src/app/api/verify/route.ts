@@ -30,7 +30,7 @@ export async function POST(req: Request) {
     // 1. Fetch user record from Supabase
     const { data: user, error: userError } = await supabaseAdmin
       .from("profiles")
-      .select("kyc_attempts, kyc_status")
+      .select("kyc_attempts, kyc_retry_count, kyc_status, kyc_last_attempt_at, updated_at")
       .eq("id", userId)
       .single();
 
@@ -38,14 +38,29 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "user_not_found" }, { status: 404 });
     }
 
-    // 2. Enforce 3-attempt limit check
-    if ((user.kyc_attempts ?? 0) >= 3 || user.kyc_status === "SUPPORT_REQUIRED") {
+    // 2. Enforce 3-attempt limit within 24 hours
+    const lastAttemptTime = user.kyc_last_attempt_at ? new Date(user.kyc_last_attempt_at).getTime() : 0;
+    const hoursSinceLastAttempt = (Date.now() - lastAttemptTime) / (1000 * 60 * 60);
+
+    let currentAttempts = Number(user.kyc_attempts ?? user.kyc_retry_count ?? 0);
+
+    // If 24 hours have elapsed since the last failed attempt, reset the rolling attempts counter
+    if (hoursSinceLastAttempt >= 24 && currentAttempts > 0 && user.kyc_status !== 'approved') {
+      currentAttempts = 0;
+      await supabaseAdmin.from('profiles').update({
+        kyc_attempts: 0,
+        kyc_retry_count: 0,
+        updated_at: new Date().toISOString(),
+      }).eq('id', userId);
+    }
+
+    if (currentAttempts >= 3 || user.kyc_status === "SUPPORT_REQUIRED" || user.kyc_status === "permanently_rejected") {
       return NextResponse.json(
         {
           error: "max_attempts_exceeded",
           code: "max_attempts_exceeded",
           message:
-            "You have reached the maximum allowed verification attempts (3/3). Please contact customer support.",
+            "You have reached the maximum allowed verification attempts (3/3 in 24 hours). Please contact customer support.",
         },
         { status: 403 }
       );
@@ -57,9 +72,8 @@ export async function POST(req: Request) {
     const targetUrl = `${diditBase}/session/`;
 
     const workflowId = process.env.DIDIT_WORKFLOW_ID || WORKFLOW_ID;
-    const callbackUrl = process.env.NEXT_PUBLIC_APP_URL
-      ? `${process.env.NEXT_PUBLIC_APP_URL.replace(/\/+$/, '')}/p2p/verification-callback`
-      : "https://paxones.com/p2p/verification-callback";
+    const siteUrl = (process.env.NEXT_PUBLIC_SITE_URL || process.env.NEXT_PUBLIC_APP_URL || 'https://paxones.com').replace(/\/+$/, '');
+    const callbackUrl = `${siteUrl}/p2p/verification-callback`;
 
     const apiKey = process.env.DIDIT_API_KEY;
     if (!apiKey) {
@@ -101,22 +115,42 @@ export async function POST(req: Request) {
     }
 
     const session = await res.json();
+    const sessionId = session.session_id || session.id || session.vendor_session_id;
 
-    // 4. Log initial verification record in Supabase
+    // 4. Update profile kyc_status to 'in_review' immediately upon initiation
+    try {
+      await supabaseAdmin.from("profiles").update({
+        kyc_status: "in_review",
+        didit_session_id: sessionId,
+        kyc_vendor_session_id: sessionId,
+        kyc_submitted_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      }).eq("id", userId);
+    } catch (profErr) {
+      console.warn("Could not update profile to in_review:", profErr);
+    }
+
+    // 5. Log initial verification record in Supabase
     try {
       await supabaseAdmin.from("kyc_verifications").insert({
         user_id: userId,
-        session_id: session.session_id,
+        session_id: sessionId,
         status: "PENDING_REVIEW",
+        vendor_data: { userId, workflowId, initiatedAt: new Date().toISOString() },
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
       });
     } catch (insertErr) {
       console.warn("Could not insert to kyc_verifications:", insertErr);
     }
 
     return NextResponse.json({
+      success: true,
       url: session.url,
       sessionUrl: session.url,
-      session_id: session.session_id,
+      session_id: sessionId,
+      sessionId: sessionId,
+      status: "in_review",
     });
   } catch (error) {
     console.error("Session Error:", error);

@@ -164,14 +164,14 @@ export async function GET(req: NextRequest) {
     if (query) {
       filteredUsers = combinedUsers.filter((u: any) => {
         const idMatch = u.id?.toLowerCase().includes(query);
-        const customIdMatch = u.user_custom_id?.toLowerCase().includes(query);
+        const usernameMatch = u.username?.toLowerCase().includes(query);
         const nameMatch = u.full_name?.toLowerCase().includes(query);
         const emailMatch = u.email?.toLowerCase().includes(query);
         const roleMatch = u.role?.toLowerCase().includes(query);
         const statusMatch = u.status?.toLowerCase().includes(query);
         const associatedEntityMatch = matchedUserIdsFromAssociatedEntities.has(u.id);
 
-        return idMatch || customIdMatch || nameMatch || emailMatch || roleMatch || statusMatch || associatedEntityMatch;
+        return idMatch || usernameMatch || nameMatch || emailMatch || roleMatch || statusMatch || associatedEntityMatch;
       });
     }
 

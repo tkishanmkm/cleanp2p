@@ -110,7 +110,7 @@ export default function AdminTradeModeratorPage({ params }: { params?: Promise<{
     if (ids.length > 0) {
       const { data: profs } = await supabase
         .from("profiles")
-        .select("id, email, full_name, user_custom_id")
+        .select("id, email, full_name, username")
         .in("id", ids);
 
       const pMap = new Map((profs || []).map((p: any) => [p.id, p]));
@@ -384,7 +384,7 @@ export default function AdminTradeModeratorPage({ params }: { params?: Promise<{
           <p className="font-semibold text-white">{trade.buyer?.full_name || "Customer Buyer"}</p>
           <p className="text-xs text-slate-400 font-mono">{trade.buyer?.email || "No email"}</p>
           <p className="text-[11px] text-slate-500 font-mono">
-            Custom ID: <span className="text-slate-300">{trade.buyer?.user_custom_id || "N/A"}</span>
+            Username: <span className="text-slate-300">@{trade.buyer?.username || "N/A"}</span>
           </p>
         </div>
 
@@ -404,7 +404,7 @@ export default function AdminTradeModeratorPage({ params }: { params?: Promise<{
           <p className="font-semibold text-white">{trade.seller?.full_name || "Customer Seller"}</p>
           <p className="text-xs text-slate-400 font-mono">{trade.seller?.email || "No email"}</p>
           <p className="text-[11px] text-slate-500 font-mono">
-            Custom ID: <span className="text-slate-300">{trade.seller?.user_custom_id || "N/A"}</span>
+            Username: <span className="text-slate-300">@{trade.seller?.username || "N/A"}</span>
           </p>
         </div>
 
@@ -552,8 +552,8 @@ export default function AdminTradeModeratorPage({ params }: { params?: Promise<{
             <form onSubmit={handleInterveneEscrow} className="space-y-4">
               <div className="p-3 bg-slate-950 border border-slate-800 rounded-lg text-xs space-y-1">
                 <p><strong>Amount to Transfer:</strong> <span className="font-mono text-emerald-400">{trade.amount} {cryptoSym}</span></p>
-                <p><strong>Buyer:</strong> {trade.buyer?.email} ({trade.buyer?.user_custom_id})</p>
-                <p><strong>Seller:</strong> {trade.seller?.email} ({trade.seller?.user_custom_id})</p>
+                <p><strong>Buyer:</strong> {trade.buyer?.email} (@{trade.buyer?.username})</p>
+                <p><strong>Seller:</strong> {trade.seller?.email} (@{trade.seller?.username})</p>
               </div>
 
               <div>

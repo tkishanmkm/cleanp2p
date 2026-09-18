@@ -200,7 +200,7 @@ export function AdminGlobalSearch() {
                             {u.full_name || u.email}
                           </p>
                           <p className="text-[11px] text-slate-400 font-mono truncate">
-                            {u.email} • ID: {u.user_custom_id || u.id.slice(0, 8)} • Role: {u.role || "user"}
+                            {u.email} • @{u.username || u.id.slice(0, 8)} • Role: {u.role || "user"}
                           </p>
                         </div>
                         <span className="text-[10px] px-2 py-0.5 rounded-full font-medium bg-slate-800 text-slate-300 border border-slate-700">

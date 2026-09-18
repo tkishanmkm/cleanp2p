@@ -103,10 +103,10 @@ export function KYCVerifyButton({
     return (
       <div className="p-4 border border-red-300 bg-red-50 dark:bg-red-950/30 dark:border-red-800/60 rounded-lg text-center space-y-3">
         <p className="text-red-700 dark:text-red-400 font-medium">
-          You have reached the maximum number of KYC verification attempts ({attempts}/3).
+          You have reached the maximum verification attempts ({attempts}/3 in 24 hours).
         </p>
         <p className="text-sm text-red-600 dark:text-red-300">
-          Manual identity verification is required by our compliance team.
+          Manual identity verification or reset is required by our compliance team.
         </p>
         <Link
           href="/support?reason=kyc_limit_exceeded"

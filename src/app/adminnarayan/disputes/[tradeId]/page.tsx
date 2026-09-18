@@ -89,8 +89,8 @@ export default function AdminDisputeModeratorPage({ params }: { params?: Promise
       .from("trades")
       .select(`
         *,
-        buyer:profiles!trades_buyer_id_fkey(user_custom_id, id),
-        seller:profiles!trades_seller_id_fkey(user_custom_id, id)
+        buyer:profiles!trades_buyer_id_fkey(username, id),
+        seller:profiles!trades_seller_id_fkey(username, id)
       `)
       .eq("id", tradeId)
       .single();
@@ -110,7 +110,7 @@ export default function AdminDisputeModeratorPage({ params }: { params?: Promise
         if (ids.length > 0) {
           const { data: profs } = await supabase
             .from("profiles")
-            .select("id, user_custom_id")
+            .select("id, username")
             .in("id", ids);
 
           const profMap = new Map((profs || []).map((p: any) => [p.id, p]));
@@ -212,7 +212,7 @@ export default function AdminDisputeModeratorPage({ params }: { params?: Promise
           <p className="text-xs text-gray-500 font-mono">Trade ID: {tradeId}</p>
           {trade && (
             <p className="text-xs text-gray-600 dark:text-gray-400 mt-1">
-              Buyer ID: <span className="font-mono font-semibold">{trade.buyer?.user_custom_id || trade.buyer_id}</span> | Seller ID: <span className="font-mono font-semibold">{trade.seller?.user_custom_id || trade.seller_id}</span>
+              Buyer: <span className="font-mono font-semibold">@{trade.buyer?.username || trade.buyer_id}</span> | Seller: <span className="font-mono font-semibold">@{trade.seller?.username || trade.seller_id}</span>
             </p>
           )}
         </div>

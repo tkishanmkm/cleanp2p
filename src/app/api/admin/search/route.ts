@@ -54,7 +54,7 @@ export async function GET(req: NextRequest) {
     const matchedUsers = (profiles || []).filter((u: any) => {
       return (
         u.id?.toLowerCase().includes(lQuery) ||
-        u.user_custom_id?.toLowerCase().includes(lQuery) ||
+        u.username?.toLowerCase().includes(lQuery) ||
         u.full_name?.toLowerCase().includes(lQuery) ||
         u.email?.toLowerCase().includes(lQuery) ||
         u.role?.toLowerCase().includes(lQuery) ||

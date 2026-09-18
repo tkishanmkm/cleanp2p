@@ -1053,8 +1053,24 @@ function FeedbackForm({
             .eq('id', existingFeedback.id)
             .select()
             .maybeSingle();
-          if (updateErr) throw updateErr;
-          savedFbRecord = updatedData;
+
+          if (updateErr) {
+            // Fallback without is_positive if column not present in schema cache
+            const { data: fallbackUpdated, error: fbErr } = await supabase
+              .from('feedback')
+              .update({
+                rating: values.rating,
+                comment: values.comment,
+                updated_at: new Date().toISOString()
+              })
+              .eq('id', existingFeedback.id)
+              .select()
+              .maybeSingle();
+            if (fbErr) throw fbErr;
+            savedFbRecord = fallbackUpdated;
+          } else {
+            savedFbRecord = updatedData;
+          }
         } else {
           const { data: insertedData, error: insertErr } = await supabase.from('feedback').insert([
             {
@@ -1068,30 +1084,51 @@ function FeedbackForm({
               created_at: new Date().toISOString()
             }
           ]).select().maybeSingle();
-          if (insertErr) throw insertErr;
-          savedFbRecord = insertedData;
+
+          if (insertErr) {
+            // Fallback without is_positive if column not present in schema cache
+            const { data: fallbackInserted, error: fbErr } = await supabase.from('feedback').insert([
+              {
+                trade_id: trade.id,
+                from_user: currentUserId,
+                from_username: currentUsername || 'Trader',
+                to_user: opponentId,
+                rating: values.rating,
+                comment: values.comment,
+                created_at: new Date().toISOString()
+              }
+            ]).select().maybeSingle();
+            if (fbErr) throw fbErr;
+            savedFbRecord = fallbackInserted;
+          } else {
+            savedFbRecord = insertedData;
+          }
         }
 
-        // Adjust counts in profiles table
-        const { data: allFb } = await supabase
-          .from('feedback')
-          .select('rating, is_positive')
-          .eq('to_user', opponentId);
+        // Adjust counts in profiles table safely
+        try {
+          const { data: allFb } = await supabase
+            .from('feedback')
+            .select('rating')
+            .eq('to_user', opponentId);
 
-        if (allFb) {
-          const positiveCount = allFb.filter((f) => f.is_positive === true || f.is_positive === 'true' || f.rating === 'positive').length;
-          const negativeCount = allFb.filter((f) => f.is_positive === false || f.is_positive === 'false' || f.rating === 'negative').length;
-          const total = positiveCount + negativeCount;
-          const score = total > 0 ? Math.round((positiveCount / total) * 100) : 100;
+          if (allFb) {
+            const positiveCount = allFb.filter((f) => f.rating === 'positive' || (f as any).is_positive === true || (f as any).is_positive === 'true').length;
+            const negativeCount = allFb.filter((f) => f.rating === 'negative' || (f as any).is_positive === false || (f as any).is_positive === 'false').length;
+            const total = positiveCount + negativeCount;
+            const score = total > 0 ? Math.round((positiveCount / total) * 100) : 100;
 
-          await supabase
-            .from('profiles')
-            .update({
-              positive_feedback: positiveCount,
-              negative_feedback: negativeCount,
-              feedback_score: score
-            })
-            .eq('id', opponentId);
+            await supabase
+              .from('profiles')
+              .update({
+                positive_feedback: positiveCount,
+                negative_feedback: negativeCount,
+                feedback_score: score
+              })
+              .eq('id', opponentId);
+          }
+        } catch (profileErr) {
+          console.warn('Profiles feedback sync notice:', profileErr);
         }
 
         // Add official Paxones system message in trade_messages
@@ -1477,6 +1514,7 @@ export function TradeDetails({
   }, [trade?.id, buyerId, sellerId, supabase]);
 
   // Dynamic payment countdown window (e.g. 30 mins from ad or trade configuration)
+  const isCountdownActive = ['active', 'pending'].includes(tradeStatus);
   const paymentWindowMinutes = Number(trade?.payment_window_minutes || ad?.payment_window_minutes || 30);
   const createdAtTime = trade?.created_at ? new Date(trade.created_at).getTime() : Date.now();
   const dynamicExpiresDate = trade?.expiresAt || trade?.expires_at 
@@ -1558,14 +1596,28 @@ export function TradeDetails({
   const escrowFeeCoin = `${(effectiveCryptoAmount * 0.015).toFixed(2)} ${coinSymbol}`;
 
   // Offer Tag and Ad Tags extraction
-  const offerLabel = (ad?.offer_label || ad?.label || trade?.offer_label || trade?.label || '').trim();
-  const rawAdTags = ad?.tags || ad?.ad_tags || trade?.tags || trade?.ad_tags || [];
-  const adTags: string[] = (Array.isArray(rawAdTags) ? rawAdTags : [rawAdTags]).filter(Boolean).map(String);
+  const offerLabel = (ad?.offer_label || ad?.label || ad?.offer_tag || ad?.offerTag || trade?.offer_label || trade?.label || trade?.offer_tag || trade?.offerTag || '').trim();
+  const rawAdTags = ad?.tags || ad?.ad_tags || ad?.offer_tags || trade?.tags || trade?.ad_tags || trade?.offer_tags || [];
+  const adTags: string[] = (
+    Array.isArray(rawAdTags) 
+      ? rawAdTags 
+      : typeof rawAdTags === 'string' 
+        ? rawAdTags.split(',').map((s: string) => s.trim()) 
+        : [rawAdTags]
+  ).filter(Boolean).map((t: any) => String(t).replace(/^#/, ''));
 
   // Prioritize ad.id (e.g. per9yeeotd4k) over generated system IDs
-  const rawAdRef = ad?.id || trade?.ad_id || trade?.adId || ad?.public_id || ad?.public_ad_id || trade?.public_ad_id;
+  const rawAdRef = ad?.id || ad?.public_ad_id || ad?.public_id || trade?.ad_id || trade?.adId || trade?.public_ad_id;
   const publicAdDisplayId = rawAdRef ? (String(rawAdRef).replace(/^#/, '')) : '';
-  const sellerOfferTerms = ad?.terms || ad?.terms_conditions || ad?.termsAndConditions || trade?.terms || trade?.seller_terms || '';
+  const sellerOfferTerms = (
+    ad?.terms || 
+    ad?.terms_conditions || 
+    ad?.termsAndConditions || 
+    trade?.terms || 
+    trade?.seller_terms || 
+    trade?.terms_conditions || 
+    ''
+  ).trim();
 
   const publicTradeId = trade?.trade_id || trade?.public_id || trade?.tradeId || formatTradeId(trade?.id);
   const badgeStatusClass = statusColors[effectiveTradeStatus as keyof typeof statusColors] || statusColors.expired;

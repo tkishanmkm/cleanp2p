@@ -223,7 +223,7 @@ export default function AdminUsersPage() {
     return (
       u.email?.toLowerCase().includes(q) ||
       u.full_name?.toLowerCase().includes(q) ||
-      u.user_custom_id?.toLowerCase().includes(q) ||
+      u.username?.toLowerCase().includes(q) ||
       u.id?.toLowerCase().includes(q) ||
       u.role?.toLowerCase().includes(q) ||
       u.status?.toLowerCase().includes(q)
@@ -325,7 +325,7 @@ export default function AdminUsersPage() {
                           </Link>
                           <p className="text-xs text-slate-400 font-mono">{u.email || "No email"}</p>
                           <p className="text-[11px] text-slate-500 font-mono">
-                            CID: <span className="text-slate-300">{u.user_custom_id || "N/A"}</span> | UUID: {u.id.slice(0, 8)}...
+                            @{u.username || "user"} | UUID: {u.id.slice(0, 8)}...
                           </p>
                         </div>
                       </div>
@@ -449,7 +449,7 @@ export default function AdminUsersPage() {
                   Adjust Wallet Balance
                 </h2>
                 <p className="text-xs text-slate-400 font-mono mt-0.5">
-                  Target: {selectedUser.email || selectedUser.full_name} ({selectedUser.user_custom_id || selectedUser.id.slice(0, 8)})
+                  Target: {selectedUser.email || selectedUser.full_name} (@{selectedUser.username || selectedUser.id.slice(0, 8)})
                 </p>
               </div>
               <button onClick={closeModal} className="text-slate-400 hover:text-white text-sm">
@@ -563,7 +563,7 @@ export default function AdminUsersPage() {
                   Manage User Status & Role
                 </h2>
                 <p className="text-xs text-slate-400 font-mono mt-0.5">
-                  {selectedUser.email || selectedUser.full_name} ({selectedUser.user_custom_id})
+                  {selectedUser.email || selectedUser.full_name} (@{selectedUser.username || selectedUser.id.slice(0, 8)})
                 </p>
               </div>
               <button onClick={closeModal} className="text-slate-400 hover:text-white text-sm">

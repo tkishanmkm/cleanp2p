@@ -132,7 +132,7 @@ export default function AdminUserDetailsPage({ params }: { params?: Promise<{ us
       const { data } = await supabase
         .from("profiles")
         .select("*")
-        .or(`user_custom_id.eq.${userId},email.eq.${userId}`)
+        .or(`username.eq.${userId},email.eq.${userId}`)
         .limit(1)
         .maybeSingle();
       prof = data;
@@ -349,7 +349,7 @@ export default function AdminUserDetailsPage({ params }: { params?: Promise<{ us
               </span>
             </div>
             <p className="text-xs text-slate-400 font-mono mt-0.5">
-              Email: <span className="text-slate-200">{profile.email}</span> | Custom ID: <span className="text-blue-400 font-semibold">{profile.user_custom_id || "None"}</span> | UUID: {profile.id}
+              Email: <span className="text-slate-200">{profile.email}</span> | Username: <span className="text-blue-400 font-semibold">@{profile.username || "None"}</span> | UUID: {profile.id}
             </p>
           </div>
         </div>

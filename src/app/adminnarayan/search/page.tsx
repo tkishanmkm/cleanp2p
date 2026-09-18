@@ -50,7 +50,7 @@ export default function AdminGlobalSearchPage() {
       const { data: profs } = await supabase
         .from("profiles")
         .select("*")
-        .or(`email.ilike.%${q}%,full_name.ilike.%${q}%,user_custom_id.ilike.%${q}%,id.ilike.%${q}%`)
+        .or(`email.ilike.%${q}%,full_name.ilike.%${q}%,username.ilike.%${q}%,id.ilike.%${q}%`)
         .limit(20);
 
       // 2. Search Trades
@@ -58,8 +58,8 @@ export default function AdminGlobalSearchPage() {
         .from("trades")
         .select(`
           *,
-          buyer:profiles!trades_buyer_id_fkey(full_name, email, user_custom_id),
-          seller:profiles!trades_seller_id_fkey(full_name, email, user_custom_id)
+          buyer:profiles!trades_buyer_id_fkey(full_name, email, username),
+          seller:profiles!trades_seller_id_fkey(full_name, email, username)
         `)
         .or(`id.ilike.%${q}%,status.ilike.%${q}%`)
         .limit(20);
@@ -258,7 +258,7 @@ export default function AdminGlobalSearchPage() {
                         {admin.full_name || "Admin Account"}
                       </p>
                       <p className="text-xs text-slate-400 font-mono">{admin.email}</p>
-                      <p className="text-[11px] text-purple-400 font-mono">CID: {admin.user_custom_id} | UUID: {admin.id.slice(0, 8)}...</p>
+                      <p className="text-[11px] text-purple-400 font-mono">@{admin.username || "admin"} | UUID: {admin.id.slice(0, 8)}...</p>
                     </div>
                   </div>
                   <ChevronRight className="w-5 h-5 text-slate-500 group-hover:text-purple-400 transition-colors" />
@@ -302,7 +302,7 @@ export default function AdminGlobalSearchPage() {
                         </span>
                       </div>
                       <p className="text-xs text-slate-400 font-mono">{user.email}</p>
-                      <p className="text-[11px] text-slate-500 font-mono">CID: {user.user_custom_id} | UUID: {user.id.slice(0, 8)}...</p>
+                      <p className="text-[11px] text-slate-500 font-mono">@{user.username || "user"} | UUID: {user.id.slice(0, 8)}...</p>
                     </div>
                   </div>
                   <ChevronRight className="w-5 h-5 text-slate-500 group-hover:text-blue-400 transition-colors" />

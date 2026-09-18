@@ -12,8 +12,8 @@ export default async function AdminTradesPage() {
     .from("trades")
     .select(`
       *,
-      buyer:profiles!buyer_id(id, full_name, username, user_custom_id),
-      seller:profiles!seller_id(id, full_name, username, user_custom_id)
+      buyer:profiles!buyer_id(id, full_name, username),
+      seller:profiles!seller_id(id, full_name, username)
     `)
     .order("created_at", { ascending: false });
 

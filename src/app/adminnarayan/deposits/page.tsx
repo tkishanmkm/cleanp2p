@@ -83,7 +83,7 @@ export default function AdminDepositsPage() {
     // 1. Attempt join with profiles
     const { data: joinedData, error: joinError } = await supabase
       .from("deposits")
-      .select("*, profiles:profiles!deposits_user_id_fkey(id, email, user_custom_id, full_name)")
+      .select("*, profiles:profiles!deposits_user_id_fkey(id, email, username, full_name)")
       .order("created_at", { ascending: false });
 
     if (!joinError && joinedData) {
@@ -101,7 +101,7 @@ export default function AdminDepositsPage() {
         if (userIds.length > 0) {
           const { data: profs } = await supabase
             .from("profiles")
-            .select("id, email, user_custom_id, full_name")
+            .select("id, email, username, full_name")
             .in("id", userIds);
 
           const profMap = new Map((profs || []).map((p: any) => [p.id, p]));
@@ -120,7 +120,7 @@ export default function AdminDepositsPage() {
           id: d.user_id,
           email: d.user_email || "unknown@user.com",
           full_name: "Customer",
-          user_custom_id: d.user_id ? String(d.user_id).slice(0, 8) : "N/A",
+          username: d.user_id ? String(d.user_id).slice(0, 8) : "N/A",
         },
       }));
       setDeposits(normalized);
@@ -189,7 +189,7 @@ export default function AdminDepositsPage() {
 
     const fullName = d.profiles?.full_name?.toLowerCase() || "";
     const email = d.profiles?.email?.toLowerCase() || "";
-    const customId = d.profiles?.user_custom_id?.toLowerCase() || "";
+    const username = d.profiles?.username?.toLowerCase() || "";
     const userId = (d.user_id || "").toLowerCase();
     const depositId = (d.id || "").toLowerCase();
     const curr = (d.currency || "").toLowerCase();
@@ -199,7 +199,7 @@ export default function AdminDepositsPage() {
     return (
       fullName.includes(q) ||
       email.includes(q) ||
-      customId.includes(q) ||
+      username.includes(q) ||
       userId.includes(q) ||
       depositId.includes(q) ||
       curr.includes(q) ||
@@ -307,7 +307,7 @@ export default function AdminDepositsPage() {
                     </Link>
                     <p className="text-xs text-slate-400 font-mono">{d.profiles?.email}</p>
                     <p className="text-[11px] text-slate-500 font-mono">
-                      CID: <span className="text-slate-300">{d.profiles?.user_custom_id || "N/A"}</span>
+                      @{d.profiles?.username || "user"}
                     </p>
                   </td>
 
@@ -404,7 +404,7 @@ export default function AdminDepositsPage() {
                         <p className="text-sm font-bold text-white">{targetUserInfo.full_name || "User Account"}</p>
                         <p className="text-xs text-slate-300">{targetUserInfo.email}</p>
                         <p className="text-xs text-slate-400 font-mono">
-                          Custom ID: <span className="text-blue-400">{targetUserInfo.user_custom_id || "None"}</span> | UUID: {targetUserInfo.id}
+                          Username: <span className="text-blue-400">@{targetUserInfo.username || "None"}</span> | UUID: {targetUserInfo.id}
                         </p>
                       </div>
                       <button
@@ -461,7 +461,7 @@ export default function AdminDepositsPage() {
                           >
                             <div>
                               <p className="font-semibold text-white">{u.full_name || u.email}</p>
-                              <p className="text-slate-400 font-mono text-[11px]">{u.email} • ID: {u.user_custom_id || u.id.slice(0, 8)}</p>
+                              <p className="text-slate-400 font-mono text-[11px]">{u.email} • @{u.username || u.id.slice(0, 8)}</p>
                             </div>
                             <span className="text-blue-400 font-semibold text-[11px] bg-blue-950/60 px-2 py-0.5 rounded border border-blue-800">
                               Select

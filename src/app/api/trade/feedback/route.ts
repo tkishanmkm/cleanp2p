@@ -101,10 +101,10 @@ export async function POST(req: NextRequest) {
       .maybeSingle();
 
     let savedFeedback: any = null;
-
     const isPositive = rating === 'positive';
 
     if (existingFeedback?.id) {
+      // First attempt update with standard columns
       const { data: updated, error: updateErr } = await admin
         .from('feedback')
         .update({
@@ -115,10 +115,29 @@ export async function POST(req: NextRequest) {
         })
         .eq('id', existingFeedback.id)
         .select()
-        .single();
+        .maybeSingle();
 
-      if (updateErr) throw updateErr;
-      savedFeedback = updated;
+      if (updateErr) {
+        // If error mentions column is_positive, fallback to update without is_positive
+        if (updateErr.message?.includes('is_positive') || (updateErr as any)?.code === 'PGRST204') {
+          const { data: fbFallback, error: fallbackErr } = await admin
+            .from('feedback')
+            .update({
+              rating,
+              comment: comment.trim(),
+              updated_at: new Date().toISOString(),
+            })
+            .eq('id', existingFeedback.id)
+            .select()
+            .single();
+          if (fallbackErr) throw fallbackErr;
+          savedFeedback = fbFallback;
+        } else {
+          throw updateErr;
+        }
+      } else {
+        savedFeedback = updated;
+      }
     } else {
       const { data: inserted, error: insertErr } = await admin
         .from('feedback')
@@ -133,10 +152,32 @@ export async function POST(req: NextRequest) {
           created_at: new Date().toISOString(),
         })
         .select()
-        .single();
+        .maybeSingle();
 
-      if (insertErr) throw insertErr;
-      savedFeedback = inserted;
+      if (insertErr) {
+        // If error mentions column is_positive, fallback to insert without is_positive
+        if (insertErr.message?.includes('is_positive') || (insertErr as any)?.code === 'PGRST204') {
+          const { data: fbFallback, error: fallbackErr } = await admin
+            .from('feedback')
+            .insert({
+              trade_id: tradeId,
+              from_user: user.id,
+              from_username: fromUsername,
+              to_user: effectiveCounterpartId,
+              rating,
+              comment: comment.trim(),
+              created_at: new Date().toISOString(),
+            })
+            .select()
+            .single();
+          if (fallbackErr) throw fallbackErr;
+          savedFeedback = fbFallback;
+        } else {
+          throw insertErr;
+        }
+      } else {
+        savedFeedback = inserted;
+      }
     }
 
     // 3. Update counterparty's profile stats (positive_feedback, negative_feedback, feedback_score)

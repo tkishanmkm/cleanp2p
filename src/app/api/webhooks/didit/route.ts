@@ -89,18 +89,54 @@ export async function POST(req: NextRequest) {
       return new NextResponse('Invalid signature', { status: 401 });
     }
 
-    // Target user ID from vendor_data, client_reference_id, or user_id
-    const userId = parsed.vendor_data || parsed.client_reference_id || parsed.user_id || parsed.user_data?.user_id;
-    if (!userId) {
-      return new NextResponse('Missing user reference (vendor_data)', { status: 400 });
-    }
+    // Target user ID from vendor_data, client_reference_id, user_id, or session lookup
+    let userId = parsed.vendor_data || parsed.client_reference_id || parsed.user_id || parsed.user_data?.user_id;
+    const sessionId = parsed.session_id || parsed.id || parsed.vendor_session_id;
 
     const supabase = getSupabaseClient();
 
-    const overallStatus = String(parsed.status || parsed.decision?.status || parsed.verification_status || '').toLowerCase();
+    if (!userId && sessionId) {
+      // Lookup profile by didit_session_id
+      const { data: profBySession } = await supabase
+        .from('profiles')
+        .select('id')
+        .or(`didit_session_id.eq.${sessionId},kyc_vendor_session_id.eq.${sessionId}`)
+        .maybeSingle();
+
+      if (profBySession?.id) {
+        userId = profBySession.id;
+      } else {
+        const { data: kycBySession } = await supabase
+          .from('kyc_verifications')
+          .select('user_id')
+          .eq('session_id', sessionId)
+          .maybeSingle();
+        if (kycBySession?.user_id) {
+          userId = kycBySession.user_id;
+        }
+      }
+    }
+
+    if (!userId) {
+      console.warn('[DIDIT WEBHOOK] Missing user reference in payload, session:', sessionId);
+      return new NextResponse(JSON.stringify({ error: 'Missing user reference (vendor_data or session_id)' }), {
+        status: 400,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }
+
+    const eventName = String(parsed.event || '').toLowerCase();
+    const rawStatus = String(parsed.status || parsed.decision?.status || parsed.verification_status || '').toLowerCase();
+    const overallStatus = eventName.includes('approved')
+      ? 'approved'
+      : eventName.includes('declined') || eventName.includes('rejected')
+      ? 'declined'
+      : eventName.includes('review') || eventName.includes('submitted')
+      ? 'in_review'
+      : rawStatus;
 
     // 3. Process Decisions
-    if (overallStatus === 'approved' || overallStatus === 'completed') {
+    if (overallStatus === 'approved' || overallStatus === 'completed' || isApprovedStatus(overallStatus)) {
       const decision = parsed.decision || {};
 
       // Normalize array or object structures for verification checks
@@ -116,22 +152,24 @@ export async function POST(req: NextRequest) {
         ? decision.face_matches
         : decision.face_match ? [decision.face_match] : [];
 
-      // Requirement: User must pass ID Verification, 3D Liveness Detection, AND Biometric Face Match
-      const idPassed = idVerifications.length > 0 && idVerifications.every((v: any) => isApprovedStatus(v.status || v.result || v.decision));
-      const livenessPassed = livenessChecks.length > 0 && livenessChecks.every((v: any) => isApprovedStatus(v.status || v.result || v.decision));
-      const faceMatchPassed = faceMatches.length > 0 && faceMatches.every((v: any) => isApprovedStatus(v.status || v.result || v.decision));
+      // If detailed modules are provided, verify they passed
+      if (idVerifications.length > 0 || livenessChecks.length > 0 || faceMatches.length > 0) {
+        const idPassed = idVerifications.length === 0 || idVerifications.every((v: any) => isApprovedStatus(v.status || v.result || v.decision));
+        const livenessPassed = livenessChecks.length === 0 || livenessChecks.every((v: any) => isApprovedStatus(v.status || v.result || v.decision));
+        const faceMatchPassed = faceMatches.length === 0 || faceMatches.every((v: any) => isApprovedStatus(v.status || v.result || v.decision));
 
-      if (!idPassed || !livenessPassed || !faceMatchPassed) {
-        console.warn(`[DIDIT WEBHOOK] Verification incomplete for user ${userId}: ID=${idPassed}, Liveness=${livenessPassed}, Face=${faceMatchPassed}`);
-        await supabase.from('profiles').update({
-          kyc_status: 'declined',
-          updated_at: new Date().toISOString(),
-        }).eq('id', userId);
+        if (!idPassed || !livenessPassed || !faceMatchPassed) {
+          console.warn(`[DIDIT WEBHOOK] Verification incomplete for user ${userId}: ID=${idPassed}, Liveness=${livenessPassed}, Face=${faceMatchPassed}`);
+          await supabase.from('profiles').update({
+            kyc_status: 'declined',
+            updated_at: new Date().toISOString(),
+          }).eq('id', userId);
 
-        return new NextResponse(JSON.stringify({ message: 'Modules incomplete or unapproved', idPassed, livenessPassed, faceMatchPassed }), {
-          status: 200,
-          headers: { 'Content-Type': 'application/json' },
-        });
+          return new NextResponse(JSON.stringify({ message: 'Modules incomplete or unapproved', idPassed, livenessPassed, faceMatchPassed }), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          });
+        }
       }
 
       // Extract details from ID OCR
@@ -176,43 +214,44 @@ export async function POST(req: NextRequest) {
         }
       }
 
-      // Duplicate Prevention Rule: Check if identity belongs to ANY other account (approved, banned, or existing)
-      let duplicateQuery = supabase
-        .from('profiles')
-        .select('id, email, username, full_name, date_of_birth, id_document_number, kyc_status, is_banned')
-        .neq('id', userId);
+      // Duplicate Prevention Rule: Check if identity belongs to ANY other account
+      if (documentNumber || (extractedFullName && extractedDob)) {
+        let duplicateQuery = supabase
+          .from('profiles')
+          .select('id, email, username, full_name, date_of_birth, id_document_number, kyc_status, is_banned')
+          .neq('id', userId);
 
-      const orConditions: string[] = [];
-      if (documentNumber) {
-        orConditions.push(`id_document_number.eq.${documentNumber}`);
-      }
-      if (extractedFullName && extractedDob) {
-        orConditions.push(`and(full_name.eq.${extractedFullName},date_of_birth.eq.${extractedDob})`);
-      }
+        const orConditions: string[] = [];
+        if (documentNumber) {
+          orConditions.push(`id_document_number.eq.${documentNumber}`);
+        }
+        if (extractedFullName && extractedDob) {
+          orConditions.push(`and(full_name.eq.${extractedFullName},date_of_birth.eq.${extractedDob})`);
+        }
 
-      if (orConditions.length > 0) {
-        const { data: existingMatches } = await duplicateQuery.or(orConditions.join(','));
+        if (orConditions.length > 0) {
+          const { data: existingMatches } = await duplicateQuery.or(orConditions.join(','));
 
-        if (existingMatches && existingMatches.length > 0) {
-          console.error(`[DIDIT WEBHOOK] Duplicate identity detected for user ${userId}. Matching existing user(s):`, existingMatches);
+          if (existingMatches && existingMatches.length > 0) {
+            console.error(`[DIDIT WEBHOOK] Duplicate identity detected for user ${userId}. Matching existing user(s):`, existingMatches);
 
-          // DUPLICATE DETECTED: Ban the user immediately with explicit reason
-          await supabase.from('profiles').update({
-            is_banned: true,
-            status: 'banned',
-            is_suspended: true,
-            kyc_status: 'banned',
-            suspension_reason: 'Multi-account violation: Attempting KYC with a government ID or legal identity already associated with another PaxOnes account.',
-            updated_at: new Date().toISOString(),
-          }).eq('id', userId);
+            await supabase.from('profiles').update({
+              is_banned: true,
+              status: 'banned',
+              is_suspended: true,
+              kyc_status: 'banned',
+              suspension_reason: 'Multi-account violation: Attempting KYC with an identity already associated with another account.',
+              updated_at: new Date().toISOString(),
+            }).eq('id', userId);
 
-          return new NextResponse(JSON.stringify({
-            status: 'banned',
-            message: 'Duplicate identity detected across multiple accounts. Account permanently banned.',
-          }), {
-            status: 200,
-            headers: { 'Content-Type': 'application/json' },
-          });
+            return new NextResponse(JSON.stringify({
+              status: 'banned',
+              message: 'Duplicate identity detected across multiple accounts. Account permanently banned.',
+            }), {
+              status: 200,
+              headers: { 'Content-Type': 'application/json' },
+            });
+          }
         }
       }
 
@@ -221,7 +260,9 @@ export async function POST(req: NextRequest) {
         kyc_status: 'approved',
         is_kyc_locked: true,
         id_verified: true,
+        is_verified: true,
         kyc_retry_count: 0,
+        kyc_approved_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
       };
 
@@ -250,16 +291,75 @@ export async function POST(req: NextRequest) {
         return new NextResponse(JSON.stringify({ error: updateErr.message }), { status: 500 });
       }
 
+      // Update kyc_verifications table
+      if (sessionId) {
+        await supabase
+          .from('kyc_verifications')
+          .update({
+            status: 'APPROVED',
+            decision: parsed,
+            updated_at: new Date().toISOString(),
+          })
+          .eq('session_id', sessionId);
+      }
+
+      // Notify User
+      try {
+        await supabase.from('notifications').insert({
+          user_id: userId,
+          title: 'KYC Verification Approved',
+          message: 'Your identity verification was approved! You now have Tier 2 unlimited trading privileges.',
+          link: '/settings/identity',
+          is_read: false,
+          created_at: new Date().toISOString(),
+        });
+      } catch (notifErr) {
+        console.warn('Non-fatal: KYC approval notification:', notifErr);
+      }
+
       console.log(`[DIDIT WEBHOOK] KYC successfully approved and locked for user ${userId}`);
-    } else if (overallStatus === 'declined' || overallStatus === 'rejected') {
-      // 3-Attempt Retry Logic
+    } else if (
+      overallStatus === 'in_review' ||
+      overallStatus === 'pending' ||
+      overallStatus === 'submitted' ||
+      overallStatus === 'pending_review'
+    ) {
+      // User is under review
+      await supabase.from('profiles').update({
+        kyc_status: 'in_review',
+        updated_at: new Date().toISOString(),
+      }).eq('id', userId);
+
+      if (sessionId) {
+        await supabase
+          .from('kyc_verifications')
+          .update({
+            status: 'PENDING_REVIEW',
+            decision: parsed,
+            updated_at: new Date().toISOString(),
+          })
+          .eq('session_id', sessionId);
+      }
+
+      console.log(`[DIDIT WEBHOOK] User ${userId} KYC marked as in_review.`);
+    } else if (overallStatus === 'declined' || overallStatus === 'rejected' || overallStatus === 'failed') {
+      // 3-Attempt Retry Logic within 24 hours
       const { data: userProfile } = await supabase
         .from('profiles')
-        .select('kyc_retry_count, kyc_attempts')
+        .select('kyc_retry_count, kyc_attempts, kyc_last_attempt_at')
         .eq('id', userId)
         .maybeSingle();
 
-      const currentRetries = Number(userProfile?.kyc_retry_count || userProfile?.kyc_attempts || 0);
+      const lastAttemptTime = userProfile?.kyc_last_attempt_at ? new Date(userProfile.kyc_last_attempt_at).getTime() : 0;
+      const hoursSinceLastAttempt = (Date.now() - lastAttemptTime) / (1000 * 60 * 60);
+
+      let currentRetries = Number(userProfile?.kyc_retry_count || userProfile?.kyc_attempts || 0);
+
+      // If more than 24 hours have passed since previous attempt, reset the attempt count
+      if (hoursSinceLastAttempt >= 24) {
+        currentRetries = 0;
+      }
+
       const newRetries = currentRetries + 1;
 
       if (newRetries >= 3) {
@@ -267,21 +367,71 @@ export async function POST(req: NextRequest) {
           kyc_status: 'permanently_rejected',
           kyc_retry_count: newRetries,
           kyc_attempts: newRetries,
+          kyc_last_attempt_at: new Date().toISOString(),
           is_kyc_locked: true,
-          suspension_reason: 'KYC failed 3 consecutive times. Identity verification is permanently locked.',
+          suspension_reason: 'KYC failed 3 consecutive times in 24 hours. Contact support for manual verification.',
           updated_at: new Date().toISOString(),
         }).eq('id', userId);
 
-        console.warn(`[DIDIT WEBHOOK] User ${userId} exceeded 3 KYC attempts. Verification permanently locked.`);
+        if (sessionId) {
+          await supabase
+            .from('kyc_verifications')
+            .update({
+              status: 'SUPPORT_REQUIRED',
+              decision: parsed,
+              updated_at: new Date().toISOString(),
+            })
+            .eq('session_id', sessionId);
+        }
+
+        try {
+          await supabase.from('notifications').insert({
+            user_id: userId,
+            title: 'KYC Verification Limit Reached',
+            message: 'You have failed 3 verification attempts in 24 hours. Please contact customer support.',
+            link: '/support?reason=kyc_limit_exceeded',
+            is_read: false,
+            created_at: new Date().toISOString(),
+          });
+        } catch (notifErr) {
+          console.warn('Non-fatal: notification failed:', notifErr);
+        }
+
+        console.warn(`[DIDIT WEBHOOK] User ${userId} reached 3 KYC attempts in 24 hours.`);
       } else {
         await supabase.from('profiles').update({
-          kyc_status: 'rejected',
+          kyc_status: 'declined',
           kyc_retry_count: newRetries,
           kyc_attempts: newRetries,
+          kyc_last_attempt_at: new Date().toISOString(),
           updated_at: new Date().toISOString(),
         }).eq('id', userId);
 
-        console.log(`[DIDIT WEBHOOK] User ${userId} KYC rejected. Attempt ${newRetries}/3 recorded.`);
+        if (sessionId) {
+          await supabase
+            .from('kyc_verifications')
+            .update({
+              status: 'DECLINED',
+              decision: parsed,
+              updated_at: new Date().toISOString(),
+            })
+            .eq('session_id', sessionId);
+        }
+
+        try {
+          await supabase.from('notifications').insert({
+            user_id: userId,
+            title: 'KYC Verification Declined',
+            message: `Your identity verification was declined. You have ${3 - newRetries} attempt(s) remaining in this 24-hour window.`,
+            link: '/settings/identity',
+            is_read: false,
+            created_at: new Date().toISOString(),
+          });
+        } catch (notifErr) {
+          console.warn('Non-fatal: notification failed:', notifErr);
+        }
+
+        console.log(`[DIDIT WEBHOOK] User ${userId} KYC declined. Attempt ${newRetries}/3 recorded.`);
       }
     }
 

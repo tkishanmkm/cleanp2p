@@ -615,7 +615,20 @@ export function TradeChat({
   };
 
   const { timezone } = useUserTimezone();
-  const tradeStatus = (trade?.status || 'active').toLowerCase();
+  const resolveTradeStatus = (t: any): string => {
+    if (!t) return 'active';
+    const st = (t.status || '').toLowerCase();
+    if (['released', 'completed'].includes(st)) return 'released';
+    if (st === 'cancelled') return 'cancelled';
+    if (st === 'disputed' || st === 'dispute') return 'disputed';
+    if (st === 'expired') return 'expired';
+    if (t.paid_at || t.marked_paid_at || t.payment_confirmed_at || t.escrow_status === 'PAID' || ['paid', 'buyer_marked_paid', 'payment_sent'].includes(st)) {
+      return 'paid';
+    }
+    return st || 'active';
+  };
+
+  const tradeStatus = resolveTradeStatus(trade);
   const isTradeStopped = ['released', 'cancelled', 'expired', 'completed'].includes(tradeStatus);
   const isDisputed = ['disputed', 'dispute'].includes(tradeStatus);
 
@@ -983,52 +996,67 @@ export function TradeChat({
 
   return (
     <Card className="flex flex-col h-full shadow-none border-0 rounded-none bg-card text-card-foreground">
-      <CardHeader className="space-y-3 border-b border-border/60 p-4">
-        <div className="flex justify-between items-center">
-          <div className="flex items-center gap-3">
-            <Link href={`/users/${opponentUsername}`}>
-              <Avatar className="h-10 w-10 border border-primary/20">
+      <CardHeader className="space-y-2.5 sm:space-y-3 border-b border-border/60 p-2.5 sm:p-4">
+        <div className="flex justify-between items-center gap-2">
+          {/* Left: Opponent Avatar & Details */}
+          <div className="flex items-center gap-2 sm:gap-3 min-w-0 flex-1">
+            <Link href={`/users/${opponentUsername}`} className="shrink-0">
+              <Avatar className="h-8 w-8 sm:h-10 sm:w-10 border border-primary/20">
                 <AvatarImage src={opponentPhoto} alt={opponentUsername} />
-                <AvatarFallback className="bg-primary/10 text-primary font-bold">
+                <AvatarFallback className="bg-primary/10 text-primary font-bold text-xs sm:text-sm">
                   <DefaultAvatar />
                 </AvatarFallback>
               </Avatar>
             </Link>
-            <div>
-              <div className="flex items-center gap-1.5 flex-wrap">
-                <Link href={`/users/${opponentUsername}`} className="font-bold text-sm text-foreground hover:underline">
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center gap-1 sm:gap-1.5 flex-wrap">
+                <Link
+                  href={`/users/${opponentUsername}`}
+                  className="font-bold text-xs sm:text-sm text-foreground hover:underline truncate max-w-[110px] sm:max-w-[160px]"
+                >
                   @{opponentUsername}
                 </Link>
                 <MerchantBadge tier={opponent?.merchant_tier || (opponent as any)?.merchantTier} size="sm" />
-                <span className="text-[11px] font-semibold px-1.5 py-0.5 rounded bg-muted text-muted-foreground">
+                <span className="text-[10px] sm:text-[11px] font-semibold px-1 sm:px-1.5 py-0.5 rounded bg-muted text-muted-foreground shrink-0">
                   {opponentRoleLabel}
                 </span>
-                {opponent?.country && <FlagIcon countryCode={opponent.country} />}
-                <Button variant="ghost" size="icon" onClick={onInfoClick} className="h-6 w-6 text-primary hover:text-primary">
-                  <InfoIcon className="h-4 w-4" />
+                {opponent?.country && (
+                  <span className="shrink-0 scale-90 sm:scale-100 origin-left">
+                    <FlagIcon countryCode={opponent.country} />
+                  </span>
+                )}
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  onClick={onInfoClick}
+                  className="h-5 w-5 sm:h-6 sm:w-6 text-primary hover:text-primary shrink-0 p-0"
+                  title="Trader Information"
+                >
+                  <InfoIcon className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
                 </Button>
               </div>
-              <div className="flex items-center gap-2 mt-0.5">
-                <div className={cn('h-2 w-2 rounded-full', activity.dotClass)} />
-                <p className={cn('text-xs font-medium', activity.textClass)}>{activity.text}</p>
+              <div className="flex items-center gap-1.5 sm:gap-2 mt-0.5">
+                <div className={cn('h-1.5 w-1.5 sm:h-2 sm:w-2 rounded-full shrink-0', activity.dotClass)} />
+                <p className={cn('text-[11px] sm:text-xs font-medium truncate', activity.textClass)}>{activity.text}</p>
               </div>
             </div>
           </div>
 
-          <div className="text-right">
-            <div className="flex items-center gap-3 text-xs justify-end font-semibold">
-              <div className="flex items-center gap-1 text-emerald-600 dark:text-emerald-400">
-                <ThumbsUp className="h-3.5 w-3.5" />
+          {/* Right: Feedback & Timer */}
+          <div className="text-right shrink-0">
+            <div className="flex items-center gap-2 sm:gap-3 text-[11px] sm:text-xs justify-end font-semibold">
+              <div className="flex items-center gap-0.5 sm:gap-1 text-emerald-600 dark:text-emerald-400">
+                <ThumbsUp className="h-3 w-3 sm:h-3.5 sm:w-3.5" />
                 <span className="font-[Arial,Helvetica,sans-serif]">{liveOpponentFeedback.positive}</span>
               </div>
-              <div className="flex items-center gap-1 text-destructive">
-                <ThumbsDown className="h-3.5 w-3.5" />
+              <div className="flex items-center gap-0.5 sm:gap-1 text-destructive">
+                <ThumbsDown className="h-3 w-3 sm:h-3.5 sm:w-3.5" />
                 <span className="font-[Arial,Helvetica,sans-serif]">{liveOpponentFeedback.negative}</span>
               </div>
             </div>
             
             {/* Dual Timer Badges: Reverse Countdown + Active Stopwatch via TradeChatTimer */}
-            <div className="mt-1">
+            <div className="mt-0.5 sm:mt-1 scale-90 sm:scale-100 origin-right">
               <TradeChatTimer
                 createdAt={trade?.createdAt || trade?.created_at || new Date().toISOString()}
                 status={effectiveTradeStatus.toUpperCase()}
@@ -1259,10 +1287,10 @@ export function TradeChat({
           </div>
 
           <div className="flex items-center justify-between px-1 text-xs">
-            <span className="text-[11px] text-muted-foreground">
+            <span className="hidden sm:inline-block text-[11px] text-muted-foreground">
               Press <kbd className="px-1 py-0.5 rounded bg-muted font-mono text-[10px]">Enter ↵</kbd> to send, <kbd className="px-1 py-0.5 rounded bg-muted font-mono text-[10px]">Shift+Enter</kbd> for new line
             </span>
-            <span className="text-xs text-slate-500 font-mono">
+            <span className="text-xs text-slate-500 font-mono ml-auto">
               {newMessage.length}/1000
             </span>
           </div>

@@ -169,67 +169,78 @@ export default function TradePage() {
         }
       }
 
-      // 5. Fetch Ad details defensively across tables and fallback references
+      // 5. Fetch Ad details defensively across tables (p2p_ads & ads) and fallback references
       const rawAdRef = tradeData.ad_id || tradeData.adId || tradeData.public_ad_id;
       let adResult: any = null;
 
+      const adTables = ['p2p_ads', 'ads'];
+
       if (rawAdRef) {
-        // First, check by primary id (can be slug like per9yeeotd4k or uuid)
-        try {
-          const { data } = await supabase.from('ads').select('*').eq('id', String(rawAdRef)).maybeSingle();
-          if (data) adResult = data;
-        } catch {}
-
-        if (!adResult) {
+        for (const table of adTables) {
+          if (adResult) break;
           try {
-            const { data } = await supabase.from('ads').select('*').eq('public_id', String(rawAdRef)).maybeSingle();
+            const { data } = await supabase.from(table).select('*').eq('id', String(rawAdRef)).maybeSingle();
             if (data) adResult = data;
           } catch {}
-        }
 
-        if (!adResult) {
-          try {
-            const { data } = await supabase.from('ads').select('*').eq('public_ad_id', String(rawAdRef)).maybeSingle();
-            if (data) adResult = data;
-          } catch {}
-        }
+          if (!adResult) {
+            try {
+              const { data } = await supabase.from(table).select('*').eq('public_id', String(rawAdRef)).maybeSingle();
+              if (data) adResult = data;
+            } catch {}
+          }
 
-        if (!adResult) {
-          try {
-            const { data } = await supabase.from('ads').select('*').eq('ad_id', String(rawAdRef)).maybeSingle();
-            if (data) adResult = data;
-          } catch {}
+          if (!adResult) {
+            try {
+              const { data } = await supabase.from(table).select('*').eq('public_ad_id', String(rawAdRef)).maybeSingle();
+              if (data) adResult = data;
+            } catch {}
+          }
+
+          if (!adResult) {
+            try {
+              const { data } = await supabase.from(table).select('*').eq('ad_id', String(rawAdRef)).maybeSingle();
+              if (data) adResult = data;
+            } catch {}
+          }
         }
       }
 
       // Fallback: If ad still not found by direct ID, search seller's recent ad matching the trade crypto & fiat
       if (!adResult && tradeData.seller_id) {
-        try {
-          const cryptoSym = tradeData.crypto || tradeData.asset_symbol || tradeData.coin || 'BTC';
-          const { data: sellerAd } = await supabase
-            .from('ads')
-            .select('*')
-            .eq('user_id', tradeData.seller_id)
-            .ilike('asset_symbol', cryptoSym)
-            .order('created_at', { ascending: false })
-            .limit(1)
-            .maybeSingle();
+        for (const table of adTables) {
+          if (adResult) break;
+          try {
+            const cryptoSym = tradeData.crypto || tradeData.asset_symbol || tradeData.coin || 'BTC';
+            const { data: sellerAd } = await supabase
+              .from(table)
+              .select('*')
+              .eq('user_id', tradeData.seller_id)
+              .ilike('asset_symbol', cryptoSym)
+              .order('created_at', { ascending: false })
+              .limit(1)
+              .maybeSingle();
 
-          if (sellerAd) adResult = sellerAd;
-        } catch {}
+            if (sellerAd) adResult = sellerAd;
+          } catch {}
+        }
       }
 
       if (adResult) {
         setAd(adResult);
-      } else if (tradeData.terms || tradeData.seller_terms || tradeData.tags) {
+      } else {
         // Construct ad metadata from trade record
+        const fallbackAdId = tradeData.ad_id || tradeData.public_ad_id || tradeData.adId || '';
         setAd({
-          id: tradeData.ad_id || tradeData.public_ad_id || 'AD-DIRECT',
-          public_id: tradeData.public_ad_id || tradeData.ad_id || 'AD-DIRECT',
-          terms: tradeData.terms || tradeData.seller_terms || '',
-          tags: tradeData.tags || tradeData.ad_tags || [],
-          ad_tags: tradeData.tags || tradeData.ad_tags || [],
-          payment_methods: tradeData.payment_methods || tradeData.payment_method ? [tradeData.payment_method] : [],
+          id: fallbackAdId,
+          public_id: fallbackAdId,
+          public_ad_id: fallbackAdId,
+          terms: tradeData.terms || tradeData.seller_terms || tradeData.terms_conditions || '',
+          terms_conditions: tradeData.terms_conditions || tradeData.terms || tradeData.seller_terms || '',
+          offer_label: tradeData.offer_label || tradeData.label || '',
+          tags: tradeData.tags || tradeData.ad_tags || tradeData.offer_tags || [],
+          ad_tags: tradeData.ad_tags || tradeData.tags || tradeData.offer_tags || [],
+          payment_methods: tradeData.payment_methods || (tradeData.payment_method ? [tradeData.payment_method] : []),
         });
       }
     } catch (err: any) {
