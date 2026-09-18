@@ -42,7 +42,7 @@ import { useI18n } from "@/context/i18n-context";
 import type { Language } from "@/lib/types";
 import { useAuth } from '@/components/providers/auth-provider';
 import { useWallet } from '@/context/wallet-context';
-import { useRouter } from 'next/navigation';
+import { useRouter, usePathname } from 'next/navigation';
 import { useToast } from '@/hooks/use-toast';
 import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar';
 import { DefaultAvatar } from '@/components/icons';
@@ -63,6 +63,8 @@ export function Header() {
   const { user, isUserLoading, signOut } = useAuth();
   const { totalConvertedValue, preferredCurrency } = useWallet();
   const router = useRouter();
+  const pathname = usePathname();
+  const isHomePage = pathname === '/';
   const { toast } = useToast();
   const selectedLanguage = LANGUAGES.flatMap(l => l.dialects || l).find(l => l.code === language) || LANGUAGES[0];
 
@@ -250,7 +252,7 @@ export function Header() {
         </div>
 
         <div className="flex items-center gap-2">
-            {user && <NotificationBell />}
+            {user && !isHomePage && <NotificationBell />}
             <ModeToggle />
              <DropdownMenu>
               <DropdownMenuTrigger asChild>

@@ -216,13 +216,18 @@ export default function MyTradesPage() {
     };
   }, [fetchTrades]);
 
-  const handleDownloadCSV = () => {
-    if (!allTrades.length) return;
-    const headers = 'Trade ID,Buyer Username,Seller Username,Crypto Asset,Coin Amount,Fiat Amount,Fiat Currency,Escrow Fee,Status,Date (UTC)\n';
-    const csvContent = allTrades
-      .map((t) => {
-        const dateStr = t.createdAt ? new Date(t.createdAt).toISOString().replace('T', ' ').replace(/\..+/, ' UTC') : 'N/A';
+  const handleDownloadCSV = async () => {
+    try {
+      // 1. Trades section
+      let csvContent = '=== TRADES HISTORY ===\n';
+      csvContent += 'Trade ID,Type,Buyer Username,Seller Username,Crypto Asset,Coin Amount,Fiat Amount,Fiat Currency,Escrow Fee,Status,Date (UTC),Time (UTC)\n';
+      
+      allTrades.forEach((t) => {
+        const d = t.createdAt ? new Date(t.createdAt) : null;
+        const dateStr = d ? d.toISOString().split('T')[0] : 'N/A';
+        const timeStr = d ? d.toISOString().split('T')[1].replace('Z', '') : 'N/A';
         const tradeId = `"${(t.tradeId || t.id || '').replace(/"/g, '""')}"`;
+        const role = t.buyerId === authUser?.id ? 'BUY' : 'SELL';
         const buyer = `"${(t.buyer?.username || t.buyerId || 'N/A').replace(/"/g, '""')}"`;
         const seller = `"${(t.seller?.username || t.sellerId || 'N/A').replace(/"/g, '""')}"`;
         const crypto = t.crypto || 'BTC';
@@ -232,18 +237,81 @@ export default function MyTradesPage() {
         const escrowFee = t.escrowFee || 0;
         const status = t.status || 'unknown';
 
-        return `${tradeId},${buyer},${seller},${crypto},${coinAmount},${fiatAmount},${fiatCurrency},${escrowFee},${status},"${dateStr}"`;
-      })
-      .join('\n');
+        csvContent += `${tradeId},${role},${buyer},${seller},${crypto},${coinAmount},${fiatAmount},${fiatCurrency},${escrowFee},${status},"${dateStr}","${timeStr}"\n`;
+      });
 
-    const blob = new Blob([headers + csvContent], { type: 'text/csv;charset=utf-8;' });
-    const link = document.createElement('a');
-    const url = URL.createObjectURL(blob);
-    link.setAttribute('href', url);
-    link.setAttribute('download', `trade_history_${Date.now()}.csv`);
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+      // 2. Fetch Deposits
+      if (authUser?.id) {
+        try {
+          const { data: deposits } = await supabase
+            .from('deposits')
+            .select('*')
+            .eq('user_id', authUser.id)
+            .order('created_at', { ascending: false });
+
+          if (deposits && deposits.length > 0) {
+            csvContent += '\n=== DEPOSITS HISTORY ===\n';
+            csvContent += 'Deposit ID,Asset,Amount,Network,Transaction Hash,Status,Date (UTC),Time (UTC)\n';
+            deposits.forEach((dep: any) => {
+              const d = dep.created_at ? new Date(dep.created_at) : null;
+              const dateStr = d ? d.toISOString().split('T')[0] : 'N/A';
+              const timeStr = d ? d.toISOString().split('T')[1].replace('Z', '') : 'N/A';
+              const depId = `"${(dep.id || '').replace(/"/g, '""')}"`;
+              const asset = dep.asset_symbol || dep.asset || dep.crypto || 'USDT';
+              const amount = dep.amount || 0;
+              const network = dep.network || 'Mainnet';
+              const txHash = `"${(dep.tx_hash || dep.transaction_hash || dep.txid || 'N/A').replace(/"/g, '""')}"`;
+              const status = dep.status || 'COMPLETED';
+
+              csvContent += `${depId},${asset},${amount},${network},${txHash},${status},"${dateStr}","${timeStr}"\n`;
+            });
+          }
+        } catch (depErr) {
+          console.warn('CSV export deposits fetch notice:', depErr);
+        }
+
+        // 3. Fetch Withdrawals
+        try {
+          const { data: withdrawals } = await supabase
+            .from('withdrawals')
+            .select('*')
+            .eq('user_id', authUser.id)
+            .order('created_at', { ascending: false });
+
+          if (withdrawals && withdrawals.length > 0) {
+            csvContent += '\n=== WITHDRAWALS HISTORY ===\n';
+            csvContent += 'Withdrawal ID,Asset,Amount,Network Fee,Destination Address,Transaction Hash,Status,Date (UTC),Time (UTC)\n';
+            withdrawals.forEach((w: any) => {
+              const d = w.created_at ? new Date(w.created_at) : null;
+              const dateStr = d ? d.toISOString().split('T')[0] : 'N/A';
+              const timeStr = d ? d.toISOString().split('T')[1].replace('Z', '') : 'N/A';
+              const wId = `"${(w.id || '').replace(/"/g, '""')}"`;
+              const asset = w.asset_symbol || w.asset || w.crypto || 'USDT';
+              const amount = w.amount || 0;
+              const fee = w.fee || w.network_fee || 0;
+              const destAddr = `"${(w.destination_address || w.address || 'N/A').replace(/"/g, '""')}"`;
+              const txHash = `"${(w.tx_hash || w.transaction_hash || w.txid || 'N/A').replace(/"/g, '""')}"`;
+              const status = w.status || 'COMPLETED';
+
+              csvContent += `${wId},${asset},${amount},${fee},${destAddr},${txHash},${status},"${dateStr}","${timeStr}"\n`;
+            });
+          }
+        } catch (wErr) {
+          console.warn('CSV export withdrawals fetch notice:', wErr);
+        }
+      }
+
+      const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+      const link = document.createElement('a');
+      const url = URL.createObjectURL(blob);
+      link.setAttribute('href', url);
+      link.setAttribute('download', `paxones_activity_history_${Date.now()}.csv`);
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+    } catch (csvError) {
+      console.error('Failed to generate CSV export:', csvError);
+    }
   };
 
   if (isAuthLoading || (!authUser && typeof window !== 'undefined')) {
