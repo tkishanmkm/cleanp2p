@@ -22,7 +22,7 @@ import {
   disputeTrade
 } from '@/lib/wallet';
 import { insertPaxonesSystemMessage, formatCryptoAmount } from '@/lib/trade-system-messages';
-import { cn, toDate } from '@/lib/utils';
+import { cn, toDate, playTradeBeep } from '@/lib/utils';
 import { formatUserDateTimeArial, formatUtcDateTime } from '@/lib/date-utils';
 import { useUserTimezone } from '@/hooks/use-user-timezone';
 import { MerchantBadge } from '@/components/merchant/merchant-badge';
@@ -608,6 +608,16 @@ const ActionButtons = ({
   const [totpCode, setTotpCode] = useState('');
 
   useEffect(() => {
+    playTradeBeep();
+  }, []);
+
+  useEffect(() => {
+    if (tradeStatus === 'released') {
+      playTradeBeep();
+    }
+  }, [tradeStatus]);
+
+  useEffect(() => {
     if (isReleaseConfirmOpen && currentUserId) {
       const check2FA = async () => {
         try {
@@ -909,13 +919,37 @@ const ActionButtons = ({
           </AlertDialog>
         )}
 
-        {tradeStatus === 'paid' && currentUserId && (
-          <OpenDisputeDialog
-            trade={trade}
-            currentUserId={currentUserId}
-            currentUsername={currentUsername || 'user'}
-            disabled={false}
-          />
+        {tradeStatus === 'paid' && currentUserId && !resolvedDispute && tradeStatus !== 'disputed' && (
+          <div className="space-y-2">
+            {!isDisputeEligible && (
+              <p className="text-[11px] text-muted-foreground text-center">
+                Dispute available in: <span className="font-mono font-bold text-foreground">{String(disputeTimeRemaining.hours).padStart(2, '0')}:{String(disputeTimeRemaining.minutes).padStart(2, '0')}:{String(disputeTimeRemaining.seconds).padStart(2, '0')}</span> (3 hours after payment)
+              </p>
+            )}
+            <OpenDisputeDialog
+              trade={trade}
+              currentUserId={currentUserId}
+              currentUsername={currentUsername || 'user'}
+              disabled={!isDisputeEligible}
+            />
+          </div>
+        )}
+
+        {(resolvedDispute || tradeStatus === 'disputed') && (
+          <div className="rounded-xl border border-destructive/40 p-3 bg-destructive/10 space-y-1">
+            <div className="flex items-center gap-1.5 text-xs font-bold text-destructive">
+              <ShieldAlert className="h-4 w-4" />
+              <span>Official Dispute Opened</span>
+            </div>
+            <p className="text-xs text-foreground">
+              Reason: <span className="font-semibold">{resolvedDispute?.reason || 'Payment or Escrow Dispute'}</span>
+            </p>
+            {resolvedDispute?.explanation && (
+              <p className="text-xs text-muted-foreground italic">
+                &ldquo;{resolvedDispute.explanation}&rdquo;
+              </p>
+            )}
+          </div>
         )}
       </div>
     </div>
@@ -1449,7 +1483,11 @@ export function TradeDetails({
     ? new Date(trade?.expiresAt || trade?.expires_at) 
     : new Date(createdAtTime + paymentWindowMinutes * 60 * 1000);
 
-  const isCountdownActive = tradeStatus === 'active' || tradeStatus === 'pending';
+  const markedPaidAt = trade?.marked_paid_at || trade?.paid_at || trade?.updated_at;
+  const paidTimeMs = markedPaidAt ? new Date(markedPaidAt).getTime() : 0;
+  const disputeEligibleTimeMs = paidTimeMs > 0 ? paidTimeMs + (3 * 60 * 60 * 1000) : Date.now() + (3 * 60 * 60 * 1000);
+  const disputeTimeRemaining = useCountdown(tradeStatus === 'paid' ? new Date(disputeEligibleTimeMs) : new Date(0));
+  const isDisputeEligible = tradeStatus === 'paid' && (disputeTimeRemaining.isFinished || disputeEligibleTimeMs <= Date.now());
   const paymentTimeRemaining = useCountdown(isCountdownActive ? dynamicExpiresDate : new Date(0));
   const isExpired = tradeStatus === 'expired' || (isCountdownActive && (paymentTimeRemaining.isFinished || (dynamicExpiresDate.getTime() > 0 && dynamicExpiresDate.getTime() <= Date.now())));
   const effectiveTradeStatus = isExpired ? 'expired' : tradeStatus;

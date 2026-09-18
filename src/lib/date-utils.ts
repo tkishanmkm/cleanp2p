@@ -147,10 +147,13 @@ export function getFriendlyTzTag(tzString?: string | null): string {
     tz.toLowerCase().includes('kolkata') ||
     tz === 'UTC+05:30'
   ) {
-    return 'IST (UTC+05:30)';
+    return 'IST (+05:30)';
   }
   const match = tz.match(/UTC[+-±]\d{1,2}(?::\d{2})?/i);
-  return match ? match[0] : 'GMT';
+  if (match) {
+    return match[0].replace(/UTC/gi, '').trim();
+  }
+  return 'GMT';
 }
 
 /**

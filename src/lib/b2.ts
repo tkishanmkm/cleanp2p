@@ -17,17 +17,32 @@ export function getB2Config() {
     process.env.B2_APPLICATION_KEY_ID ||
     process.env.B2_ACCESS_KEY_ID ||
     process.env.B2_KEY_ID ||
+    process.env.AWS_ACCESS_KEY_ID ||
     '';
 
   const applicationKey =
     process.env.B2_APPLICATION_KEY ||
     process.env.B2_SECRET_ACCESS_KEY ||
     process.env.B2_APP_KEY ||
+    process.env.AWS_SECRET_ACCESS_KEY ||
     '';
 
-  const bucketName = process.env.B2_BUCKET_NAME || 'thepax';
-  const region = process.env.B2_BUCKET_REGION || process.env.B2_REGION || 'us-east-005';
-  const rawEndpoint = process.env.B2_ENDPOINT || 'https://s3.us-east-005.backblazeb2.com';
+  const bucketName =
+    process.env.B2_BUCKET_NAME ||
+    process.env.AWS_BUCKET_NAME ||
+    'thepax';
+
+  const region =
+    process.env.B2_BUCKET_REGION ||
+    process.env.B2_REGION ||
+    process.env.AWS_REGION ||
+    'us-east-005';
+
+  const rawEndpoint =
+    process.env.B2_ENDPOINT ||
+    process.env.AWS_ENDPOINT_URL ||
+    'https://s3.us-east-005.backblazeb2.com';
+
   const endpoint = rawEndpoint.startsWith('http') ? rawEndpoint : `https://${rawEndpoint}`;
 
   return {
@@ -257,11 +272,12 @@ export async function saveKycAddressToB2(
 }
 
 /**
- * Generates short-lived presigned download URL for private KYC / Trade documents
+ * Generates presigned download URL for private KYC / Trade documents or avatars
+ * Defaults to 24 hours (86400s) for media delivery
  */
 export async function getPresignedDownloadUrl(
   key: string,
-  expiresInSeconds = 900
+  expiresInSeconds = 86400
 ): Promise<string> {
   const config = getB2Config();
   const client = getB2Client();
@@ -292,13 +308,28 @@ export async function downloadFromB2(
     const response = await client.send(command);
     if (!response.Body) return null;
 
-    const stream = response.Body as any;
-    const chunks: Uint8Array[] = [];
-    for await (const chunk of stream) {
-      chunks.push(typeof chunk === 'string' ? Buffer.from(chunk) : chunk);
-    }
+    let buffer: Buffer;
+    const bodyAny = response.Body as any;
 
-    let buffer = Buffer.concat(chunks);
+    if (typeof bodyAny.transformToByteArray === 'function') {
+      const byteArray = await bodyAny.transformToByteArray();
+      buffer = Buffer.from(byteArray);
+    } else if (typeof bodyAny.pipe === 'function') {
+      buffer = await new Promise<Buffer>((resolve, reject) => {
+        const chunks: Buffer[] = [];
+        bodyAny.on('data', (c: any) => chunks.push(Buffer.isBuffer(c) ? c : Buffer.from(c)));
+        bodyAny.on('error', reject);
+        bodyAny.on('end', () => resolve(Buffer.concat(chunks)));
+      });
+    } else if (typeof bodyAny[Symbol.asyncIterator] === 'function') {
+      const chunks: Uint8Array[] = [];
+      for await (const chunk of bodyAny) {
+        chunks.push(typeof chunk === 'string' ? Buffer.from(chunk) : chunk);
+      }
+      buffer = Buffer.concat(chunks);
+    } else {
+      buffer = Buffer.from(bodyAny);
+    }
 
     // If gzipped, decompress
     if (response.ContentEncoding === 'gzip' || key.endsWith('.gz')) {
@@ -315,7 +346,7 @@ export async function downloadFromB2(
       contentEncoding: response.ContentEncoding,
     };
   } catch (err) {
-    console.error('downloadFromB2 error:', err);
+    console.error('downloadFromB2 error for key', key, ':', err);
     return null;
   }
 }

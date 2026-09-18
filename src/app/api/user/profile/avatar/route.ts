@@ -44,7 +44,7 @@ export async function POST(req: NextRequest) {
     // Upload compressed DP directly to Backblaze B2
     try {
       const b2Result = await uploadToB2(objectKey, compressedBuffer, mimeType);
-      avatarUrl = `/api/media/avatar/${user.id}?v=${Date.now()}`;
+      avatarUrl = `/api/media/avatar/${user.id}?ext=${fileExt}&v=${Date.now()}`;
     } catch (b2Err) {
       console.warn('B2 upload failed or unconfigured, falling back to data URI:', b2Err);
     }

@@ -31,7 +31,7 @@ export async function GET(request: NextRequest) {
         try {
           const { data: profile } = await supabase
             .from('profiles')
-            .select('id, username_changed')
+            .select('id, username_changed, username_changes_remaining, username_changed_count')
             .eq('id', user.id)
             .maybeSingle();
 
@@ -58,6 +58,16 @@ export async function GET(request: NextRequest) {
               created_at: new Date().toISOString(),
               updated_at: new Date().toISOString(),
             });
+          } else if (profile.username_changed === null || profile.username_changed === undefined || profile.username_changes_remaining === null || profile.username_changes_remaining === undefined) {
+            // Profile created by database trigger without explicit flags: grant 1-time username change
+            await supabase
+              .from('profiles')
+              .update({
+                username_changed: false,
+                username_changes_remaining: 1,
+                username_changed_count: 0,
+              })
+              .eq('id', user.id);
           }
         } catch (profileErr) {
           console.error('[Auth Callback] Error checking/creating OAuth profile:', profileErr);

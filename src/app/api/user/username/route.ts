@@ -43,11 +43,13 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: 'New username must be different from current username.' }, { status: 400 });
     }
 
-    if (
-      profile.username_changed ||
-      (profile.username_changed_count && profile.username_changed_count >= 1) ||
-      (profile.username_changes_remaining !== undefined && profile.username_changes_remaining <= 0)
-    ) {
+    const isLocked = Boolean(
+      profile.username_changed === true ||
+      (typeof profile.username_changed_count === 'number' && profile.username_changed_count >= 1) ||
+      (typeof profile.username_changes_remaining === 'number' && profile.username_changes_remaining <= 0)
+    );
+
+    if (isLocked) {
       return NextResponse.json({ error: 'You have reached the maximum allowed username changes (1 time).' }, { status: 403 });
     }
 
@@ -67,6 +69,7 @@ export async function POST(req: Request) {
       .from('profiles')
       .update({
         username: normalized,
+        display_name: normalized,
         username_changed: true,
         username_changed_count: 1,
         username_changes_remaining: 0,

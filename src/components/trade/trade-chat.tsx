@@ -493,6 +493,14 @@ export function TradeChat({
   const [newMessage, setNewMessage] = useState('');
   const [isUploading, setIsUploading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [currentProfileUsername, setCurrentProfileUsername] = useState<string>('Trader');
+
+  useEffect(() => {
+    if (!currentUserId) return;
+    supabase.from('profiles').select('username').eq('id', currentUserId).maybeSingle().then(({ data }) => {
+      if (data?.username) setCurrentProfileUsername(data.username);
+    });
+  }, [currentUserId, supabase]);
 
   // External link security modal state (only for typed chat web links)
   const [selectedExternalUrl, setSelectedExternalUrl] = useState<string | null>(null);
@@ -656,8 +664,8 @@ export function TradeChat({
             body: JSON.stringify({
               type: 'TRADE_EXPIRED',
               metadata: {
-                buyerUsername: isBuyer ? 'You' : (opponent?.username || 'Buyer'),
-                sellerUsername: isBuyer ? (opponent?.username || 'Seller') : 'You',
+                buyerUsername: isBuyer ? currentProfileUsername : (opponent?.username || 'Buyer'),
+                sellerUsername: isBuyer ? (opponent?.username || 'Seller') : currentProfileUsername,
                 coinAmount: trade?.crypto_amount || trade?.amount,
                 coinSymbol: trade?.crypto || trade?.asset_symbol || 'USDT'
               }
@@ -740,8 +748,8 @@ export function TradeChat({
             body: JSON.stringify({
               type: 'TRADE_INITIATED',
               metadata: {
-                buyerUsername: isBuyer ? 'You' : (opponent?.username || 'Buyer'),
-                sellerUsername: isBuyer ? (opponent?.username || 'Seller') : 'You',
+                buyerUsername: isBuyer ? currentProfileUsername : (opponent?.username || 'Buyer'),
+                sellerUsername: isBuyer ? (opponent?.username || 'Seller') : currentProfileUsername,
                 coinAmount: trade?.crypto_amount || trade?.amount,
                 coinSymbol: trade?.crypto || trade?.asset_symbol || 'USDT',
                 fiatAmount: trade?.fiat_amount || trade?.fiatAmount,

@@ -48,7 +48,7 @@ export async function PATCH(request: NextRequest) {
   // Fetch current user profile to verify one-time change condition
   const { data: profile, error: profileError } = await supabase
     .from('profiles')
-    .select('username, username_changed_count')
+    .select('username, username_changed, username_changed_count, username_changes_remaining')
     .eq('id', user.id)
     .single();
 
@@ -56,8 +56,14 @@ export async function PATCH(request: NextRequest) {
     return NextResponse.json({ error: 'Failed to verify account status' }, { status: 500 });
   }
 
-  const changeCount = profile?.username_changed_count || 0;
-  if (changeCount >= 1) {
+  const changeCount = typeof profile?.username_changed_count === 'number' ? profile.username_changed_count : (profile?.username_changed ? 1 : 0);
+  const isLocked = Boolean(
+    profile?.username_changed === true ||
+    changeCount >= 1 ||
+    (typeof profile?.username_changes_remaining === 'number' && profile.username_changes_remaining <= 0)
+  );
+
+  if (isLocked) {
     return NextResponse.json(
       { error: 'You have already used your one-time username modification. Your handle is permanently locked.' },
       { status: 400 }
@@ -77,7 +83,9 @@ export async function PATCH(request: NextRequest) {
     .update({
       username: cleanUsername,
       display_name: cleanUsername,
-      username_changed_count: changeCount + 1,
+      username_changed: true,
+      username_changed_count: 1,
+      username_changes_remaining: 0,
       updated_at: new Date().toISOString(),
     })
     .eq('id', user.id);

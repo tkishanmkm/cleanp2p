@@ -1,6 +1,6 @@
 'use client'
 
-import React from 'react'
+import React, { useState } from 'react'
 
 interface UserAvatarProps {
   avatarUrl?: string | null
@@ -10,6 +10,8 @@ interface UserAvatarProps {
 }
 
 export default function UserAvatar({ avatarUrl, username, size = 'md', className = '' }: UserAvatarProps) {
+  const [hasError, setHasError] = useState(false)
+
   const sizeClasses = {
     sm: 'w-7 h-7',
     md: 'w-10 h-10',
@@ -17,11 +19,12 @@ export default function UserAvatar({ avatarUrl, username, size = 'md', className
     xl: 'w-20 h-20',
   }
 
-  if (avatarUrl) {
+  if (avatarUrl && !hasError) {
     return (
       <img
         src={avatarUrl}
         alt={username || 'User Avatar'}
+        onError={() => setHasError(true)}
         className={`${sizeClasses[size]} rounded-full object-cover border border-neutral-200 dark:border-neutral-700 ${className}`}
       />
     )

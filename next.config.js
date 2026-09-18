@@ -1,5 +1,6 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
+  distDir: process.env.NEXT_DIST_DIR || '.next',
   output: 'standalone',
   /* config options here */
   transpilePackages: ['aria-hidden', 'get-nonce', '@floating-ui/react', '@floating-ui/dom', '@floating-ui/core', '@floating-ui/utils'],

@@ -25,6 +25,8 @@ const sourceCodePro = Source_Code_Pro({
   variable: '--font-mono',
 });
 
+export const dynamic = 'force-dynamic';
+
 export const metadata: Metadata = {
   title: 'Paxones - Secure P2P Coin Trading',
   description: 'A full-featured, production-quality Peer-to-Peer (P2P) coin trading platform with an escrow system.',

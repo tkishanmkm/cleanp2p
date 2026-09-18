@@ -18,6 +18,8 @@ export interface AuthUser {
   email: string | null;
   displayName: string | null;
   photoURL: string | null;
+  avatar_url?: string | null;
+  photo_url?: string | null;
   role: 'user' | 'admin' | 'moderator';
   isAdmin: boolean;
   rawUser: SupabaseUser;
@@ -235,6 +237,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       email: supabaseUser.email || null,
       displayName: effectiveUsername,
       photoURL: effectivePhoto,
+      avatar_url: effectivePhoto,
+      photo_url: effectivePhoto,
       role: (profile?.role || (isUserAdmin ? 'admin' : 'user')) as 'user' | 'admin' | 'moderator',
       isAdmin: isUserAdmin,
       rawUser: supabaseUser,

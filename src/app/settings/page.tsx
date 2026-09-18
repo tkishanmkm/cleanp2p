@@ -1548,9 +1548,9 @@ export default function SettingsPage() {
                 {/* Change Username & Save Username Button */}
                 {(() => {
                   const isUsernameLocked = Boolean(
-                    profile?.username_changed ||
-                    (profile?.username_changed_count && profile.username_changed_count >= 1) ||
-                    (profile?.username_changes_remaining !== undefined && profile.username_changes_remaining <= 0)
+                    profile?.username_changed === true ||
+                    (typeof profile?.username_changed_count === 'number' && profile.username_changed_count >= 1) ||
+                    (typeof profile?.username_changes_remaining === 'number' && profile.username_changes_remaining <= 0)
                   );
 
                   return (

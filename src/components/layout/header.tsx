@@ -301,8 +301,8 @@ export function Header() {
                 <DropdownMenuTrigger asChild>
                    <Button variant="ghost" className="flex shrink-0 items-center gap-1.5 md:gap-2 p-1 h-auto rounded-md">
                     <Avatar className="h-8 w-8 shrink-0">
-                      {user.photoURL ? (
-                        <AvatarImage src={user.photoURL} alt={user.displayName || 'User Avatar'} />
+                      {(user.photoURL || user.avatar_url || (user as any).photo_url) ? (
+                        <AvatarImage src={user.photoURL || user.avatar_url || (user as any).photo_url} alt={user.displayName || 'User Avatar'} />
                       ) : (
                         <AvatarFallback className="bg-transparent">
                           <DefaultAvatar />

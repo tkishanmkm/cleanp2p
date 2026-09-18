@@ -475,14 +475,14 @@ export async function getUserProfile(userId: string): Promise<UserProfile | null
     let { data, error } = await supabase
       .from('profiles')
       .select('*')
-      .eq('user_id', userId)
+      .eq('id', userId)
       .maybeSingle();
 
     if (!data) {
       const fallback = await supabase
         .from('profiles')
         .select('*')
-        .eq('id', userId)
+        .eq('user_id', userId)
         .maybeSingle();
       if (fallback.data) {
         data = fallback.data;
@@ -513,7 +513,11 @@ export async function getUserProfile(userId: string): Promise<UserProfile | null
       username: data.username,
       email: data.email,
       display_name: data.display_name || data.username,
-      avatar_url: data.avatar_url,
+      avatar_url: data.avatar_url || data.photo_url || null,
+      photo_url: data.photo_url || data.avatar_url || null,
+      username_changed: Boolean(data.username_changed),
+      username_changed_count: typeof data.username_changed_count === 'number' ? data.username_changed_count : (data.username_changed ? 1 : 0),
+      username_changes_remaining: typeof data.username_changes_remaining === 'number' ? data.username_changes_remaining : (data.username_changed ? 0 : 1),
       country: data.country || data.ip_based_country || null,
       preferredCurrency: data.preferred_currency || data.preferredCurrency || 'USD',
       preferred_currency: data.preferred_currency || data.preferredCurrency || 'USD',
