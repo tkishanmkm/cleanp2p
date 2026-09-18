@@ -3,23 +3,23 @@
 import { useEffect, useState, useMemo } from 'react';
 
 const useCountdown = (targetDate: string | number | Date) => {
-    const [now, setNow] = useState(new Date().getTime());
-
     const targetTime = useMemo(() => {
-        const time = new Date(targetDate).getTime();
+        if (!targetDate) return 0;
+        if (typeof targetDate === 'number') return isNaN(targetDate) ? 0 : targetDate;
+        const time = targetDate instanceof Date ? targetDate.getTime() : new Date(targetDate).getTime();
         return isNaN(time) ? 0 : time;
-    }, [targetDate]);
+    }, [typeof targetDate === 'object' && targetDate instanceof Date ? targetDate.getTime() : targetDate]);
+
+    const [now, setNow] = useState(() => Date.now());
 
     useEffect(() => {
         if (targetTime <= 0) {
-            // If the target is in the past or invalid, no need for an interval.
-            // Update 'now' once to ensure the countdown reflects being finished.
-            setNow(new Date().getTime());
             return;
         }
-        
+
+        setNow(Date.now());
         const interval = setInterval(() => {
-            setNow(new Date().getTime());
+            setNow(Date.now());
         }, 1000);
 
         return () => clearInterval(interval);

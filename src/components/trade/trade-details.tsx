@@ -586,7 +586,8 @@ const ActionButtons = ({
   currentUserId,
   currentUsername,
   counterpartId,
-  isExpired
+  isExpired,
+  resolvedDispute
 }: {
   trade: Trade | any;
   currentUserRole: 'buy' | 'sell';
@@ -594,6 +595,7 @@ const ActionButtons = ({
   currentUsername?: string;
   counterpartId?: string;
   isExpired?: boolean;
+  resolvedDispute?: any;
 }) => {
   const { toast } = useToast();
   const tradeStatus = resolveTradeStatus(trade);
@@ -606,6 +608,13 @@ const ActionButtons = ({
   const [isSubmittingAction, setIsSubmittingAction] = useState(false);
   const [is2faActive, setIs2faActive] = useState(false);
   const [totpCode, setTotpCode] = useState('');
+
+  const activeDispute = resolvedDispute || trade?.dispute || null;
+  const markedPaidAt = trade?.marked_paid_at || trade?.paid_at || trade?.updated_at;
+  const paidTimeMs = markedPaidAt ? new Date(markedPaidAt).getTime() : 0;
+  const disputeEligibleTimeMs = paidTimeMs > 0 ? paidTimeMs + (3 * 60 * 60 * 1000) : 0;
+  const disputeTimeRemaining = useCountdown(tradeStatus === 'paid' && disputeEligibleTimeMs > 0 ? disputeEligibleTimeMs : 0);
+  const isDisputeEligible = tradeStatus === 'paid' && (disputeEligibleTimeMs === 0 || disputeTimeRemaining.isFinished || disputeEligibleTimeMs <= Date.now());
 
   useEffect(() => {
     playTradeBeep();
@@ -919,7 +928,7 @@ const ActionButtons = ({
           </AlertDialog>
         )}
 
-        {tradeStatus === 'paid' && currentUserId && !resolvedDispute && tradeStatus !== 'disputed' && (
+        {tradeStatus === 'paid' && currentUserId && !activeDispute && tradeStatus !== 'disputed' && (
           <div className="space-y-2">
             {!isDisputeEligible && (
               <p className="text-[11px] text-muted-foreground text-center">
@@ -935,18 +944,18 @@ const ActionButtons = ({
           </div>
         )}
 
-        {(resolvedDispute || tradeStatus === 'disputed') && (
+        {(activeDispute || tradeStatus === 'disputed') && (
           <div className="rounded-xl border border-destructive/40 p-3 bg-destructive/10 space-y-1">
             <div className="flex items-center gap-1.5 text-xs font-bold text-destructive">
               <ShieldAlert className="h-4 w-4" />
               <span>Official Dispute Opened</span>
             </div>
             <p className="text-xs text-foreground">
-              Reason: <span className="font-semibold">{resolvedDispute?.reason || 'Payment or Escrow Dispute'}</span>
+              Reason: <span className="font-semibold">{activeDispute?.reason || 'Payment or Escrow Dispute'}</span>
             </p>
-            {resolvedDispute?.explanation && (
+            {activeDispute?.explanation && (
               <p className="text-xs text-muted-foreground italic">
-                &ldquo;{resolvedDispute.explanation}&rdquo;
+                &ldquo;{activeDispute.explanation}&rdquo;
               </p>
             )}
           </div>
@@ -1524,9 +1533,9 @@ export function TradeDetails({
   const markedPaidAt = trade?.marked_paid_at || trade?.paid_at || trade?.updated_at;
   const paidTimeMs = markedPaidAt ? new Date(markedPaidAt).getTime() : 0;
   const disputeEligibleTimeMs = paidTimeMs > 0 ? paidTimeMs + (3 * 60 * 60 * 1000) : Date.now() + (3 * 60 * 60 * 1000);
-  const disputeTimeRemaining = useCountdown(tradeStatus === 'paid' ? new Date(disputeEligibleTimeMs) : new Date(0));
-  const isDisputeEligible = tradeStatus === 'paid' && (disputeTimeRemaining.isFinished || disputeEligibleTimeMs <= Date.now());
-  const paymentTimeRemaining = useCountdown(isCountdownActive ? dynamicExpiresDate : new Date(0));
+  const disputeTimeRemaining = useCountdown(tradeStatus === 'paid' && disputeEligibleTimeMs > 0 ? disputeEligibleTimeMs : 0);
+  const isDisputeEligible = tradeStatus === 'paid' && (disputeEligibleTimeMs === 0 || disputeTimeRemaining.isFinished || disputeEligibleTimeMs <= Date.now());
+  const paymentTimeRemaining = useCountdown(isCountdownActive ? dynamicExpiresDate.getTime() : 0);
   const isExpired = tradeStatus === 'expired' || (isCountdownActive && (paymentTimeRemaining.isFinished || (dynamicExpiresDate.getTime() > 0 && dynamicExpiresDate.getTime() <= Date.now())));
   const effectiveTradeStatus = isExpired ? 'expired' : tradeStatus;
   const showReopen = ['cancelled', 'expired'].includes(effectiveTradeStatus);
@@ -1774,6 +1783,7 @@ export function TradeDetails({
                 currentUsername={currentUser?.user_metadata?.username || currentUser?.email?.split('@')[0]}
                 counterpartId={opponentId}
                 isExpired={isExpired}
+                resolvedDispute={resolvedDispute}
               />
             </div>
           )}

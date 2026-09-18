@@ -79,61 +79,90 @@ export function NotificationBell() {
         const supabase = createClient();
         const { data: trades, error } = await supabase
           .from('trades')
-          .select(`
-            id,
-            crypto_currency,
-            crypto,
-            fiat_currency,
-            crypto_amount,
-            amount,
-            fiat_amount,
-            status,
-            is_disputed,
-            paid_at,
-            marked_paid_at,
-            released_at,
-            cancelled_at,
-            expires_at,
-            payment_window_minutes,
-            payment_window,
-            created_at,
-            buyer_id,
-            seller_id,
-            buyer:profiles!trades_buyer_id_fkey(username, avatar_url),
-            seller:profiles!trades_seller_id_fkey(username, avatar_url)
-          `)
+          .select('*')
           .or(`buyer_id.eq.${userId},seller_id.eq.${userId}`)
           .order('created_at', { ascending: false })
-          .limit(8);
+          .limit(10);
 
-        if (!error && trades) {
+        if (!error && trades && trades.length > 0) {
+          // Fetch profiles for all counterparty IDs
+          const partnerIds = Array.from(
+            new Set(
+              trades
+                .flatMap((t: any) => [t.buyer_id, t.seller_id])
+                .filter((id: any) => id && id !== userId)
+            )
+          );
+
+          let profileMap: Record<string, any> = {};
+          if (partnerIds.length > 0) {
+            const { data: profiles } = await supabase
+              .from('profiles')
+              .select('id, username, display_name, avatar_url, photo_url')
+              .in('id', partnerIds);
+
+            if (profiles) {
+              profiles.forEach((p: any) => {
+                profileMap[p.id] = {
+                  username: p.username || p.display_name || 'Trader',
+                  avatar_url: p.avatar_url || p.photo_url || null,
+                };
+              });
+            }
+          }
+
           const formatted: RecentTradeItem[] = trades.map((t: any) => {
             const isBuyer = t.buyer_id === userId;
-            const counterparty = isBuyer ? t.seller : t.buyer;
-            const rawStatus = (t.status || 'pending').toLowerCase();
+            const partnerId = isBuyer ? t.seller_id : t.buyer_id;
+            const counterparty = profileMap[partnerId];
+            const rawStatus = (t.status || '').toLowerCase();
+            const escrowStatus = (t.escrow_status || '').toLowerCase();
 
             // Calculate precise, real-time effective status
-            let effectiveStatus = rawStatus;
+            let effectiveStatus = 'pending';
 
-            if (t.is_disputed || rawStatus === 'disputed' || rawStatus === 'dispute') {
+            if (
+              t.is_disputed ||
+              rawStatus === 'disputed' ||
+              rawStatus === 'dispute' ||
+              escrowStatus === 'disputed'
+            ) {
               effectiveStatus = 'disputed';
-            } else if (rawStatus === 'released' || rawStatus === 'completed' || t.released_at) {
+            } else if (
+              rawStatus === 'released' ||
+              rawStatus === 'completed' ||
+              escrowStatus === 'released' ||
+              escrowStatus === 'completed' ||
+              Boolean(t.released_at) ||
+              Boolean(t.completed_at)
+            ) {
               effectiveStatus = 'completed';
-            } else if (rawStatus === 'cancelled' || rawStatus === 'canceled' || t.cancelled_at) {
+            } else if (
+              rawStatus === 'cancelled' ||
+              rawStatus === 'canceled' ||
+              escrowStatus === 'cancelled' ||
+              Boolean(t.cancelled_at)
+            ) {
               effectiveStatus = 'cancelled';
             } else if (
               rawStatus === 'paid' ||
               rawStatus === 'mark_paid' ||
               rawStatus === 'buyer_marked_paid' ||
               rawStatus === 'payment_sent' ||
-              t.paid_at ||
-              t.marked_paid_at
+              escrowStatus === 'paid' ||
+              Boolean(t.paid_at) ||
+              Boolean(t.marked_paid_at) ||
+              Boolean(t.payment_confirmed_at)
             ) {
               effectiveStatus = 'paid';
-            } else if (rawStatus === 'expired') {
+            } else if (
+              rawStatus === 'expired' ||
+              escrowStatus === 'expired' ||
+              Boolean(t.expired_at)
+            ) {
               effectiveStatus = 'expired';
-            } else if (['pending', 'active', 'escrow_locked', 'awaiting_confirmation'].includes(rawStatus)) {
-              // Check expiration time
+            } else {
+              // Check payment timer window expiration
               const createdAtMs = t.created_at ? new Date(t.created_at).getTime() : 0;
               const winMin = Number(t.payment_window_minutes || t.payment_window || 30);
               const expiresAtMs = t.expires_at
@@ -142,14 +171,6 @@ export function NotificationBell() {
 
               if (expiresAtMs > 0 && Date.now() > expiresAtMs) {
                 effectiveStatus = 'expired';
-                // Trigger background expiration sync
-                if (rawStatus !== 'expired') {
-                  fetch(`/api/trades/${t.id}/actions`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ action: 'EXPIRE_TRADE' })
-                  }).catch(() => {});
-                }
               } else {
                 effectiveStatus = 'pending';
               }
@@ -157,8 +178,8 @@ export function NotificationBell() {
 
             return {
               id: t.id,
-              crypto_currency: (t.crypto_currency || t.crypto || 'USDT').toUpperCase(),
-              fiat_currency: (t.fiat_currency || 'INR').toUpperCase(),
+              crypto_currency: (t.crypto_currency || t.crypto || t.asset_symbol || 'USDT').toUpperCase(),
+              fiat_currency: (t.fiat_currency || t.fiat || 'USD').toUpperCase(),
               crypto_amount: Number(t.crypto_amount ?? t.amount ?? 0),
               fiat_amount: Number(t.fiat_amount || 0),
               status: effectiveStatus,
@@ -171,6 +192,8 @@ export function NotificationBell() {
             };
           });
           setRecentTrades(formatted);
+        } else {
+          setRecentTrades([]);
         }
       } catch (err) {
         console.error('Failed to load recent trades for notification bell:', err);

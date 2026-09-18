@@ -60,20 +60,75 @@ export default async function UserProfilePage({ params }: PageProps) {
     console.warn('Error querying user ads:', err);
   }
 
-  // Filter ads from visitor perspective:
+  // Fetch user's crypto balances for precise limit clamping
+  let userCryptoBalances: Record<string, number> = {
+    BTC: Number(profile.btc_balance || 0),
+    ETH: Number(profile.eth_balance || 0),
+    LTC: Number(profile.ltc_balance || 0),
+    USDT: Number(profile.usdt_balance || 0),
+    SOL: Number(profile.sol_balance || 0),
+  };
+
+  try {
+    const { data: userWallets } = await supabase
+      .from('user_wallets')
+      .select('*')
+      .eq('user_id', profile.id);
+
+    if (userWallets && userWallets.length > 0) {
+      userWallets.forEach((w: any) => {
+        const sym = (w.asset_symbol || w.symbol || w.crypto || '').toUpperCase();
+        const bal = Number(w.available_balance ?? w.available ?? w.balance ?? 0);
+        if (sym && bal > 0) {
+          userCryptoBalances[sym] = Math.max(userCryptoBalances[sym] || 0, bal);
+        }
+      });
+    }
+
+    const { data: walletAssets } = await supabase
+      .from('wallet_assets')
+      .select('*')
+      .eq('user_id', profile.id);
+
+    if (walletAssets && walletAssets.length > 0) {
+      walletAssets.forEach((a: any) => {
+        const sym = (a.asset_symbol || a.asset_code || a.symbol || a.crypto || '').toUpperCase();
+        const bal = Number(a.available ?? a.balance ?? a.amount ?? 0);
+        if (sym && bal > 0) {
+          userCryptoBalances[sym] = Math.max(userCryptoBalances[sym] || 0, bal);
+        }
+      });
+    }
+  } catch (err) {
+    console.warn('Error querying wallet balances:', err);
+  }
+
+  // Filter ads from visitor perspective and attach available crypto:
   // 1. If advertiser created a 'SELL' ad, the visitor BUYs crypto from advertiser -> "Buy Ads" tab
-  const buyAds = userAds.filter((ad) => {
-    const type = String(ad.type || ad.ad_type || ad.trade_type || '').toUpperCase();
-    const isActive = ad.is_active !== false && ad.active !== false && String(ad.status || '').toUpperCase() !== 'INACTIVE';
-    return (type === 'SELL' || type === 'ONLINE_SELL' || type === '') && isActive;
-  });
+  const buyAds = userAds
+    .filter((ad) => {
+      const type = String(ad.type || ad.ad_type || ad.trade_type || '').toUpperCase();
+      const isActive = ad.is_active !== false && ad.active !== false && String(ad.status || '').toUpperCase() !== 'INACTIVE';
+      return (type === 'SELL' || type === 'ONLINE_SELL' || type === '') && isActive;
+    })
+    .map((ad) => {
+      const sym = (ad.asset_symbol || ad.crypto || ad.asset || 'USDT').toUpperCase();
+      return {
+        ...ad,
+        available_crypto: userCryptoBalances[sym] ?? -1,
+      };
+    });
 
   // 2. If advertiser created a 'BUY' ad, the visitor SELLs crypto to advertiser -> "Sell Ads" tab
-  const sellAds = userAds.filter((ad) => {
-    const type = String(ad.type || ad.ad_type || ad.trade_type || '').toUpperCase();
-    const isActive = ad.is_active !== false && ad.active !== false && String(ad.status || '').toUpperCase() !== 'INACTIVE';
-    return (type === 'BUY' || type === 'ONLINE_BUY') && isActive;
-  });
+  const sellAds = userAds
+    .filter((ad) => {
+      const type = String(ad.type || ad.ad_type || ad.trade_type || '').toUpperCase();
+      const isActive = ad.is_active !== false && ad.active !== false && String(ad.status || '').toUpperCase() !== 'INACTIVE';
+      return (type === 'BUY' || type === 'ONLINE_BUY') && isActive;
+    })
+    .map((ad) => ({
+      ...ad,
+    }));
 
   // 3. Aggregate Real Trade Stats & Dynamic Averages from trades table
   let completedTradeCount = Number(profile.completed_trades || 0);

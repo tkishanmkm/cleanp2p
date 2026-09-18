@@ -276,7 +276,7 @@ function PaxonesSystemMessageBubble({
   let IconComponent = ShieldCheck;
 
   if (isInitiated) {
-    title = 'Escrow Secured';
+    title = 'Trade Initiated';
     badgeClass = 'bg-primary/20 text-primary border-primary/40 font-bold';
     containerClass = 'bg-primary/10 border-primary/30 text-foreground';
     IconComponent = ShieldCheck;
@@ -343,7 +343,16 @@ function PaxonesSystemMessageBubble({
   return (
     <div className={cn('rounded-xl border p-3.5 my-2.5 text-xs transition-all shadow-xs', containerClass)}>
       <div className="flex items-center justify-between gap-2 mb-2 pb-1.5 border-b border-current/15">
-        <div className="flex items-center gap-1.5 font-bold tracking-tight">
+        <div className="flex items-center gap-2 font-bold tracking-tight">
+          <div className="relative h-6 w-6 rounded-full overflow-hidden shrink-0 border border-current/25 bg-background/80 flex items-center justify-center p-0.5 shadow-2xs">
+            <Image
+              src="/logo-mobile.webp"
+              alt="Paxones"
+              width={24}
+              height={24}
+              className="h-full w-full object-contain"
+            />
+          </div>
           <IconComponent className="h-4 w-4 shrink-0" />
           <span>{title}</span>
         </div>
@@ -812,10 +821,57 @@ export function TradeChat({
   }, [tradeId, supabase, toast]);
 
   const displayMessages = useMemo(() => {
-    if (!messages) return [];
+    if (!messages || messages.length === 0) return [];
     const allMessages = [...messages];
     allMessages.sort((a, b) => (toDate(a.createdAt)?.getTime() ?? 0) - (toDate(b.createdAt)?.getTime() ?? 0));
-    return allMessages;
+
+    // Deduplicate system messages so each transition/status notice is displayed only once
+    const seenSystemKeys = new Set<string>();
+    const deduplicated: any[] = [];
+
+    for (const msg of allMessages) {
+      const isSystem =
+        msg.senderId === 'system' ||
+        msg.senderId === '00000000-0000-0000-0000-000000000000' ||
+        msg.senderUsername === 'Paxones System' ||
+        msg.senderUsername === 'System' ||
+        Boolean(msg.isModerator && msg.senderUsername?.toLowerCase().includes('system')) ||
+        Boolean(msg.isSystemMessage) ||
+        Boolean(msg.is_system_message) ||
+        (typeof msg.message === 'string' && (
+          msg.message.includes('PAXONES ESCROW') ||
+          msg.message.includes('TRADE INITIATED') ||
+          msg.message.includes('TRADE EXPIRED') ||
+          msg.message.includes('PAYMENT TIME EXCEEDED') ||
+          msg.message.includes('Paxones Security Reminder') ||
+          msg.message.includes('Message blocked:') ||
+          (msg.message.includes('sold') && msg.message.includes('successfully to @')) ||
+          msg.message.includes('Trade is now in dispute.') ||
+          msg.message.includes('Trade cancelled.')
+        ));
+
+      if (isSystem && typeof msg.message === 'string') {
+        const text = msg.message.trim();
+        let sysKey = '';
+        if (text.includes('TRADE EXPIRED') || text.includes('PAYMENT TIME EXCEEDED')) sysKey = 'SYS_EXPIRED';
+        else if (text.includes('TRADE INITIATED') || text.includes('PAXONES ESCROW SECURED') || text.includes('safely held in Paxones Escrow')) sysKey = 'SYS_INITIATED';
+        else if (text.includes('Trade cancelled')) sysKey = 'SYS_CANCELLED';
+        else if (text.includes('Trade is now in dispute')) sysKey = 'SYS_DISPUTED';
+        else if (text.includes('sold') && text.includes('successfully to @')) sysKey = 'SYS_RELEASED';
+        else if (text.includes('has marked the trade as paid')) sysKey = 'SYS_PAID';
+
+        if (sysKey) {
+          if (seenSystemKeys.has(sysKey)) {
+            // Duplicate detected, omit redundant message from stream
+            continue;
+          }
+          seenSystemKeys.add(sysKey);
+        }
+      }
+      deduplicated.push(msg);
+    }
+
+    return deduplicated;
   }, [messages]);
 
   useEffect(() => {
@@ -900,7 +956,7 @@ export function TradeChat({
         {
           trade_id: tradeId,
           sender_id: currentUserId,
-          sender_username: opponent?.username || opponent?.userId || 'Trader',
+          sender_username: currentProfileUsername || userRoleLabel || 'Trader',
           message: messageToSend,
           is_moderator: isAdmin,
           media_url: mediaUrl || null,
@@ -1141,9 +1197,15 @@ export function TradeChat({
                   return (
                     <div key={msg.id} className={cn('flex items-end gap-2', isCurrentUser ? 'justify-end' : 'justify-start')}>
                       {!isCurrentUser && (
-                        <Avatar className="h-7 w-7 shrink-0 border border-border">
+                        <Avatar className="h-7 w-7 shrink-0 border border-border overflow-hidden bg-background">
                           {msg.isModerator ? (
-                            <AvatarFallback className="bg-primary/20 text-primary text-xs font-bold">MOD</AvatarFallback>
+                            <Image
+                              src="/logo-mobile.webp"
+                              alt="Paxones Moderator"
+                              width={28}
+                              height={28}
+                              className="h-full w-full object-contain p-0.5"
+                            />
                           ) : (
                             <>
                               <AvatarImage src={opponentPhoto} />
@@ -1286,8 +1348,8 @@ export function TradeChat({
             </Button>
           </div>
 
-          <div className="flex items-center justify-between px-1 text-xs">
-            <span className="hidden sm:inline-block text-[11px] text-muted-foreground">
+          <div className="hidden sm:flex items-center justify-between px-1 text-xs">
+            <span className="text-[11px] text-muted-foreground">
               Press <kbd className="px-1 py-0.5 rounded bg-muted font-mono text-[10px]">Enter ↵</kbd> to send, <kbd className="px-1 py-0.5 rounded bg-muted font-mono text-[10px]">Shift+Enter</kbd> for new line
             </span>
             <span className="text-xs text-slate-500 font-mono ml-auto">

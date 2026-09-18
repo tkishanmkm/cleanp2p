@@ -48,8 +48,30 @@ export function AdCard({ ad, onSelectAd }: AdCardProps) {
   const joinedDateText = formatJoinedDate(profile?.created_at);
 
   const rawType = (ad.trade_type || ad.type || 'BUY').toUpperCase();
-  const crypto = ad.crypto_currency || ad.asset_symbol || ad.asset || 'Crypto';
-  const fiat = ad.fiat_currency || ad.fiat_symbol || 'USD';
+  const crypto = (ad.crypto_currency || ad.asset_symbol || ad.asset || 'USDT').toUpperCase();
+  const fiat = (ad.fiat_currency || ad.fiat_symbol || 'USD').toUpperCase();
+  const price = Number(ad.price || 0);
+
+  const minLimit = Number(ad.min_limit ?? ad.min_amount ?? ad.minAmount ?? 0);
+  const maxLimit = Number(ad.max_limit ?? ad.max_amount ?? ad.maxAmount ?? 0);
+
+  // If advertiser is selling, cap max limit by available balance in fiat
+  let effectiveMaxLimit = maxLimit;
+  const availCrypto = Number(
+    ad.available_crypto ?? 
+    ad.availableCrypto ?? 
+    (profile as any)?.cryptoBalances?.[crypto] ?? 
+    (profile as any)?.[`${crypto.toLowerCase()}_balance`] ?? 
+    (profile as any)?.available_balance ?? 
+    -1
+  );
+
+  if (rawType === 'SELL' && availCrypto >= 0 && price > 0) {
+    const availFiat = availCrypto * price;
+    if (availFiat > 0) {
+      effectiveMaxLimit = maxLimit > 0 ? Math.min(maxLimit, availFiat) : availFiat;
+    }
+  }
 
   return (
     <div id={`ad-card-${ad.id}`} className="border rounded-lg p-4 bg-white shadow-sm hover:shadow-md transition-all mb-3">
@@ -97,7 +119,7 @@ export function AdCard({ ad, onSelectAd }: AdCardProps) {
         </div>
         <div className="text-right">
           <span className="text-slate-500 block text-xs">Limits</span>
-          <span className="text-slate-700">{Number(ad.min_limit).toLocaleString()} - {Number(ad.max_limit).toLocaleString()} {fiat}</span>
+          <span className="text-slate-700">{minLimit.toLocaleString()} - {effectiveMaxLimit.toLocaleString()} {fiat}</span>
         </div>
       </div>
     </div>

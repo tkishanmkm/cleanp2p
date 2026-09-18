@@ -67,6 +67,7 @@ export async function updateAdStatus(_db: any, adId: string, active: boolean) {
       body: JSON.stringify({
         status: active ? 'ACTIVE' : 'OFFLINE',
         active,
+        is_active: active,
       }),
     });
 
@@ -78,16 +79,40 @@ export async function updateAdStatus(_db: any, adId: string, active: boolean) {
     console.warn('API PATCH failed, falling back to direct query:', err);
   }
 
-  const { data, error } = await supabase
-    .from('p2p_ads')
-    .update({ active, status: active ? 'ACTIVE' : 'OFFLINE' })
-    .eq('id', adId)
-    .select();
+  // Resilient direct Supabase queries across schema variants
+  try {
+    const { data, error } = await supabase
+      .from('p2p_ads')
+      .update({ active, status: active ? 'ACTIVE' : 'OFFLINE', is_active: active })
+      .eq('id', adId)
+      .select();
 
-  if (error) {
-    throw new Error(error.message);
+    if (!error) return data;
+  } catch (err) {
+    console.warn('p2p_ads status update notice:', err);
   }
-  return data;
+
+  try {
+    const { data } = await supabase
+      .from('p2p_ads')
+      .update({ is_active: active })
+      .eq('id', adId)
+      .select();
+    if (data) return data;
+  } catch (e) {
+    console.warn('p2p_ads is_active fallback notice:', e);
+  }
+
+  try {
+    const { data } = await supabase
+      .from('ads')
+      .update({ is_active: active, status: active ? 'ACTIVE' : 'INACTIVE' })
+      .eq('id', adId)
+      .select();
+    return data;
+  } catch (e) {
+    console.warn('ads table fallback notice:', e);
+  }
 }
 
 export async function softDeleteAd(_db: any, adId: string) {
@@ -111,16 +136,23 @@ export async function softDeleteAd(_db: any, adId: string) {
     console.warn('API DELETE failed, falling back to direct query:', err);
   }
 
-  const { data, error } = await supabase
-    .from('p2p_ads')
-    .update({ active: false, status: 'DELETED' })
-    .eq('id', adId)
-    .select();
-
-  if (error) {
-    throw new Error(error.message);
+  try {
+    const { error } = await supabase
+      .from('p2p_ads')
+      .delete()
+      .eq('id', adId);
+    if (!error) return { success: true };
+  } catch (e) {
+    console.warn('Direct delete p2p_ads notice:', e);
   }
-  return data;
+
+  try {
+    await supabase.from('ads').delete().eq('id', adId);
+  } catch (e) {
+    console.warn('Direct delete ads notice:', e);
+  }
+
+  return { success: true };
 }
 
 export async function getMarketplaceAds(

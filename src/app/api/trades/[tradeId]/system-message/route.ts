@@ -63,26 +63,55 @@ export async function POST(
     const actualTradeId = trade.id || tradeId;
 
     // Fetch profiles for accurate usernames in system message
-    let buyerUsername = metadata.buyerUsername || 'Buyer';
-    let sellerUsername = metadata.sellerUsername || 'Seller';
+    let buyerUsername = trade.buyer_username || metadata.buyerUsername || '';
+    let sellerUsername = trade.seller_username || metadata.sellerUsername || '';
 
-    if (trade.buyer_id && (!metadata.buyerUsername || metadata.buyerUsername === 'Buyer')) {
+    if (trade.buyer_id) {
       const { data: bp } = await supabaseAdmin
         .from('profiles')
-        .select('username')
-        .eq('id', trade.buyer_id)
+        .select('username, display_name, email')
+        .or(`id.eq.${trade.buyer_id},user_id.eq.${trade.buyer_id}`)
         .maybeSingle();
       if (bp?.username) buyerUsername = bp.username;
+      else if (bp?.display_name) buyerUsername = bp.display_name;
+      else if (bp?.email && !buyerUsername) buyerUsername = bp.email.split('@')[0];
+      else if (!buyerUsername) {
+        // Fallback: Check auth.admin user
+        try {
+          const { data: authUser } = await supabaseAdmin.auth.admin.getUserById(trade.buyer_id);
+          if (authUser?.user?.user_metadata?.username) {
+            buyerUsername = authUser.user.user_metadata.username;
+          } else if (authUser?.user?.email) {
+            buyerUsername = authUser.user.email.split('@')[0];
+          }
+        } catch {}
+      }
     }
 
-    if (trade.seller_id && (!metadata.sellerUsername || metadata.sellerUsername === 'Seller')) {
+    if (trade.seller_id) {
       const { data: sp } = await supabaseAdmin
         .from('profiles')
-        .select('username')
-        .eq('id', trade.seller_id)
+        .select('username, display_name, email')
+        .or(`id.eq.${trade.seller_id},user_id.eq.${trade.seller_id}`)
         .maybeSingle();
       if (sp?.username) sellerUsername = sp.username;
+      else if (sp?.display_name) sellerUsername = sp.display_name;
+      else if (sp?.email && !sellerUsername) sellerUsername = sp.email.split('@')[0];
+      else if (!sellerUsername) {
+        // Fallback: Check auth.admin user
+        try {
+          const { data: authUser } = await supabaseAdmin.auth.admin.getUserById(trade.seller_id);
+          if (authUser?.user?.user_metadata?.username) {
+            sellerUsername = authUser.user.user_metadata.username;
+          } else if (authUser?.user?.email) {
+            sellerUsername = authUser.user.email.split('@')[0];
+          }
+        } catch {}
+      }
     }
+
+    if (!buyerUsername || buyerUsername.toLowerCase() === 'buyer') buyerUsername = metadata.buyerUsername || trade.buyer_username || 'Trader';
+    if (!sellerUsername || sellerUsername.toLowerCase() === 'seller') sellerUsername = metadata.sellerUsername || trade.seller_username || 'Trader';
 
     const payload: SystemMessagePayload = {
       tradeId: actualTradeId,
@@ -105,13 +134,13 @@ export async function POST(
     const now = new Date().toISOString();
     const systemUuid = '00000000-0000-0000-0000-000000000000';
 
-    // Prevent duplicate automated initiation or expiration notices
-    if (type === 'TRADE_INITIATED' || type === 'TRADE_STARTED') {
+    // Prevent duplicate automated system messages for all trade lifecycle events
+    if (type === 'TRADE_INITIATED' || type === 'TRADE_STARTED' || type === 'ESCROW_LOCKED') {
       const { data: existingInit } = await supabaseAdmin
         .from('trade_messages')
         .select('id')
         .eq('trade_id', actualTradeId)
-        .ilike('message', '%PAXONES ESCROW SECURED%')
+        .or('message.ilike.%TRADE INITIATED%,message.ilike.%PAXONES ESCROW SECURED%,message.ilike.%safely held in Paxones Escrow%')
         .limit(1)
         .maybeSingle();
 
@@ -135,12 +164,36 @@ export async function POST(
         .from('trade_messages')
         .select('id')
         .eq('trade_id', actualTradeId)
-        .ilike('message', '%TRADE EXPIRED%')
+        .or('message.ilike.%TRADE EXPIRED%,message.ilike.%PAYMENT TIME EXCEEDED%')
         .limit(1)
         .maybeSingle();
 
       if (existingExp) {
         return NextResponse.json({ success: true, message: 'Expiration message already present', id: existingExp.id });
+      }
+    } else if (type === 'TRADE_CANCELLED') {
+      const { data: existingCancel } = await supabaseAdmin
+        .from('trade_messages')
+        .select('id')
+        .eq('trade_id', actualTradeId)
+        .ilike('message', '%Trade cancelled%')
+        .limit(1)
+        .maybeSingle();
+
+      if (existingCancel) {
+        return NextResponse.json({ success: true, message: 'Cancellation message already present', id: existingCancel.id });
+      }
+    } else if (type === 'TRADE_RELEASED' || type === 'TRADE_COMPLETED') {
+      const { data: existingRelease } = await supabaseAdmin
+        .from('trade_messages')
+        .select('id')
+        .eq('trade_id', actualTradeId)
+        .or('message.ilike.%sold%successfully to%,message.ilike.%bought%successfully from%')
+        .limit(1)
+        .maybeSingle();
+
+      if (existingRelease) {
+        return NextResponse.json({ success: true, message: 'Release message already present', id: existingRelease.id });
       }
     }
 

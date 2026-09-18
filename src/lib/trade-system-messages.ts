@@ -1713,7 +1713,7 @@ export function formatSystemMessageContent(
     case 'TRADE_STARTED':
     case 'ESCROW_LOCKED':
       return (
-        `🔒 PAXONES ESCROW SECURED\n` +
+        `🔒 TRADE INITIATED\n` +
         `------------------------\n` +
         `• ${formattedAmount} ${cleanCoin} is safely held in Paxones Escrow.\n` +
         `• Buyer (@${buyerUsername}): Please transfer payment according to the seller's payment instructions before the timer expires, then click "I have paid".\n` +

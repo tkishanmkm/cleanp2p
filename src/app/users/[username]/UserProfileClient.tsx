@@ -573,6 +573,16 @@ export default function UserProfileClient({
                 const price = Number(ad.price || ad.unit_price || 0);
                 const paymentMethods = parsePaymentMethods(ad.payment_methods);
 
+                // Compute effectiveMaxLimit capped by advertiser's crypto balance
+                const availCrypto = Number(ad.available_crypto ?? -1);
+                let effectiveMaxLimit = maxLimit;
+                if (availCrypto >= 0 && price > 0) {
+                  const availFiat = availCrypto * price;
+                  if (availFiat > 0) {
+                    effectiveMaxLimit = maxLimit > 0 ? Math.min(maxLimit, availFiat) : availFiat;
+                  }
+                }
+
                 return (
                   <div
                     key={ad.id}
@@ -588,7 +598,7 @@ export default function UserProfileClient({
                         <span className="text-xs text-neutral-500 dark:text-neutral-400">
                           Order Limit:{' '}
                           <span className="font-semibold text-neutral-900 dark:text-neutral-100">
-                            {minLimit.toLocaleString()} - {maxLimit.toLocaleString()} {fiat}
+                            {minLimit.toLocaleString()} - {effectiveMaxLimit.toLocaleString()} {fiat}
                           </span>
                         </span>
                       </div>

@@ -55,6 +55,27 @@ export default function OfferCard({ offer }: OfferCardProps) {
 
   const tradeCount = offer.completed_trades_count ?? offer.profiles?.completed_trades_count ?? 0;
 
+  const minLimit = Number(offer.min_limit || 0);
+  const maxLimit = Number(offer.max_limit || 0);
+  const price = Number(offer.price || 0);
+  const asset = (offer.asset_symbol || 'USDT').toUpperCase();
+
+  const availCrypto = Number(
+    (offer as any).available_crypto ?? 
+    (offer as any).availableCrypto ?? 
+    (offer.profiles as any)?.cryptoBalances?.[asset] ?? 
+    (offer.profiles as any)?.[`${asset.toLowerCase()}_balance`] ?? 
+    -1
+  );
+
+  let effectiveMaxLimit = maxLimit;
+  if (isSellerAd && availCrypto >= 0 && price > 0) {
+    const availFiat = availCrypto * price;
+    if (availFiat > 0) {
+      effectiveMaxLimit = maxLimit > 0 ? Math.min(maxLimit, availFiat) : availFiat;
+    }
+  }
+
   return (
     <div className="p-5 border rounded-2xl bg-card flex flex-col md:flex-row justify-between items-start md:items-center gap-4 hover:shadow-sm transition-shadow">
       <div className="space-y-2">
@@ -111,8 +132,8 @@ export default function OfferCard({ offer }: OfferCardProps) {
             {formatCurrency(Number(offer.price), offer.fiat_symbol)}
           </div>
           <div className="text-xs text-muted-foreground mt-0.5">
-            Limits: {formatCurrency(Number(offer.min_limit), offer.fiat_symbol)} -{' '}
-            {formatCurrency(Number(offer.max_limit), offer.fiat_symbol)}
+            Limits: {formatCurrency(minLimit, offer.fiat_symbol)} -{' '}
+            {formatCurrency(effectiveMaxLimit, offer.fiat_symbol)}
           </div>
         </div>
 

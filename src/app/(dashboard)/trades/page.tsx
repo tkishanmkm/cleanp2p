@@ -69,29 +69,120 @@ export default function MyTradesPage() {
 
       if (error) throw error;
 
-      const mapped: Trade[] = (data || []).map((raw: any) => ({
-        id: raw.id,
-        tradeId: raw.trade_id || raw.id,
-        adId: raw.ad_id,
-        buyerId: raw.buyer_id,
-        sellerId: raw.seller_id,
-        crypto: raw.crypto,
-        amount: Number(raw.amount || 0),
-        fiatCurrency: raw.fiat_currency,
-        fiatAmount: Number(raw.fiat_amount || 0),
-        fiatAmountInUSD: Number(raw.fiat_amount_in_usd || 0),
-        price: Number(raw.price || 0),
-        status: raw.status || 'active',
-        paymentMethod: raw.payment_method || '',
-        escrowFee: Number(raw.escrow_fee || 0),
-        createdAt: raw.created_at,
-        expiresAt: raw.expires_at,
-        paidAt: raw.paid_at,
-        releasedAt: raw.released_at,
-        claimedByBuyer: raw.claimed_by_buyer ?? false,
-        buyer: raw.buyer || { id: raw.buyer_id, username: raw.buyer_username || 'Buyer' },
-        seller: raw.seller || { id: raw.seller_id, username: raw.seller_username || 'Seller' },
-      }));
+      // Extract all user IDs for batch profile lookup
+      const allUserIds = Array.from(
+        new Set(
+          (data || [])
+            .flatMap((raw: any) => [raw.buyer_id, raw.seller_id])
+            .filter(Boolean)
+        )
+      );
+
+      let profileMap: Record<string, any> = {};
+      if (allUserIds.length > 0) {
+        const { data: profiles } = await supabase
+          .from('profiles')
+          .select('id, username, display_name, country, country_code, avatar_url, photo_url')
+          .in('id', allUserIds);
+
+        if (profiles) {
+          profiles.forEach((p: any) => {
+            profileMap[p.id] = {
+              id: p.id,
+              username: p.username || p.display_name || 'Trader',
+              country: p.country || p.country_code || null,
+              avatar_url: p.avatar_url || p.photo_url || null,
+            };
+          });
+        }
+      }
+
+      const mapped: Trade[] = (data || []).map((raw: any) => {
+        const rawStatus = (raw.status || '').toLowerCase();
+        const escrowStatus = (raw.escrow_status || '').toLowerCase();
+
+        // Calculate precise effective status
+        let effectiveStatus = 'active';
+
+        if (
+          raw.is_disputed ||
+          rawStatus === 'disputed' ||
+          rawStatus === 'dispute' ||
+          escrowStatus === 'disputed'
+        ) {
+          effectiveStatus = 'disputed';
+        } else if (
+          rawStatus === 'released' ||
+          rawStatus === 'completed' ||
+          escrowStatus === 'released' ||
+          escrowStatus === 'completed' ||
+          Boolean(raw.released_at) ||
+          Boolean(raw.completed_at)
+        ) {
+          effectiveStatus = 'completed';
+        } else if (
+          rawStatus === 'cancelled' ||
+          rawStatus === 'canceled' ||
+          escrowStatus === 'cancelled' ||
+          Boolean(raw.cancelled_at)
+        ) {
+          effectiveStatus = 'cancelled';
+        } else if (
+          rawStatus === 'paid' ||
+          rawStatus === 'mark_paid' ||
+          rawStatus === 'buyer_marked_paid' ||
+          rawStatus === 'payment_sent' ||
+          escrowStatus === 'paid' ||
+          Boolean(raw.paid_at) ||
+          Boolean(raw.marked_paid_at) ||
+          Boolean(raw.payment_confirmed_at)
+        ) {
+          effectiveStatus = 'paid';
+        } else if (
+          rawStatus === 'expired' ||
+          escrowStatus === 'expired' ||
+          Boolean(raw.expired_at)
+        ) {
+          effectiveStatus = 'expired';
+        } else {
+          // Check payment window timer
+          const createdAtMs = raw.created_at ? new Date(raw.created_at).getTime() : 0;
+          const winMin = Number(raw.payment_window_minutes || raw.payment_window || 30);
+          const expiresAtMs = raw.expires_at
+            ? new Date(raw.expires_at).getTime()
+            : (createdAtMs > 0 ? createdAtMs + winMin * 60 * 1000 : 0);
+
+          if (expiresAtMs > 0 && Date.now() > expiresAtMs) {
+            effectiveStatus = 'expired';
+          } else {
+            effectiveStatus = 'active';
+          }
+        }
+
+        return {
+          id: raw.id,
+          tradeId: raw.trade_id || raw.id,
+          adId: raw.ad_id,
+          buyerId: raw.buyer_id,
+          sellerId: raw.seller_id,
+          crypto: (raw.crypto || raw.asset_symbol || 'USDT').toUpperCase(),
+          amount: Number(raw.amount ?? raw.crypto_amount ?? 0),
+          fiatCurrency: (raw.fiat_currency || raw.fiat || 'USD').toUpperCase(),
+          fiatAmount: Number(raw.fiat_amount || 0),
+          fiatAmountInUSD: Number(raw.fiat_amount_in_usd || 0),
+          price: Number(raw.price || 0),
+          status: effectiveStatus as any,
+          paymentMethod: raw.payment_method || '',
+          escrowFee: Number(raw.escrow_fee || 0),
+          createdAt: raw.created_at,
+          expiresAt: raw.expires_at,
+          paidAt: raw.paid_at,
+          releasedAt: raw.released_at,
+          claimedByBuyer: raw.claimed_by_buyer ?? false,
+          buyer: profileMap[raw.buyer_id] || { id: raw.buyer_id, username: raw.buyer_username || 'Buyer' },
+          seller: profileMap[raw.seller_id] || { id: raw.seller_id, username: raw.seller_username || 'Seller' },
+        };
+      });
 
       setAllTrades(mapped);
     } catch (err) {
@@ -104,18 +195,17 @@ export default function MyTradesPage() {
   useEffect(() => {
     fetchTrades();
 
-    // Listen to live status changes on trades
+    // Listen to live insert and status changes on trades
     const tradeChannel = supabase
       .channel('trade-status-updates')
       .on(
         'postgres_changes',
         {
-          event: 'UPDATE',
+          event: '*',
           schema: 'public',
           table: 'trades',
         },
-        (payload) => {
-          console.log('Trade status changed:', payload.new);
+        () => {
           fetchTrades();
         }
       )
