@@ -287,7 +287,12 @@ export default function UserProfileClient({
           {/* Avatar & User Identifiers */}
           <div className="flex items-start sm:items-center gap-4 sm:gap-5">
             <div className="relative shrink-0">
-              <UserAvatar avatarUrl={profile.avatar_url} username={cleanUsername} size="xl" />
+              <UserAvatar
+                userId={profile.id}
+                avatarUrl={profile.avatar_url || (profile as any)?.photo_url}
+                username={cleanUsername}
+                size="xl"
+              />
               <span
                 title={presence.label}
                 className={`absolute bottom-0 right-0 w-4 h-4 rounded-full border-2 border-white dark:border-neutral-900 ${
@@ -829,7 +834,8 @@ export default function UserProfileClient({
                         className="flex items-center gap-2.5 group hover:opacity-80 transition-opacity"
                       >
                         <UserAvatar
-                          avatarUrl={counterParty?.avatar_url}
+                          userId={counterParty?.id || (fb as any)?.from_user_id || (fb as any)?.to_user_id || (fb as any)?.reviewer_id || (fb as any)?.reviewee_id}
+                          avatarUrl={counterParty?.avatar_url || (counterParty as any)?.photo_url}
                           username={counterPartyName}
                           size="sm"
                         />

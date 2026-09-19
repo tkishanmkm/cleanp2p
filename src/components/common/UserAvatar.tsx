@@ -3,45 +3,62 @@
 import React, { useState } from 'react'
 
 interface UserAvatarProps {
+  userId?: string | null
   avatarUrl?: string | null
+  photoUrl?: string | null
+  photoURL?: string | null
   username?: string | null
-  size?: 'sm' | 'md' | 'lg' | 'xl'
+  size?: 'xs' | 'sm' | 'md' | 'lg' | 'xl' | '2xl'
   className?: string
+  alt?: string
 }
 
-export default function UserAvatar({ avatarUrl, username, size = 'md', className = '' }: UserAvatarProps) {
+export default function UserAvatar({
+  userId,
+  avatarUrl,
+  photoUrl,
+  photoURL,
+  username,
+  size = 'md',
+  className = '',
+  alt,
+}: UserAvatarProps) {
   const [hasError, setHasError] = useState(false)
 
   const sizeClasses = {
-    sm: 'w-7 h-7',
-    md: 'w-10 h-10',
-    lg: 'w-14 h-14',
-    xl: 'w-20 h-20',
+    xs: 'w-5 h-5 text-[9px]',
+    sm: 'w-7 h-7 text-xs',
+    md: 'w-10 h-10 text-sm',
+    lg: 'w-14 h-14 text-base',
+    xl: 'w-20 h-20 text-xl',
+    '2xl': 'w-24 h-24 text-2xl',
   }
 
-  if (avatarUrl && !hasError) {
+  // Resolve best source
+  const src = avatarUrl || photoUrl || photoURL || (userId ? `/api/media/avatar/${userId}` : null)
+
+  const initials = username
+    ? username.replace(/[^a-zA-Z0-9]/g, '').slice(0, 2).toUpperCase()
+    : 'PX'
+
+  if (src && !hasError) {
     return (
       <img
-        src={avatarUrl}
-        alt={username || 'User Avatar'}
+        src={src}
+        alt={alt || username || 'User Avatar'}
         onError={() => setHasError(true)}
-        className={`${sizeClasses[size]} rounded-full object-cover border border-neutral-200 dark:border-neutral-700 ${className}`}
+        className={`${sizeClasses[size]} rounded-full object-cover border border-neutral-200 dark:border-neutral-700 shrink-0 ${className}`}
       />
     )
   }
 
-  // Fallback matching avatar asset
+  // Fallback avatar with clean initials
   return (
     <div
-      className={`${sizeClasses[size]} rounded-full bg-neutral-300 dark:bg-neutral-700 flex items-center justify-center overflow-hidden border border-neutral-200 dark:border-neutral-700 shrink-0 ${className}`}
+      className={`${sizeClasses[size]} rounded-full bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-200 font-bold flex items-center justify-center overflow-hidden border border-neutral-200 dark:border-neutral-700 shrink-0 ${className}`}
     >
-      <svg
-        className="w-full h-full text-neutral-100 dark:text-neutral-400 translate-y-1"
-        fill="currentColor"
-        viewBox="0 0 24 24"
-      >
-        <path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z" />
-      </svg>
+      <span>{initials}</span>
     </div>
   )
 }
+

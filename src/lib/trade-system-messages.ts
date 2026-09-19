@@ -1778,6 +1778,19 @@ export function formatSystemMessageContent(
           `Instructions for Wise:\n` +
           `1. Buyer: Upload official Wise transfer receipt PDF showing recipient details and 'Sent' status.\n` +
           `2. Seller: Upload screenshot of Wise multi-currency account activity for trade period.`;
+      } else if (
+        method.includes('gift') ||
+        method.includes('card') ||
+        method.includes('amazon') ||
+        method.includes('apple') ||
+        method.includes('steam') ||
+        method.includes('google play') ||
+        method.includes('itunes')
+      ) {
+        instructions =
+          `Instructions for Gift Card:\n` +
+          `1. Buyer: Upload clear photos of physical gift card (front and back with code visible) AND official cash/card purchase receipt showing serial/barcode match and timestamp.\n` +
+          `2. Seller: Upload screen recording or screenshot of the redemption attempt error showing time of redemption or already redeemed timestamp from merchant.`;
       } else {
         instructions =
           `Instructions for ${paymentMethod || 'Selected Payment Method'}:\n` +

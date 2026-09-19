@@ -170,7 +170,8 @@ function RecentTradeNotificationRow({ trade, currentUserId }: { trade: any; curr
   const isBuyer = (trade.buyerId || trade.buyer_id) === currentUserId;
   const partner = isBuyer ? trade.seller : trade.buyer;
   const partnerUsername = partner?.username || (isBuyer ? trade.seller_username : trade.buyer_username) || 'Trader';
-  const partnerAvatar = partner?.avatar_url || partner?.photo_url;
+  const partnerId = isBuyer ? (trade.sellerId || trade.seller_id) : (trade.buyerId || trade.buyer_id);
+  const partnerAvatar = partner?.avatar_url || partner?.photo_url || (partnerId ? `/api/media/avatar/${partnerId}` : null);
   const rawCoin = trade.crypto || trade.cryptocurrency || trade.coin_symbol || trade.coin || trade.asset || 'BTC';
   const coin = rawCoin.toUpperCase();
   const amount = Number(trade.amount || 0);
@@ -178,10 +179,31 @@ function RecentTradeNotificationRow({ trade, currentUserId }: { trade: any; curr
   const fiatCurrency = trade.fiatCurrency || trade.fiat_currency || 'USD';
   const paymentMethod = trade.paymentMethod || trade.payment_method || 'Bank Transfer';
   const tradeIdFormatted = trade.tradeId || (trade.id ? '#' + trade.id.replace(/-/g, '').slice(0, 8).toUpperCase() : '');
-  const status = (trade.status || 'active').toLowerCase();
-  const isActive = status === 'active' || status === 'pending';
 
-  const stopwatch = useStopwatch(trade.createdAt || trade.created_at, !isActive);
+  // Calculate precise, real-time effective status
+  const rawStatus = (trade.status || '').toLowerCase();
+  const escrowStatus = (trade.escrow_status || '').toLowerCase();
+  const isDisputed = Boolean(trade.is_disputed || rawStatus === 'disputed' || rawStatus === 'dispute' || escrowStatus === 'disputed');
+  const isCompleted = Boolean(trade.completed_at || trade.released_at || rawStatus === 'completed' || rawStatus === 'released' || escrowStatus === 'completed' || escrowStatus === 'released');
+  const isCancelled = Boolean(trade.cancelled_at || rawStatus === 'cancelled' || rawStatus === 'canceled' || escrowStatus === 'cancelled');
+  const isPaid = Boolean(trade.paid_at || trade.marked_paid_at || trade.payment_confirmed_at || rawStatus === 'paid' || rawStatus === 'mark_paid' || rawStatus === 'buyer_marked_paid' || escrowStatus === 'paid');
+  const isExplicitExpired = Boolean(trade.expired_at || rawStatus === 'expired' || escrowStatus === 'expired');
+
+  const createdAtMs = trade.createdAt || trade.created_at ? new Date(trade.createdAt || trade.created_at).getTime() : 0;
+  const winMin = Number(trade.payment_window_minutes || trade.payment_window || 30);
+  const expiresAtMs = trade.expires_at || trade.expiresAt ? new Date(trade.expires_at || trade.expiresAt).getTime() : (createdAtMs > 0 ? createdAtMs + winMin * 60 * 1000 : 0);
+  const isTimeExpired = (!isPaid && !isCompleted && !isDisputed) && (expiresAtMs > 0 && Date.now() >= expiresAtMs);
+
+  let effectiveStatus = 'pending';
+  if (isDisputed) effectiveStatus = 'disputed';
+  else if (isCompleted) effectiveStatus = 'completed';
+  else if (isCancelled) effectiveStatus = 'cancelled';
+  else if (isPaid) effectiveStatus = 'paid';
+  else if (isExplicitExpired || isTimeExpired) effectiveStatus = 'expired';
+  else effectiveStatus = 'pending';
+
+  const isActive = effectiveStatus === 'pending' && !isTimeExpired;
+  const remainingSeconds = Math.max(0, Math.floor((expiresAtMs - Date.now()) / 1000));
 
   return (
     <DropdownMenuItem asChild className="p-0 focus:bg-accent/40 rounded-xl">
@@ -219,15 +241,15 @@ function RecentTradeNotificationRow({ trade, currentUserId }: { trade: any; curr
               variant="outline"
               className={cn(
                 'capitalize text-[10px] px-2 py-0.5 font-bold font-mono',
-                statusColors[status as keyof typeof statusColors] || 'border-border'
+                statusColors[effectiveStatus as keyof typeof statusColors] || 'border-border'
               )}
             >
-              {status === 'paid' ? 'Mark Paid' : status === 'dispute' ? 'Disputed' : status}
+              {effectiveStatus === 'paid' ? 'Mark Paid' : effectiveStatus === 'disputed' ? 'Disputed' : effectiveStatus}
             </Badge>
-            {isActive && (
+            {isActive && remainingSeconds > 0 && (
               <span className="text-[10px] font-mono text-amber-600 dark:text-amber-400 font-bold flex items-center gap-0.5">
                 <Timer className="h-3 w-3 animate-spin" />
-                {formatTime(stopwatch.elapsedSeconds)}
+                {formatTime(remainingSeconds)}
               </span>
             )}
           </div>
@@ -316,6 +338,7 @@ export function DashboardHeader() {
             const buyerProfile = profilesMap[t.buyer_id];
             const sellerProfile = profilesMap[t.seller_id];
             return {
+              ...t,
               id: t.id,
               tradeId: t.trade_id || t.id,
               buyerId: t.buyer_id,
@@ -327,19 +350,30 @@ export function DashboardHeader() {
               amount: Number(t.amount || 0),
               price: Number(t.price || 0),
               status: t.status || 'created',
+              escrow_status: t.escrow_status,
+              is_disputed: t.is_disputed,
+              payment_window_minutes: t.payment_window_minutes,
+              expires_at: t.expires_at,
+              paid_at: t.paid_at,
+              completed_at: t.completed_at,
+              released_at: t.released_at,
+              cancelled_at: t.cancelled_at,
+              expired_at: t.expired_at,
               createdAt: t.created_at || new Date().toISOString(),
               paymentMethod: t.payment_method || 'Bank Transfer',
               buyer: {
                 id: t.buyer_id,
                 username: buyerProfile?.username || t.buyer_username || 'Buyer',
-                avatar_url: buyerProfile?.avatar_url || buyerProfile?.photo_url || null,
+                avatar_url: buyerProfile?.avatar_url || buyerProfile?.photo_url || (t.buyer_id ? `/api/media/avatar/${t.buyer_id}` : null),
+                photo_url: buyerProfile?.avatar_url || buyerProfile?.photo_url || (t.buyer_id ? `/api/media/avatar/${t.buyer_id}` : null),
                 feedbackScore: 100,
                 completedTrades: 0,
               } as any,
               seller: {
                 id: t.seller_id,
                 username: sellerProfile?.username || t.seller_username || 'Seller',
-                avatar_url: sellerProfile?.avatar_url || sellerProfile?.photo_url || null,
+                avatar_url: sellerProfile?.avatar_url || sellerProfile?.photo_url || (t.seller_id ? `/api/media/avatar/${t.seller_id}` : null),
+                photo_url: sellerProfile?.avatar_url || sellerProfile?.photo_url || (t.seller_id ? `/api/media/avatar/${t.seller_id}` : null),
                 feedbackScore: 100,
                 completedTrades: 0,
               } as any,

@@ -118,18 +118,27 @@ export default function SellPageMarketplace() {
         .filter((item: any) => item.active !== false && item.status !== 'INACTIVE' && item.status !== 'DELETED')
         .map((item: any) => {
           const profile = profilesMap[item.user_id];
+          const resolvedAvatar = profile?.avatar_url || profile?.photo_url || (item.user_id ? `/api/media/avatar/${item.user_id}` : null);
           return {
             ...item,
             side: item.side || item.type || 'BUY',
             crypto_currency: (item.crypto_currency || item.crypto || item.asset || item.coin || 'BTC').toUpperCase(),
             fiat_currency: (item.fiat_currency || item.fiat || 'USD').toUpperCase(),
             price: Number(item.price || 0),
-            profiles: profile || {
-              username: item.user_display_name || 'Trader',
-              completed_trades: 0,
-              positive_feedback: 0,
-              negative_feedback: 0,
-            },
+            profiles: profile
+              ? {
+                  ...profile,
+                  avatar_url: resolvedAvatar,
+                  photo_url: resolvedAvatar,
+                }
+              : {
+                  username: item.user_display_name || 'Trader',
+                  avatar_url: resolvedAvatar,
+                  photo_url: resolvedAvatar,
+                  completed_trades: 0,
+                  positive_feedback: 0,
+                  negative_feedback: 0,
+                },
           };
         });
 

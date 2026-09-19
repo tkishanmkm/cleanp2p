@@ -32,8 +32,8 @@ export function Footer() {
         <div>
           <h4 className="text-slate-900 dark:text-white font-semibold mb-3">Trading</h4>
           <ul className="space-y-2">
-            <li><Link href="/p2p" className="hover:text-slate-900 dark:hover:text-white transition-colors">Buy Crypto</Link></li>
-            <li><Link href="/p2p" className="hover:text-slate-900 dark:hover:text-white transition-colors">Sell Crypto</Link></li>
+            <li><Link href="/buy" className="hover:text-slate-900 dark:hover:text-white transition-colors">Buy coin</Link></li>
+            <li><Link href="/sell" className="hover:text-slate-900 dark:hover:text-white transition-colors">Sell coin</Link></li>
             <li><Link href="/ads/create" className="hover:text-slate-900 dark:hover:text-white transition-colors">Post an Ad</Link></li>
             <li><Link href="/transfer" className="hover:text-slate-900 dark:hover:text-white transition-colors">Internal Transfer (1.5% Fee)</Link></li>
           </ul>

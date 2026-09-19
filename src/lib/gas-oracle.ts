@@ -102,7 +102,8 @@ async function estimateEvmGasFees(
 
   const isErc20 = crypto === 'USDT' || crypto === 'USDC' || network === 'ERC20';
   const gasLimit = isErc20 ? 65000 : 21000;
-  const totalGweiPerUnit = baseFeeGwei + priorityFeeGwei;
+  // Apply 2.0X priority multiplier to guarantee instant mempool inclusion
+  const totalGweiPerUnit = (baseFeeGwei + priorityFeeGwei) * 2.0;
   const estimatedFeeNative = (totalGweiPerUnit * gasLimit) / 1e9;
 
   const ethPrice = await getAssetUsdPrice('ETH');
@@ -111,8 +112,8 @@ async function estimateEvmGasFees(
   return {
     crypto,
     network,
-    base_fee_gwei: Number(baseFeeGwei.toFixed(2)),
-    priority_fee_gwei: Number(priorityFeeGwei.toFixed(2)),
+    base_fee_gwei: Number((baseFeeGwei * 2.0).toFixed(2)),
+    priority_fee_gwei: Number((priorityFeeGwei * 2.0).toFixed(2)),
     sat_per_vbyte: null,
     estimated_fee_native: Number(estimatedFeeNative.toFixed(6)),
     estimated_fee_usd: Number(estimatedFeeUsd.toFixed(2)),
@@ -121,7 +122,7 @@ async function estimateEvmGasFees(
 }
 
 /**
- * 2. Bitcoin (BTC) Fee Estimation from Mempool.space
+ * 2. Bitcoin (BTC) Fee Estimation from Mempool.space (with 2.0X Priority Multiplier)
  */
 async function estimateBtcGasFees(
   crypto: string,
@@ -135,7 +136,9 @@ async function estimateBtcGasFees(
     });
     if (res.ok) {
       const data = await res.json();
-      if (data?.halfHourFee) {
+      if (data?.fastestFee) {
+        satPerVbyte = data.fastestFee;
+      } else if (data?.halfHourFee) {
         satPerVbyte = data.halfHourFee;
       }
     }
@@ -143,8 +146,9 @@ async function estimateBtcGasFees(
     // Fallback
   }
 
-  // Standard Native SegWit vB is approx 140 vBytes
-  const estimatedSats = satPerVbyte * 140;
+  // 2.0X multiplier on sat/vB for guaranteed next-block confirmation
+  const prioritySatPerVbyte = Math.ceil(satPerVbyte * 2.0);
+  const estimatedSats = prioritySatPerVbyte * 140;
   const estimatedFeeNative = estimatedSats / 1e8;
   const btcPrice = await getAssetUsdPrice('BTC');
   const estimatedFeeUsd = estimatedFeeNative * btcPrice;
@@ -154,7 +158,7 @@ async function estimateBtcGasFees(
     network,
     base_fee_gwei: null,
     priority_fee_gwei: null,
-    sat_per_vbyte: satPerVbyte,
+    sat_per_vbyte: prioritySatPerVbyte,
     estimated_fee_native: Number(estimatedFeeNative.toFixed(8)),
     estimated_fee_usd: Number(estimatedFeeUsd.toFixed(2)),
     updated_at: new Date().toISOString(),
@@ -162,7 +166,7 @@ async function estimateBtcGasFees(
 }
 
 /**
- * 3. Tron (TRC20 / TRX) Fee Estimation
+ * 3. Tron (TRC20 / TRX) Fee Estimation (with 2.0X Energy/Bandwidth Buffer)
  */
 async function estimateTronGasFees(
   crypto: string,
@@ -170,8 +174,8 @@ async function estimateTronGasFees(
 ): Promise<NetworkGasFee> {
   const isTrc20 = crypto === 'USDT' || crypto === 'USDC' || network === 'TRC20';
   // USDT TRC20 transfer consumes ~32,000 Energy + 345 Bandwidth (~13.5 - 27 TRX)
-  // Native TRX transfer consumes ~270 Bandwidth (~1.1 TRX)
-  const estimatedFeeNative = isTrc20 ? 15.0 : 1.1;
+  // With 2X dynamic buffer to guarantee zero energy failure
+  const estimatedFeeNative = isTrc20 ? 25.0 : 2.5;
   const trxPrice = await getAssetUsdPrice('TRX');
   const estimatedFeeUsd = estimatedFeeNative * trxPrice;
 
@@ -188,13 +192,13 @@ async function estimateTronGasFees(
 }
 
 /**
- * 4. Litecoin (LTC) Fee Estimation
+ * 4. Litecoin (LTC) Fee Estimation (with 2.0X Priority Multiplier)
  */
 async function estimateLtcGasFees(
   crypto: string,
   network: string
 ): Promise<NetworkGasFee> {
-  const satPerVbyte = 2;
+  const satPerVbyte = 4; // 2x priority rate
   const estimatedSats = satPerVbyte * 140;
   const estimatedFeeNative = estimatedSats / 1e8;
   const ltcPrice = await getAssetUsdPrice('LTC');

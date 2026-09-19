@@ -128,7 +128,13 @@ export default function AdCard({ ad }: AdCardProps) {
     return ['Bank Transfer'];
   })();
 
-  const avatarUrl = ad.user?.avatar_url || ad.profiles?.avatar_url || null;
+  const avatarUrl =
+    ad.user?.avatar_url ||
+    ad.user?.photo_url ||
+    ad.user?.photoURL ||
+    ad.profiles?.avatar_url ||
+    ad.profiles?.photo_url ||
+    (ad.user_id ? `/api/media/avatar/${ad.user_id}` : null);
   const completedTrades = Number(ad.user?.completed_trades ?? ad.profiles?.completed_trades ?? (ad as any).completed_trades ?? 0);
   const positiveFeedback = Number(ad.user?.positive_feedback ?? ad.profiles?.positive_feedback ?? (ad as any).positive_feedback ?? 0);
   const negativeFeedback = Number(ad.user?.negative_feedback ?? ad.profiles?.negative_feedback ?? (ad as any).negative_feedback ?? 0);

@@ -105,7 +105,7 @@ export function NotificationBell() {
               profiles.forEach((p: any) => {
                 profileMap[p.id] = {
                   username: p.username || p.display_name || 'Trader',
-                  avatar_url: p.avatar_url || p.photo_url || null,
+                  avatar_url: p.avatar_url || p.photo_url || `/api/media/avatar/${p.id}`,
                 };
               });
             }
@@ -187,7 +187,7 @@ export function NotificationBell() {
               buyer_id: t.buyer_id,
               seller_id: t.seller_id,
               counterparty_username: counterparty?.username || (isBuyer ? 'Seller' : 'Buyer'),
-              counterparty_avatar: counterparty?.avatar_url || null,
+              counterparty_avatar: counterparty?.avatar_url || (partnerId ? `/api/media/avatar/${partnerId}` : null),
               my_role: isBuyer ? 'BUY' : 'SELL',
             };
           });

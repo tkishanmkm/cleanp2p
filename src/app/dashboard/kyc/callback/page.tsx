@@ -104,7 +104,7 @@ export default function KycCallbackPage() {
 
             <div className="pt-2 flex flex-col gap-2.5">
               <Link
-                href="/p2p"
+                href="/buy"
                 className="w-full py-3 px-4 rounded-xl bg-primary text-primary-foreground font-semibold flex items-center justify-center gap-2 hover:opacity-95 transition text-sm shadow-md"
               >
                 Go to P2P Trading <ArrowRight className="w-4 h-4" />

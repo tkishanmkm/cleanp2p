@@ -169,10 +169,11 @@ export function WithdrawDialog({ open, onOpenChange, asset, userWallets }: Withd
     if (!asset || !watchedChain) return { feeInCrypto: 0, feeInUsd: 0 };
 
     // Prefer live gas oracle estimate
-    if (gasFeeData?.estimated_fee_native) {
-      const nativeFee = Number(gasFeeData.estimated_fee_native) || 0;
-      const usdFee = Number(gasFeeData.estimated_fee_usd) || (prices[asset] ? nativeFee * prices[asset] : 0);
-      return { feeInCrypto: nativeFee, feeInUsd: usdFee };
+    if (gasFeeData?.estimated_fee_usd) {
+      const usdFee = Number(gasFeeData.estimated_fee_usd) || 0;
+      const assetPrice = Number(prices[asset] || (asset === 'USDT' ? 1.0 : 0));
+      const cryptoFee = assetPrice > 0 ? usdFee / assetPrice : (Number(gasFeeData.estimated_fee_native) || 0);
+      return { feeInCrypto: Number(cryptoFee.toFixed(6)), feeInUsd: Number(usdFee.toFixed(2)) };
     }
 
     // Fallback to static lookup

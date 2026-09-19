@@ -190,7 +190,7 @@ export function AdCard({ ad, marketPriceUsd: propMarketPriceUsd, fiatExchangeRat
         <div className="flex-grow space-y-3">
           <div className="flex items-center gap-3">
             <Avatar className="h-10 w-10">
-              <AvatarImage src={adCreator?.photoURL || adCreator?.avatar_url} />
+              <AvatarImage src={adCreator?.photoURL || adCreator?.avatar_url || (ad.user_id ? `/api/media/avatar/${ad.user_id}` : undefined)} />
               <AvatarFallback><DefaultAvatar /></AvatarFallback>
             </Avatar>
             <div>
@@ -312,7 +312,7 @@ export function AdCard({ ad, marketPriceUsd: propMarketPriceUsd, fiatExchangeRat
                       <div className="space-y-2 text-sm p-3 border rounded-md bg-secondary/50">
                         <div className="flex items-center gap-3">
                           <Avatar className="h-10 w-10">
-                            <AvatarImage src={adCreator?.photoURL || adCreator?.avatar_url} />
+                            <AvatarImage src={adCreator?.photoURL || adCreator?.avatar_url || (ad.user_id ? `/api/media/avatar/${ad.user_id}` : undefined)} />
                             <AvatarFallback><DefaultAvatar /></AvatarFallback>
                           </Avatar>
                           <div>
