@@ -241,12 +241,13 @@ export default function MyTradesPage() {
       });
 
       // 2. Fetch Deposits
-      if (authUser?.id) {
+      const currentUserId = authUser?.id || authUser?.uid;
+      if (currentUserId) {
         try {
           const { data: deposits } = await supabase
             .from('deposits')
             .select('*')
-            .eq('user_id', authUser.id)
+            .eq('user_id', currentUserId)
             .order('created_at', { ascending: false });
 
           if (deposits && deposits.length > 0) {
@@ -275,7 +276,7 @@ export default function MyTradesPage() {
           const { data: withdrawals } = await supabase
             .from('withdrawals')
             .select('*')
-            .eq('user_id', authUser.id)
+            .eq('user_id', currentUserId)
             .order('created_at', { ascending: false });
 
           if (withdrawals && withdrawals.length > 0) {
@@ -422,7 +423,16 @@ export default function MyTradesPage() {
                     <TableRow key={trade.id}>
                       <TableCell className="font-mono text-xs">{trade.tradeId}</TableCell>
                       <TableCell>
-                        <Badge variant={isBuyer ? 'default' : 'secondary'}>{isBuyer ? 'Buyer' : 'Seller'}</Badge>
+                        <Badge 
+                          className={cn(
+                            "font-semibold text-xs px-2.5 py-0.5 border shadow-xs transition-colors",
+                            isBuyer 
+                              ? "bg-blue-500/15 text-blue-600 dark:text-blue-400 border-blue-500/30 hover:bg-blue-500/25" 
+                              : "bg-purple-500/15 text-purple-600 dark:text-purple-400 border-purple-500/30 hover:bg-purple-500/25"
+                          )}
+                        >
+                          {isBuyer ? 'Buyer' : 'Seller'}
+                        </Badge>
                       </TableCell>
                       <TableCell>
                         <div className="flex items-center gap-2">

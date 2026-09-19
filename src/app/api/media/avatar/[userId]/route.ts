@@ -18,6 +18,7 @@ export async function GET(
 
     // 1. Fetch Profile using Admin client to ensure RLS or absent cookies don't break public avatar display
     let avatarUrl: string | null = null;
+    let profileFound = false;
     try {
       const admin = getSupabaseAdminClient();
       const { data: profile } = await admin
@@ -26,9 +27,17 @@ export async function GET(
         .eq('id', userId)
         .maybeSingle();
 
-      avatarUrl = profile?.avatar_url || profile?.photo_url || null;
+      if (profile) {
+        profileFound = true;
+        avatarUrl = profile.avatar_url || profile.photo_url || null;
+      }
     } catch (dbErr) {
       console.warn('Profile fetch error in avatar media proxy:', dbErr);
+    }
+
+    // If profile exists and user explicitly has NO avatar (deleted or not set), return default fallback immediately
+    if (profileFound && !avatarUrl) {
+      return returnFallbackSvg();
     }
 
     // 2. Handle base64 data URIs

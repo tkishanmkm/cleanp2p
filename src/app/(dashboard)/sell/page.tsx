@@ -330,7 +330,7 @@ function P2PMarketplaceContent() {
               completedTrades: p.completed_trades ?? 0,
               avgReleaseTime: Number(p.avg_release_minutes || p.avg_release_time) || 0,
               avgPayTime: Number(p.avg_payment_minutes || p.avg_pay_time) || 0,
-              photoURL: p.avatar_url || p.photo_url || `/api/media/avatar/${p.id}`,
+              photoURL: p.avatar_url || p.photo_url || null,
               badges: p.badges || [],
               lastActive: p.last_seen || p.last_seen_at || p.last_active || p.updated_at,
               last_seen: p.last_seen || p.last_seen_at || p.last_active,

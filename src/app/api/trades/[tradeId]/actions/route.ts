@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { createClient } from '@/utils/supabase/server';
+import { createClient, getSupabaseAdminClient } from '@/utils/supabase/server';
 import { insertPaxonesSystemMessage } from '@/lib/trade-system-messages';
 import { verify2FAOTP } from '@/lib/2fa';
 
@@ -25,6 +25,8 @@ export async function POST(
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
+    const adminClient = getSupabaseAdminClient();
+
     const body = await req.json().catch(() => ({}));
     const { action, reason, receiptUrl } = body;
     const totpCode = body.totpCode || body.totp_code || body.code;
@@ -32,7 +34,7 @@ export async function POST(
     const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(tradeId);
 
     // Fetch trade record (support by UUID or trade_id)
-    let tradeQuery = supabase.from('trades').select('*');
+    let tradeQuery = adminClient.from('trades').select('*');
     if (isUuid) {
       tradeQuery = tradeQuery.or(`id.eq.${tradeId},trade_id.eq.${tradeId}`);
     } else {
@@ -47,19 +49,23 @@ export async function POST(
     let buyerName = 'Buyer';
     let sellerName = 'Seller';
     if (trade?.buyer_id) {
-      const { data: bp } = await supabase.from('profiles').select('username').eq('id', trade.buyer_id).maybeSingle();
+      const { data: bp } = await adminClient.from('profiles').select('username').eq('id', trade.buyer_id).maybeSingle();
       if (bp?.username) buyerName = bp.username;
     }
     if (trade?.seller_id) {
-      const { data: sp } = await supabase.from('profiles').select('username').eq('id', trade.seller_id).maybeSingle();
+      const { data: sp } = await adminClient.from('profiles').select('username').eq('id', trade.seller_id).maybeSingle();
       if (sp?.username) sellerName = sp.username;
     }
 
     if (action === 'MARK_PAID') {
       const now = new Date().toISOString();
 
+      // Ensure caller is the buyer or party to the trade
+      if (trade?.buyer_id && trade.buyer_id !== user.id) {
+        return NextResponse.json({ error: 'Only the buyer can mark this trade as paid.' }, { status: 403 });
+      }
+
       // 1. Primary update: record paid_at, marked_paid_at, payment_confirmed_at, and escrow_status = 'PAID'
-      // These columns do not fire trg_update_user_trade_metrics and always succeed reliably
       const updateData: any = {
         paid_at: now,
         marked_paid_at: now,
@@ -67,10 +73,9 @@ export async function POST(
         escrow_status: 'PAID',
       };
 
-      let q = supabase.from('trades').update(updateData);
+      let q = adminClient.from('trades').update(updateData);
       if (isActualUuid) q = q.eq('id', actualTradeId);
       else q = q.eq('trade_id', tradeId);
-      q = q.eq('buyer_id', user.id);
       const { error: updateError } = await q;
 
       if (updateError) {
@@ -80,10 +85,9 @@ export async function POST(
 
       // 2. Also attempt updating status: 'paid' (or uppercase 'PAID') if the database schema allows it
       try {
-        let qStatus = supabase.from('trades').update({ status: 'paid' });
+        let qStatus = adminClient.from('trades').update({ status: 'paid' });
         if (isActualUuid) qStatus = qStatus.eq('id', actualTradeId);
         else qStatus = qStatus.eq('trade_id', tradeId);
-        qStatus = qStatus.eq('buyer_id', user.id);
         const { error: statusErr } = await qStatus;
         if (statusErr) {
           console.warn('Status enum update warning (recorded via escrow_status and paid_at):', statusErr.message);
@@ -94,7 +98,7 @@ export async function POST(
 
       // Also sync p2p_trades if applicable
       try {
-        await supabase
+        await adminClient
           .from('p2p_trades')
           .update({ status: 'PAID', paid_at: now })
           .eq('id', actualTradeId);
@@ -102,7 +106,7 @@ export async function POST(
 
       // Post official Paxones system announcement
       try {
-        await insertPaxonesSystemMessage(supabase, {
+        await insertPaxonesSystemMessage(adminClient, {
           tradeId: actualTradeId,
           type: 'MARKED_PAID',
           buyerUsername: buyerName,
@@ -115,7 +119,7 @@ export async function POST(
       // Notification for seller
       if (trade?.seller_id) {
         try {
-          await supabase.from('notifications').insert({
+          await adminClient.from('notifications').insert({
             user_id: trade.seller_id,
             title: 'Payment Marked as Paid',
             message: `Buyer @${buyerName} has marked trade as paid. Please verify receiving account before releasing.`,
@@ -159,7 +163,7 @@ export async function POST(
       // Try RPC first
       let rpcSucceeded = false;
       try {
-        const { data: rpcData, error: rpcError } = await supabase.rpc('expire_p2p_trade', {
+        const { data: rpcData, error: rpcError } = await adminClient.rpc('expire_p2p_trade', {
           p_trade_id: actualTradeId,
         });
         if (!rpcError && rpcData?.success) {
@@ -170,8 +174,8 @@ export async function POST(
       }
 
       if (!rpcSucceeded) {
-        // 1. Update trade status to 'expired' (valid PostgreSQL enum value)
-        let q = supabase.from('trades').update({
+        // 1. Update trade status to 'expired'
+        let q = adminClient.from('trades').update({
           status: 'expired',
           escrow_status: 'EXPIRED',
           updated_at: now,
@@ -180,9 +184,9 @@ export async function POST(
         else q = q.eq('trade_id', tradeId);
         let { error: updateError } = await q;
 
-        // Defensive fallback if enum in Postgres is uppercase 'EXPIRED'
-        if (updateError && (updateError.message?.includes('enum') || updateError.code === '22P02')) {
-          let qUpper = supabase.from('trades').update({
+        // Defensive fallback 1: Uppercase 'EXPIRED'
+        if (updateError) {
+          let qUpper = adminClient.from('trades').update({
             status: 'EXPIRED',
             escrow_status: 'EXPIRED',
             updated_at: now,
@@ -195,11 +199,48 @@ export async function POST(
           }
         }
 
+        // Defensive fallback 2: 'cancelled' / 'CANCELLED' if 'expired' is not in enum
+        if (updateError) {
+          let qCancelled = adminClient.from('trades').update({
+            status: 'cancelled',
+            escrow_status: 'EXPIRED',
+            updated_at: now,
+          });
+          if (isActualUuid) qCancelled = qCancelled.eq('id', actualTradeId);
+          else qCancelled = qCancelled.eq('trade_id', tradeId);
+          const resCancelled = await qCancelled;
+          if (!resCancelled.error) {
+            updateError = null;
+          }
+        }
+
+        // Defensive fallback 3: Update escrow_status and timestamp only
+        if (updateError) {
+          let qEscrowOnly = adminClient.from('trades').update({
+            escrow_status: 'EXPIRED',
+            updated_at: now,
+          });
+          if (isActualUuid) qEscrowOnly = qEscrowOnly.eq('id', actualTradeId);
+          else qEscrowOnly = qEscrowOnly.eq('trade_id', tradeId);
+          const resEscrow = await qEscrowOnly;
+          if (!resEscrow.error) {
+            updateError = null;
+          }
+        }
+
         if (updateError) {
           console.error('Failed to update trade status to expired:', updateError);
           return NextResponse.json({ error: updateError.message || 'Failed to expire trade.' }, { status: 400 });
         }
       }
+
+      // Also sync p2p_trades if applicable
+      try {
+        await adminClient
+          .from('p2p_trades')
+          .update({ status: 'EXPIRED', updated_at: now })
+          .eq('id', actualTradeId);
+      } catch (_) {}
 
       // 2. Unlock/Refund seller escrow balance safely across all balance tables if seller_id is present
       try {
@@ -207,7 +248,7 @@ export async function POST(
         const cryptoAmt = Number(trade?.crypto_amount ?? trade?.amount ?? 0);
         if (trade?.seller_id && cryptoAmt > 0) {
           // 2a. Update user_wallets
-          const { data: uWallet } = await supabase
+          const { data: uWallet } = await adminClient
             .from('user_wallets')
             .select('*')
             .eq('user_id', trade.seller_id)
@@ -217,7 +258,7 @@ export async function POST(
           if (uWallet) {
             const curLocked = Number(uWallet.locked_balance || 0);
             const curReserved = Number(uWallet.reserved_balance || 0);
-            await supabase
+            await adminClient
               .from('user_wallets')
               .update({
                 locked_balance: Math.max(0, curLocked - cryptoAmt),
@@ -228,7 +269,7 @@ export async function POST(
           }
 
           // 2b. Update wallet_assets
-          const { data: sellerAsset } = await supabase
+          const { data: sellerAsset } = await adminClient
             .from('wallet_assets')
             .select('*')
             .eq('user_id', trade.seller_id)
@@ -239,7 +280,7 @@ export async function POST(
             const curLocked = Number(sellerAsset.locked_escrow ?? sellerAsset.locked_balance ?? 0);
             const curReserved = Number(sellerAsset.reserved_balance ?? 0);
             const curAvail = Number(sellerAsset.available ?? sellerAsset.balance ?? 0);
-            await supabase
+            await adminClient
               .from('wallet_assets')
               .update({
                 available: curAvail + cryptoAmt,
@@ -251,7 +292,7 @@ export async function POST(
           }
 
           // 2c. Update wallets (chain-level)
-          const { data: mainWallet } = await supabase
+          const { data: mainWallet } = await adminClient
             .from('wallets')
             .select('*')
             .eq('user_id', trade.seller_id)
@@ -261,7 +302,7 @@ export async function POST(
             const curLocked = Number(mainWallet.locked_balance || 0);
             const curAvail = Number(mainWallet.available_balance || 0);
             const curReserved = Number(mainWallet.reserved_balance || 0);
-            await supabase
+            await adminClient
               .from('wallets')
               .update({
                 available_balance: curAvail + cryptoAmt,
@@ -278,7 +319,7 @@ export async function POST(
 
       // 3. Post official system message in trade chat if not already present
       try {
-        const { data: existingMsg } = await supabase
+        const { data: existingMsg } = await adminClient
           .from('trade_messages')
           .select('id')
           .eq('trade_id', actualTradeId)
@@ -287,7 +328,7 @@ export async function POST(
           .maybeSingle();
 
         if (!existingMsg) {
-          await insertPaxonesSystemMessage(supabase, {
+          await insertPaxonesSystemMessage(adminClient, {
             tradeId: actualTradeId,
             type: 'TRADE_EXPIRED',
             buyerUsername: buyerName,
@@ -304,7 +345,7 @@ export async function POST(
       const userIds = [trade?.buyer_id, trade?.seller_id].filter(Boolean);
       for (const uid of userIds) {
         try {
-          await supabase.from('notifications').insert({
+          await adminClient.from('notifications').insert({
             user_id: uid,
             title: 'Trade Expired',
             message: `Trade has expired because payment was not confirmed within the countdown window.`,
@@ -319,8 +360,13 @@ export async function POST(
     }
 
     if (action === 'RELEASE_ESCROW') {
+      // Ensure caller is the seller
+      if (trade?.seller_id && trade.seller_id !== user.id) {
+        return NextResponse.json({ error: 'Only the seller can release escrow.' }, { status: 403 });
+      }
+
       // 2FA check for sensitive trade release operation
-      const { data: sellerProfile } = await supabase
+      const { data: sellerProfile } = await adminClient
         .from('profiles')
         .select('is_2fa_enabled, is_mfa_enabled, two_factor_secret, security_answer_hash')
         .eq('id', user.id)
@@ -346,7 +392,7 @@ export async function POST(
       let rpcResult: any = null;
 
       try {
-        const { data, error } = await supabase.rpc('release_trade_escrow', {
+        const { data, error } = await adminClient.rpc('release_trade_escrow', {
           p_trade_id: actualTradeId,
           p_seller_id: user.id,
         });
@@ -373,7 +419,7 @@ export async function POST(
 
       // Fallback: direct update if RPC is missing
       const now = new Date().toISOString();
-      let updateQuery = supabase
+      let updateQuery = adminClient
         .from('trades')
         .update({
           status: 'released',
@@ -394,7 +440,7 @@ export async function POST(
       // If status update failed due to trigger or enum constraint, fallback to updating escrow_status and timestamps
       if (updateError) {
         console.warn('Primary release status update warning, trying escrow_status update:', updateError.message);
-        let qFallback = supabase
+        let qFallback = adminClient
           .from('trades')
           .update({
             escrow_status: 'RELEASED',
@@ -422,7 +468,7 @@ export async function POST(
       // 1. Deduct seller locked escrow across tables
       try {
         if (trade?.seller_id && totalSellerDeduct > 0) {
-          const { data: sUW } = await supabase
+          const { data: sUW } = await adminClient
             .from('user_wallets')
             .select('*')
             .eq('user_id', trade.seller_id)
@@ -430,7 +476,7 @@ export async function POST(
             .maybeSingle();
 
           if (sUW) {
-            await supabase
+            await adminClient
               .from('user_wallets')
               .update({
                 locked_balance: Math.max(0, Number(sUW.locked_balance || 0) - totalSellerDeduct),
@@ -440,7 +486,7 @@ export async function POST(
               .eq('id', sUW.id);
           }
 
-          const { data: sWA } = await supabase
+          const { data: sWA } = await adminClient
             .from('wallet_assets')
             .select('*')
             .eq('user_id', trade.seller_id)
@@ -448,7 +494,7 @@ export async function POST(
             .maybeSingle();
 
           if (sWA) {
-            await supabase
+            await adminClient
               .from('wallet_assets')
               .update({
                 locked_escrow: Math.max(0, Number(sWA.locked_escrow ?? sWA.locked_balance ?? 0) - totalSellerDeduct),
@@ -461,7 +507,7 @@ export async function POST(
 
         // 2. Credit buyer available balance across tables
         if (trade?.buyer_id && coinAmount > 0) {
-          const { data: bUW } = await supabase
+          const { data: bUW } = await adminClient
             .from('user_wallets')
             .select('*')
             .eq('user_id', trade.buyer_id)
@@ -469,7 +515,7 @@ export async function POST(
             .maybeSingle();
 
           if (bUW) {
-            await supabase
+            await adminClient
               .from('user_wallets')
               .update({
                 available_balance: Number(bUW.available_balance || 0) + coinAmount,
@@ -478,7 +524,7 @@ export async function POST(
               })
               .eq('id', bUW.id);
           } else {
-            await supabase
+            await adminClient
               .from('user_wallets')
               .insert({
                 user_id: trade.buyer_id,
@@ -491,7 +537,7 @@ export async function POST(
               });
           }
 
-          const { data: bWA } = await supabase
+          const { data: bWA } = await adminClient
             .from('wallet_assets')
             .select('*')
             .eq('user_id', trade.buyer_id)
@@ -499,7 +545,7 @@ export async function POST(
             .maybeSingle();
 
           if (bWA) {
-            await supabase
+            await adminClient
               .from('wallet_assets')
               .update({
                 available: Number(bWA.available ?? bWA.balance ?? 0) + coinAmount,
@@ -511,18 +557,18 @@ export async function POST(
 
         // 3. Increment completed_trades in profiles
         if (trade?.seller_id) {
-          const { data: sP } = await supabase.from('profiles').select('completed_trades').eq('id', trade.seller_id).maybeSingle();
-          await supabase.from('profiles').update({ completed_trades: (sP?.completed_trades || 0) + 1 }).eq('id', trade.seller_id);
+          const { data: sP } = await adminClient.from('profiles').select('completed_trades').eq('id', trade.seller_id).maybeSingle();
+          await adminClient.from('profiles').update({ completed_trades: (sP?.completed_trades || 0) + 1 }).eq('id', trade.seller_id);
         }
         if (trade?.buyer_id) {
-          const { data: bP } = await supabase.from('profiles').select('completed_trades').eq('id', trade.buyer_id).maybeSingle();
-          await supabase.from('profiles').update({ completed_trades: (bP?.completed_trades || 0) + 1 }).eq('id', trade.buyer_id);
+          const { data: bP } = await adminClient.from('profiles').select('completed_trades').eq('id', trade.buyer_id).maybeSingle();
+          await adminClient.from('profiles').update({ completed_trades: (bP?.completed_trades || 0) + 1 }).eq('id', trade.buyer_id);
         }
       } catch (balErr) {
         console.warn('Balance sync on escrow release warning:', balErr);
       }
 
-      await insertPaxonesSystemMessage(supabase, {
+      await insertPaxonesSystemMessage(adminClient, {
         tradeId: actualTradeId,
         type: 'TRADE_COMPLETED',
         sellerUsername: sellerName,
@@ -532,7 +578,7 @@ export async function POST(
       });
 
       if (trade?.buyer_id) {
-        await supabase.from('notifications').insert({
+        await adminClient.from('notifications').insert({
           user_id: trade.buyer_id,
           title: 'Escrow Released',
           message: `@${sellerName} released ${coinAmount} ${coinSymbol} to your wallet.`,
@@ -551,7 +597,7 @@ export async function POST(
       let rpcResult: any = null;
 
       try {
-        const { data, error } = await supabase.rpc('cancel_p2p_trade', {
+        const { data, error } = await adminClient.rpc('cancel_p2p_trade', {
           p_trade_id: actualTradeId,
           p_user_id: user.id,
           p_reason: reason || 'Cancelled by user',
@@ -577,7 +623,7 @@ export async function POST(
       }
 
       // Fallback: direct update if RPC is missing
-      let updateQuery = supabase
+      let updateQuery = adminClient
         .from('trades')
         .update({
           status: 'cancelled',
@@ -597,7 +643,7 @@ export async function POST(
 
       if (updateError) {
         console.warn('Primary cancel status update warning, trying escrow_status fallback:', updateError.message);
-        let qFallback = supabase
+        let qFallback = adminClient
           .from('trades')
           .update({
             escrow_status: 'CANCELLED',
@@ -617,14 +663,14 @@ export async function POST(
         return NextResponse.json({ error: updateError.message }, { status: 400 });
       }
 
-      await insertPaxonesSystemMessage(supabase, {
+      await insertPaxonesSystemMessage(adminClient, {
         tradeId: actualTradeId,
         type: 'TRADE_CANCELLED'
       });
 
       const counterpartyId = user.id === trade?.buyer_id ? trade?.seller_id : trade?.buyer_id;
       if (counterpartyId) {
-        await supabase.from('notifications').insert({
+        await adminClient.from('notifications').insert({
           user_id: counterpartyId,
           title: 'Trade Cancelled',
           message: `Trade has been cancelled. Any locked escrow has been refunded.`,

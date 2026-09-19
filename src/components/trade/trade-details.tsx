@@ -166,13 +166,13 @@ const DetailRow = ({
   boldLabel?: boolean;
 }) => (
   <div className="flex justify-between items-center text-xs sm:text-sm py-1 border-b border-border/40 last:border-0">
-    <p className={boldLabel ? "font-bold text-foreground" : "text-muted-foreground"}>{label}</p>
+    <div className={boldLabel ? "font-bold text-foreground" : "text-muted-foreground"}>{label}</div>
     {isLink ? (
       <Link href={href} className="font-mono font-bold text-primary hover:underline">
         {value}
       </Link>
     ) : (
-      <p className={cn('font-medium text-foreground text-right', valueClass)}>{value}</p>
+      <div className={cn('font-medium text-foreground text-right', valueClass)}>{value}</div>
     )}
   </div>
 );
@@ -221,7 +221,7 @@ const ParticipantRow = ({
 
   return (
     <div className="flex justify-between items-center text-xs sm:text-sm py-1.5 border-b border-border/40">
-      <p className="font-bold text-foreground">{label}</p>
+      <div className="font-bold text-foreground">{label}</div>
       <div className="flex items-center gap-1.5">
         <Link
           href={`/users/${displayUsername}`}

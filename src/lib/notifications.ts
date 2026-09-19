@@ -15,13 +15,29 @@ export interface AppNotification {
 
 /**
  * Fetch all notifications for a specific user from Supabase.
+ * Automatically prunes/deletes notification records older than 10 days.
  */
 export async function getUserNotifications(userId: string): Promise<Notification[]> {
   try {
+    const tenDaysAgo = new Date(Date.now() - 10 * 24 * 60 * 60 * 1000).toISOString();
+
+    // 1. Auto-delete activity logs older than 10 days from database
+    try {
+      await supabase
+        .from('notifications')
+        .delete()
+        .eq('user_id', userId)
+        .lt('created_at', tenDaysAgo);
+    } catch (cleanupErr) {
+      console.warn('Notification auto-clean notice:', cleanupErr);
+    }
+
+    // 2. Fetch current 10-day notifications
     const { data, error } = await supabase
       .from('notifications')
       .select('*')
       .eq('user_id', userId)
+      .gte('created_at', tenDaysAgo)
       .order('created_at', { ascending: false });
 
     if (error) {

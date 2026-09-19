@@ -1,8 +1,65 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient, getSupabaseAdminClient } from '@/utils/supabase/server';
-import { uploadToB2, compressAvatar } from '@/lib/b2';
+import { uploadToB2, compressAvatar, deleteFromB2 } from '@/lib/b2';
 
 export const dynamic = 'force-dynamic';
+
+export async function DELETE(req: NextRequest) {
+  try {
+    const supabase = await createClient();
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+
+    if (!user) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+
+    const admin = getSupabaseAdminClient();
+
+    // 1. Clear profile avatar fields in Supabase
+    await admin
+      .from('profiles')
+      .update({
+        avatar_url: null,
+        photo_url: null,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', user.id);
+
+    // 2. Clear Supabase Auth user metadata
+    try {
+      await admin.auth.admin.updateUserById(user.id, {
+        user_metadata: {
+          avatar_url: null,
+          photo_url: null,
+          picture: null,
+          photoURL: null,
+        },
+      });
+    } catch (authMetaErr) {
+      console.warn('Auth metadata update error (non-fatal):', authMetaErr);
+    }
+
+    // 3. Delete files from B2 if present
+    try {
+      await deleteFromB2(`avatars/${user.id}.webp`);
+      await deleteFromB2(`avatars/${user.id}.jpg`);
+      await deleteFromB2(`avatars/${user.id}.png`);
+      await deleteFromB2(`avatars/${user.id}.jpeg`);
+    } catch (b2Err) {
+      console.warn('B2 avatar deletion warning:', b2Err);
+    }
+
+    return NextResponse.json({
+      success: true,
+      message: 'Avatar deleted successfully and synced across platform.',
+    });
+  } catch (err: any) {
+    console.error('Error deleting avatar:', err);
+    return NextResponse.json({ error: err.message || 'Failed to delete avatar' }, { status: 500 });
+  }
+}
 
 export async function POST(req: NextRequest) {
   try {

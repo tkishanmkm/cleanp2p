@@ -350,3 +350,23 @@ export async function downloadFromB2(
     return null;
   }
 }
+
+/**
+ * Delete a file directly from Backblaze B2 bucket by key
+ */
+export async function deleteFromB2(key: string): Promise<boolean> {
+  try {
+    const config = getB2Config();
+    const client = getB2Client();
+    const command = new DeleteObjectCommand({
+      Bucket: config.bucketName,
+      Key: key,
+    });
+    await client.send(command);
+    return true;
+  } catch (err) {
+    console.warn('deleteFromB2 error for key', key, ':', err);
+    return false;
+  }
+}
+

@@ -3,49 +3,23 @@
 import { useAuth } from "@/components/providers/auth-provider";
 import { supabase } from "@/lib/supabase/client";
 import type { P2PAd, CryptoCurrency } from "@/lib/types";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
-import { Button } from "@/components/ui/button";
-import { Switch } from "@/components/ui/switch";
-import { Badge } from "@/components/ui/badge";
-import { Edit, Plus, Trash2, Loader2, PlusCircle } from "lucide-react";
+import { Loader2, Plus } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { softDeleteAd, updateAdStatus } from "@/lib/ads";
 import Link from "next/link";
 import ManageAds, { AdItem } from "@/components/ManageAds";
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-  AlertDialogTrigger,
-} from "@/components/ui/alert-dialog";
 import { useEffect, useState, useCallback } from "react";
 import { useRouter } from "next/navigation";
+import { useWallet } from "@/context/wallet-context";
 
 export default function MyAdsPage() {
   const { user, isUserLoading } = useAuth();
+  const { balances: walletContextBalances } = useWallet();
   const router = useRouter();
   const { toast } = useToast();
 
-  const [ads, setAds] = useState<P2PAd[]>([]);
+  const [ads, setAds] = useState<any[]>([]);
+  const [userCoinBalances, setUserCoinBalances] = useState<Record<string, number>>({});
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
@@ -57,7 +31,6 @@ export default function MyAdsPage() {
   const fetchMyAds = useCallback(async () => {
     setIsLoading(true);
     try {
-      // Always fetch active user session directly
       const { data: authData } = await supabase.auth.getUser();
       const currentUser = authData?.user;
 
@@ -66,8 +39,9 @@ export default function MyAdsPage() {
         return;
       }
 
-      // Fetch user's ads via API route
       let rawAds: any[] = [];
+      let fetchedBalances: Record<string, number> = {};
+
       try {
         const { data: { session } } = await supabase.auth.getSession();
         const headers: Record<string, string> = {};
@@ -81,6 +55,7 @@ export default function MyAdsPage() {
         if (apiRes.ok) {
           const json = await apiRes.json();
           if (Array.isArray(json.ads)) rawAds = json.ads;
+          if (json.balances) fetchedBalances = json.balances;
         }
       } catch (apiErr) {
         console.warn("API /api/p2p/my-ads error, fallback to direct query:", apiErr);
@@ -106,45 +81,41 @@ export default function MyAdsPage() {
         }
       }
 
-      const mapped: P2PAd[] = rawAds.map((raw: any) => {
-        const rawType = (raw.type || raw.ad_type || raw.adType || raw.side || 'sell').toLowerCase();
-        const isMarket = raw.pricing_type === 'FLOAT' || raw.rate_type === 'market' || raw.rate_type === 'floating';
-        const priceVal = raw.price != null ? Number(raw.price) : (raw.fixed_rate ?? raw.fixedRate ?? raw.unit_price ?? 0);
-        const isActive = raw.status ? (raw.status.toLowerCase() === 'active') : (raw.is_active ?? raw.active ?? true);
+      // Also query live balances directly from client supabase to ensure accuracy
+      try {
+        const [
+          { data: walletAssets },
+          { data: userWallets }
+        ] = await Promise.all([
+          supabase.from('wallet_assets').select('*').eq('user_id', currentUser.id),
+          supabase.from('user_wallets').select('*').eq('user_id', currentUser.id),
+        ]);
 
-        return {
-          id: raw.id,
-          userId: raw.user_id || raw.userId,
-          publicAdId: raw.public_ad_id || raw.publicAdId || raw.id,
-          adType: (rawType === 'buy' ? 'buy' : 'sell') as 'buy' | 'sell',
-          crypto: (raw.asset_symbol || raw.asset || raw.coin || raw.crypto || raw.crypto_currency || 'USDT') as CryptoCurrency,
-          fiatCurrency: raw.fiat_symbol || raw.fiat || raw.fiat_currency || raw.fiatCurrency || 'USD',
-          rateType: isMarket ? 'market' : 'fixed',
-          fixedRate: priceVal,
-          ratePercent: Number(raw.margin_percentage ?? raw.margin ?? raw.rate_percent ?? raw.ratePercent ?? 0),
-          minAmount: Number(raw.min_limit ?? raw.min_amount ?? raw.minAmount ?? 0),
-          maxAmount: Number(raw.max_limit ?? raw.max_amount ?? raw.maxAmount ?? 0),
-          paymentMethods: Array.isArray(raw.payment_methods)
-            ? raw.payment_methods
-            : Array.isArray(raw.paymentMethods)
-            ? raw.paymentMethods
-            : typeof raw.payment_methods === 'string'
-            ? (() => {
-                try {
-                  const parsed = JSON.parse(raw.payment_methods);
-                  return Array.isArray(parsed) ? parsed : [raw.payment_methods];
-                } catch {
-                  return [raw.payment_methods];
-                }
-              })()
-            : ['Bank Transfer'],
-          terms: raw.terms || raw.terms_conditions || '',
-          active: isActive,
-          createdAt: raw.created_at || raw.createdAt || new Date().toISOString(),
-        };
-      });
+        if (walletAssets && Array.isArray(walletAssets)) {
+          walletAssets.forEach((wa: any) => {
+            const sym = String(wa.asset_symbol || wa.asset_code || wa.symbol || wa.crypto || '').toUpperCase();
+            const avail = Number(wa.available ?? wa.balance ?? 0) - Number(wa.locked_escrow ?? wa.locked_balance ?? 0);
+            if (sym && !isNaN(avail)) {
+              fetchedBalances[sym] = Math.max(fetchedBalances[sym] || 0, Math.max(0, avail));
+            }
+          });
+        }
 
-      setAds(mapped);
+        if (userWallets && Array.isArray(userWallets)) {
+          userWallets.forEach((w: any) => {
+            const sym = String(w.asset_symbol || '').toUpperCase();
+            const avail = Number(w.available_balance ?? (Number(w.balance || 0) - Number(w.locked_balance || 0)));
+            if (sym && !isNaN(avail)) {
+              fetchedBalances[sym] = Math.max(fetchedBalances[sym] || 0, Math.max(0, avail));
+            }
+          });
+        }
+      } catch (balErr) {
+        console.warn('Live balance query error in my-ads:', balErr);
+      }
+
+      setUserCoinBalances(fetchedBalances);
+      setAds(rawAds);
     } catch (err: any) {
       console.error('Error fetching my ads:', err);
     } finally {
@@ -160,7 +131,7 @@ export default function MyAdsPage() {
     try {
       await updateAdStatus(null, adId, !currentStatus);
       setAds((prev) =>
-        prev.map((a) => (a.id === adId ? { ...a, active: !currentStatus } : a))
+        prev.map((a) => (a.id === adId ? { ...a, active: !currentStatus, status: !currentStatus ? 'ACTIVE' : 'INACTIVE' } : a))
       );
       toast({
         title: "Ad Updated",
@@ -192,26 +163,65 @@ export default function MyAdsPage() {
     );
   }
 
-  const formattedManageAds: AdItem[] = ads.map((ad) => ({
-    id: ad.id,
-    type: (ad.adType === 'buy' ? 'BUY' : 'SELL') as 'BUY' | 'SELL',
-    asset: ad.crypto,
-    fiat_currency: ad.fiatCurrency,
-    price: Number(ad.fixedRate || 0),
-    pricing_type: ad.rateType === 'fixed' ? 'FIXED' : 'FLOAT',
-    margin_percent: ad.ratePercent,
-    status: ad.active ? 'ACTIVE' : 'INACTIVE',
-    min_limit: ad.minAmount,
-    max_limit: ad.maxAmount,
-    available_amount: ad.maxAmount,
-    payment_methods: ad.paymentMethods,
-    terms_conditions: ad.terms,
-    created_at: typeof ad.createdAt === 'string' ? ad.createdAt : new Date().toISOString(),
-  }));
+  const formattedManageAds: AdItem[] = ads.map((raw: any) => {
+    const rawType = (raw.type || raw.ad_type || raw.adType || raw.side || 'SELL').toUpperCase();
+    const coin = (raw.asset_symbol || raw.asset || raw.coin || raw.crypto || raw.crypto_currency || 'USDT').toUpperCase();
+    const fiat = (raw.fiat_symbol || raw.fiat || raw.fiat_currency || raw.fiatCurrency || 'USD').toUpperCase();
+    const isMarket = raw.pricing_type === 'FLOAT' || raw.rate_type === 'market' || raw.rate_type === 'floating';
+    const priceVal = Number(raw.price ?? raw.fixed_rate ?? raw.fixedRate ?? raw.unit_price ?? 0);
+    const isActive = raw.status ? (raw.status.toUpperCase() === 'ACTIVE') : (raw.is_active ?? raw.active ?? true);
+
+    const minLimit = Number(raw.min_limit ?? raw.min_amount ?? raw.minAmount ?? 0);
+    const maxLimit = Number(raw.max_limit ?? raw.max_amount ?? raw.maxAmount ?? 0);
+
+    // Live available coin balance for Rule 3
+    const contextBal = walletContextBalances[coin as CryptoCurrency]?.available;
+    const directBal = userCoinBalances[coin];
+    const adBal = raw.available_crypto ?? raw.available_amount;
+    
+    let liveCoinBalance = 0;
+    if (contextBal !== undefined && contextBal >= 0) {
+      liveCoinBalance = contextBal;
+    } else if (directBal !== undefined && directBal >= 0) {
+      liveCoinBalance = directBal;
+    } else if (adBal !== undefined && adBal >= 0) {
+      liveCoinBalance = Number(adBal);
+    }
+
+    let pMethods: string[] = ['Bank Transfer'];
+    if (Array.isArray(raw.payment_methods)) pMethods = raw.payment_methods;
+    else if (Array.isArray(raw.paymentMethods)) pMethods = raw.paymentMethods;
+    else if (typeof raw.payment_methods === 'string') {
+      try {
+        const parsed = JSON.parse(raw.payment_methods);
+        if (Array.isArray(parsed)) pMethods = parsed;
+        else pMethods = [raw.payment_methods];
+      } catch {
+        pMethods = [raw.payment_methods];
+      }
+    }
+
+    return {
+      id: raw.id,
+      type: rawType === 'BUY' ? 'BUY' : 'SELL',
+      asset: coin,
+      fiat_currency: fiat,
+      price: priceVal,
+      pricing_type: isMarket ? 'FLOAT' : 'FIXED',
+      margin_percent: Number(raw.margin_percentage ?? raw.margin ?? raw.rate_percent ?? raw.ratePercent ?? 0),
+      status: isActive ? 'ACTIVE' : 'INACTIVE',
+      min_limit: minLimit,
+      max_limit: maxLimit,
+      available_amount: Number(liveCoinBalance.toFixed(6)),
+      payment_methods: pMethods,
+      terms_conditions: raw.terms_conditions || raw.terms || '',
+      created_at: typeof raw.created_at === 'string' ? raw.created_at : new Date().toISOString(),
+    };
+  });
 
   return (
     <div className="space-y-6">
-      {/* Clean Solid Header with Zero Glassmorphism */}
+      {/* Header */}
       <div className="bg-card text-card-foreground border border-border py-6 px-6 sm:px-8 rounded-2xl shadow-xs">
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div>

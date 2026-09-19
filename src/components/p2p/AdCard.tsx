@@ -97,6 +97,23 @@ export default function AdCard({ ad }: AdCardProps) {
   const minLimitVal = Number(ad.min_limit ?? (ad as any).min_amount ?? 0);
   const maxLimitVal = Number(ad.max_limit ?? (ad as any).max_amount ?? 0);
 
+  // Effective max limit computation according to Rule 2
+  const rawAvailCrypto = Number(
+    (ad as any).available_crypto ?? 
+    (ad as any).availableCrypto ?? 
+    (traderProfile as any)?.cryptoBalances?.[assetSymbol] ?? 
+    (traderProfile as any)?.[`${assetSymbol.toLowerCase()}_balance`] ?? 
+    (traderProfile as any)?.available_balance ?? 
+    -1
+  );
+  let effectiveMaxLimit = maxLimitVal;
+  if (adType === 'SELL' && rawAvailCrypto >= 0 && priceVal > 0) {
+    const availFiat = rawAvailCrypto * priceVal;
+    if (availFiat > 0) {
+      effectiveMaxLimit = maxLimitVal > 0 ? Math.min(maxLimitVal, availFiat) : availFiat;
+    }
+  }
+
   // Parse payment_methods list
   const rawMethods = ad.payment_methods ?? (ad as any).paymentMethods;
   const methodsList: string[] = (() => {
@@ -197,7 +214,7 @@ export default function AdCard({ ad }: AdCardProps) {
         <div className="text-right">
           <span className="text-xs text-gray-400 block">Limits</span>
           <span className="text-xs font-medium text-gray-700 dark:text-gray-300">
-            {minLimitVal.toLocaleString()} - {maxLimitVal.toLocaleString()} {fiatSymbol}
+            {minLimitVal.toLocaleString()} - {effectiveMaxLimit.toLocaleString(undefined, { maximumFractionDigits: 2 })} {fiatSymbol}
           </span>
         </div>
       </div>

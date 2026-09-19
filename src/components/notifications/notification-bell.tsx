@@ -203,6 +203,33 @@ export function NotificationBell() {
     }
 
     fetchRecentTrades();
+
+    // Realtime subscription for trade status updates
+    const supabase = createClient();
+    const tradeChannel = supabase
+      .channel(`bell-trades-sync:${userId}`)
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'trades',
+        },
+        () => {
+          fetchRecentTrades();
+        }
+      )
+      .subscribe();
+
+    // Periodic timer to check expiration of pending trades in real-time
+    const interval = setInterval(() => {
+      fetchRecentTrades();
+    }, 15000);
+
+    return () => {
+      supabase.removeChannel(tradeChannel);
+      clearInterval(interval);
+    };
   }, [userId]);
 
   const getStatusBadge = (status: string) => {

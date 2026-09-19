@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState, useEffect } from 'react';
-import { Info, Play, Pause, Trash2, X, Share2, Copy, Check, ExternalLink, Send } from 'lucide-react';
+import { Info, Play, Pause, Trash2, X, Share2, Copy, Check, ExternalLink, Send, Pencil } from 'lucide-react';
 import { FIAT_CURRENCIES } from '@/lib/currencies';
 import Link from 'next/link';
 
@@ -149,6 +149,14 @@ export default function ManageAds({
               <tbody className="divide-y divide-border">
                 {ads.map((ad) => {
                   const currSym = getCurrencySymbol(ad.fiat_currency);
+                  const price = Number(ad.price || 0);
+                  const minLimit = Number(ad.min_limit || 0);
+                  const maxLimit = Number(ad.max_limit || 0);
+                  const availCrypto = Number(ad.available_amount || 0);
+                  const effectiveMaxLimit = ad.type === 'SELL' && availCrypto >= 0 && price > 0
+                    ? (maxLimit > 0 ? Math.min(maxLimit, availCrypto * price) : availCrypto * price)
+                    : maxLimit;
+
                   return (
                     <tr key={ad.id} className="hover:bg-muted/40 transition-colors">
                       <td className="p-4 font-mono font-bold text-primary">{ad.id ? ad.id.substring(0, 8) : 'AD'}...</td>
@@ -161,7 +169,7 @@ export default function ManageAds({
                       </td>
                       <td className="p-4 font-semibold text-foreground">{ad.asset}/{ad.fiat_currency}</td>
                       <td className="p-4 font-mono font-bold text-foreground">
-                        {currSym}{Number(ad.price || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} {ad.fiat_currency}
+                        {currSym}{price.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} {ad.fiat_currency}
                         {ad.pricing_type === 'FLOAT' && (
                           <span className="text-xs text-muted-foreground font-normal ml-1">
                             ({ad.margin_percent && ad.margin_percent > 0 ? `+${ad.margin_percent}` : ad.margin_percent}% float)
@@ -169,8 +177,8 @@ export default function ManageAds({
                         )}
                       </td>
                       <td className="p-4 space-y-0.5">
-                        <div className="text-foreground font-mono">{currSym}{Number(ad.min_limit || 0).toLocaleString()} - {currSym}{Number(ad.max_limit || 0).toLocaleString()} {ad.fiat_currency}</div>
-                        <div className="text-[11px] text-muted-foreground">Avail: <span className="text-primary font-semibold">{ad.available_amount} {ad.asset}</span></div>
+                        <div className="text-foreground font-mono">{currSym}{minLimit.toLocaleString()} - {currSym}{effectiveMaxLimit.toLocaleString(undefined, { maximumFractionDigits: 2 })} {ad.fiat_currency}</div>
+                        <div className="text-[11px] text-muted-foreground">Avail: <span className="text-primary font-semibold">{availCrypto} {ad.asset}</span></div>
                       </td>
                       <td className="p-4">
                         <span className={`px-2 py-0.5 rounded-full text-[11px] font-bold ${
@@ -181,6 +189,13 @@ export default function ManageAds({
                       </td>
                       <td className="p-4 text-right">
                         <div className="flex items-center justify-end gap-2">
+                          <Link
+                            href={`/ads/edit/${ad.id}`}
+                            className="p-2 rounded-lg bg-blue-500/10 hover:bg-blue-500/20 text-blue-600 dark:text-blue-400 cursor-pointer transition-colors inline-flex items-center justify-center"
+                            title="Edit Ad"
+                          >
+                            <Pencil className="h-4 w-4" />
+                          </Link>
                           <button 
                             onClick={() => handleShare(ad)} 
                             className="p-2 rounded-lg bg-[#9273FC]/10 hover:bg-[#9273FC]/20 text-[#9273FC] cursor-pointer transition-colors" 
@@ -210,6 +225,14 @@ export default function ManageAds({
           <div className="grid grid-cols-1 gap-3 md:hidden">
             {ads.map((ad) => {
               const currSym = getCurrencySymbol(ad.fiat_currency);
+              const price = Number(ad.price || 0);
+              const minLimit = Number(ad.min_limit || 0);
+              const maxLimit = Number(ad.max_limit || 0);
+              const availCrypto = Number(ad.available_amount || 0);
+              const effectiveMaxLimit = ad.type === 'SELL' && availCrypto >= 0 && price > 0
+                ? (maxLimit > 0 ? Math.min(maxLimit, availCrypto * price) : availCrypto * price)
+                : maxLimit;
+
               return (
                 <div key={ad.id} className="p-4 rounded-2xl bg-card border border-border shadow-xs space-y-3">
                   <div className="flex items-center justify-between border-b border-border pb-2">
@@ -231,20 +254,27 @@ export default function ManageAds({
                   <div className="grid grid-cols-2 gap-2 text-xs">
                     <div>
                       <p className="text-muted-foreground text-[10px]">Price</p>
-                      <p className="font-mono font-bold text-foreground">{currSym}{Number(ad.price || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} {ad.fiat_currency}</p>
+                      <p className="font-mono font-bold text-foreground">{currSym}{price.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} {ad.fiat_currency}</p>
                     </div>
                     <div>
                       <p className="text-muted-foreground text-[10px]">Available Asset</p>
-                      <p className="font-mono font-semibold text-primary">{ad.available_amount} {ad.asset}</p>
+                      <p className="font-mono font-semibold text-primary">{availCrypto} {ad.asset}</p>
                     </div>
                     <div className="col-span-2">
                       <p className="text-muted-foreground text-[10px]">Trade Limits</p>
-                      <p className="font-mono text-foreground">{currSym}{Number(ad.min_limit || 0).toLocaleString()} - {currSym}{Number(ad.max_limit || 0).toLocaleString()} {ad.fiat_currency}</p>
+                      <p className="font-mono text-foreground">{currSym}{minLimit.toLocaleString()} - {currSym}{effectiveMaxLimit.toLocaleString(undefined, { maximumFractionDigits: 2 })} {ad.fiat_currency}</p>
                     </div>
                   </div>
 
                   <div className="flex items-center justify-between pt-2 border-t border-border gap-2">
                     <div className="flex items-center gap-1.5">
+                      <Link
+                        href={`/ads/edit/${ad.id}`}
+                        className="px-2.5 py-1.5 rounded-xl bg-blue-500/10 border border-blue-500/20 text-blue-600 dark:text-blue-400 text-xs font-semibold flex items-center gap-1 cursor-pointer hover:bg-blue-500/20 transition-colors"
+                        title="Edit Ad"
+                      >
+                        <Pencil className="h-3.5 w-3.5" /> Edit
+                      </Link>
                       <button 
                         onClick={() => handleShare(ad)} 
                         className="px-2.5 py-1.5 rounded-xl bg-[#6347ea]/10 border border-[#6347ea]/20 text-[#6347ea] text-xs font-semibold flex items-center gap-1 cursor-pointer hover:bg-[#6347ea]/20 transition-colors"
