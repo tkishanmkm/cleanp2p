@@ -1,10 +1,9 @@
-
 'use client';
+
 import React, { createContext, useContext, useState, useEffect, ReactNode, useCallback } from 'react';
-import { useAuth } from '@/components/providers/auth-provider';
 import { LANGUAGES } from '@/lib/constants';
 
-// Import all locale data
+// Import all active locale data
 import en from '@/locales/en.json';
 import ar from '@/locales/ar.json';
 import fr from '@/locales/fr.json';
@@ -16,8 +15,6 @@ import es from '@/locales/es.json';
 import vi from '@/locales/vi.json';
 import zhCN from '@/locales/zh-CN.json';
 import zhTW from '@/locales/zh-TW.json';
-import enIN from '@/locales/en-IN.json';
-import bho from '@/locales/bho.json';
 
 const translations: Record<string, any> = {
   en,
@@ -31,8 +28,6 @@ const translations: Record<string, any> = {
   vi,
   'zh-CN': zhCN,
   'zh-TW': zhTW,
-  'en-IN': enIN,
-  bho,
 };
 
 const countryToLang: Record<string, string> = {
@@ -61,7 +56,6 @@ const I18nContext = createContext<I18nContextType | undefined>(undefined);
 const getNestedValue = (obj: any, key: string) => {
   return key.split('.').reduce((acc, part) => acc && acc[part], obj);
 };
-
 
 export function I18nProvider({ children }: { children: ReactNode }) {
   const [language, setLanguageState] = useState('en');

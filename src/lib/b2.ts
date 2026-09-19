@@ -1,7 +1,18 @@
 import { S3Client, PutObjectCommand, GetObjectCommand, DeleteObjectCommand } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
-import sharp from 'sharp';
 import zlib from 'zlib';
+
+/**
+ * Safely obtain sharp instance if installed and native bindings are available.
+ */
+async function getSharpInstance() {
+  try {
+    const sharpModule = await import('sharp');
+    return (sharpModule as any).default || sharpModule;
+  } catch {
+    return null;
+  }
+}
 
 /**
  * Directly fetch Backblaze B2 credentials and endpoints from environment variables at runtime.
@@ -89,6 +100,15 @@ export async function compressAvatar(buffer: Buffer): Promise<{
   extension: string;
 }> {
   try {
+    const sharp = await getSharpInstance();
+    if (!sharp) {
+      return {
+        buffer,
+        contentType: 'image/jpeg',
+        extension: 'jpg',
+      };
+    }
+
     const compressed = await sharp(buffer)
       .resize(256, 256, {
         fit: 'cover',
@@ -128,6 +148,11 @@ export async function compressTradeMedia(
   // If image: compress via sharp
   if (mimeType.startsWith('image/')) {
     try {
+      const sharp = await getSharpInstance();
+      if (!sharp) {
+        return { buffer, contentType: mimeType, fileName, isCompressed: false };
+      }
+
       const metadata = await sharp(buffer).metadata();
       const isAnimated = (metadata.pages || 1) > 1;
 

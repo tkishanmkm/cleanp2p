@@ -125,17 +125,46 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    const eventName = String(parsed.event || '').toLowerCase();
-    const rawStatus = String(parsed.status || parsed.decision?.status || parsed.verification_status || '').toLowerCase();
-    const overallStatus = eventName.includes('approved')
-      ? 'approved'
-      : eventName.includes('declined') || eventName.includes('rejected')
-      ? 'declined'
-      : eventName.includes('review') || eventName.includes('submitted')
-      ? 'in_review'
-      : rawStatus;
+    // 4. Idempotency Check on event_id
+    const eventId = parsed.event_id;
+    if (eventId) {
+      const { data: existingEvent } = await supabase
+        .from('kyc_verifications')
+        .select('id')
+        .eq('session_id', sessionId)
+        .contains('vendor_data', { last_event_id: eventId })
+        .maybeSingle();
 
-    // 3. Process Decisions
+      if (existingEvent) {
+        console.log(`[DIDIT WEBHOOK] Event ${eventId} already processed for session ${sessionId}. Skipping duplicate.`);
+        return new NextResponse(JSON.stringify({ received: true, deduplicated: true }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+    }
+
+    const eventName = String(parsed.event || parsed.webhook_type || '').toLowerCase();
+    const rawStatus = String(parsed.status || parsed.decision?.status || parsed.verification_status || '');
+    const normalizedStatus = rawStatus.toLowerCase();
+
+    const overallStatus = rawStatus === 'Approved' || normalizedStatus === 'approved' || eventName.includes('approved')
+      ? 'approved'
+      : rawStatus === 'Declined' || normalizedStatus === 'declined' || eventName.includes('declined') || eventName.includes('rejected')
+      ? 'declined'
+      : rawStatus === 'Resubmitted' || normalizedStatus === 'resubmitted'
+      ? 'resubmitted'
+      : rawStatus === 'Kyc Expired' || normalizedStatus === 'kyc expired' || normalizedStatus === 'kyc_expired'
+      ? 'kyc_expired'
+      : rawStatus === 'Abandoned' || normalizedStatus === 'abandoned'
+      ? 'abandoned'
+      : rawStatus === 'Expired' || normalizedStatus === 'expired'
+      ? 'expired'
+      : rawStatus === 'In Review' || normalizedStatus === 'in review' || normalizedStatus === 'in_review' || eventName.includes('review') || eventName.includes('submitted')
+      ? 'in_review'
+      : normalizedStatus;
+
+    // 5. Process Decisions
     if (overallStatus === 'approved' || overallStatus === 'completed' || isApprovedStatus(overallStatus)) {
       const decision = parsed.decision || {};
 
@@ -432,6 +461,79 @@ export async function POST(req: NextRequest) {
         }
 
         console.log(`[DIDIT WEBHOOK] User ${userId} KYC declined. Attempt ${newRetries}/3 recorded.`);
+      }
+    } else if (overallStatus === 'resubmitted') {
+      await supabase.from('profiles').update({
+        kyc_status: 'resubmit_required',
+        updated_at: new Date().toISOString(),
+      }).eq('id', userId);
+
+      if (sessionId) {
+        await supabase
+          .from('kyc_verifications')
+          .update({
+            status: 'RESUBMIT_REQUIRED',
+            decision: parsed,
+            vendor_data: { ...(parsed.vendor_data || {}), resubmit_info: parsed.resubmit_info, last_event_id: eventId },
+            updated_at: new Date().toISOString(),
+          })
+          .eq('session_id', sessionId);
+      }
+
+      try {
+        await supabase.from('notifications').insert({
+          user_id: userId,
+          title: 'KYC Resubmission Requested',
+          message: 'Didit requires you to resubmit one or more verification steps. Please visit identity settings.',
+          link: '/settings/identity',
+          is_read: false,
+          created_at: new Date().toISOString(),
+        });
+      } catch (notifErr) {
+        console.warn('Non-fatal: notification failed:', notifErr);
+      }
+    } else if (overallStatus === 'kyc_expired') {
+      await supabase.from('profiles').update({
+        kyc_status: 'expired',
+        is_verified: false,
+        id_verified: false,
+        is_kyc_locked: false,
+        updated_at: new Date().toISOString(),
+      }).eq('id', userId);
+
+      if (sessionId) {
+        await supabase
+          .from('kyc_verifications')
+          .update({
+            status: 'EXPIRED',
+            decision: parsed,
+            updated_at: new Date().toISOString(),
+          })
+          .eq('session_id', sessionId);
+      }
+
+      try {
+        await supabase.from('notifications').insert({
+          user_id: userId,
+          title: 'KYC Verification Expired',
+          message: 'Your verification has expired per standard compliance cycle. Please re-verify your identity.',
+          link: '/settings/identity',
+          is_read: false,
+          created_at: new Date().toISOString(),
+        });
+      } catch (notifErr) {
+        console.warn('Non-fatal: notification failed:', notifErr);
+      }
+    } else if (overallStatus === 'abandoned' || overallStatus === 'expired') {
+      if (sessionId) {
+        await supabase
+          .from('kyc_verifications')
+          .update({
+            status: overallStatus.toUpperCase(),
+            decision: parsed,
+            updated_at: new Date().toISOString(),
+          })
+          .eq('session_id', sessionId);
       }
     }
 

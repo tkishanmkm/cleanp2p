@@ -3,7 +3,38 @@ import { getSupabaseAdminClient } from '@/lib/supabase/server';
 
 export async function POST(req: Request) {
   try {
-    const { identifier, securityQuestion, securityAnswer } = await req.json();
+    const { identifier, securityQuestion, securityAnswer, captchaToken } = await req.json();
+
+    if (!captchaToken) {
+      return NextResponse.json(
+        { error: 'Please complete the hCaptcha verification before continuing.' },
+        { status: 400 }
+      );
+    }
+
+    // Optional server-side hCaptcha secret key validation if configured
+    const hcaptchaSecret = process.env.HCAPTCHA_SECRET_KEY;
+    if (hcaptchaSecret) {
+      try {
+        const verifyRes = await fetch('https://hcaptcha.com/siteverify', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+          body: new URLSearchParams({
+            secret: hcaptchaSecret,
+            response: captchaToken,
+          }),
+        });
+        const verifyData = await verifyRes.json();
+        if (!verifyData.success) {
+          return NextResponse.json(
+            { error: 'Captcha validation failed. Please solve the captcha challenge again.' },
+            { status: 400 }
+          );
+        }
+      } catch (captchaErr) {
+        console.warn('hCaptcha siteverify warning:', captchaErr);
+      }
+    }
 
     if (!identifier || !identifier.trim()) {
       return NextResponse.json({ error: 'Email or username is required.' }, { status: 400 });

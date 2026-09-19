@@ -1,17 +1,20 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import Link from 'next/link';
 import { User, KeyRound, ShieldAlert, CheckCircle2, Loader2, ArrowLeft } from 'lucide-react';
 import { UNIVERSAL_SECURITY_QUESTIONS } from '@/lib/settings-constants';
+import { ResponsiveHCaptcha, ResponsiveHCaptchaRef } from '@/components/auth/responsive-hcaptcha';
 
 export function ForgotPasswordForm() {
   const [identifier, setIdentifier] = useState('');
   const [securityQuestion, setSecurityQuestion] = useState(UNIVERSAL_SECURITY_QUESTIONS[0]);
   const [securityAnswer, setSecurityAnswer] = useState('');
+  const [captchaToken, setCaptchaToken] = useState('');
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
   const [successInfo, setSuccessInfo] = useState<{ email: string; message: string } | null>(null);
+  const captchaRef = useRef<ResponsiveHCaptchaRef>(null);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -27,6 +30,11 @@ export function ForgotPasswordForm() {
       return;
     }
 
+    if (!captchaToken) {
+      setErrorMsg('Please complete the hCaptcha security verification box.');
+      return;
+    }
+
     setLoading(true);
 
     try {
@@ -37,6 +45,7 @@ export function ForgotPasswordForm() {
           identifier: identifier.trim(),
           securityQuestion,
           securityAnswer: securityAnswer.trim(),
+          captchaToken,
         }),
       });
 
@@ -52,6 +61,8 @@ export function ForgotPasswordForm() {
       });
     } catch (err: any) {
       setErrorMsg(err.message || 'Password recovery failed. Please check your details.');
+      setCaptchaToken('');
+      captchaRef.current?.resetCaptcha();
     } finally {
       setLoading(false);
     }
@@ -143,6 +154,27 @@ export function ForgotPasswordForm() {
         <p className="text-[10px] text-slate-400 mt-1">
           Answer must match the security verification answer linked to your account.
         </p>
+      </div>
+
+      {/* Responsive hCaptcha widget matching box breadth and dark/light mode */}
+      <div className="pt-1">
+        <label className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1.5">
+          Security Verification
+        </label>
+        <div className="w-full bg-slate-50 dark:bg-[#07090e] border border-slate-200 dark:border-[#1e2640] rounded-xl p-2.5 flex items-center justify-center">
+          <ResponsiveHCaptcha
+            ref={captchaRef}
+            onVerify={(token) => {
+              setCaptchaToken(token);
+              setErrorMsg('');
+            }}
+            onExpire={() => setCaptchaToken('')}
+            onError={() => {
+              setCaptchaToken('');
+              setErrorMsg('Failed to load security challenge. Please try again.');
+            }}
+          />
+        </div>
       </div>
 
       <button

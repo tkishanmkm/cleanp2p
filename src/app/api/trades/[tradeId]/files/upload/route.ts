@@ -2,7 +2,15 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/utils/supabase/server';
 import { getSupabaseAdminClient } from '@/lib/supabase/server';
 import { uploadToB2, isB2Configured } from '@/lib/b2';
-import sharp from 'sharp';
+
+async function getSharpInstance() {
+  try {
+    const sharpModule = await import('sharp');
+    return (sharpModule as any).default || sharpModule;
+  } catch {
+    return null;
+  }
+}
 
 export const dynamic = 'force-dynamic';
 
@@ -211,14 +219,17 @@ export async function POST(
           </svg>
         `;
 
-        uploadBuffer = await sharp(uploadBuffer)
-          .resize(1600, 1600, { fit: 'inside', withoutEnlargement: true })
-          .composite([{ input: Buffer.from(watermarkSvg), gravity: 'southeast' }])
-          .jpeg({ quality: 88 })
-          .toBuffer();
+        const sharp = await getSharpInstance();
+        if (sharp) {
+          uploadBuffer = await sharp(uploadBuffer)
+            .resize(1600, 1600, { fit: 'inside', withoutEnlargement: true })
+            .composite([{ input: Buffer.from(watermarkSvg), gravity: 'southeast' }])
+            .jpeg({ quality: 88 })
+            .toBuffer();
 
-        fileExt = 'jpg';
-        mimeType = 'image/jpeg';
+          fileExt = 'jpg';
+          mimeType = 'image/jpeg';
+        }
       } catch (watermarkErr) {
         console.warn('Watermark processing bypassed:', watermarkErr);
       }

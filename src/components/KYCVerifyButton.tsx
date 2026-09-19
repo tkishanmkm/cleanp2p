@@ -48,10 +48,24 @@ export function KYCVerifyButton({
     setError(null);
 
     try {
+      let activeUserId = userId;
+      if (!activeUserId) {
+        try {
+          const { createClient } = await import('@/utils/supabase/client');
+          const supabase = createClient();
+          const { data: { user } } = await supabase.auth.getUser();
+          if (user?.id) {
+            activeUserId = user.id;
+          }
+        } catch {
+          // ignore
+        }
+      }
+
       const response = await fetch('/api/verify', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ userId }),
+        body: JSON.stringify({ userId: activeUserId, vendorData: activeUserId }),
       });
 
       const data = await response.json();

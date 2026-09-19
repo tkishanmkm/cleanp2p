@@ -29,7 +29,6 @@ export const FIXED_WITHDRAWAL_FEES_USD: { [key: string]: number } = {
   'USDT-BEP20': 2,
 };
 
-
 export const LANGUAGES: Language[] = [
   { code: 'en', name: 'English', nativeName: 'English' },
   { code: 'zh-CN', name: 'Simplified Chinese', nativeName: '简体中文' },
@@ -41,16 +40,7 @@ export const LANGUAGES: Language[] = [
   { code: 'ru', name: 'Russian', nativeName: 'Русский' },
   { code: 'vi', name: 'Vietnamese', nativeName: 'Tiếng Việt' },
   { code: 'ar', name: 'Arabic', nativeName: 'العربية' },
-  {
-    code: 'hi',
-    name: 'Hindi',
-    nativeName: 'हिन्दी',
-    dialects: [
-        { code: 'hi', name: 'Hindi', nativeName: 'हिन्दी' },
-        { code: 'en-IN', name: 'Hinglish', nativeName: 'Hinglish' },
-        { code: 'bho', name: 'Bhojpuri', nativeName: 'भोजपुरी' },
-    ]
-  },
+  { code: 'hi', name: 'Hindi', nativeName: 'हिन्दी' },
 ];
 
 // In a real app, these would be in environment variables
@@ -92,10 +82,6 @@ export const USDT_CONFIGS: Record<string, TokenConfig> = {
     contractAddress: process.env.USDT_CONTRACT_BEP20 || '0x55d398326f99059fF775485246999027B3197955',
     decimals: 18,
   },
-  POLYGON: {
-    contractAddress: process.env.USDT_CONTRACT_POLYGON || '0xc2132D05D31c914a87C6611C10748AEb04B58e8F',
-    decimals: 6,
-  },
 };
 
 export function getUsdtConfig(network: string): TokenConfig {
@@ -103,17 +89,17 @@ export function getUsdtConfig(network: string): TokenConfig {
   const aliasMap: Record<string, string> = {
     ETH: 'ERC20',
     ETHEREUM: 'ERC20',
+    ERC20: 'ERC20',
     BSC: 'BEP20',
     BINANCE: 'BEP20',
+    BEP20: 'BEP20',
     TRON: 'TRC20',
-    MATIC: 'POLYGON',
-    SEPOLIA: 'ERC20',
-    ETH_SEPOLIA: 'ERC20',
+    TRC20: 'TRC20',
   };
   const resolvedKey = aliasMap[norm] || norm;
   const config = USDT_CONFIGS[resolvedKey];
   if (!config) {
-    throw new Error(`Unsupported network for USDT: ${network}`);
+    throw new Error(`Unsupported network for USDT: ${network}. Supported networks are ERC20, TRC20, and BEP20.`);
   }
 
   let contractAddress = config.contractAddress.trim();
@@ -128,4 +114,3 @@ export function getUsdtConfig(network: string): TokenConfig {
     contractAddress,
   };
 }
-

@@ -188,17 +188,25 @@ export default function AdDetailClient({ ad, advertiser, stats }: AdDetailClient
           >
             ← Back to Marketplace
           </Link>
-          <div className="flex items-center gap-2.5 mt-2">
-            <img 
-              src={ASSET_ICONS[asset] || ASSET_ICONS.BTC} 
-              alt={asset} 
-              className="w-7 h-7 rounded-full shadow-sm" 
+          <div className="flex items-center gap-3 mt-2">
+            <UserAvatar 
+              avatarUrl={advertiser?.avatar_url} 
+              username={advertiser?.username} 
+              size="md" 
+              className="ring-2 ring-blue-500/20 shadow-sm"
             />
-            <h1 className="text-xl sm:text-2xl font-bold tracking-tight">
-              {isAdvertiserBuyer 
-                ? `Sell ${asset} to @${advertiser?.username || 'user'}` 
-                : `Buy ${asset} from @${advertiser?.username || 'user'}`}
-            </h1>
+            <div className="flex items-center gap-2">
+              <img 
+                src={ASSET_ICONS[asset] || ASSET_ICONS.BTC} 
+                alt={asset} 
+                className="w-5 h-5 rounded-full shadow-xs" 
+              />
+              <h1 className="text-xl sm:text-2xl font-bold tracking-tight">
+                {isAdvertiserBuyer 
+                  ? `Sell ${asset} to @${advertiser?.username || 'user'}` 
+                  : `Buy ${asset} from @${advertiser?.username || 'user'}`}
+              </h1>
+            </div>
           </div>
           <p className="text-xs text-neutral-500 dark:text-neutral-400 mt-1">
             Ad ID: <span className="font-mono">{ad.id}</span> • Protected by PaxOnes Escrow
