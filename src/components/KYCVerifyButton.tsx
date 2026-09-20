@@ -150,7 +150,7 @@ export function KYCVerifyButton({
     return (
       <div className="p-3 bg-yellow-50 dark:bg-yellow-950/30 border border-yellow-200 dark:border-yellow-800/60 text-yellow-800 dark:text-yellow-300 rounded-lg text-center font-medium text-sm space-y-1">
         <div>Under Review (Active for up to 24 hours)</div>
-        <p className="text-[11px] opacity-80">If Didit does not respond within 24 hours, this review status will automatically clear.</p>
+        <p className="text-[11px] opacity-80">If verification does not respond within 24 hours, this review status will automatically clear.</p>
       </div>
     );
   }

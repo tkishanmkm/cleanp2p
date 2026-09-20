@@ -24,9 +24,16 @@ export default function KycCallbackPage() {
         return;
       }
 
+      // Trigger automatic sync with provider
+      try {
+        await fetch(`/api/kyc/sync?userId=${user.id}`, { cache: 'no-store' });
+      } catch (syncErr) {
+        console.warn('KYC sync attempt notice:', syncErr);
+      }
+
       const { data: prof, error: profErr } = await supabase
         .from('profiles')
-        .select('id, username, full_name, kyc_status, id_verified, is_kyc_locked, kyc_retry_count, kyc_attempts')
+        .select('id, username, full_name, kyc_status, id_verified, is_verified, is_kyc_locked, kyc_retry_count, kyc_attempts')
         .eq('id', user.id)
         .single();
 
@@ -73,7 +80,7 @@ export default function KycCallbackPage() {
             </div>
             <h2 className="text-xl font-bold text-foreground">Synchronizing Verification...</h2>
             <p className="text-sm text-muted-foreground">
-              Please wait while we receive and synchronize your Didit KYC verification result.
+              Please wait while we receive and synchronize your identity verification result.
             </p>
           </div>
         ) : isApproved ? (
@@ -193,7 +200,7 @@ export default function KycCallbackPage() {
               </span>
               <h1 className="text-2xl font-extrabold text-foreground">Verification Under Review</h1>
               <p className="text-sm text-muted-foreground mt-2">
-                Your Didit KYC verification has been submitted and is currently being processed by automated compliance checks.
+                Your identity verification has been submitted and is currently being processed by automated compliance checks.
               </p>
             </div>
 

@@ -30,23 +30,8 @@ const translations: Record<string, any> = {
   'zh-TW': zhTW,
 };
 
-const countryToLang: Record<string, string> = {
-  CN: 'zh-CN',
-  TW: 'zh-TW',
-  HK: 'zh-TW',
-  BR: 'pt-BR',
-  PT: 'pt-BR',
-  KR: 'ko',
-  FR: 'fr',
-  ES: 'es',
-  MX: 'es',
-  RU: 'ru',
-  VN: 'vi',
-  IN: 'hi',
-};
-
 interface I18nContextType {
-  t: (key: string) => string;
+  t: (key: string, params?: Record<string, string | number>) => string;
   setLanguage: (lang: string) => void;
   language: string;
 }
@@ -54,16 +39,17 @@ interface I18nContextType {
 const I18nContext = createContext<I18nContextType | undefined>(undefined);
 
 const getNestedValue = (obj: any, key: string) => {
-  return key.split('.').reduce((acc, part) => acc && acc[part], obj);
+  if (!obj) return undefined;
+  return key.split('.').reduce((acc, part) => (acc && acc[part] !== undefined ? acc[part] : undefined), obj);
 };
 
 export function I18nProvider({ children }: { children: ReactNode }) {
-  const [language, setLanguageState] = useState('en');
-  const [messages, setMessages] = useState(translations.en);
+  const [language, setLanguageState] = useState<string>('en');
+  const [messages, setMessages] = useState<any>(translations.en);
 
   useEffect(() => {
     try {
-      const savedLang = localStorage.getItem('tradeflow-lang');
+      const savedLang = localStorage.getItem('paxones-lang') || localStorage.getItem('tradeflow-lang');
       if (savedLang && translations[savedLang]) {
         setLanguageState(savedLang);
         return;
@@ -74,7 +60,7 @@ export function I18nProvider({ children }: { children: ReactNode }) {
         const supportedLang = LANGUAGES.find(
           (l) => l.code === browserLang || browserLang.startsWith(l.code.split('-')[0])
         );
-        if (supportedLang) {
+        if (supportedLang && translations[supportedLang.code]) {
           setLanguageState(supportedLang.code);
           return;
         }
@@ -86,18 +72,51 @@ export function I18nProvider({ children }: { children: ReactNode }) {
   }, []);
 
   useEffect(() => {
-    setMessages(translations[language] || translations.en);
+    const currentMessages = translations[language] || translations.en;
+    setMessages(currentMessages);
+
+    // Update document language and text direction dynamically
+    if (typeof document !== 'undefined') {
+      document.documentElement.lang = language;
+      document.documentElement.dir = language === 'ar' ? 'rtl' : 'ltr';
+    }
   }, [language]);
 
   const setLanguage = useCallback((lang: string) => {
-    localStorage.setItem('tradeflow-lang', lang);
+    if (!translations[lang]) return;
+    try {
+      localStorage.setItem('paxones-lang', lang);
+      localStorage.setItem('tradeflow-lang', lang);
+    } catch {
+      // Ignore storage errors in private browsing
+    }
     setLanguageState(lang);
   }, []);
 
-  const t = useCallback((key: string): string => {
-    const value = getNestedValue(messages, key);
-    return value || key;
-  }, [messages]);
+  const t = useCallback((key: string, params?: Record<string, string | number>): string => {
+    let value = getNestedValue(messages, key);
+    
+    // Fallback to English if translation is missing in current locale
+    if (value === undefined && language !== 'en') {
+      value = getNestedValue(translations.en, key);
+    }
+
+    if (value === undefined || value === null) {
+      return key;
+    }
+
+    if (typeof value !== 'string') {
+      return String(value);
+    }
+
+    if (params) {
+      return Object.entries(params).reduce((acc, [paramKey, paramVal]) => {
+        return acc.replace(new RegExp(`\\{${paramKey}\\}`, 'g'), String(paramVal));
+      }, value);
+    }
+
+    return value;
+  }, [messages, language]);
 
   return (
     <I18nContext.Provider value={{ t, setLanguage, language }}>
@@ -113,3 +132,4 @@ export function useI18n() {
   }
   return context;
 }
+

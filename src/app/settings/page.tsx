@@ -200,6 +200,9 @@ export default function SettingsPage() {
 
   const [isKycSubmitted, setIsKycSubmitted] = useState(false);
   const [kycStatus, setKycStatus] = useState<'NOT_SUBMITTED' | 'PENDING' | 'VERIFIED' | 'REJECTED'>('NOT_SUBMITTED');
+  const [kycRetryCount, setKycRetryCount] = useState<number>(0);
+  const [kycCooldownHours, setKycCooldownHours] = useState<number>(0);
+  const [kycIsPermanentlyRejected, setKycIsPermanentlyRejected] = useState(false);
   const [submittingKyc, setSubmittingKyc] = useState(false);
 
   // ----------------------------------------------------
@@ -452,16 +455,70 @@ export default function SettingsPage() {
         setDob(p.dob || p.date_of_birth || '');
         setNameVisibility(p.name_visibility || 'FULL');
 
-        // KYC status
-        const kStatus = p.kyc_status || 'NOT_SUBMITTED';
-        setKycStatus(kStatus);
-        if (kStatus === 'PENDING' || kStatus === 'VERIFIED') {
+        // KYC status, 3-attempt limit, and 24-hour cooldown logic
+        const rawStatus = (p.kyc_status || 'NOT_SUBMITTED').toLowerCase();
+        const isApproved = rawStatus === 'approved' || rawStatus === 'verified' || Boolean(p.is_verified) || Boolean(p.id_verified);
+        const isReviewStatus = !isApproved && (rawStatus === 'pending' || rawStatus === 'in_review' || rawStatus === 'submitted' || rawStatus === 'pending_review');
+        const isDeclinedStatus = !isApproved && (rawStatus === 'declined' || rawStatus === 'rejected' || rawStatus === 'failed' || rawStatus === 'permanently_rejected');
+
+        const attempts = Number(p.kyc_retry_count || p.kyc_attempts || 0);
+        setKycRetryCount(attempts);
+
+        const submittedTimestamp = p.kyc_last_attempt_at || p.kyc_submitted_at || p.updated_at;
+        const hoursElapsed = submittedTimestamp ? (Date.now() - new Date(submittedTimestamp).getTime()) / (1000 * 60 * 60) : 0;
+
+        if (isApproved) {
+          setKycStatus('VERIFIED');
           setIsKycSubmitted(true);
+          setKycIsPermanentlyRejected(false);
+          setKycCooldownHours(0);
+        } else if (attempts >= 3 || rawStatus === 'permanently_rejected') {
+          setKycStatus('REJECTED');
+          setIsKycSubmitted(false);
+          setKycIsPermanentlyRejected(true);
+          setKycCooldownHours(0);
+        } else if (isReviewStatus) {
+          if (hoursElapsed >= 24) {
+            // 24 hours have passed without response: reset review and show form again
+            setKycStatus('NOT_STARTED');
+            setIsKycSubmitted(false);
+            setKycIsPermanentlyRejected(false);
+            setKycCooldownHours(0);
+          } else {
+            setKycStatus('PENDING');
+            setIsKycSubmitted(true);
+            setKycIsPermanentlyRejected(false);
+            setKycCooldownHours(0);
+          }
+        } else if (isDeclinedStatus) {
+          if (hoursElapsed < 24) {
+            setKycStatus('REJECTED');
+            setIsKycSubmitted(false);
+            setKycIsPermanentlyRejected(false);
+            setKycCooldownHours(Math.max(1, Math.ceil(24 - hoursElapsed)));
+          } else {
+            // 24 hours cooldown expired, allow retry
+            setKycStatus('NOT_STARTED');
+            setIsKycSubmitted(false);
+            setKycIsPermanentlyRejected(false);
+            setKycCooldownHours(0);
+          }
+        } else {
+          setKycStatus(p.kyc_status || 'NOT_SUBMITTED');
+          setIsKycSubmitted(false);
+          setKycIsPermanentlyRejected(false);
+          setKycCooldownHours(0);
         }
+
         if (p.country) setKycCountry(p.country);
         if (p.address_street) setKycStreet(p.address_street);
         if (p.address_city) setKycCity(p.address_city);
         if (p.address_postal_code) setKycPostalCode(p.address_postal_code);
+        if (p.address && !p.address_street) {
+          const parts = p.address.split(',');
+          if (parts[0]) setKycStreet(parts[0].trim());
+          if (parts[1]) setKycCity(parts[1].trim());
+        }
 
         // Preferences
         setCurrency(p.preferred_currency || 'USD');
@@ -2933,43 +2990,189 @@ export default function SettingsPage() {
                     )}
                   </div>
 
-                  {isKycSubmitted ? (
-                    <div className="p-5 rounded-xl bg-secondary/50 border border-border space-y-4">
+                  {kycStatus === 'VERIFIED' ? (
+                    <div className="p-5 rounded-xl bg-emerald-500/5 border border-emerald-500/20 space-y-4">
                       <div className="flex items-center gap-3">
-                        <div className="w-10 h-10 rounded-xl bg-primary/10 text-primary flex items-center justify-center shrink-0">
+                        <div className="w-10 h-10 rounded-xl bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 flex items-center justify-center shrink-0">
                           <ShieldCheck className="w-5 h-5" />
                         </div>
                         <div>
                           <p className="text-sm font-bold text-foreground">
-                            KYC Documents Permanently Saved & Locked
+                            Tier 2 Identity Verified &amp; Permanently Locked
                           </p>
                           <p className="text-xs text-muted-foreground mt-0.5">
-                            Your verification record is permanently encrypted and securely saved for Tier 2 limits. In accordance with compliance regulations, verified KYC details cannot be altered.
+                            Your identity verification is approved. You have unlocked unlimited peer-to-peer trading and withdrawals.
+                          </p>
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 pt-3 border-t border-border text-xs">
+                        <div>
+                          <span className="text-muted-foreground block font-semibold">Issuing Country</span>
+                          <span className="font-bold text-foreground flex items-center gap-1.5 mt-0.5">
+                            <span>{selectedCountryObj.flag}</span>
+                            <span>{selectedCountryObj.name}</span>
+                          </span>
+                        </div>
+                        <div>
+                          <span className="text-muted-foreground block font-semibold">Verified Name</span>
+                          <span className="font-bold text-foreground block mt-0.5 truncate">
+                            {profile?.full_name || fullName || 'Verified User'}
+                          </span>
+                        </div>
+                        <div>
+                          <span className="text-muted-foreground block font-semibold">Date of Birth</span>
+                          <span className="font-bold text-foreground block mt-0.5">
+                            {profile?.dob || dob || 'Verified on Record'}
+                          </span>
+                        </div>
+                        <div>
+                          <span className="text-muted-foreground block font-semibold">Trading Limit</span>
+                          <span className="font-bold text-emerald-600 dark:text-emerald-400 block mt-0.5">
+                            Unlimited (Tier 2)
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                  ) : kycIsPermanentlyRejected ? (
+                    <div className="p-5 rounded-xl bg-destructive/10 border border-destructive/20 space-y-4">
+                      <div className="flex items-center gap-3">
+                        <div className="w-10 h-10 rounded-xl bg-destructive/15 text-destructive flex items-center justify-center shrink-0">
+                          <AlertTriangle className="w-5 h-5" />
+                        </div>
+                        <div>
+                          <p className="text-sm font-bold text-destructive">
+                            Identity Verification Locked (3 Failed Attempts)
+                          </p>
+                          <p className="text-xs text-muted-foreground mt-0.5">
+                            You have exceeded the maximum limit of 3 identity verification attempts in 24 hours. For account security, online verification is permanently locked.
+                          </p>
+                        </div>
+                      </div>
+                      <div className="pt-3 border-t border-destructive/20 flex items-center justify-between">
+                        <p className="text-xs text-muted-foreground">
+                          Please contact our Compliance Support team to request a manual identity review.
+                        </p>
+                        <a
+                          href="mailto:support@paxones.com?subject=KYC%20Verification%20Appeal"
+                          className="px-3.5 py-1.5 rounded-xl bg-destructive text-destructive-foreground text-xs font-bold hover:opacity-90 transition-opacity"
+                        >
+                          Contact Support
+                        </a>
+                      </div>
+                    </div>
+                  ) : kycCooldownHours > 0 ? (
+                    <div className="p-5 rounded-xl bg-amber-500/10 border border-amber-500/20 space-y-4">
+                      <div className="flex items-center gap-3">
+                        <div className="w-10 h-10 rounded-xl bg-amber-500/15 text-amber-600 dark:text-amber-400 flex items-center justify-center shrink-0">
+                          <Clock className="w-5 h-5" />
+                        </div>
+                        <div>
+                          <div className="flex items-center gap-2">
+                            <p className="text-sm font-bold text-amber-600 dark:text-amber-400">
+                              Verification Rejected (Attempt {kycRetryCount} of 3)
+                            </p>
+                            <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-500/20 text-amber-700 dark:text-amber-300">
+                              {kycCooldownHours}h Cooldown Active
+                            </span>
+                          </div>
+                          <p className="text-xs text-muted-foreground mt-0.5">
+                            Your previous verification attempt was rejected. A mandatory 24-hour cool-off period is in effect. You have {3 - kycRetryCount} attempt(s) remaining before automated verification is locked.
+                          </p>
+                        </div>
+                      </div>
+                      <div className="pt-3 border-t border-amber-500/20 flex items-center justify-between">
+                        <p className="text-xs text-muted-foreground">
+                          You can retry your submission after {kycCooldownHours} hour{kycCooldownHours > 1 ? 's' : ''}.
+                        </p>
+                        <button
+                          type="button"
+                          onClick={async () => {
+                            try {
+                              notify('info', 'Synchronizing verification status...');
+                              const targetUserId = userId || profile?.id;
+                              const syncRes = await fetch(`/api/kyc/sync?userId=${targetUserId}`);
+                              const syncData = await syncRes.json();
+                              if (syncData.status === 'approved' || syncData.is_verified) {
+                                notify('success', 'Verification approved! Limits unlocked.');
+                              } else {
+                                notify('info', `Status: ${syncData.status || 'Cooldown active'}`);
+                              }
+                              await loadSettings();
+                            } catch {
+                              notify('error', 'Status check failed.');
+                            }
+                          }}
+                          className="text-xs font-bold text-primary hover:underline flex items-center gap-1 cursor-pointer"
+                        >
+                          <RefreshCw className="w-3 h-3" /> Check Status
+                        </button>
+                      </div>
+                    </div>
+                  ) : isKycSubmitted ? (
+                    <div className="p-5 rounded-xl bg-amber-500/5 border border-amber-500/20 space-y-4">
+                      <div className="flex items-center gap-3">
+                        <div className="w-10 h-10 rounded-xl bg-amber-500/10 text-amber-600 dark:text-amber-400 flex items-center justify-center shrink-0">
+                          <Clock className="w-5 h-5 animate-pulse" />
+                        </div>
+                        <div>
+                          <div className="flex items-center gap-2">
+                            <p className="text-sm font-bold text-foreground">
+                              Verification Under Review
+                            </p>
+                            <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20">
+                              Active for 24h
+                            </span>
+                          </div>
+                          <p className="text-xs text-muted-foreground mt-0.5">
+                            Your address and biometric identity session have been submitted and are undergoing automated compliance checks. No further action is required.
                           </p>
                         </div>
                       </div>
 
                       <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 pt-3 border-t border-border text-xs">
                         <div>
-                          <span className="text-muted-foreground block font-semibold">Issuing Country</span>
+                          <span className="text-muted-foreground block font-semibold">Submitted Country</span>
                           <span className="font-bold text-foreground flex items-center gap-1.5 mt-0.5">
                             <span>{selectedCountryObj.flag}</span>
                             <span>{selectedCountryObj.name} ({selectedCountryObj.code})</span>
                           </span>
                         </div>
                         <div>
-                          <span className="text-muted-foreground block font-semibold">Document Type</span>
-                          <span className="font-bold text-foreground block mt-0.5">
-                            {KYC_DOC_TYPES.find((d) => d.id === kycDocType)?.label || kycDocType}
+                          <span className="text-muted-foreground block font-semibold">Submitted Address</span>
+                          <span className="font-bold text-foreground block mt-0.5 truncate">
+                            {kycStreet ? `${kycStreet}, ${kycCity}` : 'Address recorded'}
                           </span>
                         </div>
                         <div>
-                          <span className="text-muted-foreground block font-semibold">Compliance Status</span>
-                          <span className="font-bold text-primary block mt-0.5">
-                            {kycStatus === 'VERIFIED' ? 'Verified' : 'Under Compliance Review'}
-                          </span>
+                          <span className="text-muted-foreground block font-semibold">Status Sync</span>
+                          <button
+                            type="button"
+                            onClick={async () => {
+                              try {
+                                notify('info', 'Synchronizing verification status...');
+                                const targetUserId = userId || profile?.id;
+                                const syncRes = await fetch(`/api/kyc/sync?userId=${targetUserId}`);
+                                const syncData = await syncRes.json();
+                                if (syncData.status === 'approved' || syncData.is_verified) {
+                                  notify('success', 'Verification approved! Limits unlocked.');
+                                } else {
+                                  notify('info', `Status: ${syncData.status || 'Under review'}`);
+                                }
+                                await loadSettings();
+                              } catch {
+                                notify('error', 'Status check failed.');
+                              }
+                            }}
+                            className="mt-0.5 text-xs font-bold text-primary hover:underline flex items-center gap-1 cursor-pointer"
+                          >
+                            <RefreshCw className="w-3 h-3" /> Check Status Now
+                          </button>
                         </div>
                       </div>
+                      <p className="text-[11px] text-muted-foreground pt-1">
+                        Note: If verification does not receive a vendor response within 24 hours, the review status will automatically clear so you can resubmit.
+                      </p>
                     </div>
                   ) : (
                     <form onSubmit={handleSubmitKycPermanent} className="space-y-4 sm:space-y-5">

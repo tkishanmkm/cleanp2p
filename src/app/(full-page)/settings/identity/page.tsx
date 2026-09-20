@@ -14,7 +14,7 @@ export default function IdentitySettingsPage() {
   const [avatarKey, setAvatarKey] = useState<number>(Date.now());
   const [toastMessage, setToastMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
-  const DIDIT_URL = "https://verify.didit.me/u/s2rBqin8QnKJOcHRhNBy_Q";
+  const VERIFICATION_URL = "https://verify.didit.me/u/s2rBqin8QnKJOcHRhNBy_Q";
 
   useEffect(() => {
     loadProfile();
@@ -194,7 +194,7 @@ export default function IdentitySettingsPage() {
               </Link>
             </div>
             <p className="text-[11px] text-slate-400">
-              Unverified accounts are limited to $1,000 in total cumulative trades. Verification is processed via Didit. If rejected, you have 3 attempts per 24 hours before needing support assistance.
+              Unverified accounts are limited to $1,000 in total cumulative trades. Verification is processed via automated biometric identity verification. If rejected, you have 3 attempts per 24 hours before needing support assistance.
             </p>
           </div>
         )}

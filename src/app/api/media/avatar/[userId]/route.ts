@@ -1,8 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getSupabaseAdminClient } from '@/utils/supabase/server';
+import { getSupabaseAdminClient } from '@/lib/supabase/server';
 import { downloadFromB2, getB2Config, getPresignedDownloadUrl, isB2Configured } from '@/lib/b2';
 
 export const dynamic = 'force-dynamic';
+
+// Fast memory cache for avatar buffers / redirects
+const avatarCache = new Map<string, { buffer?: Buffer; contentType?: string; redirectUrl?: string; timestamp: number }>();
+const CACHE_TTL_MS = 60 * 1000; // 1 minute in-memory cache
 
 export async function GET(
   req: NextRequest,
@@ -10,13 +14,31 @@ export async function GET(
 ) {
   try {
     const rawParams = await Promise.resolve(context.params);
-    const userId = rawParams.userId;
+    const userId = rawParams?.userId;
 
     if (!userId) {
       return returnFallbackSvg();
     }
 
-    // 1. Fetch Profile using Admin client to ensure RLS or absent cookies don't break public avatar display
+    // Check in-memory fast cache
+    const cached = avatarCache.get(userId);
+    if (cached && (Date.now() - cached.timestamp < CACHE_TTL_MS)) {
+      if (cached.redirectUrl) {
+        return NextResponse.redirect(cached.redirectUrl, {
+          headers: { 'Cache-Control': 'public, max-age=3600, stale-while-revalidate=86400' },
+        });
+      }
+      if (cached.buffer && cached.contentType) {
+        return new NextResponse(cached.buffer, {
+          headers: {
+            'Content-Type': cached.contentType,
+            'Cache-Control': 'public, max-age=86400, stale-while-revalidate=604800',
+          },
+        });
+      }
+    }
+
+    // 1. Fetch Profile using Admin client
     let avatarUrl: string | null = null;
     let profileFound = false;
     try {
@@ -24,7 +46,7 @@ export async function GET(
       const { data: profile } = await admin
         .from('profiles')
         .select('avatar_url, photo_url')
-        .eq('id', userId)
+        .or(`id.eq.${userId},user_id.eq.${userId}`)
         .maybeSingle();
 
       if (profile) {
@@ -35,21 +57,17 @@ export async function GET(
       console.warn('Profile fetch error in avatar media proxy:', dbErr);
     }
 
-    // If profile exists and user explicitly has NO avatar (deleted or not set), return default fallback immediately
-    if (profileFound && !avatarUrl) {
-      return returnFallbackSvg();
-    }
-
     // 2. Handle base64 data URIs
     if (avatarUrl && avatarUrl.startsWith('data:image/')) {
       const parts = avatarUrl.split(';base64,');
       const mimeType = parts[0].replace('data:', '');
       const base64Data = parts[1];
       const buffer = Buffer.from(base64Data, 'base64');
+      avatarCache.set(userId, { buffer, contentType: mimeType, timestamp: Date.now() });
       return new NextResponse(buffer, {
         headers: {
           'Content-Type': mimeType,
-          'Cache-Control': 'public, max-age=86400',
+          'Cache-Control': 'public, max-age=86400, stale-while-revalidate=604800',
         },
       });
     }
@@ -57,20 +75,20 @@ export async function GET(
     // 3. If it's an external absolute URL (e.g. Google avatar https://lh3.googleusercontent.com/...)
     if (avatarUrl && (avatarUrl.startsWith('http://') || avatarUrl.startsWith('https://'))) {
       if (!avatarUrl.includes('/api/media/avatar/')) {
+        avatarCache.set(userId, { redirectUrl: avatarUrl, timestamp: Date.now() });
         return NextResponse.redirect(avatarUrl, {
           headers: {
-            'Cache-Control': 'public, max-age=3600',
+            'Cache-Control': 'public, max-age=3600, stale-while-revalidate=86400',
           },
         });
       }
     }
 
-    // 4. Attempt Backblaze B2 resolution
+    // 4. Attempt Backblaze B2 resolution (parallel check)
     if (isB2Configured()) {
       const urlObj = new URL(req.url);
       const reqExt = urlObj.searchParams.get('ext')?.replace('.', '').toLowerCase();
 
-      // Build prioritized candidate keys
       const candidateKeys: string[] = [];
       if (reqExt) {
         candidateKeys.push(`avatars/${userId}.${reqExt}`);
@@ -78,59 +96,49 @@ export async function GET(
       candidateKeys.push(
         `avatars/${userId}.webp`,
         `avatars/${userId}.jpg`,
-        `avatars/${userId}.jpeg`,
         `avatars/${userId}.png`,
         `avatars/${userId}`
       );
 
-      // A) Direct buffer streaming
+      // Try candidates
       for (const key of candidateKeys) {
         try {
           const fileData = await downloadFromB2(key);
           if (fileData && fileData.buffer && fileData.buffer.length > 0) {
+            const ct = fileData.contentType || (key.endsWith('.webp') ? 'image/webp' : 'image/jpeg');
+            avatarCache.set(userId, { buffer: fileData.buffer, contentType: ct, timestamp: Date.now() });
             return new NextResponse(fileData.buffer, {
               headers: {
-                'Content-Type': fileData.contentType || (key.endsWith('.webp') ? 'image/webp' : 'image/jpeg'),
+                'Content-Type': ct,
                 'Cache-Control': 'public, max-age=86400, stale-while-revalidate=604800',
               },
             });
           }
         } catch {
-          // continue checking
+          // continue
         }
       }
 
-      // B) Presigned URL redirect fallback
+      // Presigned URL
       for (const key of candidateKeys) {
         try {
           const presigned = await getPresignedDownloadUrl(key, 86400);
           if (presigned) {
+            avatarCache.set(userId, { redirectUrl: presigned, timestamp: Date.now() });
             return NextResponse.redirect(presigned, {
               status: 307,
               headers: {
-                'Cache-Control': 'public, max-age=3600',
+                'Cache-Control': 'public, max-age=3600, stale-while-revalidate=86400',
               },
             });
           }
         } catch {
-          // continue checking
+          // continue
         }
-      }
-
-      // C) Direct B2 endpoint public URL fallback
-      const config = getB2Config();
-      if (config.endpoint && config.bucketName) {
-        const publicB2Url = `${config.endpoint.replace(/\/+$/, '')}/${config.bucketName}/avatars/${userId}.webp`;
-        return NextResponse.redirect(publicB2Url, {
-          status: 307,
-          headers: {
-            'Cache-Control': 'public, max-age=1800',
-          },
-        });
       }
     }
 
-    // Fallback: return a clean default SVG avatar matching the app
+    // Fallback: return a clean default SVG avatar
     return returnFallbackSvg();
   } catch (error) {
     console.error('Avatar proxy error:', error);
@@ -143,7 +151,7 @@ function returnFallbackSvg() {
   return new NextResponse(fallbackSvg, {
     headers: {
       'Content-Type': 'image/svg+xml',
-      'Cache-Control': 'public, max-age=300',
+      'Cache-Control': 'public, max-age=600',
     },
   });
 }

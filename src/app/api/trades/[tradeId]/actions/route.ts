@@ -365,6 +365,18 @@ export async function POST(
         return NextResponse.json({ error: 'Only the seller can release escrow.' }, { status: 403 });
       }
 
+      // Verify seller can only release when buyer marked paid OR when trade is in dispute
+      const rawStatus = String(trade?.status || '').toLowerCase();
+      const rawEscrowStatus = String(trade?.escrow_status || '').toUpperCase();
+      const isPaid = Boolean(trade?.paid_at || trade?.marked_paid_at || rawEscrowStatus === 'PAID' || ['paid', 'buyer_marked_paid', 'payment_sent'].includes(rawStatus));
+      const isDisputed = Boolean(rawStatus === 'disputed' || rawEscrowStatus === 'DISPUTED');
+
+      if (!isPaid && !isDisputed) {
+        return NextResponse.json({
+          error: 'Escrow can only be released after the buyer marks the trade as paid, or if the trade is in dispute.'
+        }, { status: 400 });
+      }
+
       // 2FA check for sensitive trade release operation
       const { data: sellerProfile } = await adminClient
         .from('profiles')
@@ -426,6 +438,7 @@ export async function POST(
           escrow_status: 'RELEASED',
           released_at: now,
           completed_at: now,
+          updated_at: now
         });
 
       if (isActualUuid) {
@@ -446,6 +459,7 @@ export async function POST(
             escrow_status: 'RELEASED',
             released_at: now,
             completed_at: now,
+            updated_at: now
           });
         if (isActualUuid) qFallback = qFallback.eq('id', actualTradeId);
         else qFallback = qFallback.eq('trade_id', tradeId);
@@ -462,12 +476,50 @@ export async function POST(
 
       const coinAmount = Number(trade?.amount ?? trade?.crypto_amount ?? 0);
       const coinSymbol = (trade?.crypto ?? trade?.asset_symbol ?? 'USDT').toUpperCase();
-      const feeAmount = Number(trade?.escrow_fee ?? trade?.platform_fee ?? 0);
+      const feeAmount = Number(trade?.escrow_fee ?? trade?.platform_fee ?? (coinAmount * 0.015));
       const totalSellerDeduct = coinAmount + feeAmount;
 
       // 1. Deduct seller locked escrow across tables
       try {
         if (trade?.seller_id && totalSellerDeduct > 0) {
+          // Table: balances
+          const { data: sBal } = await adminClient
+            .from('balances')
+            .select('*')
+            .eq('user_id', trade.seller_id)
+            .ilike('asset', coinSymbol)
+            .maybeSingle();
+
+          if (sBal) {
+            await adminClient
+              .from('balances')
+              .update({
+                locked_balance: Math.max(0, Number(sBal.locked_balance || 0) - totalSellerDeduct),
+                total_balance: Math.max(0, Number(sBal.total_balance || 0) - totalSellerDeduct),
+                updated_at: now
+              })
+              .eq('id', sBal.id);
+          }
+
+          // Table: user_balances
+          const { data: sUBal } = await adminClient
+            .from('user_balances')
+            .select('*')
+            .eq('user_id', trade.seller_id)
+            .ilike('asset', coinSymbol)
+            .maybeSingle();
+
+          if (sUBal) {
+            await adminClient
+              .from('user_balances')
+              .update({
+                locked_balance: Math.max(0, Number(sUBal.locked_balance || 0) - totalSellerDeduct),
+                updated_at: now
+              })
+              .eq('id', sUBal.id);
+          }
+
+          // Table: user_wallets
           const { data: sUW } = await adminClient
             .from('user_wallets')
             .select('*')
@@ -481,11 +533,13 @@ export async function POST(
               .update({
                 locked_balance: Math.max(0, Number(sUW.locked_balance || 0) - totalSellerDeduct),
                 reserved_balance: Math.max(0, Number(sUW.reserved_balance || 0) - totalSellerDeduct),
+                balance: Math.max(0, Number(sUW.balance || 0) - totalSellerDeduct),
                 updated_at: now
               })
               .eq('id', sUW.id);
           }
 
+          // Table: wallet_assets
           const { data: sWA } = await adminClient
             .from('wallet_assets')
             .select('*')
@@ -498,15 +552,90 @@ export async function POST(
               .from('wallet_assets')
               .update({
                 locked_escrow: Math.max(0, Number(sWA.locked_escrow ?? sWA.locked_balance ?? 0) - totalSellerDeduct),
-                reserved_balance: Math.max(0, Number(sWA.reserved_balance ?? 0) - totalSellerDeduct),
+                locked_balance: Math.max(0, Number(sWA.locked_balance ?? sWA.locked_escrow ?? 0) - totalSellerDeduct),
+                reserved_balance: Math.max(0, Number(sWA.reserved_balance || 0) - totalSellerDeduct),
                 updated_at: now
               })
               .eq('id', sWA.id);
+          }
+
+          // Table: wallets
+          const { data: sW } = await adminClient
+            .from('wallets')
+            .select('*')
+            .eq('user_id', trade.seller_id)
+            .ilike('currency', coinSymbol)
+            .maybeSingle();
+
+          if (sW) {
+            await adminClient
+              .from('wallets')
+              .update({
+                locked_balance: Math.max(0, Number(sW.locked_balance || 0) - totalSellerDeduct),
+                total_balance: Math.max(0, Number(sW.total_balance || 0) - totalSellerDeduct),
+                updated_at: now
+              })
+              .eq('id', sW.id);
           }
         }
 
         // 2. Credit buyer available balance across tables
         if (trade?.buyer_id && coinAmount > 0) {
+          // Table: balances
+          const { data: bBal } = await adminClient
+            .from('balances')
+            .select('*')
+            .eq('user_id', trade.buyer_id)
+            .ilike('asset', coinSymbol)
+            .maybeSingle();
+
+          if (bBal) {
+            await adminClient
+              .from('balances')
+              .update({
+                available_balance: Number(bBal.available_balance || 0) + coinAmount,
+                total_balance: Number(bBal.total_balance || 0) + coinAmount,
+                updated_at: now
+              })
+              .eq('id', bBal.id);
+          } else {
+            await adminClient.from('balances').insert({
+              user_id: trade.buyer_id,
+              asset: coinSymbol,
+              available_balance: coinAmount,
+              locked_balance: 0,
+              total_balance: coinAmount,
+              updated_at: now
+            });
+          }
+
+          // Table: user_balances
+          const { data: bUBal } = await adminClient
+            .from('user_balances')
+            .select('*')
+            .eq('user_id', trade.buyer_id)
+            .ilike('asset', coinSymbol)
+            .maybeSingle();
+
+          if (bUBal) {
+            await adminClient
+              .from('user_balances')
+              .update({
+                available_balance: Number(bUBal.available_balance || 0) + coinAmount,
+                updated_at: now
+              })
+              .eq('id', bUBal.id);
+          } else {
+            await adminClient.from('user_balances').insert({
+              user_id: trade.buyer_id,
+              asset: coinSymbol,
+              available_balance: coinAmount,
+              locked_balance: 0,
+              updated_at: now
+            });
+          }
+
+          // Table: user_wallets
           const { data: bUW } = await adminClient
             .from('user_wallets')
             .select('*')
@@ -537,6 +666,7 @@ export async function POST(
               });
           }
 
+          // Table: wallet_assets
           const { data: bWA } = await adminClient
             .from('wallet_assets')
             .select('*')
@@ -552,6 +682,35 @@ export async function POST(
                 updated_at: now
               })
               .eq('id', bWA.id);
+          } else {
+            await adminClient
+              .from('wallet_assets')
+              .insert({
+                user_id: trade.buyer_id,
+                asset_symbol: coinSymbol,
+                available: coinAmount,
+                locked_escrow: 0,
+                locked_balance: 0,
+                updated_at: now
+              });
+          }
+
+          // Table: wallets
+          const { data: bW } = await adminClient
+            .from('wallets')
+            .select('*')
+            .eq('user_id', trade.buyer_id)
+            .ilike('currency', coinSymbol)
+            .maybeSingle();
+
+          if (bW) {
+            await adminClient
+              .from('wallets')
+              .update({
+                total_balance: Number(bW.total_balance || 0) + coinAmount,
+                updated_at: now
+              })
+              .eq('id', bW.id);
           }
         }
 
@@ -564,6 +723,16 @@ export async function POST(
           const { data: bP } = await adminClient.from('profiles').select('completed_trades').eq('id', trade.buyer_id).maybeSingle();
           await adminClient.from('profiles').update({ completed_trades: (bP?.completed_trades || 0) + 1 }).eq('id', trade.buyer_id);
         }
+
+        // 4. If dispute existed, mark resolved
+        await adminClient
+          .from('disputes')
+          .update({
+            status: 'RESOLVED',
+            admin_decision: 'RELEASE_BUYER',
+            resolved_at: now
+          })
+          .eq('trade_id', actualTradeId);
       } catch (balErr) {
         console.warn('Balance sync on escrow release warning:', balErr);
       }
@@ -600,7 +769,7 @@ export async function POST(
         const { data, error } = await adminClient.rpc('cancel_p2p_trade', {
           p_trade_id: actualTradeId,
           p_user_id: user.id,
-          p_reason: reason || 'Cancelled by user',
+          p_reason: reason || 'Cancelled by buyer',
         });
 
         if (!error && data) {
@@ -629,7 +798,8 @@ export async function POST(
           status: 'cancelled',
           escrow_status: 'CANCELLED',
           cancellation_reason: reason || 'Cancelled by user',
-          cancelled_at: now
+          cancelled_at: now,
+          updated_at: now
         });
 
       if (isActualUuid) {
@@ -648,7 +818,8 @@ export async function POST(
           .update({
             escrow_status: 'CANCELLED',
             cancellation_reason: reason || 'Cancelled by user',
-            cancelled_at: now
+            cancelled_at: now,
+            updated_at: now
           });
         if (isActualUuid) qFallback = qFallback.eq('id', actualTradeId);
         else qFallback = qFallback.eq('trade_id', tradeId);
@@ -663,6 +834,125 @@ export async function POST(
         return NextResponse.json({ error: updateError.message }, { status: 400 });
       }
 
+      // Refund locked funds back to seller available balance
+      const coinAmount = Number(trade?.amount ?? trade?.crypto_amount ?? 0);
+      const coinSymbol = (trade?.crypto ?? trade?.asset_symbol ?? 'USDT').toUpperCase();
+      const feeAmount = Number(trade?.escrow_fee ?? trade?.platform_fee ?? (coinAmount * 0.015));
+      const totalRefund = coinAmount + feeAmount;
+
+      try {
+        if (trade?.seller_id && totalRefund > 0) {
+          // Table: balances
+          const { data: sBal } = await adminClient
+            .from('balances')
+            .select('*')
+            .eq('user_id', trade.seller_id)
+            .ilike('asset', coinSymbol)
+            .maybeSingle();
+
+          if (sBal) {
+            await adminClient
+              .from('balances')
+              .update({
+                available_balance: Number(sBal.available_balance || 0) + totalRefund,
+                locked_balance: Math.max(0, Number(sBal.locked_balance || 0) - totalRefund),
+                updated_at: now
+              })
+              .eq('id', sBal.id);
+          }
+
+          // Table: user_balances
+          const { data: sUBal } = await adminClient
+            .from('user_balances')
+            .select('*')
+            .eq('user_id', trade.seller_id)
+            .ilike('asset', coinSymbol)
+            .maybeSingle();
+
+          if (sUBal) {
+            await adminClient
+              .from('user_balances')
+              .update({
+                available_balance: Number(sUBal.available_balance || 0) + totalRefund,
+                locked_balance: Math.max(0, Number(sUBal.locked_balance || 0) - totalRefund),
+                updated_at: now
+              })
+              .eq('id', sUBal.id);
+          }
+
+          // Table: user_wallets
+          const { data: sUW } = await adminClient
+            .from('user_wallets')
+            .select('*')
+            .eq('user_id', trade.seller_id)
+            .ilike('asset_symbol', coinSymbol)
+            .maybeSingle();
+
+          if (sUW) {
+            await adminClient
+              .from('user_wallets')
+              .update({
+                available_balance: Number(sUW.available_balance || sUW.balance || 0) + totalRefund,
+                locked_balance: Math.max(0, Number(sUW.locked_balance || 0) - totalRefund),
+                reserved_balance: Math.max(0, Number(sUW.reserved_balance || 0) - totalRefund),
+                updated_at: now
+              })
+              .eq('id', sUW.id);
+          }
+
+          // Table: wallet_assets
+          const { data: sWA } = await adminClient
+            .from('wallet_assets')
+            .select('*')
+            .eq('user_id', trade.seller_id)
+            .ilike('asset_symbol', coinSymbol)
+            .maybeSingle();
+
+          if (sWA) {
+            await adminClient
+              .from('wallet_assets')
+              .update({
+                available: Number(sWA.available ?? sWA.balance ?? 0) + totalRefund,
+                locked_escrow: Math.max(0, Number(sWA.locked_escrow ?? sWA.locked_balance ?? 0) - totalRefund),
+                locked_balance: Math.max(0, Number(sWA.locked_balance ?? sWA.locked_escrow ?? 0) - totalRefund),
+                reserved_balance: Math.max(0, Number(sWA.reserved_balance || 0) - totalRefund),
+                updated_at: now
+              })
+              .eq('id', sWA.id);
+          }
+
+          // Table: wallets
+          const { data: sW } = await adminClient
+            .from('wallets')
+            .select('*')
+            .eq('user_id', trade.seller_id)
+            .ilike('currency', coinSymbol)
+            .maybeSingle();
+
+          if (sW) {
+            await adminClient
+              .from('wallets')
+              .update({
+                locked_balance: Math.max(0, Number(sW.locked_balance || 0) - totalRefund),
+                updated_at: now
+              })
+              .eq('id', sW.id);
+          }
+        }
+
+        // Close any active dispute
+        await adminClient
+          .from('disputes')
+          .update({
+            status: 'CLOSED',
+            admin_decision: 'REFUND_SELLER',
+            resolved_at: now
+          })
+          .eq('trade_id', actualTradeId);
+      } catch (balErr) {
+        console.warn('Balance refund on trade cancel warning:', balErr);
+      }
+
       await insertPaxonesSystemMessage(adminClient, {
         tradeId: actualTradeId,
         type: 'TRADE_CANCELLED'
@@ -673,7 +963,7 @@ export async function POST(
         await adminClient.from('notifications').insert({
           user_id: counterpartyId,
           title: 'Trade Cancelled',
-          message: `Trade has been cancelled. Any locked escrow has been refunded.`,
+          message: `Trade has been cancelled. Any locked escrow has been refunded to the seller.`,
           link: `/trade/${actualTradeId}`,
           is_read: false,
           created_at: now

@@ -50,8 +50,8 @@ export async function POST(req: NextRequest) {
     const tsHeader = req.headers.get('x-timestamp');
     const ts = tsHeader ? Number(tsHeader) : null;
 
-    // 1. Replay attack freshness check (300 seconds)
-    if (ts && Math.abs(Date.now() / 1000 - ts) > 300) {
+    // 1. Replay attack freshness check (900 seconds / 15 mins for webhook clock skew)
+    if (ts && Math.abs(Date.now() / 1000 - ts) > 900) {
       return new NextResponse('Stale timestamp', { status: 401 });
     }
 
@@ -209,6 +209,20 @@ export async function POST(req: NextRequest) {
       const extractedDob = primaryId.date_of_birth || primaryId.dob || primaryId.birth_date || null;
       const documentNumber = primaryId.document_number || primaryId.id_number || primaryId.documentNumber || null;
       const extractedCountry = primaryId.issuing_country || primaryId.nationality || primaryId.country || null;
+      
+      let rawAddress = primaryId.address || primaryId.formatted_address || parsed.decision?.address || parsed.decision?.extracted_data?.address || null;
+      let extractedAddress: string | null = null;
+      if (typeof rawAddress === 'string' && rawAddress.trim()) {
+        extractedAddress = rawAddress.trim();
+      } else if (typeof rawAddress === 'object' && rawAddress !== null) {
+        extractedAddress = [
+          rawAddress.street_line_1 || rawAddress.street,
+          rawAddress.city,
+          rawAddress.state || rawAddress.province,
+          rawAddress.postal_code || rawAddress.zip_code,
+          rawAddress.country
+        ].filter(Boolean).join(', ');
+      }
 
       // Child Safety Rule: Under 18 strictly prohibited - immediate permanent ban
       if (extractedDob) {
@@ -308,6 +322,11 @@ export async function POST(req: NextRequest) {
       if (extractedCountry) {
         updatePayload.country = String(extractedCountry).toUpperCase().slice(0, 2);
         updatePayload.is_country_locked = true;
+      }
+      if (extractedAddress) {
+        updatePayload.address = extractedAddress;
+        updatePayload.address_street = extractedAddress;
+        updatePayload.is_address_locked = true;
       }
 
       const { error: updateErr } = await supabase
@@ -484,7 +503,7 @@ export async function POST(req: NextRequest) {
         await supabase.from('notifications').insert({
           user_id: userId,
           title: 'KYC Resubmission Requested',
-          message: 'Didit requires you to resubmit one or more verification steps. Please visit identity settings.',
+          message: 'Automated compliance check requires you to resubmit one or more verification steps. Please visit identity settings.',
           link: '/settings/identity',
           is_read: false,
           created_at: new Date().toISOString(),

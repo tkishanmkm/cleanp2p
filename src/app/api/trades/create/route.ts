@@ -1,4 +1,5 @@
 import { createClient } from '@/utils/supabase/server';
+import { getSupabaseAdminClient } from '@/lib/supabase/server';
 import { NextRequest, NextResponse } from 'next/server';
 import { generateTradeId } from '@/lib/id-generator';
 
@@ -129,6 +130,49 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    // 3.6. Enforce $1,000 USD Cumulative Limit for Unverified Accounts
+    if (!isKycVerified) {
+      const userFiatCurrency = (ad.fiat_currency || 'USD').toUpperCase();
+      let fiatToUsdRate = 1.0;
+      if (userFiatCurrency === 'INR') fiatToUsdRate = 1 / 85.0;
+      else if (userFiatCurrency === 'EUR') fiatToUsdRate = 1.08;
+      else if (userFiatCurrency === 'GBP') fiatToUsdRate = 1.28;
+      else if (userFiatCurrency === 'CAD' || userFiatCurrency === 'AUD') fiatToUsdRate = 0.68;
+      else if (userFiatCurrency === 'AED') fiatToUsdRate = 0.27;
+
+      const currentTradeUsd = numericFiat * fiatToUsdRate;
+
+      // Query prior trade history for unverified user
+      const { data: pastTrades } = await supabase
+        .from('trades')
+        .select('fiat_amount, fiat_currency, status')
+        .or(`buyer_id.eq.${user.id},seller_id.eq.${user.id}`)
+        .in('status', ['COMPLETED', 'completed', 'PAID', 'paid', 'ESCROW_LOCKED', 'in_escrow', 'DISPUTED']);
+
+      let priorTradedUsd = 0;
+      if (pastTrades && pastTrades.length > 0) {
+        for (const t of pastTrades) {
+          const curr = (t.fiat_currency || 'USD').toUpperCase();
+          let rate = 1.0;
+          if (curr === 'INR') rate = 1 / 85.0;
+          else if (curr === 'EUR') rate = 1.08;
+          else if (curr === 'GBP') rate = 1.28;
+          else if (curr === 'CAD' || curr === 'AUD') rate = 0.68;
+          else if (curr === 'AED') rate = 0.27;
+          priorTradedUsd += (Number(t.fiat_amount) || 0) * rate;
+        }
+      }
+
+      if (priorTradedUsd + currentTradeUsd > 1000) {
+        return NextResponse.json(
+          {
+            error: `Unverified accounts have a cumulative limit of $1,000 USD in total trades (Current history: $${priorTradedUsd.toFixed(2)} USD). Please complete Identity Verification in Settings to trade without limits.`,
+          },
+          { status: 403 }
+        );
+      }
+    }
+
     const isSellAd = (ad.type || ad.ad_type || 'SELL').toUpperCase() === 'SELL';
     const adOwnerId = ad.user_id || ad.seller_id || ad.advertiser_id || (ad.profiles && ad.profiles.id);
     const buyerId = isSellAd ? user.id : adOwnerId;
@@ -145,6 +189,98 @@ export async function POST(req: NextRequest) {
     const paymentMethod = paymentMethods[0] || 'Bank Transfer';
 
     const shortId = generateTradeId();
+    const targetAsset = (ad.crypto || ad.asset || 'BTC').toUpperCase();
+    const escrowFee = calculatedCrypto * 0.015;
+    const totalLock = calculatedCrypto + escrowFee;
+
+    // 3.8. Lock seller escrow balance atomically
+    const adminClient = getSupabaseAdminClient();
+    try {
+      const { data: lockData, error: lockErr } = await adminClient.rpc('lock_seller_escrow', {
+        p_seller_id: sellerId,
+        p_asset: targetAsset,
+        p_crypto_amount: calculatedCrypto,
+        p_escrow_fee: escrowFee,
+      });
+
+      if (lockErr && (lockErr.message?.toLowerCase().includes('insufficient') || lockErr.code === 'P0001')) {
+        return NextResponse.json(
+          { error: lockErr.message || `Seller has insufficient available balance. Need at least ${totalLock.toFixed(6)} ${targetAsset} (${calculatedCrypto} + ${escrowFee.toFixed(6)} escrow fee).` },
+          { status: 400 }
+        );
+      }
+    } catch (e) {
+      console.warn('lock_seller_escrow RPC call notice:', e);
+    }
+
+    // Direct atomic balance deduction fallback
+    try {
+      const { data: sBal } = await adminClient
+        .from('balances')
+        .select('*')
+        .eq('user_id', sellerId)
+        .ilike('asset', targetAsset)
+        .maybeSingle();
+
+      if (sBal) {
+        const avail = Number(sBal.available_balance ?? 0);
+        if (avail < totalLock) {
+          return NextResponse.json(
+            { error: `Seller has insufficient available balance (${avail.toFixed(6)} ${targetAsset}). Required: ${totalLock.toFixed(6)} ${targetAsset} (${calculatedCrypto.toFixed(6)} + ${escrowFee.toFixed(6)} escrow fee).` },
+            { status: 400 }
+          );
+        }
+        await adminClient
+          .from('balances')
+          .update({
+            available_balance: Math.max(0, avail - totalLock),
+            locked_balance: Number(sBal.locked_balance || 0) + totalLock,
+            updated_at: new Date().toISOString()
+          })
+          .eq('id', sBal.id);
+      }
+
+      const { data: sWA } = await adminClient
+        .from('wallet_assets')
+        .select('*')
+        .eq('user_id', sellerId)
+        .ilike('asset_symbol', targetAsset)
+        .maybeSingle();
+
+      if (sWA) {
+        const availWA = Number(sWA.available ?? sWA.balance ?? 0);
+        await adminClient
+          .from('wallet_assets')
+          .update({
+            available: Math.max(0, availWA - totalLock),
+            locked_escrow: Number(sWA.locked_escrow ?? sWA.locked_balance ?? 0) + totalLock,
+            locked_balance: Number(sWA.locked_balance ?? sWA.locked_escrow ?? 0) + totalLock,
+            updated_at: new Date().toISOString()
+          })
+          .eq('id', sWA.id);
+      }
+
+      const { data: sUW } = await adminClient
+        .from('user_wallets')
+        .select('*')
+        .eq('user_id', sellerId)
+        .ilike('asset_symbol', targetAsset)
+        .maybeSingle();
+
+      if (sUW) {
+        const availUW = Number(sUW.available_balance ?? sUW.balance ?? 0);
+        await adminClient
+          .from('user_wallets')
+          .update({
+            available_balance: Math.max(0, availUW - totalLock),
+            locked_balance: Number(sUW.locked_balance || 0) + totalLock,
+            updated_at: new Date().toISOString()
+          })
+          .eq('id', sUW.id);
+      }
+    } catch (balLockErr) {
+      console.warn('Direct balance lock warning:', balLockErr);
+    }
 
     // 4. Insert Trade into database safely
     let tradeResult: any = null;
@@ -154,11 +290,14 @@ export async function POST(req: NextRequest) {
       public_id: shortId,
       buyer_id: String(buyerId),
       seller_id: String(sellerId),
-      crypto: (ad.crypto || ad.asset || 'BTC').toUpperCase(),
-      coin: (ad.crypto || ad.asset || 'BTC').toUpperCase(),
-      asset: (ad.crypto || ad.asset || 'BTC').toUpperCase(),
+      crypto: targetAsset,
+      coin: targetAsset,
+      asset: targetAsset,
       amount: calculatedCrypto,
       crypto_amount: calculatedCrypto,
+      escrow_fee: escrowFee,
+      platform_fee: escrowFee,
+      escrow_status: 'locked',
       fiat_currency: ad.fiat_currency || ad.fiat || 'USD',
       fiat_amount: numericFiat,
       amount_usd: numericFiat,

@@ -21,6 +21,27 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       return NextResponse.json({ error: 'Invalid payload' }, { status: 400 });
     }
 
+    // Check KYC status for withdrawal
+    const { data: userProfile } = await supabaseAdmin
+      .from('profiles')
+      .select('id, is_verified, kyc_status, id_verified')
+      .eq('id', userId)
+      .maybeSingle();
+
+    const isVerified = Boolean(
+      userProfile?.is_verified ||
+      userProfile?.kyc_status === 'approved' ||
+      userProfile?.kyc_status === 'verified' ||
+      userProfile?.id_verified
+    );
+
+    if (!isVerified) {
+      return NextResponse.json(
+        { error: 'Identity verification is required before initiating cryptocurrency withdrawals. Please complete Identity Verification in Settings.' },
+        { status: 403 }
+      );
+    }
+
     const { error: deductError } = await supabaseAdmin.rpc('deduct_user_balance', {
       p_user_id: userId,
       p_amount: amount,

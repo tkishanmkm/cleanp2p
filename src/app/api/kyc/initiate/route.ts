@@ -21,7 +21,7 @@ export async function POST(req: NextRequest) {
     // 1. Fetch user status
     const { data: profile, error } = await supabase
       .from('profiles')
-      .select('kyc_status, is_banned, kyc_retry_count, kyc_attempts')
+      .select('kyc_status, is_banned, kyc_retry_count, kyc_attempts, kyc_last_attempt_at, kyc_submitted_at, is_verified, id_verified')
       .eq('id', userId)
       .single();
 
@@ -34,19 +34,38 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Account is banned from performing KYC' }, { status: 403 });
     }
 
+    if (profile.kyc_status === 'approved' || profile.is_verified || profile.id_verified) {
+      return NextResponse.json({
+        success: true,
+        message: 'Account is already verified with Tier 2 privileges.',
+        status: 'approved',
+      });
+    }
+
+    const lastAttemptTime = profile.kyc_last_attempt_at || profile.kyc_submitted_at;
+    const hoursSinceLastAttempt = lastAttemptTime ? (Date.now() - new Date(lastAttemptTime).getTime()) / (1000 * 60 * 60) : 999;
+
+    let retryCount = Number(profile.kyc_retry_count || profile.kyc_attempts || 0);
+
+    // If 24 hours have passed since previous attempt, reset the attempt count
+    if (hoursSinceLastAttempt >= 24) {
+      retryCount = 0;
+    }
+
     // Rule: Reject if 3 retries exceeded or permanently rejected
-    const retryCount = Number(profile.kyc_retry_count || profile.kyc_attempts || 0);
     if (profile.kyc_status === 'permanently_rejected' || retryCount >= 3) {
       return NextResponse.json({
         error: 'KYC_LIMIT_REACHED',
-        message: 'Maximum KYC retry attempts (3/3) exceeded. Your verification is permanently locked. Please contact support.',
+        message: 'Maximum KYC retry attempts (3/3) exceeded in 24 hours. Your verification is locked. Please contact support.',
       }, { status: 403 });
     }
 
-    if (profile.kyc_status === 'approved') {
-      // Immediate ban attempt: Trying to re-verify an already verified account
-      await supabase.from('profiles').update({ is_banned: true, kyc_status: 'banned' }).eq('id', userId);
-      return NextResponse.json({ error: 'Re-verification attempt detected. Account banned.' }, { status: 403 });
+    // Rule: If under review and within 24 hours, inform user
+    if ((profile.kyc_status === 'in_review' || profile.kyc_status === 'pending') && hoursSinceLastAttempt < 24) {
+      return NextResponse.json({
+        error: 'KYC_UNDER_REVIEW',
+        message: 'Your verification is currently under review (active for up to 24 hours). Please wait or sync status.',
+      }, { status: 400 });
     }
 
     // 2. Compress and save KYC address details directly into Backblaze B2 (Private compliance document)
@@ -82,21 +101,19 @@ export async function POST(req: NextRequest) {
       })
       .eq('id', userId);
 
-    // 4. Request session from Didit
+    // 4. Request session from verification service
     const rawBaseUrl = process.env.DIDIT_API_URL || 'https://verification.didit.me/v3';
     const diditBase = rawBaseUrl.replace(/\/+$/, '');
     const targetUrl = `${diditBase}/session/`;
 
     const apiKey = process.env.DIDIT_API_KEY;
-    const workflowId = process.env.DIDIT_WORKFLOW_ID || 'b36ac1aa-29fc-4272-8939-c1d184d072fd';
+    const workflowId = process.env.DIDIT_WORKFLOW_ID || 'e2b3e066-d5f9-45b8-a11c-1139c27f9beb';
     const siteUrl = (process.env.NEXT_PUBLIC_SITE_URL || process.env.NEXT_PUBLIC_APP_URL || 'https://paxones.com').replace(/\/+$/, '');
     const callbackUrl = `${siteUrl}/dashboard/kyc/callback`;
 
     if (!apiKey) {
-      return NextResponse.json({ error: 'DIDIT_API_KEY is not configured' }, { status: 500 });
+      return NextResponse.json({ error: 'Verification service is not configured' }, { status: 500 });
     }
-
-    console.log('[DEBUG] Fetching URL:', targetUrl);
 
     let res: Response;
     try {
@@ -113,15 +130,14 @@ export async function POST(req: NextRequest) {
         }),
       });
     } catch (fetchErr: any) {
-      console.error('[DEBUG] Failed Fetch Target:', targetUrl);
-      console.error(fetchErr);
-      return NextResponse.json({ error: 'Didit network connection failed', detail: fetchErr.message }, { status: 502 });
+      console.error('[KYC INITIATE] Failed target:', targetUrl, fetchErr);
+      return NextResponse.json({ error: 'Verification service network connection failed', detail: fetchErr.message }, { status: 502 });
     }
 
     if (!res.ok) {
       const detail = await res.text();
-      console.error('[DEBUG] Didit API error response:', res.status, detail);
-      return NextResponse.json({ error: 'Failed to create Didit session', detail }, { status: 502 });
+      console.error('[KYC INITIATE] Service error response:', res.status, detail);
+      return NextResponse.json({ error: 'Failed to create verification session', detail }, { status: 502 });
     }
 
     const session = await res.json();
