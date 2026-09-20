@@ -148,6 +148,20 @@ export async function POST(req: NextRequest) {
             updated_at: new Date().toISOString(),
           });
         }
+
+        // Dispatch Activity Center notification
+        try {
+          await supabaseAdmin.from('notifications').insert({
+            user_id: resolvedUserId,
+            title: 'Deposit Successful',
+            message: `Deposit of ${depositAmount} LTC confirmed and credited to your wallet.`,
+            link: '/wallet',
+            is_read: false,
+            created_at: new Date().toISOString(),
+          });
+        } catch (nErr) {
+          console.warn('[LTC Webhook] notification insert warning:', nErr);
+        }
       } catch (assetErr) {
         console.warn('[LTC Webhook] wallet_assets balance update warning:', assetErr);
       }

@@ -160,6 +160,23 @@ export async function POST(
         message: message.trim(),
       });
 
+      // Also notify both trade participants in Activity Center
+      const participantIds = [trade.buyer_id, trade.seller_id].filter(Boolean);
+      for (const pid of participantIds) {
+        try {
+          await supabase.from("notifications").insert({
+            user_id: pid,
+            title: "New Moderator Message",
+            message: `A Paxones Moderator posted in Trade: "${message.trim().slice(0, 100)}"`,
+            link: `/trade/${trade.id}`,
+            is_read: false,
+            created_at: new Date().toISOString(),
+          });
+        } catch (notifErr) {
+          console.warn("Moderator message notification insert error:", notifErr);
+        }
+      }
+
       return NextResponse.json({ success: true, message: "Moderator message sent" });
     }
 

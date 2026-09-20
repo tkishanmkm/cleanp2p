@@ -190,7 +190,9 @@ export default function AdDetailClient({ ad, advertiser, stats }: AdDetailClient
           </Link>
           <div className="flex items-center gap-3 mt-2">
             <UserAvatar 
-              avatarUrl={advertiser?.avatar_url} 
+              userId={advertiser?.id || (ad as any)?.user_id || (ad as any)?.userId}
+              avatarUrl={advertiser?.avatar_url || advertiser?.photo_url || advertiser?.photoURL} 
+              photoUrl={advertiser?.photo_url || advertiser?.photoURL}
               username={advertiser?.username} 
               size="md" 
               className="ring-2 ring-blue-500/20 shadow-sm"
@@ -203,8 +205,14 @@ export default function AdDetailClient({ ad, advertiser, stats }: AdDetailClient
               />
               <h1 className="text-xl sm:text-2xl font-bold tracking-tight">
                 {isAdvertiserBuyer 
-                  ? `Sell ${asset} to @${advertiser?.username || 'user'}` 
-                  : `Buy ${asset} from @${advertiser?.username || 'user'}`}
+                  ? `Sell ${asset} to `
+                  : `Buy ${asset} from `}
+                <Link
+                  href={`/users/${advertiser?.username || 'Trader'}`}
+                  className="hover:underline text-primary"
+                >
+                  @{advertiser?.username || 'Trader'}
+                </Link>
               </h1>
             </div>
           </div>
@@ -383,11 +391,20 @@ export default function AdDetailClient({ ad, advertiser, stats }: AdDetailClient
           </h3>
 
           <div className="flex items-center space-x-3">
-            <UserAvatar avatarUrl={advertiser?.avatar_url} username={advertiser?.username} size="lg" />
+            <UserAvatar 
+              userId={advertiser?.id || (ad as any)?.user_id || (ad as any)?.userId}
+              avatarUrl={advertiser?.avatar_url || advertiser?.photo_url || advertiser?.photoURL} 
+              photoUrl={advertiser?.photo_url || advertiser?.photoURL}
+              username={advertiser?.username} 
+              size="lg" 
+            />
             <div>
-              <p className="font-bold text-base text-neutral-900 dark:text-neutral-100">
-                @{advertiser?.username || 'titan721'}
-              </p>
+              <Link 
+                href={`/users/${advertiser?.username || 'Trader'}`}
+                className="font-bold text-base text-neutral-900 dark:text-neutral-100 hover:text-primary hover:underline transition-colors block"
+              >
+                @{advertiser?.username || 'Trader'}
+              </Link>
               <div className="flex items-center space-x-1.5 text-xs mt-0.5">
                 <span className={`w-2 h-2 rounded-full ${presence.isOnline ? 'bg-green-500' : 'bg-neutral-400'}`}></span>
                 <span className="text-neutral-500 dark:text-neutral-400">{presence.label}</span>

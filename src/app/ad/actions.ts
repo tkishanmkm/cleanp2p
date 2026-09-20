@@ -754,7 +754,7 @@ export async function createTradeOrderWithEscrow(input: {
       unit_price: price,
       total_price: fiatAmount,
       escrow_fee: escrowFeeCrypto,
-      status: 'PENDING',
+      status: 'pending',
       escrow_status: 'locked',
     };
 
@@ -793,7 +793,7 @@ export async function createTradeOrderWithEscrow(input: {
         fiat_currency: fiatSymbol,
         price: price,
         unit_price: price,
-        status: 'PENDING',
+        status: 'pending',
         escrow_status: 'locked',
       };
 
@@ -818,7 +818,7 @@ export async function createTradeOrderWithEscrow(input: {
           amount: baseCryptoAmount,
           fiat_amount: fiatAmount,
           price: price,
-          status: 'PENDING',
+          status: 'pending',
         };
 
         const { data: ultraOrder, error: ultraError } = await adminClient

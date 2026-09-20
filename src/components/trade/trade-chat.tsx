@@ -760,18 +760,35 @@ export function TradeChat({
         // Automated System Message Implant: Ensure Escrow Secured notice exists for active trade
         const hasInitiatedMsg = mapped.some((m: any) =>
           typeof m.message === 'string' &&
-          (m.message.includes('PAXONES ESCROW SECURED') || m.message.includes('safely held in Paxones Escrow'))
+          (m.message.includes('PAXONES ESCROW SECURED') || m.message.includes('safely held in Paxones Escrow') || m.message.includes('TRADE INITIATED'))
         );
 
         if (!hasInitiatedMsg && (tradeStatus === 'active' || tradeStatus === 'pending')) {
+          // Resolve usernames with high accuracy
+          let resolvedBuyer = trade?.buyer_username || (isBuyer ? (currentProfileUsername !== 'Trader' ? currentProfileUsername : '') : (opponent?.username || ''));
+          let resolvedSeller = trade?.seller_username || (isBuyer ? (opponent?.username || '') : (currentProfileUsername !== 'Trader' ? currentProfileUsername : ''));
+
+          if (!resolvedBuyer && currentUserId) {
+            try {
+              const { data: prof } = await supabase.from('profiles').select('username').eq('id', trade?.buyer_id || (isBuyer ? currentUserId : opponent?.id)).maybeSingle();
+              if (prof?.username) resolvedBuyer = prof.username;
+            } catch {}
+          }
+          if (!resolvedSeller && currentUserId) {
+            try {
+              const { data: prof } = await supabase.from('profiles').select('username').eq('id', trade?.seller_id || (!isBuyer ? currentUserId : opponent?.id)).maybeSingle();
+              if (prof?.username) resolvedSeller = prof.username;
+            } catch {}
+          }
+
           fetch(`/api/trades/${encodeURIComponent(tradeId)}/system-message`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
               type: 'TRADE_INITIATED',
               metadata: {
-                buyerUsername: isBuyer ? currentProfileUsername : (opponent?.username || 'Buyer'),
-                sellerUsername: isBuyer ? (opponent?.username || 'Seller') : currentProfileUsername,
+                buyerUsername: resolvedBuyer || (isBuyer ? currentProfileUsername : opponent?.username) || 'Trader',
+                sellerUsername: resolvedSeller || (!isBuyer ? currentProfileUsername : opponent?.username) || 'Trader',
                 coinAmount: trade?.crypto_amount || trade?.amount,
                 coinSymbol: trade?.crypto || trade?.asset_symbol || 'USDT',
                 fiatAmount: trade?.fiat_amount || trade?.fiatAmount,
@@ -1035,7 +1052,7 @@ export function TradeChat({
     }
   };
 
-  const opponentUsername = opponent?.username || opponent?.userId || opponent?.user_id || 'Trader';
+  const opponentUsername = opponent?.username || (opponent?.userId && !opponent.userId.includes('-') ? opponent.userId : 'Trader');
   const opponentRoleLabel = isBuyer ? 'Seller' : 'Buyer';
   const opponentPhoto = opponent?.photoURL || opponent?.photo_url;
   const positiveFeedback = Number(opponent?.positiveFeedback ?? opponent?.positive_feedback ?? 0);

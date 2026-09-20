@@ -1,6 +1,6 @@
 'use client'
 
-import React, { useState } from 'react'
+import React, { useState, useEffect } from 'react'
 
 interface UserAvatarProps {
   userId?: string | null
@@ -37,6 +37,10 @@ export default function UserAvatar({
   // Resolve best source
   const src = avatarUrl || photoUrl || photoURL || (userId ? `/api/media/avatar/${userId}` : null)
 
+  useEffect(() => {
+    setHasError(false)
+  }, [src])
+
   const initials = username
     ? username.replace(/[^a-zA-Z0-9]/g, '').slice(0, 2).toUpperCase()
     : 'PX'
@@ -46,6 +50,7 @@ export default function UserAvatar({
       <img
         src={src}
         alt={alt || username || 'User Avatar'}
+        referrerPolicy="no-referrer"
         onError={() => setHasError(true)}
         className={`${sizeClasses[size]} rounded-full object-cover border border-neutral-200 dark:border-neutral-700 shrink-0 ${className}`}
       />

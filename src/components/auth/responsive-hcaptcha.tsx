@@ -49,17 +49,17 @@ export const ResponsiveHCaptcha = forwardRef<ResponsiveHCaptchaRef, ResponsiveHC
       setMounted(true);
     }, []);
 
-    // Calculate scale factor so standard 302px hCaptcha width fits container perfectly
+    // Calculate scale factor so standard 302px hCaptcha width fits smoothly on all mobile viewports
     useEffect(() => {
       if (!containerRef.current) return;
 
       const updateScale = () => {
         if (!containerRef.current) return;
-        const containerWidth = containerRef.current.offsetWidth;
-        const standardWidth = 302; // Standard hCaptcha normal iframe width
+        const availableWidth = containerRef.current.clientWidth || containerRef.current.offsetWidth || window.innerWidth;
+        const standardWidth = 302; // Standard hCaptcha widget width
 
-        if (containerWidth > 0 && containerWidth < standardWidth) {
-          const newScale = containerWidth / standardWidth;
+        if (availableWidth > 0 && availableWidth < standardWidth) {
+          const newScale = (availableWidth - 4) / standardWidth;
           setScale(Math.min(1, Math.max(0.65, newScale)));
         } else {
           setScale(1);
@@ -81,30 +81,36 @@ export const ResponsiveHCaptcha = forwardRef<ResponsiveHCaptchaRef, ResponsiveHC
       return (
         <div
           ref={containerRef}
-          className={`w-full min-h-[78px] flex items-center justify-center rounded-xl bg-slate-50 dark:bg-[#07090e] border border-slate-200/80 dark:border-[#1e2640] ${className}`}
+          className={`w-full max-w-[304px] min-h-[78px] flex items-center justify-center ${className}`}
         >
           <span className="text-xs text-slate-400">Loading security verification...</span>
         </div>
       );
     }
 
-    const scaledHeight = Math.round(78 * scale);
+    const scaledHeight = Math.ceil(78 * scale);
+    const scaledWidth = Math.ceil(302 * scale);
 
     return (
       <div
         ref={containerRef}
-        className={`w-full flex justify-center items-center overflow-hidden transition-all ${className}`}
+        className={`w-full max-w-[304px] flex justify-center items-center transition-all ${className}`}
         style={{
           minHeight: `${scaledHeight}px`,
+          height: `${scaledHeight}px`,
+          overflow: 'visible',
         }}
       >
         <div
           style={{
             transform: scale < 1 ? `scale(${scale})` : undefined,
-            transformOrigin: 'center center',
+            transformOrigin: 'top center',
             width: '302px',
+            minWidth: '302px',
+            height: '78px',
             display: 'flex',
             justifyContent: 'center',
+            alignItems: 'center',
           }}
         >
           <HCaptcha

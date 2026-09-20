@@ -284,6 +284,20 @@ export async function POST(req: Request) {
         });
       }
 
+      // Dispatch Activity Center notification
+      try {
+        await supabaseAdmin.from('notifications').insert({
+          user_id: userId,
+          title: 'Deposit Successful',
+          message: `Deposit of ${amount} ${item.assetSymbol} received and credited to your wallet.`,
+          link: '/wallet',
+          is_read: false,
+          created_at: new Date().toISOString(),
+        });
+      } catch (notifErr) {
+        console.warn('[Deposit Webhook] notification insert warning:', notifErr);
+      }
+
       processedResults.push({
         txHash,
         logIndex,

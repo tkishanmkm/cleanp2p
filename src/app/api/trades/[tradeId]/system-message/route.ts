@@ -63,19 +63,32 @@ export async function POST(
     const actualTradeId = trade.id || tradeId;
 
     // Fetch profiles for accurate usernames in system message
-    let buyerUsername = trade.buyer_username || metadata.buyerUsername || '';
-    let sellerUsername = trade.seller_username || metadata.sellerUsername || '';
+    let buyerUsername = '';
+    let sellerUsername = '';
+
+    if (metadata.buyerUsername && metadata.buyerUsername.toLowerCase() !== 'buyer' && metadata.buyerUsername.toLowerCase() !== 'trader') {
+      buyerUsername = metadata.buyerUsername;
+    }
+    if (metadata.sellerUsername && metadata.sellerUsername.toLowerCase() !== 'seller' && metadata.sellerUsername.toLowerCase() !== 'trader') {
+      sellerUsername = metadata.sellerUsername;
+    }
 
     if (trade.buyer_id) {
-      const { data: bp } = await supabaseAdmin
-        .from('profiles')
-        .select('username, display_name, email')
-        .or(`id.eq.${trade.buyer_id},user_id.eq.${trade.buyer_id}`)
-        .maybeSingle();
-      if (bp?.username) buyerUsername = bp.username;
-      else if (bp?.display_name) buyerUsername = bp.display_name;
-      else if (bp?.email && !buyerUsername) buyerUsername = bp.email.split('@')[0];
-      else if (!buyerUsername) {
+      try {
+        const { data: bp } = await supabaseAdmin
+          .from('profiles')
+          .select('username, display_name, email')
+          .eq('id', trade.buyer_id)
+          .maybeSingle();
+
+        if (bp?.username) buyerUsername = bp.username;
+        else if (bp?.display_name && !buyerUsername) buyerUsername = bp.display_name;
+        else if (bp?.email && !buyerUsername) buyerUsername = bp.email.split('@')[0];
+      } catch (bpErr) {
+        console.warn('Buyer profile fetch warning in system message:', bpErr);
+      }
+
+      if (!buyerUsername) {
         // Fallback: Check auth.admin user
         try {
           const { data: authUser } = await supabaseAdmin.auth.admin.getUserById(trade.buyer_id);
@@ -89,15 +102,21 @@ export async function POST(
     }
 
     if (trade.seller_id) {
-      const { data: sp } = await supabaseAdmin
-        .from('profiles')
-        .select('username, display_name, email')
-        .or(`id.eq.${trade.seller_id},user_id.eq.${trade.seller_id}`)
-        .maybeSingle();
-      if (sp?.username) sellerUsername = sp.username;
-      else if (sp?.display_name) sellerUsername = sp.display_name;
-      else if (sp?.email && !sellerUsername) sellerUsername = sp.email.split('@')[0];
-      else if (!sellerUsername) {
+      try {
+        const { data: sp } = await supabaseAdmin
+          .from('profiles')
+          .select('username, display_name, email')
+          .eq('id', trade.seller_id)
+          .maybeSingle();
+
+        if (sp?.username) sellerUsername = sp.username;
+        else if (sp?.display_name && !sellerUsername) sellerUsername = sp.display_name;
+        else if (sp?.email && !sellerUsername) sellerUsername = sp.email.split('@')[0];
+      } catch (spErr) {
+        console.warn('Seller profile fetch warning in system message:', spErr);
+      }
+
+      if (!sellerUsername) {
         // Fallback: Check auth.admin user
         try {
           const { data: authUser } = await supabaseAdmin.auth.admin.getUserById(trade.seller_id);
@@ -110,8 +129,9 @@ export async function POST(
       }
     }
 
-    if (!buyerUsername || buyerUsername.toLowerCase() === 'buyer') buyerUsername = metadata.buyerUsername || trade.buyer_username || 'Trader';
-    if (!sellerUsername || sellerUsername.toLowerCase() === 'seller') sellerUsername = metadata.sellerUsername || trade.seller_username || 'Trader';
+    // Secondary fallback to trade records / metadata if still unassigned
+    if (!buyerUsername) buyerUsername = trade.buyer_username || metadata.buyerUsername || 'Trader';
+    if (!sellerUsername) sellerUsername = trade.seller_username || metadata.sellerUsername || 'Trader';
 
     const payload: SystemMessagePayload = {
       tradeId: actualTradeId,

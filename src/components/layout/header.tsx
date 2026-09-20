@@ -52,10 +52,10 @@ import { NotificationBell } from '@/components/notifications/notification-bell';
 
 
 const mobileNavLinks = [
-  { href: "/buy", label: "Buy Coin" },
-  { href: "/sell", label: "Sell Coin" },
-  { href: "/wallets", label: "Wallet" },
-  { href: "/contact", label: "Support" },
+  { href: "/buy", label: "Buy Coin", icon: HdBuyCoinIcon },
+  { href: "/sell", label: "Sell Coin", icon: HdSellCoinIcon },
+  { href: "/wallets", label: "Wallet", icon: HdWalletsIcon },
+  { href: "/contact", label: "Support", icon: HdSupportIcon },
 ];
 
 export function Header() {
@@ -104,15 +104,19 @@ export function Header() {
                       <SheetDescription className="sr-only">Main navigation menu</SheetDescription>
                   </SheetHeader>
                 <nav className="flex flex-col gap-4">
-                  {mobileNavLinks.map((link) => (
-                    <Link
-                      key={link.href}
-                      href={link.href}
-                      className="text-lg font-medium text-foreground hover:text-accent-foreground"
-                    >
-                      {link.label}
-                    </Link>
-                  ))}
+                  {mobileNavLinks.map((link) => {
+                    const IconComponent = link.icon;
+                    return (
+                      <Link
+                        key={link.href}
+                        href={link.href}
+                        className="flex items-center gap-3 text-lg font-medium text-foreground hover:text-accent-foreground py-2"
+                      >
+                        {IconComponent && <IconComponent className="h-5 w-5 text-[#9273FC]" />}
+                        <span>{link.label}</span>
+                      </Link>
+                    );
+                  })}
                 </nav>
                  <div className="mt-auto">
                     <DropdownMenu>

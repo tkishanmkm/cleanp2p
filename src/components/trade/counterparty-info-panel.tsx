@@ -103,8 +103,8 @@ export function CounterpartyInfoPanel({
       try {
         const { data: { user: currentUser } } = await supabase.auth.getUser();
 
-        const targetId = user.id || user.user_id || user.userId;
-        const targetUsername = user.username || user.user_id || user.userId;
+        const targetId = user.id || (typeof user.userId === 'string' && user.userId.includes('-') ? user.userId : undefined);
+        const targetUsername = user.username || (typeof user.userId === 'string' && !user.userId.includes('-') ? user.userId : undefined);
 
         let targetProfileId = targetId;
 
@@ -271,7 +271,7 @@ export function CounterpartyInfoPanel({
   if (!user && !profileData) return null;
 
   const current = profileData || user;
-  const username = current.username || current.userId || current.user_id || 'Trader';
+  const username = current.username || (current.userId && !current.userId.includes('-') ? current.userId : 'Trader');
   const fullName = current.fullName || current.full_name || 'Unverified User';
   const photoURL = current.photoURL || current.photo_url;
   

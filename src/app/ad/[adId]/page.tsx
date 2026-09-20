@@ -82,6 +82,24 @@ export default async function AdDetailPage({ params }: PageProps) {
     }
   }
 
+  if (advertiserProfile) {
+    advertiserProfile = {
+      ...advertiserProfile,
+      id: advertiserProfile.id || sellerUserId,
+      username: advertiserProfile.username || ad.user_display_name || ad.username || 'Trader',
+      avatar_url: advertiserProfile.avatar_url || advertiserProfile.photo_url || ad.avatar_url || ad.user_avatar_url || ad.photo_url || (sellerUserId ? `/api/media/avatar/${sellerUserId}` : null),
+      photo_url: advertiserProfile.photo_url || advertiserProfile.avatar_url || ad.photo_url || ad.user_avatar_url || (sellerUserId ? `/api/media/avatar/${sellerUserId}` : null),
+    };
+  } else {
+    advertiserProfile = {
+      id: sellerUserId,
+      username: ad.user_display_name || ad.username || 'Trader',
+      avatar_url: ad.avatar_url || ad.user_avatar_url || ad.photo_url || ad.photoURL || (sellerUserId ? `/api/media/avatar/${sellerUserId}` : null),
+      photo_url: ad.photo_url || ad.avatar_url || ad.user_avatar_url || (sellerUserId ? `/api/media/avatar/${sellerUserId}` : null),
+      created_at: ad.created_at || ad.createdAt
+    };
+  }
+
   // 3. Fetch Feedback Counts
   let positive = 0
   let negative = 0

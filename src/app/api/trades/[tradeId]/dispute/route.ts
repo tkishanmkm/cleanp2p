@@ -124,6 +124,23 @@ export async function POST(
       console.warn('System message insert skipped:', mErr);
     }
 
+    // Insert notifications for both participants in Activity Center
+    const participantIds = [trade?.buyer_id, trade?.seller_id].filter(Boolean);
+    for (const pid of participantIds) {
+      try {
+        await supabase.from('notifications').insert({
+          user_id: pid,
+          title: 'Trade Disputed',
+          message: `Dispute opened for Trade. Moderator review requested: ${disputeReason}`,
+          link: `/trade/${actualTradeId}`,
+          is_read: false,
+          created_at: now,
+        });
+      } catch (nErr) {
+        console.warn('Dispute notification insert error:', nErr);
+      }
+    }
+
     return NextResponse.json({
       success: true,
       message: 'Dispute raised successfully. An admin moderator will review this trade.',

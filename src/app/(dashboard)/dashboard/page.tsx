@@ -33,6 +33,8 @@ import { useRouter } from 'next/navigation';
 import { FlagIcon } from '@/components/ui/flag-icon';
 import { SUPPORTED_CRYPTOS } from '@/lib/constants';
 import { supabase } from '@/lib/supabase/client';
+import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
+import { MiniCoinIcon } from '@/components/notifications/notification-bell';
 
 const CryptoLogo = ({ crypto, className }: { crypto: CryptoCurrency; className?: string }) => {
   switch (crypto) {
@@ -66,7 +68,8 @@ export default function DashboardPage() {
   }, [authUser, isAuthLoading, router]);
 
   const fetchActiveTrades = useCallback(async () => {
-    if (!authUser?.uid) {
+    const currentUserId = authUser?.uid || (authUser as any)?.id;
+    if (!currentUserId) {
       setActiveTrades([]);
       setIsLoadingActiveTrades(false);
       return;
@@ -93,8 +96,7 @@ export default function DashboardPage() {
         const { data: clientData, error } = await supabase
           .from('trades')
           .select('*')
-          .or(`buyer_id.eq.${authUser.uid},seller_id.eq.${authUser.uid}`)
-          .in('status', ['active', 'paid', 'disputed'])
+          .or(`buyer_id.eq.${currentUserId},seller_id.eq.${currentUserId}`)
           .order('created_at', { ascending: false });
 
         if (!error && clientData) {
@@ -102,22 +104,124 @@ export default function DashboardPage() {
         }
       }
 
-      const mapped: Trade[] = (data || []).map((raw: any) => ({
-        id: raw.id,
-        tradeId: raw.trade_id || raw.id,
-        adId: raw.ad_id,
-        buyerId: raw.buyer_id,
-        sellerId: raw.seller_id,
-        crypto: raw.crypto,
-        amount: Number(raw.amount || 0),
-        fiatCurrency: raw.fiat_currency,
-        fiatAmount: Number(raw.fiat_amount || 0),
-        price: Number(raw.price || 0),
-        status: raw.status || 'active',
-        createdAt: raw.created_at,
-        buyer: raw.buyer || { id: raw.buyer_id, username: raw.buyer_username || 'Buyer' },
-        seller: raw.seller || { id: raw.seller_id, username: raw.seller_username || 'Seller' },
-      }));
+      if (!data || data.length === 0) {
+        setActiveTrades([]);
+        setIsLoadingActiveTrades(false);
+        return;
+      }
+
+      // 3. Fetch counterparty profiles for avatars and usernames
+      const partnerIds = Array.from(
+        new Set(
+          data
+            .flatMap((t: any) => [t.buyer_id, t.seller_id])
+            .filter((id: any) => id && id !== currentUserId)
+        )
+      );
+
+      let profileMap: Record<string, any> = {};
+      if (partnerIds.length > 0) {
+        const { data: profiles } = await supabase
+          .from('profiles')
+          .select('id, username, display_name, avatar_url, photo_url, country')
+          .in('id', partnerIds);
+
+        if (profiles) {
+          profiles.forEach((p: any) => {
+            profileMap[p.id] = {
+              username: p.username || p.display_name || 'Trader',
+              avatar_url: p.avatar_url || p.photo_url || `/api/media/avatar/${p.id}`,
+              country: p.country,
+            };
+          });
+        }
+      }
+
+      const now = Date.now();
+      const mapped: any[] = [];
+
+      for (const raw of data) {
+        const isBuyer = raw.buyer_id === currentUserId;
+        const partnerId = isBuyer ? raw.seller_id : raw.buyer_id;
+        const counterparty = profileMap[partnerId];
+        const rawStatus = (raw.status || '').toLowerCase();
+        const escrowStatus = (raw.escrow_status || '').toLowerCase();
+
+        // Calculate precise effective status
+        const isDisputed = Boolean(
+          raw.is_disputed ||
+          rawStatus === 'disputed' ||
+          rawStatus === 'dispute' ||
+          escrowStatus === 'disputed'
+        );
+        const isCompleted = Boolean(
+          raw.completed_at ||
+          raw.released_at ||
+          rawStatus === 'completed' ||
+          rawStatus === 'released' ||
+          escrowStatus === 'completed' ||
+          escrowStatus === 'released'
+        );
+        const isCancelled = Boolean(
+          raw.cancelled_at ||
+          rawStatus === 'cancelled' ||
+          rawStatus === 'canceled' ||
+          escrowStatus === 'cancelled'
+        );
+        const isPaid = Boolean(
+          raw.paid_at ||
+          raw.marked_paid_at ||
+          raw.payment_confirmed_at ||
+          rawStatus === 'paid' ||
+          rawStatus === 'mark_paid' ||
+          rawStatus === 'buyer_marked_paid' ||
+          escrowStatus === 'paid'
+        );
+        const isExplicitExpired = Boolean(
+          raw.expired_at ||
+          rawStatus === 'expired' ||
+          escrowStatus === 'expired'
+        );
+
+        const createdAtMs = raw.created_at ? new Date(raw.created_at).getTime() : 0;
+        const winMin = Number(raw.payment_window_minutes || raw.payment_window || 30);
+        const expiresAtMs = raw.expires_at ? new Date(raw.expires_at).getTime() : (createdAtMs > 0 ? createdAtMs + winMin * 60 * 1000 : 0);
+        const isTimeExpired = (!isPaid && !isCompleted && !isDisputed) && (expiresAtMs > 0 && now >= expiresAtMs);
+
+        // Filter out finalized/expired trades from active list
+        if (isCompleted || isCancelled || isExplicitExpired || isTimeExpired) {
+          continue;
+        }
+
+        let effectiveStatus = 'active';
+        if (isDisputed) effectiveStatus = 'disputed';
+        else if (isPaid) effectiveStatus = 'paid';
+
+        const rawTradeId = raw.trade_id || raw.id;
+        const shortTradeId = '#' + (rawTradeId || '').replace(/[^a-zA-Z0-9]/g, '').slice(0, 8).toUpperCase();
+
+        mapped.push({
+          id: raw.id,
+          tradeId: shortTradeId,
+          adId: raw.ad_id,
+          buyerId: raw.buyer_id,
+          sellerId: raw.seller_id,
+          crypto: (raw.crypto || raw.crypto_currency || raw.asset_symbol || 'USDT').toUpperCase(),
+          amount: Number(raw.amount || raw.crypto_amount || 0),
+          fiatCurrency: (raw.fiat_currency || raw.fiat || 'USD').toUpperCase(),
+          fiatAmount: Number(raw.fiat_amount || raw.fiatAmount || 0),
+          price: Number(raw.price || 0),
+          paymentMethod: raw.payment_method || raw.paymentMethod || 'Bank Transfer',
+          status: effectiveStatus,
+          createdAt: raw.created_at,
+          isBuyer,
+          buyer: isBuyer ? { id: currentUserId, username: authUser?.displayName || 'You' } : { id: partnerId, username: counterparty?.username || 'Buyer', avatar_url: counterparty?.avatar_url, country: counterparty?.country },
+          seller: !isBuyer ? { id: currentUserId, username: authUser?.displayName || 'You' } : { id: partnerId, username: counterparty?.username || 'Seller', avatar_url: counterparty?.avatar_url, country: counterparty?.country },
+          counterpartyUsername: counterparty?.username || (isBuyer ? raw.seller_username : raw.buyer_username) || 'Trader',
+          counterpartyAvatar: counterparty?.avatar_url || null,
+          counterpartyCountry: counterparty?.country || null,
+        });
+      }
 
       setActiveTrades(mapped);
     } catch (err) {
@@ -125,7 +229,7 @@ export default function DashboardPage() {
     } finally {
       setIsLoadingActiveTrades(false);
     }
-  }, [authUser?.uid]);
+  }, [authUser?.uid, (authUser as any)?.id, authUser?.displayName]);
 
   useEffect(() => {
     fetchActiveTrades();
@@ -287,48 +391,114 @@ export default function DashboardPage() {
             </CardContent>
           </Card>
 
-          <Card>
-            <CardHeader>
-              <CardTitle>Active Trades</CardTitle>
-              <CardDescription>Trades that require your attention.</CardDescription>
+          <Card className="rounded-2xl border border-border shadow-xs overflow-hidden">
+            <CardHeader className="bg-muted/10 border-b border-border/40 pb-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <CardTitle className="text-base font-bold text-foreground">Active Trades</CardTitle>
+                  <CardDescription className="text-xs text-muted-foreground mt-0.5">
+                    Trades that require your immediate payment, confirmation, or release.
+                  </CardDescription>
+                </div>
+                {activeTrades.length > 0 && (
+                  <Badge variant="outline" className="bg-blue-500/10 text-blue-600 dark:text-blue-400 border-blue-500/30 text-xs font-semibold">
+                    {activeTrades.length} Active
+                  </Badge>
+                )}
+              </div>
             </CardHeader>
-            <CardContent>
-              {isLoadingActiveTrades && <Skeleton className="h-24 w-full" />}
+            <CardContent className="p-0">
+              {isLoadingActiveTrades && (
+                <div className="p-6 space-y-3">
+                  <Skeleton className="h-14 w-full rounded-xl" />
+                  <Skeleton className="h-14 w-full rounded-xl" />
+                </div>
+              )}
+
               {!isLoadingActiveTrades && activeTrades.length > 0 && (
                 <>
+                  {/* Desktop Table View */}
                   <Table className="hidden md:table">
-                    <TableHeader>
+                    <TableHeader className="bg-muted/20">
                       <TableRow>
-                        <TableHead>Partner</TableHead>
-                        <TableHead>Amount</TableHead>
-                        <TableHead>Status</TableHead>
-                        <TableHead className="text-right">Action</TableHead>
+                        <TableHead className="text-xs font-semibold">Trade & Partner</TableHead>
+                        <TableHead className="text-xs font-semibold">Crypto Amount</TableHead>
+                        <TableHead className="text-xs font-semibold">Fiat Total</TableHead>
+                        <TableHead className="text-xs font-semibold">Payment Method</TableHead>
+                        <TableHead className="text-xs font-semibold">Status</TableHead>
+                        <TableHead className="text-right text-xs font-semibold">Action</TableHead>
                       </TableRow>
                     </TableHeader>
-                    <TableBody>
-                      {activeTrades.map((trade) => {
-                        const isBuyer = trade.buyerId === authUser?.uid;
-                        const partner = isBuyer ? trade.seller : trade.buyer;
+                    <TableBody className="divide-y divide-border/40">
+                      {activeTrades.map((trade: any) => {
                         return (
-                          <TableRow key={trade.id}>
-                            <TableCell>
-                              <div className="flex items-center gap-2 font-medium">
-                                {partner?.username}
-                                {partner?.country && <FlagIcon countryCode={partner.country} />}
+                          <TableRow key={trade.id} className="hover:bg-muted/30 transition-colors">
+                            {/* Partner & DP */}
+                            <TableCell className="py-3">
+                              <div className="flex items-center gap-2.5">
+                                <Avatar className="h-8 w-8 rounded-full border border-border shrink-0">
+                                  {trade.counterpartyAvatar && (
+                                    <AvatarImage src={trade.counterpartyAvatar} alt={trade.counterpartyUsername} />
+                                  )}
+                                  <AvatarFallback className="bg-muted text-foreground font-bold text-[11px]">
+                                    {(trade.counterpartyUsername || 'TR').substring(0, 2).toUpperCase()}
+                                  </AvatarFallback>
+                                </Avatar>
+                                <div>
+                                  <div className="flex items-center gap-1.5">
+                                    <span className={cn(
+                                      "text-[10px] font-bold px-1.5 py-0.2 rounded leading-tight",
+                                      trade.isBuyer
+                                        ? "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400"
+                                        : "bg-rose-500/15 text-rose-600 dark:text-rose-400"
+                                    )}>
+                                      {trade.isBuyer ? 'BUY' : 'SELL'}
+                                    </span>
+                                    <span className="font-semibold text-xs text-foreground">
+                                      @{trade.counterpartyUsername}
+                                    </span>
+                                  </div>
+                                  <span className="text-[10px] text-muted-foreground font-mono">
+                                    {trade.tradeId}
+                                  </span>
+                                </div>
                               </div>
                             </TableCell>
-                            <TableCell>
-                              {trade.amount.toFixed(6)} {trade.crypto}
+
+                            {/* Crypto Amount with MiniCoinIcon */}
+                            <TableCell className="py-3">
+                              <div className="flex items-center gap-1.5 text-xs font-semibold text-foreground">
+                                <MiniCoinIcon symbol={trade.crypto} className="h-4 w-4 shrink-0" />
+                                <span>{trade.amount.toFixed(4)} {trade.crypto}</span>
+                              </div>
                             </TableCell>
-                            <TableCell>
-                              <Badge variant="outline" className={cn('capitalize', statusColors[trade.status])}>
-                                {trade.status}
+
+                            {/* Fiat Total */}
+                            <TableCell className="py-3">
+                              <span className="text-xs font-mono font-medium text-foreground">
+                                {trade.fiatAmount.toLocaleString()} {trade.fiatCurrency}
+                              </span>
+                            </TableCell>
+
+                            {/* Payment Method */}
+                            <TableCell className="py-3">
+                              <span className="px-2 py-0.5 text-[11px] font-medium rounded-md bg-muted text-foreground border border-border/50">
+                                {trade.paymentMethod}
+                              </span>
+                            </TableCell>
+
+                            {/* Status Badge */}
+                            <TableCell className="py-3">
+                              <Badge variant="outline" className={cn('capitalize text-xs font-semibold', statusColors[trade.status])}>
+                                {trade.status === 'paid' ? 'Marked Paid' : trade.status}
                               </Badge>
                             </TableCell>
-                            <TableCell className="text-right">
-                              <Button asChild variant="outline" size="sm">
+
+                            {/* Action Button */}
+                            <TableCell className="text-right py-3">
+                              <Button asChild variant="outline" size="sm" className="h-8 text-xs font-medium rounded-lg">
                                 <Link href={`/trade/${trade.id}`}>
-                                  View Trade <ArrowRight className="ml-2 h-3 w-3" />
+                                  Open Trade <ArrowRight className="ml-1.5 h-3 w-3" />
                                 </Link>
                               </Button>
                             </TableCell>
@@ -337,42 +507,75 @@ export default function DashboardPage() {
                       })}
                     </TableBody>
                   </Table>
-                  <div className="grid gap-4 md:hidden">
-                    {activeTrades.map((trade) => {
-                      const isBuyer = trade.buyerId === authUser?.uid;
-                      const partner = isBuyer ? trade.seller : trade.buyer;
+
+                  {/* Mobile Card View */}
+                  <div className="grid gap-3 p-3 md:hidden">
+                    {activeTrades.map((trade: any) => {
                       return (
-                        <Card key={trade.id}>
-                          <CardHeader>
-                            <div className="flex items-center justify-between">
-                              <CardTitle className="text-base">
-                                {trade.amount.toFixed(4)} {trade.crypto}
-                              </CardTitle>
-                              <Badge variant="outline" className={cn('capitalize', statusColors[trade.status])}>
-                                {trade.status}
-                              </Badge>
+                        <div key={trade.id} className="p-3.5 rounded-xl border border-border/70 bg-card/60 space-y-3">
+                          <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-2">
+                              <Avatar className="h-8 w-8 rounded-full border border-border shrink-0">
+                                {trade.counterpartyAvatar && (
+                                  <AvatarImage src={trade.counterpartyAvatar} alt={trade.counterpartyUsername} />
+                                )}
+                                <AvatarFallback className="bg-muted text-foreground font-bold text-[11px]">
+                                  {(trade.counterpartyUsername || 'TR').substring(0, 2).toUpperCase()}
+                                </AvatarFallback>
+                              </Avatar>
+                              <div>
+                                <div className="flex items-center gap-1.5">
+                                  <span className={cn(
+                                    "text-[10px] font-bold px-1.5 py-0.2 rounded leading-tight",
+                                    trade.isBuyer
+                                      ? "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400"
+                                      : "bg-rose-500/15 text-rose-600 dark:text-rose-400"
+                                  )}>
+                                    {trade.isBuyer ? 'BUY' : 'SELL'}
+                                  </span>
+                                  <span className="font-semibold text-xs text-foreground">
+                                    @{trade.counterpartyUsername}
+                                  </span>
+                                </div>
+                                <span className="text-[10px] text-muted-foreground font-mono">
+                                  {trade.tradeId}
+                                </span>
+                              </div>
                             </div>
-                            <CardDescription>
-                              Partner: {partner?.username}
-                              {partner?.country && <FlagIcon countryCode={partner.country} className="inline ml-2" />}
-                            </CardDescription>
-                          </CardHeader>
-                          <CardFooter>
-                            <Button asChild variant="secondary" className="w-full">
-                              <Link href={`/trade/${trade.id}`}>View Trade</Link>
-                            </Button>
-                          </CardFooter>
-                        </Card>
+
+                            <Badge variant="outline" className={cn('capitalize text-xs font-semibold', statusColors[trade.status])}>
+                              {trade.status === 'paid' ? 'Marked Paid' : trade.status}
+                            </Badge>
+                          </div>
+
+                          <div className="flex items-center justify-between pt-1 border-t border-border/40 text-xs">
+                            <div className="flex items-center gap-1.5 font-semibold text-foreground">
+                              <MiniCoinIcon symbol={trade.crypto} className="h-3.5 w-3.5" />
+                              <span>{trade.amount.toFixed(4)} {trade.crypto}</span>
+                              <span className="text-muted-foreground font-normal">≈</span>
+                              <span className="font-mono text-muted-foreground">{trade.fiatAmount.toLocaleString()} {trade.fiatCurrency}</span>
+                            </div>
+
+                            <span className="px-1.5 py-0.2 text-[10px] font-medium rounded bg-muted text-foreground">
+                              {trade.paymentMethod}
+                            </span>
+                          </div>
+
+                          <Button asChild variant="secondary" className="w-full h-8 text-xs font-medium rounded-lg">
+                            <Link href={`/trade/${trade.id}`}>View Trade Details →</Link>
+                          </Button>
+                        </div>
                       );
                     })}
                   </div>
                 </>
               )}
+
               {!isLoadingActiveTrades && activeTrades.length === 0 && (
-                <div className="text-center text-muted-foreground py-10 border-2 border-dashed rounded-lg">
-                  <ArrowLeftRight className="mx-auto h-12 w-12 text-muted-foreground/50" />
-                  <h3 className="mt-4 text-lg font-semibold">No Active Trades</h3>
-                  <p className="mt-1 text-sm">You have no trades that require immediate action.</p>
+                <div className="text-center text-muted-foreground py-10">
+                  <ArrowLeftRight className="mx-auto h-10 w-10 text-muted-foreground/40 mb-2" />
+                  <h3 className="text-sm font-semibold text-foreground">No Active Trades</h3>
+                  <p className="mt-0.5 text-xs text-muted-foreground">You have no trades that require immediate action.</p>
                 </div>
               )}
             </CardContent>

@@ -128,8 +128,8 @@ export default function TradePage() {
           setOpponent({
             ...opponentProfile,
             id: opponentProfile.id,
-            userId: opponentProfile.username || opponentProfile.id?.substring(0, 8),
-            username: opponentProfile.username,
+            userId: opponentProfile.username || 'Trader',
+            username: opponentProfile.username || 'Trader',
             fullName: opponentProfile.full_name,
             dob: opponentProfile.dob,
             country: opponentProfile.country,

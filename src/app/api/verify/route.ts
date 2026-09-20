@@ -30,12 +30,28 @@ export async function POST(req: Request) {
     // 1. Fetch user record from Supabase
     const { data: user, error: userError } = await supabaseAdmin
       .from("profiles")
-      .select("kyc_attempts, kyc_retry_count, kyc_status, kyc_last_attempt_at, updated_at")
+      .select("kyc_attempts, kyc_retry_count, kyc_status, kyc_last_attempt_at, kyc_submitted_at, updated_at")
       .eq("id", userId)
       .single();
 
     if (userError || !user) {
       return NextResponse.json({ error: "user_not_found" }, { status: 404 });
+    }
+
+    // 1.1 Check 24-hr under review timeout: if in review for > 24 hours without response, remove under review status
+    const submittedTime = user.kyc_submitted_at ? new Date(user.kyc_submitted_at).getTime() : 0;
+    const hoursSinceSubmission = (Date.now() - submittedTime) / (1000 * 60 * 60);
+    const normalizedStatus = (user.kyc_status || '').toLowerCase();
+
+    if (['in_review', 'under_review', 'pending_review'].includes(normalizedStatus) && user.kyc_submitted_at && hoursSinceSubmission >= 24) {
+      await supabaseAdmin.from('profiles').update({
+        kyc_status: 'not_started',
+        didit_session_id: null,
+        kyc_vendor_session_id: null,
+        kyc_submitted_at: null,
+        updated_at: new Date().toISOString(),
+      }).eq('id', userId);
+      user.kyc_status = 'not_started';
     }
 
     // 2. Enforce 3-attempt limit within 24 hours
@@ -45,7 +61,7 @@ export async function POST(req: Request) {
     let currentAttempts = Number(user.kyc_attempts ?? user.kyc_retry_count ?? 0);
 
     // If 24 hours have elapsed since the last failed attempt, reset the rolling attempts counter
-    if (hoursSinceLastAttempt >= 24 && currentAttempts > 0 && user.kyc_status !== 'approved') {
+    if (hoursSinceLastAttempt >= 24 && currentAttempts > 0 && user.kyc_status !== 'approved' && user.kyc_status !== 'VERIFIED') {
       currentAttempts = 0;
       await supabaseAdmin.from('profiles').update({
         kyc_attempts: 0,

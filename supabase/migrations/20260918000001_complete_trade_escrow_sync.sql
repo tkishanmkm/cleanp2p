@@ -251,7 +251,7 @@ BEGIN
   END IF;
 
   -- 3. Strict Guard: Never cancel a paid, released, or disputed trade
-  IF v_trade.paid_at IS NOT NULL OR v_trade.marked_paid_at IS NOT NULL OR v_trade.escrow_status = 'PAID' OR v_trade.status IN ('paid', 'buyer_marked_paid', 'payment_sent') THEN
+  IF v_trade.paid_at IS NOT NULL OR v_trade.marked_paid_at IS NOT NULL OR v_trade.escrow_status = 'PAID' OR LOWER(COALESCE(v_trade.status::text, '')) IN ('paid', 'buyer_marked_paid', 'payment_sent') THEN
     RAISE EXCEPTION 'Trade cannot be cancelled because it has already been marked as paid.';
   END IF;
 
@@ -342,7 +342,7 @@ BEGIN
   END IF;
 
   -- Critical Check: Do NOT expire if marked as paid, completed, released, or disputed
-  IF v_trade.paid_at IS NOT NULL OR v_trade.marked_paid_at IS NOT NULL OR v_trade.escrow_status = 'PAID' OR v_trade.status IN ('paid', 'buyer_marked_paid', 'payment_sent') THEN
+  IF v_trade.paid_at IS NOT NULL OR v_trade.marked_paid_at IS NOT NULL OR v_trade.escrow_status = 'PAID' OR LOWER(COALESCE(v_trade.status::text, '')) IN ('paid', 'buyer_marked_paid', 'payment_sent') THEN
     RETURN jsonb_build_object(
       'success', false,
       'trade_id', p_trade_id,

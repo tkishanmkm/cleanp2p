@@ -325,6 +325,33 @@ export async function POST(req: NextRequest) {
       console.error('Final transfer record insertion failure:', transferInsertErr);
     }
 
+    // 9. Dispatch Activity Center notifications to sender and recipient
+    const nowIso = new Date().toISOString();
+    try {
+      // Recipient notification
+      await admin.from('notifications').insert({
+        user_id: recipientProfile.id,
+        title: 'Transfer Received',
+        message: `Received ${numericAmount} ${coinSymbol} from @${senderName}.`,
+        link: '/wallet',
+        is_read: false,
+        created_at: nowIso,
+        sender_username: senderName,
+      });
+
+      // Sender confirmation notification
+      await admin.from('notifications').insert({
+        user_id: user.id,
+        title: 'Transfer Sent',
+        message: `Successfully transferred ${numericAmount} ${coinSymbol} to @${recipientName}.`,
+        link: '/wallet',
+        is_read: false,
+        created_at: nowIso,
+      });
+    } catch (notifErr) {
+      console.warn('Transfer notifications insert notice:', notifErr);
+    }
+
     return NextResponse.json({
       success: true,
       transferId: publicId,

@@ -79,6 +79,20 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       status: txHash ? 'completed' : 'processing',
     });
 
+    // Activity Center Notification
+    try {
+      await supabaseAdmin.from('notifications').insert({
+        user_id: userId,
+        title: 'Withdrawal Processed',
+        message: `Withdrawal of ${amount} ${asset} to ${destinationAddress.slice(0, 6)}...${destinationAddress.slice(-4)} has been submitted.`,
+        link: '/wallet',
+        is_read: false,
+        created_at: new Date().toISOString(),
+      });
+    } catch (notifErr) {
+      console.warn('Withdrawal notification insert notice:', notifErr);
+    }
+
     return NextResponse.json({ success: true, txHash: txHash || 'QUEUED_FOR_BROADCAST' });
   } catch (err: unknown) {
     const errorMessage = err instanceof Error ? err.message : 'Withdrawal dispatch failed';

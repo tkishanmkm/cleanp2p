@@ -156,12 +156,12 @@ export function ForgotPasswordForm() {
         </p>
       </div>
 
-      {/* Responsive hCaptcha widget matching box breadth and dark/light mode */}
+      {/* Responsive hCaptcha widget */}
       <div className="pt-1">
-        <label className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1.5">
+        <label className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1.5 text-center sm:text-left">
           Security Verification
         </label>
-        <div className="w-full bg-slate-50 dark:bg-[#07090e] border border-slate-200 dark:border-[#1e2640] rounded-xl p-2.5 flex items-center justify-center">
+        <div className="w-full max-w-[304px] mx-auto flex items-center justify-center">
           <ResponsiveHCaptcha
             ref={captchaRef}
             onVerify={(token) => {

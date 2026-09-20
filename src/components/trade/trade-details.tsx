@@ -207,13 +207,15 @@ const ParticipantRow = ({
 
         if (data?.username) {
           setDisplayUsername(data.username);
+        } else {
+          setDisplayUsername(fallbackUsername || 'Trader');
         }
         if (data?.merchant_tier) {
           setMerchantTier(data.merchant_tier);
         }
         return;
       }
-      setDisplayUsername(fallbackUsername || userId);
+      setDisplayUsername(fallbackUsername || (userId && !userId.includes('-') ? userId : 'Trader'));
     };
 
     fetchUsername();
@@ -1819,12 +1821,12 @@ export function TradeDetails({
             <ParticipantRow
               label="Buyer"
               userId={buyerId}
-              fallbackUsername={trade?.buyer?.username || trade?.buyer_username || (buyerId ? `user_${buyerId.substring(0, 6)}` : 'forcehui4819')}
+              fallbackUsername={trade?.buyer?.username || trade?.buyer_username || 'Trader'}
             />
             <ParticipantRow
               label="Seller"
               userId={sellerId}
-              fallbackUsername={trade?.seller?.username || trade?.seller_username || (sellerId ? `user_${sellerId.substring(0, 6)}` : 'Seller')}
+              fallbackUsername={trade?.seller?.username || trade?.seller_username || 'Trader'}
             />
             {(trade?.paymentMethod || trade?.payment_method) && (
               <DetailRow label="Payment Method" value={trade.paymentMethod || trade.payment_method} />

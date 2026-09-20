@@ -111,8 +111,8 @@ export function AdCard({ ad, marketPriceUsd: propMarketPriceUsd, fiatExchangeRat
     : null;
 
   const priceBadgeClass = pricePremium >= 0 
-    ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/50 dark:text-emerald-300' 
-    : 'bg-amber-100 text-amber-800 dark:bg-amber-950/50 dark:text-amber-300';
+    ? 'bg-red-100 text-red-800 dark:bg-red-950/50 dark:text-red-300' 
+    : 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/50 dark:text-emerald-300';
 
   const buttonLabel = isAdTypeBuy ? 'Sell' : 'Buy';
   const buttonColorClass = buttonLabel === 'Buy'
