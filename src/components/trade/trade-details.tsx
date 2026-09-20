@@ -666,16 +666,16 @@ const ActionButtons = ({
     tradeStatus === 'disputed' || 
     Boolean(activeDispute)
   );
-  // Buyer can cancel when: active/pending, marked paid, or in dispute (with mandatory "I did not pay" confirmation checkbox)
+  // Buyer can cancel when: active/pending, marked paid, or in dispute (with mandatory confirmation checkbox)
+  const isTradeInDispute = tradeStatus === 'disputed' || tradeStatus === 'dispute' || Boolean(activeDispute);
   const canBuyerCancel = !isTradeExpired && isBuyer && (
     tradeStatus === 'active' || 
     tradeStatus === 'pending' || 
     tradeStatus === 'paid' || 
     tradeStatus === 'buyer_marked_paid' || 
     tradeStatus === 'payment_sent' || 
-    tradeStatus === 'disputed' || 
-    Boolean(activeDispute)
-  ) && tradeStatus !== 'released' && tradeStatus !== 'cancelled' && tradeStatus !== 'completed';
+    isTradeInDispute
+  ) && !['released', 'cancelled', 'completed', 'expired'].includes(tradeStatus);
 
   const handleMarkAsPaid = async () => {
     setIsSubmittingAction(true);
@@ -902,18 +902,20 @@ const ActionButtons = ({
           <AlertDialog>
             <AlertDialogTrigger asChild>
               <Button variant="outline" size="sm" className="w-full text-xs font-bold text-destructive border-destructive/30 hover:bg-destructive/10">
-                <XCircle className="mr-1.5 h-3.5 w-3.5" /> Cancel Trade
+                <XCircle className="mr-1.5 h-3.5 w-3.5" /> {isTradeInDispute ? 'Cancel Trade (Withdraw Dispute)' : 'Cancel Trade'}
               </Button>
             </AlertDialogTrigger>
             <AlertDialogContent className="sm:max-w-md">
               <AlertDialogHeader>
                 <AlertDialogTitle className="text-base text-destructive flex items-center gap-2">
                   <AlertCircle className="h-5 w-5" />
-                  Are you sure you want to cancel this trade?
+                  {isTradeInDispute ? 'Cancel Trade & Close Dispute?' : 'Are you sure you want to cancel this trade?'}
                 </AlertDialogTitle>
                 <AlertDialogDescription className="text-xs space-y-2 text-foreground/80">
                   <p>
-                    Only confirm cancellation if you have not made the required payment. False cancellation information may affect dispute resolution and account status.
+                    {isTradeInDispute
+                      ? 'Cancelling will close this dispute immediately and return the full locked crypto balance (including escrow fee) back to the seller. Only confirm if you agree to cancel this transaction.'
+                      : 'Only confirm cancellation if you have not made the required payment. False cancellation information may affect dispute resolution and account status.'}
                   </p>
                 </AlertDialogDescription>
               </AlertDialogHeader>
@@ -926,7 +928,9 @@ const ActionButtons = ({
                     className="mt-0.5"
                   />
                   <Label htmlFor="did-not-pay-check" className="text-xs font-semibold leading-snug cursor-pointer">
-                    I confirm that I have not sent payment
+                    {isTradeInDispute
+                      ? 'I confirm that I want to cancel this trade and return locked funds to the seller'
+                      : 'I confirm that I have not sent payment'}
                   </Label>
                 </div>
               </div>
@@ -938,7 +942,7 @@ const ActionButtons = ({
                   className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
                 >
                   {isSubmittingAction && <Loader2 className="h-4 w-4 animate-spin mr-1.5" />}
-                  Confirm Cancellation
+                  {isTradeInDispute ? 'Confirm & Close Dispute' : 'Confirm Cancellation'}
                 </AlertDialogAction>
               </AlertDialogFooter>
             </AlertDialogContent>
@@ -1579,7 +1583,10 @@ export function TradeDetails({
   }, [isExpired, tradeStatus, trade?.id]);
 
   const showFeedbackSection = effectiveTradeStatus === 'released' || effectiveTradeStatus === 'completed';
-  const showActions = !isExpired && ['active', 'paid', 'pending', 'buyer_marked_paid', 'payment_sent'].includes(tradeStatus);
+  const showActions = !isExpired && (
+    ['active', 'paid', 'pending', 'buyer_marked_paid', 'payment_sent', 'disputed', 'dispute'].includes(tradeStatus) ||
+    Boolean(resolvedDispute)
+  );
 
   const getPositiveNumber = (...values: any[]): number => {
     for (const v of values) {

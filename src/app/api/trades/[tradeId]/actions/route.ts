@@ -479,7 +479,7 @@ export async function POST(
       const feeAmount = Number(trade?.escrow_fee ?? trade?.platform_fee ?? (coinAmount * 0.015));
       const totalSellerDeduct = coinAmount + feeAmount;
 
-      // 1. Deduct seller locked escrow across tables
+      // 1. Deduct seller locked escrow across tables (amount + escrow fee deducted upon release)
       try {
         if (trade?.seller_id && totalSellerDeduct > 0) {
           // Table: balances
@@ -499,24 +499,6 @@ export async function POST(
                 updated_at: now
               })
               .eq('id', sBal.id);
-          }
-
-          // Table: user_balances
-          const { data: sUBal } = await adminClient
-            .from('user_balances')
-            .select('*')
-            .eq('user_id', trade.seller_id)
-            .ilike('asset', coinSymbol)
-            .maybeSingle();
-
-          if (sUBal) {
-            await adminClient
-              .from('user_balances')
-              .update({
-                locked_balance: Math.max(0, Number(sUBal.locked_balance || 0) - totalSellerDeduct),
-                updated_at: now
-              })
-              .eq('id', sUBal.id);
           }
 
           // Table: user_wallets
@@ -605,32 +587,6 @@ export async function POST(
               available_balance: coinAmount,
               locked_balance: 0,
               total_balance: coinAmount,
-              updated_at: now
-            });
-          }
-
-          // Table: user_balances
-          const { data: bUBal } = await adminClient
-            .from('user_balances')
-            .select('*')
-            .eq('user_id', trade.buyer_id)
-            .ilike('asset', coinSymbol)
-            .maybeSingle();
-
-          if (bUBal) {
-            await adminClient
-              .from('user_balances')
-              .update({
-                available_balance: Number(bUBal.available_balance || 0) + coinAmount,
-                updated_at: now
-              })
-              .eq('id', bUBal.id);
-          } else {
-            await adminClient.from('user_balances').insert({
-              user_id: trade.buyer_id,
-              asset: coinSymbol,
-              available_balance: coinAmount,
-              locked_balance: 0,
               updated_at: now
             });
           }
@@ -861,25 +817,6 @@ export async function POST(
               .eq('id', sBal.id);
           }
 
-          // Table: user_balances
-          const { data: sUBal } = await adminClient
-            .from('user_balances')
-            .select('*')
-            .eq('user_id', trade.seller_id)
-            .ilike('asset', coinSymbol)
-            .maybeSingle();
-
-          if (sUBal) {
-            await adminClient
-              .from('user_balances')
-              .update({
-                available_balance: Number(sUBal.available_balance || 0) + totalRefund,
-                locked_balance: Math.max(0, Number(sUBal.locked_balance || 0) - totalRefund),
-                updated_at: now
-              })
-              .eq('id', sUBal.id);
-          }
-
           // Table: user_wallets
           const { data: sUW } = await adminClient
             .from('user_wallets')
@@ -940,12 +877,12 @@ export async function POST(
           }
         }
 
-        // Close any active dispute
+        // Close any active dispute and set resolution to refund seller
         await adminClient
           .from('disputes')
           .update({
-            status: 'CLOSED',
-            admin_decision: 'REFUND_SELLER',
+            status: 'RESOLVED',
+            admin_decision: 'CANCELLED_BY_BUYER',
             resolved_at: now
           })
           .eq('trade_id', actualTradeId);
