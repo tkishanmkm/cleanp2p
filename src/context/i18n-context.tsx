@@ -30,8 +30,23 @@ const translations: Record<string, any> = {
   'zh-TW': zhTW,
 };
 
+const countryToLang: Record<string, string> = {
+  CN: 'zh-CN',
+  TW: 'zh-TW',
+  HK: 'zh-TW',
+  BR: 'pt-BR',
+  PT: 'pt-BR',
+  KR: 'ko',
+  FR: 'fr',
+  ES: 'es',
+  MX: 'es',
+  RU: 'ru',
+  VN: 'vi',
+  IN: 'hi',
+};
+
 interface I18nContextType {
-  t: (key: string, params?: Record<string, string | number>) => string;
+  t: (key: string) => string;
   setLanguage: (lang: string) => void;
   language: string;
 }
@@ -39,17 +54,16 @@ interface I18nContextType {
 const I18nContext = createContext<I18nContextType | undefined>(undefined);
 
 const getNestedValue = (obj: any, key: string) => {
-  if (!obj) return undefined;
-  return key.split('.').reduce((acc, part) => (acc && acc[part] !== undefined ? acc[part] : undefined), obj);
+  return key.split('.').reduce((acc, part) => acc && acc[part], obj);
 };
 
 export function I18nProvider({ children }: { children: ReactNode }) {
-  const [language, setLanguageState] = useState<string>('en');
-  const [messages, setMessages] = useState<any>(translations.en);
+  const [language, setLanguageState] = useState('en');
+  const [messages, setMessages] = useState(translations.en);
 
   useEffect(() => {
     try {
-      const savedLang = localStorage.getItem('paxones-lang') || localStorage.getItem('tradeflow-lang');
+      const savedLang = localStorage.getItem('tradeflow-lang');
       if (savedLang && translations[savedLang]) {
         setLanguageState(savedLang);
         return;
@@ -60,7 +74,7 @@ export function I18nProvider({ children }: { children: ReactNode }) {
         const supportedLang = LANGUAGES.find(
           (l) => l.code === browserLang || browserLang.startsWith(l.code.split('-')[0])
         );
-        if (supportedLang && translations[supportedLang.code]) {
+        if (supportedLang) {
           setLanguageState(supportedLang.code);
           return;
         }
@@ -72,51 +86,25 @@ export function I18nProvider({ children }: { children: ReactNode }) {
   }, []);
 
   useEffect(() => {
-    const currentMessages = translations[language] || translations.en;
-    setMessages(currentMessages);
-
-    // Update document language and text direction dynamically
-    if (typeof document !== 'undefined') {
-      document.documentElement.lang = language;
-      document.documentElement.dir = language === 'ar' ? 'rtl' : 'ltr';
-    }
+    setMessages(translations[language] || translations.en);
   }, [language]);
 
   const setLanguage = useCallback((lang: string) => {
-    if (!translations[lang]) return;
-    try {
-      localStorage.setItem('paxones-lang', lang);
-      localStorage.setItem('tradeflow-lang', lang);
-    } catch {
-      // Ignore storage errors in private browsing
-    }
+    localStorage.setItem('tradeflow-lang', lang);
     setLanguageState(lang);
   }, []);
 
-  const t = useCallback((key: string, params?: Record<string, string | number>): string => {
-    let value = getNestedValue(messages, key);
-    
-    // Fallback to English if translation is missing in current locale
-    if (value === undefined && language !== 'en') {
-      value = getNestedValue(translations.en, key);
-    }
-
-    if (value === undefined || value === null) {
-      return key;
-    }
-
-    if (typeof value !== 'string') {
+  const t = useCallback((key: string): string => {
+    const value = getNestedValue(messages, key);
+    if (value !== undefined && value !== null && value !== '') {
       return String(value);
     }
-
-    if (params) {
-      return Object.entries(params).reduce((acc, [paramKey, paramVal]) => {
-        return acc.replace(new RegExp(`\\{${paramKey}\\}`, 'g'), String(paramVal));
-      }, value);
+    const enValue = getNestedValue(translations.en, key);
+    if (enValue !== undefined && enValue !== null && enValue !== '') {
+      return String(enValue);
     }
-
-    return value;
-  }, [messages, language]);
+    return key;
+  }, [messages]);
 
   return (
     <I18nContext.Provider value={{ t, setLanguage, language }}>
@@ -132,4 +120,3 @@ export function useI18n() {
   }
   return context;
 }
-

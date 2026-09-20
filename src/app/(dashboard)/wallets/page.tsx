@@ -789,35 +789,17 @@ export default function WalletPage() {
             </CardHeader>
             <CardContent className="space-y-2">
               <div>
-                <div className="text-3xl font-bold">
+                <span className="text-xs text-muted-foreground font-medium uppercase tracking-wider block">Available Balance</span>
+                <div className="text-3xl font-bold mt-1">
                   {data.availableBalance === 0 ? '0' : data.availableBalance.toFixed(6)}
                 </div>
-                <p className="text-xs text-muted-foreground">
+                <p className="text-xs text-muted-foreground mt-0.5">
                   ≈{' '}
                   {data.fiatValue.toLocaleString(undefined, {
                     style: 'currency',
                     currency: profile?.preferredCurrency || 'USD',
                   })}
                 </p>
-              </div>
-              <div className="space-y-1 pt-1 border-t border-border/40">
-                {data.inEscrow > 0 && (
-                  <p className="text-[11px] text-amber-500 font-medium font-mono flex items-center justify-between">
-                    <span>In P2P Escrow:</span>
-                    <span>{data.inEscrow === 0 ? '0' : data.inEscrow.toFixed(6)}</span>
-                  </p>
-                )}
-                {data.inWithdrawal > 0 && (
-                  <p className="text-[11px] text-blue-400 font-medium font-mono flex items-center justify-between">
-                    <span>Pending Withdrawal:</span>
-                    <span>{data.inWithdrawal === 0 ? '0' : data.inWithdrawal.toFixed(6)}</span>
-                  </p>
-                )}
-                {data.inEscrow === 0 && data.inWithdrawal === 0 && (
-                  <p className="text-[11px] text-muted-foreground font-mono">
-                    All funds spendable
-                  </p>
-                )}
               </div>
             </CardContent>
             <CardFooter className="grid grid-cols-3 gap-1.5 pt-2">

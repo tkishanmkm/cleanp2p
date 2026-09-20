@@ -65,17 +65,20 @@ async function getAssetUsdPrice(cryptoCode: string): Promise<number> {
 }
 
 /**
- * 1. Ethereum / EVM Gas Estimation
+ * 1. Ethereum / EVM & BSC Gas Estimation
  */
 async function estimateEvmGasFees(
   crypto: string,
   network: string
 ): Promise<NetworkGasFee> {
-  let baseFeeGwei = 20;
-  let priorityFeeGwei = 1.5;
+  const isBsc = network.toUpperCase() === 'BEP20' || network.toUpperCase() === 'BSC' || crypto.toUpperCase() === 'BNB';
+  const rpcUrl = isBsc ? 'https://binance.llamarpc.com' : 'https://cloudflare-eth.com';
+  
+  let baseFeeGwei = isBsc ? 3 : 15;
+  let priorityFeeGwei = isBsc ? 1 : 1.5;
 
   try {
-    const res = await fetch('https://cloudflare-eth.com', {
+    const res = await fetch(rpcUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -92,22 +95,28 @@ async function estimateEvmGasFees(
       if (data?.result) {
         const gasPriceWei = parseInt(data.result, 16);
         const gasPriceGwei = gasPriceWei / 1e9;
-        baseFeeGwei = Math.max(gasPriceGwei * 0.85, 5);
-        priorityFeeGwei = Math.max(gasPriceGwei * 0.15, 1);
+        if (isBsc) {
+          baseFeeGwei = Math.max(gasPriceGwei * 0.9, 1);
+          priorityFeeGwei = Math.max(gasPriceGwei * 0.1, 0.5);
+        } else {
+          baseFeeGwei = Math.max(gasPriceGwei * 0.85, 3);
+          priorityFeeGwei = Math.max(gasPriceGwei * 0.15, 1);
+        }
       }
     }
   } catch {
     // Fallback to default gas estimates
   }
 
-  const isErc20 = crypto === 'USDT' || crypto === 'USDC' || network === 'ERC20';
-  const gasLimit = isErc20 ? 65000 : 21000;
+  const isToken = crypto === 'USDT' || crypto === 'USDC' || network === 'ERC20' || network === 'BEP20';
+  const gasLimit = isToken ? (isBsc ? 45000 : 65000) : 21000;
+  
   // Apply 2.0X priority multiplier to guarantee instant mempool inclusion
   const totalGweiPerUnit = (baseFeeGwei + priorityFeeGwei) * 2.0;
   const estimatedFeeNative = (totalGweiPerUnit * gasLimit) / 1e9;
 
-  const ethPrice = await getAssetUsdPrice('ETH');
-  const estimatedFeeUsd = estimatedFeeNative * ethPrice;
+  const nativeAssetPrice = isBsc ? await getAssetUsdPrice('BNB') : await getAssetUsdPrice('ETH');
+  const estimatedFeeUsd = estimatedFeeNative * nativeAssetPrice;
 
   return {
     crypto,
@@ -224,8 +233,9 @@ export async function fetchAndCacheNetworkGasFees(): Promise<NetworkGasFee[]> {
     { crypto: 'BTC', network: 'BTC' },
     { crypto: 'ETH', network: 'ETH' },
     { crypto: 'USDT', network: 'ERC20' },
-    { crypto: 'USDC', network: 'ERC20' },
+    { crypto: 'USDT', network: 'BEP20' },
     { crypto: 'USDT', network: 'TRC20' },
+    { crypto: 'USDC', network: 'ERC20' },
     { crypto: 'TRX', network: 'TRX' },
     { crypto: 'LTC', network: 'LTC' },
   ];

@@ -658,9 +658,24 @@ const ActionButtons = ({
   }, [isReleaseConfirmOpen, currentUserId]);
 
   const canMarkPaid = !isTradeExpired && isBuyer && (tradeStatus === 'active' || tradeStatus === 'pending');
-  // CRITICAL ESCROW RULE: The Release Escrow button MUST strictly render ONLY when trade status is PAID / buyer_marked_paid
-  const canRelease = !isBuyer && (tradeStatus === 'paid' || tradeStatus === 'buyer_marked_paid' || tradeStatus === 'payment_sent');
-  const canBuyerCancel = !isTradeExpired && isBuyer && (tradeStatus === 'active' || tradeStatus === 'pending');
+  // CRITICAL ESCROW RULE: The Release Escrow button MUST strictly render ONLY when trade status is PAID or DISPUTED
+  const canRelease = !isBuyer && (
+    tradeStatus === 'paid' || 
+    tradeStatus === 'buyer_marked_paid' || 
+    tradeStatus === 'payment_sent' || 
+    tradeStatus === 'disputed' || 
+    Boolean(activeDispute)
+  );
+  // Buyer can cancel when: active/pending, marked paid, or in dispute (with mandatory "I did not pay" confirmation checkbox)
+  const canBuyerCancel = !isTradeExpired && isBuyer && (
+    tradeStatus === 'active' || 
+    tradeStatus === 'pending' || 
+    tradeStatus === 'paid' || 
+    tradeStatus === 'buyer_marked_paid' || 
+    tradeStatus === 'payment_sent' || 
+    tradeStatus === 'disputed' || 
+    Boolean(activeDispute)
+  ) && tradeStatus !== 'released' && tradeStatus !== 'cancelled' && tradeStatus !== 'completed';
 
   const handleMarkAsPaid = async () => {
     setIsSubmittingAction(true);
