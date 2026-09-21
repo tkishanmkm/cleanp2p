@@ -57,7 +57,7 @@ export default function DepositAddresses({ userId }: { userId: string }) {
     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
       {/* EVM Address */}
       <div className="p-4 rounded-lg bg-gray-900 border border-gray-800">
-        <span className="text-xs text-gray-400 uppercase tracking-wider font-semibold">ETH / BSC / Polygon (EVM)</span>
+        <span className="text-xs text-gray-400 uppercase tracking-wider font-semibold">ETH / BSC (EVM Mainnet)</span>
         <div className="mt-2 flex items-center justify-between bg-black p-2 rounded border border-gray-800">
           <span className="font-mono text-xs truncate text-gray-200">{addresses.evm || 'Provisioning...'}</span>
           {addresses.evm && (

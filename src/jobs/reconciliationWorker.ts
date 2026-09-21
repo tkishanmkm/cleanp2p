@@ -26,7 +26,7 @@ function resolveHotWalletAddress(): string {
       return new ethers.Wallet(formattedKey).address;
     } catch (_) {}
   }
-  return '0xB5e9502336A2968467555bBaC369210cAA974e95';
+  return '';
 }
 
 const HOT_WALLET_ADDRESS = resolveHotWalletAddress();
@@ -35,7 +35,6 @@ const HOT_WALLET_ADDRESS = resolveHotWalletAddress();
 const MIN_GAS_THRESHOLDS: Record<string, bigint> = {
   ERC20: ethers.parseEther('0.05'),   // Min 0.05 ETH
   BEP20: ethers.parseEther('0.10'),   // Min 0.10 BNB
-  POLYGON: ethers.parseEther('10.0'), // Min 10.0 POL
 };
 
 /**
@@ -90,9 +89,8 @@ export interface ReconciliationReport {
  */
 export async function checkHotWalletGasLevels(): Promise<GasStatus[]> {
   const networks = [
-    { code: 'ERC20', chainId: 1, rpc: process.env.ETH_RPC_URL || 'https://eth.llamarpc.com', symbol: 'ETH' },
+    { code: 'ERC20', chainId: 1, rpc: process.env.ETH_RPC_URL || process.env.EVM_RPC_URL || 'https://cloudflare-eth.com', symbol: 'ETH' },
     { code: 'BEP20', chainId: 56, rpc: process.env.BSC_RPC_URL || 'https://bsc-dataseed.binance.org', symbol: 'BNB' },
-    { code: 'POLYGON', chainId: 137, rpc: process.env.POLYGON_RPC_URL || 'https://polygon-rpc.com', symbol: 'POL' },
   ];
 
   const gasStatuses: GasStatus[] = [];
@@ -203,9 +201,8 @@ export async function reconcileLedgerVsChain(assetSymbol = 'USDT'): Promise<Reco
   // 3. Query total multi-chain USDT on-chain reserves held in Hot Wallet
   let totalOnChainBalance = 0;
   const networkConfigs = [
-    { net: 'ERC20', chainId: 1, rpc: process.env.ETH_RPC_URL || 'https://eth.llamarpc.com' },
+    { net: 'ERC20', chainId: 1, rpc: process.env.ETH_RPC_URL || process.env.EVM_RPC_URL || 'https://cloudflare-eth.com' },
     { net: 'BEP20', chainId: 56, rpc: process.env.BSC_RPC_URL || 'https://bsc-dataseed.binance.org' },
-    { net: 'POLYGON', chainId: 137, rpc: process.env.POLYGON_RPC_URL || 'https://polygon-rpc.com' },
   ];
 
   for (const item of networkConfigs) {

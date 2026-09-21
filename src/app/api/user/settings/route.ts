@@ -238,8 +238,7 @@ export async function PATCH(req: NextRequest) {
             const { data: duplicateProfiles } = await admin
               .from('profiles')
               .select('id, full_name, dob, date_of_birth')
-              .neq('id', user.id)
-              .neq('status', 'deleted');
+              .neq('id', user.id);
 
             const match = (duplicateProfiles || []).find((p: any) => {
               const pName = (p.full_name || '').trim().toLowerCase();

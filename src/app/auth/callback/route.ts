@@ -14,6 +14,11 @@ export async function GET(request: NextRequest) {
     const errorDescription = requestUrl.searchParams.get('error_description');
 
     if (errorCode || errorDescription) {
+      if (next.startsWith('/reset-password')) {
+        const resetRedirect = new URL(`${origin}/reset-password`);
+        resetRedirect.searchParams.set('error', errorDescription || errorCode || 'Verification failed');
+        return NextResponse.redirect(resetRedirect.toString());
+      }
       const errorRedirect = new URL(`${origin}/auth/auth-code-error`);
       if (errorCode) errorRedirect.searchParams.set('error', errorCode);
       if (errorDescription) errorRedirect.searchParams.set('error_description', errorDescription);

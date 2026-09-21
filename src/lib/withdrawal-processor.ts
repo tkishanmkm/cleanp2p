@@ -61,20 +61,10 @@ const ERC20_ABI = [
 function getRpcUrlForNetwork(network: string): string {
   const norm = network.toUpperCase().trim();
   switch (norm) {
-    case 'SEPOLIA':
-    case 'ETH_SEPOLIA':
-      return (
-        process.env.ETH_SEPOLIA_RPC_URL ||
-        process.env.SEPOLIA_RPC_URL ||
-        'https://ethereum-sepolia-rpc.publicnode.com'
-      );
     case 'BEP20':
     case 'BSC':
     case 'BINANCE':
       return process.env.BSC_RPC_URL || 'https://bsc-dataseed.binance.org';
-    case 'POLYGON':
-    case 'MATIC':
-      return process.env.POLYGON_RPC_URL || 'https://polygon-rpc.com';
     case 'TRC20':
     case 'TRON':
       return process.env.TRON_RPC_URL || 'https://api.trongrid.io';
@@ -83,10 +73,9 @@ function getRpcUrlForNetwork(network: string): string {
     case 'ETHEREUM':
     default:
       return (
-        process.env.ETH_SEPOLIA_RPC_URL ||
-        process.env.EVM_RPC_URL ||
         process.env.ETH_RPC_URL ||
-        'https://ethereum-sepolia-rpc.publicnode.com'
+        process.env.EVM_RPC_URL ||
+        'https://cloudflare-eth.com'
       );
   }
 }

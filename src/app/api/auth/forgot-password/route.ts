@@ -89,9 +89,11 @@ export async function POST(req: Request) {
     }
 
     // 3. Send password reset link to user's email
-    const origin = req.headers.get('origin') || process.env.NEXT_PUBLIC_APP_URL || 'https://paxones.com';
+    const forwardedProto = req.headers.get('x-forwarded-proto') || 'https';
+    const host = req.headers.get('host');
+    const origin = req.headers.get('origin') || (host ? `${forwardedProto}://${host}` : '') || process.env.NEXT_PUBLIC_APP_URL || 'https://paxones.com';
     const { error: resetError } = await admin.auth.resetPasswordForEmail(targetEmail, {
-      redirectTo: `${origin}/reset-password`,
+      redirectTo: `${origin}/auth/callback?next=/reset-password`,
     });
 
     if (resetError) {

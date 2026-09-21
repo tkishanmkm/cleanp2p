@@ -35,19 +35,15 @@ export interface ConfirmationWorkerResult {
 function getRpcUrl(network: string): string {
   const norm = network.toUpperCase().trim();
   switch (norm) {
-    case 'ERC20':
-    case 'ETH':
-    case 'ETHEREUM':
-      return process.env.ETH_RPC_URL || process.env.EVM_RPC_URL || 'https://cloudflare-eth.com';
     case 'BEP20':
     case 'BSC':
     case 'BINANCE':
       return process.env.BSC_RPC_URL || 'https://bsc-dataseed.binance.org';
-    case 'POLYGON':
-    case 'MATIC':
-      return process.env.POLYGON_RPC_URL || 'https://polygon-rpc.com';
+    case 'ERC20':
+    case 'ETH':
+    case 'ETHEREUM':
     default:
-      return process.env.EVM_RPC_URL || 'https://cloudflare-eth.com';
+      return process.env.ETH_RPC_URL || process.env.EVM_RPC_URL || 'https://cloudflare-eth.com';
   }
 }
 

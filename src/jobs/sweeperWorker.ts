@@ -41,7 +41,7 @@ function resolveHotWalletAddress(): string {
       return new ethers.Wallet(formattedKey).address;
     } catch (_) {}
   }
-  return '0x71C80a6c6a46C652136e095b3d5bfa780d6D33A4';
+  return '';
 }
 
 function resolveTronHotWalletAddress(): string {
@@ -49,7 +49,7 @@ function resolveTronHotWalletAddress(): string {
     process.env.HOT_WALLET_TRON_ADDRESS ||
     process.env.TRON_HOT_WALLET_ADDRESS ||
     process.env.TRC20_HOT_WALLET_ADDRESS ||
-    'TW4zM5R2KxZt8U3WvYvK8CqQ5Yk5Q8n6Jp'
+    ''
   );
 }
 
@@ -57,7 +57,7 @@ function resolveBtcHotWalletAddress(): string {
   return (
     process.env.HOT_WALLET_BTC_ADDRESS ||
     process.env.BTC_HOT_WALLET_ADDRESS ||
-    'bc1q8c8v8g46w98r8m22qcv984m8z4v9p9z2w9f7xy'
+    ''
   );
 }
 
@@ -65,7 +65,7 @@ function resolveLtcHotWalletAddress(): string {
   return (
     process.env.HOT_WALLET_LTC_ADDRESS ||
     process.env.LTC_HOT_WALLET_ADDRESS ||
-    'ltc1q8c8v8g46w98r8m22qcv984m8z4v9p9z2w9f7xy'
+    ''
   );
 }
 
@@ -108,29 +108,19 @@ export interface SweepResult {
 
 export function getRpcUrlForNetwork(network: string): string {
   switch (network.toUpperCase()) {
-    case 'SEPOLIA':
-    case 'ETH_SEPOLIA':
-      return (
-        process.env.ETH_SEPOLIA_RPC_URL ||
-        process.env.SEPOLIA_RPC_URL ||
-        'https://ethereum-sepolia-rpc.publicnode.com'
-      );
     case 'ERC20':
     case 'ETH':
     case 'ETHEREUM':
-      return process.env.ETH_RPC_URL || 'https://eth.llamarpc.com';
+      return process.env.ETH_RPC_URL || process.env.EVM_RPC_URL || 'https://cloudflare-eth.com';
     case 'BEP20':
     case 'BSC':
     case 'BINANCE':
       return process.env.BSC_RPC_URL || 'https://bsc-dataseed.binance.org';
-    case 'POLYGON':
-    case 'MATIC':
-      return process.env.POLYGON_RPC_URL || 'https://polygon-rpc.com';
     case 'TRC20':
     case 'TRON':
       return process.env.TRON_RPC_URL || 'https://api.trongrid.io';
     default:
-      return process.env.ETH_SEPOLIA_RPC_URL || process.env.EVM_RPC_URL || 'https://ethereum-sepolia-rpc.publicnode.com';
+      return process.env.ETH_RPC_URL || process.env.EVM_RPC_URL || 'https://cloudflare-eth.com';
   }
 }
 
@@ -556,7 +546,7 @@ export async function sweepLtcDepositAddress(
  */
 export async function sweepUserDepositAddress(
   depositAddress: string,
-  network: 'ERC20' | 'BEP20' | 'POLYGON' | 'TRC20' | 'ETH' | 'BTC' | 'LTC',
+  network: 'ERC20' | 'BEP20' | 'TRC20' | 'ETH' | 'BTC' | 'LTC',
   derivationIndex: number,
   assetSymbol: string = 'USDT'
 ): Promise<SweepResult> {

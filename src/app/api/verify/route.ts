@@ -89,7 +89,7 @@ export async function POST(req: Request) {
 
     const workflowId = process.env.DIDIT_WORKFLOW_ID || WORKFLOW_ID;
     const siteUrl = (process.env.NEXT_PUBLIC_SITE_URL || process.env.NEXT_PUBLIC_APP_URL || 'https://paxones.com').replace(/\/+$/, '');
-    const callbackUrl = `${siteUrl}/p2p/verification-callback`;
+    const callbackUrl = `${siteUrl}/dashboard/kyc/callback`;
 
     const apiKey = process.env.DIDIT_API_KEY;
     if (!apiKey) {

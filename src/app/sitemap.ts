@@ -31,7 +31,7 @@ export default function sitemap(): MetadataRoute.Sitemap {
       priority: 0.9,
     },
     {
-      url: `${BASE_URL}/p2p`,
+      url: `${BASE_URL}/ads/create`,
       lastModified: currentDate,
       changeFrequency: 'daily',
       priority: 0.8,

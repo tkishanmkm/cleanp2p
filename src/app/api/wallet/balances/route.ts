@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseAdminClient } from '@/lib/supabase/server';
 import { createPublicClient, http, formatEther } from 'viem';
-import { sepolia } from 'viem/chains';
+import { mainnet } from 'viem/chains';
 
 export const dynamic = 'force-dynamic';
 
@@ -133,8 +133,8 @@ export async function GET(req: NextRequest) {
     if (address && address.startsWith('0x') && address.length === 42) {
       try {
         const client = createPublicClient({
-          chain: sepolia,
-          transport: http(process.env.ETH_SEPOLIA_RPC_URL || process.env.EVM_RPC_URL || 'https://eth-sepolia.g.alchemy.com/v2/alch_60h82hz17l-PYtgn20DyU'),
+          chain: mainnet,
+          transport: http(process.env.ETH_RPC_URL || process.env.EVM_RPC_URL || 'https://cloudflare-eth.com'),
         });
         const onChainBal = await client.getBalance({ address: address as `0x${string}` });
         const onChainEth = parseFloat(formatEther(onChainBal));
@@ -149,7 +149,7 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({
       success: true,
       balances: [
-        { network: 'Ethereum (Sepolia)', symbol: 'ETH', balance: ethBalance.toFixed(4) },
+        { network: 'Ethereum Mainnet', symbol: 'ETH', balance: ethBalance.toFixed(4) },
         { network: 'USDT (All Chains)', symbol: 'USDT', balance: usdtBalance.toFixed(2) },
         { network: 'Bitcoin', symbol: 'BTC', balance: btcBalance.toFixed(6) },
         { network: 'Litecoin', symbol: 'LTC', balance: ltcBalance.toFixed(4) },
@@ -159,7 +159,7 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({
       success: false,
       balances: [
-        { network: 'Ethereum (Sepolia)', symbol: 'ETH', balance: '0.0000' },
+        { network: 'Ethereum Mainnet', symbol: 'ETH', balance: '0.0000' },
         { network: 'USDT (All Chains)', symbol: 'USDT', balance: '0.00' },
         { network: 'Bitcoin', symbol: 'BTC', balance: '0.000000' },
         { network: 'Litecoin', symbol: 'LTC', balance: '0.0000' },

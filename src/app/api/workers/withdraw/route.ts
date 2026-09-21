@@ -82,20 +82,18 @@ async function verifyGasWithOracle(
 
 function getEvmRpcUrl(network: string): { url: string; providerName: string } {
   const normNet = network.toUpperCase();
-  const alchemyKey = process.env.NEXT_PUBLIC_ALCHEMY_API_KEY || 'alch_60h82hz17l-PYtgn20DyU';
 
   if (normNet === 'BEP20' || normNet === 'BSC' || normNet === 'BINANCE') {
-    const bscUrl = process.env.BSC_RPC_URL || `https://bnb-testnet.g.alchemy.com/v2/${alchemyKey}`;
-    return { url: bscUrl, providerName: 'Alchemy BSC RPC' };
+    const bscUrl = process.env.BSC_RPC_URL || 'https://bsc-dataseed.binance.org';
+    return { url: bscUrl, providerName: 'BNB Smart Chain RPC' };
   }
 
   const ethUrl =
     process.env.ETH_RPC_URL ||
-    process.env.ETH_SEPOLIA_RPC_URL ||
     process.env.EVM_RPC_URL ||
-    `https://eth-sepolia.g.alchemy.com/v2/${alchemyKey}`;
+    'https://cloudflare-eth.com';
 
-  return { url: ethUrl, providerName: 'Alchemy Ethereum RPC' };
+  return { url: ethUrl, providerName: 'Ethereum Mainnet RPC' };
 }
 
 // ============================================================================
@@ -103,7 +101,7 @@ function getEvmRpcUrl(network: string): { url: string; providerName: string } {
 // ============================================================================
 
 /**
- * Executes EVM Transfers (Native ETH or USDT ERC20 / BEP20) via Alchemy RPC
+ * Executes EVM Transfers (Native ETH or USDT ERC20 / BEP20)
  */
 async function processEvmWithdrawal(
   toAddress: string,
@@ -129,7 +127,7 @@ async function processEvmWithdrawal(
   const normNet = network.toUpperCase();
 
   // 1. Native ETH / BNB
-  if (normAsset === 'ETH' || normAsset === 'BNB' || normAsset === 'MATIC') {
+  if (normAsset === 'ETH' || normAsset === 'BNB') {
     const value = ethers.parseEther(amount);
     const feeData = await provider.getFeeData();
     const gasEstimate = await provider.estimateGas({ to: toAddress, value }).catch(() => 21000n);
@@ -147,23 +145,23 @@ async function processEvmWithdrawal(
 
   // 2. Token Transfers: USDT ERC-20 or USDT BEP-20
   let tokenContractAddress = '';
+  let decimals = 6;
   if (normNet === 'BEP20' || normNet === 'BSC') {
     tokenContractAddress =
       process.env.USDT_CONTRACT_BEP20 ||
-      '0x337610d27c682E347C9cD6064b3b907c2daE471d';
+      '0x55d398326f99059fF775485246999027B3197955';
+    decimals = 18;
   } else {
     tokenContractAddress =
       process.env.USDT_CONTRACT_ERC20 ||
-      '0x7169D38820dfd117c3fa1f22a697dBA58d90BA06';
+      '0xdAC17F958D2ee523a2206206994597C13D831ec7';
+    decimals = 6;
   }
 
   const contract = new ethers.Contract(tokenContractAddress, ERC20_ABI, wallet);
-  let decimals = 6;
   try {
     decimals = await contract.decimals();
-  } catch {
-    decimals = 6;
-  }
+  } catch {}
 
   const parsedAmount = ethers.parseUnits(amount, decimals);
   const gasEstimate = await contract.transfer.estimateGas(toAddress, parsedAmount).catch(() => 65000n);
@@ -189,7 +187,7 @@ async function processTronWithdrawal(
   }
 
   const cleanKey = rawKey.replace(/^0x/, '');
-  const rpcUrl = process.env.TRON_RPC_URL || 'https://api.shasta.trongrid.io';
+  const rpcUrl = process.env.TRON_RPC_URL || 'https://api.trongrid.io';
 
   const TronWebClass: any =
     (TronWebLib as any).TronWeb ||
@@ -215,7 +213,7 @@ async function processTronWithdrawal(
   // USDT TRC-20
   const contractAddress =
     process.env.USDT_CONTRACT_TRC20 ||
-    'TXLAQ63Xg1NAzckPwKHvzw7CSEmLMEqcdj';
+    'TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t';
 
   const contract = await tronWeb.contract().at(contractAddress);
   const parsedSun = Math.floor(parseFloat(amount) * 1_000_000);

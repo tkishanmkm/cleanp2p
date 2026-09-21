@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import { getSupabaseAdminClient } from '@/lib/supabase/server';
 import { createWalletClient, http, parseEther } from 'viem';
 import { privateKeyToAccount } from 'viem/accounts';
-import { sepolia } from 'viem/chains';
+import { mainnet } from 'viem/chains';
 
 const WORKER_SECRET = process.env.WITHDRAWAL_WORKER_SECRET;
 const HOT_WALLET_KEY = process.env.HOT_WALLET_PRIVATE_KEY || process.env.EVM_HOT_WALLET_PRIVATE_KEY;
@@ -65,8 +65,8 @@ export async function POST(req: Request) {
           const hotWalletAccount = privateKeyToAccount(HOT_WALLET_KEY as `0x${string}`);
           const walletClient = createWalletClient({
             account: hotWalletAccount,
-            chain: sepolia,
-            transport: http(process.env.ETH_SEPOLIA_RPC_URL || process.env.EVM_RPC_URL || 'https://eth-sepolia.g.alchemy.com/v2/alch_60h82hz17l-PYtgn20DyU'),
+            chain: mainnet,
+            transport: http(process.env.ETH_RPC_URL || process.env.EVM_RPC_URL || 'https://cloudflare-eth.com'),
           });
 
           console.log(`[Withdrawal Worker] Broadcasting withdrawal ${withdrawal.id} of ${withdrawal.amount} to ${targetAddress}`);
@@ -74,7 +74,7 @@ export async function POST(req: Request) {
           // Send on-chain transaction with explicit destination address mapping
           const hash = await walletClient.sendTransaction({
             account: hotWalletAccount,
-            chain: sepolia,
+            chain: mainnet,
             to: targetAddress as `0x${string}`, // Ensure this matches destination address from database
             value: parseEther(withdrawal.amount.toString()),
           });

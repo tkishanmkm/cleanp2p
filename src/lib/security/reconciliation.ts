@@ -289,9 +289,7 @@ export async function runFinancialReconciliation(): Promise<ReconciliationReport
   // 4. Hot Wallet Solvency Check (Check BSC primary and optionally others)
   const activeNetworks = ['BEP20'];
   if (process.env.ETH_RPC_URL || process.env.EVM_RPC_URL) activeNetworks.push('ERC20');
-  if (process.env.POLYGON_RPC_URL) activeNetworks.push('POLYGON');
-  if (process.env.SEPOLIA_RPC_URL) activeNetworks.push('SEPOLIA');
-  if (process.env.TRON_HOT_WALLET_ADDRESS) activeNetworks.push('TRC20');
+  if (process.env.TRON_HOT_WALLET_ADDRESS || process.env.HOT_WALLET_TRON_ADDRESS) activeNetworks.push('TRC20');
 
   const hotWalletReserves: HotWalletReserveStatus[] = [];
   let totalHotWalletUsdt = 0;

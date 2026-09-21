@@ -41,8 +41,7 @@ export async function POST(req: NextRequest) {
     // Query profiles for existing users with matching full_name and dob
     const { data: existingUsers, error: queryError } = await adminSupabase
       .from('profiles')
-      .select('id, full_name, dob, date_of_birth, email, status, is_suspended')
-      .neq('status', 'deleted');
+      .select('id, full_name, dob, date_of_birth, email, status, is_suspended');
 
     if (queryError) {
       console.error('[REGISTRATION_CHECK] Database query error:', queryError);

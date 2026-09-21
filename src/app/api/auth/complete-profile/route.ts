@@ -48,8 +48,7 @@ export async function POST(req: Request) {
     const { data: existingProfiles } = await adminSupabase
       .from('profiles')
       .select('id, full_name, dob, date_of_birth, status')
-      .neq('id', currentUserId)
-      .neq('status', 'deleted');
+      .neq('id', currentUserId);
 
     const duplicateProfile = (existingProfiles || []).find((p: any) => {
       const pName = (p.full_name || '').trim().toLowerCase();

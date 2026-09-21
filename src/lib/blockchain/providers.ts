@@ -1,10 +1,10 @@
 import { ethers } from 'ethers';
 import { createPublicClient, http } from 'viem';
-import { sepolia } from 'viem/chains';
+import { mainnet } from 'viem/chains';
 
 export const publicClient = createPublicClient({
-  chain: sepolia,
-  transport: http(process.env.ETH_SEPOLIA_RPC_URL || 'https://eth-sepolia.g.alchemy.com/v2/alch_60h82hz17l-PYtgn20DyU'),
+  chain: mainnet,
+  transport: http(process.env.ETH_RPC_URL || process.env.EVM_RPC_URL || 'https://cloudflare-eth.com'),
 });
 
 export const sepoliaClient = publicClient;
@@ -42,25 +42,6 @@ export const SUPPORTED_EVM_CHAINS: Record<string, ChainConfig> = {
     usdtContractAddress: process.env.USDT_CONTRACT_ERC20 || '0xdAC17F958D2ee523a2206206994597C13D831ec7',
     usdtDecimals: 6,
   },
-  SEPOLIA: {
-    chainId: 11155111,
-    name: 'Ethereum Sepolia',
-    networkCode: 'SEPOLIA',
-    nativeSymbol: 'ETH',
-    nativeDecimals: 18,
-    rpcUrls: [
-      process.env.ETH_SEPOLIA_RPC_URL || '',
-      process.env.SEPOLIA_RPC_URL || '',
-      'https://eth-sepolia.g.alchemy.com/v2/alch_60h82hz17l-PYtgn20DyU',
-      'https://rpc.sepolia.org',
-      'https://ethereum-sepolia-rpc.publicnode.com',
-    ].filter(Boolean),
-    blockExplorer: 'https://sepolia.etherscan.io',
-    isTestnet: true,
-    requiredConfirmations: 3,
-    usdtContractAddress: process.env.USDT_CONTRACT_SEPOLIA || '0x7169D38820dfd117C3FA1f22a697dBA58d90BA06',
-    usdtDecimals: 6,
-  },
   BEP20: {
     chainId: 56,
     name: 'BNB Smart Chain',
@@ -79,48 +60,28 @@ export const SUPPORTED_EVM_CHAINS: Record<string, ChainConfig> = {
     usdtContractAddress: process.env.USDT_CONTRACT_BEP20 || '0x55d398326f99059fF775485246999027B3197955',
     usdtDecimals: 18, // BSC USDT uses 18 decimals
   },
-  POLYGON: {
-    chainId: 137,
-    name: 'Polygon PoS',
-    networkCode: 'POLYGON',
-    nativeSymbol: 'POL',
-    nativeDecimals: 18,
-    rpcUrls: [
-      process.env.POLYGON_RPC_URL || '',
-      'https://polygon-rpc.com',
-      'https://polygon.llamarpc.com',
-    ].filter(Boolean),
-    blockExplorer: 'https://polygonscan.com',
-    isTestnet: false,
-    requiredConfirmations: 128,
-    usdtContractAddress: process.env.USDT_CONTRACT_POLYGON || '0xc2132D05D31c914a87C6611C10748AEb04B58e8F',
-    usdtDecimals: 6,
-  },
 };
 
 // Map shorthand aliases to standard network keys
 export function normalizeNetworkCode(network: string): string {
   const norm = (network || '').toUpperCase().trim();
-  const isSepolia = Boolean(
-    process.env.ETH_SEPOLIA_RPC_URL ||
-    process.env.SEPOLIA_RPC_URL ||
-    process.env.NEXT_PUBLIC_ENABLE_TESTNET === 'true'
-  );
 
   const aliasMap: Record<string, string> = {
-    ETH: isSepolia ? 'SEPOLIA' : 'ERC20',
-    ETHEREUM: isSepolia ? 'SEPOLIA' : 'ERC20',
-    SEPOLIA: 'SEPOLIA',
-    ETH_SEPOLIA: 'SEPOLIA',
-    SEPOLIA_ETH: 'SEPOLIA',
+    ETH: 'ERC20',
+    ETHEREUM: 'ERC20',
     MAINNET: 'ERC20',
+    ERC20: 'ERC20',
     BSC: 'BEP20',
     BINANCE: 'BEP20',
     BNB: 'BEP20',
-    MATIC: 'POLYGON',
-    POL: 'POLYGON',
+    BEP20: 'BEP20',
     TRON: 'TRC20',
     TRX: 'TRC20',
+    TRC20: 'TRC20',
+    BTC: 'BTC',
+    BITCOIN: 'BTC',
+    LTC: 'LTC',
+    LITECOIN: 'LTC',
   };
   return aliasMap[norm] || norm;
 }
@@ -172,8 +133,7 @@ export function getEvmHotWalletSigner(network: string = 'ERC20'): {
 
   const rawKey =
     process.env.HOT_WALLET_PRIVATE_KEY ||
-    process.env.EVM_HOT_WALLET_PRIVATE_KEY ||
-    (normalizeNetworkCode(network) === 'SEPOLIA' ? process.env.SEPOLIA_PRIVATE_KEY : undefined);
+    process.env.EVM_HOT_WALLET_PRIVATE_KEY;
 
   if (!rawKey || rawKey.trim().length === 0) {
     return { provider, signer: null, address: null };

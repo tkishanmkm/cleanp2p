@@ -46,7 +46,8 @@ export async function POST(req: NextRequest) {
     // 4. Mark or clean up profile
     try {
       await supabaseAdmin.from('profiles').update({
-        status: 'deleted',
+        status: 'suspended',
+        account_status: 'DELETED',
         is_suspended: true,
         full_name: '[Deleted User]',
         username: `deleted_${userId.slice(0, 8)}`,
