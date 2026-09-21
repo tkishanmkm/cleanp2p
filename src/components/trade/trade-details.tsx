@@ -539,6 +539,7 @@ export function resolveTradeStatus(t: any): string {
   if (!t) return 'active';
   const raw = String(t.status || '').toLowerCase();
   
+  // 1. Released or completed is a terminal state - always highest precedence
   if (
     t.released_at ||
     t.completed_at ||
@@ -549,24 +550,38 @@ export function resolveTradeStatus(t: any): string {
     return 'released';
   }
 
-  if (
-    t.is_disputed ||
-    t.disputed_at ||
-    String(t.escrow_status || '').toUpperCase() === 'DISPUTED' ||
-    raw === 'disputed'
-  ) {
-    return 'disputed';
-  }
-
+  // 2. Cancelled is a terminal state - MUST precede dispute checks
+  // (Prevents cancelled disputed trades from remaining stuck as 'disputed')
   if (
     t.cancelled_at ||
     String(t.escrow_status || '').toUpperCase() === 'CANCELLED' ||
     String(t.escrow_status || '').toUpperCase() === 'REFUNDED' ||
-    raw === 'cancelled'
+    raw === 'cancelled' ||
+    raw === 'canceled'
   ) {
     return 'cancelled';
   }
 
+  // 3. Expired terminal state
+  if (
+    t.expired_at ||
+    String(t.escrow_status || '').toUpperCase() === 'EXPIRED' ||
+    raw === 'expired'
+  ) {
+    return 'expired';
+  }
+
+  // 4. Disputed state - only active if not in a terminal completed/cancelled state
+  if (
+    String(t.escrow_status || '').toUpperCase() === 'DISPUTED' ||
+    raw === 'disputed' ||
+    raw === 'dispute' ||
+    (t.is_disputed === true && raw !== 'cancelled' && raw !== 'released' && raw !== 'expired')
+  ) {
+    return 'disputed';
+  }
+
+  // 5. Paid state
   if (
     t.paid_at ||
     t.marked_paid_at ||
@@ -603,6 +618,7 @@ const ActionButtons = ({
   const tradeStatus = resolveTradeStatus(trade);
   const isBuyer = currentUserRole === 'buy';
   const isTradeExpired = Boolean(isExpired || tradeStatus === 'expired');
+  const isTerminal = ['released', 'completed', 'cancelled', 'expired'].includes(tradeStatus);
 
   const [didNotPayChecked, setDidNotPayChecked] = useState(false);
   const [isPaidConfirmOpen, setIsPaidConfirmOpen] = useState(false);
@@ -611,7 +627,13 @@ const ActionButtons = ({
   const [is2faActive, setIs2faActive] = useState(false);
   const [totpCode, setTotpCode] = useState('');
 
-  const activeDispute = resolvedDispute || trade?.dispute || null;
+  const isOpenDispute = Boolean(
+    (resolvedDispute && ['open', 'OPEN', 'pending', 'PENDING', 'in_review', 'IN_REVIEW', 'investigating'].includes(resolvedDispute?.status)) ||
+    (trade?.dispute && ['open', 'OPEN', 'pending', 'PENDING', 'in_review', 'IN_REVIEW', 'investigating'].includes(trade?.dispute?.status))
+  );
+  const activeDispute = !isTerminal && isOpenDispute ? (resolvedDispute || trade?.dispute || null) : null;
+  const isTradeInDispute = !isTerminal && (tradeStatus === 'disputed' || tradeStatus === 'dispute' || isOpenDispute);
+
   const markedPaidAt = trade?.marked_paid_at || trade?.paid_at || trade?.updated_at;
   const paidTimeMs = markedPaidAt ? new Date(markedPaidAt).getTime() : 0;
   const disputeEligibleTimeMs = paidTimeMs > 0 ? paidTimeMs + (3 * 60 * 60 * 1000) : 0;
@@ -657,25 +679,23 @@ const ActionButtons = ({
     }
   }, [isReleaseConfirmOpen, currentUserId]);
 
-  const canMarkPaid = !isTradeExpired && isBuyer && (tradeStatus === 'active' || tradeStatus === 'pending');
-  // CRITICAL ESCROW RULE: The Release Escrow button MUST strictly render ONLY when trade status is PAID or DISPUTED
-  const canRelease = !isBuyer && (
+  const canMarkPaid = !isTradeExpired && !isTerminal && isBuyer && (tradeStatus === 'active' || tradeStatus === 'pending');
+  // CRITICAL ESCROW RULE: The Release Escrow button MUST strictly render ONLY when trade status is PAID or DISPUTED and not terminal
+  const canRelease = !isTerminal && !isBuyer && (
     tradeStatus === 'paid' || 
     tradeStatus === 'buyer_marked_paid' || 
     tradeStatus === 'payment_sent' || 
-    tradeStatus === 'disputed' || 
-    Boolean(activeDispute)
+    isTradeInDispute
   );
   // Buyer can cancel when: active/pending, marked paid, or in dispute (with mandatory confirmation checkbox)
-  const isTradeInDispute = tradeStatus === 'disputed' || tradeStatus === 'dispute' || Boolean(activeDispute);
-  const canBuyerCancel = !isTradeExpired && isBuyer && (
+  const canBuyerCancel = !isTradeExpired && !isTerminal && isBuyer && (
     tradeStatus === 'active' || 
     tradeStatus === 'pending' || 
     tradeStatus === 'paid' || 
     tradeStatus === 'buyer_marked_paid' || 
     tradeStatus === 'payment_sent' || 
     isTradeInDispute
-  ) && !['released', 'cancelled', 'completed', 'expired'].includes(tradeStatus);
+  );
 
   const handleMarkAsPaid = async () => {
     setIsSubmittingAction(true);
@@ -787,6 +807,10 @@ const ActionButtons = ({
         trade.cancelled_at = nowIso;
         trade.escrow_status = 'CANCELLED';
         trade.status = 'cancelled';
+        trade.is_disputed = false;
+        if (trade.dispute) {
+          trade.dispute.status = 'RESOLVED';
+        }
       }
 
       if (typeof window !== 'undefined') {
@@ -796,6 +820,7 @@ const ActionButtons = ({
               cancelled_at: nowIso,
               escrow_status: 'CANCELLED',
               status: 'cancelled',
+              is_disputed: false,
             },
           })
         );
@@ -911,12 +936,10 @@ const ActionButtons = ({
                   <AlertCircle className="h-5 w-5" />
                   {isTradeInDispute ? 'Cancel Trade & Close Dispute?' : 'Are you sure you want to cancel this trade?'}
                 </AlertDialogTitle>
-                <AlertDialogDescription className="text-xs space-y-2 text-foreground/80">
-                  <p>
-                    {isTradeInDispute
-                      ? 'Cancelling will close this dispute immediately and return the full locked crypto balance (including escrow fee) back to the seller. Only confirm if you agree to cancel this transaction.'
-                      : 'Only confirm cancellation if you have not made the required payment. False cancellation information may affect dispute resolution and account status.'}
-                  </p>
+                <AlertDialogDescription className="text-xs text-foreground/80">
+                  {isTradeInDispute
+                    ? 'Cancelling will close this dispute immediately and return the full locked crypto balance (including escrow fee) back to the seller. Only confirm if you agree to cancel this transaction.'
+                    : 'Only confirm cancellation if you have not made the required payment. False cancellation information may affect dispute resolution and account status.'}
                 </AlertDialogDescription>
               </AlertDialogHeader>
               <div className="space-y-3 py-2">

@@ -837,7 +837,7 @@ export async function POST(
               .eq('id', sUW.id);
           }
 
-          // Table: wallet_assets
+          // Table: wallet_assets (user_id & asset_symbol)
           const { data: sWA } = await adminClient
             .from('wallet_assets')
             .select('*')
@@ -849,10 +849,8 @@ export async function POST(
             await adminClient
               .from('wallet_assets')
               .update({
-                available: Number(sWA.available ?? sWA.balance ?? 0) + totalRefund,
-                locked_escrow: Math.max(0, Number(sWA.locked_escrow ?? sWA.locked_balance ?? 0) - totalRefund),
+                balance: Number(sWA.balance ?? sWA.available ?? 0) + totalRefund,
                 locked_balance: Math.max(0, Number(sWA.locked_balance ?? sWA.locked_escrow ?? 0) - totalRefund),
-                reserved_balance: Math.max(0, Number(sWA.reserved_balance || 0) - totalRefund),
                 updated_at: now
               })
               .eq('id', sWA.id);
