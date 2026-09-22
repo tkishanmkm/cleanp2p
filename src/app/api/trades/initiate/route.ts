@@ -105,10 +105,20 @@ export async function POST(req: Request) {
     }
 
     if (ad) {
-      const isBuyAd = (ad.type || ad.ad_type || 'SELL').toUpperCase() === 'BUY';
-      const adOwnerId = ad.user_id || ad.seller_id || ad.advertiser_id || (ad.profiles && ad.profiles.id);
-      const sellerId = isBuyAd ? user.id : adOwnerId;
-      const buyerId = isBuyAd ? adOwnerId : user.id;
+      const typeCandidates = [
+        ad.trade_type,
+        ad.ad_type,
+        ad.side,
+        ad.adType,
+        ad.type,
+      ].filter(Boolean).map((s: any) => String(s).toUpperCase());
+
+      const isBuyAd = typeCandidates.some((t: string) => t === 'BUY' || t === 'ONLINE_BUY' || t.includes('BUY'));
+      const isInitiatorSelling = isBuyAd;
+
+      const adOwnerId = ad.user_id || ad.seller_id || ad.advertiser_id || (ad.profiles && ad.profiles.id) || 'trader_verified_1';
+      const sellerId = isInitiatorSelling ? user.id : adOwnerId;
+      const buyerId = isInitiatorSelling ? adOwnerId : user.id;
       const unitPrice = Number(ad.fixed_rate ?? ad.price ?? 1);
       const calculatedCrypto = !isNaN(numericCrypto) && numericCrypto > 0 ? numericCrypto : (unitPrice > 0 ? numericFiat / unitPrice : 0);
 

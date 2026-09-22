@@ -187,12 +187,16 @@ const ParticipantRow = ({
   fallbackUsername?: string;
 }) => {
   const supabase = createClient();
-  const [displayUsername, setDisplayUsername] = useState<string>(fallbackUsername || 'Trader');
+  const initialName = (fallbackUsername && fallbackUsername !== 'Trader' && fallbackUsername !== 'Buyer' && fallbackUsername !== 'Seller') ? fallbackUsername : null;
+  const [displayUsername, setDisplayUsername] = useState<string | null>(initialName);
   const [merchantTier, setMerchantTier] = useState<string | null>(null);
 
   useEffect(() => {
+    let isMounted = true;
     if (!userId) {
-      if (fallbackUsername) setDisplayUsername(fallbackUsername);
+      if (initialName) {
+        setDisplayUsername(initialName);
+      }
       return;
     }
 
@@ -205,33 +209,44 @@ const ParticipantRow = ({
           .eq('id', userId)
           .maybeSingle();
 
-        if (data?.username) {
-          setDisplayUsername(data.username);
-        } else {
-          setDisplayUsername(fallbackUsername || 'Trader');
-        }
-        if (data?.merchant_tier) {
-          setMerchantTier(data.merchant_tier);
+        if (isMounted) {
+          if (data?.username) {
+            setDisplayUsername(data.username);
+          } else if (initialName) {
+            setDisplayUsername(initialName);
+          }
+          if (data?.merchant_tier) {
+            setMerchantTier(data.merchant_tier);
+          }
         }
         return;
       }
-      setDisplayUsername(fallbackUsername || (userId && !userId.includes('-') ? userId : 'Trader'));
+      if (isMounted) {
+        setDisplayUsername(initialName || (userId && !userId.includes('-') ? userId : null));
+      }
     };
 
     fetchUsername();
-  }, [userId, fallbackUsername, supabase]);
+    return () => {
+      isMounted = false;
+    };
+  }, [userId, fallbackUsername, initialName, supabase]);
 
   return (
     <div className="flex justify-between items-center text-xs sm:text-sm py-1.5 border-b border-border/40">
       <div className="font-bold text-foreground">{label}</div>
       <div className="flex items-center gap-1.5">
-        <Link
-          href={`/users/${displayUsername}`}
-          className="font-bold text-primary hover:underline flex items-center gap-1.5"
-        >
-          <span>@{displayUsername}</span>
-        </Link>
-        <MerchantBadge tier={merchantTier} size="sm" />
+        {displayUsername ? (
+          <Link
+            href={`/users/${displayUsername}`}
+            className="font-bold text-primary hover:underline flex items-center gap-1.5"
+          >
+            <span>@{displayUsername}</span>
+          </Link>
+        ) : (
+          <span className="h-4 w-20 bg-muted animate-pulse rounded inline-block" />
+        )}
+        {merchantTier && <MerchantBadge tier={merchantTier} size="sm" />}
       </div>
     </div>
   );
@@ -1662,8 +1677,8 @@ export function TradeDetails({
         : [rawAdTags]
   ).filter(Boolean).map((t: any) => String(t).replace(/^#/, ''));
 
-  // Prioritize ad.id (e.g. per9yeeotd4k) over generated system IDs
-  const rawAdRef = ad?.id || ad?.public_ad_id || ad?.public_id || trade?.ad_id || trade?.adId || trade?.public_ad_id;
+  // Prioritize ad.id (e.g. per9yeeotd4k, 9sxin3zpbdgv) over generated system IDs
+  const rawAdRef = ad?.id || ad?.public_ad_id || ad?.public_id || ad?.ad_id || trade?.ad_id || trade?.adId || trade?.public_ad_id || trade?.ad_public_id || trade?.ad;
   const publicAdDisplayId = rawAdRef ? (String(rawAdRef).replace(/^#/, '')) : '';
   const sellerOfferTerms = (
     ad?.terms || 
@@ -1866,12 +1881,12 @@ export function TradeDetails({
             <ParticipantRow
               label="Buyer"
               userId={buyerId}
-              fallbackUsername={trade?.buyer?.username || trade?.buyer_username || 'Trader'}
+              fallbackUsername={trade?.buyer?.username || trade?.buyer_username}
             />
             <ParticipantRow
               label="Seller"
               userId={sellerId}
-              fallbackUsername={trade?.seller?.username || trade?.seller_username || 'Trader'}
+              fallbackUsername={trade?.seller?.username || trade?.seller_username}
             />
             {(trade?.paymentMethod || trade?.payment_method) && (
               <DetailRow label="Payment Method" value={trade.paymentMethod || trade.payment_method} />
@@ -1950,13 +1965,22 @@ export function TradeDetails({
             <h4 className="text-xs font-bold text-foreground uppercase tracking-wider mb-1">
               Offer Terms &amp; Ad Info
             </h4>
-            <DetailRow
-              label="Ad ID"
-              boldLabel
-              value={`#${publicAdDisplayId}`}
-              isLink={Boolean(publicAdDisplayId)}
-              href={`/ad/${publicAdDisplayId}`}
-            />
+            {publicAdDisplayId ? (
+              <DetailRow
+                label="Ad ID"
+                boldLabel
+                value={`#${publicAdDisplayId}`}
+                isLink={true}
+                href={`/ad/${publicAdDisplayId}`}
+              />
+            ) : (
+              <DetailRow
+                label="Ad ID"
+                boldLabel
+                value="—"
+                isLink={false}
+              />
+            )}
             {offerLabel && (
               <DetailRow
                 label="Offer Tag"

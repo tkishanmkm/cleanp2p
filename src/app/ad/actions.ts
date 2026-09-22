@@ -597,16 +597,24 @@ export async function createTradeOrderWithEscrow(input: {
     const assetSymbol = (ad.asset_symbol || ad.crypto || ad.asset_code || 'BTC').toUpperCase();
     const fiatSymbol = (ad.fiat_symbol || ad.fiat || ad.fiat_currency || 'USD').toUpperCase();
 
-    const rawType = String(ad.type || ad.ad_type || ad.adType || ad.trade_type || ad.side || '').toUpperCase();
-    const isAdSell = rawType === 'SELL' || rawType === 'ONLINE_SELL' || rawType === '';
-    const isInitiatorSelling = !isAdSell; // On a BUY ad, initiator is selling crypto. On a SELL ad, advertiser is selling.
-
     // 5. Determine who is providing crypto for escrow:
-    // If BUY ad: The initiating user is the seller and must have available crypto + 1.5% fee
-    // If SELL ad: The advertiser is the seller and must have available crypto + 1.5% fee
+    const typeCandidates = [
+      ad.trade_type,
+      ad.ad_type,
+      ad.side,
+      ad.adType,
+      ad.type,
+    ].filter(Boolean).map((s: any) => String(s).toUpperCase());
+
+    const isBuyAd = typeCandidates.some((t: string) => t === 'BUY' || t === 'ONLINE_BUY' || t.includes('BUY'));
+    // If ad is BUY: Advertiser is buying crypto with fiat, so the initiating user is the SELLER providing crypto.
+    // If ad is SELL: Advertiser is selling crypto for fiat, so the advertiser is the SELLER providing crypto.
+    const isInitiatorSelling = isBuyAd;
+    const isAdSell = !isBuyAd;
+
     const adOwnerId = ad.user_id || ad.seller_id || ad.advertiser_id || (ad.profiles && ad.profiles.id) || 'trader_verified_1';
-    const sellerId = isAdSell ? adOwnerId : user.id;
-    const buyerId = isAdSell ? user.id : adOwnerId;
+    const sellerId = isInitiatorSelling ? user.id : adOwnerId;
+    const buyerId = isInitiatorSelling ? adOwnerId : user.id;
 
     // Check Seller available balance comprehensively
     const sellerBalanceInfo = await fetchUserCryptoBalance(sellerId, assetSymbol);
@@ -655,30 +663,21 @@ export async function createTradeOrderWithEscrow(input: {
     const newLocked = sellerBalanceInfo.lockedEscrow + totalCryptoRequiredForSeller;
 
     try {
-      if (sellerBalanceInfo.walletId) {
-        const { data: updatedRows, error: updateErr } = await adminClient
-          .from('wallet_assets')
-          .update({
-            available: newAvail,
-            locked_escrow: newLocked,
-            updated_at: new Date().toISOString(),
-          })
-          .eq('wallet_id', sellerBalanceInfo.walletId)
-          .or(`asset_code.eq.${assetSymbol},asset_symbol.eq.${assetSymbol}`)
-          .select('wallet_id');
+      // 7a. Update all matching wallet_assets for this user and crypto
+      const { data: updatedAssets } = await adminClient
+        .from('wallet_assets')
+        .update({
+          balance: newAvail,
+          locked_balance: newLocked,
+          available: newAvail,
+          locked_escrow: newLocked,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('user_id', sellerId)
+        .or(`asset_symbol.eq.${assetSymbol},asset_code.eq.${assetSymbol},symbol.eq.${assetSymbol}`)
+        .select('id');
 
-        if (updateErr || !updatedRows || updatedRows.length === 0) {
-          await adminClient
-            .from('wallet_assets')
-            .upsert({
-              wallet_id: sellerBalanceInfo.walletId,
-              asset_code: assetSymbol,
-              available: newAvail,
-              locked_escrow: newLocked,
-              updated_at: new Date().toISOString(),
-            });
-        }
-      } else if (sellerBalanceInfo.matchedAssetRow?.id) {
+      if (sellerBalanceInfo.walletId) {
         await adminClient
           .from('wallet_assets')
           .update({
@@ -688,13 +687,18 @@ export async function createTradeOrderWithEscrow(input: {
             locked_escrow: newLocked,
             updated_at: new Date().toISOString(),
           })
-          .eq('id', sellerBalanceInfo.matchedAssetRow.id);
-      } else {
+          .eq('wallet_id', sellerBalanceInfo.walletId)
+          .or(`asset_symbol.eq.${assetSymbol},asset_code.eq.${assetSymbol},symbol.eq.${assetSymbol}`);
+      }
+
+      // If no rows were updated, insert / upsert asset row
+      if (!updatedAssets || updatedAssets.length === 0) {
         await adminClient
           .from('wallet_assets')
           .upsert({
             user_id: sellerId,
             asset_symbol: assetSymbol,
+            asset_code: assetSymbol,
             balance: newAvail,
             locked_balance: newLocked,
             available: newAvail,
@@ -703,6 +707,7 @@ export async function createTradeOrderWithEscrow(input: {
           });
       }
 
+      // 7b. Sync user_wallets table
       try {
         await adminClient
           .from('user_wallets')
@@ -711,12 +716,47 @@ export async function createTradeOrderWithEscrow(input: {
             asset_symbol: assetSymbol,
             balance: newAvail,
             locked_balance: newLocked,
+            available_balance: newAvail,
             updated_at: new Date().toISOString(),
           });
       } catch (uwErr) {
         console.warn('user_wallets lock sync warning:', uwErr);
       }
 
+      // 7c. Sync balances table
+      try {
+        const { data: sBal } = await adminClient
+          .from('balances')
+          .select('*')
+          .eq('user_id', sellerId)
+          .or(`asset.ilike.${assetSymbol},asset_symbol.ilike.${assetSymbol}`)
+          .maybeSingle();
+
+        if (sBal) {
+          await adminClient.from('balances').update({
+            available_balance: newAvail,
+            available: newAvail,
+            locked_balance: newLocked,
+            total_balance: newAvail + newLocked,
+            updated_at: new Date().toISOString(),
+          }).eq('id', sBal.id);
+        } else {
+          await adminClient.from('balances').insert({
+            user_id: sellerId,
+            asset: assetSymbol,
+            asset_symbol: assetSymbol,
+            available_balance: newAvail,
+            available: newAvail,
+            locked_balance: newLocked,
+            total_balance: newAvail + newLocked,
+            updated_at: new Date().toISOString(),
+          });
+        }
+      } catch (balErr) {
+        console.warn('balances lock sync warning:', balErr);
+      }
+
+      // 7d. Sync profiles table
       if (assetSymbol === 'BTC') {
         await adminClient.from('profiles').update({ btc_balance: newAvail, updated_at: new Date().toISOString() }).eq('id', sellerId);
       } else if (assetSymbol === 'ETH') {
@@ -740,25 +780,18 @@ export async function createTradeOrderWithEscrow(input: {
       buyer_id: String(buyerId),
       seller_id: String(sellerId),
       crypto: assetSymbol,
-      coin: assetSymbol,
-      asset: assetSymbol,
-      crypto_currency: assetSymbol,
       amount: baseCryptoAmount,
       crypto_amount: baseCryptoAmount,
-      amount_crypto: baseCryptoAmount,
       fiat_currency: fiatSymbol,
       fiat_amount: fiatAmount,
-      amount_usd: fiatAmount,
-      total_amount: fiatAmount,
       price: price,
       unit_price: price,
-      total_price: fiatAmount,
       escrow_fee: escrowFeeCrypto,
       status: 'pending',
       escrow_status: 'locked',
+      public_ad_id: String(cleanAdId).replace(/^#/, ''),
     };
 
-    // Only set ad_id if validAdUuid exists in ads table to strictly prevent trades_ad_id_fkey or UUID syntax errors
     if (validAdUuid) {
       tradePayload.ad_id = validAdUuid;
     }
@@ -778,7 +811,7 @@ export async function createTradeOrderWithEscrow(input: {
     } else {
       console.warn('[Trade Insert Full Failed, trying safe payload without foreign key]:', orderError?.message || orderError);
       
-      // Attempt 2: Clean payload without ad_id
+      // Attempt 2: Clean payload with public_ad_id
       const cleanPayload: Record<string, any> = {
         trade_id: shortTradeId,
         public_id: shortTradeId,
@@ -795,6 +828,8 @@ export async function createTradeOrderWithEscrow(input: {
         unit_price: price,
         status: 'pending',
         escrow_status: 'locked',
+        escrow_fee: escrowFeeCrypto,
+        public_ad_id: String(cleanAdId).replace(/^#/, ''),
       };
 
       const { data: fbOrder, error: fbError } = await adminClient

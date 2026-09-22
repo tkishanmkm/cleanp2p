@@ -171,7 +171,7 @@ export default function TradePage() {
       }
 
       // 5. Fetch Ad details defensively across tables (p2p_ads & ads) and fallback references
-      const rawAdRef = tradeData.ad_id || tradeData.adId || tradeData.public_ad_id;
+      const rawAdRef = tradeData.ad_id || tradeData.adId || tradeData.public_ad_id || tradeData.ad_public_id || tradeData.ad;
       let adResult: any = null;
 
       const adTables = ['p2p_ads', 'ads'];
@@ -207,23 +207,27 @@ export default function TradePage() {
         }
       }
 
-      // Fallback: If ad still not found by direct ID, search seller's recent ad matching the trade crypto & fiat
-      if (!adResult && tradeData.seller_id) {
-        for (const table of adTables) {
+      // Fallback: If ad still not found by direct ID, search participants' recent ad matching the trade crypto & fiat
+      if (!adResult) {
+        const participantIds = [tradeData.seller_id, tradeData.buyer_id, tradeData.sellerId, tradeData.buyerId].filter(Boolean);
+        for (const pId of participantIds) {
           if (adResult) break;
-          try {
-            const cryptoSym = tradeData.crypto || tradeData.asset_symbol || tradeData.coin || 'BTC';
-            const { data: sellerAd } = await supabase
-              .from(table)
-              .select('*')
-              .eq('user_id', tradeData.seller_id)
-              .ilike('asset_symbol', cryptoSym)
-              .order('created_at', { ascending: false })
-              .limit(1)
-              .maybeSingle();
+          for (const table of adTables) {
+            if (adResult) break;
+            try {
+              const cryptoSym = tradeData.crypto || tradeData.asset_symbol || tradeData.coin || 'USDT';
+              const { data: matchedAd } = await supabase
+                .from(table)
+                .select('*')
+                .eq('user_id', pId)
+                .ilike('asset_symbol', cryptoSym)
+                .order('created_at', { ascending: false })
+                .limit(1)
+                .maybeSingle();
 
-            if (sellerAd) adResult = sellerAd;
-          } catch {}
+              if (matchedAd) adResult = matchedAd;
+            } catch {}
+          }
         }
       }
 
@@ -231,7 +235,7 @@ export default function TradePage() {
         setAd(adResult);
       } else {
         // Construct ad metadata from trade record
-        const fallbackAdId = tradeData.ad_id || tradeData.public_ad_id || tradeData.adId || '';
+        const fallbackAdId = tradeData.ad_id || tradeData.public_ad_id || tradeData.ad_public_id || tradeData.adId || tradeData.ad || '';
         setAd({
           id: fallbackAdId,
           public_id: fallbackAdId,

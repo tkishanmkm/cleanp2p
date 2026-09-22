@@ -171,7 +171,7 @@ export function ActiveTradesList() {
         const rawCoin = t.crypto || t.crypto_currency || t.asset_symbol || 'USDT';
         const coin = rawCoin.toUpperCase();
         const rawTradeId = t.trade_id || t.id;
-        const shortTradeId = '#' + (rawTradeId || '').replace(/[^a-zA-Z0-9]/g, '').slice(0, 8).toUpperCase();
+        const shortTradeId = '#' + (rawTradeId || '').replace(/[^a-zA-Z0-9]/g, '').slice(0, 12).toUpperCase();
 
         mapped.push({
           id: t.id,

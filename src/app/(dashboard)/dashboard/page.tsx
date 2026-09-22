@@ -198,7 +198,7 @@ export default function DashboardPage() {
         else if (isPaid) effectiveStatus = 'paid';
 
         const rawTradeId = raw.trade_id || raw.id;
-        const shortTradeId = '#' + (rawTradeId || '').replace(/[^a-zA-Z0-9]/g, '').slice(0, 8).toUpperCase();
+        const shortTradeId = '#' + (rawTradeId || '').replace(/[^a-zA-Z0-9]/g, '').slice(0, 12).toUpperCase();
 
         mapped.push({
           id: raw.id,

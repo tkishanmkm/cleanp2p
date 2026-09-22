@@ -173,10 +173,21 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    const isSellAd = (ad.type || ad.ad_type || 'SELL').toUpperCase() === 'SELL';
-    const adOwnerId = ad.user_id || ad.seller_id || ad.advertiser_id || (ad.profiles && ad.profiles.id);
-    const buyerId = isSellAd ? user.id : adOwnerId;
-    const sellerId = isSellAd ? adOwnerId : user.id;
+    const typeCandidates = [
+      ad.trade_type,
+      ad.ad_type,
+      ad.side,
+      ad.adType,
+      ad.type,
+    ].filter(Boolean).map((s: any) => String(s).toUpperCase());
+
+    const isBuyAd = typeCandidates.some((t: string) => t === 'BUY' || t === 'ONLINE_BUY' || t.includes('BUY'));
+    const isInitiatorSelling = isBuyAd;
+    const isAdSell = !isBuyAd;
+
+    const adOwnerId = ad.user_id || ad.seller_id || ad.advertiser_id || (ad.profiles && ad.profiles.id) || 'trader_verified_1';
+    const sellerId = isInitiatorSelling ? user.id : adOwnerId;
+    const buyerId = isInitiatorSelling ? adOwnerId : user.id;
 
     const unitPrice = Number(ad.fixed_rate ?? ad.price ?? 1);
     const calculatedCrypto = parseFloat(crypto_amount) || (unitPrice > 0 ? numericFiat / unitPrice : 0);
@@ -213,70 +224,96 @@ export async function POST(req: NextRequest) {
       console.warn('lock_seller_escrow RPC call notice:', e);
     }
 
-    // Direct atomic balance deduction fallback
+    // Direct atomic balance deduction fallback across all balance tables
     try {
-      const { data: sBal } = await adminClient
-        .from('balances')
-        .select('*')
-        .eq('user_id', sellerId)
-        .ilike('asset', targetAsset)
-        .maybeSingle();
-
-      if (sBal) {
-        const avail = Number(sBal.available_balance ?? 0);
-        if (avail < totalLock) {
-          return NextResponse.json(
-            { error: `Seller has insufficient available balance (${avail.toFixed(6)} ${targetAsset}). Required: ${totalLock.toFixed(6)} ${targetAsset} (${calculatedCrypto.toFixed(6)} + ${escrowFee.toFixed(6)} escrow fee).` },
-            { status: 400 }
-          );
-        }
-        await adminClient
-          .from('balances')
-          .update({
-            available_balance: Math.max(0, avail - totalLock),
-            locked_balance: Number(sBal.locked_balance || 0) + totalLock,
-            updated_at: new Date().toISOString()
-          })
-          .eq('id', sBal.id);
-      }
-
       const { data: sWA } = await adminClient
         .from('wallet_assets')
         .select('*')
         .eq('user_id', sellerId)
-        .ilike('asset_symbol', targetAsset)
-        .maybeSingle();
+        .or(`asset_symbol.eq.${targetAsset},asset_code.eq.${targetAsset},symbol.eq.${targetAsset}`);
 
-      if (sWA) {
-        const availWA = Number(sWA.available ?? sWA.balance ?? 0);
-        await adminClient
-          .from('wallet_assets')
-          .update({
-            available: Math.max(0, availWA - totalLock),
-            locked_escrow: Number(sWA.locked_escrow ?? sWA.locked_balance ?? 0) + totalLock,
-            locked_balance: Number(sWA.locked_balance ?? sWA.locked_escrow ?? 0) + totalLock,
-            updated_at: new Date().toISOString()
-          })
-          .eq('id', sWA.id);
+      if (sWA && sWA.length > 0) {
+        for (const row of sWA) {
+          const availWA = Number(row.balance !== undefined && row.balance !== null ? row.balance : (row.available ?? 0));
+          const lockedWA = Number(row.locked_balance ?? row.locked_escrow ?? 0);
+          const nextAvail = Math.max(0, availWA - totalLock);
+          const nextLocked = lockedWA + totalLock;
+          await adminClient
+            .from('wallet_assets')
+            .update({
+              balance: nextAvail,
+              available: nextAvail,
+              locked_escrow: nextLocked,
+              locked_balance: nextLocked,
+              in_escrow: nextLocked,
+              updated_at: new Date().toISOString()
+            })
+            .eq('id', row.id);
+        }
+      }
+
+      const { data: sBal } = await adminClient
+        .from('balances')
+        .select('*')
+        .eq('user_id', sellerId)
+        .or(`asset.eq.${targetAsset},asset_symbol.eq.${targetAsset}`);
+
+      if (sBal && sBal.length > 0) {
+        for (const row of sBal) {
+          const avail = Number(row.available_balance ?? row.available ?? 0);
+          const locked = Number(row.locked_balance || 0);
+          await adminClient
+            .from('balances')
+            .update({
+              available_balance: Math.max(0, avail - totalLock),
+              available: Math.max(0, avail - totalLock),
+              locked_balance: locked + totalLock,
+              updated_at: new Date().toISOString()
+            })
+            .eq('id', row.id);
+        }
       }
 
       const { data: sUW } = await adminClient
         .from('user_wallets')
         .select('*')
         .eq('user_id', sellerId)
-        .ilike('asset_symbol', targetAsset)
-        .maybeSingle();
+        .or(`asset_symbol.eq.${targetAsset},asset_code.eq.${targetAsset}`);
 
-      if (sUW) {
-        const availUW = Number(sUW.available_balance ?? sUW.balance ?? 0);
-        await adminClient
-          .from('user_wallets')
-          .update({
-            available_balance: Math.max(0, availUW - totalLock),
-            locked_balance: Number(sUW.locked_balance || 0) + totalLock,
-            updated_at: new Date().toISOString()
-          })
-          .eq('id', sUW.id);
+      if (sUW && sUW.length > 0) {
+        for (const row of sUW) {
+          const availUW = Number(row.available_balance ?? row.balance ?? 0);
+          const lockedUW = Number(row.locked_balance || 0);
+          await adminClient
+            .from('user_wallets')
+            .update({
+              available_balance: Math.max(0, availUW - totalLock),
+              balance: Math.max(0, availUW - totalLock),
+              locked_balance: lockedUW + totalLock,
+              updated_at: new Date().toISOString()
+            })
+            .eq('id', row.id);
+        }
+      }
+
+      // Also sync profiles table for instant UI responsiveness
+      try {
+        const { data: sProf } = await adminClient
+          .from('profiles')
+          .select('btc_balance, eth_balance, ltc_balance, usdt_balance')
+          .eq('id', sellerId)
+          .maybeSingle();
+
+        if (sProf) {
+          const profLock: Record<string, any> = { updated_at: new Date().toISOString() };
+          if (targetAsset === 'BTC') profLock.btc_balance = Math.max(0, Number(sProf.btc_balance || 0) - totalLock);
+          else if (targetAsset === 'ETH') profLock.eth_balance = Math.max(0, Number(sProf.eth_balance || 0) - totalLock);
+          else if (targetAsset === 'LTC') profLock.ltc_balance = Math.max(0, Number(sProf.ltc_balance || 0) - totalLock);
+          else if (targetAsset === 'USDT') profLock.usdt_balance = Math.max(0, Number(sProf.usdt_balance || 0) - totalLock);
+          await adminClient.from('profiles').update(profLock).eq('id', sellerId);
+        }
+      } catch (profErr) {
+        console.warn('profiles lock sync warning:', profErr);
       }
     } catch (balLockErr) {
       console.warn('Direct balance lock warning:', balLockErr);
@@ -285,6 +322,7 @@ export async function POST(req: NextRequest) {
     // 4. Insert Trade into database safely
     let tradeResult: any = null;
 
+    const adIdentifier = String(ad.public_ad_id || ad.public_id || ad.ad_id || ad.id || '');
     const tradePayload: Record<string, any> = {
       trade_id: shortId,
       public_id: shortId,
@@ -306,11 +344,13 @@ export async function POST(req: NextRequest) {
       payment_window_minutes: ad.payment_window || ad.payment_window_minutes || 30,
       terms: ad.terms || ad.terms_conditions || '',
       tags: Array.isArray(ad.tags) ? ad.tags : (Array.isArray(ad.ad_tags) ? ad.ad_tags : []),
-      public_ad_id: ad.public_ad_id || ad.public_id || ad.ad_id || validAdUuid || String(ad.id),
+      public_ad_id: adIdentifier,
     };
 
-    if (validAdUuid) {
+    if (validAdUuid && isValidUUID(validAdUuid)) {
       tradePayload.ad_id = validAdUuid;
+    } else if (ad.id && isValidUUID(ad.id)) {
+      tradePayload.ad_id = ad.id;
     }
 
     // Attempt insert with standard table columns
@@ -332,9 +372,12 @@ export async function POST(req: NextRequest) {
           seller_id: String(sellerId),
           crypto: (ad.crypto || ad.asset || 'BTC').toUpperCase(),
           amount: calculatedCrypto,
+          crypto_amount: calculatedCrypto,
           fiat_amount: numericFiat,
           price: unitPrice,
           status: 'PENDING',
+          escrow_fee: escrowFee,
+          public_ad_id: adIdentifier,
         })
         .select('*')
         .single();

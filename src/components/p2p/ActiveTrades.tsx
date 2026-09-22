@@ -116,7 +116,7 @@ export default function ActiveTrades({ currentUserId }: { currentUserId: string 
               <div key={trade.id} className="p-5 bg-slate-950 border border-slate-800 rounded-xl flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
                 <div className="space-y-1">
                   <div className="flex items-center gap-2">
-                    <span className="font-bold text-indigo-400">Trade #{trade.id.slice(0, 8)}</span>
+                    <span className="font-bold text-indigo-400">Trade #{(trade.trade_id || trade.public_id || trade.id).replace(/[^a-zA-Z0-9]/g, '').slice(0, 12).toUpperCase()}</span>
                     <span className={`px-2 py-0.5 text-xs rounded font-semibold ${trade.status === 'COMPLETED' ? 'bg-emerald-950 text-emerald-400' : 'bg-amber-950 text-amber-400'}`}>
                       {trade.status}
                     </span>

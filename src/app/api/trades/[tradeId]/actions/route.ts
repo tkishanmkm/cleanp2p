@@ -246,7 +246,9 @@ export async function POST(
       try {
         const cryptoSym = (trade?.crypto || trade?.asset_symbol || trade?.coin || 'USDT').toUpperCase();
         const cryptoAmt = Number(trade?.crypto_amount ?? trade?.amount ?? 0);
-        if (trade?.seller_id && cryptoAmt > 0) {
+        const feeAmt = Number(trade?.escrow_fee ?? trade?.platform_fee ?? (cryptoAmt * 0.015));
+        const totalRefund = cryptoAmt + feeAmt;
+        if (trade?.seller_id && totalRefund > 0) {
           // 2a. Update user_wallets
           const { data: uWallet } = await adminClient
             .from('user_wallets')
@@ -258,17 +260,42 @@ export async function POST(
           if (uWallet) {
             const curLocked = Number(uWallet.locked_balance || 0);
             const curReserved = Number(uWallet.reserved_balance || 0);
+            const curAvail = Number(uWallet.available_balance || uWallet.balance || 0);
             await adminClient
               .from('user_wallets')
               .update({
-                locked_balance: Math.max(0, curLocked - cryptoAmt),
-                reserved_balance: Math.max(0, curReserved - cryptoAmt),
+                available_balance: curAvail + totalRefund,
+                balance: curAvail + totalRefund,
+                locked_balance: Math.max(0, curLocked - totalRefund),
+                reserved_balance: Math.max(0, curReserved - totalRefund),
                 updated_at: now
               })
               .eq('id', uWallet.id);
           }
 
-          // 2b. Update wallet_assets
+          // 2b. Update balances table
+          const { data: uBal } = await adminClient
+            .from('balances')
+            .select('*')
+            .eq('user_id', trade.seller_id)
+            .ilike('asset', cryptoSym)
+            .maybeSingle();
+
+          if (uBal) {
+            const curAvail = Number(uBal.available_balance ?? uBal.available ?? 0);
+            const curLocked = Number(uBal.locked_balance || 0);
+            await adminClient
+              .from('balances')
+              .update({
+                available_balance: curAvail + totalRefund,
+                available: curAvail + totalRefund,
+                locked_balance: Math.max(0, curLocked - totalRefund),
+                updated_at: now
+              })
+              .eq('id', uBal.id);
+          }
+
+          // 2c. Update wallet_assets
           const { data: sellerAsset } = await adminClient
             .from('wallet_assets')
             .select('*')
@@ -279,19 +306,22 @@ export async function POST(
           if (sellerAsset) {
             const curLocked = Number(sellerAsset.locked_escrow ?? sellerAsset.locked_balance ?? 0);
             const curReserved = Number(sellerAsset.reserved_balance ?? 0);
-            const curAvail = Number(sellerAsset.available ?? sellerAsset.balance ?? 0);
+            const curAvail = Number(sellerAsset.balance !== undefined && sellerAsset.balance !== null ? sellerAsset.balance : (sellerAsset.available ?? 0));
             await adminClient
               .from('wallet_assets')
               .update({
-                available: curAvail + cryptoAmt,
-                locked_escrow: Math.max(0, curLocked - cryptoAmt),
-                reserved_balance: Math.max(0, curReserved - cryptoAmt),
+                balance: curAvail + totalRefund,
+                available: curAvail + totalRefund,
+                locked_escrow: Math.max(0, curLocked - totalRefund),
+                locked_balance: Math.max(0, curLocked - totalRefund),
+                in_escrow: Math.max(0, Number(sellerAsset.in_escrow ?? 0) - totalRefund),
+                reserved_balance: Math.max(0, curReserved - totalRefund),
                 updated_at: now
               })
               .eq('id', sellerAsset.id);
           }
 
-          // 2c. Update wallets (chain-level)
+          // 2d. Update wallets (chain-level)
           const { data: mainWallet } = await adminClient
             .from('wallets')
             .select('*')
@@ -305,9 +335,9 @@ export async function POST(
             await adminClient
               .from('wallets')
               .update({
-                available_balance: curAvail + cryptoAmt,
-                locked_balance: Math.max(0, curLocked - cryptoAmt),
-                reserved_balance: Math.max(0, curReserved - cryptoAmt),
+                available_balance: curAvail + totalRefund,
+                locked_balance: Math.max(0, curLocked - totalRefund),
+                reserved_balance: Math.max(0, curReserved - totalRefund),
                 updated_at: now
               })
               .eq('id', mainWallet.id);
@@ -535,6 +565,7 @@ export async function POST(
               .update({
                 locked_escrow: Math.max(0, Number(sWA.locked_escrow ?? sWA.locked_balance ?? 0) - totalSellerDeduct),
                 locked_balance: Math.max(0, Number(sWA.locked_balance ?? sWA.locked_escrow ?? 0) - totalSellerDeduct),
+                in_escrow: Math.max(0, Number(sWA.in_escrow ?? sWA.locked_escrow ?? 0) - totalSellerDeduct),
                 reserved_balance: Math.max(0, Number(sWA.reserved_balance || 0) - totalSellerDeduct),
                 updated_at: now
               })
@@ -631,10 +662,13 @@ export async function POST(
             .maybeSingle();
 
           if (bWA) {
+            const curBal = Number(bWA.balance !== undefined && bWA.balance !== null ? bWA.balance : (bWA.available ?? 0));
+            const curAvail = Number(bWA.available !== undefined && bWA.available !== null ? bWA.available : (bWA.balance ?? 0));
             await adminClient
               .from('wallet_assets')
               .update({
-                available: Number(bWA.available ?? bWA.balance ?? 0) + coinAmount,
+                balance: curBal + coinAmount,
+                available: curAvail + coinAmount,
                 updated_at: now
               })
               .eq('id', bWA.id);
@@ -644,9 +678,11 @@ export async function POST(
               .insert({
                 user_id: trade.buyer_id,
                 asset_symbol: coinSymbol,
+                balance: coinAmount,
                 available: coinAmount,
                 locked_escrow: 0,
                 locked_balance: 0,
+                in_escrow: 0,
                 updated_at: now
               });
           }
@@ -667,6 +703,26 @@ export async function POST(
                 updated_at: now
               })
               .eq('id', bW.id);
+          }
+
+          // Table: profiles (Credit buyer coin balance)
+          try {
+            const { data: bProf } = await adminClient
+              .from('profiles')
+              .select('btc_balance, eth_balance, ltc_balance, usdt_balance')
+              .eq('id', trade.buyer_id)
+              .maybeSingle();
+
+            if (bProf) {
+              const bProfUpdate: Record<string, any> = { updated_at: now };
+              if (coinSymbol === 'BTC') bProfUpdate.btc_balance = Number(((bProf.btc_balance || 0) + coinAmount).toFixed(8));
+              else if (coinSymbol === 'ETH') bProfUpdate.eth_balance = Number(((bProf.eth_balance || 0) + coinAmount).toFixed(8));
+              else if (coinSymbol === 'LTC') bProfUpdate.ltc_balance = Number(((bProf.ltc_balance || 0) + coinAmount).toFixed(8));
+              else if (coinSymbol === 'USDT') bProfUpdate.usdt_balance = Number(((bProf.usdt_balance || 0) + coinAmount).toFixed(8));
+              await adminClient.from('profiles').update(bProfUpdate).eq('id', trade.buyer_id);
+            }
+          } catch (bProfErr) {
+            console.warn('Buyer profile balance update warning:', bProfErr);
           }
         }
 
@@ -846,11 +902,16 @@ export async function POST(
             .maybeSingle();
 
           if (sWA) {
+            const curBal = Number(sWA.balance !== undefined && sWA.balance !== null ? sWA.balance : (sWA.available ?? 0));
+            const curAvail = Number(sWA.available !== undefined && sWA.available !== null ? sWA.available : (sWA.balance ?? 0));
             await adminClient
               .from('wallet_assets')
               .update({
-                balance: Number(sWA.balance ?? sWA.available ?? 0) + totalRefund,
+                balance: curBal + totalRefund,
+                available: curAvail + totalRefund,
                 locked_balance: Math.max(0, Number(sWA.locked_balance ?? sWA.locked_escrow ?? 0) - totalRefund),
+                locked_escrow: Math.max(0, Number(sWA.locked_escrow ?? sWA.locked_balance ?? 0) - totalRefund),
+                in_escrow: Math.max(0, Number(sWA.in_escrow ?? 0) - totalRefund),
                 updated_at: now
               })
               .eq('id', sWA.id);
@@ -872,6 +933,26 @@ export async function POST(
                 updated_at: now
               })
               .eq('id', sW.id);
+          }
+
+          // Table: profiles (Refund seller coin balance)
+          try {
+            const { data: sProf } = await adminClient
+              .from('profiles')
+              .select('btc_balance, eth_balance, ltc_balance, usdt_balance')
+              .eq('id', trade.seller_id)
+              .maybeSingle();
+
+            if (sProf) {
+              const sProfRefund: Record<string, any> = { updated_at: now };
+              if (coinSymbol === 'BTC') sProfRefund.btc_balance = Number(((sProf.btc_balance || 0) + totalRefund).toFixed(8));
+              else if (coinSymbol === 'ETH') sProfRefund.eth_balance = Number(((sProf.eth_balance || 0) + totalRefund).toFixed(8));
+              else if (coinSymbol === 'LTC') sProfRefund.ltc_balance = Number(((sProf.ltc_balance || 0) + totalRefund).toFixed(8));
+              else if (coinSymbol === 'USDT') sProfRefund.usdt_balance = Number(((sProf.usdt_balance || 0) + totalRefund).toFixed(8));
+              await adminClient.from('profiles').update(sProfRefund).eq('id', trade.seller_id);
+            }
+          } catch (sProfErr) {
+            console.warn('Seller profile refund warning:', sProfErr);
           }
         }
 

@@ -39,7 +39,31 @@ export async function getUserWalletBalances(
 
   if (!userId) return balanceMap;
 
-  // 0. Query balances table directly
+  // 1. Primary Authority: Server API /api/wallet/balance (accurate locked escrow calculations & admin reconciliation)
+  try {
+    const res = await fetch(`/api/wallet/balance?userId=${encodeURIComponent(userId)}`, {
+      cache: 'no-store',
+    });
+    if (res.ok) {
+      const data = await res.json();
+      if (data?.success && data?.balances) {
+        (['BTC', 'ETH', 'LTC', 'USDT'] as CryptoCurrency[]).forEach((coin) => {
+          const coinData = data.balances[coin];
+          if (coinData) {
+            balanceMap[coin] = {
+              balance: Number(coinData.available ?? 0),
+              lockedBalance: Number(coinData.inEscrow ?? 0) + Number(coinData.inWithdrawal ?? 0),
+            };
+          }
+        });
+        return balanceMap;
+      }
+    }
+  } catch (err) {
+    console.warn('/api/wallet/balance query notice:', err);
+  }
+
+  // 2. Direct query from balances table
   try {
     const { data: balancesData, error: balancesError } = await supabase
       .from('balances')
@@ -60,16 +84,15 @@ export async function getUserWalletBalances(
           };
         }
       });
-      // Return if we found non-zero balances or successfully queried
-      if (Object.values(balanceMap).some(b => b.balance > 0)) {
+      if (Object.values(balanceMap).some(b => b.balance > 0 || b.lockedBalance > 0)) {
         return balanceMap;
       }
     }
   } catch (err) {
-    console.warn("balances table query error:", err);
+    console.warn('balances table query error:', err);
   }
 
-  // 1. Direct query from wallet_assets using select('*')
+  // 2. Direct query from wallet_assets using select('*')
   try {
     const { data: walletAssets, error: assetsError } = await supabase
       .from('wallet_assets')
@@ -94,30 +117,6 @@ export async function getUserWalletBalances(
     }
   } catch (err) {
     console.warn("wallet_assets query error:", err);
-  }
-
-  // 2. Fetch from server API endpoint /api/wallet/balance (which bypasses any RLS using admin client)
-  try {
-    const res = await fetch(`/api/wallet/balance?userId=${encodeURIComponent(userId)}`, {
-      cache: 'no-store',
-    });
-    if (res.ok) {
-      const data = await res.json();
-      if (data?.success && data?.balances) {
-        (['BTC', 'ETH', 'LTC', 'USDT'] as CryptoCurrency[]).forEach((coin) => {
-          const coinData = data.balances[coin];
-          if (coinData) {
-            balanceMap[coin] = {
-              balance: Number(coinData.available ?? 0),
-              lockedBalance: Number(coinData.inEscrow ?? 0) + Number(coinData.inWithdrawal ?? 0),
-            };
-          }
-        });
-        return balanceMap;
-      }
-    }
-  } catch (err) {
-    console.warn("/api/wallet/balance query error:", err);
   }
 
   // 3. Query user_wallets table as secondary fallback

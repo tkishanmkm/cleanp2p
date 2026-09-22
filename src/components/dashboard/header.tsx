@@ -179,7 +179,7 @@ function RecentTradeNotificationRow({ trade, currentUserId }: { trade: any; curr
   const fiatAmount = Number(trade.fiatAmount || trade.fiat_amount || 0);
   const fiatCurrency = trade.fiatCurrency || trade.fiat_currency || 'USD';
   const paymentMethod = trade.paymentMethod || trade.payment_method || 'Bank Transfer';
-  const tradeIdFormatted = trade.tradeId || (trade.id ? '#' + trade.id.replace(/-/g, '').slice(0, 8).toUpperCase() : '');
+  const tradeIdFormatted = trade.tradeId || (trade.id ? '#' + trade.id.replace(/-/g, '').slice(0, 12).toUpperCase() : '');
 
   // Calculate precise, real-time effective status
   const rawStatus = (trade.status || '').toLowerCase();

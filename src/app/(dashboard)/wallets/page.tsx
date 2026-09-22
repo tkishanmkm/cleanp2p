@@ -568,7 +568,7 @@ export default function WalletPage() {
   const [isWithdrawOpen, setIsWithdrawOpen] = useState(false);
   const [isTransferOpen, setIsTransferOpen] = useState(false);
 
-  // Fetch real-time balances from Supabase
+  // Fetch real-time balances with accurate escrow locks
   const loadBalances = useCallback(async () => {
     try {
       const { data: authData } = await supabase.auth.getUser();
@@ -576,7 +576,38 @@ export default function WalletPage() {
       const currentUserId = user?.uid || authData?.user?.id || sessionRes.data?.session?.user?.id;
       if (!currentUserId) return;
 
-      // 1. Direct query from wallet_assets using select('*')
+      // 1. Primary: Server API /api/wallet/balance with active trade escrow lock calculations & reconciliation
+      try {
+        const res = await fetch(`/api/wallet/balance?userId=${encodeURIComponent(currentUserId)}`, { cache: 'no-store' });
+        if (res.ok) {
+          const apiData = await res.json();
+          if (apiData?.success && apiData?.balances) {
+            const balanceMap: { [key in CryptoCurrency]?: { balance: number; lockedBalance: number } } = {
+              BTC: { balance: 0, lockedBalance: 0 },
+              ETH: { balance: 0, lockedBalance: 0 },
+              LTC: { balance: 0, lockedBalance: 0 },
+              USDT: { balance: 0, lockedBalance: 0 },
+            };
+
+            (['BTC', 'ETH', 'LTC', 'USDT'] as CryptoCurrency[]).forEach((coin) => {
+              const coinData = apiData.balances[coin];
+              if (coinData) {
+                balanceMap[coin] = {
+                  balance: Number(coinData.available ?? 0),
+                  lockedBalance: Number(coinData.inEscrow ?? 0) + Number(coinData.inWithdrawal ?? 0),
+                };
+              }
+            });
+
+            setSupabaseBalances(balanceMap);
+            return;
+          }
+        }
+      } catch (apiErr) {
+        console.warn('API wallet balance fetch notice:', apiErr);
+      }
+
+      // 2. Direct query from wallet_assets using select('*')
       const { data: walletAssets, error } = await supabase
         .from('wallet_assets')
         .select('*')
@@ -608,7 +639,7 @@ export default function WalletPage() {
         return;
       }
 
-      // 2. Fallback to getUserWalletBalances helper
+      // 3. Fallback to getUserWalletBalances helper
       const fallbackBalances = await getUserWalletBalances(currentUserId);
       if (fallbackBalances && Object.keys(fallbackBalances).length > 0) {
         setSupabaseBalances(fallbackBalances);
@@ -653,6 +684,7 @@ export default function WalletPage() {
         }
       )
       .on('postgres_changes', { event: '*', schema: 'public', table: 'user_wallets' }, () => loadBalances())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'trades' }, () => loadBalances())
       .on('postgres_changes', { event: '*', schema: 'public', table: 'deposits' }, () => loadBalances())
       .on('postgres_changes', { event: '*', schema: 'public', table: 'wallet_transactions' }, () => loadBalances())
       .subscribe((status) => {

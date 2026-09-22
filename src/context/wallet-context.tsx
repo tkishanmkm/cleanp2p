@@ -354,6 +354,17 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
         {
           event: '*',
           schema: 'public',
+          table: 'trades',
+        },
+        () => {
+          fetchBalances();
+        }
+      )
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
           table: 'profiles',
         },
         () => {

@@ -92,8 +92,8 @@ export default function AdDetailClient({ ad, advertiser, stats }: AdDetailClient
   const asset = (ad.asset_symbol || ad.asset || ad.crypto || ad.crypto_symbol || ad.cryptoSymbol || ad.coin || ad.crypto_currency || 'BTC').toUpperCase()
   const fiatCurrency = (ad.fiat_symbol || ad.fiat_currency || ad.fiatCurrency || ad.fiat || ad.currency || 'USD').toUpperCase()
   const unitPrice = parseFloat(ad.price || ad.unit_price || ad.fixed_rate || ad.fixedRate || '0')
-  const rawSide = String(ad.type || ad.side || ad.ad_type || ad.adType || 'SELL').toUpperCase()
-  const isAdvertiserBuyer = rawSide.includes('BUY')
+  const rawSide = String(ad.trade_type || ad.type || ad.side || ad.ad_type || ad.adType || '').toUpperCase()
+  const isAdvertiserBuyer = rawSide === 'BUY' || rawSide === 'ONLINE_BUY' || rawSide.includes('BUY')
   const ESCROW_FEE_RATE = 0.015 // 1.5% Escrow Fee
 
   const presence = usePresenceStatus(advertiser, 15000)
