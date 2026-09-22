@@ -200,123 +200,26 @@ export async function POST(req: NextRequest) {
     const paymentMethod = paymentMethods[0] || 'Bank Transfer';
 
     const shortId = generateTradeId();
-    const targetAsset = (ad.crypto || ad.asset || 'BTC').toUpperCase();
+    const targetAsset = (ad.crypto || ad.asset || 'USDT').toUpperCase();
     const escrowFee = calculatedCrypto * 0.015;
     const totalLock = calculatedCrypto + escrowFee;
 
-    // 3.8. Lock seller escrow balance atomically
+    // 3.8. Lock seller escrow balance atomically in PostgreSQL
     const adminClient = getSupabaseAdminClient();
-    try {
-      const { data: lockData, error: lockErr } = await adminClient.rpc('lock_seller_escrow', {
-        p_seller_id: sellerId,
-        p_asset: targetAsset,
-        p_crypto_amount: calculatedCrypto,
-        p_escrow_fee: escrowFee,
-      });
+    const { data: lockData, error: lockErr } = await adminClient.rpc('lock_seller_escrow', {
+      p_seller_id: sellerId,
+      p_asset: targetAsset,
+      p_crypto_amount: calculatedCrypto,
+      p_escrow_fee: escrowFee,
+      p_trade_ref: shortId,
+    });
 
-      if (lockErr && (lockErr.message?.toLowerCase().includes('insufficient') || lockErr.code === 'P0001')) {
-        return NextResponse.json(
-          { error: lockErr.message || `Seller has insufficient available balance. Need at least ${totalLock.toFixed(6)} ${targetAsset} (${calculatedCrypto} + ${escrowFee.toFixed(6)} escrow fee).` },
-          { status: 400 }
-        );
-      }
-    } catch (e) {
-      console.warn('lock_seller_escrow RPC call notice:', e);
-    }
-
-    // Direct atomic balance deduction fallback across all balance tables
-    try {
-      const { data: sWA } = await adminClient
-        .from('wallet_assets')
-        .select('*')
-        .eq('user_id', sellerId)
-        .or(`asset_symbol.eq.${targetAsset},asset_code.eq.${targetAsset},symbol.eq.${targetAsset}`);
-
-      if (sWA && sWA.length > 0) {
-        for (const row of sWA) {
-          const availWA = Number(row.balance !== undefined && row.balance !== null ? row.balance : (row.available ?? 0));
-          const lockedWA = Number(row.locked_balance ?? row.locked_escrow ?? 0);
-          const nextAvail = Math.max(0, availWA - totalLock);
-          const nextLocked = lockedWA + totalLock;
-          await adminClient
-            .from('wallet_assets')
-            .update({
-              balance: nextAvail,
-              available: nextAvail,
-              locked_escrow: nextLocked,
-              locked_balance: nextLocked,
-              in_escrow: nextLocked,
-              updated_at: new Date().toISOString()
-            })
-            .eq('id', row.id);
-        }
-      }
-
-      const { data: sBal } = await adminClient
-        .from('balances')
-        .select('*')
-        .eq('user_id', sellerId)
-        .or(`asset.eq.${targetAsset},asset_symbol.eq.${targetAsset}`);
-
-      if (sBal && sBal.length > 0) {
-        for (const row of sBal) {
-          const avail = Number(row.available_balance ?? row.available ?? 0);
-          const locked = Number(row.locked_balance || 0);
-          await adminClient
-            .from('balances')
-            .update({
-              available_balance: Math.max(0, avail - totalLock),
-              available: Math.max(0, avail - totalLock),
-              locked_balance: locked + totalLock,
-              updated_at: new Date().toISOString()
-            })
-            .eq('id', row.id);
-        }
-      }
-
-      const { data: sUW } = await adminClient
-        .from('user_wallets')
-        .select('*')
-        .eq('user_id', sellerId)
-        .or(`asset_symbol.eq.${targetAsset},asset_code.eq.${targetAsset}`);
-
-      if (sUW && sUW.length > 0) {
-        for (const row of sUW) {
-          const availUW = Number(row.available_balance ?? row.balance ?? 0);
-          const lockedUW = Number(row.locked_balance || 0);
-          await adminClient
-            .from('user_wallets')
-            .update({
-              available_balance: Math.max(0, availUW - totalLock),
-              balance: Math.max(0, availUW - totalLock),
-              locked_balance: lockedUW + totalLock,
-              updated_at: new Date().toISOString()
-            })
-            .eq('id', row.id);
-        }
-      }
-
-      // Also sync profiles table for instant UI responsiveness
-      try {
-        const { data: sProf } = await adminClient
-          .from('profiles')
-          .select('btc_balance, eth_balance, ltc_balance, usdt_balance')
-          .eq('id', sellerId)
-          .maybeSingle();
-
-        if (sProf) {
-          const profLock: Record<string, any> = { updated_at: new Date().toISOString() };
-          if (targetAsset === 'BTC') profLock.btc_balance = Math.max(0, Number(sProf.btc_balance || 0) - totalLock);
-          else if (targetAsset === 'ETH') profLock.eth_balance = Math.max(0, Number(sProf.eth_balance || 0) - totalLock);
-          else if (targetAsset === 'LTC') profLock.ltc_balance = Math.max(0, Number(sProf.ltc_balance || 0) - totalLock);
-          else if (targetAsset === 'USDT') profLock.usdt_balance = Math.max(0, Number(sProf.usdt_balance || 0) - totalLock);
-          await adminClient.from('profiles').update(profLock).eq('id', sellerId);
-        }
-      } catch (profErr) {
-        console.warn('profiles lock sync warning:', profErr);
-      }
-    } catch (balLockErr) {
-      console.warn('Direct balance lock warning:', balLockErr);
+    if (lockErr || !lockData?.success) {
+      const errMsg = lockErr?.message || lockData?.message || `Seller has insufficient available balance. Need at least ${totalLock.toFixed(6)} ${targetAsset} (${calculatedCrypto} + ${escrowFee.toFixed(6)} escrow fee).`;
+      return NextResponse.json(
+        { error: errMsg, code: 'INSUFFICIENT_AVAILABLE_ESCROW' },
+        { status: 400 }
+      );
     }
 
     // 4. Insert Trade into database safely
@@ -335,7 +238,7 @@ export async function POST(req: NextRequest) {
       crypto_amount: calculatedCrypto,
       escrow_fee: escrowFee,
       platform_fee: escrowFee,
-      escrow_status: 'locked',
+      escrow_status: 'LOCKED',
       fiat_currency: ad.fiat_currency || ad.fiat || 'USD',
       fiat_amount: numericFiat,
       amount_usd: numericFiat,
@@ -368,6 +271,35 @@ export async function POST(req: NextRequest) {
         .insert({
           trade_id: shortId,
           public_id: shortId,
+          buyer_id: String(buyerId),
+          seller_id: String(sellerId),
+          crypto: targetAsset,
+          amount: calculatedCrypto,
+          crypto_amount: calculatedCrypto,
+          fiat_amount: numericFiat,
+          price: unitPrice,
+          status: 'PENDING',
+          escrow_fee: escrowFee,
+          escrow_status: 'LOCKED',
+          public_ad_id: adIdentifier,
+        })
+        .select('*')
+        .single();
+
+      if (fallbackError) {
+        console.error('Safe fallback trade insert error, rolling back escrow lock:', fallbackError);
+        // Automatic rollback of locked funds if DB trade insertion failed completely
+        await adminClient.rpc('expire_trade_escrow', {
+          p_trade_id: shortId,
+          p_seller_id: sellerId,
+        }).catch(() => {});
+        throw fallbackError;
+      } else {
+        tradeResult = fallbackTrade;
+      }
+    } else {
+      tradeResult = insertedTrade;
+    }
           buyer_id: String(buyerId),
           seller_id: String(sellerId),
           crypto: (ad.crypto || ad.asset || 'BTC').toUpperCase(),

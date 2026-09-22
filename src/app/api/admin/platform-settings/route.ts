@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseAdminClient } from '@/lib/supabase/server';
+import { verifyServerAdmin } from '@/lib/server-admin-auth';
 
 export const dynamic = 'force-dynamic';
 
@@ -24,9 +25,17 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   try {
-    const body = await req.json();
-    const { global_withdrawals_disabled, maintenance_mode, p2p_trading_enabled, adminEmail } = body;
+    // 1. Mandatory Server-Side Admin Authentication
+    const auth = await verifyServerAdmin(req);
+    if (!auth.authorized) {
+      return auth.response!;
+    }
+
+    const body = await req.json().catch(() => ({}));
+    const { global_withdrawals_disabled, maintenance_mode, p2p_trading_enabled } = body;
     const supabase = getSupabaseAdminClient();
+    const adminEmail = auth.adminEmail || 'admin@paxones.com';
+    const adminId = auth.adminId || auth.user.id;
 
     const updatePayload: Record<string, any> = {
       updated_at: new Date().toISOString(),
@@ -55,8 +64,10 @@ export async function POST(req: NextRequest) {
       console.warn('Direct upsert platform_settings error (falling back to simple response):', error);
     }
 
+    // Record immutable admin audit log with authenticated actor identity
     await supabase.from('admin_audit_logs').insert({
-      admin_email: adminEmail || 'admin@paxones.com',
+      admin_id: adminId,
+      admin_email: adminEmail,
       action: 'UPDATE_GLOBAL_PLATFORM_SETTINGS',
       details: updatePayload,
     });

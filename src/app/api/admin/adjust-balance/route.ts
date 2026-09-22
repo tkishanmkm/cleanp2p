@@ -1,52 +1,74 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSupabaseAdminClient } from "@/lib/supabase/server";
+import { verifyServerAdmin } from "@/lib/server-admin-auth";
 
 export const dynamic = "force-dynamic";
 
+const SUPPORTED_CURRENCIES = ["USDT", "BTC", "ETH", "LTC", "BNB", "TRX", "SOL", "USDC"];
+const MAX_SINGLE_ADJUSTMENT = 500000; // 500k units max safety boundary
+
 export async function POST(req: NextRequest) {
   try {
-    const body = await req.json();
+    // 1. Mandatory Server-Side Admin Authentication & Authorization
+    const auth = await verifyServerAdmin(req);
+    if (!auth.authorized) {
+      return auth.response!;
+    }
+
+    const body = await req.json().catch(() => ({}));
     const {
       userId,
       currency,
       action, // "add" | "subtract"
       amount,
       reason,
-      adminEmail = "admin@paxones.com",
     } = body;
 
-    // 1. Validation
-    if (!userId) {
-      return NextResponse.json({ success: false, error: "Target user is required." }, { status: 400 });
+    // 2. Strict Input Validation (Never trust client-supplied admin identity)
+    if (!userId || typeof userId !== "string" || !/^[0-9a-fA-F-]{36}$/.test(userId.trim())) {
+      return NextResponse.json({ success: false, error: "Valid target user UUID is required." }, { status: 400 });
     }
 
     const numAmount = parseFloat(amount);
-    if (isNaN(numAmount) || numAmount <= 0) {
-      return NextResponse.json({ success: false, error: "Please enter a valid positive crypto amount." }, { status: 400 });
+    if (isNaN(numAmount) || !isFinite(numAmount) || numAmount <= 0) {
+      return NextResponse.json({ success: false, error: "Please enter a valid positive numeric crypto amount." }, { status: 400 });
+    }
+
+    if (numAmount > MAX_SINGLE_ADJUSTMENT) {
+      return NextResponse.json({ success: false, error: `Adjustment exceeds maximum single limit of ${MAX_SINGLE_ADJUSTMENT}.` }, { status: 400 });
     }
 
     const cleanCurrency = (currency || "USDT").trim().toUpperCase();
+    if (!SUPPORTED_CURRENCIES.includes(cleanCurrency)) {
+      return NextResponse.json({ success: false, error: `Unsupported currency '${cleanCurrency}'.` }, { status: 400 });
+    }
+
     const cleanAction = action === "subtract" ? "subtract" : "add";
-    const cleanReason = (reason || "").trim() || `Manual ${cleanAction} by admin`;
+    const cleanReason = (reason || "").trim();
+    if (!cleanReason || cleanReason.length < 3) {
+      return NextResponse.json({ success: false, error: "A valid audit reason is required for manual balance adjustments." }, { status: 400 });
+    }
 
     const supabase = getSupabaseAdminClient();
+    const adminEmail = auth.adminEmail || "admin@paxones.com";
+    const adminId = auth.adminId || auth.user.id;
 
-    // 2. Validate target user existence
+    // 3. Validate target user existence
     const { data: profile, error: profError } = await supabase
       .from("profiles")
       .select("id, full_name, email")
-      .eq("id", userId)
+      .eq("id", userId.trim())
       .maybeSingle();
 
     if (profError || !profile) {
       return NextResponse.json({ success: false, error: "Target user not found in database." }, { status: 404 });
     }
 
-    // 3. Fetch existing wallet balance
+    // 4. Fetch existing wallet balance
     const { data: existingWallet } = await supabase
       .from("wallets")
       .select("*")
-      .eq("user_id", userId)
+      .eq("user_id", profile.id)
       .eq("currency", cleanCurrency)
       .maybeSingle();
 
@@ -59,14 +81,14 @@ export async function POST(req: NextRequest) {
       }, { status: 400 });
     }
 
-    // 4. Execute atomic balance adjustment via RPC
+    // 5. Execute atomic balance adjustment via RPC
     let newBalance: number = currentBalance;
     let rpcSuccess = false;
 
     try {
       const { data: rpcData, error: rpcError } = await supabase.rpc("admin_adjust_balance", {
         p_admin_email: adminEmail,
-        p_user_id: userId,
+        p_user_id: profile.id,
         p_currency: cleanCurrency,
         p_type: cleanAction,
         p_amount: numAmount,
@@ -90,28 +112,31 @@ export async function POST(req: NextRequest) {
           .from("wallets")
           .update({
             balance: newBalance,
+            total_balance: newBalance,
             updated_at: new Date().toISOString(),
           })
           .eq("id", existingWallet.id);
       } else {
         await supabase.from("wallets").insert({
-          user_id: userId,
+          user_id: profile.id,
           currency: cleanCurrency,
           balance: newBalance,
+          total_balance: newBalance,
         });
       }
     }
 
-    // 5. Create Ledger Entry in ledger_entries
+    // 6. Create Ledger Entry in ledger_entries
     try {
       await supabase.from("ledger_entries").insert({
-        user_id: userId,
+        user_id: profile.id,
         crypto: cleanCurrency,
         amount: cleanAction === "add" ? numAmount : -numAmount,
         type: `admin_${cleanAction}`,
         reference_id: `ADJ-${Date.now()}`,
         balance_after: newBalance,
         metadata: {
+          admin_id: adminId,
           admin_email: adminEmail,
           reason: cleanReason,
           old_balance: currentBalance,
@@ -123,10 +148,10 @@ export async function POST(req: NextRequest) {
       console.warn("[ADJUST_BALANCE] ledger_entries insert notice:", ledgerErr);
     }
 
-    // 6. Create Transaction record in wallet_transactions
+    // 7. Create Transaction record in wallet_transactions
     try {
       await supabase.from("wallet_transactions").insert({
-        user_id: userId,
+        user_id: profile.id,
         tx_type: cleanAction === "add" ? "credit" : "debit",
         asset_symbol: cleanCurrency,
         amount: numAmount,
@@ -137,12 +162,13 @@ export async function POST(req: NextRequest) {
       console.warn("[ADJUST_BALANCE] wallet_transactions insert notice:", txErr);
     }
 
-    // 7. Create Audit Record in admin_audit_logs
+    // 8. Create Audit Record in admin_audit_logs with authenticated identity
     try {
       await supabase.from("admin_audit_logs").insert({
+        admin_id: adminId,
         admin_email: adminEmail,
         action: "ADJUST_BALANCE",
-        target_user_id: userId,
+        target_user_id: profile.id,
         details: {
           currency: cleanCurrency,
           action: cleanAction,
@@ -157,10 +183,10 @@ export async function POST(req: NextRequest) {
       console.warn("[ADJUST_BALANCE] admin_audit_logs insert notice:", auditErr);
     }
 
-    // 8. Create User Notification
+    // 9. Create User Notification
     try {
       await supabase.from("notifications").insert({
-        user_id: userId,
+        user_id: profile.id,
         message: `Your ${cleanCurrency} wallet balance was adjusted by administrator: ${cleanAction === "add" ? "+" : "-"}${numAmount} ${cleanCurrency}. Reason: ${cleanReason}`,
         is_read: false,
         created_at: new Date().toISOString(),

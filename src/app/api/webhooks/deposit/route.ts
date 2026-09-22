@@ -21,8 +21,8 @@ function verifySignature(rawBody: string, signatureHeader: string | null): boole
     process.env.CHAIN_INGEST_SECRET;
 
   if (!secret) {
-    console.warn('⚠️ [Deposit Webhook] No webhook secret configured in environment.');
-    return true; // Allow for initial local development if explicitly unconfigured
+    console.error('⛔ [Deposit Webhook] REJECTED: No webhook secret configured in environment (failing closed).');
+    return false; // Fail-closed: Never accept unauthenticated deposits if secret is not set
   }
 
   if (!signatureHeader) {
@@ -62,10 +62,17 @@ export async function POST(req: Request) {
       process.env.ALCHEMY_WEBHOOK_SIGNING_KEY ||
       process.env.CHAIN_INGEST_SECRET;
 
+    if (!secret) {
+      return NextResponse.json(
+        { error: 'SERVER_MISCONFIGURATION: Webhook signing secret is not configured. Failing closed.' },
+        { status: 500 }
+      );
+    }
+
     const ingestHeader = req.headers.get('x-ingest-secret') || req.headers.get('x-api-key');
-    if (ingestHeader && secret && ingestHeader === secret) {
-      // Validated via direct shared secret header
-    } else if (secret) {
+    const isDirectHeaderValid = ingestHeader && secret && crypto.timingSafeEqual(Buffer.from(ingestHeader), Buffer.from(secret));
+
+    if (!isDirectHeaderValid) {
       if (!signature || !verifySignature(rawBody, signature)) {
         return NextResponse.json(
           { error: 'UNAUTHORIZED: Invalid or missing HMAC-SHA256 signature.' },

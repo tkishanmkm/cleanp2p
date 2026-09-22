@@ -1,32 +1,59 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { SYSTEM_CONFIG } from '@/lib/config/env';
-import { createClient } from '@supabase/supabase-js';
+import { createClient, getSupabaseAdminClient } from '@/lib/supabase/server';
 import { ethers } from 'ethers';
 
-const supabaseAdmin = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://placeholder.supabase.co',
-  process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'placeholder-key'
-);
+export const dynamic = 'force-dynamic';
 
 export async function POST(req: NextRequest): Promise<NextResponse> {
   try {
-    const { userId, destinationAddress, amount, asset } = (await req.json()) as {
-      userId?: string;
+    // 1. Authenticate caller session
+    const supabase = await createClient();
+    const admin = getSupabaseAdminClient();
+
+    let { data: { user }, error: authError } = await supabase.auth.getUser();
+
+    if (!user && req.headers.get('authorization')) {
+      const token = (req.headers.get('authorization') || '').replace(/^Bearer\s+/i, '').trim();
+      if (token) {
+        const { data: tokenData } = await admin.auth.getUser(token);
+        if (tokenData?.user) {
+          user = tokenData.user;
+          authError = null;
+        }
+      }
+    }
+
+    if (authError || !user) {
+      return NextResponse.json({ error: 'Unauthorized: Session authentication required' }, { status: 401 });
+    }
+
+    const { destinationAddress, amount, asset } = (await req.json().catch(() => ({}))) as {
       destinationAddress?: string;
       amount?: number;
       asset?: string;
     };
 
-    if (!userId || !destinationAddress || !amount || amount <= 0 || !asset) {
-      return NextResponse.json({ error: 'Invalid payload' }, { status: 400 });
+    if (!destinationAddress || !amount || amount <= 0 || !asset) {
+      return NextResponse.json({ error: 'Invalid payload: Valid destination address, positive amount, and asset required.' }, { status: 400 });
     }
 
-    // Check KYC status for withdrawal
-    const { data: userProfile } = await supabaseAdmin
+    const cleanAsset = String(asset).toUpperCase().trim();
+    const numericAmount = Number(amount);
+
+    // 2. Check KYC status for withdrawal
+    const { data: userProfile } = await admin
       .from('profiles')
-      .select('id, is_verified, kyc_status, id_verified')
-      .eq('id', userId)
+      .select('id, is_verified, kyc_status, id_verified, is_banned, is_withdrawal_locked, withdrawals_disabled')
+      .eq('id', user.id)
       .maybeSingle();
+
+    if (userProfile?.is_banned || userProfile?.is_withdrawal_locked || userProfile?.withdrawals_disabled) {
+      return NextResponse.json(
+        { error: 'Withdrawals are currently restricted for your account. Please contact support@paxones.com.' },
+        { status: 403 }
+      );
+    }
 
     const isVerified = Boolean(
       userProfile?.is_verified ||
@@ -42,14 +69,15 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       );
     }
 
-    const { error: deductError } = await supabaseAdmin.rpc('deduct_user_balance', {
-      p_user_id: userId,
-      p_amount: amount,
-      p_asset: asset,
+    // 3. Atomically check balance and lock funds
+    const { error: deductError } = await admin.rpc('deduct_user_balance', {
+      p_user_id: user.id,
+      p_amount: numericAmount,
+      p_asset: cleanAsset,
     });
 
     if (deductError) {
-      return NextResponse.json({ error: deductError.message || 'Insufficient balance' }, { status: 400 });
+      return NextResponse.json({ error: deductError.message || 'Insufficient spendable balance' }, { status: 400 });
     }
 
     let txHash = '';
@@ -64,10 +92,10 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         const baseGasPrice = feeData.gasPrice ?? ethers.parseUnits('20', 'gwei');
         const priorityGasPrice = (baseGasPrice * 200n) / 100n;
 
-        if (asset === 'ETH') {
+        if (cleanAsset === 'ETH') {
           const tx = await hotWalletSigner.sendTransaction({
             to: destinationAddress,
-            value: ethers.parseEther(amount.toString()),
+            value: ethers.parseEther(numericAmount.toString()),
             gasPrice: priorityGasPrice,
           });
           txHash = tx.hash;
@@ -81,7 +109,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
           const tx = await contract.transfer(
             destinationAddress,
-            ethers.parseUnits(amount.toString(), 6),
+            ethers.parseUnits(numericAmount.toString(), 6),
             { gasPrice: priorityGasPrice }
           );
           txHash = tx.hash;
@@ -91,10 +119,10 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       }
     }
 
-    await supabaseAdmin.from('withdrawals').insert({
-      user_id: userId,
-      currency: asset,
-      amount,
+    await admin.from('withdrawals').insert({
+      user_id: user.id,
+      currency: cleanAsset,
+      amount: numericAmount,
       destination_address: destinationAddress,
       tx_hash: txHash || null,
       status: txHash ? 'completed' : 'processing',
@@ -102,11 +130,11 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
     // Activity Center Notification
     try {
-      await supabaseAdmin.from('notifications').insert({
-        user_id: userId,
+      await admin.from('notifications').insert({
+        user_id: user.id,
         title: 'Withdrawal Processed',
-        message: `Withdrawal of ${amount} ${asset} to ${destinationAddress.slice(0, 6)}...${destinationAddress.slice(-4)} has been submitted.`,
-        link: '/wallet',
+        message: `Withdrawal of ${numericAmount} ${cleanAsset} to ${destinationAddress.slice(0, 6)}...${destinationAddress.slice(-4)} has been submitted.`,
+        link: '/wallets',
         is_read: false,
         created_at: new Date().toISOString(),
       });

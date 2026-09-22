@@ -48,11 +48,14 @@ export async function middleware(request: NextRequest) {
       }
     }
 
-    const isAdminRoute = url.pathname.startsWith('/adminnarayan') && !url.pathname.startsWith('/adminnarayan/login');
+    const isAdminRoute = (url.pathname.startsWith('/adminnarayan') && !url.pathname.startsWith('/adminnarayan/login')) || url.pathname.startsWith('/api/admin');
 
     if (isAdminRoute) {
-      // 1. Unauthenticated users -> redirect to admin login
+      // 1. Unauthenticated users -> redirect to admin login or return 401 for API
       if (!user) {
+        if (url.pathname.startsWith('/api/admin')) {
+          return NextResponse.json({ success: false, error: 'Authentication required. Admin privileges needed.' }, { status: 401 });
+        }
         url.pathname = '/adminnarayan/login';
         return NextResponse.redirect(url);
       }
@@ -63,11 +66,11 @@ export async function middleware(request: NextRequest) {
       if (!userRole) {
         const { data: profile } = await supabase
           .from('profiles')
-          .select('role')
+          .select('role, is_admin')
           .eq('id', user.id)
           .maybeSingle();
         
-        userRole = profile?.role;
+        userRole = (profile?.role === 'admin' || profile?.is_admin === true) ? 'admin' : profile?.role;
       }
 
       // Fallback: Check if verify_admin_login or check_is_admin returns true
@@ -80,6 +83,9 @@ export async function middleware(request: NextRequest) {
 
       // 3. Reject if not admin
       if (userRole !== 'admin') {
+        if (url.pathname.startsWith('/api/admin')) {
+          return NextResponse.json({ success: false, error: 'Access denied. Administrator privileges required.' }, { status: 403 });
+        }
         url.pathname = '/unauthorized';
         return NextResponse.redirect(url);
       }
