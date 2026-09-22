@@ -371,7 +371,6 @@ export async function POST(req: NextRequest) {
         .from('wallet_assets')
         .update({
           balance: newSenderBal,
-          available: newSenderBal,
           updated_at: new Date().toISOString(),
         })
         .eq('user_id', user.id)
@@ -390,7 +389,7 @@ export async function POST(req: NextRequest) {
         await admin
           .from('wallet_assets')
           .update({
-            available: newSenderBal,
+            balance: newSenderBal,
             updated_at: new Date().toISOString(),
           })
           .eq('wallet_id', sMainW.id)
@@ -487,13 +486,12 @@ export async function POST(req: NextRequest) {
         .maybeSingle();
 
       if (rWA) {
-        const curRBal = Number(rWA.available ?? rWA.balance ?? 0);
+        const curRBal = Number(rWA.balance ?? 0);
         const nextRBal = Number((curRBal + numericAmount).toFixed(8));
         await admin
           .from('wallet_assets')
           .update({
             balance: nextRBal,
-            available: nextRBal,
             updated_at: new Date().toISOString(),
           })
           .eq('id', rWA.id);
@@ -504,9 +502,10 @@ export async function POST(req: NextRequest) {
             user_id: recipientProfile.id,
             asset_symbol: coinSymbol,
             balance: numericAmount,
-            available: numericAmount,
             locked_balance: 0,
-            locked_escrow: 0,
+            reserved_balance: 0,
+            in_escrow: 0,
+            in_withdrawal: 0,
             updated_at: new Date().toISOString(),
           });
       }
@@ -529,12 +528,12 @@ export async function POST(req: NextRequest) {
           .maybeSingle();
 
         if (rWAsset) {
-          const curRBal = Number(rWAsset.available ?? 0);
+          const curRBal = Number(rWAsset.balance ?? 0);
           const nextRBal = Number((curRBal + numericAmount).toFixed(8));
           await admin
             .from('wallet_assets')
             .update({
-              available: nextRBal,
+              balance: nextRBal,
               updated_at: new Date().toISOString(),
             })
             .eq('wallet_id', rMainW.id)

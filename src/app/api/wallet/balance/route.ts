@@ -161,9 +161,8 @@ export async function GET(request: Request) {
                 .from('wallet_assets')
                 .update({
                   balance: avail,
-                  available: avail,
                   locked_balance: escrow,
-                  locked_escrow: escrow,
+                  in_escrow: escrow,
                   updated_at: new Date().toISOString()
                 })
                 .eq('id', row.id);
@@ -221,7 +220,8 @@ export async function GET(request: Request) {
                 asset_symbol: symbol,
                 balance: avail,
                 locked_balance: escrow,
-                locked_withdrawal: withdraw,
+                in_escrow: escrow,
+                in_withdrawal: withdraw,
                 updated_at: new Date().toISOString()
               });
             } catch (_) {}

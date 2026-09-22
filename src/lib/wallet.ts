@@ -103,13 +103,16 @@ export async function getUserWalletBalances(
       walletAssets.forEach((asset: any) => {
         const rawSym = String(asset.asset_symbol || asset.asset_code || asset.symbol || '').toUpperCase();
         const symbol = (['BTC', 'ETH', 'LTC', 'USDT'].includes(rawSym) ? rawSym : null) as CryptoCurrency | null;
-        const spendable = Number(asset.available ?? asset.balance ?? asset.amount ?? 0);
-        const lockedAmount = Number(asset.locked ?? asset.locked_balance ?? asset.locked_escrow ?? 0) + Number(asset.locked_withdrawal ?? 0);
+        const totalBal = Number(asset.balance ?? asset.amount ?? 0);
+        const lockedEscrow = Number(asset.in_escrow ?? asset.locked_balance ?? asset.locked ?? 0);
+        const lockedWithdrawal = Number(asset.in_withdrawal ?? 0);
+        const totalLocked = lockedEscrow + lockedWithdrawal;
+        const spendable = Math.max(0, totalBal - totalLocked);
 
         if (symbol) {
           balanceMap[symbol] = {
             balance: isNaN(spendable) ? 0 : spendable,
-            lockedBalance: isNaN(lockedAmount) ? 0 : lockedAmount,
+            lockedBalance: isNaN(totalLocked) ? 0 : totalLocked,
           };
         }
       });
