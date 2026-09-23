@@ -1,5 +1,4 @@
 import { createClient } from '@/utils/supabase/server';
-import { getSupabaseAdminClient } from '@/lib/supabase/server';
 import { NextRequest, NextResponse } from 'next/server';
 import { generateTradeId } from '@/lib/id-generator';
 
@@ -26,23 +25,31 @@ export async function POST(req: NextRequest) {
     }
 
     const body = await req.json();
-    const { ad_id, fiat_amount, crypto_amount } = body;
+    const {
+      ad_id,
+      fiat_amount,
+      crypto_amount,
+      payment_method,
+      price,
+      fiat_currency,
+      trade_ref,
+      idempotency_key,
+    } = body;
+
+    const idempotencyKey =
+      idempotency_key ||
+      req.headers.get('x-idempotency-key') ||
+      req.headers.get('idempotency-key') ||
+      null;
 
     if (!ad_id) {
       return NextResponse.json({ error: 'Advertisement ID is required.' }, { status: 400 });
     }
 
-    const numericFiat = parseFloat(fiat_amount);
-    if (isNaN(numericFiat) || numericFiat <= 0) {
-      return NextResponse.json({ error: 'Invalid fiat amount.' }, { status: 400 });
-    }
-
     const isIdUUID = isValidUUID(ad_id);
 
-    // 1. Fetch Ad safely from p2p_ads or ads
+    // 1. Fetch Ad safely to read metadata & parameters
     let ad: any = null;
-    let validAdUuid: string | null = null;
-
     let p2pQuery = supabase.from('p2p_ads').select('*');
     if (isIdUUID) {
       p2pQuery = p2pQuery.or(`id.eq.${ad_id},public_ad_id.eq.${ad_id}`);
@@ -53,25 +60,13 @@ export async function POST(req: NextRequest) {
 
     if (p2pAd) {
       ad = p2pAd;
-      if (isValidUUID(p2pAd.id)) {
-        const { data: adExists } = await supabase.from('ads').select('id').eq('id', p2pAd.id).maybeSingle();
-        if (adExists?.id) {
-          validAdUuid = adExists.id;
-        }
-      }
     } else {
       if (isIdUUID) {
         const { data: primaryAd } = await supabase.from('ads').select('*').eq('id', ad_id).maybeSingle();
-        if (primaryAd) {
-          ad = primaryAd;
-          validAdUuid = primaryAd.id;
-        }
+        if (primaryAd) ad = primaryAd;
       } else {
         const { data: primaryAd } = await supabase.from('ads').select('*').or(`public_id.eq.${ad_id},public_ad_id.eq.${ad_id}`).maybeSingle();
-        if (primaryAd && isValidUUID(primaryAd.id)) {
-          ad = primaryAd;
-          validAdUuid = primaryAd.id;
-        }
+        if (primaryAd) ad = primaryAd;
       }
     }
 
@@ -87,17 +82,36 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // 3. Verify min/max limits
+    // 3. Resolve numerical values and authoritative parameters
+    const unitPrice = Number(price ?? ad.fixed_rate ?? ad.price ?? 1);
+    let calculatedCrypto = parseFloat(crypto_amount);
+    let numericFiat = parseFloat(fiat_amount);
+
+    if (isNaN(calculatedCrypto) || calculatedCrypto <= 0) {
+      if (!isNaN(numericFiat) && numericFiat > 0 && unitPrice > 0) {
+        calculatedCrypto = numericFiat / unitPrice;
+      }
+    }
+
+    if (isNaN(calculatedCrypto) || calculatedCrypto <= 0) {
+      return NextResponse.json({ error: 'Invalid crypto amount.' }, { status: 400 });
+    }
+
+    calculatedCrypto = Number(calculatedCrypto.toFixed(8));
+    // Exact fiat amount invariant: fiat_amount = ROUND(crypto_amount * price, 2)
+    numericFiat = Number((calculatedCrypto * unitPrice).toFixed(2));
+
+    // 4. Verify min/max limits
     const minLimit = Number(ad.min_amount ?? ad.min_limit ?? 0);
     const maxLimit = Number(ad.max_amount ?? ad.max_limit ?? Infinity);
     if (numericFiat < minLimit || numericFiat > maxLimit) {
       return NextResponse.json(
-        { error: `Amount must be between ${minLimit} and ${maxLimit} ${ad.fiat_currency || 'USD'}` },
+        { error: `Amount must be between ${minLimit} and ${maxLimit} ${ad.fiat_currency || ad.fiat || 'USD'}` },
         { status: 400 }
       );
     }
 
-    // 3.5. Verify Trader Requirements (Full name & KYC)
+    // 5. Verify Trader Requirements (Full name & KYC)
     const { data: buyerProfile } = await supabase
       .from('profiles')
       .select('*')
@@ -130,9 +144,9 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // 3.6. Enforce $1,000 USD Cumulative Limit for Unverified Accounts
+    // 6. Enforce $1,000 USD Cumulative Limit for Unverified Accounts
     if (!isKycVerified) {
-      const userFiatCurrency = (ad.fiat_currency || 'USD').toUpperCase();
+      const userFiatCurrency = (ad.fiat_currency || ad.fiat || 'USD').toUpperCase();
       let fiatToUsdRate = 1.0;
       if (userFiatCurrency === 'INR') fiatToUsdRate = 1 / 85.0;
       else if (userFiatCurrency === 'EUR') fiatToUsdRate = 1.08;
@@ -142,7 +156,6 @@ export async function POST(req: NextRequest) {
 
       const currentTradeUsd = numericFiat * fiatToUsdRate;
 
-      // Query prior trade history for unverified user
       const { data: pastTrades } = await supabase
         .from('trades')
         .select('fiat_amount, fiat_currency, status')
@@ -173,165 +186,51 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    const typeCandidates = [
-      ad.trade_type,
-      ad.ad_type,
-      ad.side,
-      ad.adType,
-      ad.type,
-    ].filter(Boolean).map((s: any) => String(s).toUpperCase());
-
-    const isBuyAd = typeCandidates.some((t: string) => t === 'BUY' || t === 'ONLINE_BUY' || t.includes('BUY'));
-    const isInitiatorSelling = isBuyAd;
-    const isAdSell = !isBuyAd;
-
-    const adOwnerId = ad.user_id || ad.seller_id || ad.advertiser_id || (ad.profiles && ad.profiles.id) || 'trader_verified_1';
-    const sellerId = isInitiatorSelling ? user.id : adOwnerId;
-    const buyerId = isInitiatorSelling ? adOwnerId : user.id;
-
-    const unitPrice = Number(ad.fixed_rate ?? ad.price ?? 1);
-    const calculatedCrypto = parseFloat(crypto_amount) || (unitPrice > 0 ? numericFiat / unitPrice : 0);
-
+    // 7. Resolve Payment Method & Currency
     const paymentMethods = Array.isArray(ad.payment_methods)
       ? ad.payment_methods
       : typeof ad.payment_methods === 'string'
       ? JSON.parse(ad.payment_methods)
       : ['Bank Transfer'];
-    const paymentMethod = paymentMethods[0] || 'Bank Transfer';
+    const resolvedPaymentMethod = payment_method || paymentMethods[0] || 'Bank Transfer';
+    const resolvedFiatCurrency = fiat_currency || ad.fiat_currency || ad.fiat || 'USD';
+    const shortRef = trade_ref || generateTradeId();
+    const adIdentifier = String(ad.id || ad.public_ad_id || ad.public_id || ad_id);
 
-    const shortId = generateTradeId();
-    const targetAsset = (ad.crypto || ad.asset || 'USDT').toUpperCase();
-    const escrowFee = calculatedCrypto * 0.015;
-    const totalLock = calculatedCrypto + escrowFee;
-
-    // 3.8. Lock seller escrow balance atomically in PostgreSQL
-    const adminClient = getSupabaseAdminClient();
-    const { data: lockData, error: lockErr } = await adminClient.rpc('lock_seller_escrow', {
-      p_seller_id: sellerId,
-      p_asset: targetAsset,
+    // 8. Execute Atomic Escrow Lock & Trade Creation via Canonical Database RPC
+    const { data: rpcResult, error: rpcError } = await supabase.rpc('initiate_trade_with_escrow', {
+      p_ad_id: adIdentifier,
       p_crypto_amount: calculatedCrypto,
-      p_escrow_fee: escrowFee,
-      p_trade_ref: shortId,
+      p_fiat_amount: numericFiat,
+      p_fiat_currency: resolvedFiatCurrency,
+      p_price: unitPrice,
+      p_payment_method: resolvedPaymentMethod,
+      p_trade_ref: shortRef,
+      p_idempotency_key: idempotencyKey,
     });
 
-    if (lockErr || !lockData?.success) {
-      const errMsg = lockErr?.message || lockData?.message || `Seller has insufficient available balance. Need at least ${totalLock.toFixed(6)} ${targetAsset} (${calculatedCrypto} + ${escrowFee.toFixed(6)} escrow fee).`;
+    if (rpcError) {
+      console.error('[Trade Creation] initiate_trade_with_escrow RPC error:', rpcError);
       return NextResponse.json(
-        { error: errMsg, code: 'INSUFFICIENT_AVAILABLE_ESCROW' },
+        { error: rpcError.message || 'Failed to initiate trade with escrow.' },
         { status: 400 }
       );
     }
 
-    // 4. Insert Trade into database safely
-    let tradeResult: any = null;
-
-    const adIdentifier = String(ad.public_ad_id || ad.public_id || ad.ad_id || ad.id || '');
-    const tradePayload: Record<string, any> = {
-      trade_id: shortId,
-      public_id: shortId,
-      buyer_id: String(buyerId),
-      seller_id: String(sellerId),
-      crypto: targetAsset,
-      coin: targetAsset,
-      asset: targetAsset,
-      amount: calculatedCrypto,
-      crypto_amount: calculatedCrypto,
-      escrow_fee: escrowFee,
-      platform_fee: escrowFee,
-      escrow_status: 'LOCKED',
-      fiat_currency: ad.fiat_currency || ad.fiat || 'USD',
-      fiat_amount: numericFiat,
-      amount_usd: numericFiat,
-      price: unitPrice,
-      status: 'PENDING',
-      payment_window_minutes: ad.payment_window || ad.payment_window_minutes || 30,
-      terms: ad.terms || ad.terms_conditions || '',
-      tags: Array.isArray(ad.tags) ? ad.tags : (Array.isArray(ad.ad_tags) ? ad.ad_tags : []),
-      public_ad_id: adIdentifier,
-    };
-
-    if (validAdUuid && isValidUUID(validAdUuid)) {
-      tradePayload.ad_id = validAdUuid;
-    } else if (ad.id && isValidUUID(ad.id)) {
-      tradePayload.ad_id = ad.id;
+    if (!rpcResult || rpcResult.success === false) {
+      return NextResponse.json(
+        { error: rpcResult?.message || 'Failed to initiate trade with escrow.' },
+        { status: 400 }
+      );
     }
 
-    // Attempt insert with standard table columns
-    const { data: insertedTrade, error: insertError } = await supabase
-      .from('trades')
-      .insert(tradePayload)
-      .select('*')
-      .single();
-
-    if (insertError) {
-      console.warn('Full trade insertion failed, trying safe fallback:', insertError);
-      // Clean fallback with minimal essential columns
-      const { data: fallbackTrade, error: fallbackError } = await supabase
-        .from('trades')
-        .insert({
-          trade_id: shortId,
-          public_id: shortId,
-          buyer_id: String(buyerId),
-          seller_id: String(sellerId),
-          crypto: targetAsset,
-          amount: calculatedCrypto,
-          crypto_amount: calculatedCrypto,
-          fiat_amount: numericFiat,
-          price: unitPrice,
-          status: 'PENDING',
-          escrow_fee: escrowFee,
-          escrow_status: 'LOCKED',
-          public_ad_id: adIdentifier,
-        })
-        .select('*')
-        .single();
-
-      if (fallbackError) {
-        console.error('Safe fallback trade insert error, rolling back escrow lock:', fallbackError);
-        // Automatic rollback of locked funds if DB trade insertion failed completely
-        await adminClient.rpc('expire_trade_escrow', {
-          p_trade_id: shortId,
-          p_seller_id: sellerId,
-        }).catch(() => {});
-        throw fallbackError;
-      } else {
-        tradeResult = fallbackTrade;
-      }
-    } else {
-      tradeResult = insertedTrade;
-    }
-          buyer_id: String(buyerId),
-          seller_id: String(sellerId),
-          crypto: (ad.crypto || ad.asset || 'BTC').toUpperCase(),
-          amount: calculatedCrypto,
-          crypto_amount: calculatedCrypto,
-          fiat_amount: numericFiat,
-          price: unitPrice,
-          status: 'PENDING',
-          escrow_fee: escrowFee,
-          public_ad_id: adIdentifier,
-        })
-        .select('*')
-        .single();
-
-      if (fallbackError) {
-        console.error('Safe fallback trade insert error:', fallbackError);
-        throw fallbackError;
-      } else {
-        tradeResult = fallbackTrade;
-      }
-    } else {
-      tradeResult = insertedTrade;
-    }
-
-    if (!tradeResult || !tradeResult.id) {
-      throw new Error('Failed to create trade record.');
-    }
-
-    const actualTradeId = tradeResult.id;
+    const tradeId = rpcResult.trade_id;
+    const publicId = rpcResult.public_id || shortRef;
+    const sellerId = rpcResult.seller_id;
+    const buyerId = rpcResult.buyer_id;
     const nowIso = new Date().toISOString();
 
-    // 5. Send Auto-Reply Message if configured (ad auto_reply or profile auto_reply_message)
+    // 9. Send Auto-Reply Message if configured
     try {
       const autoReplyText = ad.auto_reply?.trim();
       let sellerAutoReply = autoReplyText;
@@ -352,7 +251,7 @@ export async function POST(req: NextRequest) {
 
       if (sellerAutoReply && sellerAutoReply.length > 0) {
         await supabase.from('trade_messages').insert({
-          trade_id: actualTradeId,
+          trade_id: tradeId,
           sender_id: sellerId,
           sender_username: sellerUsername,
           message: sellerAutoReply,
@@ -364,27 +263,25 @@ export async function POST(req: NextRequest) {
       console.warn('Auto-reply message creation notice:', autoReplyErr);
     }
 
-    // 6. Send Activity Center & Trade Request Notifications
+    // 10. Send Activity Center & Trade Request Notifications
     try {
-      const formattedCoin = (ad.crypto || 'BTC').toUpperCase();
-      // Notify Seller of Trade Request
+      const formattedCoin = (rpcResult.asset || ad.crypto || 'USDT').toUpperCase();
       if (sellerId) {
         await supabase.from('notifications').insert({
           user_id: sellerId,
           title: 'Trade Request Initiated',
-          message: `New trade request #${shortId} opened: ${calculatedCrypto.toFixed(4)} ${formattedCoin} for ${numericFiat.toFixed(2)} ${ad.fiat_currency || 'USD'}.`,
-          link: `/trade/${actualTradeId}`,
+          message: `New trade request #${publicId} opened: ${calculatedCrypto.toFixed(4)} ${formattedCoin} for ${numericFiat.toFixed(2)} ${resolvedFiatCurrency}.`,
+          link: `/trade/${tradeId}`,
           is_read: false,
           created_at: nowIso,
         });
       }
-      // Notify Buyer
       if (buyerId && buyerId !== sellerId) {
         await supabase.from('notifications').insert({
           user_id: buyerId,
           title: 'Trade Request Initiated',
-          message: `Trade #${shortId} opened successfully. Awaiting payment/escrow confirmation.`,
-          link: `/trade/${actualTradeId}`,
+          message: `Trade #${publicId} opened successfully. Awaiting payment/escrow confirmation.`,
+          link: `/trade/${tradeId}`,
           is_read: false,
           created_at: nowIso,
         });
@@ -395,9 +292,10 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({
       success: true,
-      trade_id: tradeResult.id,
-      id: tradeResult.id,
-      trade: tradeResult,
+      trade_id: tradeId,
+      id: tradeId,
+      public_id: publicId,
+      trade: rpcResult,
     });
   } catch (err: any) {
     console.error('Error creating trade:', err);

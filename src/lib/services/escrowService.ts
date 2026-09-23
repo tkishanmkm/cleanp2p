@@ -1,115 +1,52 @@
 import { getSupabaseAdminClient } from '@/lib/supabase/server';
 
-export interface CreateTradeParams {
-  sellerId: string;
-  buyerId?: string;
+export interface CreateTradeWithEscrowParams {
+  adId: string;
   cryptoAmount: number;
-  escrowFee: number;
+  fiatAmount: number;
   fiatCurrency: string;
-  rate: number;
-  cryptoSymbol?: string;
-  paymentMethod?: string;
+  price: number;
+  paymentMethod: string;
+  tradeRef?: string;
+  idempotencyKey?: string;
 }
 
 /**
- * Atomic Escrow Lock and Trade Creation Service Handler
+ * Canonical Atomic Escrow Lock and Trade Creation Service Handler
+ * Delegates exclusively to the database RPC public.initiate_trade_with_escrow.
+ * Fails closed without fallbacks or direct wallet mutations.
  */
 export async function createTradeWithEscrow({
-  sellerId,
-  buyerId,
+  adId,
   cryptoAmount,
-  escrowFee,
+  fiatAmount,
   fiatCurrency,
-  rate,
-  cryptoSymbol = 'USDT',
-  paymentMethod = 'Bank Transfer',
-}: CreateTradeParams) {
+  price,
+  paymentMethod,
+  tradeRef,
+  idempotencyKey,
+}: CreateTradeWithEscrowParams) {
   const supabase = getSupabaseAdminClient();
 
-  // 1. Call atomic lock function in Postgres (lock_seller_escrow)
-  const { data: lockData, error: lockError } = await supabase.rpc('lock_seller_escrow', {
-    p_user_id: sellerId,
-    p_crypto_amount: cryptoAmount,
-    p_escrow_fee: escrowFee,
-    p_currency: cryptoSymbol,
+  const { data, error } = await supabase.rpc('initiate_trade_with_escrow', {
+    p_ad_id: String(adId),
+    p_crypto_amount: Number(cryptoAmount),
+    p_fiat_amount: Number(fiatAmount),
+    p_fiat_currency: String(fiatCurrency),
+    p_price: Number(price),
+    p_payment_method: String(paymentMethod),
+    p_trade_ref: tradeRef ?? null,
+    p_idempotency_key: idempotencyKey ?? null,
   });
 
-  if (lockError) {
-    console.error('[EscrowService] lock_seller_escrow RPC error:', lockError);
-    // Fallback: If RPC not yet installed, defensively verify and update wallets/wallet_assets directly
-    const { data: walletRow } = await supabase
-      .from('wallets')
-      .select('id, total_balance, locked_balance, available_balance')
-      .eq('user_id', sellerId)
-      .eq('currency', cryptoSymbol)
-      .maybeSingle();
-
-    if (walletRow) {
-      const avail = Number(walletRow.available_balance ?? (Number(walletRow.total_balance || 0) - Number(walletRow.locked_balance || 0)));
-      const required = cryptoAmount + escrowFee;
-      if (avail < required) {
-        throw new Error(`Insufficient available balance (${avail.toFixed(4)} ${cryptoSymbol}) for trade amount + escrow fee (${required.toFixed(4)} ${cryptoSymbol}).`);
-      }
-
-      await supabase
-        .from('wallets')
-        .update({
-          locked_balance: Number(walletRow.locked_balance || 0) + required,
-          updated_at: new Date().toISOString(),
-        })
-        .eq('id', walletRow.id);
-    }
+  if (error) {
+    console.error('[EscrowService] initiate_trade_with_escrow RPC error:', error);
+    throw new Error(error.message || 'Failed to initiate trade with escrow.');
   }
 
-  // 2. Create trade entry with dynamic fiat rate, expires_at, and user relations
-  const totalFiat = cryptoAmount * rate;
-
-  const tradePayload = {
-    seller_id: String(sellerId),
-    buyer_id: buyerId ? String(buyerId) : null,
-    crypto: cryptoSymbol,
-    coin: cryptoSymbol,
-    asset: cryptoSymbol,
-    amount: cryptoAmount,
-    crypto_amount: cryptoAmount,
-    escrow_fee: escrowFee,
-    fiat_currency: fiatCurrency,
-    price: rate,
-    unit_price: rate,
-    fiat_amount: totalFiat,
-    amount_usd: totalFiat,
-    status: 'PENDING',
-  };
-
-  const { data: trade, error: tradeError } = await supabase
-    .from('trades')
-    .insert([tradePayload])
-    .select('*')
-    .single();
-
-  if (tradeError) {
-    // If insert fails, fallback to bare minimal columns guaranteed to exist
-    const { data: simpleTrade, error: simpleError } = await supabase
-      .from('trades')
-      .insert([
-        {
-          seller_id: String(sellerId),
-          buyer_id: buyerId ? String(buyerId) : null,
-          crypto: cryptoSymbol,
-          amount: cryptoAmount,
-          fiat_amount: totalFiat,
-          price: rate,
-          status: 'PENDING',
-        },
-      ])
-      .select('*')
-      .single();
-
-    if (simpleError) {
-      throw simpleError;
-    }
-    return simpleTrade;
+  if (!data || data.success === false) {
+    throw new Error(data?.message || 'Failed to initiate trade with escrow.');
   }
 
-  return trade;
+  return data;
 }
