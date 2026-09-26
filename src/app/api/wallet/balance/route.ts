@@ -154,23 +154,6 @@ export async function GET(request: Request) {
             avail = Math.max(0, dbBal - escrow - withdraw);
           }
 
-          // Auto-reconcile wallet_assets row if active trade locked funds were not written
-          if (dbLocked < activeEscrow || (dbAvail !== null && dbAvail > avail)) {
-            try {
-              await supabaseAdmin
-                .from('wallet_assets')
-                .update({
-                  balance: avail,
-                  locked_balance: escrow,
-                  in_escrow: escrow,
-                  updated_at: new Date().toISOString()
-                })
-                .eq('id', row.id);
-            } catch (syncErr) {
-              console.warn('wallet_assets auto-sync notice:', syncErr);
-            }
-          }
-
           const total = avail + escrow + withdraw;
 
           balanceMap[symbol] = {
@@ -212,19 +195,6 @@ export async function GET(request: Request) {
               total: Math.max(0, total),
             };
             hasWalletAssets[symbol] = true;
-
-            // Seed into wallet_assets for consistency
-            try {
-              await supabaseAdmin.from('wallet_assets').insert({
-                user_id: effectiveUserId,
-                asset_symbol: symbol,
-                balance: avail,
-                locked_balance: escrow,
-                in_escrow: escrow,
-                in_withdrawal: withdraw,
-                updated_at: new Date().toISOString()
-              });
-            } catch (_) {}
           }
         }
       }

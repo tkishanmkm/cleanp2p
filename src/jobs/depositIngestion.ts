@@ -3,14 +3,13 @@ import { createClient } from '@supabase/supabase-js';
 import {
   SUPPORTED_EVM_CHAINS,
   getEvmProvider,
-  normalizeNetworkCode,
-  getTokenDecimals,
   ERC20_ABI,
 } from '@/lib/blockchain/providers';
 import { TRON_CONFIG, getTronWeb, isValidTronAddress } from '@/lib/blockchain/tron';
+import { normalizeDepositNetwork } from '@/lib/hd-derivation-engine';
 
 // Initialize Supabase admin client with service role
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL || 'https://placeholder.supabase.co';
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL || 'https://eaiwgfxoiwxepinvcykg.supabase.co';
 const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'placeholder-key';
 
 export const supabaseAdmin = createClient(supabaseUrl, supabaseKey, {
@@ -19,6 +18,30 @@ export const supabaseAdmin = createClient(supabaseUrl, supabaseKey, {
     autoRefreshToken: false,
   },
 });
+
+export const CANONICAL_USDT_CONTRACTS: Record<string, string> = {
+  ERC20: process.env.USDT_CONTRACT_ERC20 || '0xdAC17F958D2ee523a2206206994597C13D831ec7',
+  BEP20: process.env.USDT_CONTRACT_BEP20 || '0x55d398326f99059fF775485246999027B3197955',
+  TRC20: process.env.USDT_CONTRACT_TRC20 || 'TXYZopYRdj2D9XRtbG411XZZ3kM5VkAeBf',
+};
+
+export function getBtcMempoolApi(): string {
+  if (
+    process.env.BTC_MEMPOOL_API &&
+    process.env.BTC_MEMPOOL_API.trim() !== ''
+  ) {
+    return process.env.BTC_MEMPOOL_API.trim();
+  }
+
+  const network =
+    (process.env.BTC_NETWORK || 'mainnet').toLowerCase().trim();
+
+  if (network === 'testnet4') {
+    return 'https://mempool.space/testnet4/api';
+  }
+
+  return 'https://mempool.space/api';
+}
 
 export interface IngestionResult {
   network: string;
@@ -52,12 +75,22 @@ export async function getMonitoredAddresses(): Promise<{
       for (const row of primaryAddresses) {
         if (!row.address) continue;
         const clean = row.address.trim();
-        const normNet = normalizeNetworkCode(row.network_code || '');
+        const normNet = normalizeDepositNetwork(row.network_code || '');
         const normAsset = (row.asset_code || '').toUpperCase().trim();
 
         if (normNet === 'TRC20' || isValidTronAddress(clean)) {
           tronAddresses.add(clean);
-        } else if (normNet === 'BTC' || normAsset === 'BTC' || clean.startsWith('bc1') || clean.startsWith('1') || clean.startsWith('3')) {
+        } else if (
+          normNet === 'BTC' ||
+          normAsset === 'BTC' ||
+          clean.startsWith('bc1') ||
+          clean.startsWith('tb1') ||
+          clean.startsWith('1') ||
+          clean.startsWith('3') ||
+          clean.startsWith('m') ||
+          clean.startsWith('n') ||
+          clean.startsWith('2')
+        ) {
           btcAddresses.add(clean);
         } else if (normNet === 'LTC' || normAsset === 'LTC' || clean.startsWith('ltc1') || clean.startsWith('L') || clean.startsWith('M')) {
           ltcAddresses.add(clean);
@@ -76,12 +109,22 @@ export async function getMonitoredAddresses(): Promise<{
       for (const row of fallbackAddresses) {
         if (!row.address) continue;
         const clean = row.address.trim();
-        const normNet = normalizeNetworkCode(row.network || '');
+        const normNet = normalizeDepositNetwork(row.network || '');
         const normCoin = (row.coin || '').toUpperCase().trim();
 
         if (normNet === 'TRC20' || isValidTronAddress(clean)) {
           tronAddresses.add(clean);
-        } else if (normNet === 'BTC' || normCoin === 'BTC' || clean.startsWith('bc1') || clean.startsWith('1') || clean.startsWith('3')) {
+        } else if (
+          normNet === 'BTC' ||
+          normCoin === 'BTC' ||
+          clean.startsWith('bc1') ||
+          clean.startsWith('tb1') ||
+          clean.startsWith('1') ||
+          clean.startsWith('3') ||
+          clean.startsWith('m') ||
+          clean.startsWith('n') ||
+          clean.startsWith('2')
+        ) {
           btcAddresses.add(clean);
         } else if (normNet === 'LTC' || normCoin === 'LTC' || clean.startsWith('ltc1') || clean.startsWith('L') || clean.startsWith('M')) {
           ltcAddresses.add(clean);
@@ -100,12 +143,22 @@ export async function getMonitoredAddresses(): Promise<{
       for (const row of userWallets) {
         if (!row.address) continue;
         const clean = row.address.trim();
-        const normNet = normalizeNetworkCode(row.chain || '');
+        const normNet = normalizeDepositNetwork(row.chain || '');
         const normCoin = (row.currency || '').toUpperCase().trim();
 
         if (normNet === 'TRC20' || isValidTronAddress(clean)) {
           tronAddresses.add(clean);
-        } else if (normNet === 'BTC' || normCoin === 'BTC' || clean.startsWith('bc1') || clean.startsWith('1') || clean.startsWith('3')) {
+        } else if (
+          normNet === 'BTC' ||
+          normCoin === 'BTC' ||
+          clean.startsWith('bc1') ||
+          clean.startsWith('tb1') ||
+          clean.startsWith('1') ||
+          clean.startsWith('3') ||
+          clean.startsWith('m') ||
+          clean.startsWith('n') ||
+          clean.startsWith('2')
+        ) {
           btcAddresses.add(clean);
         } else if (normNet === 'LTC' || normCoin === 'LTC' || clean.startsWith('ltc1') || clean.startsWith('L') || clean.startsWith('M')) {
           ltcAddresses.add(clean);
@@ -134,14 +187,15 @@ async function scanEvmTokenDeposits(
   let credited = 0;
   const errors: string[] = [];
 
-  const normNet = normalizeNetworkCode(network);
+  const normNet = normalizeDepositNetwork(network);
   const chainConfig = SUPPORTED_EVM_CHAINS[normNet];
-  if (!chainConfig || !chainConfig.usdtContractAddress) {
+  const tokenContractAddress = CANONICAL_USDT_CONTRACTS[normNet] || chainConfig?.usdtContractAddress;
+
+  if (!chainConfig || !tokenContractAddress) {
     return { detected: 0, credited: 0, errors: [] };
   }
 
   const provider = getEvmProvider(normNet);
-  const tokenContractAddress = chainConfig.usdtContractAddress;
   const tokenDecimals = chainConfig.usdtDecimals ?? 6;
 
   try {
@@ -171,6 +225,7 @@ async function scanEvmTokenDeposits(
 
         if (!parsed || parsed.name !== 'Transfer') continue;
 
+        const fromAddress = (parsed.args[0] as string).toLowerCase();
         const toAddress = (parsed.args[1] as string).toLowerCase();
         if (!monitoredEvmAddresses.has(toAddress)) {
           continue; // Not a platform deposit address
@@ -185,21 +240,26 @@ async function scanEvmTokenDeposits(
         detected++;
         const confirmations = Math.max(1, latestBlock - log.blockNumber + 1);
 
-        // Call atomic idempotent ingest_and_credit_deposit RPC
-        const { data, error } = await supabaseAdmin.rpc('ingest_and_credit_deposit', {
-          p_tx_hash: log.transactionHash,
-          p_log_index: log.index,
-          p_network: normNet,
-          p_to_address: toAddress,
-          p_amount: numericAmount,
+        // Call canonical atomic deposit RPC
+        const { data, error } = await supabaseAdmin.rpc('process_deposit_atomic', {
+          p_destination_address: toAddress,
           p_asset_symbol: 'USDT',
+          p_network_code: normNet,
+          p_amount: numericAmount,
+          p_tx_hash: log.transactionHash,
+          p_output_index: log.index,
+          p_block_number: log.blockNumber,
+          p_from_address: fromAddress,
+          p_token_contract: tokenContractAddress,
           p_confirmations: confirmations,
+          p_provider: 'deposit_ingestion',
         });
 
         if (error) {
           errors.push(`RPC error on tx ${log.transactionHash}: ${error.message}`);
         } else {
-          if (confirmations >= chainConfig.requiredConfirmations) {
+          const res = typeof data === 'string' ? JSON.parse(data) : data;
+          if (res?.status === 'credited' || (res?.success && confirmations >= chainConfig.requiredConfirmations)) {
             credited++;
           }
         }
@@ -215,7 +275,7 @@ async function scanEvmTokenDeposits(
 }
 
 /**
- * Scans EVM blocks for native asset transfers (ETH, BNB, POL) targeting monitored addresses
+ * Scans EVM blocks for native asset transfers (ETH) targeting monitored addresses
  */
 async function scanEvmNativeDeposits(
   network: string,
@@ -227,7 +287,7 @@ async function scanEvmNativeDeposits(
   let credited = 0;
   const errors: string[] = [];
 
-  const normNet = normalizeNetworkCode(network);
+  const normNet = normalizeDepositNetwork(network);
   const chainConfig = SUPPORTED_EVM_CHAINS[normNet];
   if (!chainConfig) return { detected: 0, credited: 0, errors: [] };
 
@@ -240,7 +300,7 @@ async function scanEvmNativeDeposits(
     for (const address of Array.from(monitoredEvmAddresses)) {
       try {
         const bal = await provider.getBalance(address);
-        if (bal > 0n) {
+        if (bal > BigInt(0)) {
           try {
             const transfers: any = await provider.send('alchemy_getAssetTransfers', [
               {
@@ -263,18 +323,25 @@ async function scanEvmNativeDeposits(
                 const confirmations = latestBlock >= txBlock ? latestBlock - txBlock + 1 : 1;
 
                 detected++;
-                const { error } = await supabaseAdmin.rpc('ingest_and_credit_deposit', {
-                  p_tx_hash: txHash,
-                  p_log_index: 0,
-                  p_network: normNet,
-                  p_to_address: address.toLowerCase(),
+                const { data, error } = await supabaseAdmin.rpc('process_deposit_atomic', {
+                  p_destination_address: address.toLowerCase(),
+                  p_asset_symbol: assetSymbol === 'ETH' ? 'ETH' : assetSymbol,
+                  p_network_code: normNet === 'ERC20' ? 'ETH' : normNet,
                   p_amount: valueNum,
-                  p_asset_symbol: assetSymbol,
+                  p_tx_hash: txHash,
+                  p_output_index: 0,
+                  p_block_number: isNaN(txBlock) ? null : txBlock,
+                  p_from_address: tx.from?.toLowerCase() || null,
+                  p_token_contract: null,
                   p_confirmations: confirmations,
+                  p_provider: 'deposit_ingestion',
                 });
 
-                if (!error && confirmations >= chainConfig.requiredConfirmations) {
-                  credited++;
+                if (!error) {
+                  const res = typeof data === 'string' ? JSON.parse(data) : data;
+                  if (res?.status === 'credited' || (res?.success && confirmations >= chainConfig.requiredConfirmations)) {
+                    credited++;
+                  }
                 }
               }
             }
@@ -297,26 +364,31 @@ async function scanEvmNativeDeposits(
         if (!tx.to) continue;
         const toClean = tx.to.toLowerCase();
 
-        if (monitoredEvmAddresses.has(toClean) && tx.value > 0n) {
+        if (monitoredEvmAddresses.has(toClean) && tx.value > BigInt(0)) {
           detected++;
           const formattedAmount = ethers.formatUnits(tx.value, chainConfig.nativeDecimals);
           const numericAmount = parseFloat(formattedAmount);
           const confirmations = Math.max(1, latestBlock - b + 1);
 
-          const { error } = await supabaseAdmin.rpc('ingest_and_credit_deposit', {
-            p_tx_hash: tx.hash,
-            p_log_index: 0,
-            p_network: normNet,
-            p_to_address: toClean,
+          const { data, error } = await supabaseAdmin.rpc('process_deposit_atomic', {
+            p_destination_address: toClean,
+            p_asset_symbol: chainConfig.nativeSymbol === 'ETH' ? 'ETH' : chainConfig.nativeSymbol,
+            p_network_code: normNet === 'ERC20' ? 'ETH' : normNet,
             p_amount: numericAmount,
-            p_asset_symbol: chainConfig.nativeSymbol,
+            p_tx_hash: tx.hash,
+            p_output_index: 0,
+            p_block_number: b,
+            p_from_address: tx.from?.toLowerCase() || null,
+            p_token_contract: null,
             p_confirmations: confirmations,
+            p_provider: 'deposit_ingestion',
           });
 
           if (error) {
             errors.push(`RPC error for native transfer ${tx.hash}: ${error.message}`);
           } else {
-            if (confirmations >= chainConfig.requiredConfirmations) {
+            const res = typeof data === 'string' ? JSON.parse(data) : data;
+            if (res?.status === 'credited' || (res?.success && confirmations >= chainConfig.requiredConfirmations)) {
               credited++;
             }
           }
@@ -332,6 +404,7 @@ async function scanEvmNativeDeposits(
 
 /**
  * Scans TRON TRC-20 token transfers targeting monitored TRON addresses
+ * Supports Alchemy TRON JSON-RPC (eth_getLogs) with automatic chunking and recovery
  */
 async function scanTronDeposits(
   monitoredTronAddresses: Set<string>
@@ -346,60 +419,390 @@ async function scanTronDeposits(
 
   try {
     const tronWeb = getTronWeb(false);
-    const contractAddress = TRON_CONFIG.usdtContract;
+    const tronHost = (process.env.TRON_RPC_URL || TRON_CONFIG.fullHost || 'https://api.trongrid.io').replace(/\/$/, '');
+    const contractAddress = process.env.USDT_CONTRACT_TRC20 || TRON_CONFIG.usdtContract || CANONICAL_USDT_CONTRACTS.TRC20;
 
-    // Fetch latest TRC20 transfer events for USDT contract
-    const eventUrl = `${TRON_CONFIG.fullHost}/v1/contracts/${contractAddress}/events?event_name=Transfer&limit=50&order_by=block_timestamp,desc`;
-    const headers: Record<string, string> = {};
-    if (TRON_CONFIG.apiKey) {
-      headers['TRON-PRO-API-KEY'] = TRON_CONFIG.apiKey;
+    // Determine TronGrid REST host (separate from Alchemy or JSON-RPC fullHost)
+    const getTronGridHost = (rpcUrl: string): string => {
+      const customGrid = process.env.TRONGRID_API_URL || process.env.TRON_EVENT_SERVER;
+      if (customGrid) return customGrid.replace(/\/$/, '');
+      const lower = (rpcUrl || '').toLowerCase();
+      if (lower.includes('nile') || lower.includes('tron-testnet')) {
+        return 'https://nile.trongrid.io';
+      }
+      if (lower.includes('shasta')) {
+        return 'https://api.shasta.trongrid.io';
+      }
+      if (lower.includes('api.trongrid.io')) {
+        return rpcUrl.replace(/\/$/, '');
+      }
+      return 'https://api.trongrid.io';
+    };
+
+    const tronGridHost = getTronGridHost(tronHost);
+    const tronGridHeaders: Record<string, string> = { Accept: 'application/json' };
+    const gridKey = process.env.TRON_GRID_API_KEY || process.env.TRONGRID_API_KEY || TRON_CONFIG.apiKey;
+    if (gridKey) {
+      tronGridHeaders['TRON-PRO-API-KEY'] = gridKey;
     }
 
-    const res = await fetch(eventUrl, { headers });
-    if (!res.ok) {
-      errors.push(`TronGrid events API returned status ${res.status}`);
-      return { detected, credited, errors };
-    }
+    // Build list of known USDT contracts for the network
+    const knownContracts: string[] = [];
+    const addKnownContract = (addr: string) => {
+      if (addr && !knownContracts.includes(addr)) {
+        knownContracts.push(addr);
+      }
+    };
+    addKnownContract(contractAddress);
+    addKnownContract('TXLAQ63Xg1NAzckPwKHvzw7CSEmLMEqcdj'); // Nile USDT
+    addKnownContract('TXYZopYRdj2D9XRtbG411XZZ3kM5VkAeBf'); // Canonical Nile TRC20 USDT
+    addKnownContract('TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t'); // Mainnet USDT
 
-    const data = await res.json();
-    const currentBlock = await tronWeb.trx.getCurrentBlock();
-    const currentHeight = currentBlock.block_header?.raw_data?.number || 0;
-
-    for (const evt of data.data || []) {
-      const toHex = evt.result?.to;
-      const rawValue = evt.result?.value;
-      if (!toHex || !rawValue) continue;
-
-      let toBase58 = toHex;
+    // Build contract addresses hex filter for eth_getLogs
+    const contractAddressesHex: string[] = [];
+    const addContractHex = (base58: string) => {
       try {
-        if (toHex.startsWith('41') || toHex.startsWith('0x')) {
-          toBase58 = tronWeb.address.fromHex(toHex);
+        const hex = '0x' + tronWeb.address.toHex(base58).slice(2);
+        if (!contractAddressesHex.includes(hex.toLowerCase())) {
+          contractAddressesHex.push(hex.toLowerCase());
         }
       } catch (_) {}
+    };
+    for (const c of knownContracts) {
+      addContractHex(c);
+    }
 
-      if (monitoredTronAddresses.has(toBase58)) {
-        detected++;
-        const amount = Number(rawValue) / 1e6; // USDT TRC20 uses 6 decimals
-        const eventBlock = evt.block_number || 0;
-        const confirmations = currentHeight > eventBlock ? currentHeight - eventBlock + 1 : 1;
+    // 1. Determine latest block height
+    let latestBlock = 0;
+    try {
+      const blockRes = await fetch(tronHost, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'eth_blockNumber', params: [] }),
+      });
+      if (blockRes.ok) {
+        const bData = await blockRes.json();
+        if (bData.result) {
+          latestBlock = parseInt(bData.result, 16);
+        }
+      }
+    } catch (_) {}
 
-        const { error } = await supabaseAdmin.rpc('ingest_and_credit_deposit', {
-          p_tx_hash: evt.transaction_id,
-          p_log_index: evt.event_index ?? 0,
-          p_network: 'TRC20',
-          p_to_address: toBase58,
-          p_amount: amount,
-          p_asset_symbol: 'USDT',
-          p_confirmations: confirmations,
+    if (!latestBlock) {
+      try {
+        const nowBlockRes = await fetch(`${tronHost}/wallet/getnowblock`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({}),
         });
+        if (nowBlockRes.ok) {
+          const nbData = await nowBlockRes.json();
+          latestBlock = nbData?.block_header?.raw_data?.number || 0;
+        }
+      } catch (_) {}
+    }
 
-        if (error) {
-          errors.push(`RPC error for TRON deposit ${evt.transaction_id}: ${error.message}`);
-        } else {
-          if (confirmations >= TRON_CONFIG.requiredConfirmations) {
-            credited++;
+    if (!latestBlock) {
+      try {
+        const curBlock = await tronWeb.trx.getCurrentBlock();
+        latestBlock = curBlock?.block_header?.raw_data?.number || 0;
+      } catch (_) {}
+    }
+
+    const transferTopic = '0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef';
+    const seenTxIndices = new Set<string>();
+
+    // 2. Strategy A: Direct Monitored Account TRC-20 Transaction Ingestion via TronGrid
+    // Queries each monitored TRON address for incoming TRC-20 transfers (works reliably regardless of block depth)
+    for (const monitoredAddr of monitoredTronAddresses) {
+      try {
+        const accountUrl = `${tronGridHost}/v1/accounts/${monitoredAddr}/transactions/trc20?limit=20`;
+        const res = await fetch(accountUrl, { headers: tronGridHeaders });
+        if (res.ok) {
+          const json = await res.json();
+          const items = Array.isArray(json?.data) ? json.data : [];
+          for (const item of items) {
+            if (item.type !== 'Transfer') continue;
+
+            let toAddr = item.to || '';
+            try {
+              if (toAddr.startsWith('41') || toAddr.startsWith('0x')) {
+                toAddr = tronWeb.address.fromHex(toAddr);
+              }
+            } catch (_) {}
+
+            if (toAddr !== monitoredAddr && !monitoredTronAddresses.has(toAddr)) {
+              continue;
+            }
+
+            const txId = item.transaction_id;
+            if (!txId) continue;
+
+            const deduplicationKey = `${txId}_0`;
+            if (seenTxIndices.has(deduplicationKey)) continue;
+            seenTxIndices.add(deduplicationKey);
+
+            let fromAddr: string | null = item.from || null;
+            try {
+              if (fromAddr && (fromAddr.startsWith('41') || fromAddr.startsWith('0x'))) {
+                fromAddr = tronWeb.address.fromHex(fromAddr);
+              }
+            } catch (_) {}
+
+            const decimals = item.token_info?.decimals !== undefined ? Number(item.token_info.decimals) : 6;
+            const rawVal = BigInt(item.value || '0');
+            if (rawVal <= 0n) continue;
+            const formattedAmount = ethers.formatUnits(rawVal, decimals);
+            const amount = parseFloat(formattedAmount);
+            if (amount <= 0) continue;
+
+            const tokenContract = item.token_info?.address || contractAddress;
+
+            // Fetch block number from TRON RPC if missing from account event
+            let eventBlock = item.block_number || 0;
+            if (!eventBlock) {
+              try {
+                const txInfoRes = await fetch(`${tronHost}/wallet/gettransactioninfobyid`, {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ value: txId }),
+                });
+                if (txInfoRes.ok) {
+                  const txInfo = await txInfoRes.json();
+                  eventBlock = txInfo.blockNumber || 0;
+                }
+              } catch (_) {}
+            }
+
+            const confirmations = (latestBlock && eventBlock && latestBlock >= eventBlock)
+              ? latestBlock - eventBlock + 1
+              : 1;
+
+            detected++;
+
+            const { data: rpcData, error } = await supabaseAdmin.rpc('process_deposit_atomic', {
+              p_destination_address: toAddr,
+              p_asset_symbol: 'USDT',
+              p_network_code: 'TRC20',
+              p_amount: amount,
+              p_tx_hash: txId,
+              p_output_index: 0,
+              p_block_number: eventBlock || null,
+              p_from_address: fromAddr,
+              p_token_contract: tokenContract,
+              p_confirmations: confirmations,
+              p_provider: 'deposit_ingestion',
+            });
+
+            if (error) {
+              errors.push(`RPC error for TRON deposit ${txId}: ${error.message}`);
+            } else {
+              const r = typeof rpcData === 'string' ? JSON.parse(rpcData) : rpcData;
+              if (r?.status === 'credited' || (r?.success && confirmations >= TRON_CONFIG.requiredConfirmations)) {
+                credited++;
+              }
+            }
           }
         }
+      } catch (acctErr: any) {
+        errors.push(`TronGrid account TRC20 error for ${monitoredAddr}: ${acctErr.message}`);
+      }
+    }
+
+    // 3. Strategy B: TronGrid Contract Event Ingestion (Transfer events on known USDT contracts)
+    for (const cAddr of knownContracts) {
+      try {
+        const eventUrl = `${tronGridHost}/v1/contracts/${cAddr}/events?event_name=Transfer&limit=50&order_by=block_timestamp,desc`;
+        const res = await fetch(eventUrl, { headers: tronGridHeaders });
+        if (res.ok) {
+          const data = await res.json();
+          for (const evt of data.data || []) {
+            const txId = evt.transaction_id;
+            const outputIndex = evt.event_index !== undefined && evt.event_index !== null ? Number(evt.event_index) : 0;
+            const deduplicationKey = `${txId}_${outputIndex}`;
+            if (seenTxIndices.has(deduplicationKey)) continue;
+
+            const fromHex = evt.result?.from;
+            const toHex = evt.result?.to;
+            const rawValue = evt.result?.value;
+            if (!toHex || !rawValue) continue;
+
+            let toBase58 = toHex;
+            let fromBase58: string | null = fromHex || null;
+            try {
+              if (toHex.startsWith('41') || toHex.startsWith('0x')) {
+                toBase58 = tronWeb.address.fromHex(toHex);
+              }
+              if (fromHex && (fromHex.startsWith('41') || fromHex.startsWith('0x'))) {
+                fromBase58 = tronWeb.address.fromHex(fromHex);
+              }
+            } catch (_) {}
+
+            if (!monitoredTronAddresses.has(toBase58)) continue;
+            seenTxIndices.add(deduplicationKey);
+
+            detected++;
+            const rawValBig = BigInt(rawValue);
+            const formattedAmount = ethers.formatUnits(rawValBig, 6);
+            const amount = parseFloat(formattedAmount);
+            const eventBlock = evt.block_number || 0;
+            const confirmations = (latestBlock && eventBlock && latestBlock >= eventBlock)
+              ? latestBlock - eventBlock + 1
+              : 1;
+
+            const { data: rpcData, error } = await supabaseAdmin.rpc('process_deposit_atomic', {
+              p_destination_address: toBase58,
+              p_asset_symbol: 'USDT',
+              p_network_code: 'TRC20',
+              p_amount: amount,
+              p_tx_hash: txId,
+              p_output_index: outputIndex,
+              p_block_number: eventBlock || null,
+              p_from_address: fromBase58,
+              p_token_contract: cAddr,
+              p_confirmations: confirmations,
+              p_provider: 'deposit_ingestion',
+            });
+
+            if (error) {
+              errors.push(`RPC error for TRON deposit ${txId}: ${error.message}`);
+            } else {
+              const r = typeof rpcData === 'string' ? JSON.parse(rpcData) : rpcData;
+              if (r?.status === 'credited' || (r?.success && confirmations >= TRON_CONFIG.requiredConfirmations)) {
+                credited++;
+              }
+            }
+          }
+        }
+      } catch (evtErr: any) {
+        errors.push(`TronGrid contract events error for ${cAddr}: ${evtErr.message}`);
+      }
+    }
+
+    // 4. Strategy C: JSON-RPC eth_getLogs on configured RPC endpoint (Alchemy TRON compatible)
+    if (latestBlock && (tronHost.includes('alchemy.com') || tronHost.includes('rpc'))) {
+      try {
+        const scanWindow = 100;
+        const fromBlock = Math.max(0, latestBlock - scanWindow);
+        const ranges: Array<{ from: number; to: number }> = [];
+        for (let b = fromBlock; b <= latestBlock; b += 9) {
+          ranges.push({ from: b, to: Math.min(b + 8, latestBlock) });
+        }
+
+        const allLogs: any[] = [];
+        for (let i = 0; i < ranges.length; i += 5) {
+          const batch = ranges.slice(i, i + 5);
+          const chunkResults = await Promise.all(
+            batch.map(async (r) => {
+              if (r.from > latestBlock) return null;
+              const clampedTo = Math.min(r.to, latestBlock);
+              if (r.from > clampedTo) return null;
+
+              const res = await fetch(tronHost, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  jsonrpc: '2.0',
+                  id: 1,
+                  method: 'eth_getLogs',
+                  params: [
+                    {
+                      fromBlock: '0x' + r.from.toString(16),
+                      toBlock: '0x' + clampedTo.toString(16),
+                      address: contractAddressesHex.length === 1 ? contractAddressesHex[0] : contractAddressesHex,
+                      topics: [transferTopic],
+                    },
+                  ],
+                }),
+              });
+              if (!res.ok) return null;
+              const json = await res.json();
+              if (json.error) return null;
+              return json.result || [];
+            })
+          );
+
+          for (const logs of chunkResults) {
+            if (Array.isArray(logs)) {
+              allLogs.push(...logs);
+            }
+          }
+        }
+
+        for (const log of allLogs) {
+          if (!log.topics || log.topics.length < 3) continue;
+          if ((log.topics[0] || '').toLowerCase() !== transferTopic) continue;
+
+          const txHash = (log.transactionHash || '').replace(/^0x/, '');
+          const outputIndex = parseInt(log.logIndex || '0x0', 16) || 0;
+          const deduplicationKey = `${txHash}_${outputIndex}`;
+          if (seenTxIndices.has(deduplicationKey)) continue;
+
+          let toBase58 = '';
+          try {
+            const toHex = '41' + (log.topics[2] || '').slice(-40);
+            toBase58 = tronWeb.address.fromHex(toHex);
+          } catch (_) {
+            continue;
+          }
+
+          if (!monitoredTronAddresses.has(toBase58)) continue;
+          seenTxIndices.add(deduplicationKey);
+
+          let fromBase58: string | null = null;
+          try {
+            const fromHex = '41' + (log.topics[1] || '').slice(-40);
+            fromBase58 = tronWeb.address.fromHex(fromHex);
+          } catch (_) {}
+
+          let numericAmount = 0;
+          try {
+            const rawValue = BigInt(log.data || '0x0');
+            if (rawValue <= 0n) continue;
+            const formattedAmount = ethers.formatUnits(rawValue, 6);
+            numericAmount = parseFloat(formattedAmount);
+          } catch (_) {
+            continue;
+          }
+
+          if (numericAmount <= 0) continue;
+
+          const eventBlock = parseInt(log.blockNumber || '0x0', 16) || 0;
+          const confirmations = latestBlock > eventBlock ? latestBlock - eventBlock + 1 : 1;
+
+          let eventContractBase58 = contractAddress;
+          try {
+            const logAddrHex = (log.address || '').toLowerCase().replace(/^0x/, '');
+            eventContractBase58 = tronWeb.address.fromHex('41' + logAddrHex);
+          } catch (_) {}
+
+          detected++;
+
+          const { data: rpcData, error } = await supabaseAdmin.rpc('process_deposit_atomic', {
+            p_destination_address: toBase58,
+            p_asset_symbol: 'USDT',
+            p_network_code: 'TRC20',
+            p_amount: numericAmount,
+            p_tx_hash: txHash,
+            p_output_index: outputIndex,
+            p_block_number: eventBlock,
+            p_from_address: fromBase58,
+            p_token_contract: eventContractBase58,
+            p_confirmations: confirmations,
+            p_provider: 'deposit_ingestion',
+          });
+
+          if (error) {
+            errors.push(`RPC error for TRON deposit ${txHash}: ${error.message}`);
+          } else {
+            const res = typeof rpcData === 'string' ? JSON.parse(rpcData) : rpcData;
+            if (res?.status === 'credited' || (res?.success && confirmations >= TRON_CONFIG.requiredConfirmations)) {
+              credited++;
+            }
+          }
+        }
+      } catch (rpcErr: any) {
+        errors.push(`eth_getLogs query error: ${rpcErr.message}`);
       }
     }
   } catch (err: any) {
@@ -423,7 +826,7 @@ async function scanBtcDeposits(
     return { detected: 0, credited: 0, errors: [] };
   }
 
-  const btcApiBase = process.env.BTC_MEMPOOL_API || 'https://mempool.space/api';
+  const btcApiBase = getBtcMempoolApi();
 
   for (const btcAddr of Array.from(monitoredBtcAddresses)) {
     try {
@@ -452,20 +855,25 @@ async function scanBtcDeposits(
           const blockHeight = tx.status?.block_height;
           let confirmations = isConfirmed ? 2 : 0;
 
-          const { error } = await supabaseAdmin.rpc('ingest_and_credit_deposit', {
-            p_tx_hash: tx.txid,
-            p_log_index: voutIndex,
-            p_network: 'BTC',
-            p_to_address: btcAddr,
-            p_amount: btcAmount,
+          const { data, error } = await supabaseAdmin.rpc('process_deposit_atomic', {
+            p_destination_address: btcAddr,
             p_asset_symbol: 'BTC',
+            p_network_code: 'BTC',
+            p_amount: btcAmount,
+            p_tx_hash: tx.txid,
+            p_output_index: voutIndex,
+            p_block_number: blockHeight || null,
+            p_from_address: null,
+            p_token_contract: null,
             p_confirmations: confirmations,
+            p_provider: 'deposit_ingestion',
           });
 
           if (error) {
             errors.push(`RPC error for BTC deposit ${tx.txid}: ${error.message}`);
           } else {
-            if (confirmations >= 2) {
+            const res = typeof data === 'string' ? JSON.parse(data) : data;
+            if (res?.status === 'credited' || (res?.success && confirmations >= 2)) {
               credited++;
             }
           }
@@ -519,22 +927,28 @@ async function scanLtcDeposits(
           detected++;
           const ltcAmount = outputAmountLit / 100_000_000;
           const isConfirmed = tx.status?.confirmed === true;
+          const blockHeight = tx.status?.block_height;
           let confirmations = isConfirmed ? 6 : 0;
 
-          const { error } = await supabaseAdmin.rpc('ingest_and_credit_deposit', {
-            p_tx_hash: tx.txid,
-            p_log_index: voutIndex,
-            p_network: 'LTC',
-            p_to_address: ltcAddr,
-            p_amount: ltcAmount,
+          const { data, error } = await supabaseAdmin.rpc('process_deposit_atomic', {
+            p_destination_address: ltcAddr,
             p_asset_symbol: 'LTC',
+            p_network_code: 'LTC',
+            p_amount: ltcAmount,
+            p_tx_hash: tx.txid,
+            p_output_index: voutIndex,
+            p_block_number: blockHeight || null,
+            p_from_address: null,
+            p_token_contract: null,
             p_confirmations: confirmations,
+            p_provider: 'deposit_ingestion',
           });
 
           if (error) {
             errors.push(`RPC error for LTC deposit ${tx.txid}: ${error.message}`);
           } else {
-            if (confirmations >= 6) {
+            const res = typeof data === 'string' ? JSON.parse(data) : data;
+            if (res?.status === 'credited' || (res?.success && confirmations >= 6)) {
               credited++;
             }
           }
@@ -572,7 +986,11 @@ export async function refreshPendingDepositConfirmations(): Promise<{
     checked = pendingDeposits.length;
 
     for (const dep of pendingDeposits) {
-      const normNet = normalizeNetworkCode(dep.network);
+      const normNet = normalizeDepositNetwork(dep.network);
+      const destinationAddress = dep.to_address || dep.address;
+      const outputIndex = dep.output_index ?? dep.log_index ?? 0;
+      const assetSymbol = (dep.asset_symbol || 'USDT').toUpperCase().trim();
+      const tokenContract = CANONICAL_USDT_CONTRACTS[normNet] || null;
 
       if (normNet === 'TRC20') {
         const tronWeb = getTronWeb(false);
@@ -582,20 +1000,79 @@ export async function refreshPendingDepositConfirmations(): Promise<{
           const currentHeight = currentBlock.block_header?.raw_data?.number || 0;
           const confs = Math.max(1, currentHeight - txInfo.blockNumber + 1);
 
-          await supabaseAdmin.rpc('ingest_and_credit_deposit', {
-            p_tx_hash: dep.tx_hash,
-            p_log_index: dep.log_index || 0,
-            p_network: 'TRC20',
-            p_to_address: dep.to_address,
+          const { data, error: rpcErr } = await supabaseAdmin.rpc('process_deposit_atomic', {
+            p_destination_address: destinationAddress,
+            p_asset_symbol: assetSymbol,
+            p_network_code: 'TRC20',
             p_amount: Number(dep.amount),
-            p_asset_symbol: dep.asset_symbol || 'USDT',
+            p_tx_hash: dep.tx_hash,
+            p_output_index: outputIndex,
+            p_block_number: txInfo.blockNumber,
+            p_from_address: dep.from_address || null,
+            p_token_contract: tokenContract,
             p_confirmations: confs,
+            p_provider: 'confirmations_worker',
           });
 
-          if (confs >= TRON_CONFIG.requiredConfirmations) {
-            newlyCredited++;
+          if (!rpcErr) {
+            const res = typeof data === 'string' ? JSON.parse(data) : data;
+            if (res?.status === 'credited') {
+              newlyCredited++;
+            }
           }
         }
+      } else if (normNet === 'BTC') {
+        const btcApiBase = process.env.BTC_MEMPOOL_API || 'https://mempool.space/api';
+        try {
+          const res = await fetch(`${btcApiBase}/tx/${dep.tx_hash}/status`);
+          if (res.ok) {
+            const statusData = await res.json();
+            const confs = statusData.confirmed ? 2 : 0;
+            const { data, error: rpcErr } = await supabaseAdmin.rpc('process_deposit_atomic', {
+              p_destination_address: destinationAddress,
+              p_asset_symbol: 'BTC',
+              p_network_code: 'BTC',
+              p_amount: Number(dep.amount),
+              p_tx_hash: dep.tx_hash,
+              p_output_index: outputIndex,
+              p_block_number: statusData.block_height || null,
+              p_from_address: null,
+              p_token_contract: null,
+              p_confirmations: confs,
+              p_provider: 'confirmations_worker',
+            });
+            if (!rpcErr) {
+              const r = typeof data === 'string' ? JSON.parse(data) : data;
+              if (r?.status === 'credited') newlyCredited++;
+            }
+          }
+        } catch (_) {}
+      } else if (normNet === 'LTC') {
+        const ltcApiBase = process.env.LTC_MEMPOOL_API || 'https://litecoinspace.org/api';
+        try {
+          const res = await fetch(`${ltcApiBase}/tx/${dep.tx_hash}/status`);
+          if (res.ok) {
+            const statusData = await res.json();
+            const confs = statusData.confirmed ? 6 : 0;
+            const { data, error: rpcErr } = await supabaseAdmin.rpc('process_deposit_atomic', {
+              p_destination_address: destinationAddress,
+              p_asset_symbol: 'LTC',
+              p_network_code: 'LTC',
+              p_amount: Number(dep.amount),
+              p_tx_hash: dep.tx_hash,
+              p_output_index: outputIndex,
+              p_block_number: statusData.block_height || null,
+              p_from_address: null,
+              p_token_contract: null,
+              p_confirmations: confs,
+              p_provider: 'confirmations_worker',
+            });
+            if (!rpcErr) {
+              const r = typeof data === 'string' ? JSON.parse(data) : data;
+              if (r?.status === 'credited') newlyCredited++;
+            }
+          }
+        } catch (_) {}
       } else {
         const chain = SUPPORTED_EVM_CHAINS[normNet];
         if (chain) {
@@ -605,18 +1082,25 @@ export async function refreshPendingDepositConfirmations(): Promise<{
             const currentBlock = await provider.getBlockNumber();
             const confs = Math.max(1, currentBlock - receipt.blockNumber + 1);
 
-            await supabaseAdmin.rpc('ingest_and_credit_deposit', {
-              p_tx_hash: dep.tx_hash,
-              p_log_index: dep.log_index || 0,
-              p_network: normNet,
-              p_to_address: dep.to_address,
+            const { data, error: rpcErr } = await supabaseAdmin.rpc('process_deposit_atomic', {
+              p_destination_address: destinationAddress,
+              p_asset_symbol: assetSymbol,
+              p_network_code: normNet,
               p_amount: Number(dep.amount),
-              p_asset_symbol: dep.asset_symbol || 'USDT',
+              p_tx_hash: dep.tx_hash,
+              p_output_index: outputIndex,
+              p_block_number: receipt.blockNumber,
+              p_from_address: receipt.from?.toLowerCase() || dep.from_address || null,
+              p_token_contract: tokenContract,
               p_confirmations: confs,
+              p_provider: 'confirmations_worker',
             });
 
-            if (confs >= chain.requiredConfirmations) {
-              newlyCredited++;
+            if (!rpcErr) {
+              const res = typeof data === 'string' ? JSON.parse(data) : data;
+              if (res?.status === 'credited') {
+                newlyCredited++;
+              }
             }
           }
         }
@@ -639,7 +1123,7 @@ export async function runDepositIngestion(): Promise<{
   const { evmAddresses, tronAddresses, btcAddresses, ltcAddresses } = await getMonitoredAddresses();
   const results: IngestionResult[] = [];
 
-  // 1. Scan EVM Chains
+  // 1. Scan EVM Chains (ERC20, BEP20)
   for (const [netKey, chain] of Object.entries(SUPPORTED_EVM_CHAINS)) {
     const netResult: IngestionResult = {
       network: netKey,
@@ -658,13 +1142,13 @@ export async function runDepositIngestion(): Promise<{
       netResult.scannedBlocks = latestBlock - fromBlock;
 
       if (evmAddresses.size > 0) {
-        // Scan ERC20 USDT
+        // Scan ERC20 / BEP20 USDT
         const tokenRes = await scanEvmTokenDeposits(netKey, evmAddresses, fromBlock, latestBlock);
         netResult.depositsDetected += tokenRes.detected;
         netResult.depositsCredited += tokenRes.credited;
         netResult.errors.push(...tokenRes.errors);
 
-        // Scan Native transfers
+        // Scan Native transfers (ETH)
         const nativeRes = await scanEvmNativeDeposits(netKey, evmAddresses, fromBlock, latestBlock);
         netResult.depositsDetected += nativeRes.detected;
         netResult.depositsCredited += nativeRes.credited;

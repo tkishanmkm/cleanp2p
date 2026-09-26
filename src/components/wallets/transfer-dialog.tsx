@@ -58,8 +58,16 @@ export function TransferDialog({ open, onOpenChange, asset }: TransferDialogProp
   const [resolvedRecipient, setResolvedRecipient] = useState<RecipientInfo | null>(null);
   const [isResolving, setIsResolving] = useState(false);
   const [is2faEnabledState, setIs2faEnabledState] = useState<boolean | null>(null);
+  const [idempotencyKey, setIdempotencyKey] = useState<string>(() => globalThis.crypto.randomUUID());
 
   const coin = asset || 'USDT';
+
+  // Generate a fresh idempotency key each time the transfer dialog opens
+  useEffect(() => {
+    if (open) {
+      setIdempotencyKey(globalThis.crypto.randomUUID());
+    }
+  }, [open]);
 
   // Actively check 2FA status from Supabase profiles table when dialog opens
   useEffect(() => {
@@ -276,12 +284,16 @@ export function TransferDialog({ open, onOpenChange, asset }: TransferDialogProp
     try {
       const res = await fetch('/api/wallet/transfer', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'x-idempotency-key': idempotencyKey,
+        },
         body: JSON.stringify({
           recipientInput: values.recipient.trim(),
           asset: coin,
           amount: Number(values.amount),
           totpCode: values.totpCode,
+          idempotencyKey,
         }),
       });
 
@@ -290,10 +302,17 @@ export function TransferDialog({ open, onOpenChange, asset }: TransferDialogProp
         throw new Error(json.error || 'Failed to complete internal transfer');
       }
 
-      toast({
-        title: 'Transfer Completed Instantly!',
-        description: `Sent ${values.amount} ${coin} to @${json.recipientUsername} (ID: ${json.transferId}) with fee ${json.fee} ${coin}.`,
-      });
+      if (json.idempotentReplay || json.idempotent_replay) {
+        toast({
+          title: 'Transfer Already Completed',
+          description: `This transfer was previously processed (ID: ${json.transferId}).`,
+        });
+      } else {
+        toast({
+          title: 'Transfer Completed Instantly!',
+          description: `Sent ${values.amount} ${coin} to @${json.recipientUsername} (ID: ${json.transferId}) with fee ${json.fee} ${coin}.`,
+        });
+      }
 
       await refreshBalances();
       onOpenChange(false);

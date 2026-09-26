@@ -2,57 +2,46 @@ import { NextResponse } from 'next/server';
 import { getSupabaseAdminClient } from '@/lib/supabase/server';
 
 export async function POST(req: Request) {
-  const payload = await req.json();
-  const { hash: txHash, outputs, confirmations, block_height } = payload;
+  const payload = await req.json().catch(() => ({}));
+  const { hash: txHash, outputs, confirmations = 0, block_height } = payload;
 
-  // Process only confirmed transactions (e.g., min 1 confirmation)
-  if (confirmations < 1) {
-    return NextResponse.json({ message: 'Unconfirmed transaction ignored' }, { status: 200 });
+  if (!txHash || !Array.isArray(outputs)) {
+    return NextResponse.json({ message: 'Invalid payload' }, { status: 400 });
   }
 
+  // Process only transactions with valid hash
   const supabaseAdmin = getSupabaseAdminClient();
+  const results = [];
 
-  for (const output of outputs || []) {
+  for (const output of outputs) {
     const toAddress = output.addresses?.[0];
     const valueBtc = (output.value || 0) / 1e8; // Convert Satoshis to BTC
+    const outputIndex = typeof output.n === 'number' ? output.n : 0;
 
     if (!toAddress || valueBtc <= 0) continue;
 
-    const { data: addressRecord } = await supabaseAdmin
-      .from('user_deposit_addresses')
-      .select('user_id')
-      .eq('address', toAddress)
-      .single();
-
-    if (!addressRecord) continue;
-
-    const userId = addressRecord.user_id;
-
-    // Insert transaction record
-    const { error: txError } = await supabaseAdmin
-      .from('wallet_transactions')
-      .insert({
-        user_id: userId,
-        tx_hash: `${txHash}:${output.n}`, // Combine hash + index for output uniqueness
-        type: 'deposit',
-        network: 'bitcoin',
-        asset_symbol: 'BTC',
-        amount: valueBtc,
-        to_address: toAddress,
-        status: 'confirmed',
-        block_number: block_height
-      });
-
-    if (txError && txError.code === '23505') continue;
-
-    // Credit balance
-    await supabaseAdmin.rpc('credit_user_balance', {
-      target_user_id: userId,
-      target_asset: 'BTC',
-      target_network: 'bitcoin',
-      credit_amount: valueBtc
+    // Call canonical atomic deposit RPC
+    const { data: rpcData, error: rpcErr } = await supabaseAdmin.rpc('process_deposit_atomic', {
+      p_destination_address: toAddress,
+      p_asset_symbol: 'BTC',
+      p_network_code: 'BTC',
+      p_amount: valueBtc,
+      p_tx_hash: txHash,
+      p_output_index: outputIndex,
+      p_block_number: block_height || null,
+      p_from_address: null,
+      p_token_contract: null,
+      p_confirmations: confirmations || 0,
+      p_provider: 'blockcypher_webhook',
     });
+
+    if (rpcErr) {
+      console.error(`[Blockcypher Webhook] RPC error for ${txHash}:${outputIndex}:`, rpcErr.message);
+      results.push({ txHash, outputIndex, error: rpcErr.message });
+    } else {
+      results.push({ txHash, outputIndex, result: rpcData });
+    }
   }
 
-  return NextResponse.json({ status: 'success' }, { status: 200 });
+  return NextResponse.json({ status: 'success', processed: results.length, results }, { status: 200 });
 }

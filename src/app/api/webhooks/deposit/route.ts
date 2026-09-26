@@ -2,17 +2,10 @@ import { NextResponse } from 'next/server';
 import crypto from 'crypto';
 import { ethers } from 'ethers';
 import { getSupabaseAdminClient } from '@/lib/supabase/server';
+import { normalizeDepositNetwork } from '@/lib/hd-derivation-engine';
+import { CANONICAL_USDT_CONTRACTS } from '@/jobs/depositIngestion';
 
 export const dynamic = 'force-dynamic';
-
-const MINIMUM_CONFIRMATIONS: Record<string, number> = {
-  ethereum: 12,
-  mainnet: 12,
-  polygon: 15,
-  bsc: 15,
-  arbitrum: 20,
-  sepolia: 3,
-};
 
 function verifySignature(rawBody: string, signatureHeader: string | null): boolean {
   const secret =
@@ -22,7 +15,7 @@ function verifySignature(rawBody: string, signatureHeader: string | null): boole
 
   if (!secret) {
     console.error('⛔ [Deposit Webhook] REJECTED: No webhook secret configured in environment (failing closed).');
-    return false; // Fail-closed: Never accept unauthenticated deposits if secret is not set
+    return false; // Fail-closed
   }
 
   if (!signatureHeader) {
@@ -90,11 +83,11 @@ export async function POST(req: Request) {
 
     const supabaseAdmin = getSupabaseAdminClient();
 
-    // Standardize event items across providers (Alchemy, QuickNode, Moralis, custom)
+    // Standardize event items across providers
     const items: Array<{
       txHash: string;
       logIndex: number;
-      from: string;
+      from?: string;
       to: string;
       value: string | number;
       assetSymbol: string;
@@ -112,7 +105,7 @@ export async function POST(req: Request) {
           to: ev.to || ev.toAddress,
           value: ev.value || ev.amount,
           assetSymbol: (ev.assetSymbol || ev.symbol || ev.asset || 'USDT').toUpperCase(),
-          network: (ev.network || payload.network || 'ethereum').toLowerCase(),
+          network: (ev.network || payload.network || 'ERC20'),
           confirmations: ev.confirmations,
           blockNumber: ev.blockNumber ? parseInt(ev.blockNumber, 10) : undefined,
         });
@@ -126,7 +119,7 @@ export async function POST(req: Request) {
           to: act.toAddress,
           value: act.value,
           assetSymbol: (act.asset || 'USDT').toUpperCase(),
-          network: (payload.type === 'ADDRESS_ACTIVITY' ? 'ethereum' : 'arbitrum').toLowerCase(),
+          network: 'ERC20',
           blockNumber: act.blockNum ? parseInt(act.blockNum, 16) : undefined,
         });
       }
@@ -138,7 +131,7 @@ export async function POST(req: Request) {
         to: payload.to || payload.toAddress,
         value: payload.value || payload.amount,
         assetSymbol: (payload.assetSymbol || payload.symbol || 'USDT').toUpperCase(),
-        network: (payload.network || 'ethereum').toLowerCase(),
+        network: (payload.network || 'ERC20'),
         confirmations: payload.confirmations,
         blockNumber: payload.blockNumber ? parseInt(payload.blockNumber, 10) : undefined,
       });
@@ -149,170 +142,52 @@ export async function POST(req: Request) {
     }
 
     const processedResults = [];
-    const rpcUrl = process.env.EVM_RPC_URL;
-    let provider: ethers.JsonRpcProvider | null = null;
-    if (rpcUrl) {
-      try {
-        provider = new ethers.JsonRpcProvider(rpcUrl);
-      } catch {
-        provider = null;
-      }
-    }
 
     for (const item of items) {
-      const destinationAddress = item.to?.toLowerCase();
+      const destinationAddress = item.to?.trim();
       const txHash = item.txHash;
       const logIndex = item.logIndex;
       const amount = typeof item.value === 'number' ? item.value : parseFloat(item.value);
+      const normNet = normalizeDepositNetwork(item.network);
+      const assetSymbol = (item.assetSymbol || 'USDT').toUpperCase().trim();
+      const tokenContract = CANONICAL_USDT_CONTRACTS[normNet] || null;
 
       if (!destinationAddress || !txHash || isNaN(amount) || amount <= 0) {
         continue;
       }
 
-      // Check confirmation thresholds if confirmations provided
-      const requiredConfirmations = MINIMUM_CONFIRMATIONS[item.network] || 12;
-      if (item.confirmations !== undefined && item.confirmations < requiredConfirmations) {
-        console.log(
-          `[Deposit Webhook] Tx ${txHash} has ${item.confirmations}/${requiredConfirmations} confirmations. Waiting for threshold.`
-        );
-        processedResults.push({
-          txHash,
-          logIndex,
-          status: 'pending_confirmations',
-          confirmations: item.confirmations,
-          requiredConfirmations,
-        });
-        continue;
-      }
-
-      // 2. On-chain receipt verification (verify tx on-chain via provider.getTransactionReceipt)
-      if (provider) {
-        try {
-          const receipt = await provider.getTransactionReceipt(txHash);
-          if (receipt && receipt.status === 0) {
-            console.warn(`[Deposit Webhook] Tx ${txHash} was reverted on-chain. Skipping credit.`);
-            processedResults.push({
-              txHash,
-              status: 'reverted_on_chain',
-            });
-            continue;
-          }
-        } catch (rpcErr: any) {
-          console.warn(`[Deposit Webhook] On-chain receipt verification warning for ${txHash}:`, rpcErr?.message);
-        }
-      }
-
-      // 3. Resolve User ID assigned to this deposit address
-      let userId: string | null = null;
-
-      const { data: userDepositAddr } = await supabaseAdmin
-        .from('user_deposit_addresses')
-        .select('user_id')
-        .ilike('address', destinationAddress)
-        .maybeSingle();
-
-      if (userDepositAddr?.user_id) {
-        userId = userDepositAddr.user_id;
-      } else {
-        const { data: depositAddr } = await supabaseAdmin
-          .from('deposit_addresses')
-          .select('user_id')
-          .ilike('address', destinationAddress)
-          .maybeSingle();
-
-        if (depositAddr?.user_id) {
-          userId = depositAddr.user_id;
-        }
-      }
-
-      if (!userId) {
-        console.log(`[Deposit Webhook] Address ${destinationAddress} does not belong to any platform user.`);
-        continue;
-      }
-
-      // 4. Replay Protection: Check composite unique idempotency (tx_hash, log_index)
-      const { data: existingTx } = await supabaseAdmin
-        .from('wallet_transactions')
-        .select('id')
-        .eq('tx_hash', txHash)
-        .maybeSingle();
-
-      if (existingTx) {
-        console.log(`[Deposit Webhook] Tx ${txHash} already processed. Skipping (replay protection).`);
-        processedResults.push({
-          txHash,
-          logIndex,
-          alreadyProcessed: true,
-          status: 'skipped_duplicate',
-        });
-        continue;
-      }
-
-      // 5. Record transaction in wallet_transactions
-      const { error: txError } = await supabaseAdmin
-        .from('wallet_transactions')
-        .insert({
-          user_id: userId,
-          tx_hash: txHash,
-          type: 'deposit',
-          network: item.network,
-          asset_symbol: item.assetSymbol,
-          amount,
-          from_address: item.from,
-          to_address: destinationAddress,
-          status: 'confirmed',
-          block_number: item.blockNumber,
-        });
-
-      if (txError) {
-        console.warn(`[Deposit Webhook] Could not insert transaction record:`, txError.message);
-        continue;
-      }
-
-      // 6. Credit user balance in wallet_assets
-      const { data: existingAsset } = await supabaseAdmin
-        .from('wallet_assets')
-        .select('id, balance')
-        .eq('user_id', userId)
-        .eq('asset_symbol', item.assetSymbol)
-        .maybeSingle();
-
-      if (existingAsset) {
-        const newBalance = (parseFloat(existingAsset.balance || '0') + amount).toFixed(8);
-        await supabaseAdmin
-          .from('wallet_assets')
-          .update({ balance: newBalance, updated_at: new Date().toISOString() })
-          .eq('id', existingAsset.id);
-      } else {
-        await supabaseAdmin.from('wallet_assets').insert({
-          user_id: userId,
-          asset_symbol: item.assetSymbol,
-          balance: amount.toFixed(8),
-        });
-      }
-
-      // Dispatch Activity Center notification
-      try {
-        await supabaseAdmin.from('notifications').insert({
-          user_id: userId,
-          title: 'Deposit Successful',
-          message: `Deposit of ${amount} ${item.assetSymbol} received and credited to your wallet.`,
-          link: '/wallet',
-          is_read: false,
-          created_at: new Date().toISOString(),
-        });
-      } catch (notifErr) {
-        console.warn('[Deposit Webhook] notification insert warning:', notifErr);
-      }
-
-      processedResults.push({
-        txHash,
-        logIndex,
-        userId,
-        creditedAmount: amount,
-        asset: item.assetSymbol,
-        status: 'credited',
+      // Delegate credit and recording atomically to canonical process_deposit_atomic RPC
+      const { data: rpcData, error: rpcErr } = await supabaseAdmin.rpc('process_deposit_atomic', {
+        p_destination_address: destinationAddress,
+        p_asset_symbol: assetSymbol,
+        p_network_code: normNet,
+        p_amount: amount,
+        p_tx_hash: txHash,
+        p_output_index: logIndex,
+        p_block_number: item.blockNumber ?? null,
+        p_from_address: item.from || null,
+        p_token_contract: tokenContract,
+        p_confirmations: item.confirmations ?? 12,
+        p_provider: 'deposit_webhook',
       });
+
+      if (rpcErr) {
+        console.error(`[Deposit Webhook] RPC error for tx ${txHash}:`, rpcErr.message);
+        processedResults.push({
+          txHash,
+          logIndex,
+          status: 'error',
+          error: rpcErr.message,
+        });
+      } else {
+        const parsed = typeof rpcData === 'string' ? JSON.parse(rpcData) : rpcData;
+        processedResults.push({
+          txHash,
+          logIndex,
+          status: parsed?.status || (parsed?.already_processed ? 'already_processed' : 'success'),
+          result: parsed,
+        });
+      }
     }
 
     return NextResponse.json({

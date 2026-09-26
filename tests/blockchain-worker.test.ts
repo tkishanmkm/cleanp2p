@@ -1,5 +1,6 @@
 import { createClient } from '@supabase/supabase-js';
 import { processWithdrawalQueue } from '../src/jobs/withdrawalWorker';
+import { CANONICAL_USDT_CONTRACTS } from '../src/jobs/depositIngestion';
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL || 'https://placeholder.supabase.co';
 const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'placeholder-key';
@@ -49,6 +50,7 @@ async function runBlockchainWorkerTests() {
     await supabase.from('deposit_addresses').upsert(
       {
         user_id: testUserId,
+        wallet_id: testWalletId,
         address: testDepositAddress,
         network_code: 'BEP20',
         asset_code: 'USDT',
@@ -67,14 +69,18 @@ async function runBlockchainWorkerTests() {
     const depositAmount = 250.0;
     const requiredConfirmations = 15; // BEP20 requires 15 confirmations
 
-    const { data: ingestResult, error: ingestErr } = await supabase.rpc('ingest_and_credit_deposit', {
-      p_tx_hash: testTxHash,
-      p_log_index: testLogIndex,
-      p_network: 'BEP20',
-      p_to_address: testDepositAddress,
-      p_amount: depositAmount,
+    const { data: ingestResult, error: ingestErr } = await supabase.rpc('process_deposit_atomic', {
+      p_destination_address: testDepositAddress,
       p_asset_symbol: 'USDT',
+      p_network_code: 'BEP20',
+      p_amount: depositAmount,
+      p_tx_hash: testTxHash,
+      p_output_index: testLogIndex,
+      p_block_number: 1000000,
+      p_from_address: '0x3333333333333333333333333333333333333333',
+      p_token_contract: CANONICAL_USDT_CONTRACTS.BEP20,
       p_confirmations: requiredConfirmations,
+      p_provider: 'test_suite',
     });
 
     if (ingestErr) {
@@ -100,23 +106,26 @@ async function runBlockchainWorkerTests() {
     // ------------------------------------------------------------------------
     // TEST 2: Idempotency & Double-Spend Prevention
     // ------------------------------------------------------------------------
-    console.log(bold('\nTest 2: Double-Spend Rejection on Duplicate (tx_hash, log_index)'));
-    const { data: duplicateResult, error: dupErr } = await supabase.rpc('ingest_and_credit_deposit', {
-      p_tx_hash: testTxHash,
-      p_log_index: testLogIndex,
-      p_network: 'BEP20',
-      p_to_address: testDepositAddress,
-      p_amount: depositAmount,
+    console.log(bold('\nTest 2: Double-Spend Rejection on Duplicate (tx_hash, output_index)'));
+    const { data: duplicateResult, error: dupErr } = await supabase.rpc('process_deposit_atomic', {
+      p_destination_address: testDepositAddress,
       p_asset_symbol: 'USDT',
+      p_network_code: 'BEP20',
+      p_amount: depositAmount,
+      p_tx_hash: testTxHash,
+      p_output_index: testLogIndex,
+      p_block_number: 1000000,
+      p_from_address: '0x3333333333333333333333333333333333333333',
+      p_token_contract: CANONICAL_USDT_CONTRACTS.BEP20,
       p_confirmations: requiredConfirmations,
+      p_provider: 'test_suite',
     });
 
     if (dupErr) {
       console.log(red(`  ✗ Duplicate ingest check failed: ${dupErr.message}`));
     } else {
-      const isAlreadyProcessed =
-        duplicateResult?.[0]?.already_processed === true ||
-        duplicateResult?.already_processed === true;
+      const parsedDup = typeof duplicateResult === 'string' ? JSON.parse(duplicateResult) : duplicateResult;
+      const isAlreadyProcessed = parsedDup?.already_processed === true;
 
       // Verify balance didn't double
       const { data: assetAfterDup } = await supabase

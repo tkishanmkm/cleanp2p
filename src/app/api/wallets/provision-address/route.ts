@@ -6,6 +6,7 @@ import { getSupabaseAdminClient } from '@/lib/supabase/server';
 import { deriveHDAddress, encodeBech32 } from '@/lib/hd-wallet';
 import { ethers } from 'ethers';
 import crypto from 'crypto';
+import { getOrDeriveUserDepositAddresses } from '@/lib/hd-derivation-engine';
 
 // Base58 Alphabet
 const BASE58_ALPHABET = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
@@ -504,110 +505,19 @@ async function handleProvisioning(req: NextRequest) {
       }
     }
 
-    // 5. Atomic Counter Increment from address_derivation_counters via Admin Client
-    let derivationIndex = 1;
-    try {
-      const { data: counterData, error: counterError } = await adminClient
-        .from('address_derivation_counters')
-        .select('next_index')
-        .eq('chain', chainCategory)
-        .maybeSingle();
+    // 5. Trigger canonical provisioning via atomic RPC
+    const provisionResult = await getOrDeriveUserDepositAddresses(user.id);
+    let targetAddress = provisionResult.addresses.ETH;
+    if (chainCategory === 'BTC') targetAddress = provisionResult.addresses.BTC;
+    if (chainCategory === 'LTC') targetAddress = provisionResult.addresses.LTC;
+    if (chainCategory === 'TRON') targetAddress = provisionResult.addresses.USDT_TRC20;
 
-      if (!counterError && counterData && typeof counterData.next_index === 'number') {
-        derivationIndex = counterData.next_index;
-        await adminClient
-          .from('address_derivation_counters')
-          .update({
-            next_index: derivationIndex + 1,
-            updated_at: new Date().toISOString(),
-          })
-          .eq('chain', chainCategory);
-      } else {
-        // Count existing addresses on this chain
-        const { count } = await adminClient
-          .from('deposit_addresses')
-          .select('*', { count: 'exact', head: true })
-          .eq('network_code', chainCategory);
-
-        derivationIndex = (count || 0) + 1;
-
-        // Upsert counter
-        await adminClient
-          .from('address_derivation_counters')
-          .upsert(
-            {
-              chain: chainCategory,
-              next_index: derivationIndex + 1,
-              updated_at: new Date().toISOString(),
-            },
-            { onConflict: 'chain' }
-          );
-      }
-    } catch (countErr) {
-      console.warn("Derivation counter atomic increment fallback:", countErr);
-      derivationIndex = 1;
-    }
-
-    // 6. Derive Address for Chain
-    const derived = await deriveAddressForChain(chainCategory, derivationIndex, rawAsset);
-
-    // 7. Ensure User Wallet Container exists
-    let walletId: string | null = null;
-    try {
-      const { data: wallet } = await adminClient
-        .from('wallets')
-        .select('id')
-        .eq('user_id', user.id)
-        .maybeSingle();
-
-      if (wallet?.id) {
-        walletId = wallet.id;
-      } else {
-        const { data: newWallet } = await adminClient
-          .from('wallets')
-          .insert({
-            user_id: user.id,
-            status: 'active',
-            provisioning_status: 'completed',
-          })
-          .select('id')
-          .single();
-
-        walletId = newWallet?.id || null;
-      }
-    } catch (wErr) {
-      console.warn("Wallet lookup/creation warning:", wErr);
-    }
-
-    // 8. Insert New Record into deposit_addresses via Admin Client (Bypassing RLS)
-    try {
-      const record: Record<string, any> = {
-        user_id: user.id,
-        asset_code: derived.asset,
-        network_code: derived.network,
-        address: derived.address,
-        custody_provider: 'internal_hot_hd',
-        derivation_path: derived.derivationPath,
-        status: 'active',
-        updated_at: new Date().toISOString(),
-      };
-
-      if (walletId) {
-        record.wallet_id = walletId;
-      }
-
-      await adminClient.from('deposit_addresses').insert(record);
-    } catch (insertErr) {
-      console.warn("Insert deposit_address warning:", insertErr);
-    }
-
-    // 9. Return standard success payload
     return NextResponse.json({
       success: true,
-      address: derived.address,
+      address: targetAddress,
       chain: chainCategory,
-      network: derived.network,
-      asset: derived.asset,
+      network: chainCategory,
+      asset: rawAsset || chainCategory,
     }, { status: 200 });
 
   } catch (err: any) {

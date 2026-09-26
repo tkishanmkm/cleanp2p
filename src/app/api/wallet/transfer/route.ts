@@ -13,11 +13,26 @@ export async function POST(req: NextRequest) {
 
     const admin = getSupabaseAdminClient();
     const body = await req.json();
-    const { recipientInput, recipientUsername, asset, crypto, amount, totpCode } = body;
+    const {
+      recipientInput,
+      recipientUsername,
+      asset,
+      crypto,
+      amount,
+      totpCode,
+      idempotencyKey: bodyIdempotencyKey,
+      idempotency_key,
+      requestId,
+    } = body;
     
     const targetIdentifier = String(recipientInput || recipientUsername || '').trim();
     const coinSymbol = String(asset || crypto || 'USDT').toUpperCase().trim();
     const numericAmount = Number(amount);
+
+    // Extract or generate cryptographically secure idempotency key
+    const headerIdempotencyKey = req.headers.get('x-idempotency-key') || req.headers.get('idempotency-key');
+    const rawKey = String(bodyIdempotencyKey || idempotency_key || requestId || headerIdempotencyKey || '').trim();
+    const idempotencyKey = rawKey && rawKey.length >= 8 && rawKey.length <= 128 ? rawKey : globalThis.crypto.randomUUID();
 
     if (!targetIdentifier || !coinSymbol || isNaN(numericAmount) || numericAmount <= 0) {
       return NextResponse.json({ error: 'Invalid transfer payload. Recipient and positive amount required.' }, { status: 400 });
@@ -196,475 +211,128 @@ export async function POST(req: NextRequest) {
       }, { status: 403 });
     }
 
-    // 4. Calculate 1.5% transfer fee
-    // If transferring 100 USDT -> fee is 1.5 USDT -> total deduction = 101.5 USDT
-    const feeAmount = Number((numericAmount * 0.015).toFixed(8));
-    const totalDeduction = Number((numericAmount + feeAmount).toFixed(8));
+    const senderName = senderProfile?.username || 'Trader';
+    const recipientName = recipientProfile.username || targetIdentifier.replace(/^@/, '');
 
-    // 5. Comprehensive Sender Balance Discovery across all tables
-    let currentSenderBalance = 0;
-    let foundSenderSource = false;
+    // 4. Delegate atomic transfer, balance updates, ledgering, and transfer recording to canonical database RPC
+    const { data: rpcResult, error: rpcError } = await admin.rpc('execute_internal_transfer', {
+      p_sender_id: user.id,
+      p_recipient_username: recipientProfile.username,
+      p_asset: coinSymbol,
+      p_gross_amount: numericAmount,
+      p_idempotency_key: idempotencyKey,
+    });
 
-    // 5a. Check balances table
-    try {
-      const { data: sBal } = await admin
-        .from('balances')
-        .select('*')
-        .eq('user_id', user.id)
-        .or(`asset.ilike.${coinSymbol},asset_symbol.ilike.${coinSymbol}`)
-        .maybeSingle();
-
-      if (sBal) {
-        const avail = Number(sBal.available_balance ?? sBal.available ?? sBal.balance ?? 0);
-        if (avail > 0) {
-          currentSenderBalance = avail;
-          foundSenderSource = true;
-        }
-      }
-    } catch (_) {}
-
-    // 5b. Check user_wallets table
-    if (!foundSenderSource) {
-      try {
-        const { data: sUW } = await admin
-          .from('user_wallets')
-          .select('*')
-          .eq('user_id', user.id)
-          .or(`asset_symbol.ilike.${coinSymbol},asset_code.ilike.${coinSymbol}`)
-          .maybeSingle();
-
-        if (sUW) {
-          const avail = Number(sUW.available_balance ?? sUW.balance ?? 0);
-          if (avail > 0) {
-            currentSenderBalance = avail;
-            foundSenderSource = true;
-          }
-        }
-      } catch (_) {}
-    }
-
-    // 5c. Check wallet_assets table
-    if (!foundSenderSource) {
-      try {
-        const { data: sWA } = await admin
-          .from('wallet_assets')
-          .select('*')
-          .eq('user_id', user.id)
-          .or(`asset_symbol.ilike.${coinSymbol},asset_code.ilike.${coinSymbol},symbol.ilike.${coinSymbol}`)
-          .maybeSingle();
-
-        if (sWA) {
-          const avail = Number(sWA.available ?? sWA.balance ?? sWA.amount ?? 0);
-          if (avail > 0) {
-            currentSenderBalance = avail;
-            foundSenderSource = true;
-          }
-        }
-      } catch (_) {}
-    }
-
-    // 5d. Check wallets relation -> wallet_assets
-    if (!foundSenderSource) {
-      try {
-        const { data: mainW } = await admin
-          .from('wallets')
-          .select('id, available_balance, balance')
-          .eq('user_id', user.id)
-          .maybeSingle();
-
-        if (mainW?.id) {
-          const { data: wAsset } = await admin
-            .from('wallet_assets')
-            .select('*')
-            .eq('wallet_id', mainW.id)
-            .or(`asset_code.ilike.${coinSymbol},asset_symbol.ilike.${coinSymbol}`)
-            .maybeSingle();
-
-          if (wAsset) {
-            const avail = Number(wAsset.available ?? wAsset.balance ?? 0);
-            if (avail > 0) {
-              currentSenderBalance = avail;
-              foundSenderSource = true;
-            }
-          }
-        }
-      } catch (_) {}
-    }
-
-    // 5e. Check profiles table direct balance columns
-    if (!foundSenderSource) {
-      try {
-        const { data: profBal } = await admin
-          .from('profiles')
-          .select('btc_balance, eth_balance, ltc_balance, usdt_balance, wallets')
-          .eq('id', user.id)
-          .maybeSingle();
-
-        if (profBal) {
-          let profAvail = 0;
-          if (coinSymbol === 'BTC') profAvail = Number(profBal.btc_balance ?? profBal.wallets?.BTC?.balance ?? 0);
-          else if (coinSymbol === 'ETH') profAvail = Number(profBal.eth_balance ?? profBal.wallets?.ETH?.balance ?? 0);
-          else if (coinSymbol === 'LTC') profAvail = Number(profBal.ltc_balance ?? profBal.wallets?.LTC?.balance ?? 0);
-          else if (coinSymbol === 'USDT') profAvail = Number(profBal.usdt_balance ?? profBal.wallets?.USDT?.balance ?? 0);
-
-          if (profAvail > 0) {
-            currentSenderBalance = profAvail;
-            foundSenderSource = true;
-          }
-        }
-      } catch (_) {}
-    }
-
-    if (currentSenderBalance < totalDeduction) {
+    if (rpcError) {
+      console.error('[Internal Transfer] RPC execute_internal_transfer error:', rpcError);
       return NextResponse.json({
-        error: `Insufficient ${coinSymbol} balance. You need ${totalDeduction} ${coinSymbol} (${numericAmount} transfer + 1.5% fee of ${feeAmount} ${coinSymbol}), but only have ${currentSenderBalance} ${coinSymbol} available.`
+        error: rpcError.message || 'Failed to execute internal transfer.',
+        code: rpcError.code || 'TRANSFER_RPC_ERROR',
       }, { status: 400 });
     }
 
-    // 6. Execute atomic balance updates across ALL tables
-    const newSenderBal = Number(Math.max(0, currentSenderBalance - totalDeduction).toFixed(8));
-
-    // 6a. Update sender in balances table
-    try {
-      const { data: sBal } = await admin
-        .from('balances')
-        .select('*')
-        .eq('user_id', user.id)
-        .or(`asset.ilike.${coinSymbol},asset_symbol.ilike.${coinSymbol}`)
-        .maybeSingle();
-
-      if (sBal) {
-        await admin.from('balances').update({
-          available_balance: newSenderBal,
-          available: newSenderBal,
-          total_balance: Number(sBal.locked_balance || 0) + newSenderBal,
-          updated_at: new Date().toISOString(),
-        }).eq('id', sBal.id);
-      }
-    } catch (e) {
-      console.warn('Sender balances table update notice:', e);
+    // Fail closed: Ensure RPC response is valid and explicitly reports success
+    interface TransferRpcResponse {
+      success?: boolean;
+      transfer_id?: string;
+      public_id?: string;
+      sender_id?: string;
+      recipient_id?: string;
+      asset?: string;
+      gross_amount?: number | string;
+      net_amount?: number | string;
+      fee_amount?: number | string;
+      sender_balance_after?: number | string;
+      recipient_balance_after?: number | string;
+      status?: string;
+      idempotent_replay?: boolean;
+      error?: string;
     }
 
-    // 6b. Update sender in user_wallets table
-    try {
-      const { data: sUW } = await admin
-        .from('user_wallets')
-        .select('*')
-        .eq('user_id', user.id)
-        .or(`asset_symbol.ilike.${coinSymbol},asset_code.ilike.${coinSymbol}`)
-        .maybeSingle();
+    const transferData = rpcResult as TransferRpcResponse | null;
 
-      if (sUW) {
-        await admin.from('user_wallets').update({
-          available_balance: newSenderBal,
-          balance: newSenderBal,
-          updated_at: new Date().toISOString(),
-        }).eq('id', sUW.id);
-      }
-    } catch (e) {
-      console.warn('Sender user_wallets update notice:', e);
+    if (!transferData || transferData.success !== true) {
+      const errorMsg = transferData?.error || 'Failed to execute internal transfer.';
+      return NextResponse.json({
+        error: errorMsg,
+        code: 'TRANSFER_REJECTED',
+      }, { status: 400 });
     }
 
-    // 6c. Update sender in wallet_assets (by user_id)
-    try {
-      await admin
-        .from('wallet_assets')
-        .update({
-          balance: newSenderBal,
-          updated_at: new Date().toISOString(),
-        })
-        .eq('user_id', user.id)
-        .or(`asset_symbol.ilike.${coinSymbol},asset_code.ilike.${coinSymbol}`);
-    } catch (_) {}
-
-    // 6d. Update sender in wallet_assets (by wallet_id)
-    try {
-      const { data: sMainW } = await admin
-        .from('wallets')
-        .select('id')
-        .eq('user_id', user.id)
-        .maybeSingle();
-
-      if (sMainW?.id) {
-        await admin
-          .from('wallet_assets')
-          .update({
-            balance: newSenderBal,
-            updated_at: new Date().toISOString(),
-          })
-          .eq('wallet_id', sMainW.id)
-          .or(`asset_code.ilike.${coinSymbol},asset_symbol.ilike.${coinSymbol}`);
-      }
-    } catch (_) {}
-
-    // 6e. Update sender in profiles table
-    try {
-      const profUpdate: Record<string, any> = { updated_at: new Date().toISOString() };
-      if (coinSymbol === 'BTC') profUpdate.btc_balance = newSenderBal;
-      else if (coinSymbol === 'ETH') profUpdate.eth_balance = newSenderBal;
-      else if (coinSymbol === 'LTC') profUpdate.ltc_balance = newSenderBal;
-      else if (coinSymbol === 'USDT') profUpdate.usdt_balance = newSenderBal;
-      await admin.from('profiles').update(profUpdate).eq('id', user.id);
-    } catch (_) {}
-
-    // ==========================================
-    // 7. Credit recipient across all balance tables
-    // ==========================================
-
-    // 7a. Credit recipient in balances table
-    try {
-      const { data: rBal } = await admin
-        .from('balances')
-        .select('*')
-        .eq('user_id', recipientProfile.id)
-        .or(`asset.ilike.${coinSymbol},asset_symbol.ilike.${coinSymbol}`)
-        .maybeSingle();
-
-      if (rBal) {
-        const curRBal = Number(rBal.available_balance ?? rBal.available ?? rBal.balance ?? 0);
-        const nextRBal = Number((curRBal + numericAmount).toFixed(8));
-        await admin.from('balances').update({
-          available_balance: nextRBal,
-          available: nextRBal,
-          total_balance: Number(rBal.locked_balance || 0) + nextRBal,
-          updated_at: new Date().toISOString(),
-        }).eq('id', rBal.id);
-      } else {
-        await admin.from('balances').insert({
-          user_id: recipientProfile.id,
-          asset: coinSymbol,
-          asset_symbol: coinSymbol,
-          available_balance: numericAmount,
-          available: numericAmount,
-          locked_balance: 0,
-          total_balance: numericAmount,
-          updated_at: new Date().toISOString(),
-        });
-      }
-    } catch (e) {
-      console.warn('Recipient balances credit notice:', e);
+    // Verify critical financial fields are strictly present from the RPC output
+    if (
+      !transferData.transfer_id ||
+      transferData.gross_amount === undefined ||
+      transferData.gross_amount === null ||
+      transferData.net_amount === undefined ||
+      transferData.net_amount === null ||
+      transferData.fee_amount === undefined ||
+      transferData.fee_amount === null
+    ) {
+      console.error('[Internal Transfer] Malformed RPC response missing financial fields:', transferData);
+      return NextResponse.json({
+        error: 'Transfer failed: Incomplete financial response received from database.',
+        code: 'INVALID_RPC_RESPONSE',
+      }, { status: 500 });
     }
 
-    // 7b. Credit recipient in user_wallets table
-    try {
-      const { data: rUW } = await admin
-        .from('user_wallets')
-        .select('*')
-        .eq('user_id', recipientProfile.id)
-        .or(`asset_symbol.ilike.${coinSymbol},asset_code.ilike.${coinSymbol}`)
-        .maybeSingle();
+    const isIdempotentReplay = Boolean(transferData.idempotent_replay);
+    const transferId = String(transferData.public_id || transferData.transfer_id);
+    const dbTransferId = String(transferData.transfer_id);
+    const grossAmount = Number(transferData.gross_amount);
+    const netAmount = Number(transferData.net_amount);
+    const feeAmount = Number(transferData.fee_amount);
+    const senderBalanceAfter = transferData.sender_balance_after != null ? Number(transferData.sender_balance_after) : undefined;
+    const recipientBalanceAfter = transferData.recipient_balance_after != null ? Number(transferData.recipient_balance_after) : undefined;
+    const transferStatus = String(transferData.status || 'completed').toLowerCase();
 
-      if (rUW) {
-        const curRBal = Number(rUW.available_balance ?? rUW.balance ?? 0);
-        const nextRBal = Number((curRBal + numericAmount).toFixed(8));
-        await admin.from('user_wallets').update({
-          available_balance: nextRBal,
-          balance: nextRBal,
-          updated_at: new Date().toISOString(),
-        }).eq('id', rUW.id);
-      } else {
-        await admin.from('user_wallets').insert({
-          user_id: recipientProfile.id,
-          asset_symbol: coinSymbol,
-          available_balance: numericAmount,
-          balance: numericAmount,
-          locked_balance: 0,
-          updated_at: new Date().toISOString(),
-        });
-      }
-    } catch (e) {
-      console.warn('Recipient user_wallets credit notice:', e);
-    }
-
-    // 7c. Credit recipient in wallet_assets (by user_id)
-    try {
-      const { data: rWA } = await admin
-        .from('wallet_assets')
-        .select('*')
-        .eq('user_id', recipientProfile.id)
-        .or(`asset_symbol.ilike.${coinSymbol},asset_code.ilike.${coinSymbol}`)
-        .maybeSingle();
-
-      if (rWA) {
-        const curRBal = Number(rWA.balance ?? 0);
-        const nextRBal = Number((curRBal + numericAmount).toFixed(8));
-        await admin
-          .from('wallet_assets')
-          .update({
-            balance: nextRBal,
-            updated_at: new Date().toISOString(),
-          })
-          .eq('id', rWA.id);
-      } else {
-        await admin
-          .from('wallet_assets')
-          .insert({
-            user_id: recipientProfile.id,
-            asset_symbol: coinSymbol,
-            balance: numericAmount,
-            locked_balance: 0,
-            reserved_balance: 0,
-            in_escrow: 0,
-            in_withdrawal: 0,
-            updated_at: new Date().toISOString(),
-          });
-      }
-    } catch (_) {}
-
-    // 7d. Credit recipient in wallet_assets (by wallet_id)
-    try {
-      const { data: rMainW } = await admin
-        .from('wallets')
-        .select('id')
-        .eq('user_id', recipientProfile.id)
-        .maybeSingle();
-
-      if (rMainW?.id) {
-        const { data: rWAsset } = await admin
-          .from('wallet_assets')
-          .select('*')
-          .eq('wallet_id', rMainW.id)
-          .or(`asset_code.ilike.${coinSymbol},asset_symbol.ilike.${coinSymbol}`)
-          .maybeSingle();
-
-        if (rWAsset) {
-          const curRBal = Number(rWAsset.balance ?? 0);
-          const nextRBal = Number((curRBal + numericAmount).toFixed(8));
-          await admin
-            .from('wallet_assets')
-            .update({
-              balance: nextRBal,
-              updated_at: new Date().toISOString(),
-            })
-            .eq('wallet_id', rMainW.id)
-            .or(`asset_code.ilike.${coinSymbol},asset_symbol.ilike.${coinSymbol}`);
-        }
-      }
-    } catch (_) {}
-
-    // 7e. Credit recipient in profiles table
-    try {
-      const { data: rProf } = await admin
-        .from('profiles')
-        .select('btc_balance, eth_balance, ltc_balance, usdt_balance')
-        .eq('id', recipientProfile.id)
-        .maybeSingle();
-
-      if (rProf) {
-        const profCredit: Record<string, any> = { updated_at: new Date().toISOString() };
-        if (coinSymbol === 'BTC') profCredit.btc_balance = Number(((rProf.btc_balance || 0) + numericAmount).toFixed(8));
-        else if (coinSymbol === 'ETH') profCredit.eth_balance = Number(((rProf.eth_balance || 0) + numericAmount).toFixed(8));
-        else if (coinSymbol === 'LTC') profCredit.ltc_balance = Number(((rProf.ltc_balance || 0) + numericAmount).toFixed(8));
-        else if (coinSymbol === 'USDT') profCredit.usdt_balance = Number(((rProf.usdt_balance || 0) + numericAmount).toFixed(8));
-        await admin.from('profiles').update(profCredit).eq('id', recipientProfile.id);
-      }
-    } catch (_) {}
-
-    // 7. Generate 12-character alphanumeric transfer ID
-    const randomHex = Math.random().toString(36).substring(2, 11).toUpperCase();
-    const publicId = `TRF${randomHex}`.substring(0, 12);
-    const senderName = senderProfile?.username || 'Trader';
-    const recipientName = recipientProfile.username || 'Trader';
-
-    // 8. Record in transfers table (resilient multi-payload fallback)
-    let transferInsertErr: any = null;
-
-    // Try primary insert with all standard fields
-    const primaryPayload: any = {
-      public_id: publicId,
-      sender_id: user.id,
-      sender_username: senderName,
-      recipient_id: recipientProfile.id,
-      recipient_username: recipientName,
-      crypto: coinSymbol,
-      amount: numericAmount,
-      fee: feeAmount,
-      status: 'confirmed',
-      created_at: new Date().toISOString(),
-    };
-
-    const res1 = await admin.from('transfers').insert(primaryPayload);
-    transferInsertErr = res1.error;
-
-    if (transferInsertErr) {
-      console.warn('Transfers primary insert failed, attempting fallback with fee_amount/asset_symbol:', transferInsertErr);
-      
-      const fallbackPayload1: any = {
-        public_id: publicId,
-        sender_id: user.id,
-        sender_username: senderName,
-        recipient_id: recipientProfile.id,
-        recipient_username: recipientName,
-        crypto: coinSymbol,
-        asset_symbol: coinSymbol,
-        amount: numericAmount,
-        fee_amount: feeAmount,
-        status: 'confirmed',
-        created_at: new Date().toISOString(),
-      };
-      const res2 = await admin.from('transfers').insert(fallbackPayload1);
-      transferInsertErr = res2.error;
-
-      // If still error, try core minimal fields
-      if (transferInsertErr) {
-        console.warn('Transfers fallback 1 failed, trying core minimal fields:', transferInsertErr);
-        const fallbackPayload2: any = {
-          sender_id: user.id,
-          recipient_id: recipientProfile.id,
-          crypto: coinSymbol,
-          amount: numericAmount,
+    // 5. Dispatch confirmation notification for sender only on new transfer (not replay)
+    if (!isIdempotentReplay) {
+      try {
+        await admin.from('notifications').insert({
+          user_id: user.id,
+          title: 'Transfer Sent',
+          message: `Successfully transferred ${grossAmount} ${coinSymbol} to @${recipientName} (Net: ${netAmount} ${coinSymbol}, 1.5% Fee: ${feeAmount} ${coinSymbol}).`,
+          link: '/wallet',
+          is_read: false,
           created_at: new Date().toISOString(),
-        };
-        const res3 = await admin.from('transfers').insert(fallbackPayload2);
-        transferInsertErr = res3.error;
+        });
+      } catch (notifErr) {
+        console.warn('Sender transfer notification insert notice:', notifErr);
       }
     }
 
-    if (transferInsertErr) {
-      console.error('Final transfer record insertion failure:', transferInsertErr);
-    }
-
-    // 9. Dispatch Activity Center notifications to sender and recipient
-    const nowIso = new Date().toISOString();
-    try {
-      // Recipient notification
-      await admin.from('notifications').insert({
-        user_id: recipientProfile.id,
-        title: 'Transfer Received',
-        message: `Received ${numericAmount} ${coinSymbol} from @${senderName}.`,
-        link: '/wallet',
-        is_read: false,
-        created_at: nowIso,
-        sender_username: senderName,
-      });
-
-      // Sender confirmation notification
-      await admin.from('notifications').insert({
-        user_id: user.id,
-        title: 'Transfer Sent',
-        message: `Successfully transferred ${numericAmount} ${coinSymbol} to @${recipientName}.`,
-        link: '/wallet',
-        is_read: false,
-        created_at: nowIso,
-      });
-    } catch (notifErr) {
-      console.warn('Transfer notifications insert notice:', notifErr);
-    }
+    const message = isIdempotentReplay
+      ? `Transfer was already completed previously (ID: ${transferId}).`
+      : `Successfully transferred ${grossAmount} ${coinSymbol} to @${recipientName} (Net: ${netAmount} ${coinSymbol}, 1.5% Fee: ${feeAmount} ${coinSymbol}).`;
 
     return NextResponse.json({
       success: true,
-      transferId: publicId,
-      amount: numericAmount,
+      idempotentReplay: isIdempotentReplay,
+      idempotent_replay: isIdempotentReplay,
+      transferId,
+      publicId: transferData.public_id || transferId,
+      dbTransferId,
+      amount: grossAmount,
+      grossAmount,
+      netAmount,
       fee: feeAmount,
-      totalDeduction,
+      feeAmount,
+      totalDeduction: grossAmount,
       crypto: coinSymbol,
+      asset: coinSymbol,
       senderUsername: senderName,
       recipientUsername: recipientName,
-      message: `Successfully transferred ${numericAmount} ${coinSymbol} to @${recipientName} (1.5% Fee: ${feeAmount} ${coinSymbol}).`,
+      senderBalanceAfter,
+      recipientBalanceAfter,
+      status: transferStatus,
+      message,
     }, { status: 200 });
 
-  } catch (err: any) {
+  } catch (err: unknown) {
+    const errorMessage = err instanceof Error ? err.message : 'Internal server error during transfer';
     console.error('Transfer API route error:', err);
-    return NextResponse.json({ error: err.message || 'Internal server error during transfer' }, { status: 500 });
+    return NextResponse.json({ error: errorMessage }, { status: 500 });
   }
 }
+

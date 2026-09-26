@@ -33,7 +33,46 @@ export async function resolveDispute({
   const adminId = await verifyAdmin();
   const adminSupabase = createAdminClient();
 
-  // 1. Update dispute status
+  // 1. Fetch trade record to verify counterparties
+  const { data: trade, error: tradeFetchError } = await adminSupabase
+    .from("trades")
+    .select("id, buyer_id, seller_id")
+    .eq("id", tradeId)
+    .single();
+
+  if (tradeFetchError || !trade) {
+    throw new Error(`Trade not found: ${tradeFetchError?.message || 'Invalid trade ID'}`);
+  }
+
+  // 2. Perform canonical financial settlement
+  if (winnerId === trade.seller_id) {
+    // Seller wins: atomic cancellation and locked escrow refund to seller
+    const { data: rpcData, error: rpcError } = await adminSupabase.rpc('cancel_p2p_trade', {
+      p_trade_id: tradeId,
+      p_user_id: adminId,
+      p_reason: `Dispute resolved in favor of seller: ${resolutionReason}`,
+    });
+
+    if (rpcError || (rpcData && !rpcData.success)) {
+      const errorMsg = rpcError?.message || rpcData?.message || 'Failed to cancel trade and refund escrow.';
+      throw new Error(`Cancellation settlement failed: ${errorMsg}`);
+    }
+  } else if (winnerId === trade.buyer_id) {
+    // Buyer wins: atomic escrow release and credit to buyer
+    const { data: rpcData, error: rpcError } = await adminSupabase.rpc('release_trade_escrow', {
+      p_trade_id: tradeId,
+      p_seller_id: trade.seller_id,
+    });
+
+    if (rpcError || (rpcData && !rpcData.success)) {
+      const errorMsg = rpcError?.message || rpcData?.message || 'Failed to release escrow to buyer.';
+      throw new Error(`Escrow release settlement failed: ${errorMsg}`);
+    }
+  } else {
+    throw new Error('Invalid winner: winner must be either trade buyer or seller.');
+  }
+
+  // 3. Update dispute status only after successful financial settlement
   const { error: disputeError } = await adminSupabase
     .from("disputes")
     .update({
@@ -46,14 +85,6 @@ export async function resolveDispute({
     .eq("id", disputeId);
 
   if (disputeError) throw new Error(`Dispute update failed: ${disputeError.message}`);
-
-  // 2. Mark trade status as resolved/completed
-  const { error: tradeError } = await adminSupabase
-    .from("trades")
-    .update({ status: "resolved" })
-    .eq("id", tradeId);
-
-  if (tradeError) throw new Error(`Trade update failed: ${tradeError.message}`);
 
   revalidatePath("/adminnarayan/disputes");
   revalidatePath("/adminnarayan/dashboard");

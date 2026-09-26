@@ -1,5 +1,6 @@
 import crypto from 'crypto';
 import { supabase } from '@/lib/supabase/client';
+import { getOrDeriveUserDepositAddresses } from '@/lib/hd-derivation-engine';
 import {
   deriveEvmAddressFromXpub,
   deriveBtcSegwitAddressFromZpub,
@@ -251,104 +252,20 @@ export async function getOrProvisionHDDepositAddress(
   const asset = cryptoCode.toUpperCase();
   const network = networkCode.toUpperCase();
 
-  // 1. Check for existing active deposit address
-  const { data: existingAddress, error: searchError } = await supabase
-    .from('deposit_addresses')
-    .select('id, address, derivation_path, status')
-    .eq('user_id', userId)
-    .eq('asset_code', asset)
-    .eq('network_code', network)
-    .eq('status', 'active')
-    .limit(1)
-    .maybeSingle();
+  const provisionResult = await getOrDeriveUserDepositAddresses(userId);
+  let address = provisionResult.addresses.ETH;
+  let path = `${STANDARD_DERIVATION_PATHS.ETH || "m/44'/60'/0'/0"}/${provisionResult.walletIndex}`;
 
-  if (!searchError && existingAddress?.address) {
-    return {
-      address: existingAddress.address,
-      path: existingAddress.derivation_path || '',
-      isNew: false,
-    };
+  if (asset === 'BTC' || network === 'BTC') {
+    address = provisionResult.addresses.BTC;
+    path = `${STANDARD_DERIVATION_PATHS.BTC || "m/84'/0'/0'/0"}/${provisionResult.walletIndex}`;
+  } else if (asset === 'LTC' || network === 'LTC') {
+    address = provisionResult.addresses.LTC;
+    path = `${STANDARD_DERIVATION_PATHS.LTC || "m/84'/2'/0'/0"}/${provisionResult.walletIndex}`;
+  } else if (network === 'TRC20' || asset === 'TRX') {
+    address = provisionResult.addresses.USDT_TRC20;
+    path = `${STANDARD_DERIVATION_PATHS.TRC20 || "m/44'/195'/0'/0"}/${provisionResult.walletIndex}`;
   }
 
-  // 2. Obtain next index via RPC or count
-  let nextIndex = 1;
-  try {
-    const { data: rpcIndex, error: rpcError } = await supabase.rpc('get_next_hd_index', {
-      p_crypto: asset,
-      p_network: network,
-    });
-
-    if (!rpcError && typeof rpcIndex === 'number') {
-      nextIndex = rpcIndex;
-    } else {
-      // Fallback index calculation: total addresses for this pair + 1
-      const { count } = await supabase
-        .from('deposit_addresses')
-        .select('*', { count: 'exact', head: true })
-        .eq('asset_code', asset)
-        .eq('network_code', network);
-
-      nextIndex = (count || 0) + 1;
-    }
-  } catch {
-    nextIndex = 1;
-  }
-
-  // 3. Ensure user has a wallet container
-  let walletId: string | null = null;
-  const { data: walletData } = await supabase
-    .from('wallets')
-    .select('id')
-    .eq('user_id', userId)
-    .maybeSingle();
-
-  if (walletData?.id) {
-    walletId = walletData.id;
-  } else {
-    // Create wallet container if not present
-    let newWalletId: string | null = null;
-    try {
-      const { data: newWallet } = await supabase
-        .from('wallets')
-        .insert({ user_id: userId, status: 'active' })
-        .select('id')
-        .maybeSingle();
-      newWalletId = newWallet?.id || null;
-    } catch {
-      // fallback
-    }
-    if (!newWalletId) {
-      const { data: fallbackWallet } = await supabase
-        .from('wallets')
-        .insert({ user_id: userId })
-        .select('id')
-        .maybeSingle();
-      newWalletId = fallbackWallet?.id || userId;
-    }
-    walletId = newWalletId;
-  }
-
-  // 4. Derive the new address using network public xpub
-  const publicXpub = process.env.PUBLIC_PLATFORM_XPUB || `xpub_plat_${asset}_${network}_pubkey`;
-  const { address, path } = await deriveHDAddress(asset, network, publicXpub, nextIndex);
-
-  // 5. Store in Supabase deposit_addresses table
-  if (walletId) {
-    await supabase.from('deposit_addresses').upsert(
-      {
-        wallet_id: walletId,
-        user_id: userId,
-        asset_code: asset,
-        network_code: network,
-        address,
-        custody_provider: 'internal_hd',
-        derivation_path: path,
-        status: 'active',
-        updated_at: new Date().toISOString(),
-      },
-      { onConflict: 'address' }
-    );
-  }
-
-  return { address, path, isNew: true };
+  return { address, path, isNew: false };
 }

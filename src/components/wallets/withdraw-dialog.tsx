@@ -228,14 +228,19 @@ export function WithdrawDialog({ open, onOpenChange, asset, userWallets }: Withd
 
       if (internalDep?.user_id && internalDep.user_id !== user.uid) {
         // Internal transfer detected! Execute instantly via internal transfer API
+        const internalTransferKey = globalThis.crypto.randomUUID();
         const transferRes = await fetch('/api/wallet/transfer', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: {
+            'Content-Type': 'application/json',
+            'x-idempotency-key': internalTransferKey,
+          },
           body: JSON.stringify({
             recipientInput: targetAddress,
             asset,
             amount: withdrawAmt,
             totpCode: values.totpCode?.trim() || '',
+            idempotencyKey: internalTransferKey,
           }),
         });
 
@@ -244,10 +249,17 @@ export function WithdrawDialog({ open, onOpenChange, asset, userWallets }: Withd
           throw new Error(transferData.error || 'Failed to complete internal transfer');
         }
 
-        toast({
-          title: 'Internal Transfer Completed!',
-          description: `Address belongs to @${transferData.recipientUsername}. Processed instantly as an internal transfer (1.5% Fee: ${transferData.fee} ${asset}).`,
-        });
+        if (transferData.idempotentReplay || transferData.idempotent_replay) {
+          toast({
+            title: 'Internal Transfer Already Completed',
+            description: `This transfer was previously completed (ID: ${transferData.transferId}).`,
+          });
+        } else {
+          toast({
+            title: 'Internal Transfer Completed!',
+            description: `Address belongs to @${transferData.recipientUsername}. Processed instantly as an internal transfer (1.5% Fee: ${transferData.fee} ${asset}).`,
+          });
+        }
 
         await refreshBalances();
         onOpenChange(false);

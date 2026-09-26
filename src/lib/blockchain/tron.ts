@@ -11,7 +11,7 @@ export interface TronConfig {
 export const TRON_CONFIG: TronConfig = {
   fullHost: process.env.TRON_RPC_URL || 'https://api.trongrid.io',
   apiKey: process.env.TRON_GRID_API_KEY || process.env.TRONGRID_API_KEY,
-  usdtContract: process.env.USDT_CONTRACT_TRC20 || 'TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t',
+  usdtContract: process.env.USDT_CONTRACT_TRC20 || 'TXYZopYRdj2D9XRtbG411XZZ3kM5VkAeBf',
   usdtDecimals: 6,
   requiredConfirmations: 19,
 };

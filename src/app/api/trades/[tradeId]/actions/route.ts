@@ -160,194 +160,18 @@ export async function POST(
         );
       }
 
-      // Try RPC first
-      let rpcSucceeded = false;
-      try {
-        const { data: rpcData, error: rpcError } = await adminClient.rpc('expire_p2p_trade', {
-          p_trade_id: actualTradeId,
-        });
-        if (!rpcError && rpcData?.success) {
-          rpcSucceeded = true;
-        }
-      } catch (e) {
-        console.warn('expire_p2p_trade RPC call warning:', e);
+      // Canonical RPC call
+      const { data: rpcData, error: rpcError } = await adminClient.rpc('expire_p2p_trade', {
+        p_trade_id: actualTradeId,
+      });
+
+      if (rpcError || (rpcData && !rpcData.success)) {
+        const errorMsg = rpcError?.message || rpcData?.message || 'Failed to expire trade.';
+        console.error('expire_p2p_trade RPC failed:', errorMsg);
+        return NextResponse.json({ error: errorMsg }, { status: 400 });
       }
 
-      if (!rpcSucceeded) {
-        // 1. Update trade status to 'expired'
-        let q = adminClient.from('trades').update({
-          status: 'expired',
-          escrow_status: 'EXPIRED',
-          updated_at: now,
-        });
-        if (isActualUuid) q = q.eq('id', actualTradeId);
-        else q = q.eq('trade_id', tradeId);
-        let { error: updateError } = await q;
-
-        // Defensive fallback 1: Uppercase 'EXPIRED'
-        if (updateError) {
-          let qUpper = adminClient.from('trades').update({
-            status: 'EXPIRED',
-            escrow_status: 'EXPIRED',
-            updated_at: now,
-          });
-          if (isActualUuid) qUpper = qUpper.eq('id', actualTradeId);
-          else qUpper = qUpper.eq('trade_id', tradeId);
-          const resUpper = await qUpper;
-          if (!resUpper.error) {
-            updateError = null;
-          }
-        }
-
-        // Defensive fallback 2: 'cancelled' / 'CANCELLED' if 'expired' is not in enum
-        if (updateError) {
-          let qCancelled = adminClient.from('trades').update({
-            status: 'cancelled',
-            escrow_status: 'EXPIRED',
-            updated_at: now,
-          });
-          if (isActualUuid) qCancelled = qCancelled.eq('id', actualTradeId);
-          else qCancelled = qCancelled.eq('trade_id', tradeId);
-          const resCancelled = await qCancelled;
-          if (!resCancelled.error) {
-            updateError = null;
-          }
-        }
-
-        // Defensive fallback 3: Update escrow_status and timestamp only
-        if (updateError) {
-          let qEscrowOnly = adminClient.from('trades').update({
-            escrow_status: 'EXPIRED',
-            updated_at: now,
-          });
-          if (isActualUuid) qEscrowOnly = qEscrowOnly.eq('id', actualTradeId);
-          else qEscrowOnly = qEscrowOnly.eq('trade_id', tradeId);
-          const resEscrow = await qEscrowOnly;
-          if (!resEscrow.error) {
-            updateError = null;
-          }
-        }
-
-        if (updateError) {
-          console.error('Failed to update trade status to expired:', updateError);
-          return NextResponse.json({ error: updateError.message || 'Failed to expire trade.' }, { status: 400 });
-        }
-      }
-
-      // Also sync p2p_trades if applicable
-      try {
-        await adminClient
-          .from('p2p_trades')
-          .update({ status: 'EXPIRED', updated_at: now })
-          .eq('id', actualTradeId);
-      } catch (_) {}
-
-      // 2. Unlock/Refund seller escrow balance safely across all balance tables if seller_id is present
-      try {
-        const cryptoSym = (trade?.crypto || trade?.asset_symbol || trade?.coin || 'USDT').toUpperCase();
-        const cryptoAmt = Number(trade?.crypto_amount ?? trade?.amount ?? 0);
-        const feeAmt = Number(trade?.escrow_fee ?? trade?.platform_fee ?? (cryptoAmt * 0.015));
-        const totalRefund = cryptoAmt + feeAmt;
-        if (trade?.seller_id && totalRefund > 0) {
-          // 2a. Update user_wallets
-          const { data: uWallet } = await adminClient
-            .from('user_wallets')
-            .select('*')
-            .eq('user_id', trade.seller_id)
-            .ilike('asset_symbol', cryptoSym)
-            .maybeSingle();
-
-          if (uWallet) {
-            const curLocked = Number(uWallet.locked_balance || 0);
-            const curReserved = Number(uWallet.reserved_balance || 0);
-            const curAvail = Number(uWallet.available_balance || uWallet.balance || 0);
-            await adminClient
-              .from('user_wallets')
-              .update({
-                available_balance: curAvail + totalRefund,
-                balance: curAvail + totalRefund,
-                locked_balance: Math.max(0, curLocked - totalRefund),
-                reserved_balance: Math.max(0, curReserved - totalRefund),
-                updated_at: now
-              })
-              .eq('id', uWallet.id);
-          }
-
-          // 2b. Update balances table
-          const { data: uBal } = await adminClient
-            .from('balances')
-            .select('*')
-            .eq('user_id', trade.seller_id)
-            .ilike('asset', cryptoSym)
-            .maybeSingle();
-
-          if (uBal) {
-            const curAvail = Number(uBal.available_balance ?? uBal.available ?? 0);
-            const curLocked = Number(uBal.locked_balance || 0);
-            await adminClient
-              .from('balances')
-              .update({
-                available_balance: curAvail + totalRefund,
-                available: curAvail + totalRefund,
-                locked_balance: Math.max(0, curLocked - totalRefund),
-                updated_at: now
-              })
-              .eq('id', uBal.id);
-          }
-
-          // 2c. Update wallet_assets
-          const { data: sellerAsset } = await adminClient
-            .from('wallet_assets')
-            .select('*')
-            .eq('user_id', trade.seller_id)
-            .ilike('asset_symbol', cryptoSym)
-            .maybeSingle();
-
-          if (sellerAsset) {
-            const curLocked = Number(sellerAsset.locked_escrow ?? sellerAsset.locked_balance ?? 0);
-            const curReserved = Number(sellerAsset.reserved_balance ?? 0);
-            const curAvail = Number(sellerAsset.balance !== undefined && sellerAsset.balance !== null ? sellerAsset.balance : (sellerAsset.available ?? 0));
-            await adminClient
-              .from('wallet_assets')
-              .update({
-                balance: curAvail + totalRefund,
-                available: curAvail + totalRefund,
-                locked_escrow: Math.max(0, curLocked - totalRefund),
-                locked_balance: Math.max(0, curLocked - totalRefund),
-                in_escrow: Math.max(0, Number(sellerAsset.in_escrow ?? 0) - totalRefund),
-                reserved_balance: Math.max(0, curReserved - totalRefund),
-                updated_at: now
-              })
-              .eq('id', sellerAsset.id);
-          }
-
-          // 2d. Update wallets (chain-level)
-          const { data: mainWallet } = await adminClient
-            .from('wallets')
-            .select('*')
-            .eq('user_id', trade.seller_id)
-            .maybeSingle();
-
-          if (mainWallet) {
-            const curLocked = Number(mainWallet.locked_balance || 0);
-            const curAvail = Number(mainWallet.available_balance || 0);
-            const curReserved = Number(mainWallet.reserved_balance || 0);
-            await adminClient
-              .from('wallets')
-              .update({
-                available_balance: curAvail + totalRefund,
-                locked_balance: Math.max(0, curLocked - totalRefund),
-                reserved_balance: Math.max(0, curReserved - totalRefund),
-                updated_at: now
-              })
-              .eq('id', mainWallet.id);
-          }
-        }
-      } catch (refundErr) {
-        console.warn('Escrow refund on expiration warning:', refundErr);
-      }
-
-      // 3. Post official system message in trade chat if not already present
+      // Post official system message in trade chat if not already present
       try {
         const { data: existingMsg } = await adminClient
           .from('trade_messages')
@@ -371,7 +195,7 @@ export async function POST(
         console.warn('Error inserting expired system message:', sysMsgErr);
       }
 
-      // 4. Notify both parties
+      // Notify both parties
       const userIds = [trade?.buyer_id, trade?.seller_id].filter(Boolean);
       for (const uid of userIds) {
         try {
@@ -386,7 +210,7 @@ export async function POST(
         } catch {}
       }
 
-      return NextResponse.json({ success: true, message: 'Trade marked as expired.' });
+      return NextResponse.json({ success: true, message: rpcData?.message || 'Trade marked as expired.' });
     }
 
     if (action === 'RELEASE_ESCROW') {
@@ -430,563 +254,95 @@ export async function POST(
         }
       }
 
-      let rpcSucceeded = false;
-      let rpcResult: any = null;
+      // Canonical RPC call
+      const { data: rpcData, error: rpcError } = await adminClient.rpc('release_trade_escrow', {
+        p_trade_id: actualTradeId,
+        p_seller_id: user.id,
+      });
 
-      try {
-        const { data, error } = await adminClient.rpc('release_trade_escrow', {
-          p_trade_id: actualTradeId,
-          p_seller_id: user.id,
-        });
-
-        if (!error && data) {
-          rpcSucceeded = true;
-          rpcResult = data;
-        } else if (error && error.code !== 'PGRST202') {
-          // If real error occurred (not missing function)
-          if (!data?.success && error.message) {
-            return NextResponse.json({ error: error.message }, { status: 400 });
-          }
-        }
-      } catch (e) {
-        console.warn('release_trade_escrow RPC call failed, falling back:', e);
-      }
-
-      if (rpcSucceeded) {
-        if (!rpcResult.success) {
-          return NextResponse.json({ error: rpcResult.message || 'Failed to release escrow' }, { status: 400 });
-        }
-        return NextResponse.json({ success: true, message: rpcResult.message || 'Escrow released successfully.' });
-      }
-
-      // Fallback: direct update if RPC is missing
-      const now = new Date().toISOString();
-      let updateQuery = adminClient
-        .from('trades')
-        .update({
-          status: 'released',
-          escrow_status: 'RELEASED',
-          released_at: now,
-          completed_at: now,
-          updated_at: now
-        });
-
-      if (isActualUuid) {
-        updateQuery = updateQuery.eq('id', actualTradeId);
-      } else {
-        updateQuery = updateQuery.eq('trade_id', tradeId);
-      }
-      updateQuery = updateQuery.eq('seller_id', user.id);
-
-      let { error: updateError } = await updateQuery;
-
-      // If status update failed due to trigger or enum constraint, fallback to updating escrow_status and timestamps
-      if (updateError) {
-        console.warn('Primary release status update warning, trying escrow_status update:', updateError.message);
-        let qFallback = adminClient
-          .from('trades')
-          .update({
-            escrow_status: 'RELEASED',
-            released_at: now,
-            completed_at: now,
-            updated_at: now
-          });
-        if (isActualUuid) qFallback = qFallback.eq('id', actualTradeId);
-        else qFallback = qFallback.eq('trade_id', tradeId);
-        qFallback = qFallback.eq('seller_id', user.id);
-        const resFb = await qFallback;
-        if (!resFb.error) {
-          updateError = null;
-        }
-      }
-
-      if (updateError) {
-        return NextResponse.json({ error: updateError.message }, { status: 400 });
+      if (rpcError || (rpcData && !rpcData.success)) {
+        const errorMsg = rpcError?.message || rpcData?.message || 'Failed to release escrow.';
+        console.error('release_trade_escrow RPC failed:', errorMsg);
+        return NextResponse.json({ error: errorMsg }, { status: 400 });
       }
 
       const coinAmount = Number(trade?.amount ?? trade?.crypto_amount ?? 0);
       const coinSymbol = (trade?.crypto ?? trade?.asset_symbol ?? 'USDT').toUpperCase();
-      const feeAmount = Number(trade?.escrow_fee ?? trade?.platform_fee ?? (coinAmount * 0.015));
-      const totalSellerDeduct = coinAmount + feeAmount;
+      const now = new Date().toISOString();
 
-      // 1. Deduct seller locked escrow across tables (amount + escrow fee deducted upon release)
       try {
-        if (trade?.seller_id && totalSellerDeduct > 0) {
-          // Table: balances
-          const { data: sBal } = await adminClient
-            .from('balances')
-            .select('*')
-            .eq('user_id', trade.seller_id)
-            .ilike('asset', coinSymbol)
-            .maybeSingle();
-
-          if (sBal) {
-            await adminClient
-              .from('balances')
-              .update({
-                locked_balance: Math.max(0, Number(sBal.locked_balance || 0) - totalSellerDeduct),
-                total_balance: Math.max(0, Number(sBal.total_balance || 0) - totalSellerDeduct),
-                updated_at: now
-              })
-              .eq('id', sBal.id);
-          }
-
-          // Table: user_wallets
-          const { data: sUW } = await adminClient
-            .from('user_wallets')
-            .select('*')
-            .eq('user_id', trade.seller_id)
-            .ilike('asset_symbol', coinSymbol)
-            .maybeSingle();
-
-          if (sUW) {
-            await adminClient
-              .from('user_wallets')
-              .update({
-                locked_balance: Math.max(0, Number(sUW.locked_balance || 0) - totalSellerDeduct),
-                reserved_balance: Math.max(0, Number(sUW.reserved_balance || 0) - totalSellerDeduct),
-                balance: Math.max(0, Number(sUW.balance || 0) - totalSellerDeduct),
-                updated_at: now
-              })
-              .eq('id', sUW.id);
-          }
-
-          // Table: wallet_assets
-          const { data: sWA } = await adminClient
-            .from('wallet_assets')
-            .select('*')
-            .eq('user_id', trade.seller_id)
-            .ilike('asset_symbol', coinSymbol)
-            .maybeSingle();
-
-          if (sWA) {
-            await adminClient
-              .from('wallet_assets')
-              .update({
-                locked_escrow: Math.max(0, Number(sWA.locked_escrow ?? sWA.locked_balance ?? 0) - totalSellerDeduct),
-                locked_balance: Math.max(0, Number(sWA.locked_balance ?? sWA.locked_escrow ?? 0) - totalSellerDeduct),
-                in_escrow: Math.max(0, Number(sWA.in_escrow ?? sWA.locked_escrow ?? 0) - totalSellerDeduct),
-                reserved_balance: Math.max(0, Number(sWA.reserved_balance || 0) - totalSellerDeduct),
-                updated_at: now
-              })
-              .eq('id', sWA.id);
-          }
-
-          // Table: wallets
-          const { data: sW } = await adminClient
-            .from('wallets')
-            .select('*')
-            .eq('user_id', trade.seller_id)
-            .ilike('currency', coinSymbol)
-            .maybeSingle();
-
-          if (sW) {
-            await adminClient
-              .from('wallets')
-              .update({
-                locked_balance: Math.max(0, Number(sW.locked_balance || 0) - totalSellerDeduct),
-                total_balance: Math.max(0, Number(sW.total_balance || 0) - totalSellerDeduct),
-                updated_at: now
-              })
-              .eq('id', sW.id);
-          }
-        }
-
-        // 2. Credit buyer available balance across tables
-        if (trade?.buyer_id && coinAmount > 0) {
-          // Table: balances
-          const { data: bBal } = await adminClient
-            .from('balances')
-            .select('*')
-            .eq('user_id', trade.buyer_id)
-            .ilike('asset', coinSymbol)
-            .maybeSingle();
-
-          if (bBal) {
-            await adminClient
-              .from('balances')
-              .update({
-                available_balance: Number(bBal.available_balance || 0) + coinAmount,
-                total_balance: Number(bBal.total_balance || 0) + coinAmount,
-                updated_at: now
-              })
-              .eq('id', bBal.id);
-          } else {
-            await adminClient.from('balances').insert({
-              user_id: trade.buyer_id,
-              asset: coinSymbol,
-              available_balance: coinAmount,
-              locked_balance: 0,
-              total_balance: coinAmount,
-              updated_at: now
-            });
-          }
-
-          // Table: user_wallets
-          const { data: bUW } = await adminClient
-            .from('user_wallets')
-            .select('*')
-            .eq('user_id', trade.buyer_id)
-            .ilike('asset_symbol', coinSymbol)
-            .maybeSingle();
-
-          if (bUW) {
-            await adminClient
-              .from('user_wallets')
-              .update({
-                available_balance: Number(bUW.available_balance || 0) + coinAmount,
-                balance: Number(bUW.balance || 0) + coinAmount,
-                updated_at: now
-              })
-              .eq('id', bUW.id);
-          } else {
-            await adminClient
-              .from('user_wallets')
-              .insert({
-                user_id: trade.buyer_id,
-                asset_symbol: coinSymbol,
-                available_balance: coinAmount,
-                locked_balance: 0,
-                balance: coinAmount,
-                created_at: now,
-                updated_at: now
-              });
-          }
-
-          // Table: wallet_assets
-          const { data: bWA } = await adminClient
-            .from('wallet_assets')
-            .select('*')
-            .eq('user_id', trade.buyer_id)
-            .ilike('asset_symbol', coinSymbol)
-            .maybeSingle();
-
-          if (bWA) {
-            const curBal = Number(bWA.balance !== undefined && bWA.balance !== null ? bWA.balance : (bWA.available ?? 0));
-            const curAvail = Number(bWA.available !== undefined && bWA.available !== null ? bWA.available : (bWA.balance ?? 0));
-            await adminClient
-              .from('wallet_assets')
-              .update({
-                balance: curBal + coinAmount,
-                available: curAvail + coinAmount,
-                updated_at: now
-              })
-              .eq('id', bWA.id);
-          } else {
-            await adminClient
-              .from('wallet_assets')
-              .insert({
-                user_id: trade.buyer_id,
-                asset_symbol: coinSymbol,
-                balance: coinAmount,
-                available: coinAmount,
-                locked_escrow: 0,
-                locked_balance: 0,
-                in_escrow: 0,
-                updated_at: now
-              });
-          }
-
-          // Table: wallets
-          const { data: bW } = await adminClient
-            .from('wallets')
-            .select('*')
-            .eq('user_id', trade.buyer_id)
-            .ilike('currency', coinSymbol)
-            .maybeSingle();
-
-          if (bW) {
-            await adminClient
-              .from('wallets')
-              .update({
-                total_balance: Number(bW.total_balance || 0) + coinAmount,
-                updated_at: now
-              })
-              .eq('id', bW.id);
-          }
-
-          // Table: profiles (Credit buyer coin balance)
-          try {
-            const { data: bProf } = await adminClient
-              .from('profiles')
-              .select('btc_balance, eth_balance, ltc_balance, usdt_balance')
-              .eq('id', trade.buyer_id)
-              .maybeSingle();
-
-            if (bProf) {
-              const bProfUpdate: Record<string, any> = { updated_at: now };
-              if (coinSymbol === 'BTC') bProfUpdate.btc_balance = Number(((bProf.btc_balance || 0) + coinAmount).toFixed(8));
-              else if (coinSymbol === 'ETH') bProfUpdate.eth_balance = Number(((bProf.eth_balance || 0) + coinAmount).toFixed(8));
-              else if (coinSymbol === 'LTC') bProfUpdate.ltc_balance = Number(((bProf.ltc_balance || 0) + coinAmount).toFixed(8));
-              else if (coinSymbol === 'USDT') bProfUpdate.usdt_balance = Number(((bProf.usdt_balance || 0) + coinAmount).toFixed(8));
-              await adminClient.from('profiles').update(bProfUpdate).eq('id', trade.buyer_id);
-            }
-          } catch (bProfErr) {
-            console.warn('Buyer profile balance update warning:', bProfErr);
-          }
-        }
-
-        // 3. Increment completed_trades in profiles
-        if (trade?.seller_id) {
-          const { data: sP } = await adminClient.from('profiles').select('completed_trades').eq('id', trade.seller_id).maybeSingle();
-          await adminClient.from('profiles').update({ completed_trades: (sP?.completed_trades || 0) + 1 }).eq('id', trade.seller_id);
-        }
-        if (trade?.buyer_id) {
-          const { data: bP } = await adminClient.from('profiles').select('completed_trades').eq('id', trade.buyer_id).maybeSingle();
-          await adminClient.from('profiles').update({ completed_trades: (bP?.completed_trades || 0) + 1 }).eq('id', trade.buyer_id);
-        }
-
-        // 4. If dispute existed, mark resolved
-        await adminClient
-          .from('disputes')
-          .update({
-            status: 'RESOLVED',
-            admin_decision: 'RELEASE_BUYER',
-            resolved_at: now
-          })
-          .eq('trade_id', actualTradeId);
-      } catch (balErr) {
-        console.warn('Balance sync on escrow release warning:', balErr);
+        await insertPaxonesSystemMessage(adminClient, {
+          tradeId: actualTradeId,
+          type: 'TRADE_COMPLETED',
+          sellerUsername: sellerName,
+          buyerUsername: buyerName,
+          coinAmount,
+          coinSymbol
+        });
+      } catch (msgErr) {
+        console.warn('System message insert warning:', msgErr);
       }
-
-      await insertPaxonesSystemMessage(adminClient, {
-        tradeId: actualTradeId,
-        type: 'TRADE_COMPLETED',
-        sellerUsername: sellerName,
-        buyerUsername: buyerName,
-        coinAmount,
-        coinSymbol
-      });
 
       if (trade?.buyer_id) {
-        await adminClient.from('notifications').insert({
-          user_id: trade.buyer_id,
-          title: 'Escrow Released',
-          message: `@${sellerName} released ${coinAmount} ${coinSymbol} to your wallet.`,
-          link: `/trade/${actualTradeId}`,
-          is_read: false,
-          created_at: now
-        }).select().maybeSingle();
+        try {
+          await adminClient.from('notifications').insert({
+            user_id: trade.buyer_id,
+            title: 'Escrow Released',
+            message: `@${sellerName} released ${coinAmount} ${coinSymbol} to your wallet.`,
+            link: `/trade/${actualTradeId}`,
+            is_read: false,
+            created_at: now
+          }).select().maybeSingle();
+        } catch (notifErr) {
+          console.warn('Notification insert warning:', notifErr);
+        }
       }
 
-      return NextResponse.json({ success: true, message: 'Escrow released successfully.' });
+      return NextResponse.json({ success: true, message: rpcData?.message || 'Escrow released successfully.' });
     }
 
     if (action === 'CANCEL_TRADE') {
       const now = new Date().toISOString();
-      let rpcSucceeded = false;
-      let rpcResult: any = null;
 
-      try {
-        const { data, error } = await adminClient.rpc('cancel_p2p_trade', {
-          p_trade_id: actualTradeId,
-          p_user_id: user.id,
-          p_reason: reason || 'Cancelled by buyer',
-        });
-
-        if (!error && data) {
-          rpcSucceeded = true;
-          rpcResult = data;
-        } else if (error && error.code !== 'PGRST202') {
-          if (!data?.success && error.message) {
-            return NextResponse.json({ error: error.message }, { status: 400 });
-          }
-        }
-      } catch (e) {
-        console.warn('cancel_p2p_trade RPC call failed, falling back:', e);
-      }
-
-      if (rpcSucceeded) {
-        if (!rpcResult.success) {
-          return NextResponse.json({ error: rpcResult.message || 'Failed to cancel trade' }, { status: 400 });
-        }
-        return NextResponse.json({ success: true, message: rpcResult.message || 'Trade cancelled successfully.' });
-      }
-
-      // Fallback: direct update if RPC is missing
-      let updateQuery = adminClient
-        .from('trades')
-        .update({
-          status: 'cancelled',
-          escrow_status: 'CANCELLED',
-          cancellation_reason: reason || 'Cancelled by user',
-          cancelled_at: now,
-          updated_at: now
-        });
-
-      if (isActualUuid) {
-        updateQuery = updateQuery.eq('id', actualTradeId);
-      } else {
-        updateQuery = updateQuery.eq('trade_id', tradeId);
-      }
-      updateQuery = updateQuery.or(`buyer_id.eq.${user.id},seller_id.eq.${user.id}`);
-
-      let { error: updateError } = await updateQuery;
-
-      if (updateError) {
-        console.warn('Primary cancel status update warning, trying escrow_status fallback:', updateError.message);
-        let qFallback = adminClient
-          .from('trades')
-          .update({
-            escrow_status: 'CANCELLED',
-            cancellation_reason: reason || 'Cancelled by user',
-            cancelled_at: now,
-            updated_at: now
-          });
-        if (isActualUuid) qFallback = qFallback.eq('id', actualTradeId);
-        else qFallback = qFallback.eq('trade_id', tradeId);
-        qFallback = qFallback.or(`buyer_id.eq.${user.id},seller_id.eq.${user.id}`);
-        const resFb = await qFallback;
-        if (!resFb.error) {
-          updateError = null;
-        }
-      }
-
-      if (updateError) {
-        return NextResponse.json({ error: updateError.message }, { status: 400 });
-      }
-
-      // Refund locked funds back to seller available balance
-      const coinAmount = Number(trade?.amount ?? trade?.crypto_amount ?? 0);
-      const coinSymbol = (trade?.crypto ?? trade?.asset_symbol ?? 'USDT').toUpperCase();
-      const feeAmount = Number(trade?.escrow_fee ?? trade?.platform_fee ?? (coinAmount * 0.015));
-      const totalRefund = coinAmount + feeAmount;
-
-      try {
-        if (trade?.seller_id && totalRefund > 0) {
-          // Table: balances
-          const { data: sBal } = await adminClient
-            .from('balances')
-            .select('*')
-            .eq('user_id', trade.seller_id)
-            .ilike('asset', coinSymbol)
-            .maybeSingle();
-
-          if (sBal) {
-            await adminClient
-              .from('balances')
-              .update({
-                available_balance: Number(sBal.available_balance || 0) + totalRefund,
-                locked_balance: Math.max(0, Number(sBal.locked_balance || 0) - totalRefund),
-                updated_at: now
-              })
-              .eq('id', sBal.id);
-          }
-
-          // Table: user_wallets
-          const { data: sUW } = await adminClient
-            .from('user_wallets')
-            .select('*')
-            .eq('user_id', trade.seller_id)
-            .ilike('asset_symbol', coinSymbol)
-            .maybeSingle();
-
-          if (sUW) {
-            await adminClient
-              .from('user_wallets')
-              .update({
-                available_balance: Number(sUW.available_balance || sUW.balance || 0) + totalRefund,
-                locked_balance: Math.max(0, Number(sUW.locked_balance || 0) - totalRefund),
-                reserved_balance: Math.max(0, Number(sUW.reserved_balance || 0) - totalRefund),
-                updated_at: now
-              })
-              .eq('id', sUW.id);
-          }
-
-          // Table: wallet_assets (user_id & asset_symbol)
-          const { data: sWA } = await adminClient
-            .from('wallet_assets')
-            .select('*')
-            .eq('user_id', trade.seller_id)
-            .ilike('asset_symbol', coinSymbol)
-            .maybeSingle();
-
-          if (sWA) {
-            const curBal = Number(sWA.balance !== undefined && sWA.balance !== null ? sWA.balance : (sWA.available ?? 0));
-            const curAvail = Number(sWA.available !== undefined && sWA.available !== null ? sWA.available : (sWA.balance ?? 0));
-            await adminClient
-              .from('wallet_assets')
-              .update({
-                balance: curBal + totalRefund,
-                available: curAvail + totalRefund,
-                locked_balance: Math.max(0, Number(sWA.locked_balance ?? sWA.locked_escrow ?? 0) - totalRefund),
-                locked_escrow: Math.max(0, Number(sWA.locked_escrow ?? sWA.locked_balance ?? 0) - totalRefund),
-                in_escrow: Math.max(0, Number(sWA.in_escrow ?? 0) - totalRefund),
-                updated_at: now
-              })
-              .eq('id', sWA.id);
-          }
-
-          // Table: wallets
-          const { data: sW } = await adminClient
-            .from('wallets')
-            .select('*')
-            .eq('user_id', trade.seller_id)
-            .ilike('currency', coinSymbol)
-            .maybeSingle();
-
-          if (sW) {
-            await adminClient
-              .from('wallets')
-              .update({
-                locked_balance: Math.max(0, Number(sW.locked_balance || 0) - totalRefund),
-                updated_at: now
-              })
-              .eq('id', sW.id);
-          }
-
-          // Table: profiles (Refund seller coin balance)
-          try {
-            const { data: sProf } = await adminClient
-              .from('profiles')
-              .select('btc_balance, eth_balance, ltc_balance, usdt_balance')
-              .eq('id', trade.seller_id)
-              .maybeSingle();
-
-            if (sProf) {
-              const sProfRefund: Record<string, any> = { updated_at: now };
-              if (coinSymbol === 'BTC') sProfRefund.btc_balance = Number(((sProf.btc_balance || 0) + totalRefund).toFixed(8));
-              else if (coinSymbol === 'ETH') sProfRefund.eth_balance = Number(((sProf.eth_balance || 0) + totalRefund).toFixed(8));
-              else if (coinSymbol === 'LTC') sProfRefund.ltc_balance = Number(((sProf.ltc_balance || 0) + totalRefund).toFixed(8));
-              else if (coinSymbol === 'USDT') sProfRefund.usdt_balance = Number(((sProf.usdt_balance || 0) + totalRefund).toFixed(8));
-              await adminClient.from('profiles').update(sProfRefund).eq('id', trade.seller_id);
-            }
-          } catch (sProfErr) {
-            console.warn('Seller profile refund warning:', sProfErr);
-          }
-        }
-
-        // Close any active dispute and set resolution to refund seller
-        await adminClient
-          .from('disputes')
-          .update({
-            status: 'RESOLVED',
-            admin_decision: 'CANCELLED_BY_BUYER',
-            resolved_at: now
-          })
-          .eq('trade_id', actualTradeId);
-      } catch (balErr) {
-        console.warn('Balance refund on trade cancel warning:', balErr);
-      }
-
-      await insertPaxonesSystemMessage(adminClient, {
-        tradeId: actualTradeId,
-        type: 'TRADE_CANCELLED'
+      // Canonical RPC call
+      const { data: rpcData, error: rpcError } = await adminClient.rpc('cancel_p2p_trade', {
+        p_trade_id: actualTradeId,
+        p_user_id: user.id,
+        p_reason: reason || 'Cancelled by buyer',
       });
+
+      if (rpcError || (rpcData && !rpcData.success)) {
+        const errorMsg = rpcError?.message || rpcData?.message || 'Failed to cancel trade.';
+        console.error('cancel_p2p_trade RPC failed:', errorMsg);
+        return NextResponse.json({ error: errorMsg }, { status: 400 });
+      }
+
+      try {
+        await insertPaxonesSystemMessage(adminClient, {
+          tradeId: actualTradeId,
+          type: 'TRADE_CANCELLED'
+        });
+      } catch (msgErr) {
+        console.warn('System message insert warning:', msgErr);
+      }
 
       const counterpartyId = user.id === trade?.buyer_id ? trade?.seller_id : trade?.buyer_id;
       if (counterpartyId) {
-        await adminClient.from('notifications').insert({
-          user_id: counterpartyId,
-          title: 'Trade Cancelled',
-          message: `Trade has been cancelled. Any locked escrow has been refunded to the seller.`,
-          link: `/trade/${actualTradeId}`,
-          is_read: false,
-          created_at: now
-        }).select().maybeSingle();
+        try {
+          await adminClient.from('notifications').insert({
+            user_id: counterpartyId,
+            title: 'Trade Cancelled',
+            message: `Trade has been cancelled. Any locked escrow has been refunded to the seller.`,
+            link: `/trade/${actualTradeId}`,
+            is_read: false,
+            created_at: now
+          }).select().maybeSingle();
+        } catch (notifErr) {
+          console.warn('Notification insert warning:', notifErr);
+        }
       }
 
-      return NextResponse.json({ success: true, message: 'Trade cancelled successfully.' });
+      return NextResponse.json({ success: true, message: rpcData?.message || 'Trade cancelled successfully.' });
     }
 
     return NextResponse.json({ error: 'Invalid action' }, { status: 400 });

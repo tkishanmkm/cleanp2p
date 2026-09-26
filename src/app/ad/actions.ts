@@ -658,237 +658,60 @@ export async function createTradeOrderWithEscrow(input: {
       };
     }
 
-    // 7. Lock escrow & update records
-    const newAvail = Math.max(0, currentSellerAvail - totalCryptoRequiredForSeller);
-    const newLocked = sellerBalanceInfo.lockedEscrow + totalCryptoRequiredForSeller;
-
-    try {
-      // 7a. Update all matching wallet_assets for this user and crypto
-      const { data: updatedAssets } = await adminClient
-        .from('wallet_assets')
-        .update({
-          balance: newAvail,
-          locked_balance: newLocked,
-          available: newAvail,
-          locked_escrow: newLocked,
-          updated_at: new Date().toISOString(),
-        })
-        .eq('user_id', sellerId)
-        .or(`asset_symbol.eq.${assetSymbol},asset_code.eq.${assetSymbol},symbol.eq.${assetSymbol}`)
-        .select('id');
-
-      if (sellerBalanceInfo.walletId) {
-        await adminClient
-          .from('wallet_assets')
-          .update({
-            balance: newAvail,
-            locked_balance: newLocked,
-            available: newAvail,
-            locked_escrow: newLocked,
-            updated_at: new Date().toISOString(),
-          })
-          .eq('wallet_id', sellerBalanceInfo.walletId)
-          .or(`asset_symbol.eq.${assetSymbol},asset_code.eq.${assetSymbol},symbol.eq.${assetSymbol}`);
-      }
-
-      // If no rows were updated, insert / upsert asset row
-      if (!updatedAssets || updatedAssets.length === 0) {
-        await adminClient
-          .from('wallet_assets')
-          .upsert({
-            user_id: sellerId,
-            asset_symbol: assetSymbol,
-            asset_code: assetSymbol,
-            balance: newAvail,
-            locked_balance: newLocked,
-            available: newAvail,
-            locked_escrow: newLocked,
-            updated_at: new Date().toISOString(),
-          });
-      }
-
-      // 7b. Sync user_wallets table
-      try {
-        await adminClient
-          .from('user_wallets')
-          .upsert({
-            user_id: sellerId,
-            asset_symbol: assetSymbol,
-            balance: newAvail,
-            locked_balance: newLocked,
-            available_balance: newAvail,
-            updated_at: new Date().toISOString(),
-          });
-      } catch (uwErr) {
-        console.warn('user_wallets lock sync warning:', uwErr);
-      }
-
-      // 7c. Sync balances table
-      try {
-        const { data: sBal } = await adminClient
-          .from('balances')
-          .select('*')
-          .eq('user_id', sellerId)
-          .or(`asset.ilike.${assetSymbol},asset_symbol.ilike.${assetSymbol}`)
-          .maybeSingle();
-
-        if (sBal) {
-          await adminClient.from('balances').update({
-            available_balance: newAvail,
-            available: newAvail,
-            locked_balance: newLocked,
-            total_balance: newAvail + newLocked,
-            updated_at: new Date().toISOString(),
-          }).eq('id', sBal.id);
-        } else {
-          await adminClient.from('balances').insert({
-            user_id: sellerId,
-            asset: assetSymbol,
-            asset_symbol: assetSymbol,
-            available_balance: newAvail,
-            available: newAvail,
-            locked_balance: newLocked,
-            total_balance: newAvail + newLocked,
-            updated_at: new Date().toISOString(),
-          });
-        }
-      } catch (balErr) {
-        console.warn('balances lock sync warning:', balErr);
-      }
-
-      // 7d. Sync profiles table
-      if (assetSymbol === 'BTC') {
-        await adminClient.from('profiles').update({ btc_balance: newAvail, updated_at: new Date().toISOString() }).eq('id', sellerId);
-      } else if (assetSymbol === 'ETH') {
-        await adminClient.from('profiles').update({ eth_balance: newAvail, updated_at: new Date().toISOString() }).eq('id', sellerId);
-      } else if (assetSymbol === 'LTC') {
-        await adminClient.from('profiles').update({ ltc_balance: newAvail, updated_at: new Date().toISOString() }).eq('id', sellerId);
-      } else if (assetSymbol === 'USDT') {
-        await adminClient.from('profiles').update({ usdt_balance: newAvail, updated_at: new Date().toISOString() }).eq('id', sellerId);
-      }
-    } catch (lockErr) {
-      console.warn('[Escrow Lock Warning]:', lockErr);
-    }
-
-    // 8. Insert Trade Record (Defensive schema-compliant logic)
+    // 7. Execute Atomic Escrow Lock & Trade Creation via Canonical Database RPC
     const shortTradeId = generateTradeId();
+    const adIdentifier = String(ad.id || ad.public_ad_id || ad.public_id || cleanAdId);
+    const paymentMethods = Array.isArray(ad.payment_methods)
+      ? ad.payment_methods
+      : typeof ad.payment_methods === 'string'
+      ? JSON.parse(ad.payment_methods)
+      : ['Bank Transfer'];
+    const resolvedPaymentMethod = paymentMethods[0] || 'Bank Transfer';
 
-    // Standard primary payload matching verified database columns
-    const tradePayload: Record<string, any> = {
-      trade_id: shortTradeId,
-      public_id: shortTradeId,
-      buyer_id: String(buyerId),
-      seller_id: String(sellerId),
-      crypto: assetSymbol,
-      amount: baseCryptoAmount,
-      crypto_amount: baseCryptoAmount,
-      fiat_currency: fiatSymbol,
-      fiat_amount: fiatAmount,
-      price: price,
-      unit_price: price,
-      escrow_fee: escrowFeeCrypto,
-      status: 'pending',
-      escrow_status: 'locked',
-      public_ad_id: String(cleanAdId).replace(/^#/, ''),
-    };
+    const { data: rpcResult, error: rpcError } = await adminClient.rpc('initiate_trade_with_escrow', {
+      p_ad_id: adIdentifier,
+      p_crypto_amount: baseCryptoAmount,
+      p_fiat_amount: fiatAmount,
+      p_fiat_currency: fiatSymbol,
+      p_price: price,
+      p_payment_method: resolvedPaymentMethod,
+      p_trade_ref: shortTradeId,
+      p_idempotency_key: null,
+    });
 
-    if (validAdUuid) {
-      tradePayload.ad_id = validAdUuid;
-    }
-
-    let createdOrder: any = null;
-    let createError: any = null;
-
-    // Attempt 1: Full structured payload
-    const { data: order, error: orderError } = await adminClient
-      .from('trades')
-      .insert(tradePayload)
-      .select('*')
-      .single();
-
-    if (!orderError && order) {
-      createdOrder = order;
-    } else {
-      console.warn('[Trade Insert Full Failed, trying safe payload without foreign key]:', orderError?.message || orderError);
-      
-      // Attempt 2: Clean payload with public_ad_id
-      const cleanPayload: Record<string, any> = {
-        trade_id: shortTradeId,
-        public_id: shortTradeId,
-        buyer_id: String(buyerId),
-        seller_id: String(sellerId),
-        crypto: assetSymbol,
-        coin: assetSymbol,
-        asset: assetSymbol,
-        amount: baseCryptoAmount,
-        crypto_amount: baseCryptoAmount,
-        fiat_amount: fiatAmount,
-        fiat_currency: fiatSymbol,
-        price: price,
-        unit_price: price,
-        status: 'pending',
-        escrow_status: 'locked',
-        escrow_fee: escrowFeeCrypto,
-        public_ad_id: String(cleanAdId).replace(/^#/, ''),
+    if (rpcError) {
+      console.error('[createTradeOrderWithEscrow] RPC initiate_trade_with_escrow error:', rpcError);
+      return {
+        data: null,
+        error: {
+          message: rpcError.message || 'Failed to initiate trade and lock escrow.',
+          code: rpcError.code === 'P0001' ? 'INSUFFICIENT_FUNDS' : 'ESCROW_ERROR',
+        },
       };
-
-      const { data: fbOrder, error: fbError } = await adminClient
-        .from('trades')
-        .insert(cleanPayload)
-        .select('*')
-        .single();
-
-      if (!fbError && fbOrder) {
-        createdOrder = fbOrder;
-      } else {
-        console.warn('[Trade Clean Insert Failed, trying ultra-safe minimal]:', fbError?.message || fbError);
-
-        // Attempt 3: Ultra-minimal insert (trade_id, buyer_id, seller_id, crypto, amount, fiat_amount, price, status)
-        const ultraMinimalPayload: Record<string, any> = {
-          trade_id: shortTradeId,
-          public_id: shortTradeId,
-          buyer_id: String(buyerId),
-          seller_id: String(sellerId),
-          crypto: assetSymbol,
-          amount: baseCryptoAmount,
-          fiat_amount: fiatAmount,
-          price: price,
-          status: 'pending',
-        };
-
-        const { data: ultraOrder, error: ultraError } = await adminClient
-          .from('trades')
-          .insert(ultraMinimalPayload)
-          .select('id')
-          .single();
-
-        if (!ultraError && ultraOrder) {
-          createdOrder = ultraOrder;
-        } else {
-          createError = ultraError || fbError || orderError;
-        }
-      }
     }
 
-    if (!createdOrder) {
-      // Rollback locked escrow if trade creation failed
-      try {
-        if (sellerBalanceInfo.walletId) {
-          await adminClient
-            .from('wallet_assets')
-            .update({
-              available: currentSellerAvail,
-              locked_escrow: sellerBalanceInfo.lockedEscrow,
-              updated_at: new Date().toISOString(),
-            })
-            .eq('wallet_id', sellerBalanceInfo.walletId)
-            .or(`asset_code.eq.${assetSymbol},asset_symbol.eq.${assetSymbol}`);
-        }
-      } catch {}
-      return { data: null, error: { message: createError?.message || 'Failed to create trade record.', code: '500' } };
+    if (!rpcResult || rpcResult.success === false) {
+      return {
+        data: null,
+        error: {
+          message: rpcResult?.message || 'Failed to initiate trade with escrow.',
+          code: 'ESCROW_FAILED',
+        },
+      };
     }
 
-    return { data: { orderId: createdOrder.id }, error: null };
+    const tradeId = rpcResult.trade_id || rpcResult.id;
+    if (!tradeId) {
+      return {
+        data: null,
+        error: {
+          message: 'Failed to obtain trade ID from escrow lock response.',
+          code: '500',
+        },
+      };
+    }
+
+    return { data: { orderId: tradeId }, error: null };
   } catch (err: any) {
     console.error('[CreateTradeOrder Exception]:', err);
     return { data: null, error: { message: err?.message || 'Server error occurred during trade creation.', code: '500' } };

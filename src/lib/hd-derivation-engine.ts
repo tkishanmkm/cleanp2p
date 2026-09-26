@@ -30,18 +30,51 @@ export const LTC_NETWORK = {
 // ============================================================================
 
 export type ChainNetwork =
+  | 'ETH'
+  | 'BTC'
+  | 'LTC'
+  | 'ERC20'
+  | 'BEP20'
+  | 'TRC20'
   | 'ethereum'
   | 'arbitrum'
   | 'base'
   | 'polygon'
-  | 'bitcoin'
-  | 'ERC20'
-  | 'BEP20'
-  | 'TRC20';
+  | 'bitcoin';
 
 export type SupportedAssetSymbol = 'BTC' | 'ETH' | 'LTC' | 'USDT';
-export type SupportedChain = 'ethereum' | 'bitcoin' | 'arbitrum' | 'base' | 'polygon' | 'ERC20' | 'BEP20' | 'TRC20';
-export type SupportedNetwork = 'ethereum' | 'ERC20' | 'BEP20' | 'TRC20' | 'bitcoin' | 'arbitrum' | 'base' | 'polygon';
+export type SupportedChain = 'ETH' | 'BTC' | 'LTC' | 'ERC20' | 'BEP20' | 'TRC20' | 'ethereum' | 'bitcoin';
+export type SupportedNetwork = 'BTC' | 'LTC' | 'ETH' | 'ERC20' | 'BEP20' | 'TRC20' | 'ethereum' | 'bitcoin';
+
+export function normalizeDepositNetwork(network: string): string {
+  const norm = (network || '').toUpperCase().trim();
+  switch (norm) {
+    case 'BTC':
+    case 'BITCOIN':
+      return 'BTC';
+    case 'LTC':
+    case 'LITECOIN':
+      return 'LTC';
+    case 'ETH':
+    case 'ETHEREUM':
+    case 'MAINNET':
+      return 'ETH';
+    case 'ERC20':
+    case 'USDT_ERC20':
+      return 'ERC20';
+    case 'BEP20':
+    case 'BSC':
+    case 'BINANCE':
+    case 'USDT_BEP20':
+      return 'BEP20';
+    case 'TRC20':
+    case 'TRON':
+    case 'USDT_TRC20':
+      return 'TRC20';
+    default:
+      return norm;
+  }
+}
 
 export interface CryptoDepositAddresses {
   BTC: string;
@@ -87,36 +120,27 @@ export interface UserDepositAddressesResult {
     ltcDerivationPath: string;
     tronDerivationPath: string;
     evmAddressReusedFor: string[];
-    allowedChainNetworks: ChainNetwork[];
+    allowedChainNetworks: string[];
     derivedAt: string;
   };
 }
 
 export function getChainEnum(network: string): SupportedChain {
-  const norm = (network || '').toUpperCase();
+  const norm = normalizeDepositNetwork(network);
   switch (norm) {
     case 'TRC20':
-    case 'TRON':
       return 'TRC20';
-    case 'BITCOIN':
     case 'BTC':
-      return 'bitcoin';
-    case 'LITECOIN':
+      return 'BTC';
     case 'LTC':
-      return 'bitcoin'; // mapped to compatible chain enum
-    case 'ARBITRUM':
-      return 'arbitrum';
-    case 'BASE':
-      return 'base';
-    case 'POLYGON':
-      return 'polygon';
+      return 'LTC';
     case 'BEP20':
-    case 'BSC':
+      return 'BEP20';
     case 'ERC20':
+      return 'ERC20';
     case 'ETH':
-    case 'ETHEREUM':
     default:
-      return 'ethereum';
+      return 'ETH';
   }
 }
 
@@ -127,20 +151,22 @@ export function buildDepositAddressRow(
   address: string,
   derivationPath: string
 ): UserDepositAddressesRecord {
+  const normNet = normalizeDepositNetwork(network) as SupportedNetwork;
   return {
     user_id: userId,
     asset_symbol: assetSymbol,
-    chain: getChainEnum(network),
-    network: network,
+    chain: getChainEnum(normNet),
+    network: normNet,
     asset_code: assetSymbol,
-    network_code: network,
+    network_code: normNet,
     address: address,
     derivation_path: derivationPath,
   };
 }
 
 export const BIP_PATHS = {
-  BTC: "m/84'/0'/0'/0",     // Native SegWit (BIP84)
+  BTC: "m/84'/0'/0'/0",     // Native SegWit Mainnet (BIP84)
+  BTC_TESTNET4: "m/84'/1'/0'/0", // Native SegWit Testnet4 (BIP84)
   ETH: "m/44'/60'/0'/0",     // EVM (ETH, USDT ERC-20, USDT BEP-20)
   LTC: "m/84'/2'/0'/0",      // Native SegWit Litecoin (BIP84)
   TRON: "m/44'/195'/0'/0",   // TRON / USDT TRC-20 (BIP44)
@@ -176,18 +202,17 @@ export function getAdminClient(): SupabaseClient {
 let cachedMasterHDKey: HDKey | null = null;
 
 /**
- * Derives master HDKey root from DEPOSIT_HD_MNEMONIC or SEED using @scure/bip39 and @scure/bip32.
+ * Derives master HDKey root from DEPOSIT_HD_MNEMONIC using @scure/bip39 and @scure/bip32.
  */
 export async function getMasterHDKey(): Promise<HDKey> {
   if (cachedMasterHDKey) return cachedMasterHDKey;
 
-  const mnemonic = (
-    process.env.DEPOSIT_HD_MNEMONIC ||
-    process.env.SEED ||
-    'sword purity trial drum middle either cool enhance hurt ridge clinic village'
-  ).trim();
+  const mnemonic = process.env.DEPOSIT_HD_MNEMONIC;
+  if (!mnemonic || !mnemonic.trim()) {
+    throw new Error('DEPOSIT_HD_MNEMONIC environment variable is not configured');
+  }
 
-  const seed: Uint8Array = await bip39.mnemonicToSeed(mnemonic);
+  const seed: Uint8Array = await bip39.mnemonicToSeed(mnemonic.trim());
   cachedMasterHDKey = HDKey.fromMasterSeed(seed);
   return cachedMasterHDKey;
 }
@@ -198,24 +223,31 @@ export async function getMasterHDKey(): Promise<HDKey> {
 export function getMasterHDKeySync(): HDKey {
   if (cachedMasterHDKey) return cachedMasterHDKey;
 
-  const mnemonic = (
-    process.env.DEPOSIT_HD_MNEMONIC ||
-    process.env.SEED ||
-    'sword purity trial drum middle either cool enhance hurt ridge clinic village'
-  ).trim();
+  const mnemonic = process.env.DEPOSIT_HD_MNEMONIC;
+  if (!mnemonic || !mnemonic.trim()) {
+    throw new Error('DEPOSIT_HD_MNEMONIC environment variable is not configured');
+  }
 
-  const seed: Uint8Array = bip39.mnemonicToSeedSync(mnemonic);
+  const seed: Uint8Array = bip39.mnemonicToSeedSync(mnemonic.trim());
   cachedMasterHDKey = HDKey.fromMasterSeed(seed);
   return cachedMasterHDKey;
 }
 
 /**
- * Derives Bitcoin Native SegWit address (BIP84: m/84'/0'/0'/0/i -> bc1q...).
+ * Derives Bitcoin Native SegWit address (BIP84: m/84'/0'/0'/0/i -> bc1q... for Mainnet, m/84'/1'/0'/0/i -> tb1q... for Testnet4).
  */
-export function deriveBitcoinNativeSegwitAddress(masterKey: HDKey, index: number): string {
+export function deriveBitcoinNativeSegwitAddress(
+  masterKey: HDKey,
+  index: number,
+  networkType: 'mainnet' | 'testnet4' = 'mainnet'
+): string {
+  const isTestnet = networkType === 'testnet4';
+  const basePath = isTestnet ? BIP_PATHS.BTC_TESTNET4 : BIP_PATHS.BTC;
+  const bech32Prefix = isTestnet ? networks.testnet.bech32 : BTC_NETWORK.bech32;
+
   try {
-    const child = masterKey.derive(`${BIP_PATHS.BTC}/${index}`);
-    if (!child.publicKey) throw new Error('No public key generated for BTC child');
+    const child = masterKey.derive(`${basePath}/${index}`);
+    if (!child.publicKey) throw new Error(`No public key generated for BTC child at ${basePath}/${index}`);
 
     const sha256 = crypto.createHash('sha256').update(child.publicKey).digest();
     const hash160 = crypto.createHash('ripemd160').update(sha256).digest();
@@ -223,17 +255,19 @@ export function deriveBitcoinNativeSegwitAddress(masterKey: HDKey, index: number
     const words = bech32.toWords(hash160);
     words.unshift(0x00);
 
-    return bech32.encode(BTC_NETWORK.bech32, words);
+    return bech32.encode(bech32Prefix, words);
   } catch (err) {
-    const btcXpub = process.env.BTC_XPUB;
-    if (btcXpub) {
-      const hdkey = HDKey.fromExtendedKey(btcXpub);
-      const child = hdkey.deriveChild(0).deriveChild(index);
-      const sha256 = crypto.createHash('sha256').update(child.publicKey!).digest();
-      const hash160 = crypto.createHash('ripemd160').update(sha256).digest();
-      const words = bech32.toWords(hash160);
-      words.unshift(0x00);
-      return bech32.encode(BTC_NETWORK.bech32, words);
+    if (!isTestnet) {
+      const btcXpub = process.env.BTC_XPUB;
+      if (btcXpub) {
+        const hdkey = HDKey.fromExtendedKey(btcXpub);
+        const child = hdkey.deriveChild(0).deriveChild(index);
+        const sha256 = crypto.createHash('sha256').update(child.publicKey!).digest();
+        const hash160 = crypto.createHash('ripemd160').update(sha256).digest();
+        const words = bech32.toWords(hash160);
+        words.unshift(0x00);
+        return bech32.encode(BTC_NETWORK.bech32, words);
+      }
     }
     throw err;
   }
@@ -399,61 +433,42 @@ export async function getOrDeriveUserDepositAddresses(
   const supabase = getAdminClient();
 
   // 1. Fetch user profile
-  const { data: profileData } = await supabase
+  const { data: profileData, error: profileErr } = await supabase
     .from('profiles')
     .select('*')
     .eq('id', userId)
     .maybeSingle();
 
-  let profile: UserProfileRecord | null = profileData || null;
-
-  // 2. Fetch existing user_deposit_addresses
-  const { data: existingAddrs } = await supabase
-    .from('user_deposit_addresses')
-    .select('user_id, asset_symbol, chain, network, asset_code, network_code, address, derivation_path, derivation_index')
-    .eq('user_id', userId);
-
-  // 3. Resolve wallet_index
-  let walletIndex: number | null = null;
-  if (profile && typeof profile.wallet_index === 'number' && profile.wallet_index > 0) {
-    walletIndex = profile.wallet_index;
+  if (profileErr || !profileData) {
+    throw new Error(`User profile not found for user ${userId}`);
   }
 
-  if (walletIndex === null && existingAddrs && existingAddrs.length > 0) {
-    const existingWithIdx = existingAddrs.find((r) => typeof r.derivation_index === 'number' && r.derivation_index > 0);
-    if (existingWithIdx) {
-      walletIndex = existingWithIdx.derivation_index;
-    }
+  const profile: UserProfileRecord = profileData;
+
+  // 2. Resolve wallet_index (Fail-closed if missing or invalid)
+  const walletIndex = profile.wallet_index;
+  if (walletIndex === null || walletIndex === undefined || typeof walletIndex !== 'number' || walletIndex <= 0) {
+    throw new Error(`Fail-closed: User profile ${userId} has no valid allocated wallet_index. Address derivation cannot proceed.`);
   }
 
-  // If no wallet_index, allocate next sequential index atomically
-  if (walletIndex === null || walletIndex <= 0) {
-    try {
-      const { data: counter } = await supabase
-        .from('address_derivation_counters')
-        .select('next_index')
-        .eq('chain', 'EVM')
-        .maybeSingle();
-
-      if (counter?.next_index) {
-        walletIndex = counter.next_index;
-        await supabase
-          .from('address_derivation_counters')
-          .update({ next_index: walletIndex + 1, updated_at: new Date().toISOString() })
-          .eq('chain', 'EVM');
-      } else {
-        const { count } = await supabase.from('wallets').select('*', { count: 'exact', head: true });
-        walletIndex = (count || 0) + 1;
-      }
-    } catch {
-      walletIndex = 1;
-    }
-  }
-
-  // 4. Derive authoritative addresses for this walletIndex
+  // 3. Derive authoritative addresses for this walletIndex
   const addresses = await deriveAllAddressesAsync(walletIndex);
 
-  // 5. Build raw asset records
+  // 4. Execute canonical atomic provisioning via database RPC
+  const { error: rpcError } = await supabase.rpc('provision_user_wallets_atomic', {
+    p_user_id: userId,
+    p_wallet_index: walletIndex,
+    p_evm_address: addresses.ETH,
+    p_tron_address: addresses.USDT_TRC20,
+    p_btc_address: addresses.BTC,
+    p_ltc_address: addresses.LTC,
+  });
+
+  if (rpcError) {
+    throw new Error(`Atomic provisioning RPC failed: ${rpcError.message}`);
+  }
+
+  // 5. Build raw asset records for caller response
   const rawAssets: Array<{
     symbol: SupportedAssetSymbol;
     network: SupportedNetwork;
@@ -462,15 +477,21 @@ export async function getOrDeriveUserDepositAddresses(
   }> = [
     {
       symbol: 'BTC',
-      network: 'bitcoin',
+      network: 'BTC',
       address: addresses.BTC,
       path: `${BIP_PATHS.BTC}/${walletIndex}`,
     },
     {
       symbol: 'ETH',
-      network: 'ethereum',
+      network: 'ETH',
       address: addresses.ETH,
       path: `${BIP_PATHS.ETH}/${walletIndex}`,
+    },
+    {
+      symbol: 'LTC',
+      network: 'LTC',
+      address: addresses.LTC,
+      path: `${BIP_PATHS.LTC}/${walletIndex}`,
     },
     {
       symbol: 'USDT',
@@ -503,67 +524,6 @@ export async function getOrDeriveUserDepositAddresses(
     derivation_path: asset.path,
   }));
 
-  // 6. Synchronize public.profiles if addresses are missing or mismatched
-  const needsProfileUpdate =
-    !profile ||
-    profile.wallet_index !== walletIndex ||
-    profile.evm_deposit_address !== addresses.ETH ||
-    profile.tron_deposit_address !== addresses.USDT_TRC20 ||
-    profile.btc_deposit_address !== addresses.BTC ||
-    profile.ltc_deposit_address !== addresses.LTC;
-
-  if (needsProfileUpdate) {
-    try {
-      await supabase.from('profiles').update({
-        wallet_index: walletIndex,
-        evm_deposit_address: addresses.ETH,
-        tron_deposit_address: addresses.USDT_TRC20,
-        btc_deposit_address: addresses.BTC,
-        ltc_deposit_address: addresses.LTC,
-        updated_at: new Date().toISOString(),
-      }).eq('id', userId);
-    } catch (profErr) {
-      console.warn('[hd-derivation-engine] profile update warning:', profErr);
-    }
-  }
-
-  // 7. Upsert asset rows into public.user_deposit_addresses
-  try {
-    await supabase
-      .from('user_deposit_addresses')
-      .upsert(
-        records.map((r) => ({
-          ...r,
-          derivation_index: walletIndex,
-          updated_at: new Date().toISOString(),
-        })),
-        { onConflict: 'address,network' }
-      );
-  } catch (upsertErr) {
-    console.warn('[hd-derivation-engine] upsert user_deposit_addresses warning:', upsertErr);
-    for (const r of records) {
-      try {
-        await supabase
-          .from('user_deposit_addresses')
-          .upsert({
-            ...r,
-            derivation_index: walletIndex,
-            updated_at: new Date().toISOString(),
-          }, { onConflict: 'address,network' });
-      } catch (_) {}
-    }
-  }
-
-  // 8. Synchronize public.wallets table
-  try {
-    await supabase.from('wallets').upsert([
-      { user_id: userId, chain: 'EVM', address: addresses.ETH, derivation_index: walletIndex, funding_status: 'UNFUNDED' },
-      { user_id: userId, chain: 'TRON', address: addresses.USDT_TRC20, derivation_index: walletIndex, funding_status: 'UNFUNDED' },
-      { user_id: userId, chain: 'BTC', address: addresses.BTC, derivation_index: walletIndex, funding_status: 'UNFUNDED' },
-      { user_id: userId, chain: 'LTC', address: addresses.LTC, derivation_index: walletIndex, funding_status: 'UNFUNDED' },
-    ], { onConflict: 'user_id,chain' });
-  } catch (_) {}
-
   return {
     userId,
     walletIndex,
@@ -576,7 +536,7 @@ export async function getOrDeriveUserDepositAddresses(
       ltcDerivationPath: `${BIP_PATHS.LTC}/${walletIndex}`,
       tronDerivationPath: `${BIP_PATHS.TRON}/${walletIndex}`,
       evmAddressReusedFor: ['ETH', 'USDT_ERC20', 'USDT_BEP20'],
-      allowedChainNetworks: ['ethereum', 'arbitrum', 'base', 'polygon', 'bitcoin', 'ERC20', 'BEP20', 'TRC20'],
+      allowedChainNetworks: ['BTC', 'LTC', 'ETH', 'ERC20', 'BEP20', 'TRC20'],
       derivedAt: new Date().toISOString(),
     },
   };

@@ -71,7 +71,7 @@ export interface TokenConfig {
 
 export const USDT_CONFIGS: Record<string, TokenConfig> = {
   TRC20: {
-    contractAddress: process.env.USDT_CONTRACT_TRC20 || 'TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t',
+    contractAddress: process.env.USDT_CONTRACT_TRC20 || 'TXYZopYRdj2D9XRtbG411XZZ3kM5VkAeBf',
     decimals: 6,
   },
   ERC20: {

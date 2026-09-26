@@ -258,7 +258,8 @@ export async function requestWithdrawal(
 }
 
 /**
- * Cancels a trade in Supabase.
+ * @deprecated Legacy non-atomic cancellation helper.
+ * All active financial and dispute cancellations now use canonical RPC public.cancel_p2p_trade.
  */
 export async function cancelTrade(
   tradeOrId: any,
@@ -359,7 +360,8 @@ export async function markTradeAsPaid(
 }
 
 /**
- * Releases funds from escrow for a trade in Supabase.
+ * @deprecated Legacy non-atomic escrow release helper.
+ * All active financial settlements now use canonical RPC public.release_trade_escrow.
  */
 export async function releaseFundsFromEscrow(
   tradeId: string
@@ -473,25 +475,31 @@ export async function sendCoinToUser(
   recipientUsername: string,
   crypto: CryptoCurrency,
   amount: number,
-  totpCode?: string
+  totpCode?: string,
+  idempotencyKey?: string
 ): Promise<string> {
+  const effectiveIdempotencyKey = idempotencyKey || globalThis.crypto.randomUUID();
   const res = await fetch('/api/wallet/transfer', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: {
+      'Content-Type': 'application/json',
+      'x-idempotency-key': effectiveIdempotencyKey,
+    },
     body: JSON.stringify({
       recipientUsername,
       asset: crypto,
       amount,
       totpCode: totpCode || '',
+      idempotencyKey: effectiveIdempotencyKey,
     }),
   });
 
   const data = await res.json();
-  if (!res.ok) {
+  if (!res.ok || data.error) {
     throw new Error(data.error || 'Failed to complete internal transfer');
   }
 
-  return data.transferId || `TX-${Date.now().toString(36).toUpperCase()}`;
+  return data.transferId || data.publicId || data.dbTransferId;
 }
 
 /**

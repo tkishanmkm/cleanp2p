@@ -72,23 +72,40 @@ export async function POST(req: NextRequest) {
       userKeys = await deriveUserKeys(SYSTEM_CONFIG.mnemonic, Number(walletIndex));
     }
 
-    // 3. Record deposit & update user balance inside Supabase DB via stored procedure
-    const { error: dbError } = await supabase.rpc('process_user_deposit', {
-      p_user_id: userId,
-      p_amount: Number(amount),
-      p_asset: asset,
-      p_tx_hash: txHash,
-    });
+    // 3. Record deposit via canonical atomic RPC
+    const isEvmAsset = ['ETH', 'USDT_ERC20', 'USDT_BEP20', 'USDT', 'BNB', 'POL'].includes(asset);
+    const normNet = asset === 'USDT_BEP20' ? 'BEP20' : asset === 'USDT_TRC20' ? 'TRC20' : 'ERC20';
+    const assetSymbol = asset === 'ETH' ? 'ETH' : 'USDT';
+    const tokenContract = normNet === 'BEP20' ? '0x55d398326f99059fF775485246999027B3197955' : '0xdAC17F958D2ee523a2206206994597C13D831ec7';
 
-    if (dbError) {
-      console.error('Database process_user_deposit error:', dbError);
-      return NextResponse.json({ error: dbError.message || 'Database error processing deposit' }, { status: 500 });
+    let userAddress = userKeys?.evm?.address;
+    if (!userAddress) {
+      const { data: profile } = await supabase.from('profiles').select('evm_deposit_address').eq('id', userId).maybeSingle();
+      userAddress = profile?.evm_deposit_address;
     }
 
-    // 4. Sweep EVM / ERC20 / BEP20 Funds to Master Hot Wallet
-    let sweepTxHash: string | null = null;
-    const isEvmAsset = ['ETH', 'USDT_ERC20', 'USDT_BEP20', 'USDT', 'BNB', 'POL'].includes(asset);
+    if (userAddress) {
+      const { error: dbError } = await supabase.rpc('process_deposit_atomic', {
+        p_destination_address: userAddress,
+        p_asset_symbol: assetSymbol,
+        p_network_code: normNet,
+        p_amount: Number(amount),
+        p_tx_hash: txHash,
+        p_output_index: 0,
+        p_block_number: null,
+        p_from_address: null,
+        p_token_contract: assetSymbol === 'USDT' ? tokenContract : null,
+        p_confirmations: 12,
+        p_provider: 'deposit_sweep_worker',
+      });
 
+      if (dbError) {
+        console.error('Database process_deposit_atomic error:', dbError);
+        return NextResponse.json({ error: dbError.message || 'Database error processing deposit' }, { status: 500 });
+      }
+    }
+
+    let sweepTxHash: string | null = null;
     if (isEvmAsset && userKeys && SYSTEM_CONFIG.hotWallets.evm.address && SYSTEM_CONFIG.rpcs.evm) {
       try {
         const provider = new ethers.JsonRpcProvider(SYSTEM_CONFIG.rpcs.evm);
@@ -98,7 +115,7 @@ export async function POST(req: NextRequest) {
           const balance = await provider.getBalance(userKeys.evm.address);
           const feeData = await provider.getFeeData();
           const gasPrice = feeData.gasPrice || ethers.parseUnits('20', 'gwei');
-          const gasLimit = 21000n;
+          const gasLimit = BigInt(21000);
           const fee = gasPrice * gasLimit;
 
           if (balance > fee) {
@@ -126,7 +143,7 @@ export async function POST(req: NextRequest) {
             );
 
             const tokenBalance = await tokenContract.balanceOf(userKeys.evm.address);
-            if (tokenBalance > 0n) {
+            if (tokenBalance > BigInt(0)) {
               const tx = await tokenContract.transfer(SYSTEM_CONFIG.hotWallets.evm.address, tokenBalance);
               sweepTxHash = tx.hash;
             }

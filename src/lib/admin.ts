@@ -2,7 +2,7 @@
 
 import { supabase } from '@/lib/supabase/client';
 import type { CryptoCurrency, Deposit, Dispute, Trade, Withdrawal, SupportTicket } from './types';
-import { cancelTrade, markTradeAsPaid, releaseFundsFromEscrow } from './wallet';
+import { markTradeAsPaid } from './wallet';
 
 /**
  * Approves a deposit and updates the user's wallet.
@@ -217,21 +217,29 @@ export async function resolveDispute(
   const isSellerWinner = winnerId === trade.sellerId;
 
   if (isSellerWinner) {
-    await cancelTrade(trade, 'Dispute resolved in favor of seller');
-    await supabase
-      .from('trades')
-      .update({ status: 'cancelled' })
-      .eq('id', trade.id);
+    const { data: rpcData, error: rpcError } = await supabase.rpc('cancel_p2p_trade', {
+      p_trade_id: trade.id,
+      p_user_id: adminId,
+      p_reason: `Dispute resolved in favor of seller by moderator (${adminId})`,
+    });
+
+    if (rpcError || (rpcData && !rpcData.success)) {
+      const errorMsg = rpcError?.message || rpcData?.message || 'Dispute seller cancellation settlement failed.';
+      console.error('resolveDispute seller cancel_p2p_trade RPC failed:', errorMsg);
+      throw new Error(errorMsg);
+    }
   } else {
-    await releaseFundsFromEscrow(trade.id);
-    await supabase
-      .from('trades')
-      .update({
-        status: 'released',
-        released_at: new Date().toISOString(),
-        fiat_amount_usd: fiatAmountInUSD,
-      })
-      .eq('id', trade.id);
+    const sellerId = trade.sellerId || (trade as any).seller_id;
+    const { data: rpcData, error: rpcError } = await supabase.rpc('release_trade_escrow', {
+      p_trade_id: trade.id,
+      p_seller_id: sellerId,
+    });
+
+    if (rpcError || (rpcData && !rpcData.success)) {
+      const errorMsg = rpcError?.message || rpcData?.message || 'Dispute buyer release_trade_escrow RPC failed.';
+      console.error('resolveDispute buyer release_trade_escrow RPC failed:', errorMsg);
+      throw new Error(errorMsg);
+    }
   }
 
   await supabase
@@ -360,7 +368,18 @@ export async function adminUnblockUser(
 
 export async function adminCancelTrade(_db: any, trade: Trade, adminId: string, reason: string) {
   const fullReason = `Cancelled by administrator. Reason: ${reason}`;
-  await cancelTrade(trade, fullReason);
+  const { data: rpcData, error: rpcError } = await supabase.rpc('cancel_p2p_trade', {
+    p_trade_id: trade.id,
+    p_user_id: adminId,
+    p_reason: fullReason,
+  });
+
+  if (rpcError || (rpcData && !rpcData.success)) {
+    const errorMsg = rpcError?.message || rpcData?.message || 'Admin cancel_p2p_trade RPC failed.';
+    console.error('adminCancelTrade RPC error:', errorMsg);
+    throw new Error(errorMsg);
+  }
+
   await supabase.from('admin_logs').insert([
     {
       admin_id: adminId,
@@ -384,7 +403,18 @@ export async function adminMarkTradeAsPaid(_db: any, trade: Trade, adminId: stri
 }
 
 export async function adminReleaseFunds(_db: any, trade: Trade, adminId: string, reason: string) {
-  await releaseFundsFromEscrow(trade.id);
+  const sellerId = trade.sellerId || (trade as any).seller_id;
+  const { data: rpcData, error: rpcError } = await supabase.rpc('release_trade_escrow', {
+    p_trade_id: trade.id,
+    p_seller_id: sellerId,
+  });
+
+  if (rpcError || (rpcData && !rpcData.success)) {
+    const errorMsg = rpcError?.message || rpcData?.message || 'Admin release_trade_escrow RPC failed.';
+    console.error('adminReleaseFunds RPC error:', errorMsg);
+    throw new Error(errorMsg);
+  }
+
   await supabase.from('admin_logs').insert([
     {
       admin_id: adminId,

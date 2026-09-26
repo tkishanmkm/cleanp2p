@@ -5,6 +5,7 @@ import { getSupabaseAdminClient } from '@/lib/supabase/server';
 import { deriveHDAddress, encodeBech32 } from '@/lib/hd-wallet';
 import { ethers } from 'ethers';
 import crypto from 'crypto';
+import { getOrDeriveUserDepositAddresses } from '@/lib/hd-derivation-engine';
 
 // Base58 Alphabet
 const BASE58_ALPHABET = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
@@ -513,102 +514,16 @@ async function handleDepositAddressRequest(req: NextRequest) {
       }
     }
 
-    // 4. Determine derivation child index for the user
-    let derivationIndex = 1;
-    try {
-      const { count } = await supabaseAdmin
-        .from('deposit_addresses')
-        .select('*', { count: 'exact', head: true })
-        .eq('asset_code', asset)
-        .eq('network_code', network);
+    // 4. Trigger canonical provisioning via atomic RPC
+    const provisionResult = await getOrDeriveUserDepositAddresses(user.id);
+    let derivedAddress = provisionResult.addresses.ETH;
+    if (asset === 'BTC') derivedAddress = provisionResult.addresses.BTC;
+    if (asset === 'LTC') derivedAddress = provisionResult.addresses.LTC;
+    if (network === 'TRC20' || asset === 'TRX') derivedAddress = provisionResult.addresses.USDT_TRC20;
 
-      derivationIndex = (count || 0) + 1;
-    } catch {
-      derivationIndex = 1;
-    }
-
-    // 5. Derive safe deposit address
-    const { address: derivedAddress, network: resolvedNetwork, derivationPath } = await deriveDepositAddress(
-      asset,
-      network,
-      derivationIndex
-    );
-
-    // 6. Ensure user wallet container exists
-    let walletId: string | null = null;
-    try {
-      const { data: wallet } = await supabaseAdmin
-        .from('wallets')
-        .select('id')
-        .eq('user_id', user.id)
-        .maybeSingle();
-
-      if (wallet?.id) {
-        walletId = wallet.id;
-      } else {
-        const { data: newWallet } = await supabaseAdmin
-          .from('wallets')
-          .insert({
-            user_id: user.id,
-            status: 'active',
-            provisioning_status: 'completed',
-          })
-          .select('id')
-          .maybeSingle();
-
-        walletId = newWallet?.id || null;
-      }
-    } catch (walletErr) {
-      console.warn("Wallet container check:", walletErr);
-    }
-
-    // 7. Insert newly derived address into Supabase public.deposit_addresses
-    try {
-      const insertRecord: Record<string, any> = {
-        user_id: user.id,
-        asset_code: asset,
-        network_code: resolvedNetwork,
-        address: derivedAddress,
-        custody_provider: 'internal_hot_hd',
-        derivation_path: derivationPath || null,
-        status: 'active',
-        updated_at: new Date().toISOString(),
-      };
-
-      if (walletId) {
-        insertRecord.wallet_id = walletId;
-      }
-
-      const { error: insertError } = await supabaseAdmin
-        .from('deposit_addresses')
-        .insert(insertRecord);
-
-      if (insertError) {
-        // If conflict on address or unique key, retrieve the existing record
-        console.warn("Deposit address insert duplicate/conflict handled:", insertError.message);
-        const { data: fallbackRecord } = await supabaseAdmin
-          .from('deposit_addresses')
-          .select('*')
-          .eq('user_id', user.id)
-          .eq('asset_code', asset)
-          .eq('network_code', resolvedNetwork)
-          .maybeSingle();
-
-        if (fallbackRecord?.address) {
-          return NextResponse.json({
-            address: fallbackRecord.address,
-            network: fallbackRecord.network_code || fallbackRecord.network || resolvedNetwork,
-          }, { status: 200 });
-        }
-      }
-    } catch (insertCatchErr) {
-      console.error("Deposit address error during insert:", insertCatchErr);
-    }
-
-    // 8. Return successfully derived address
     return NextResponse.json({
       address: derivedAddress,
-      network: resolvedNetwork,
+      network: network,
     }, { status: 200 });
   } catch (err: any) {
     console.error("Deposit address error:", err);

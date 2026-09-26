@@ -17,8 +17,6 @@ import {
 } from '@/lib/admin-actions';
 import {
   markTradeAsPaid,
-  releaseFundsFromEscrow,
-  cancelTrade,
   disputeTrade
 } from '@/lib/wallet';
 import { insertPaxonesSystemMessage, formatCryptoAmount } from '@/lib/trade-system-messages';

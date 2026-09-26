@@ -1,12 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { SYSTEM_CONFIG } from '@/lib/config/env';
-import { createClient } from '@supabase/supabase-js';
+import { getSupabaseAdminClient } from '@/lib/supabase/server';
+import { normalizeDepositNetwork } from '@/lib/hd-derivation-engine';
+import { CANONICAL_USDT_CONTRACTS } from '@/jobs/depositIngestion';
 import crypto from 'crypto';
-
-const supabaseAdmin = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://placeholder.supabase.co',
-  process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'placeholder-key'
-);
 
 function verifySignature(body: string, signature: string, secret: string): boolean {
   try {
@@ -30,7 +27,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     }
 
     const payload = JSON.parse(rawBody) as {
-      event?: { activity?: Array<{ toAddress: string; value: number; asset: string; hash: string }> };
+      event?: { activity?: Array<{ toAddress: string; fromAddress?: string; value: number; asset: string; hash: string; blockNum?: string }> };
     };
     
     const activity = payload.event?.activity?.[0];
@@ -39,109 +36,46 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       return NextResponse.json({ error: 'No activity data found' }, { status: 400 });
     }
 
-    const toAddress = activity.toAddress.toLowerCase();
-    const amount = activity.value;
-    const asset = activity.asset;
+    const toAddress = activity.toAddress.toLowerCase().trim();
+    const fromAddress = activity.fromAddress?.toLowerCase().trim() || null;
+    const amount = Number(activity.value);
+    const rawAsset = (activity.asset || 'USDT').toUpperCase().trim();
     const txHash = activity.hash;
+    const blockNumber = activity.blockNum ? parseInt(activity.blockNum, 16) : null;
 
-    // Idempotency: Pre-check for duplicate transaction hash
-    if (txHash) {
-      const { data: existingSweep } = await supabaseAdmin
-        .from('sweep_queue')
-        .select('id')
-        .eq('tx_hash', txHash)
-        .maybeSingle();
-
-      if (existingSweep) {
-        return NextResponse.json(
-          { success: false, error: 'Duplicate transaction hash' },
-          { status: 400 }
-        );
-      }
+    if (!toAddress || !txHash || isNaN(amount) || amount <= 0) {
+      return NextResponse.json({ error: 'Invalid activity data' }, { status: 400 });
     }
 
-    // Address-to-User Lookup (supports profiles, user_deposit_addresses, and deposit_addresses)
-    let userId: string | null = null;
-    let walletIndex = 0;
+    const supabaseAdmin = getSupabaseAdminClient();
+    const normNet = rawAsset === 'ETH' ? 'ETH' : 'ERC20';
+    const assetSymbol = rawAsset === 'ETH' ? 'ETH' : 'USDT';
+    const tokenContract = CANONICAL_USDT_CONTRACTS[normNet] || null;
 
-    // 1. Check profiles table
-    const { data: profile } = await supabaseAdmin
-      .from('profiles')
-      .select('id, wallet_index, evm_deposit_address, tron_deposit_address, btc_deposit_address, ltc_deposit_address')
-      .or(`evm_deposit_address.ilike.${toAddress},tron_deposit_address.ilike.${toAddress},btc_deposit_address.ilike.${toAddress},ltc_deposit_address.ilike.${toAddress}`)
-      .maybeSingle();
-
-    if (profile?.id) {
-      userId = profile.id;
-      walletIndex = profile.wallet_index ?? 0;
-    }
-
-    // 2. Fallback to user_deposit_addresses
-    if (!userId) {
-      const { data: depositAddr } = await supabaseAdmin
-        .from('user_deposit_addresses')
-        .select('user_id, derivation_index')
-        .filter('address', 'ilike', toAddress)
-        .maybeSingle();
-
-      if (depositAddr?.user_id) {
-        userId = depositAddr.user_id;
-        walletIndex = depositAddr.derivation_index ?? 0;
-      }
-    }
-
-    // 3. Fallback to legacy deposit_addresses
-    if (!userId) {
-      const { data: legacyAddr } = await supabaseAdmin
-        .from('deposit_addresses')
-        .select('user_id')
-        .filter('address', 'ilike', toAddress)
-        .maybeSingle();
-
-      if (legacyAddr?.user_id) {
-        userId = legacyAddr.user_id;
-      }
-    }
-
-    if (!userId) {
-      return NextResponse.json({ error: 'Address does not belong to platform user' }, { status: 400 });
-    }
-
-    // Process deposit credit
-    const { error: creditError } = await supabaseAdmin.rpc('process_user_deposit', {
-      p_user_id: userId,
+    // Process deposit via canonical atomic RPC
+    const { data: rpcData, error: creditError } = await supabaseAdmin.rpc('process_deposit_atomic', {
+      p_destination_address: toAddress,
+      p_asset_symbol: assetSymbol,
+      p_network_code: normNet,
       p_amount: amount,
-      p_asset: asset,
       p_tx_hash: txHash,
+      p_output_index: 0,
+      p_block_number: isNaN(blockNumber as number) ? null : blockNumber,
+      p_from_address: fromAddress,
+      p_token_contract: tokenContract,
+      p_confirmations: 12,
+      p_provider: 'alchemy_webhook',
     });
 
     if (creditError) {
-      if (
-        creditError.code === '23505' ||
-        creditError.message?.toLowerCase().includes('duplicate') ||
-        creditError.message?.toLowerCase().includes('unique') ||
-        creditError.message?.includes('Duplicate transaction hash')
-      ) {
-        return NextResponse.json(
-          { success: false, error: 'Duplicate transaction hash' },
-          { status: 400 }
-        );
-      }
-      throw creditError;
+      console.error('[Alchemy Webhook] Canonical deposit processing error:', creditError.message);
+      return NextResponse.json(
+        { success: false, error: creditError.message },
+        { status: 500 }
+      );
     }
 
-    // Enqueue for automated sweeping
-    await supabaseAdmin.from('sweep_queue').insert({
-      user_id: userId,
-      wallet_index: walletIndex,
-      asset,
-      deposit_address: toAddress,
-      amount,
-      tx_hash: txHash,
-      status: asset === 'ETH' ? 'GAS_FUNDED' : 'PENDING_GAS',
-    });
-
-    return NextResponse.json({ success: true, message: 'Deposit processed' });
+    return NextResponse.json({ success: true, message: 'Deposit processed', data: rpcData });
   } catch (err: any) {
     console.error('Webhook processing error:', err);
     return NextResponse.json(

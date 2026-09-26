@@ -4,6 +4,7 @@ import { bech32 } from 'bech32';
 import { ethers } from 'ethers';
 import bs58 from 'bs58';
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
+import { getOrDeriveUserDepositAddresses } from '@/lib/hd-derivation-engine';
 
 // ============================================================================
 // Types & Configuration Interfaces
@@ -244,326 +245,68 @@ export function generateAddressesForIndex(index: number): {
 export async function getOrCreateUserDepositAddresses(
   userId: string
 ): Promise<UserDepositAddressesBundle> {
-  const supabase = getAdminSupabaseClient();
-
-  // 1. Ensure user has a wallet container
-  let walletId: string;
-  const { data: existingWallet } = await supabase
-    .from('wallets')
-    .select('id, user_id')
-    .eq('user_id', userId)
-    .maybeSingle();
-
-  if (existingWallet?.id) {
-    walletId = existingWallet.id;
-  } else {
-    let createdWalletId: string | null = null;
-    try {
-      const { data: createdWallet, error: createWalletErr } = await supabase
-        .from('wallets')
-        .insert({
-          user_id: userId,
-          status: 'active',
-        })
-        .select('id')
-        .maybeSingle();
-
-      if (!createWalletErr && createdWallet?.id) {
-        createdWalletId = createdWallet.id;
-      }
-    } catch {
-      // continue to fallback
-    }
-
-    if (!createdWalletId) {
-      const { data: fallbackWallet } = await supabase
-        .from('wallets')
-        .insert({ user_id: userId })
-        .select('id')
-        .maybeSingle();
-      createdWalletId = fallbackWallet?.id || userId;
-    }
-    walletId = createdWalletId;
-  }
-
-  // 2. Check for existing assigned deposit addresses in user_deposit_addresses
-  const { data: existingRows } = await supabase
-    .from('user_deposit_addresses')
-    .select('address, network, asset_symbol, derivation_index')
-    .eq('user_id', userId);
-
-  let derivationIndex = 1;
-  let btcAddr: string | null = null;
-  let evmAddr: string | null = null;
-  let tronAddr: string | null = null;
-  let ltcAddr: string | null = null;
-
-  if (existingRows && existingRows.length > 0) {
-    derivationIndex = existingRows[0].derivation_index || 1;
-
-    for (const row of existingRows) {
-      const net = (row.network || '').toUpperCase();
-      const asset = (row.asset_symbol || '').toUpperCase();
-
-      if (['BTC', 'BITCOIN'].includes(net) || asset === 'BTC') {
-        btcAddr = row.address;
-      } else if (['ERC20', 'BEP20', 'ETH', 'POLYGON', 'ARBITRUM'].includes(net) || row.address.startsWith('0x')) {
-        evmAddr = row.address;
-      } else if (['TRC20', 'TRON', 'TRX'].includes(net) || (row.address.startsWith('T') && row.address.length > 30)) {
-        tronAddr = row.address;
-      } else if (['LTC', 'LITECOIN'].includes(net) || row.address.startsWith('ltc1') || row.address.startsWith('tltc1')) {
-        ltcAddr = row.address;
-      }
-    }
-  }
-
-  // 3. If any core chain address is missing, allocate a fresh index or derive with existing index
-  if (!btcAddr || !evmAddr || !tronAddr || !ltcAddr) {
-    if (!existingRows || existingRows.length === 0) {
-      // Allocate next derivation index atomically
-      try {
-        const { data: counterData, error: counterErr } = await supabase
-          .from('address_derivation_counters')
-          .select('next_index')
-          .eq('chain', 'EVM')
-          .maybeSingle();
-
-        if (!counterErr && counterData?.next_index) {
-          derivationIndex = counterData.next_index;
-          await supabase
-            .from('address_derivation_counters')
-            .update({ next_index: derivationIndex + 1, updated_at: new Date().toISOString() })
-            .eq('chain', 'EVM');
-        } else {
-          const { count } = await supabase
-            .from('wallets')
-            .select('*', { count: 'exact', head: true });
-          derivationIndex = (count || 0) + 1;
-        }
-      } catch {
-        derivationIndex = 1;
-      }
-    }
-
-    // Derive full suite of addresses
-    const derived = generateAddressesForIndex(derivationIndex);
-    btcAddr = btcAddr || derived.btc;
-    evmAddr = evmAddr || derived.evm;
-    tronAddr = tronAddr || derived.tron;
-    ltcAddr = ltcAddr || derived.ltc;
-
-    // 4. Batch upsert into user_deposit_addresses
-    const addressEntries = [
-      {
-        user_id: userId,
-        wallet_id: walletId,
-        address: btcAddr,
-        network: 'BTC',
-        asset_symbol: 'BTC',
-        derivation_index: derivationIndex,
-        updated_at: new Date().toISOString(),
-      },
-      {
-        user_id: userId,
-        wallet_id: walletId,
-        address: evmAddr,
-        network: 'ERC20',
-        asset_symbol: 'ETH',
-        derivation_index: derivationIndex,
-        updated_at: new Date().toISOString(),
-      },
-      {
-        user_id: userId,
-        wallet_id: walletId,
-        address: evmAddr,
-        network: 'ERC20',
-        asset_symbol: 'USDT',
-        derivation_index: derivationIndex,
-        updated_at: new Date().toISOString(),
-      },
-      {
-        user_id: userId,
-        wallet_id: walletId,
-        address: evmAddr,
-        network: 'BEP20',
-        asset_symbol: 'USDT',
-        derivation_index: derivationIndex,
-        updated_at: new Date().toISOString(),
-      },
-      {
-        user_id: userId,
-        wallet_id: walletId,
-        address: tronAddr,
-        network: 'TRC20',
-        asset_symbol: 'USDT',
-        derivation_index: derivationIndex,
-        updated_at: new Date().toISOString(),
-      },
-      {
-        user_id: userId,
-        wallet_id: walletId,
-        address: tronAddr,
-        network: 'TRON',
-        asset_symbol: 'TRX',
-        derivation_index: derivationIndex,
-        updated_at: new Date().toISOString(),
-      },
-      {
-        user_id: userId,
-        wallet_id: walletId,
-        address: ltcAddr,
-        network: 'LTC',
-        asset_symbol: 'LTC',
-        derivation_index: derivationIndex,
-        updated_at: new Date().toISOString(),
-      },
-    ];
-
-    await supabase
-      .from('user_deposit_addresses')
-      .upsert(addressEntries, { onConflict: 'address,network' });
-
-    // Also populate legacy deposit_addresses table for compatibility
-    const legacyEntries = [
-      {
-        wallet_id: walletId,
-        user_id: userId,
-        asset_code: 'BTC',
-        network_code: 'BTC',
-        address: btcAddr,
-        derivation_path: `${DERIVATION_PATHS.BTC}/${derivationIndex}`,
-        status: 'active',
-      },
-      {
-        wallet_id: walletId,
-        user_id: userId,
-        asset_code: 'ETH',
-        network_code: 'ERC20',
-        address: evmAddr,
-        derivation_path: `${DERIVATION_PATHS.EVM}/${derivationIndex}`,
-        status: 'active',
-      },
-      {
-        wallet_id: walletId,
-        user_id: userId,
-        asset_code: 'USDT',
-        network_code: 'ERC20',
-        address: evmAddr,
-        derivation_path: `${DERIVATION_PATHS.EVM}/${derivationIndex}`,
-        status: 'active',
-      },
-      {
-        wallet_id: walletId,
-        user_id: userId,
-        asset_code: 'USDT',
-        network_code: 'BEP20',
-        address: evmAddr,
-        derivation_path: `${DERIVATION_PATHS.EVM}/${derivationIndex}`,
-        status: 'active',
-      },
-      {
-        wallet_id: walletId,
-        user_id: userId,
-        asset_code: 'USDT',
-        network_code: 'TRC20',
-        address: tronAddr,
-        derivation_path: `${DERIVATION_PATHS.TRON}/${derivationIndex}`,
-        status: 'active',
-      },
-      {
-        wallet_id: walletId,
-        user_id: userId,
-        asset_code: 'LTC',
-        network_code: 'LTC',
-        address: ltcAddr,
-        derivation_path: `${DERIVATION_PATHS.LTC}/${derivationIndex}`,
-        status: 'active',
-      },
-    ];
-
-    await supabase
-      .from('deposit_addresses')
-      .upsert(legacyEntries, { onConflict: 'address' });
-
-    // Update wallet timestamp safely
-    try {
-      await supabase
-        .from('wallets')
-        .update({ updated_at: new Date().toISOString() })
-        .eq('id', walletId);
-    } catch {
-      // ignore
-    }
-  }
+  const result = await getOrDeriveUserDepositAddresses(userId);
 
   return {
     userId,
-    walletId,
-    derivationIndex,
+    walletId: result.userId,
+    derivationIndex: result.walletIndex,
     addresses: {
-      BTC: btcAddr,
-      ETH: evmAddr,
-      LTC: ltcAddr,
-      TRON: tronAddr,
-      USDT_ERC20: evmAddr,
-      USDT_BEP20: evmAddr,
-      USDT_TRC20: tronAddr,
+      BTC: result.addresses.BTC,
+      ETH: result.addresses.ETH,
+      LTC: result.addresses.LTC,
+      TRON: result.addresses.USDT_TRC20,
+      USDT_ERC20: result.addresses.USDT_ERC20,
+      USDT_BEP20: result.addresses.USDT_BEP20,
+      USDT_TRC20: result.addresses.USDT_TRC20,
     },
     details: [
       {
         asset: 'BTC',
         network: 'BTC',
-        address: btcAddr,
+        address: result.addresses.BTC,
         chain: 'BTC',
-        derivationPath: `${DERIVATION_PATHS.BTC}/${derivationIndex}`,
+        derivationPath: `${DERIVATION_PATHS.BTC}/${result.walletIndex}`,
         label: 'Bitcoin (Native SegWit)',
       },
       {
         asset: 'ETH',
         network: 'ERC20',
-        address: evmAddr,
+        address: result.addresses.ETH,
         chain: 'EVM',
-        derivationPath: `${DERIVATION_PATHS.EVM}/${derivationIndex}`,
+        derivationPath: `${DERIVATION_PATHS.EVM}/${result.walletIndex}`,
         label: 'Ethereum (ERC-20)',
       },
       {
         asset: 'USDT',
         network: 'ERC20',
-        address: evmAddr,
+        address: result.addresses.USDT_ERC20,
         chain: 'EVM',
-        derivationPath: `${DERIVATION_PATHS.EVM}/${derivationIndex}`,
+        derivationPath: `${DERIVATION_PATHS.EVM}/${result.walletIndex}`,
         label: 'Tether USD (ERC-20)',
       },
       {
         asset: 'USDT',
         network: 'BEP20',
-        address: evmAddr,
+        address: result.addresses.USDT_BEP20,
         chain: 'EVM',
-        derivationPath: `${DERIVATION_PATHS.EVM}/${derivationIndex}`,
+        derivationPath: `${DERIVATION_PATHS.EVM}/${result.walletIndex}`,
         label: 'Tether USD (BEP-20 / BSC)',
       },
       {
         asset: 'USDT',
         network: 'TRC20',
-        address: tronAddr,
+        address: result.addresses.USDT_TRC20,
         chain: 'TRON',
-        derivationPath: `${DERIVATION_PATHS.TRON}/${derivationIndex}`,
+        derivationPath: `${DERIVATION_PATHS.TRON}/${result.walletIndex}`,
         label: 'Tether USD (TRC-20)',
-      },
-      {
-        asset: 'TRX',
-        network: 'TRON',
-        address: tronAddr,
-        chain: 'TRON',
-        derivationPath: `${DERIVATION_PATHS.TRON}/${derivationIndex}`,
-        label: 'TRON (TRX)',
       },
       {
         asset: 'LTC',
         network: 'LTC',
-        address: ltcAddr,
+        address: result.addresses.LTC,
         chain: 'LTC',
-        derivationPath: `${DERIVATION_PATHS.LTC}/${derivationIndex}`,
+        derivationPath: `${DERIVATION_PATHS.LTC}/${result.walletIndex}`,
         label: 'Litecoin (Native SegWit)',
       },
     ],

@@ -78,49 +78,6 @@ export async function GET(req: NextRequest) {
 
     // 4. Authenticated / identified user logic
     if (userId) {
-      // Step A: Query public.profiles for the 4 deposit addresses and wallet_index
-      const { data: profile, error: profileError } = await adminClient
-        .from('profiles')
-        .select('id, wallet_index, evm_deposit_address, tron_deposit_address, btc_deposit_address, ltc_deposit_address')
-        .eq('id', userId)
-        .maybeSingle();
-
-      const hasAllFour =
-        !profileError &&
-        profile &&
-        profile.evm_deposit_address &&
-        profile.tron_deposit_address &&
-        profile.btc_deposit_address &&
-        profile.ltc_deposit_address;
-
-      if (hasAllFour) {
-        const walletIndex = typeof profile.wallet_index === 'number' && profile.wallet_index > 0
-          ? profile.wallet_index
-          : 1;
-
-        return NextResponse.json({
-          success: true,
-          wallet_index: walletIndex,
-          addresses: {
-            evm: profile.evm_deposit_address,
-            tron: profile.tron_deposit_address,
-            btc: profile.btc_deposit_address,
-            ltc: profile.ltc_deposit_address,
-            // Cross-compatible keys for UI components
-            BTC: profile.btc_deposit_address,
-            ETH: profile.evm_deposit_address,
-            LTC: profile.ltc_deposit_address,
-            USDT_ERC20: profile.evm_deposit_address,
-            USDT_BEP20: profile.evm_deposit_address,
-            USDT_TRC20: profile.tron_deposit_address,
-          },
-          userId,
-          walletIndex,
-          profile,
-        });
-      }
-
-      // Step B: Missing deposit addresses — trigger non-blocking key derivation and DB sync
       const result = await getOrDeriveUserDepositAddresses(userId);
 
       return NextResponse.json({
