@@ -54,12 +54,24 @@ export function TradeInitiationModal({ ad, isOpen, onClose }: TradeInitiationMod
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [sellerAvailableBalance, setSellerAvailableBalance] = useState<number>(0);
 
+  const availablePaymentMethods = Array.isArray(ad?.payment_methods) && ad.payment_methods.length > 0
+    ? ad.payment_methods
+    : (typeof (ad as any)?.payment_method === 'string' && (ad as any).payment_method.length > 0 ? [(ad as any).payment_method] : ["Bank Transfer"]);
+
+  const [selectedPaymentMethod, setSelectedPaymentMethod] = useState<string>(
+    availablePaymentMethods.length === 1 ? availablePaymentMethods[0] : ""
+  );
+
   // Reset inputs and fetch seller balance when modal opens with a new ad
   useEffect(() => {
     if (isOpen && ad) {
       setFiatAmount("");
       setCryptoAmount("");
       setErrorMsg(null);
+      const methods = Array.isArray(ad.payment_methods) && ad.payment_methods.length > 0
+        ? ad.payment_methods
+        : (typeof (ad as any)?.payment_method === 'string' && (ad as any).payment_method.length > 0 ? [(ad as any).payment_method] : ["Bank Transfer"]);
+      setSelectedPaymentMethod(methods.length === 1 ? methods[0] : "");
 
       const fetchSellerBalance = async () => {
         try {
@@ -150,15 +162,18 @@ export function TradeInitiationModal({ ad, isOpen, onClose }: TradeInitiationMod
       const buyerId = isBuyModal ? user.id : ad.user_id;
       const sellerId = isBuyModal ? ad.user_id : user.id;
 
-      const numericCrypto = parseFloat(cryptoAmount) || (ad.price > 0 ? numericFiat / ad.price : 0);
-      const paymentMethod = (Array.isArray(ad.payment_methods) && ad.payment_methods.length > 0)
-        ? ad.payment_methods[0]
-        : "Bank Transfer";
+      if (availablePaymentMethods.length > 1 && !selectedPaymentMethod) {
+        setErrorMsg("Please select a payment method.");
+        setLoading(false);
+        return;
+      }
+
+      const paymentMethod = selectedPaymentMethod || availablePaymentMethods[0] || "Bank Transfer";
 
       // 1. First attempt trade creation via secure backend API route
       let tradeId: string | null = null;
       try {
-        const response = await fetch('/api/trades', {
+        const response = await fetch('/api/trades/initiate', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -168,6 +183,8 @@ export function TradeInitiationModal({ ad, isOpen, onClose }: TradeInitiationMod
             cryptoAmount: numericCrypto,
             cryptoSymbol: ad.asset_symbol,
             rate: ad.price,
+            price: ad.price,
+            fiatAmount: numericFiat,
             fiatCurrency: ad.fiat_symbol || 'INR',
             paymentMethod,
           }),
@@ -175,8 +192,8 @@ export function TradeInitiationModal({ ad, isOpen, onClose }: TradeInitiationMod
 
         if (response.ok) {
           const resData = await response.json();
-          if (resData?.trade?.id) {
-            tradeId = resData.trade.id;
+          if (resData?.tradeId || resData?.trade?.id || resData?.id) {
+            tradeId = resData.tradeId || resData.trade?.id || resData.id;
           }
         }
       } catch (apiErr) {
@@ -345,6 +362,36 @@ export function TradeInitiationModal({ ad, isOpen, onClose }: TradeInitiationMod
             </div>
           </div>
         </div>
+
+        {/* Payment Method Selection */}
+        {availablePaymentMethods.length > 1 ? (
+          <div className="space-y-1.5 my-2">
+            <label className="text-xs font-medium text-muted-foreground flex items-center justify-between">
+              <span>Select Payment Method</span>
+              <span className="text-rose-500 font-bold">* Required</span>
+            </label>
+            <select
+              value={selectedPaymentMethod}
+              onChange={(e) => {
+                setSelectedPaymentMethod(e.target.value);
+                setErrorMsg(null);
+              }}
+              className="w-full h-10 px-3 rounded-xl border bg-background text-xs font-semibold focus:outline-hidden focus:ring-2 focus:ring-[#5D45F9]/30"
+            >
+              <option value="" disabled>Choose a payment method...</option>
+              {availablePaymentMethods.map((method) => (
+                <option key={method} value={method}>
+                  {method}
+                </option>
+              ))}
+            </select>
+          </div>
+        ) : (
+          <div className="flex justify-between items-center px-3 py-2 rounded-xl bg-muted/40 border text-xs my-2">
+            <span className="text-muted-foreground font-medium">Payment Method:</span>
+            <span className="font-semibold text-foreground">{availablePaymentMethods[0]}</span>
+          </div>
+        )}
 
         {/* Escrow Fee & Breakdown */}
         {cryptoAmount && parseFloat(cryptoAmount) > 0 && (

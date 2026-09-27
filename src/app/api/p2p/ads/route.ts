@@ -4,6 +4,7 @@ import { NextResponse, type NextRequest } from 'next/server';
 import { getSupabaseAdminClient } from '@/utils/supabase/server';
 import { generateAdId } from '@/lib/id-generator';
 import { calculateMinimumFiatAmount } from '@/lib/currency';
+import { resolveTradeType } from '@/utils/p2p-helpers';
 
 export const dynamic = 'force-dynamic';
 
@@ -117,7 +118,14 @@ export async function POST(request: NextRequest) {
 
     const coinType = (body.coin || body.crypto || body.crypto_currency || body.asset_symbol || body.asset || 'USDT').toUpperCase();
     const fiatType = (body.fiat || body.fiat_currency || body.fiat_symbol || 'USD').toUpperCase();
-    const adSide = (body.side || body.type || body.adType || body.ad_type || 'BUY').toUpperCase();
+    const adSide = resolveTradeType(body);
+
+    if (!adSide) {
+      return NextResponse.json(
+        { error: 'Invalid or missing ad trade direction (BUY/SELL).' },
+        { status: 400 }
+      );
+    }
 
     const requestedMax = Number(body.max_amount ?? body.max_limit ?? body.maxAmount ?? 5000);
     const requestedMin = Number(body.min_amount ?? body.min_limit ?? body.minAmount ?? 100);
@@ -234,6 +242,7 @@ export async function POST(request: NextRequest) {
       public_id: uniqueAdId,
       user_id: user.id,
       type: adSide,
+      trade_type: adSide,
       asset_symbol: coinType,
       fiat_symbol: fiatType,
       price: priceVal,

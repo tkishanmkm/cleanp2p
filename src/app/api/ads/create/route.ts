@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { createClient, getSupabaseAdminClient } from '@/utils/supabase/server';
+import { resolveTradeType } from '@/utils/p2p-helpers';
 
 export const dynamic = 'force-dynamic';
 
@@ -89,6 +90,17 @@ export async function POST(req: Request) {
     if (cleanPayload.margin_percentage !== undefined) cleanPayload.margin_percentage = cleanPayload.margin_percentage ? Number(cleanPayload.margin_percentage) : 0;
     if (cleanPayload.payment_window !== undefined) cleanPayload.payment_window = parseInt(String(cleanPayload.payment_window), 10) || 30;
     if (cleanPayload.min_completed_trades !== undefined) cleanPayload.min_completed_trades = parseInt(String(cleanPayload.min_completed_trades), 10) || 0;
+
+    // Normalize and strictly validate ad trade direction (BUY/SELL)
+    const resolvedDirection = resolveTradeType(cleanPayload);
+    if (!resolvedDirection) {
+      return NextResponse.json(
+        { error: 'Invalid or missing ad trade direction (BUY/SELL).' },
+        { status: 400 }
+      );
+    }
+    cleanPayload.trade_type = resolvedDirection;
+    cleanPayload.type = cleanPayload.type ? String(cleanPayload.type).toUpperCase() : resolvedDirection;
 
     // Attach user_id
     cleanPayload.user_id = user.id;

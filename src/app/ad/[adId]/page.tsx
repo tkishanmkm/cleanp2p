@@ -144,6 +144,13 @@ export default async function AdDetailPage({ params }: PageProps) {
       ? ad.payment_methods
       : (Array.isArray(ad.paymentMethods) ? ad.paymentMethods : ['Bank Transfer']),
     type: String(ad.type || ad.side || ad.ad_type || ad.adType || 'SELL').toUpperCase(),
+    terms: ad.terms || ad.terms_conditions || ad.termsAndConditions || '',
+    terms_conditions: ad.terms_conditions || ad.terms || ad.termsAndConditions || '',
+    offer_label: ad.offer_label || ad.offerLabel || ad.label || '',
+    tags: Array.isArray(ad.tags) ? ad.tags : (Array.isArray(ad.offer_tags) ? ad.offer_tags : (Array.isArray(ad.ad_tags) ? ad.ad_tags : [])),
+    offer_tags: Array.isArray(ad.offer_tags) ? ad.offer_tags : (Array.isArray(ad.tags) ? ad.tags : []),
+    payment_window: Number(ad.payment_window ?? ad.payment_window_minutes ?? 30),
+    payment_window_minutes: Number(ad.payment_window_minutes ?? ad.payment_window ?? 30),
   }
 
   return (

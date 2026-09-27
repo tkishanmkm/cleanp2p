@@ -333,8 +333,10 @@ export function ReportIssueDialog({
         await supabase.from('notifications').insert([
           {
             user_id: counterpartId,
+            title: 'Issue Reported',
             message: `@${currentUsername} filed an issue report for trade ${formatTradeId(trade.id)}: ${selectedIssue}`,
-            link: `/trade/${trade.id}`,
+            type: 'report',
+            metadata: { link: `/trade/${trade.id}` },
             is_read: false,
             created_at: new Date().toISOString()
           }
@@ -640,6 +642,11 @@ const ActionButtons = ({
   const [is2faActive, setIs2faActive] = useState(false);
   const [totpCode, setTotpCode] = useState('');
 
+  const adPaymentMethods = Array.isArray(trade.ad?.payment_methods) && trade.ad?.payment_methods.length > 0
+    ? trade.ad?.payment_methods
+    : (trade.payment_method ? [trade.payment_method] : ['Bank Transfer']);
+  const [selectedMarkPaidMethod, setSelectedMarkPaidMethod] = useState(trade.payment_method || adPaymentMethods[0] || 'Bank Transfer');
+
   const isOpenDispute = Boolean(
     (resolvedDispute && ['open', 'OPEN', 'pending', 'PENDING', 'in_review', 'IN_REVIEW', 'investigating'].includes(resolvedDispute?.status)) ||
     (trade?.dispute && ['open', 'OPEN', 'pending', 'PENDING', 'in_review', 'IN_REVIEW', 'investigating'].includes(trade?.dispute?.status))
@@ -716,7 +723,7 @@ const ActionButtons = ({
       const res = await fetch(`/api/trades/${trade.id}/actions`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'MARK_PAID' })
+        body: JSON.stringify({ action: 'MARK_PAID', paymentMethod: selectedMarkPaidMethod })
       });
       const data = await res.json();
       if (!res.ok || data.error) throw new Error(data.error || 'Failed to mark as paid');
@@ -728,6 +735,7 @@ const ActionButtons = ({
         trade.payment_confirmed_at = nowIso;
         trade.escrow_status = 'PAID';
         trade.status = 'paid';
+        trade.payment_method = selectedMarkPaidMethod;
       }
 
       if (typeof window !== 'undefined') {
@@ -739,6 +747,7 @@ const ActionButtons = ({
               payment_confirmed_at: nowIso,
               escrow_status: 'PAID',
               status: 'paid',
+              payment_method: selectedMarkPaidMethod,
             },
           })
         );
@@ -864,6 +873,30 @@ const ActionButtons = ({
                   Ensure you have transferred exact fiat to the seller&apos;s payment account before confirming.
                 </AlertDialogDescription>
               </AlertDialogHeader>
+              {adPaymentMethods.length > 1 ? (
+                <div className="space-y-1.5 py-2 text-left">
+                  <label className="text-xs font-semibold text-foreground flex items-center justify-between">
+                    <span>Payment Method Used:</span>
+                    <span className="text-rose-500 font-bold">* Required</span>
+                  </label>
+                  <select
+                    value={selectedMarkPaidMethod}
+                    onChange={(e) => setSelectedMarkPaidMethod(e.target.value)}
+                    className="w-full h-9 px-3 rounded-lg border bg-background text-xs font-semibold text-foreground focus:outline-hidden focus:ring-2 focus:ring-primary/20"
+                  >
+                    {adPaymentMethods.map((m: string) => (
+                      <option key={m} value={m}>
+                        {m}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              ) : (
+                <div className="flex justify-between items-center px-3 py-2 rounded-lg bg-muted/40 border text-xs my-1">
+                  <span className="text-muted-foreground font-medium">Payment Method:</span>
+                  <span className="font-semibold text-foreground">{selectedMarkPaidMethod}</span>
+                </div>
+              )}
               <AlertDialogFooter>
                 <AlertDialogCancel>Go Back</AlertDialogCancel>
                 <AlertDialogAction onClick={handleMarkAsPaid} disabled={isSubmittingAction} className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold">
@@ -1032,17 +1065,21 @@ type FeedbackFormValues = z.infer<typeof feedbackSchema>;
 function FeedbackForm({
   trade,
   existingFeedback,
+  receivedFeedback,
   onFeedbackSaved,
   currentUserId,
   currentUsername,
-  counterpartId
+  counterpartId,
+  counterpartUsername,
 }: {
   trade: Trade | any;
   existingFeedback?: Feedback;
+  receivedFeedback?: Feedback;
   onFeedbackSaved?: (fb: Feedback) => void;
   currentUserId?: string;
   currentUsername?: string;
   counterpartId?: string;
+  counterpartUsername?: string;
 }) {
   const supabase = createClient();
   const { toast } = useToast();
@@ -1209,8 +1246,10 @@ function FeedbackForm({
         await supabase.from('notifications').insert([
           {
             user_id: opponentId,
+            title: 'Feedback Received',
             message: `@${currentUsername || 'Trader'} left you ${values.rating} feedback for trade #${publicTradeId}.`,
-            link: `/trade/${trade.id}`,
+            type: 'feedback',
+            metadata: { link: `/trade/${trade.id}` },
             is_read: false,
             created_at: new Date().toISOString()
           }
@@ -1240,133 +1279,172 @@ function FeedbackForm({
     }
   }
 
-  if (existingFeedback && !isEditing) {
-    const isPositive = existingFeedback.rating === 'positive';
-    return (
-      <div className="space-y-3 pt-3 border-t border-border/60">
-        <div className="flex items-center justify-between">
-          <h4 className="font-bold text-xs text-foreground flex items-center gap-1.5">
-            <ThumbsUp className="h-3.5 w-3.5 text-primary" /> You have submitted feedback
-          </h4>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => setIsEditing(true)}
-            className="h-7 text-xs font-semibold px-2.5"
-          >
-            Edit Feedback
-          </Button>
-        </div>
-
-        <div className={cn(
-          'p-3 rounded-xl border text-xs space-y-1.5 shadow-2xs',
-          isPositive
-            ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-950 dark:text-emerald-100'
-            : 'bg-rose-500/10 border-rose-500/30 text-rose-950 dark:text-rose-100'
-        )}>
-          <div className="flex items-center justify-between">
-            <span className={cn(
-              'inline-flex items-center gap-1 font-bold px-2 py-0.5 rounded-md text-[11px]',
-              isPositive
-                ? 'bg-emerald-500/20 text-emerald-700 dark:text-emerald-300'
-                : 'bg-rose-500/20 text-rose-700 dark:text-rose-300'
-            )}>
-              {isPositive ? <ThumbsUp className="h-3 w-3" /> : <ThumbsDown className="h-3 w-3" />}
-              {isPositive ? 'Positive Feedback' : 'Negative Feedback'}
-            </span>
-            <span className="text-[10px] opacity-75 font-mono">
-              {existingFeedback.createdAt ? toDate(existingFeedback.createdAt)?.toLocaleDateString() : 'Recorded'}
-            </span>
-          </div>
-          {existingFeedback.comment && (
-            <p className="text-xs italic leading-relaxed pt-1 whitespace-pre-wrap">&quot;{existingFeedback.comment}&quot;</p>
-          )}
-        </div>
-      </div>
-    );
-  }
+  const isPositive = existingFeedback?.rating === 'positive';
+  const isReceivedPositive = receivedFeedback?.rating === 'positive';
 
   return (
-    <Form {...form}>
-      <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-3 pt-3 border-t border-border/60">
-        <div className="flex items-center justify-between">
-          <h4 className="font-semibold text-xs text-foreground">
-            {existingFeedback ? 'Edit Your Feedback' : 'Leave Feedback for Partner'}
-          </h4>
-          {existingFeedback && (
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              onClick={() => setIsEditing(false)}
-              className="h-6 text-[11px] px-2 text-muted-foreground"
-            >
-              Cancel
-            </Button>
-          )}
-        </div>
-        <FormField
-          control={form.control}
-          name="rating"
-          render={({ field }) => (
-            <FormItem className="space-y-2">
-              <FormControl>
-                <div className="grid grid-cols-2 gap-2.5">
-                  <button
-                    type="button"
-                    onClick={() => field.onChange('positive')}
-                    className={cn(
-                      'flex items-center justify-center gap-2 py-2.5 px-3 border rounded-xl transition-all text-xs font-semibold cursor-pointer select-none',
-                      field.value === 'positive'
-                        ? 'border-emerald-500 bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 font-bold shadow-xs ring-1 ring-emerald-500/30'
-                        : 'border-border/60 hover:bg-muted/60 text-muted-foreground'
-                    )}
-                  >
-                    <ThumbsUp className={cn("h-4 w-4", field.value === 'positive' ? "text-emerald-600 dark:text-emerald-400 fill-emerald-500/20" : "text-muted-foreground")} />
-                    <span>Positive</span>
-                  </button>
+    <div className="space-y-4 pt-3 border-t border-border/60">
+      {/* 1. FEEDBACK I RECEIVED SECTION */}
+      {receivedFeedback && (
+        <div className="space-y-2 rounded-xl border border-border/60 p-3 bg-muted/10">
+          <div className="flex items-center justify-between">
+            <h4 className="font-bold text-xs text-foreground flex items-center gap-1.5">
+              <UserCheck className="h-3.5 w-3.5 text-primary" /> Feedback Received from @{counterpartUsername || 'Partner'}
+            </h4>
+          </div>
 
-                  <button
-                    type="button"
-                    onClick={() => field.onChange('negative')}
-                    className={cn(
-                      'flex items-center justify-center gap-2 py-2.5 px-3 border rounded-xl transition-all text-xs font-semibold cursor-pointer select-none',
-                      field.value === 'negative'
-                        ? 'border-rose-500 bg-rose-500/15 text-rose-700 dark:text-rose-300 font-bold shadow-xs ring-1 ring-rose-500/30'
-                        : 'border-border/60 hover:bg-muted/60 text-muted-foreground'
-                    )}
-                  >
-                    <ThumbsDown className={cn("h-4 w-4", field.value === 'negative' ? "text-rose-600 dark:text-rose-400 fill-rose-500/20" : "text-muted-foreground")} />
-                    <span>Negative</span>
-                  </button>
-                </div>
-              </FormControl>
-              <FormMessage className="text-center text-xs" />
-            </FormItem>
-          )}
-        />
-        <FormField
-          control={form.control}
-          name="comment"
-          render={({ field }) => (
-            <FormItem>
-              <FormControl>
-                <Textarea
-                  placeholder="Share details about your trading experience..."
-                  className="text-xs min-h-[70px]"
-                  {...field}
-                />
-              </FormControl>
-              <FormMessage className="text-xs" />
-            </FormItem>
-          )}
-        />
-        <Button type="submit" size="sm" className="w-full text-xs font-bold" disabled={isSubmitting}>
-          {isSubmitting && <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />}
-          {existingFeedback ? 'Update Feedback' : 'Submit Feedback'}
-        </Button>
-      </form>
-    </Form>
+          <div className={cn(
+            'p-3 rounded-xl border text-xs space-y-1.5 shadow-2xs',
+            isReceivedPositive
+              ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-950 dark:text-emerald-100'
+              : 'bg-rose-500/10 border-rose-500/30 text-rose-950 dark:text-rose-100'
+          )}>
+            <div className="flex items-center justify-between">
+              <span className={cn(
+                'inline-flex items-center gap-1 font-bold px-2 py-0.5 rounded-md text-[11px]',
+                isReceivedPositive
+                  ? 'bg-emerald-500/20 text-emerald-700 dark:text-emerald-300'
+                  : 'bg-rose-500/20 text-rose-700 dark:text-rose-300'
+              )}>
+                {isReceivedPositive ? <ThumbsUp className="h-3 w-3" /> : <ThumbsDown className="h-3 w-3" />}
+                {isReceivedPositive ? 'Positive Feedback' : 'Negative Feedback'}
+              </span>
+              <span className="text-[10px] opacity-75 font-mono">
+                {receivedFeedback.createdAt ? toDate(receivedFeedback.createdAt)?.toLocaleDateString() : 'Recorded'}
+              </span>
+            </div>
+            {receivedFeedback.comment && (
+              <p className="text-xs italic leading-relaxed pt-1 whitespace-pre-wrap">&quot;{receivedFeedback.comment}&quot;</p>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* 2. FEEDBACK I GAVE SECTION */}
+      {existingFeedback && !isEditing ? (
+        <div className="space-y-2 rounded-xl border border-border/60 p-3 bg-muted/10">
+          <div className="flex items-center justify-between">
+            <h4 className="font-bold text-xs text-foreground flex items-center gap-1.5">
+              <ThumbsUp className="h-3.5 w-3.5 text-primary" /> Feedback I Gave
+            </h4>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setIsEditing(true)}
+              className="h-7 text-xs font-semibold px-2.5"
+            >
+              Edit Feedback
+            </Button>
+          </div>
+
+          <div className={cn(
+            'p-3 rounded-xl border text-xs space-y-1.5 shadow-2xs',
+            isPositive
+              ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-950 dark:text-emerald-100'
+              : 'bg-rose-500/10 border-rose-500/30 text-rose-950 dark:text-rose-100'
+          )}>
+            <div className="flex items-center justify-between">
+              <span className={cn(
+                'inline-flex items-center gap-1 font-bold px-2 py-0.5 rounded-md text-[11px]',
+                isPositive
+                  ? 'bg-emerald-500/20 text-emerald-700 dark:text-emerald-300'
+                  : 'bg-rose-500/20 text-rose-700 dark:text-rose-300'
+              )}>
+                {isPositive ? <ThumbsUp className="h-3 w-3" /> : <ThumbsDown className="h-3 w-3" />}
+                {isPositive ? 'Positive Feedback' : 'Negative Feedback'}
+              </span>
+              <span className="text-[10px] opacity-75 font-mono">
+                {existingFeedback.createdAt ? toDate(existingFeedback.createdAt)?.toLocaleDateString() : 'Recorded'}
+              </span>
+            </div>
+            {existingFeedback.comment && (
+              <p className="text-xs italic leading-relaxed pt-1 whitespace-pre-wrap">&quot;{existingFeedback.comment}&quot;</p>
+            )}
+          </div>
+        </div>
+      ) : (
+        <Form {...form}>
+          <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-3 rounded-xl border border-border/60 p-3 bg-muted/10">
+            <div className="flex items-center justify-between">
+              <h4 className="font-semibold text-xs text-foreground">
+                {existingFeedback ? 'Edit Feedback You Gave' : `Leave Feedback for @${counterpartUsername || 'Partner'}`}
+              </h4>
+              {existingFeedback && (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setIsEditing(false)}
+                  className="h-6 text-[11px] px-2 text-muted-foreground"
+                >
+                  Cancel
+                </Button>
+              )}
+            </div>
+            <FormField
+              control={form.control}
+              name="rating"
+              render={({ field }) => (
+                <FormItem className="space-y-2">
+                  <FormControl>
+                    <div className="grid grid-cols-2 gap-2.5">
+                      <button
+                        type="button"
+                        onClick={() => field.onChange('positive')}
+                        className={cn(
+                          'flex items-center justify-center gap-2 py-2.5 px-3 border rounded-xl transition-all text-xs font-semibold cursor-pointer select-none',
+                          field.value === 'positive'
+                            ? 'border-emerald-500 bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 font-bold shadow-xs ring-1 ring-emerald-500/30'
+                            : 'border-border/60 hover:bg-muted/60 text-muted-foreground'
+                        )}
+                      >
+                        <ThumbsUp className={cn("h-4 w-4", field.value === 'positive' ? "text-emerald-600 dark:text-emerald-400 fill-emerald-500/20" : "text-muted-foreground")} />
+                        <span>Positive</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => field.onChange('negative')}
+                        className={cn(
+                          'flex items-center justify-center gap-2 py-2.5 px-3 border rounded-xl transition-all text-xs font-semibold cursor-pointer select-none',
+                          field.value === 'negative'
+                            ? 'border-rose-500 bg-rose-500/15 text-rose-700 dark:text-rose-300 font-bold shadow-xs ring-1 ring-rose-500/30'
+                            : 'border-border/60 hover:bg-muted/60 text-muted-foreground'
+                        )}
+                      >
+                        <ThumbsDown className={cn("h-4 w-4", field.value === 'negative' ? "text-rose-600 dark:text-rose-400 fill-rose-500/20" : "text-muted-foreground")} />
+                        <span>Negative</span>
+                      </button>
+                    </div>
+                  </FormControl>
+                  <FormMessage className="text-center text-xs" />
+                </FormItem>
+              )}
+            />
+            <FormField
+              control={form.control}
+              name="comment"
+              render={({ field }) => (
+                <FormItem>
+                  <FormControl>
+                    <Textarea
+                      placeholder="Share details about your trading experience..."
+                      className="text-xs min-h-[70px]"
+                      {...field}
+                    />
+                  </FormControl>
+                  <FormMessage className="text-xs" />
+                </FormItem>
+              )}
+            />
+            <Button type="submit" size="sm" className="w-full text-xs font-bold" disabled={isSubmitting}>
+              {isSubmitting && <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />}
+              {existingFeedback ? 'Update Feedback' : 'Submit Feedback'}
+            </Button>
+          </form>
+        </Form>
+      )}
+    </div>
   );
 }
 
@@ -1479,11 +1557,15 @@ export function TradeDetails({
 
   const [currentUser, setCurrentUser] = useState<any>(null);
   const [existingFeedback, setExistingFeedback] = useState<Feedback | undefined>(undefined);
+  const [receivedFeedback, setReceivedFeedback] = useState<Feedback | undefined>(undefined);
   const [resolvedDispute, setResolvedDispute] = useState<any>(null);
 
   const buyerId = trade?.buyer_id || trade?.buyerId;
   const sellerId = trade?.seller_id || trade?.sellerId;
   const opponentId = currentUser?.id === buyerId ? sellerId : buyerId;
+  const opponentUsername = isBuying
+    ? (trade?.seller?.username || trade?.seller_username || 'Seller')
+    : (trade?.buyer?.username || trade?.buyer_username || 'Buyer');
 
   useEffect(() => {
     async function loadAuthAndTradeDetails() {
@@ -1511,13 +1593,25 @@ export function TradeDetails({
                   comment: apiData.feedback.comment,
                   createdAt: apiData.feedback.created_at,
                 });
-                return;
+              }
+              if (apiData?.receivedFeedback) {
+                setReceivedFeedback({
+                  id: apiData.receivedFeedback.id,
+                  tradeId: apiData.receivedFeedback.trade_id,
+                  fromUser: apiData.receivedFeedback.from_user,
+                  fromUsername: apiData.receivedFeedback.from_username,
+                  toUser: apiData.receivedFeedback.to_user,
+                  rating: apiData.receivedFeedback.rating,
+                  comment: apiData.receivedFeedback.comment,
+                  createdAt: apiData.receivedFeedback.created_at,
+                });
               }
             }
           } catch (e) {
             console.warn('Feedback API fetch notice:', e);
           }
 
+          // Direct supabase fallback for my feedback
           const { data: tradeFb } = await supabase
             .from('feedback')
             .select('*')
@@ -1558,6 +1652,27 @@ export function TradeDetails({
                 createdAt: fbData.created_at
               });
             }
+          }
+
+          // Direct supabase query for feedback received on this trade
+          const { data: recFb } = await supabase
+            .from('feedback')
+            .select('*')
+            .eq('trade_id', trade.id)
+            .eq('to_user', user.id)
+            .maybeSingle();
+
+          if (recFb) {
+            setReceivedFeedback({
+              id: recFb.id,
+              tradeId: recFb.trade_id,
+              fromUser: recFb.from_user,
+              fromUsername: recFb.from_username,
+              toUser: recFb.to_user,
+              rating: recFb.rating,
+              comment: recFb.comment,
+              createdAt: recFb.created_at
+            });
           }
         }
 
@@ -2030,10 +2145,12 @@ export function TradeDetails({
             <FeedbackForm
               trade={trade}
               existingFeedback={existingFeedback}
+              receivedFeedback={receivedFeedback}
               onFeedbackSaved={(fb) => setExistingFeedback(fb)}
               currentUserId={currentUser?.id}
               currentUsername={currentUser?.user_metadata?.username || currentUser?.email?.split('@')[0]}
               counterpartId={opponentId}
+              counterpartUsername={opponentUsername}
             />
           )}
 

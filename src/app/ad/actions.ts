@@ -489,6 +489,7 @@ export async function createAd(formData: any): Promise<ActionResponse<any>> {
 export async function createTradeOrderWithEscrow(input: {
   adId: string;
   fiatAmount: number;
+  paymentMethod?: string;
 }): Promise<ActionResponse<{ orderId: string }>> {
   try {
     const supabase = await createClient();
@@ -607,8 +608,6 @@ export async function createTradeOrderWithEscrow(input: {
     ].filter(Boolean).map((s: any) => String(s).toUpperCase());
 
     const isBuyAd = typeCandidates.some((t: string) => t === 'BUY' || t === 'ONLINE_BUY' || t.includes('BUY'));
-    // If ad is BUY: Advertiser is buying crypto with fiat, so the initiating user is the SELLER providing crypto.
-    // If ad is SELL: Advertiser is selling crypto for fiat, so the advertiser is the SELLER providing crypto.
     const isInitiatorSelling = isBuyAd;
     const isAdSell = !isBuyAd;
 
@@ -620,7 +619,6 @@ export async function createTradeOrderWithEscrow(input: {
     const sellerBalanceInfo = await fetchUserCryptoBalance(sellerId, assetSymbol);
     let currentSellerAvail = sellerBalanceInfo.available;
 
-    // If advertiser is seller, fallback to ad total_amount if explicitly posted
     if (isAdSell && Number(ad.total_amount || 0) > currentSellerAvail) {
       currentSellerAvail = Number(ad.total_amount);
     }
@@ -658,15 +656,62 @@ export async function createTradeOrderWithEscrow(input: {
       };
     }
 
-    // 7. Execute Atomic Escrow Lock & Trade Creation via Canonical Database RPC
+    // 7. Resolve Payment Method
+    let rawPaymentMethods: any[] = [];
+    if (Array.isArray(ad.payment_methods)) {
+      rawPaymentMethods = ad.payment_methods;
+    } else if (typeof ad.payment_methods === 'string') {
+      try {
+        const parsed = JSON.parse(ad.payment_methods);
+        rawPaymentMethods = Array.isArray(parsed) ? parsed : [ad.payment_methods];
+      } catch {
+        rawPaymentMethods = [ad.payment_methods];
+      }
+    } else if (ad.payment_method) {
+      rawPaymentMethods = [ad.payment_method];
+    } else {
+      rawPaymentMethods = ['Bank Transfer'];
+    }
+
+    const paymentMethods: string[] = rawPaymentMethods.filter((m: any) => typeof m === 'string' && m.trim().length > 0);
+    let resolvedPaymentMethod = '';
+    const trimmedInputMethod = typeof input.paymentMethod === 'string' ? input.paymentMethod.trim() : '';
+
+    if (paymentMethods.length > 1) {
+      if (!trimmedInputMethod) {
+        return {
+          data: null,
+          error: { message: 'Please select a payment method for this advertisement.', code: '400' },
+        };
+      }
+      const matched = paymentMethods.find((m) => m.trim().toLowerCase() === trimmedInputMethod.toLowerCase());
+      if (!matched) {
+        return {
+          data: null,
+          error: { message: `Selected payment method "${trimmedInputMethod}" is not supported by this advertisement.`, code: '400' },
+        };
+      }
+      resolvedPaymentMethod = matched;
+    } else if (paymentMethods.length === 1) {
+      if (trimmedInputMethod) {
+        const matched = paymentMethods.find((m) => m.trim().toLowerCase() === trimmedInputMethod.toLowerCase());
+        if (!matched) {
+          return {
+            data: null,
+            error: { message: `Selected payment method "${trimmedInputMethod}" is not supported by this advertisement.`, code: '400' },
+          };
+        }
+        resolvedPaymentMethod = matched;
+      } else {
+        resolvedPaymentMethod = paymentMethods[0];
+      }
+    } else {
+      resolvedPaymentMethod = trimmedInputMethod || 'Bank Transfer';
+    }
+
+    // 8. Execute Atomic Escrow Lock & Trade Creation via Canonical Database RPC
     const shortTradeId = generateTradeId();
     const adIdentifier = String(ad.id || ad.public_ad_id || ad.public_id || cleanAdId);
-    const paymentMethods = Array.isArray(ad.payment_methods)
-      ? ad.payment_methods
-      : typeof ad.payment_methods === 'string'
-      ? JSON.parse(ad.payment_methods)
-      : ['Bank Transfer'];
-    const resolvedPaymentMethod = paymentMethods[0] || 'Bank Transfer';
 
     const { data: rpcResult, error: rpcError } = await adminClient.rpc('initiate_trade_with_escrow', {
       p_ad_id: adIdentifier,
@@ -711,6 +756,13 @@ export async function createTradeOrderWithEscrow(input: {
       };
     }
 
+    if (resolvedPaymentMethod) {
+      await adminClient
+        .from('trades')
+        .update({ payment_method: resolvedPaymentMethod })
+        .eq('id', tradeId);
+    }
+
     return { data: { orderId: tradeId }, error: null };
   } catch (err: any) {
     console.error('[CreateTradeOrder Exception]:', err);
@@ -721,6 +773,7 @@ export async function createTradeOrderWithEscrow(input: {
 export async function createTradeOrder(input: {
   adId: string;
   fiatAmount: number;
+  paymentMethod?: string;
 }): Promise<ActionResponse<{ orderId: string }>> {
   return createTradeOrderWithEscrow(input);
 }

@@ -34,7 +34,7 @@ export async function POST(request: Request) {
     // 3. Execute Cancel RPC
     const { data, error } = await supabase.rpc('cancel_p2p_trade', {
       p_trade_id: tradeId,
-      p_user_id: user.id,
+      p_caller_id: user.id,
     });
 
     if (error) {

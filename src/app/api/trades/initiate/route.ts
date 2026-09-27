@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
-import { createClient } from '@/utils/supabase/server';
+import { createClient, getSupabaseAdminClient } from '@/utils/supabase/server';
+import { createClient as createSupabaseClient } from '@supabase/supabase-js';
 import { generateTradeId } from '@/lib/id-generator';
 
 export const dynamic = 'force-dynamic';
@@ -11,14 +12,27 @@ function isValidUUID(str: any): boolean {
 
 export async function POST(req: Request) {
   try {
-    const supabase = await createClient();
+    let supabase = await createClient();
+    const authHeader = req.headers.get('Authorization');
+    if (authHeader && authHeader.startsWith('Bearer ')) {
+      const token = authHeader.substring(7);
+      supabase = createSupabaseClient(
+        process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://placeholder.supabase.co',
+        process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'placeholder-key',
+        { global: { headers: { Authorization: `Bearer ${token}` } } }
+      );
+    }
     const {
       data: { user },
       error: authError,
     } = await supabase.auth.getUser();
+    console.log('[DEBUG] Auth getUser result:', { user: user?.id, error: authError });
 
     if (authError || !user) {
-      return NextResponse.json({ error: 'Unauthorized. Please sign in.' }, { status: 401 });
+      return NextResponse.json({ 
+        error: 'Unauthorized. Please sign in.',
+        debug: { authError, userId: user?.id }
+      }, { status: 401 });
     }
 
     const body = await req.json();
@@ -44,6 +58,8 @@ export async function POST(req: Request) {
 
     // 1. Fetch Ad safely to read metadata
     let ad: any = null;
+    console.log('[DEBUG] Auth User ID:', user?.id);
+    
     let p2pQuery = supabase.from('p2p_ads').select('*');
     if (isIdUUID) {
       p2pQuery = p2pQuery.or(`id.eq.${adId},public_ad_id.eq.${adId}`);
@@ -95,16 +111,55 @@ export async function POST(req: Request) {
     numericFiat = Number((calculatedCrypto * unitPrice).toFixed(2));
 
     // 4. Resolve Payment Method & Currency
-    const paymentMethods = Array.isArray(ad.payment_methods)
-      ? ad.payment_methods
-      : typeof ad.payment_methods === 'string'
-      ? JSON.parse(ad.payment_methods)
-      : ['Bank Transfer'];
-    const resolvedPaymentMethod = customPaymentMethod || paymentMethods[0] || 'Bank Transfer';
+    let rawPaymentMethods: any[] = [];
+    if (Array.isArray(ad.payment_methods)) {
+      rawPaymentMethods = ad.payment_methods;
+    } else if (typeof ad.payment_methods === 'string') {
+      try {
+        const parsed = JSON.parse(ad.payment_methods);
+        rawPaymentMethods = Array.isArray(parsed) ? parsed : [ad.payment_methods];
+      } catch {
+        rawPaymentMethods = [ad.payment_methods];
+      }
+    } else if (ad.payment_method) {
+      rawPaymentMethods = [ad.payment_method];
+    } else {
+      rawPaymentMethods = ['Bank Transfer'];
+    }
+
+    const paymentMethods: string[] = rawPaymentMethods.filter((m: any) => typeof m === 'string' && m.trim().length > 0);
+
+    let resolvedPaymentMethod = '';
+    const trimmedCustom = typeof customPaymentMethod === 'string' ? customPaymentMethod.trim() : '';
+
+    if (paymentMethods.length > 1) {
+      if (!trimmedCustom) {
+        return NextResponse.json({ error: 'Please select a payment method for this advertisement.' }, { status: 400 });
+      }
+      const matched = paymentMethods.find((m) => m.trim().toLowerCase() === trimmedCustom.toLowerCase());
+      if (!matched) {
+        return NextResponse.json({ error: `Selected payment method "${trimmedCustom}" is not supported by this advertisement.` }, { status: 400 });
+      }
+      resolvedPaymentMethod = matched;
+    } else if (paymentMethods.length === 1) {
+      if (trimmedCustom) {
+        const matched = paymentMethods.find((m) => m.trim().toLowerCase() === trimmedCustom.toLowerCase());
+        if (!matched) {
+          return NextResponse.json({ error: `Selected payment method "${trimmedCustom}" is not supported by this advertisement.` }, { status: 400 });
+        }
+        resolvedPaymentMethod = matched;
+      } else {
+        resolvedPaymentMethod = paymentMethods[0];
+      }
+    } else {
+      resolvedPaymentMethod = trimmedCustom || 'Bank Transfer';
+    }
+
     const resolvedFiatCurrency = customFiatCurrency || ad.fiat_currency || ad.fiat || 'USD';
     const adIdentifier = String(ad.id || ad.public_ad_id || ad.public_id || adId);
 
     // 5. Call Canonical Atomic Database RPC
+    console.log('[DEBUG] Calling initiate_trade_with_escrow RPC with user ID:', user?.id);
     const { data: rpcResult, error: rpcError } = await supabase.rpc('initiate_trade_with_escrow', {
       p_ad_id: adIdentifier,
       p_crypto_amount: calculatedCrypto,
@@ -141,6 +196,14 @@ export async function POST(req: Request) {
 
     const tradeId = rpcResult.trade_id;
     const publicId = rpcResult.public_id || tradeRef;
+
+    if (tradeId && resolvedPaymentMethod) {
+      const adminClient = getSupabaseAdminClient();
+      await adminClient
+        .from('trades')
+        .update({ payment_method: resolvedPaymentMethod })
+        .eq('id', tradeId);
+    }
 
     return NextResponse.json({
       success: true,

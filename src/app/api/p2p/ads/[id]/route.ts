@@ -175,12 +175,24 @@ export async function PATCH(
     // Sanitize payload data types
     const body: Record<string, any> = { ...rawBody };
     if (body.price !== undefined && body.price !== null && body.price !== '') body.price = Number(body.price);
-    if (body.margin !== undefined && body.margin !== null && body.margin !== '') body.margin = Number(body.margin);
+    if (body.margin !== undefined && body.margin !== null && body.margin !== '') {
+      body.rate_percent = Number(body.margin);
+      body.price_margin = Number(body.margin);
+      delete body.margin;
+    }
     if (body.min_amount !== undefined && body.min_amount !== null && body.min_amount !== '') body.min_amount = Number(body.min_amount);
     if (body.max_amount !== undefined && body.max_amount !== null && body.max_amount !== '') body.max_amount = Number(body.max_amount);
     if (body.min_limit !== undefined && body.min_limit !== null && body.min_limit !== '') body.min_limit = Number(body.min_limit);
     if (body.max_limit !== undefined && body.max_limit !== null && body.max_limit !== '') body.max_limit = Number(body.max_limit);
-    if (body.is_fixed !== undefined) body.is_fixed = Boolean(body.is_fixed);
+    if (body.terms !== undefined) {
+      body.terms_conditions = String(body.terms);
+      delete body.terms;
+    }
+    if (body.tags !== undefined) {
+      body.offer_tags = body.tags;
+      delete body.tags;
+    }
+    if (body.is_fixed !== undefined) delete body.is_fixed;
     if (typeof body.fixed_rate === 'boolean') delete body.fixed_rate;
 
     const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id);

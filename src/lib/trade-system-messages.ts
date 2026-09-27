@@ -1601,8 +1601,10 @@ export async function sendTradeSystemMessage(
 
   const { data, error } = await supabase.from('trade_messages').insert({
     trade_id: tradeId,
-    sender_id: 'SYSTEM',
+    sender_id: '00000000-0000-0000-0000-000000000000',
+    sender_username: 'Paxones System',
     is_system: true,
+    is_moderator: true,
     message: messageText,
     created_at: new Date().toISOString(),
   });
@@ -1802,7 +1804,7 @@ export function formatSystemMessageContent(
         `Trade is now in dispute.\n` +
         `Reason: ${disputeReason}\n` +
         `Dispute opened by: @${openerUsername}\n\n` +
-        `Please provide any requested evidence, documents, payment receipts, screenshots, or other supporting information within the specified timeframe.\n\n` +
+        `Please provide any requested evidence, documents, payment receipts, screenshots, or other supporting information within the specified timeframe. If files exceed direct upload limits (>30 MB video / >5 MB image/doc), upload to Google Drive or Dropbox and paste the view-only share link in chat (never share passwords or credentials).\n\n` +
         instructions
       );
     }

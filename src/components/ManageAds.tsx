@@ -442,7 +442,7 @@ export default function ManageAds({
               <div className="space-y-1">
                 <label className="font-semibold text-foreground">Terms & Conditions</label>
                 <p className="p-3 rounded-xl bg-muted/40 border border-border text-foreground leading-relaxed max-h-32 overflow-y-auto whitespace-pre-wrap">
-                  {selectedInfoAd.terms_conditions || 'No custom terms provided.'}
+                  {selectedInfoAd.terms_conditions || (selectedInfoAd as any).terms || 'No custom terms provided.'}
                 </p>
               </div>
             </div>

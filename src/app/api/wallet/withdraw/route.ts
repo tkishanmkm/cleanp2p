@@ -134,8 +134,9 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         user_id: user.id,
         title: 'Withdrawal Processed',
         message: `Withdrawal of ${numericAmount} ${cleanAsset} to ${destinationAddress.slice(0, 6)}...${destinationAddress.slice(-4)} has been submitted.`,
-        link: '/wallets',
+        type: 'withdrawal',
         is_read: false,
+        metadata: { link: '/wallets' },
         created_at: new Date().toISOString(),
       });
     } catch (notifErr) {

@@ -560,9 +560,11 @@ export function NotificationBell() {
                   </div>
                 );
 
-                if (n.link) {
+                const targetLink = n.link || (n as any)?.metadata?.link;
+
+                if (targetLink) {
                   return (
-                    <Link key={n.id} href={n.link} className="block">
+                    <Link key={n.id} href={targetLink} className="block">
                       {content}
                     </Link>
                   );

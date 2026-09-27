@@ -1,5 +1,7 @@
 import { NextResponse } from 'next/server';
-import { createClient } from '@/utils/supabase/server';
+import { createClient, getSupabaseAdminClient } from '@/utils/supabase/server';
+import { createClient as createSupabaseClient } from '@supabase/supabase-js';
+import { insertPaxonesSystemMessage } from '@/lib/trade-system-messages';
 
 export const dynamic = 'force-dynamic';
 
@@ -15,11 +17,20 @@ export async function POST(
       return NextResponse.json({ error: 'Trade ID is required' }, { status: 400 });
     }
 
-    const supabase = await createClient();
-    const { data: { session } } = await supabase.auth.getSession();
-    const user = session?.user || (await supabase.auth.getUser()).data.user;
+    let supabase = await createClient();
+    const authHeader = req.headers.get('Authorization') || req.headers.get('authorization');
+    if (authHeader && authHeader.startsWith('Bearer ')) {
+      const token = authHeader.substring(7).trim();
+      supabase = createSupabaseClient(
+        process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://placeholder.supabase.co',
+        process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'placeholder-key',
+        { global: { headers: { Authorization: `Bearer ${token}` } } }
+      );
+    }
 
-    if (!user) {
+    const { data: { user }, error: authError } = await supabase.auth.getUser();
+
+    if (authError || !user) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
@@ -39,6 +50,30 @@ export async function POST(
     const actualTradeId = trade?.id || tradeId;
     const isActualUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(actualTradeId);
 
+    // Verify caller is a trade participant
+    const isBuyer = trade?.buyer_id === user.id;
+    const isSeller = trade?.seller_id === user.id;
+    if (!isBuyer && !isSeller) {
+      return NextResponse.json({ error: 'Only trade participants can open a dispute.' }, { status: 403 });
+    }
+
+    // Verify trade status allows dispute
+    const currentStatus = String(trade?.status || '').toLowerCase();
+    const escrowStatus = String(trade?.escrow_status || '').toLowerCase();
+    if (
+      currentStatus === 'completed' ||
+      currentStatus === 'released' ||
+      currentStatus === 'cancelled' ||
+      currentStatus === 'canceled' ||
+      escrowStatus === 'released' ||
+      escrowStatus === 'cancelled'
+    ) {
+      return NextResponse.json({ error: 'Dispute cannot be opened for this trade in its current state.' }, { status: 400 });
+    }
+
+    const now = new Date().toISOString();
+    const disputeReason = reason || 'Non-responsive counterparty or payment issue';
+
     // Call stored RPC procedure if available
     let rpcSucceeded = false;
     let rpcResult: any = null;
@@ -47,7 +82,7 @@ export async function POST(
       const { data, error } = await supabase.rpc('raise_trade_dispute', {
         p_trade_id: actualTradeId,
         p_user_id: user.id,
-        p_reason: reason || 'Non-responsive counterparty or payment issue',
+        p_reason: disputeReason,
       });
 
       if (!error && data) {
@@ -62,36 +97,27 @@ export async function POST(
       console.warn('raise_trade_dispute RPC failed, using direct update fallback:', e);
     }
 
-    if (rpcSucceeded) {
-      if (!rpcResult.success) {
-        return NextResponse.json({ error: rpcResult.message || 'Failed to raise dispute' }, { status: 400 });
+    if (!rpcSucceeded) {
+      // Direct fallback: Update trade record
+      let updateQuery = supabase
+        .from('trades')
+        .update({
+          status: 'DISPUTED',
+          disputed_at: now,
+          dispute_reason: disputeReason,
+          disputed_by: user.id,
+        });
+
+      if (isActualUuid) {
+        updateQuery = updateQuery.eq('id', actualTradeId);
+      } else {
+        updateQuery = updateQuery.eq('trade_id', tradeId);
       }
-      return NextResponse.json({ success: true, message: rpcResult.message || 'Dispute raised successfully.' });
-    }
 
-    // Direct fallback: Update trade record
-    const now = new Date().toISOString();
-    const disputeReason = reason || 'Non-responsive counterparty or payment issue';
-
-    let updateQuery = supabase
-      .from('trades')
-      .update({
-        status: 'DISPUTED',
-        disputed_at: now,
-        dispute_reason: disputeReason,
-        disputed_by: user.id,
-      });
-
-    if (isActualUuid) {
-      updateQuery = updateQuery.eq('id', actualTradeId);
-    } else {
-      updateQuery = updateQuery.eq('trade_id', tradeId);
-    }
-
-    const { error: updateError } = await updateQuery;
-
-    if (updateError) {
-      return NextResponse.json({ error: updateError.message }, { status: 400 });
+      const { error: updateError } = await updateQuery;
+      if (updateError) {
+        return NextResponse.json({ error: updateError.message }, { status: 400 });
+      }
     }
 
     // Also record in disputes table if available
@@ -110,30 +136,46 @@ export async function POST(
       console.warn('Insert into disputes table skipped:', dErr);
     }
 
-    // Insert system notification in trade_messages
+    // Service-role admin client for official system message and notification insertion
+    const adminClient = getSupabaseAdminClient();
+
+    // Fetch opener username & trade payment method
+    let openerName = 'Trader';
     try {
-      await supabase.from('trade_messages').insert({
-        trade_id: actualTradeId,
-        sender_id: user.id,
-        content: `Trade has been marked as DISPUTED. Reason: ${disputeReason}. An admin moderator will inspect transcripts and payment proofs.`,
-        message: `Trade has been marked as DISPUTED. Reason: ${disputeReason}. An admin moderator will inspect transcripts and payment proofs.`,
-        is_system_message: true,
-        is_system: true,
+      const { data: opProfile } = await adminClient
+        .from('profiles')
+        .select('username')
+        .eq('id', user.id)
+        .maybeSingle();
+      if (opProfile?.username) openerName = opProfile.username;
+    } catch {}
+
+    const tradePaymentMethod = trade?.payment_method || trade?.paymentMethod || 'Bank Transfer';
+
+    // Insert official system notification in trade_messages using admin client to bypass user RLS
+    try {
+      await insertPaxonesSystemMessage(adminClient, {
+        tradeId: actualTradeId,
+        type: 'TRADE_DISPUTED',
+        openerUsername: openerName,
+        disputeReason: disputeReason,
+        paymentMethod: tradePaymentMethod,
       });
     } catch (mErr) {
-      console.warn('System message insert skipped:', mErr);
+      console.warn('System message insert error:', mErr);
     }
 
-    // Insert notifications for both participants in Activity Center
+    // Insert notifications for both participants in Activity Center (storing link in metadata)
     const participantIds = [trade?.buyer_id, trade?.seller_id].filter(Boolean);
     for (const pid of participantIds) {
       try {
-        await supabase.from('notifications').insert({
+        await adminClient.from('notifications').insert({
           user_id: pid,
           title: 'Trade Disputed',
           message: `Dispute opened for Trade. Moderator review requested: ${disputeReason}`,
-          link: `/trade/${actualTradeId}`,
+          type: 'dispute',
           is_read: false,
+          metadata: { link: `/trade/${actualTradeId}` },
           created_at: now,
         });
       } catch (nErr) {

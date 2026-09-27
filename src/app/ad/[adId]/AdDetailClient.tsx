@@ -104,6 +104,10 @@ export default function AdDetailClient({ ad, advertiser, stats }: AdDetailClient
     ? JSON.parse(ad.payment_methods || '[]')
     : []
 
+  const [selectedPaymentMethod, setSelectedPaymentMethod] = useState<string>(
+    paymentMethods[0] || ad.payment_method || 'Bank Transfer'
+  )
+
   // Dynamic Escrow Calculations
   const cryptoNum = parseFloat(cryptoInput) || 0
   const escrowFeeCrypto = cryptoNum * ESCROW_FEE_RATE
@@ -157,10 +161,19 @@ export default function AdDetailClient({ ad, advertiser, stats }: AdDetailClient
       return
     }
 
+    if (paymentMethods.length > 1 && !selectedPaymentMethod) {
+      setErrorMsg('Please select a payment method for this trade.')
+      return
+    }
+
     setIsSubmitting(true)
     try {
       const cleanAdId = String(ad.public_ad_id || ad.public_id || ad.id || '').replace(/^#/, '').trim()
-      const res = await createTradeOrderWithEscrow({ adId: cleanAdId, fiatAmount: fiatVal })
+      const res = await createTradeOrderWithEscrow({
+        adId: cleanAdId,
+        fiatAmount: fiatVal,
+        paymentMethod: selectedPaymentMethod || paymentMethods[0] || 'Bank Transfer',
+      })
       if (res.error) {
         setErrorMsg(res.error.message)
         setIsSubmitting(false)
@@ -318,6 +331,26 @@ export default function AdDetailClient({ ad, advertiser, stats }: AdDetailClient
                 </div>
               </div>
 
+              {/* Payment Method Selector */}
+              {paymentMethods.length > 1 && (
+                <div>
+                  <label className="block text-xs font-medium text-neutral-500 dark:text-neutral-400 mb-1">
+                    Select Payment Method <span className="text-red-500">*</span>
+                  </label>
+                  <select
+                    value={selectedPaymentMethod}
+                    onChange={(e) => setSelectedPaymentMethod(e.target.value)}
+                    className="w-full p-3 rounded-xl bg-neutral-50/50 dark:bg-neutral-800/60 border border-neutral-200 dark:border-neutral-700 text-xs font-semibold text-neutral-900 dark:text-neutral-100 focus:ring-2 focus:ring-blue-500 outline-none transition-all cursor-pointer"
+                  >
+                    {paymentMethods.map((pm, idx) => (
+                      <option key={idx} value={pm}>
+                        {pm}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
+
               {/* Escrow Fee Breakdown */}
               <div className="p-4 bg-blue-50/60 dark:bg-blue-950/30 border border-blue-200/60 dark:border-blue-900/40 rounded-xl text-xs space-y-2 font-mono">
                 <div className="flex justify-between text-neutral-700 dark:text-neutral-300">
@@ -356,9 +389,16 @@ export default function AdDetailClient({ ad, advertiser, stats }: AdDetailClient
 
           {/* Offer Details */}
           <div className="p-5 sm:p-6 rounded-2xl border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 shadow-sm space-y-4">
-            <h3 className="font-semibold text-base text-neutral-800 dark:text-neutral-200">
-              Offer Terms & Methods
-            </h3>
+            <div className="flex items-center justify-between">
+              <h3 className="font-semibold text-base text-neutral-800 dark:text-neutral-200">
+                Offer Terms & Methods
+              </h3>
+              {(ad.offer_label || ad.label) && (
+                <span className="text-xs px-2.5 py-0.5 rounded-md font-medium bg-blue-500/10 text-blue-600 dark:text-blue-400 border border-blue-500/20">
+                  {ad.offer_label || ad.label}
+                </span>
+              )}
+            </div>
             
             <div>
               <span className="text-xs text-neutral-500 dark:text-neutral-400 block mb-2">Accepted Payment Methods</span>
@@ -377,8 +417,8 @@ export default function AdDetailClient({ ad, advertiser, stats }: AdDetailClient
 
             <div>
               <span className="text-xs text-neutral-500 dark:text-neutral-400 block mb-1.5">Advertiser Terms</span>
-              <div className="p-3.5 bg-neutral-50 dark:bg-neutral-800/50 rounded-xl text-xs leading-relaxed text-neutral-700 dark:text-neutral-300 border border-neutral-200/60 dark:border-neutral-800">
-                {ad.terms || 'No custom terms provided by advertiser. Please pay from your own verified account.'}
+              <div className="p-3.5 bg-neutral-50 dark:bg-neutral-800/50 rounded-xl text-xs leading-relaxed text-neutral-700 dark:text-neutral-300 border border-neutral-200/60 dark:border-neutral-800 whitespace-pre-wrap">
+                {ad.terms || ad.terms_conditions || ad.termsAndConditions || 'No custom terms provided by advertiser. Please pay from your own verified account.'}
               </div>
             </div>
           </div>

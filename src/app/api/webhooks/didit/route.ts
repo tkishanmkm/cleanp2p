@@ -357,8 +357,9 @@ export async function POST(req: NextRequest) {
           user_id: userId,
           title: 'KYC Verification Approved',
           message: 'Your identity verification was approved! You now have Tier 2 unlimited trading privileges.',
-          link: '/settings/identity',
+          type: 'kyc',
           is_read: false,
+          metadata: { link: '/settings/identity' },
           created_at: new Date().toISOString(),
         });
       } catch (notifErr) {
@@ -437,8 +438,9 @@ export async function POST(req: NextRequest) {
             user_id: userId,
             title: 'KYC Verification Limit Reached',
             message: 'You have failed 3 verification attempts in 24 hours. Please contact customer support.',
-            link: '/support?reason=kyc_limit_exceeded',
+            type: 'kyc',
             is_read: false,
+            metadata: { link: '/support?reason=kyc_limit_exceeded' },
             created_at: new Date().toISOString(),
           });
         } catch (notifErr) {
@@ -471,8 +473,9 @@ export async function POST(req: NextRequest) {
             user_id: userId,
             title: 'KYC Verification Declined',
             message: `Your identity verification was declined. You have ${3 - newRetries} attempt(s) remaining in this 24-hour window.`,
-            link: '/settings/identity',
+            type: 'kyc',
             is_read: false,
+            metadata: { link: '/settings/identity' },
             created_at: new Date().toISOString(),
           });
         } catch (notifErr) {
@@ -504,8 +507,9 @@ export async function POST(req: NextRequest) {
           user_id: userId,
           title: 'KYC Resubmission Requested',
           message: 'Automated compliance check requires you to resubmit one or more verification steps. Please visit identity settings.',
-          link: '/settings/identity',
+          type: 'kyc',
           is_read: false,
+          metadata: { link: '/settings/identity' },
           created_at: new Date().toISOString(),
         });
       } catch (notifErr) {
@@ -536,8 +540,9 @@ export async function POST(req: NextRequest) {
           user_id: userId,
           title: 'KYC Verification Expired',
           message: 'Your verification has expired per standard compliance cycle. Please re-verify your identity.',
-          link: '/settings/identity',
+          type: 'kyc',
           is_read: false,
+          metadata: { link: '/settings/identity' },
           created_at: new Date().toISOString(),
         });
       } catch (notifErr) {

@@ -50,11 +50,13 @@ export async function POST(req: NextRequest) {
     await admin.from('notifications').insert([
       {
         user_id: userId,
+        title: 'Merchant Application Update',
         message: tier
           ? `Your Merchant Application has been approved! You are now a verified ${tier} Merchant.`
           : `Your Merchant Tier has been updated by administration.`,
-        link: '/merchants',
+        type: 'merchant',
         is_read: false,
+        metadata: { link: '/merchants' },
         created_at: new Date().toISOString(),
       },
     ]);

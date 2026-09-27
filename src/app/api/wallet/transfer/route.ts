@@ -293,8 +293,9 @@ export async function POST(req: NextRequest) {
           user_id: user.id,
           title: 'Transfer Sent',
           message: `Successfully transferred ${grossAmount} ${coinSymbol} to @${recipientName} (Net: ${netAmount} ${coinSymbol}, 1.5% Fee: ${feeAmount} ${coinSymbol}).`,
-          link: '/wallet',
+          type: 'transfer',
           is_read: false,
+          metadata: { link: '/wallet' },
           created_at: new Date().toISOString(),
         });
       } catch (notifErr) {

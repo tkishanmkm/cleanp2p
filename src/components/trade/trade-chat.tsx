@@ -514,6 +514,10 @@ export function TradeChat({
   // External link security modal state (only for typed chat web links)
   const [selectedExternalUrl, setSelectedExternalUrl] = useState<string | null>(null);
 
+  // Oversized file guidance modal state (Google Drive / Dropbox instructions)
+  const [isOversizedModalOpen, setIsOversizedModalOpen] = useState(false);
+  const [oversizedFileInfo, setOversizedFileInfo] = useState<{ name: string; size: string; type: string } | null>(null);
+
   // In-app media lightbox modal state for uploaded trade attachments
   const [previewMedia, setPreviewMedia] = useState<{ url: string; type: string; filename?: string; isPdf?: boolean; isCsv?: boolean; isText?: boolean } | null>(null);
   const [csvContent, setCsvContent] = useState<string | null>(null);
@@ -864,7 +868,9 @@ export function TradeChat({
           msg.message.includes('Message blocked:') ||
           (msg.message.includes('sold') && msg.message.includes('successfully to @')) ||
           msg.message.includes('Trade is now in dispute.') ||
-          msg.message.includes('Trade cancelled.')
+          msg.message.includes('Trade cancelled.') ||
+          msg.message.includes('positive feedback') ||
+          msg.message.includes('negative feedback')
         ));
 
       if (isSystem && typeof msg.message === 'string') {
@@ -1002,9 +1008,33 @@ export function TradeChat({
         finalFile = await compressImage(fileToUpload);
       }
 
-      // 2. Video 30MB validation
+      // 2. Video 30MB validation and image/doc 5MB validation
       if (fileToUpload.type.startsWith('video/') && fileToUpload.size > 30 * 1024 * 1024) {
-        throw new Error('Video exceeds maximum 30 MB size limit.');
+        setOversizedFileInfo({
+          name: fileToUpload.name,
+          size: (fileToUpload.size / (1024 * 1024)).toFixed(1) + ' MB',
+          type: 'Video (maximum limit 30 MB)'
+        });
+        setIsOversizedModalOpen(true);
+        throw new Error('Video exceeds maximum 30 MB size limit. Please follow Google Drive or Dropbox instructions.');
+      }
+      if (fileToUpload.type.startsWith('image/') && fileToUpload.size > 5 * 1024 * 1024) {
+        setOversizedFileInfo({
+          name: fileToUpload.name,
+          size: (fileToUpload.size / (1024 * 1024)).toFixed(1) + ' MB',
+          type: 'Image (maximum limit 5 MB)'
+        });
+        setIsOversizedModalOpen(true);
+        throw new Error('Image exceeds maximum 5 MB size limit. Please follow Google Drive or Dropbox instructions.');
+      }
+      if (!fileToUpload.type.startsWith('video/') && !fileToUpload.type.startsWith('image/') && fileToUpload.size > 5 * 1024 * 1024) {
+        setOversizedFileInfo({
+          name: fileToUpload.name,
+          size: (fileToUpload.size / (1024 * 1024)).toFixed(1) + ' MB',
+          type: 'Document (maximum limit 5 MB)'
+        });
+        setIsOversizedModalOpen(true);
+        throw new Error('Document exceeds maximum 5 MB size limit. Please follow Google Drive or Dropbox instructions.');
       }
 
       // 3. Upload to Backblaze B2 via API endpoint
@@ -1042,6 +1072,29 @@ export function TradeChat({
   const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
+
+    // Direct upload limits check (30 MB video, 5 MB image, 5 MB doc)
+    const MAX_VIDEO_SIZE = 30 * 1024 * 1024;
+    const MAX_IMAGE_SIZE = 5 * 1024 * 1024;
+    const MAX_DOC_SIZE = 5 * 1024 * 1024;
+
+    const isVideo = file.type.startsWith('video/');
+    const isImage = file.type.startsWith('image/');
+    const isOversized =
+      (isVideo && file.size > MAX_VIDEO_SIZE) ||
+      (isImage && file.size > MAX_IMAGE_SIZE) ||
+      (!isVideo && !isImage && file.size > MAX_DOC_SIZE);
+
+    if (isOversized) {
+      setOversizedFileInfo({
+        name: file.name,
+        size: (file.size / (1024 * 1024)).toFixed(1) + ' MB',
+        type: isVideo ? 'Video (limit 30 MB)' : isImage ? 'Image (limit 5 MB)' : 'Document (limit 5 MB)'
+      });
+      setIsOversizedModalOpen(true);
+      if (fileInputRef.current) fileInputRef.current.value = '';
+      return;
+    }
 
     // Check if in dispute mode
     if (isDisputed) {
@@ -1190,7 +1243,9 @@ export function TradeChat({
                       msg.message.includes('Message blocked:') ||
                       (msg.message.includes('sold') && msg.message.includes('successfully to @')) ||
                       msg.message.includes('Trade is now in dispute.') ||
-                      msg.message.includes('Trade cancelled.')
+                      msg.message.includes('Trade cancelled.') ||
+                      msg.message.includes('positive feedback') ||
+                      msg.message.includes('negative feedback')
                     ));
 
                   if (isSystemMsg) {
@@ -1478,6 +1533,94 @@ export function TradeChat({
             >
               {isUploading ? <Loader2 className="h-4 w-4 animate-spin mr-1.5" /> : null}
               Upload Media
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Oversized Evidence Google Drive / Dropbox Guidance Modal */}
+      <Dialog open={isOversizedModalOpen} onOpenChange={setIsOversizedModalOpen}>
+        <DialogContent className="sm:max-w-lg bg-card border-border">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-base font-bold text-amber-500">
+              <AlertTriangle className="h-5 w-5 text-amber-500" />
+              File Exceeds Direct Upload Limit
+            </DialogTitle>
+            <DialogDescription className="text-xs text-muted-foreground">
+              {oversizedFileInfo ? (
+                <span>
+                  &quot;{oversizedFileInfo.name}&quot; ({oversizedFileInfo.size}) exceeds the direct platform limit for {oversizedFileInfo.type}.
+                </span>
+              ) : (
+                <span>Direct upload limits: 30 MB for videos, 5 MB for images/documents (max 3 of each per trade).</span>
+              )}
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-3.5 py-2 text-xs">
+            <p className="text-foreground leading-relaxed">
+              To submit large evidence files, please upload your file to <strong>Google Drive</strong> or <strong>Dropbox</strong> and paste the shareable link into this trade chat:
+            </p>
+
+            {/* Google Drive Instructions */}
+            <div className="p-3 rounded-xl border border-border bg-muted/20 space-y-1.5">
+              <div className="font-bold text-foreground flex items-center gap-1.5">
+                <span className="w-2 h-2 rounded-full bg-blue-500" />
+                Google Drive Instructions:
+              </div>
+              <ol className="list-decimal list-inside space-y-1 text-muted-foreground pl-1">
+                <li>Upload the evidence file to Google Drive.</li>
+                <li>Right-click the file and select <strong>Share</strong>.</li>
+                <li>Set access so the authorized reviewer/counterparty can view it.</li>
+                <li>Click <strong>Copy link</strong>.</li>
+                <li>Paste the link directly into the trade chat.</li>
+              </ol>
+            </div>
+
+            {/* Dropbox Instructions */}
+            <div className="p-3 rounded-xl border border-border bg-muted/20 space-y-1.5">
+              <div className="font-bold text-foreground flex items-center gap-1.5">
+                <span className="w-2 h-2 rounded-full bg-indigo-500" />
+                Dropbox Instructions:
+              </div>
+              <ol className="list-decimal list-inside space-y-1 text-muted-foreground pl-1">
+                <li>Upload the evidence file to Dropbox.</li>
+                <li>Hover over the file and click <strong>Share</strong>.</li>
+                <li>Create and copy a share link with view-only access.</li>
+                <li>Ensure the intended reviewer can access it.</li>
+                <li>Paste the link directly into the trade chat.</li>
+              </ol>
+            </div>
+
+            {/* Security Warning */}
+            <div className="p-3 rounded-xl border border-amber-500/30 bg-amber-500/10 text-amber-600 dark:text-amber-400 space-y-1">
+              <div className="font-bold flex items-center gap-1.5">
+                <ShieldAlert className="h-4 w-4 shrink-0" />
+                Security Warning
+              </div>
+              <p className="text-[11px] leading-relaxed">
+                Never share account passwords, OTPs, seed phrases, private keys, recovery codes, or personal login credentials. Only share a view-only link to the evidence file.
+              </p>
+            </div>
+          </div>
+
+          <DialogFooter className="gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                const instructions = `[Evidence Link Guide]\nGoogle Drive: Upload file -> Share -> Copy link -> Paste here.\nDropbox: Upload file -> Share -> Copy link -> Paste here.\nSecurity: Never share passwords or private keys.`;
+                navigator.clipboard?.writeText(instructions);
+                toast({ title: 'Copied', description: 'Instructions copied to clipboard' });
+              }}
+            >
+              Copy Instructions
+            </Button>
+            <Button
+              size="sm"
+              onClick={() => setIsOversizedModalOpen(false)}
+            >
+              Understood
             </Button>
           </DialogFooter>
         </DialogContent>

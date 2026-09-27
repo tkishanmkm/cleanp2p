@@ -32,6 +32,7 @@ export async function GET(req: NextRequest) {
     // Verify admin access
     const { data: isAdmin, error: adminErr } = await supabaseAdmin.rpc('check_is_admin', {
       p_user_id: user.id,
+      user_uuid: user.id,
     });
 
     if (adminErr || !isAdmin) {

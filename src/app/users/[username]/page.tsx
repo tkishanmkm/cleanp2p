@@ -209,65 +209,91 @@ export default async function UserProfilePage({ params }: PageProps) {
     console.warn('Trades stats query notice:', tradeErr);
   }
 
-  // 4. Fetch Feedbacks (Trade feedback received and given)
+  // 4. Fetch Feedbacks (Trade feedback received and given from public.feedback)
   let receivedFeedbacks: any[] = [];
   let givenFeedbacks: any[] = [];
 
   try {
     // A. Received feedbacks
-    const { data: recFb1 } = await supabase
-      .from('feedbacks')
-      .select('id, rating, is_positive, comment, created_at, from_user_id, from_profile:profiles!from_user_id(id, username, avatar_url)')
-      .eq('to_user_id', profile.id)
+    const { data: recFbData } = await supabase
+      .from('feedback')
+      .select('id, trade_id, rating, is_positive, comment, created_at, from_user, to_user, from_username')
+      .eq('to_user', profile.id)
       .order('created_at', { ascending: false });
 
-    if (Array.isArray(recFb1) && recFb1.length > 0) {
-      receivedFeedbacks = recFb1;
-    } else {
-      const { data: recFb2 } = await supabase
-        .from('trade_feedback')
-        .select('id, rating, is_positive, feedback_type, comment, created_at, reviewer_id, reviewer:profiles!reviewer_id(id, username, avatar_url)')
-        .eq('reviewee_id', profile.id)
-        .order('created_at', { ascending: false });
+    if (Array.isArray(recFbData) && recFbData.length > 0) {
+      const reviewerIds = Array.from(new Set(recFbData.map((f) => f.from_user).filter(Boolean)));
+      let reviewerProfilesMap = new Map<string, any>();
+      if (reviewerIds.length > 0) {
+        const { data: revProfiles } = await supabase
+          .from('profiles')
+          .select('id, username, avatar_url, photo_url')
+          .in('id', reviewerIds);
+        if (revProfiles) {
+          for (const p of revProfiles) {
+            reviewerProfilesMap.set(p.id, p);
+          }
+        }
+      }
 
-      if (Array.isArray(recFb2)) {
-        receivedFeedbacks = recFb2.map((f: any) => ({
+      receivedFeedbacks = recFbData.map((f) => {
+        const revProf = reviewerProfilesMap.get(f.from_user);
+        const uname = revProf?.username || f.from_username || 'Trader';
+        return {
           id: f.id,
           rating: f.rating,
-          is_positive: f.is_positive === true || f.is_positive === 'true' || f.feedback_type === 'POSITIVE' || f.rating === 'positive',
+          is_positive: f.is_positive === true || f.is_positive === 'true' || f.rating === 'positive',
           comment: f.comment,
           created_at: f.created_at,
-          from_profile: f.reviewer || null,
-        }));
-      }
+          from_user_id: f.from_user,
+          from_profile: {
+            id: f.from_user,
+            username: uname,
+            avatar_url: revProf?.avatar_url || revProf?.photo_url || null,
+          },
+        };
+      });
     }
 
     // B. Given feedbacks
-    const { data: givFb1 } = await supabase
-      .from('feedbacks')
-      .select('id, rating, is_positive, comment, created_at, to_user_id, to_profile:profiles!to_user_id(id, username, avatar_url)')
-      .eq('from_user_id', profile.id)
+    const { data: givFbData } = await supabase
+      .from('feedback')
+      .select('id, trade_id, rating, is_positive, comment, created_at, from_user, to_user, from_username')
+      .eq('from_user', profile.id)
       .order('created_at', { ascending: false });
 
-    if (Array.isArray(givFb1) && givFb1.length > 0) {
-      givenFeedbacks = givFb1;
-    } else {
-      const { data: givFb2 } = await supabase
-        .from('trade_feedback')
-        .select('id, rating, is_positive, feedback_type, comment, created_at, reviewee_id, reviewee:profiles!reviewee_id(id, username, avatar_url)')
-        .eq('reviewer_id', profile.id)
-        .order('created_at', { ascending: false });
+    if (Array.isArray(givFbData) && givFbData.length > 0) {
+      const revieweeIds = Array.from(new Set(givFbData.map((f) => f.to_user).filter(Boolean)));
+      let revieweeProfilesMap = new Map<string, any>();
+      if (revieweeIds.length > 0) {
+        const { data: targetProfiles } = await supabase
+          .from('profiles')
+          .select('id, username, avatar_url, photo_url')
+          .in('id', revieweeIds);
+        if (targetProfiles) {
+          for (const p of targetProfiles) {
+            revieweeProfilesMap.set(p.id, p);
+          }
+        }
+      }
 
-      if (Array.isArray(givFb2)) {
-        givenFeedbacks = givFb2.map((f: any) => ({
+      givenFeedbacks = givFbData.map((f) => {
+        const tgtProf = revieweeProfilesMap.get(f.to_user);
+        const uname = tgtProf?.username || 'Trader';
+        return {
           id: f.id,
           rating: f.rating,
-          is_positive: f.is_positive === true || f.is_positive === 'true' || f.feedback_type === 'POSITIVE' || f.rating === 'positive',
+          is_positive: f.is_positive === true || f.is_positive === 'true' || f.rating === 'positive',
           comment: f.comment,
           created_at: f.created_at,
-          to_profile: f.reviewee || null,
-        }));
-      }
+          to_user_id: f.to_user,
+          to_profile: {
+            id: f.to_user,
+            username: uname,
+            avatar_url: tgtProf?.avatar_url || tgtProf?.photo_url || null,
+          },
+        };
+      });
     }
   } catch (fbErr) {
     console.warn('Feedback query warning:', fbErr);

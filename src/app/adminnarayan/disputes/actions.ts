@@ -49,8 +49,7 @@ export async function resolveDispute({
     // Seller wins: atomic cancellation and locked escrow refund to seller
     const { data: rpcData, error: rpcError } = await adminSupabase.rpc('cancel_p2p_trade', {
       p_trade_id: tradeId,
-      p_user_id: adminId,
-      p_reason: `Dispute resolved in favor of seller: ${resolutionReason}`,
+      p_caller_id: adminId,
     });
 
     if (rpcError || (rpcData && !rpcData.success)) {

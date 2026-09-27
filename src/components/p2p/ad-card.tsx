@@ -348,7 +348,7 @@ export function AdCard({ ad, marketPriceUsd: propMarketPriceUsd, fiatExchangeRat
                       </div>
                       <div className="space-y-2 text-sm p-3 border rounded-md bg-secondary/50 mt-2">
                         <p className="font-medium">Terms & Conditions</p>
-                        <p className="text-muted-foreground whitespace-pre-wrap">{ad.terms || 'No specific terms provided.'}</p>
+                        <p className="text-muted-foreground whitespace-pre-wrap">{ad.terms || ad.terms_conditions || 'No specific terms provided.'}</p>
                       </div>
                       {ad.tags && ad.tags.length > 0 && (
                         <div className="space-y-2 text-sm p-3 border rounded-md bg-secondary/50 mt-2">

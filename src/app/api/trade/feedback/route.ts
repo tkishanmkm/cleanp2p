@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient, getSupabaseAdminClient } from '@/utils/supabase/server';
+import { createClient as createSupabaseClient } from '@supabase/supabase-js';
 
 export async function GET(req: NextRequest) {
   try {
@@ -11,7 +12,16 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: 'tradeId is required' }, { status: 400 });
     }
 
-    const supabase = await createClient();
+    let supabase = await createClient();
+    const authHeader = req.headers.get('Authorization') || req.headers.get('authorization');
+    if (authHeader && authHeader.startsWith('Bearer ')) {
+      const token = authHeader.substring(7).trim();
+      supabase = createSupabaseClient(
+        process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://placeholder.supabase.co',
+        process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'placeholder-key',
+        { global: { headers: { Authorization: `Bearer ${token}` } } }
+      );
+    }
     const { data: { user } } = await supabase.auth.getUser();
     const targetUserId = userId || user?.id;
 
@@ -20,18 +30,32 @@ export async function GET(req: NextRequest) {
     }
 
     const admin = getSupabaseAdminClient();
-    const { data, error } = await admin
+    const { data: givenData, error: givenError } = await admin
       .from('feedback')
       .select('*')
       .eq('trade_id', tradeId)
       .eq('from_user', targetUserId)
       .maybeSingle();
 
-    if (error && error.code !== 'PGRST116') {
-      console.warn('Feedback query error:', error);
+    if (givenError && givenError.code !== 'PGRST116') {
+      console.warn('Feedback query error:', givenError);
     }
 
-    return NextResponse.json({ feedback: data || null });
+    const { data: recData, error: recError } = await admin
+      .from('feedback')
+      .select('*')
+      .eq('trade_id', tradeId)
+      .eq('to_user', targetUserId)
+      .maybeSingle();
+
+    if (recError && recError.code !== 'PGRST116') {
+      console.warn('Received feedback query error:', recError);
+    }
+
+    return NextResponse.json({
+      feedback: givenData || null,
+      receivedFeedback: recData || null,
+    });
   } catch (error: any) {
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
@@ -39,7 +63,16 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   try {
-    const supabase = await createClient();
+    let supabase = await createClient();
+    const authHeader = req.headers.get('Authorization') || req.headers.get('authorization');
+    if (authHeader && authHeader.startsWith('Bearer ')) {
+      const token = authHeader.substring(7).trim();
+      supabase = createSupabaseClient(
+        process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://placeholder.supabase.co',
+        process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'placeholder-key',
+        { global: { headers: { Authorization: `Bearer ${token}` } } }
+      );
+    }
     const { data: { user }, error: authError } = await supabase.auth.getUser();
 
     if (authError || !user) {
@@ -210,11 +243,11 @@ export async function POST(req: NextRequest) {
     try {
       await admin.from('trade_messages').insert({
         trade_id: tradeId,
-        sender_id: 'system',
+        sender_id: '00000000-0000-0000-0000-000000000000',
         sender_username: 'Paxones System',
         message: systemChatMessage,
         is_system: true,
-        is_moderator: false,
+        is_moderator: true,
         created_at: new Date().toISOString(),
       });
     } catch (e) {
@@ -226,9 +259,11 @@ export async function POST(req: NextRequest) {
     try {
       await admin.from('notifications').insert({
         user_id: effectiveCounterpartId,
+        title: 'Feedback Received',
         message: `@${fromUsername} left you ${rating} feedback for trade #${publicTradeRef}: "${comment.trim().substring(0, 50)}${comment.length > 50 ? '...' : ''}"`,
-        link: `/trade/${tradeId}`,
+        type: 'feedback',
         is_read: false,
+        metadata: { link: `/trade/${tradeId}` },
         created_at: new Date().toISOString(),
       });
     } catch (e) {

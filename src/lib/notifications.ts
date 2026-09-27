@@ -45,17 +45,20 @@ export async function getUserNotifications(userId: string): Promise<Notification
       return [];
     }
 
-    return (data || []).map((n) => ({
-      id: n.id,
-      userId: n.user_id,
-      title: n.title || 'Notification',
-      message: n.message || n.title || '',
-      link: n.link || undefined,
-      isRead: n.is_read ?? false,
-      senderPhotoURL: n.sender_photo_url || undefined,
-      senderUsername: n.sender_username || undefined,
-      createdAt: n.created_at,
-    }));
+    return (data || []).map((n) => {
+      const meta = (typeof n.metadata === 'object' && n.metadata) ? n.metadata : {};
+      return {
+        id: n.id,
+        userId: n.user_id,
+        title: n.title || 'Notification',
+        message: n.message || n.title || '',
+        link: meta.link || n.link || undefined,
+        isRead: n.is_read ?? n.read ?? false,
+        senderPhotoURL: meta.sender_photo_url || n.sender_photo_url || undefined,
+        senderUsername: meta.sender_username || n.sender_username || undefined,
+        createdAt: n.created_at,
+      };
+    });
   } catch (err) {
     console.error('Failed to get notifications:', err);
     return [];
@@ -69,7 +72,7 @@ export async function markNotificationAsRead(notificationId: string): Promise<bo
   try {
     const { error } = await supabase
       .from('notifications')
-      .update({ is_read: true })
+      .update({ is_read: true, read: true })
       .eq('id', notificationId);
 
     if (error) {
@@ -90,7 +93,7 @@ export async function markAllNotificationsAsRead(userId: string): Promise<boolea
   try {
     const { error } = await supabase
       .from('notifications')
-      .update({ is_read: true })
+      .update({ is_read: true, read: true })
       .eq('user_id', userId)
       .eq('is_read', false);
 
@@ -114,19 +117,27 @@ export async function createNotification(
   title?: string,
   link?: string,
   senderPhotoURL?: string,
-  senderUsername?: string
+  senderUsername?: string,
+  extraMetadata?: Record<string, any>
 ): Promise<AppNotification | null> {
   try {
+    const metadataObj: Record<string, any> = {
+      ...(typeof extraMetadata === 'object' && extraMetadata ? extraMetadata : {}),
+    };
+    if (link) metadataObj.link = link;
+    if (senderPhotoURL) metadataObj.sender_photo_url = senderPhotoURL;
+    if (senderUsername) metadataObj.sender_username = senderUsername;
+
     const { data, error } = await supabase
       .from('notifications')
       .insert({
         user_id: userId,
         title: title || 'Notification',
         message,
-        link: link || null,
+        type: 'info',
         is_read: false,
-        sender_photo_url: senderPhotoURL || null,
-        sender_username: senderUsername || null,
+        read: false,
+        metadata: metadataObj,
       })
       .select()
       .single();
@@ -189,16 +200,17 @@ export function subscribeToUserNotifications(
         filter: `user_id=eq.${userId}`,
       },
       (payload) => {
-        const newRecord = payload.new as AppNotification;
+        const newRecord = payload.new as any;
+        const meta = (typeof newRecord.metadata === 'object' && newRecord.metadata) ? newRecord.metadata : {};
         onNewNotification({
           id: newRecord.id,
           userId: newRecord.user_id,
           title: newRecord.title || 'Notification',
           message: newRecord.message || newRecord.title || '',
-          link: newRecord.link || undefined,
-          isRead: newRecord.is_read ?? false,
-          senderPhotoURL: newRecord.sender_photo_url || undefined,
-          senderUsername: newRecord.sender_username || undefined,
+          link: meta.link || newRecord.link || undefined,
+          isRead: newRecord.is_read ?? newRecord.read ?? false,
+          senderPhotoURL: meta.sender_photo_url || newRecord.sender_photo_url || undefined,
+          senderUsername: meta.sender_username || newRecord.sender_username || undefined,
           createdAt: newRecord.created_at,
         });
       }

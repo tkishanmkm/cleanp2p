@@ -39,10 +39,12 @@ export async function approveDeposit(
   await supabase.from('notifications').insert([
     {
       user_id: deposit.userId,
+      title: 'Deposit Approved',
       message: `Your deposit of ${approvedAmount} ${deposit.crypto} has been approved and added to your wallet.`,
+      type: 'deposit',
       is_read: false,
       created_at: new Date().toISOString(),
-      link: '/wallets',
+      metadata: { link: '/wallets' },
     },
   ]);
 }
@@ -85,10 +87,12 @@ export async function approveWithdrawal(
   await supabase.from('notifications').insert([
     {
       user_id: withdrawal.userId,
+      title: 'Withdrawal Approved',
       message: `Your withdrawal of ${withdrawal.amount} ${withdrawal.crypto} has been approved and processed.`,
+      type: 'withdrawal',
       is_read: false,
       created_at: new Date().toISOString(),
-      link: '/wallets',
+      metadata: { link: '/wallets' },
     },
   ]);
 }
@@ -125,10 +129,12 @@ export async function declineWithdrawal(
   await supabase.from('notifications').insert([
     {
       user_id: withdrawal.userId,
+      title: 'Withdrawal Declined',
       message: `Your withdrawal of ${withdrawal.amount} ${withdrawal.crypto} was declined and the funds returned to your wallet.`,
+      type: 'withdrawal',
       is_read: false,
       created_at: new Date().toISOString(),
-      link: '/wallets',
+      metadata: { link: '/wallets' },
     },
   ]);
 }
@@ -219,8 +225,7 @@ export async function resolveDispute(
   if (isSellerWinner) {
     const { data: rpcData, error: rpcError } = await supabase.rpc('cancel_p2p_trade', {
       p_trade_id: trade.id,
-      p_user_id: adminId,
-      p_reason: `Dispute resolved in favor of seller by moderator (${adminId})`,
+      p_caller_id: adminId,
     });
 
     if (rpcError || (rpcData && !rpcData.success)) {
@@ -256,8 +261,8 @@ export async function resolveDispute(
   await supabase.from('trade_messages').insert([
     {
       trade_id: trade.id,
-      sender_id: 'system',
-      sender_username: 'System',
+      sender_id: '00000000-0000-0000-0000-000000000000',
+      sender_username: 'Paxones System',
       message: `Dispute resolved. The trade has been awarded to ${winnerUsername}.`,
       is_moderator: true,
       created_at: new Date().toISOString(),
@@ -269,15 +274,19 @@ export async function resolveDispute(
   await supabase.from('notifications').insert([
     {
       user_id: winnerId,
+      title: 'Dispute Won',
       message: `You have won the dispute for trade ${trade.tradeId || trade.id}.`,
-      link: `/trade/${trade.id}`,
+      type: 'dispute',
+      metadata: { link: `/trade/${trade.id}` },
       is_read: false,
       created_at: new Date().toISOString(),
     },
     {
       user_id: loserId,
+      title: 'Dispute Resolved',
       message: `The dispute for trade ${trade.tradeId || trade.id} has been resolved.`,
-      link: `/trade/${trade.id}`,
+      type: 'dispute',
+      metadata: { link: `/trade/${trade.id}` },
       is_read: false,
       created_at: new Date().toISOString(),
     },
@@ -340,10 +349,12 @@ export async function adjustUserWalletBalance(
   await supabase.from('notifications').insert([
     {
       user_id: userId,
+      title: 'Balance Adjusted',
       message: `An admin has adjusted your ${crypto} wallet balance. Action: ${action}, Amount: ${amount}. Reason: ${reason}`,
+      type: 'admin',
       is_read: false,
       created_at: new Date().toISOString(),
-      link: '/wallets',
+      metadata: { link: '/wallets' },
     },
   ]);
 }
@@ -367,11 +378,9 @@ export async function adminUnblockUser(
 }
 
 export async function adminCancelTrade(_db: any, trade: Trade, adminId: string, reason: string) {
-  const fullReason = `Cancelled by administrator. Reason: ${reason}`;
   const { data: rpcData, error: rpcError } = await supabase.rpc('cancel_p2p_trade', {
     p_trade_id: trade.id,
-    p_user_id: adminId,
-    p_reason: fullReason,
+    p_caller_id: adminId,
   });
 
   if (rpcError || (rpcData && !rpcData.success)) {

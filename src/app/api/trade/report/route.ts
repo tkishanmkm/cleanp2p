@@ -39,9 +39,11 @@ export async function POST(req: Request) {
       // Create admin notification fallback
       await supabase.from('notifications').insert({
         user_id: user.id,
+        title: 'Report Received',
         message: `Your report for trade ${cleanPublicId} has been received and queued for investigation.`,
-        link: `/trade/${tradeId}`,
+        type: 'report',
         is_read: false,
+        metadata: { link: `/trade/${tradeId}` },
       });
       return NextResponse.json({ success: true, message: 'Report queued for review' });
     }

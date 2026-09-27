@@ -8,6 +8,7 @@ export async function middleware(request: NextRequest) {
   const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'placeholder-anon-key';
 
   try {
+    const authHeader = request.headers.get('Authorization') || request.headers.get('authorization');
     const supabase = createServerClient(
       supabaseUrl,
       supabaseKey,
@@ -25,6 +26,9 @@ export async function middleware(request: NextRequest) {
               supabaseResponse.cookies.set(name, value, options)
             );
           },
+        },
+        global: {
+          headers: authHeader ? { Authorization: authHeader } : undefined,
         },
       }
     );

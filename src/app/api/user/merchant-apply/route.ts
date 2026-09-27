@@ -108,9 +108,11 @@ export async function POST(req: NextRequest) {
     await admin.from('notifications').insert([
       {
         user_id: user.id,
+        title: 'Merchant Badge Active',
         message: `Congratulations! ${requiredDeposit.toLocaleString()} USDT has been locked as security deposit. Your ${tierConfig.label} badge is now active!`,
-        link: '/merchants',
+        type: 'merchant',
         is_read: false,
+        metadata: { link: '/merchants' },
         created_at: new Date().toISOString(),
       },
     ]);

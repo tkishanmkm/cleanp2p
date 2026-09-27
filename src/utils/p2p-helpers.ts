@@ -53,3 +53,38 @@ export function formatJoinedDate(createdAt?: string | null): string {
   if (diffInYears === 1) return 'Joined 1 year ago';
   return `Joined ${diffInYears} years ago`;
 }
+
+/**
+ * Safely resolves and normalizes ad trade direction (BUY / SELL) across payload variants.
+ * Rules:
+ * 1. Preserve explicit valid BUY/SELL trade_type if present.
+ * 2. Otherwise derive from type.
+ * 3. Otherwise derive from ad_type / side.
+ * 4. Return null if no valid BUY/SELL direction can be resolved.
+ */
+export function resolveTradeType(payload: Record<string, any>): 'BUY' | 'SELL' | null {
+  if (!payload || typeof payload !== 'object') return null;
+
+  const candidates = [
+    payload.trade_type,
+    payload.tradeType,
+    payload.type,
+    payload.ad_type,
+    payload.adType,
+    payload.side,
+  ];
+
+  for (const candidate of candidates) {
+    if (typeof candidate === 'string' && candidate.trim()) {
+      const val = candidate.trim().toUpperCase();
+      if (val === 'BUY' || val === 'ONLINE_BUY' || val.includes('BUY')) {
+        return 'BUY';
+      }
+      if (val === 'SELL' || val === 'ONLINE_SELL' || val.includes('SELL')) {
+        return 'SELL';
+      }
+    }
+  }
+
+  return null;
+}

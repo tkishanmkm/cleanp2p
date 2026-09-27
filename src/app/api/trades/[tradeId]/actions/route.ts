@@ -18,8 +18,19 @@ export async function POST(
     }
 
     const supabase = await createClient();
-    const { data: { session } } = await supabase.auth.getSession();
-    const user = session?.user || (await supabase.auth.getUser()).data.user;
+
+    const authHeader = req.headers.get('Authorization') || req.headers.get('authorization');
+    const bearerToken = authHeader?.startsWith('Bearer ') ? authHeader.substring(7).trim() : null;
+
+    let user: any = null;
+    if (bearerToken) {
+      const tokenAuth = await supabase.auth.getUser(bearerToken);
+      user = tokenAuth.data?.user;
+    }
+    if (!user) {
+      const { data: { session } } = await supabase.auth.getSession();
+      user = session?.user || (await supabase.auth.getUser()).data.user;
+    }
 
     if (!user) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
@@ -65,12 +76,79 @@ export async function POST(
         return NextResponse.json({ error: 'Only the buyer can mark this trade as paid.' }, { status: 403 });
       }
 
-      // 1. Primary update: record paid_at, marked_paid_at, payment_confirmed_at, and escrow_status = 'PAID'
+      // Fetch ad payment methods to validate
+      let allowedMethods: string[] = [];
+      const adId = trade?.ad_id || trade?.advertisement_id || trade?.ad_public_id || trade?.adId;
+      if (adId) {
+        let adQuery = adminClient.from('ads').select('payment_methods');
+        adQuery = adQuery.or(`id.eq.${adId},public_id.eq.${adId},public_ad_id.eq.${adId}`);
+        const { data: adRecord, error: adQueryError } = await adQuery.maybeSingle();
+
+        if (adQueryError) {
+          console.error('Error querying ad payment methods:', adQueryError);
+          return NextResponse.json({ error: 'Failed to verify trade payment methods.' }, { status: 500 });
+        }
+
+        if (!adRecord) {
+          return NextResponse.json({ error: 'Associated advertisement could not be found to verify payment methods.' }, { status: 400 });
+        }
+
+        if (Array.isArray(adRecord.payment_methods)) {
+          allowedMethods = adRecord.payment_methods;
+        } else if (typeof adRecord.payment_methods === 'string') {
+          try {
+            const parsed = JSON.parse(adRecord.payment_methods);
+            allowedMethods = Array.isArray(parsed) ? parsed : [adRecord.payment_methods];
+          } catch {
+            allowedMethods = [adRecord.payment_methods];
+          }
+        }
+      }
+
+      allowedMethods = allowedMethods.filter((m: any) => typeof m === 'string' && m.trim().length > 0);
+
+      const requestedPaymentMethod = typeof (body.paymentMethod || body.payment_method) === 'string'
+        ? (body.paymentMethod || body.payment_method).trim()
+        : '';
+
+      let confirmedPaymentMethod = '';
+      if (allowedMethods.length > 1) {
+        if (!requestedPaymentMethod) {
+          return NextResponse.json({ error: 'Please select the payment method used to make payment.' }, { status: 400 });
+        }
+        const matched = allowedMethods.find((m) => m.trim().toLowerCase() === requestedPaymentMethod.toLowerCase());
+        if (!matched) {
+          return NextResponse.json({ error: `Selected payment method "${requestedPaymentMethod}" is not supported by this trade.` }, { status: 400 });
+        }
+        confirmedPaymentMethod = matched;
+      } else if (allowedMethods.length === 1) {
+        if (requestedPaymentMethod) {
+          const matched = allowedMethods.find((m) => m.trim().toLowerCase() === requestedPaymentMethod.toLowerCase());
+          if (!matched) {
+            return NextResponse.json({ error: `Selected payment method "${requestedPaymentMethod}" is not supported by this trade.` }, { status: 400 });
+          }
+          confirmedPaymentMethod = matched;
+        } else {
+          confirmedPaymentMethod = allowedMethods[0];
+        }
+      } else {
+        // CASE B: ad lookup succeeded but payment_methods is empty/null, or trade has no adId
+        if (requestedPaymentMethod) {
+          confirmedPaymentMethod = requestedPaymentMethod;
+        } else if (trade?.payment_method) {
+          confirmedPaymentMethod = trade.payment_method;
+        } else {
+          return NextResponse.json({ error: 'Please select the payment method used to make payment.' }, { status: 400 });
+        }
+      }
+
+      // 1. Primary update: record paid_at, marked_paid_at, payment_confirmed_at, escrow_status = 'PAID', and payment_method
       const updateData: any = {
         paid_at: now,
         marked_paid_at: now,
         payment_confirmed_at: now,
         escrow_status: 'PAID',
+        payment_method: confirmedPaymentMethod,
       };
 
       let q = adminClient.from('trades').update(updateData);
@@ -85,7 +163,7 @@ export async function POST(
 
       // 2. Also attempt updating status: 'paid' (or uppercase 'PAID') if the database schema allows it
       try {
-        let qStatus = adminClient.from('trades').update({ status: 'paid' });
+        let qStatus = adminClient.from('trades').update({ status: 'paid', payment_method: confirmedPaymentMethod });
         if (isActualUuid) qStatus = qStatus.eq('id', actualTradeId);
         else qStatus = qStatus.eq('trade_id', tradeId);
         const { error: statusErr } = await qStatus;
@@ -100,7 +178,7 @@ export async function POST(
       try {
         await adminClient
           .from('p2p_trades')
-          .update({ status: 'PAID', paid_at: now })
+          .update({ status: 'PAID', paid_at: now, payment_method: confirmedPaymentMethod })
           .eq('id', actualTradeId);
       } catch (_) {}
 
@@ -123,8 +201,9 @@ export async function POST(
             user_id: trade.seller_id,
             title: 'Payment Marked as Paid',
             message: `Buyer @${buyerName} has marked trade as paid. Please verify receiving account before releasing.`,
-            link: `/trade/${actualTradeId}`,
+            type: 'trade_action',
             is_read: false,
+            metadata: { link: `/trade/${actualTradeId}` },
             created_at: now
           }).select().maybeSingle();
         } catch (notifErr) {
@@ -203,8 +282,9 @@ export async function POST(
             user_id: uid,
             title: 'Trade Expired',
             message: `Trade has expired because payment was not confirmed within the countdown window.`,
-            link: `/trade/${actualTradeId}`,
+            type: 'trade_action',
             is_read: false,
+            metadata: { link: `/trade/${actualTradeId}` },
             created_at: now
           }).select().maybeSingle();
         } catch {}
@@ -257,7 +337,7 @@ export async function POST(
       // Canonical RPC call
       const { data: rpcData, error: rpcError } = await adminClient.rpc('release_trade_escrow', {
         p_trade_id: actualTradeId,
-        p_seller_id: user.id,
+        p_caller_id: user.id,
       });
 
       if (rpcError || (rpcData && !rpcData.success)) {
@@ -289,8 +369,9 @@ export async function POST(
             user_id: trade.buyer_id,
             title: 'Escrow Released',
             message: `@${sellerName} released ${coinAmount} ${coinSymbol} to your wallet.`,
-            link: `/trade/${actualTradeId}`,
+            type: 'trade_action',
             is_read: false,
+            metadata: { link: `/trade/${actualTradeId}` },
             created_at: now
           }).select().maybeSingle();
         } catch (notifErr) {
@@ -307,8 +388,7 @@ export async function POST(
       // Canonical RPC call
       const { data: rpcData, error: rpcError } = await adminClient.rpc('cancel_p2p_trade', {
         p_trade_id: actualTradeId,
-        p_user_id: user.id,
-        p_reason: reason || 'Cancelled by buyer',
+        p_caller_id: user.id,
       });
 
       if (rpcError || (rpcData && !rpcData.success)) {
@@ -333,8 +413,9 @@ export async function POST(
             user_id: counterpartyId,
             title: 'Trade Cancelled',
             message: `Trade has been cancelled. Any locked escrow has been refunded to the seller.`,
-            link: `/trade/${actualTradeId}`,
+            type: 'trade_action',
             is_read: false,
+            metadata: { link: `/trade/${actualTradeId}` },
             created_at: now
           }).select().maybeSingle();
         } catch (notifErr) {

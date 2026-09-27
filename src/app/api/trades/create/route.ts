@@ -271,8 +271,9 @@ export async function POST(req: NextRequest) {
           user_id: sellerId,
           title: 'Trade Request Initiated',
           message: `New trade request #${publicId} opened: ${calculatedCrypto.toFixed(4)} ${formattedCoin} for ${numericFiat.toFixed(2)} ${resolvedFiatCurrency}.`,
-          link: `/trade/${tradeId}`,
+          type: 'trade_initiated',
           is_read: false,
+          metadata: { link: `/trade/${tradeId}` },
           created_at: nowIso,
         });
       }
@@ -281,8 +282,9 @@ export async function POST(req: NextRequest) {
           user_id: buyerId,
           title: 'Trade Request Initiated',
           message: `Trade #${publicId} opened successfully. Awaiting payment/escrow confirmation.`,
-          link: `/trade/${tradeId}`,
+          type: 'trade_initiated',
           is_read: false,
+          metadata: { link: `/trade/${tradeId}` },
           created_at: nowIso,
         });
       }

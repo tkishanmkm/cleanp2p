@@ -1,9 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createServerClient } from '@supabase/ssr';
+import { createClient as createSupabaseClient } from '@supabase/supabase-js';
 
 export async function POST(req: NextRequest) {
   try {
-    const supabase = createServerClient(
+    let supabase = createServerClient(
       process.env.NEXT_PUBLIC_SUPABASE_URL!,
       process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
       {
@@ -15,6 +16,16 @@ export async function POST(req: NextRequest) {
       }
     );
 
+    const authHeader = req.headers.get('Authorization') || req.headers.get('authorization');
+    if (authHeader && authHeader.startsWith('Bearer ')) {
+      const token = authHeader.substring(7).trim();
+      supabase = createSupabaseClient(
+        process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://placeholder.supabase.co',
+        process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'placeholder-key',
+        { global: { headers: { Authorization: `Bearer ${token}` } } }
+      ) as any;
+    }
+
     const { data: { user }, error: authError } = await supabase.auth.getUser();
     if (authError || !user) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
@@ -23,6 +34,7 @@ export async function POST(req: NextRequest) {
     // Check admin authorization
     const { data: isAdmin, error: adminCheckError } = await supabase.rpc('check_is_admin', {
       p_user_id: user.id,
+      user_uuid: user.id,
     });
 
     if (adminCheckError || !isAdmin) {
@@ -45,7 +57,6 @@ export async function POST(req: NextRequest) {
       rpcResult = await supabase.rpc('cancel_p2p_trade', {
         p_trade_id: tradeId,
         p_caller_id: user.id,
-        p_reason: notes || 'Resolved by admin cancellation',
       });
     }
 
