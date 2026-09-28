@@ -431,10 +431,9 @@ export async function createAd(formData: any): Promise<ActionResponse<any>> {
   try {
     const supabase = await createClient();
 
-    const auth = await supabase.auth.getUser();
-    const userId = formData.userId || formData.user_id || auth.data?.user?.id;
+    const { data: { user }, error: authError } = await supabase.auth.getUser();
 
-    if (!userId) {
+    if (authError || !user) {
       return {
         data: null,
         error: {
@@ -443,6 +442,8 @@ export async function createAd(formData: any): Promise<ActionResponse<any>> {
         },
       };
     }
+
+    const userId = user.id;
 
     const { data, error } = await supabase
       .from('ads')

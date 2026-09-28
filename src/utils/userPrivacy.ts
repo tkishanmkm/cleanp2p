@@ -26,7 +26,7 @@ export function getPublicHandle(user?: UserDataInput | { username?: string | nul
     raw = user;
   } else if (typeof user === 'object') {
     // Strictly prioritize profile_username
-    raw = user.profile_username || (user as any).username || null;
+    raw = (user as UserDataInput).profile_username || user.username || null;
   }
 
   if (!raw || raw.trim() === '') return '@trader';

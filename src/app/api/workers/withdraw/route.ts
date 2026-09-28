@@ -5,13 +5,9 @@ import * as TronWebLib from 'tronweb';
 
 export const dynamic = 'force-dynamic';
 
-// ============================================================================
-// Types
-// ============================================================================
-
 export interface WithdrawalRequestPayload {
   withdrawalId?: string;
-  asset: 'BTC' | 'ETH' | 'LTC' | 'TRX' | 'USDT' | string;
+  asset: 'BTC' | 'ETH' | 'LTC' | 'USDT' | string;
   network: 'BTC' | 'ERC20' | 'BEP20' | 'TRC20' | 'LTC' | 'TRON' | string;
   toAddress: string;
   amount: string | number;
@@ -36,15 +32,11 @@ const ERC20_ABI = [
   'function balanceOf(address account) view returns (uint256)',
 ];
 
-// ============================================================================
-// Supabase Admin Client
-// ============================================================================
-
 function getAdminClient() {
   const supabaseUrl =
     process.env.NEXT_PUBLIC_SUPABASE_URL ||
     process.env.SUPABASE_URL ||
-    'https://eaiwgfxoiwxepinvcykg.supabase.co';
+    'https://placeholder.supabase.co';
 
   const serviceKey =
     process.env.SUPABASE_SERVICE_ROLE_KEY ||
@@ -55,30 +47,6 @@ function getAdminClient() {
     auth: { persistSession: false, autoRefreshToken: false },
   });
 }
-
-// ============================================================================
-// Gas Oracle Verification
-// ============================================================================
-
-async function verifyGasWithOracle(
-  network: string,
-  providedOracleSecret?: string | null
-): Promise<{ valid: boolean; maxFeePerGas?: bigint; maxPriorityFeePerGas?: bigint; message: string }> {
-  const configuredOracleSecret = process.env.GAS_ORACLE_SECRET;
-
-  if (configuredOracleSecret && providedOracleSecret && configuredOracleSecret !== providedOracleSecret) {
-    console.warn('[Gas Oracle] Provided oracle secret does not match configured secret');
-  }
-
-  return {
-    valid: true,
-    message: 'Gas price verified within protocol limits',
-  };
-}
-
-// ============================================================================
-// Alchemy / EVM RPC Providers
-// ============================================================================
 
 function getEvmRpcUrl(network: string): { url: string; providerName: string } {
   const normNet = network.toUpperCase();
@@ -96,13 +64,6 @@ function getEvmRpcUrl(network: string): { url: string; providerName: string } {
   return { url: ethUrl, providerName: 'Ethereum Mainnet RPC' };
 }
 
-// ============================================================================
-// Network Execution Handlers
-// ============================================================================
-
-/**
- * Executes EVM Transfers (Native ETH or USDT ERC20 / BEP20)
- */
 async function processEvmWithdrawal(
   toAddress: string,
   amount: string,
@@ -126,8 +87,8 @@ async function processEvmWithdrawal(
   const normAsset = asset.toUpperCase();
   const normNet = network.toUpperCase();
 
-  // 1. Native ETH / BNB
-  if (normAsset === 'ETH' || normAsset === 'BNB') {
+  // 1. Native ETH
+  if (normAsset === 'ETH') {
     const value = ethers.parseEther(amount);
     const feeData = await provider.getFeeData();
     const gasEstimate = await provider.estimateGas({ to: toAddress, value }).catch(() => 21000n);
@@ -146,7 +107,7 @@ async function processEvmWithdrawal(
   // 2. Token Transfers: USDT ERC-20 or USDT BEP-20
   let tokenContractAddress = '';
   let decimals = 6;
-  if (normNet === 'BEP20' || normNet === 'BSC') {
+  if (normNet === 'BEP20' || normNet === 'BSC' || normNet === 'BINANCE') {
     tokenContractAddress =
       process.env.USDT_CONTRACT_BEP20 ||
       '0x55d398326f99059fF775485246999027B3197955';
@@ -173,15 +134,11 @@ async function processEvmWithdrawal(
   return { txHash: tx.hash, gasEstimated: gasEstimate.toString(), providerUsed: `${providerName} (Smart Contract)` };
 }
 
-/**
- * Executes TRON Transfers (TRX and USDT TRC-20) via TRON JSON-RPC / Grid
- */
 async function processTronWithdrawal(
   toAddress: string,
-  amount: string,
-  asset: string
+  amount: string
 ): Promise<{ txHash: string; gasEstimated: string; providerUsed: string }> {
-  const rawKey = process.env.TRON_HOT_WALLET_PRIVATE_KEY || '';
+  const rawKey = process.env.TRON_HOT_WALLET_PRIVATE_KEY || process.env.HOT_WALLET_TRON_PRIVATE_KEY || '';
   if (!rawKey) {
     throw new Error('TRON_HOT_WALLET_PRIVATE_KEY is missing');
   }
@@ -199,17 +156,6 @@ async function processTronWithdrawal(
     privateKey: cleanKey,
   });
 
-  const normAsset = asset.toUpperCase();
-
-  // Native TRX
-  if (normAsset === 'TRX') {
-    const sunAmount = Math.floor(parseFloat(amount) * 1_000_000);
-    const tx = await tronWeb.trx.sendTransaction(toAddress, sunAmount);
-    const txHash = tx?.transaction?.txID || tx?.txid || tx?.txID;
-    if (!txHash) throw new Error(`TRX transaction failed: ${JSON.stringify(tx)}`);
-    return { txHash, gasEstimated: '100000 SUN (1 TRX)', providerUsed: 'TRON JSON-RPC' };
-  }
-
   // USDT TRC-20
   const contractAddress =
     process.env.USDT_CONTRACT_TRC20 ||
@@ -217,7 +163,9 @@ async function processTronWithdrawal(
 
   const contract = await tronWeb.contract().at(contractAddress);
   const parsedSun = Math.floor(parseFloat(amount) * 1_000_000);
-  const tx = await contract.transfer(toAddress, parsedSun).send();
+  const tx = await contract.transfer(toAddress, parsedSun).send({
+    feeLimit: 50_000_000,
+  });
 
   const txHash = typeof tx === 'string' ? tx : tx?.transaction?.txID || tx?.txid || tx?.txID;
   if (!txHash) throw new Error(`TRC-20 transaction failed: ${JSON.stringify(tx)}`);
@@ -225,16 +173,11 @@ async function processTronWithdrawal(
   return { txHash, gasEstimated: '32000 Energy', providerUsed: 'TRON TRC-20 JSON-RPC' };
 }
 
-/**
- * Executes Bitcoin Transfers (BTC Native SegWit)
- */
 async function processBtcWithdrawal(
   toAddress: string,
   amount: string
 ): Promise<{ txHash: string; gasEstimated: string; providerUsed: string }> {
-  const privateKey = process.env.BTC_HOT_WALLET_PRIVATE_KEY || '';
-  const fromAddress = process.env.BTC_HOT_WALLET_ADDRESS || '';
-
+  const privateKey = process.env.BTC_HOT_WALLET_PRIVATE_KEY || process.env.HOT_WALLET_BTC_PRIVATE_KEY || '';
   if (!privateKey) throw new Error('BTC_HOT_WALLET_PRIVATE_KEY is missing');
 
   const btcRpc = process.env.BTC_RPC_URL;
@@ -259,22 +202,14 @@ async function processBtcWithdrawal(
     }
   }
 
-  const txDigest = ethers.keccak256(
-    ethers.toUtf8Bytes(`BTC:${fromAddress}:${toAddress}:${amount}:${Date.now()}:${privateKey.slice(0, 8)}`)
-  );
-  return { txHash: txDigest.replace(/^0x/, ''), gasEstimated: '141 vB (15 sat/vB)', providerUsed: 'Bitcoin Hot Wallet Dispatcher' };
+  throw new Error('Bitcoin RPC or mempool provider required for on-chain broadcast');
 }
 
-/**
- * Executes Litecoin Transfers (LTC Native SegWit) via Generic JSON-RPC
- */
 async function processLtcWithdrawal(
   toAddress: string,
   amount: string
 ): Promise<{ txHash: string; gasEstimated: string; providerUsed: string }> {
-  const privateKey = process.env.LTC_HOT_WALLET_PRIVATE_KEY || '';
-  const fromAddress = process.env.LTC_HOT_WALLET_ADDRESS || '';
-
+  const privateKey = process.env.LTC_HOT_WALLET_PRIVATE_KEY || process.env.HOT_WALLET_LTC_PRIVATE_KEY || '';
   if (!privateKey) throw new Error('LTC_HOT_WALLET_PRIVATE_KEY is missing');
 
   const ltcRpc = process.env.LTC_RPC_URL;
@@ -299,23 +234,14 @@ async function processLtcWithdrawal(
     }
   }
 
-  const txDigest = ethers.keccak256(
-    ethers.toUtf8Bytes(`LTC:${fromAddress}:${toAddress}:${amount}:${Date.now()}:${privateKey.slice(0, 8)}`)
-  );
-  return { txHash: txDigest.replace(/^0x/, ''), gasEstimated: '140 vB (5 litoshi/vB)', providerUsed: 'Litecoin Hot Wallet Dispatcher' };
+  throw new Error('Litecoin RPC or mempool provider required for on-chain broadcast');
 }
-
-// ============================================================================
-// Main POST Handler (/api/workers/withdraw)
-// ============================================================================
 
 export async function POST(req: NextRequest) {
   try {
-    // 1. Authenticate WITHDRAWAL_WORKER_SECRET
     const expectedSecret = process.env.WITHDRAWAL_WORKER_SECRET || process.env.WORKER_SECRET;
     const authHeader = req.headers.get('authorization');
     const customHeader = req.headers.get('x-withdrawal-worker-secret');
-    const gasOracleSecret = req.headers.get('x-gas-oracle-secret');
 
     const token = authHeader?.startsWith('Bearer ')
       ? authHeader.replace(/^Bearer\s+/i, '').trim()
@@ -330,7 +256,6 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // 2. Parse request payload
     let body: Partial<WithdrawalRequestPayload> = {};
     try {
       body = await req.json();
@@ -340,11 +265,7 @@ export async function POST(req: NextRequest) {
 
     const { withdrawalId, asset, network, toAddress, amount } = body;
 
-    // 3. If payload provided, process single withdrawal
     if (asset && network && toAddress && amount) {
-      // Verify gas with Oracle
-      await verifyGasWithOracle(network, gasOracleSecret);
-
       const normAsset = asset.toUpperCase().trim();
       const normNet = network.toUpperCase().trim();
       const amountStr = String(amount);
@@ -355,34 +276,18 @@ export async function POST(req: NextRequest) {
         execution = await processBtcWithdrawal(toAddress, amountStr);
       } else if (normNet === 'LTC' || normAsset === 'LTC') {
         execution = await processLtcWithdrawal(toAddress, amountStr);
-      } else if (normNet === 'TRC20' || normNet === 'TRON' || normAsset === 'TRX') {
-        execution = await processTronWithdrawal(toAddress, amountStr, normAsset);
+      } else if (normNet === 'TRC20' || normNet === 'TRON') {
+        execution = await processTronWithdrawal(toAddress, amountStr);
       } else {
-        // EVM: ETH, USDT ERC-20, USDT BEP-20
         execution = await processEvmWithdrawal(toAddress, amountStr, normAsset, normNet);
       }
 
-      // Update Supabase tables
       const supabase = getAdminClient();
       if (withdrawalId) {
-        await supabase
-          .from('withdrawals')
-          .update({
-            status: 'completed',
-            tx_hash: execution.txHash,
-            broadcasted_at: new Date().toISOString(),
-            updated_at: new Date().toISOString(),
-          })
-          .eq('id', withdrawalId);
-
-        await supabase
-          .from('onchain_withdrawals')
-          .update({
-            status: 'COMPLETED',
-            tx_hash: execution.txHash,
-            updated_at: new Date().toISOString(),
-          })
-          .eq('id', withdrawalId);
+        await supabase.rpc('complete_onchain_withdrawal', {
+          p_withdrawal_id: withdrawalId,
+          p_tx_hash: execution.txHash,
+        });
       }
 
       const result: WithdrawalExecutionResult = {
@@ -403,14 +308,11 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    // 4. If called without direct payload, process pending queue from Supabase
+    // Process pending queue from database using claim_pending_withdrawals RPC
     const supabase = getAdminClient();
-    const { data: queue, error: queueErr } = await supabase
-      .from('withdrawals')
-      .select('*')
-      .in('status', ['QUEUED', 'approved', 'processing', 'PENDING'])
-      .order('created_at', { ascending: true })
-      .limit(10);
+    const { data: queue, error: queueErr } = await supabase.rpc('claim_pending_withdrawals', {
+      p_limit: 10,
+    });
 
     if (queueErr) {
       return NextResponse.json(
@@ -431,9 +333,9 @@ export async function POST(req: NextRequest) {
     const processedResults: WithdrawalExecutionResult[] = [];
 
     for (const item of queue) {
-      const itemAsset = (item.asset_symbol || item.asset_code || 'USDT').toUpperCase();
-      const itemNet = (item.network || item.network_code || 'ERC20').toUpperCase();
-      const itemTo = item.destination_address || item.to_address || item.address;
+      const itemAsset = (item.asset_symbol || 'USDT').toUpperCase();
+      const itemNet = (item.network || 'TRC20').toUpperCase();
+      const itemTo = item.to_address || item.destination_address;
       const itemAmt = String(item.amount);
 
       if (!itemTo || !itemAmt) continue;
@@ -444,21 +346,16 @@ export async function POST(req: NextRequest) {
           exec = await processBtcWithdrawal(itemTo, itemAmt);
         } else if (itemNet === 'LTC' || itemAsset === 'LTC') {
           exec = await processLtcWithdrawal(itemTo, itemAmt);
-        } else if (itemNet === 'TRC20' || itemNet === 'TRON' || itemAsset === 'TRX') {
-          exec = await processTronWithdrawal(itemTo, itemAmt, itemAsset);
+        } else if (itemNet === 'TRC20' || itemNet === 'TRON') {
+          exec = await processTronWithdrawal(itemTo, itemAmt);
         } else {
           exec = await processEvmWithdrawal(itemTo, itemAmt, itemAsset, itemNet);
         }
 
-        await supabase
-          .from('withdrawals')
-          .update({
-            status: 'completed',
-            tx_hash: exec.txHash,
-            broadcasted_at: new Date().toISOString(),
-            updated_at: new Date().toISOString(),
-          })
-          .eq('id', item.id);
+        await supabase.rpc('complete_onchain_withdrawal', {
+          p_withdrawal_id: item.id,
+          p_tx_hash: exec.txHash,
+        });
 
         processedResults.push({
           withdrawalId: item.id,
@@ -473,14 +370,10 @@ export async function POST(req: NextRequest) {
         });
       } catch (err: unknown) {
         const errorMsg = err instanceof Error ? err.message : String(err);
-        await supabase
-          .from('withdrawals')
-          .update({
-            status: 'failed',
-            broadcast_error: errorMsg,
-            updated_at: new Date().toISOString(),
-          })
-          .eq('id', item.id);
+        await supabase.rpc('process_failed_withdrawal', {
+          p_withdrawal_id: item.id,
+          p_error_reason: errorMsg,
+        });
 
         processedResults.push({
           withdrawalId: item.id,

@@ -1,44 +1,18 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createServerClient } from '@supabase/ssr';
-import { createClient } from '@supabase/supabase-js';
+import { getSupabaseAdminClient } from '@/lib/supabase/server';
+import { verifyServerAdmin } from '@/lib/server-admin-auth';
 import { getHotWalletOnchainBalance } from '@/lib/security/reconciliation';
 
 export const dynamic = 'force-dynamic';
 
-const supabaseAdmin = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL || 'https://placeholder.supabase.co',
-  process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'placeholder-key',
-  { auth: { persistSession: false, autoRefreshToken: false } }
-);
-
 export async function GET(req: NextRequest) {
   try {
-    const supabase = createServerClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL!,
-      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-      {
-        cookies: {
-          getAll() {
-            return req.cookies.getAll();
-          },
-        },
-      }
-    );
-
-    const { data: { user }, error: authError } = await supabase.auth.getUser();
-    if (authError || !user) {
-      return NextResponse.json({ error: 'Unauthorized: Session required' }, { status: 401 });
+    const auth = await verifyServerAdmin(req);
+    if (!auth.authorized) {
+      return auth.response!;
     }
 
-    // Verify admin privileges
-    const { data: isAdmin, error: adminErr } = await supabaseAdmin.rpc('check_is_admin', {
-      p_user_id: user.id,
-      user_uuid: user.id,
-    });
-
-    if (adminErr || !isAdmin) {
-      return NextResponse.json({ error: 'Forbidden: Admin privilege required' }, { status: 403 });
-    }
+    const supabaseAdmin = getSupabaseAdminClient();
 
     // 1. Total Platform Volume (Completed P2P Trades)
     let totalVolumeUsdt = 0;
@@ -80,7 +54,6 @@ export async function GET(req: NextRequest) {
     const chainsToCheck = ['BEP20'];
     if (process.env.ETH_RPC_URL || process.env.EVM_RPC_URL) chainsToCheck.push('ERC20');
     if (process.env.POLYGON_RPC_URL) chainsToCheck.push('POLYGON');
-    if (process.env.SEPOLIA_RPC_URL) chainsToCheck.push('SEPOLIA');
     if (process.env.TRON_HOT_WALLET_ADDRESS) chainsToCheck.push('TRC20');
 
     for (const chain of chainsToCheck) {

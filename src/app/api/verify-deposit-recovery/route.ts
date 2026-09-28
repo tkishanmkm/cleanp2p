@@ -9,7 +9,7 @@ export async function GET() {
   const targetTxHash = '189079c39ef192fe8d20cf2abef610daea9f33a15f975d1cb9c058ae510a2b7e';
   const targetUserId = '37cbd587-9da1-48a1-9659-ed9f49c3e40c';
   const targetDestination = 'TEHuvkNzdaQbCRPWudV85ux4FRGPXjAyNn';
-  const targetContract = 'TXYZopYRdj2D9XRtbG411XZZ3kM5VkAeBf';
+  const targetContract = process.env.USDT_CONTRACT_TRC20 || 'TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t';
 
   const supabase = getSupabaseAdminClient();
 

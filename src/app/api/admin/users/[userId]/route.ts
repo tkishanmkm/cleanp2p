@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSupabaseAdminClient } from "@/lib/supabase/server";
+import { verifyServerAdmin } from "@/lib/server-admin-auth";
 
 export const dynamic = "force-dynamic";
 
@@ -8,6 +9,14 @@ export async function GET(
   { params }: { params: Promise<{ userId: string }> | { userId: string } }
 ) {
   try {
+    const auth = await verifyServerAdmin(req);
+    if (!auth.authorized) {
+      return (
+        auth.response ||
+        NextResponse.json({ success: false, error: "Unauthorized" }, { status: 401 })
+      );
+    }
+
     const resolvedParams = typeof (params as any)?.then === "function" ? await params : params;
     const userId = resolvedParams.userId;
 
@@ -172,11 +181,26 @@ export async function POST(
   { params }: { params: Promise<{ userId: string }> | { userId: string } }
 ) {
   try {
+    const auth = await verifyServerAdmin(req);
+    if (!auth.authorized) {
+      return (
+        auth.response ||
+        NextResponse.json({ success: false, error: "Unauthorized" }, { status: 401 })
+      );
+    }
+
     const resolvedParams = typeof (params as any)?.then === "function" ? await params : params;
     const userId = resolvedParams.userId;
 
-    const body = await req.json();
-    const { action, status, reason, banPolicy, role, adminEmail } = body;
+    if (!userId || typeof userId !== "string") {
+      return NextResponse.json({ success: false, error: "Missing or invalid userId" }, { status: 400 });
+    }
+
+    const body = await req.json().catch(() => ({}));
+    const { action, status, reason, banPolicy, role } = body;
+    // Authoritatively resolve admin identity from verified server session
+    const adminEmail = auth.adminEmail || "admin@paxones.com";
+    const adminId = auth.adminId;
     const supabase = getSupabaseAdminClient();
 
     if (action === "update_status") {
@@ -187,7 +211,7 @@ export async function POST(
       // 1. Try DB RPC
       try {
         await supabase.rpc("admin_update_user_status", {
-          p_admin_email: adminEmail || "admin@paxones.com",
+          p_admin_email: adminEmail,
           p_target_user_id: userId,
           p_status: targetStatus,
           p_ban_reason: reason || `Admin updated status to ${targetStatus}`,
@@ -211,39 +235,71 @@ export async function POST(
 
       // 3. Log audit event
       await supabase.from("admin_audit_logs").insert({
-        admin_email: adminEmail || "admin@paxones.com",
+        admin_email: adminEmail,
+        admin_id: adminId,
         action: `SET_STATUS_${targetStatus.toUpperCase()}`,
         target_user_id: userId,
-        details: { status: targetStatus, reason, banPolicy, date: new Date().toISOString() },
+        details: { status: targetStatus, reason, banPolicy, executedBy: adminEmail, date: new Date().toISOString() },
       });
 
       return NextResponse.json({ success: true, message: `Status updated to ${targetStatus}` });
     }
 
     if (action === "update_role") {
-      const newRole = role === "admin" ? "admin" : "user";
-      await supabase
-        .from("profiles")
-        .update({
-          role: newRole,
-          is_admin_account: newRole === "admin",
-        })
-        .eq("id", userId);
-
-      if (newRole === "admin") {
-        await supabase
-          .from("app_admins")
-          .upsert({ user_id: userId, role: "admin" }, { onConflict: "user_id" });
-      } else {
-        await supabase.from("app_admins").delete().eq("user_id", userId);
+      // Prevent self-role modification to avoid privilege escalation or accidental lockout
+      if (userId === adminId) {
+        return NextResponse.json(
+          { success: false, error: "Self-modification of administrative privileges is prohibited." },
+          { status: 403 }
+        );
       }
 
-      await supabase.from("admin_audit_logs").insert({
-        admin_email: adminEmail || "admin@paxones.com",
-        action: `SET_ROLE_${newRole.toUpperCase()}`,
-        target_user_id: userId,
-        details: { role: newRole, date: new Date().toISOString() },
-      });
+      const newRole = role === "admin" ? "admin" : "user";
+
+      // 1. Try atomic database RPC
+      let rpcSucceeded = false;
+      try {
+        const { error: rpcErr } = await supabase.rpc("admin_update_user_role", {
+          p_admin_id: adminId,
+          p_target_user_id: userId,
+          p_new_role: newRole,
+        });
+        if (!rpcErr) {
+          rpcSucceeded = true;
+        } else {
+          console.warn("admin_update_user_role RPC error:", rpcErr);
+        }
+      } catch (e) {
+        console.warn("admin_update_user_role RPC call failed:", e);
+      }
+
+      // 2. Direct fallback if RPC is not present
+      if (!rpcSucceeded) {
+        await supabase
+          .from("profiles")
+          .update({
+            role: newRole,
+            is_admin_account: newRole === "admin",
+            is_admin: newRole === "admin",
+          })
+          .eq("id", userId);
+
+        if (newRole === "admin") {
+          await supabase
+            .from("app_admins")
+            .upsert({ user_id: userId, role: "admin" }, { onConflict: "user_id" });
+        } else {
+          await supabase.from("app_admins").delete().eq("user_id", userId);
+        }
+
+        await supabase.from("admin_audit_logs").insert({
+          admin_email: adminEmail,
+          admin_id: adminId,
+          action: `SET_ROLE_${newRole.toUpperCase()}`,
+          target_user_id: userId,
+          details: { role: newRole, executedBy: adminEmail, date: new Date().toISOString() },
+        });
+      }
 
       return NextResponse.json({ success: true, message: `Role updated to ${newRole}` });
     }
@@ -262,10 +318,11 @@ export async function POST(
         .eq("id", userId);
 
       await supabase.from("admin_audit_logs").insert({
-        admin_email: adminEmail || "admin@paxones.com",
+        admin_email: adminEmail,
+        admin_id: adminId,
         action: "RESET_USER_KYC",
         target_user_id: userId,
-        details: { reset_at: new Date().toISOString() },
+        details: { reset_at: new Date().toISOString(), executedBy: adminEmail },
       });
 
       return NextResponse.json({ success: true, message: "KYC verification reset. User can submit documents again." });
@@ -282,10 +339,11 @@ export async function POST(
         .eq("id", userId);
 
       await supabase.from("admin_audit_logs").insert({
-        admin_email: adminEmail || "admin@paxones.com",
+        admin_email: adminEmail,
+        admin_id: adminId,
         action: "FORCE_VERIFY_KYC",
         target_user_id: userId,
-        details: { verified_at: new Date().toISOString() },
+        details: { verified_at: new Date().toISOString(), executedBy: adminEmail },
       });
 
       return NextResponse.json({ success: true, message: "User KYC marked as Verified (Tier 2)." });
@@ -302,10 +360,11 @@ export async function POST(
         .eq("id", userId);
 
       await supabase.from("admin_audit_logs").insert({
-        admin_email: adminEmail || "admin@paxones.com",
+        admin_email: adminEmail,
+        admin_id: adminId,
         action: "FORCE_UNVERIFY_KYC",
         target_user_id: userId,
-        details: { unverified_at: new Date().toISOString() },
+        details: { unverified_at: new Date().toISOString(), executedBy: adminEmail },
       });
 
       return NextResponse.json({ success: true, message: "User KYC marked as Unverified (Tier 1)." });
@@ -322,10 +381,11 @@ export async function POST(
         .eq("id", userId);
 
       await supabase.from("admin_audit_logs").insert({
-        admin_email: adminEmail || "admin@paxones.com",
+        admin_email: adminEmail,
+        admin_id: adminId,
         action: lock ? "LOCK_USER_WITHDRAWAL" : "UNLOCK_USER_WITHDRAWAL",
         target_user_id: userId,
-        details: { locked: lock, date: new Date().toISOString() },
+        details: { locked: lock, executedBy: adminEmail, date: new Date().toISOString() },
       });
 
       return NextResponse.json({

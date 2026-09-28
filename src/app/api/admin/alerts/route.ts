@@ -1,5 +1,6 @@
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
+import { verifyServerAdmin } from '@/lib/server-admin-auth';
 
 export const dynamic = 'force-dynamic';
 
@@ -20,51 +21,15 @@ const supabaseAdmin = createClient(supabaseUrl, supabaseKey, {
   },
 });
 
-async function verifyAdmin(token: string) {
-  const { data: { user }, error: authError } = await supabaseAdmin.auth.getUser(token);
-  if (authError || !user) {
-    return { user: null, error: 'Invalid token' };
-  }
-
-  const { data: profile } = await supabaseAdmin
-    .from('profiles')
-    .select('role, is_admin')
-    .eq('id', user.id)
-    .maybeSingle();
-
-  const normalizedRole = (profile?.role || '').toUpperCase();
-  const isUserAdmin =
-    normalizedRole === 'ADMIN' ||
-    normalizedRole === 'SUPER_ADMIN' ||
-    Boolean(profile?.is_admin);
-
-  if (!isUserAdmin) {
-    const { data: adminRecord } = await supabaseAdmin
-      .from('app_admins')
-      .select('user_id')
-      .eq('user_id', user.id)
-      .maybeSingle();
-
-    if (!adminRecord) {
-      return { user: null, error: 'Forbidden: Admin access required' };
-    }
-  }
-
-  return { user, error: null };
-}
-
 // GET: Fetch active (unresolved) system alerts
-export async function GET(req: Request) {
+export async function GET(req: NextRequest) {
   try {
-    const authHeader = req.headers.get('authorization');
-    if (!authHeader) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
-
-    const token = authHeader.replace(/^Bearer\s+/i, '').trim();
-    const { user, error: authError } = await verifyAdmin(token);
-    if (authError || !user) {
-      return NextResponse.json({ error: authError || 'Unauthorized' }, { status: authError?.startsWith('Forbidden') ? 403 : 401 });
+    const auth = await verifyServerAdmin(req);
+    if (!auth.authorized) {
+      return (
+        auth.response ||
+        NextResponse.json({ error: 'Unauthorized: Admin privileges required' }, { status: 401 })
+      );
     }
 
     const { data: alerts, error } = await supabaseAdmin
@@ -86,18 +51,17 @@ export async function GET(req: Request) {
 }
 
 // POST: Resolve / Dismiss an alert
-export async function POST(req: Request) {
+export async function POST(req: NextRequest) {
   try {
-    const authHeader = req.headers.get('authorization');
-    if (!authHeader) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    const auth = await verifyServerAdmin(req);
+    if (!auth.authorized) {
+      return (
+        auth.response ||
+        NextResponse.json({ error: 'Unauthorized: Admin privileges required' }, { status: 401 })
+      );
     }
 
-    const token = authHeader.replace(/^Bearer\s+/i, '').trim();
-    const { user, error: authError } = await verifyAdmin(token);
-    if (authError || !user) {
-      return NextResponse.json({ error: authError || 'Unauthorized' }, { status: authError?.startsWith('Forbidden') ? 403 : 401 });
-    }
+    const adminUserId = auth.adminId || auth.user?.id;
 
     const body = await req.json().catch(() => ({}));
     const alertId = body.alertId;
@@ -108,7 +72,7 @@ export async function POST(req: Request) {
     // Attempt RPC first
     const { error: rpcError } = await supabaseAdmin.rpc('resolve_system_alert', {
       p_alert_id: alertId,
-      p_admin_id: user.id,
+      p_admin_id: adminUserId,
     });
 
     if (rpcError) {
@@ -117,7 +81,7 @@ export async function POST(req: Request) {
         .from('system_alerts')
         .update({
           is_resolved: true,
-          resolved_by: user.id,
+          resolved_by: adminUserId,
           resolved_at: new Date().toISOString(),
           updated_at: new Date().toISOString(),
         })

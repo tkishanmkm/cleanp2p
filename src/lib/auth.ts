@@ -9,6 +9,10 @@ export interface UserProfile {
   email?: string | null;
   display_name?: string | null;
   avatar_url?: string | null;
+  photo_url?: string | null;
+  username_changed?: boolean;
+  username_changed_count?: number;
+  username_changes_remaining?: number;
   country?: string | null;
   preferredCurrency?: string;
   preferred_currency?: string;
@@ -608,7 +612,7 @@ export async function resetPasswordForEmail(email: string, redirectTo?: string):
       return { data: null, error: handleAuthError(error) };
     }
 
-    return { data, error: null };
+    return { data: null, error: null };
   } catch (err: unknown) {
     return { data: null, error: handleAuthError(err) };
   }

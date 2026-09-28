@@ -237,6 +237,22 @@ export async function compressKycData(data: Record<string, any>): Promise<Buffer
 // ==========================================
 
 /**
+ * Determines if a storage object key contains sensitive or confidential PII / KYC data.
+ */
+export function isPrivateB2Key(key: string): boolean {
+  if (!key) return false;
+  const lower = key.toLowerCase();
+  return (
+    lower.startsWith('kyc-documents/') ||
+    lower.startsWith('private/') ||
+    lower.startsWith('trade-proofs/') ||
+    lower.startsWith('disputes/') ||
+    lower.includes('/kyc/') ||
+    lower.includes('address_data_')
+  );
+}
+
+/**
  * Uploads any buffer directly to Backblaze B2 using runtime env credentials
  */
 export async function uploadToB2(
@@ -244,7 +260,7 @@ export async function uploadToB2(
   buffer: Buffer,
   contentType: string,
   contentEncoding?: string
-): Promise<{ key: string; publicUrl: string; bucket: string }> {
+): Promise<{ key: string; publicUrl: string; bucket: string; isPrivate: boolean }> {
   const config = getB2Config();
   const client = getB2Client();
 
@@ -258,12 +274,17 @@ export async function uploadToB2(
 
   await client.send(command);
 
-  const publicUrl = `${config.endpoint.replace(/\/+$/, '')}/${config.bucketName}/${key}`;
+  const isPrivate = isPrivateB2Key(key);
+  // Sensitive documents (KYC, address proof, dispute files) MUST NEVER have accessible public URLs
+  const publicUrl = isPrivate
+    ? ''
+    : `${config.endpoint.replace(/\/+$/, '')}/${config.bucketName}/${key}`;
 
   return {
     key,
     publicUrl,
     bucket: config.bucketName,
+    isPrivate,
   };
 }
 

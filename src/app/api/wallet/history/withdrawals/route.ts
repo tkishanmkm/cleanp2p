@@ -45,8 +45,8 @@ export async function GET(req: NextRequest) {
     const admin = getSupabaseAdminClient();
 
     let query = admin
-      .from('hot_wallet_withdrawals')
-      .select('id, user_id, asset_symbol, amount, gas_fee, to_address, destination_address, tx_hash, status, created_at, updated_at', { count: 'exact' })
+      .from('withdrawals')
+      .select('id, user_id, asset_symbol, asset_code, amount, network_fee, destination_address, tx_hash, txid, status, created_at, updated_at', { count: 'exact' })
       .eq('user_id', user.id);
 
     if (statusParam) {
@@ -55,7 +55,7 @@ export async function GET(req: NextRequest) {
     }
 
     if (assetParam) {
-      query = query.ilike('asset_symbol', assetParam.trim());
+      query = query.or(`asset_symbol.ilike.${assetParam.trim()},asset_code.ilike.${assetParam.trim()}`);
     }
 
     const { data, count, error } = await query
@@ -70,18 +70,18 @@ export async function GET(req: NextRequest) {
     const totalCount = count ?? 0;
     const totalPages = Math.ceil(totalCount / limit);
 
-    const formattedData = (data || []).map((withdrawal) => {
+    const formattedData = (data || []).map((withdrawal: any) => {
       const amountStr = withdrawal.amount != null ? String(withdrawal.amount) : '0';
-      const gasFeeStr = withdrawal.gas_fee != null ? String(withdrawal.gas_fee) : '0';
+      const gasFeeStr = withdrawal.network_fee != null ? String(withdrawal.network_fee) : (withdrawal.gas_fee != null ? String(withdrawal.gas_fee) : '0');
 
       return {
         id: withdrawal.id,
         user_id: withdrawal.user_id,
-        asset_symbol: (withdrawal.asset_symbol || '').toUpperCase(),
+        asset_symbol: (withdrawal.asset_symbol || withdrawal.asset_code || 'USDT').toUpperCase(),
         amount: amountStr,
         gas_fee: gasFeeStr,
-        to_address: withdrawal.to_address || withdrawal.destination_address || '',
-        tx_hash: withdrawal.tx_hash || 'processing',
+        to_address: withdrawal.destination_address || withdrawal.to_address || '',
+        tx_hash: withdrawal.tx_hash || withdrawal.txid || 'processing',
         status: (withdrawal.status || 'pending').toLowerCase(),
         created_at: withdrawal.created_at || new Date().toISOString(),
         updated_at: withdrawal.updated_at || null,

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient as createServerClient } from '@/lib/supabase/server';
 import { getSupabaseAdminClient } from '@/lib/supabase/server';
+import { verifyServerAdmin } from '@/lib/server-admin-auth';
 
 export const dynamic = 'force-dynamic';
 
@@ -23,43 +24,63 @@ async function handleSync(req: NextRequest) {
     const admin = getSupabaseAdminClient();
     const supabase = await createServerClient();
 
-    let targetUserId: string | null = null;
+    // 1. Authenticate caller session
+    let sessionUser: any = null;
 
-    // Check auth session
     const authHeader = req.headers.get('authorization');
     if (authHeader && authHeader.startsWith('Bearer ')) {
       const token = authHeader.replace(/^Bearer\s+/i, '').trim();
       const { data } = await admin.auth.getUser(token);
-      if (data?.user?.id) targetUserId = data.user.id;
+      if (data?.user) sessionUser = data.user;
     }
 
-    if (!targetUserId) {
+    if (!sessionUser) {
       const { data: { user } } = await supabase.auth.getUser();
-      if (user?.id) targetUserId = user.id;
+      if (user) sessionUser = user;
     }
 
-    // Allow query or body fallback for admin / background sync
+    if (!sessionUser) {
+      return NextResponse.json({ error: 'Unauthorized: Authentication session required' }, { status: 401 });
+    }
+
+    // 2. Resolve requested target user
+    let requestedUserId: string | null = null;
+    let requestedEmail: string | null = null;
+
     const url = new URL(req.url);
     const queryUserId = url.searchParams.get('userId') || url.searchParams.get('id');
     const queryEmail = url.searchParams.get('email');
-    if (!targetUserId && queryUserId) {
-      targetUserId = queryUserId;
-    }
+    if (queryUserId) requestedUserId = queryUserId;
+    if (queryEmail) requestedEmail = queryEmail;
 
-    let targetEmail = queryEmail;
-
-    if (!targetUserId && !targetEmail) {
+    if (req.method === 'POST') {
       try {
         const body = await req.json().catch(() => ({}));
-        if (body.userId) targetUserId = body.userId;
-        if (body.email) targetEmail = body.email;
+        if (body.userId) requestedUserId = body.userId;
+        if (body.id) requestedUserId = body.id;
+        if (body.email) requestedEmail = body.email;
       } catch {
         // ignore
       }
     }
 
-    if (!targetUserId && !targetEmail) {
-      return NextResponse.json({ error: 'Unauthorized: User ID or email required' }, { status: 401 });
+    let targetUserId = sessionUser.id;
+    let targetEmail: string | null = null;
+
+    const isTargetingDifferentUser =
+      (requestedUserId && requestedUserId !== sessionUser.id) ||
+      (requestedEmail && sessionUser.email && requestedEmail.toLowerCase() !== sessionUser.email.toLowerCase());
+
+    if (isTargetingDifferentUser) {
+      const adminAuth = await verifyServerAdmin(req);
+      if (!adminAuth.authorized) {
+        return NextResponse.json(
+          { error: 'Forbidden: Cannot sync KYC status of another user without administrator privileges.' },
+          { status: 403 }
+        );
+      }
+      if (requestedUserId) targetUserId = requestedUserId;
+      if (requestedEmail) targetEmail = requestedEmail;
     }
 
     // Fetch user profile by ID or email

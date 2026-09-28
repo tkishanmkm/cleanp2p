@@ -14,7 +14,7 @@ const supabaseAdmin = createClient(
 export async function POST(req: NextRequest) {
   try {
     const authHeader = req.headers.get('authorization');
-    const validSecret = process.env.WORKER_SECRET || process.env.CRON_SECRET;
+    const validSecret = process.env.WORKER_SECRET || process.env.CRON_SECRET || process.env.WITHDRAWAL_WORKER_SECRET;
     
     if (validSecret && authHeader !== `Bearer ${validSecret}`) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
@@ -29,51 +29,49 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ message: 'No pending withdrawals to process' }, { status: 200 });
     }
 
-    const rawPrivateKey = process.env.EVM_HOT_WALLET_PRIVATE_KEY;
+    const rawPrivateKey = process.env.EVM_HOT_WALLET_PRIVATE_KEY || process.env.HOT_WALLET_PRIVATE_KEY;
     if (!rawPrivateKey) {
       throw new Error('EVM_HOT_WALLET_PRIVATE_KEY is missing');
     }
 
-    // Initialize provider and signer
-    const provider = new ethers.JsonRpcProvider(process.env.ETH_RPC_URL);
+    const providerUrl = process.env.ETH_RPC_URL || process.env.EVM_RPC_URL || 'https://cloudflare-eth.com';
+    const provider = new ethers.JsonRpcProvider(providerUrl);
     const formattedKey = rawPrivateKey.startsWith('0x') ? rawPrivateKey : `0x${rawPrivateKey}`;
     const wallet = new ethers.Wallet(formattedKey, provider);
 
-    // Precise BigInt calculation for asset precision (USDT/USDC = 6 decimals, Native ETH = 18 decimals)
-    const assetUpper = (withdrawal.asset_symbol || '').toUpperCase();
-    const decimals = assetUpper === 'USDT' || assetUpper === 'USDC' ? 6 : 18;
-    const payoutUnits = ethers.parseUnits(String(withdrawal.amount), decimals);
+    const assetUpper = (withdrawal.asset_symbol || withdrawal.asset || '').toUpperCase();
+    const targetWithdrawalId = withdrawal.id || withdrawal.withdrawal_id;
+    const destination = withdrawal.to_address || withdrawal.destination_address || withdrawal.destination;
 
     let txHash = '';
 
     if (assetUpper === 'ETH') {
+      const payoutUnits = ethers.parseEther(String(withdrawal.amount));
       const tx = await wallet.sendTransaction({
-        to: withdrawal.to_address,
+        to: destination,
         value: payoutUnits,
       });
       txHash = tx.hash;
     } else if (assetUpper === 'USDT') {
-      // Standard ERC20 Transfer Interface
-      const tokenAddress = process.env.NEXT_PUBLIC_USDT_CONTRACT_ADDRESS || '0xdAC17F958D2ee523a2206206994597C13D831ec7';
+      const tokenAddress = process.env.USDT_CONTRACT_ERC20 || '0xdAC17F958D2ee523a2206206994597C13D831ec7';
       const erc20Abi = ['function transfer(address to, uint256 amount) returns (bool)'];
       const contract = new ethers.Contract(tokenAddress, erc20Abi, wallet);
-      const tx = await contract.transfer(withdrawal.to_address, payoutUnits);
+      const payoutUnits = ethers.parseUnits(String(withdrawal.amount), 6);
+      const tx = await contract.transfer(destination, payoutUnits);
       txHash = tx.hash;
+    } else {
+      throw new Error(`Unsupported EVM asset: ${assetUpper}`);
     }
 
-    // Update DB status to BROADCASTED without waiting for block confirmation (Serverless compliant)
-    await supabaseAdmin
-      .from('onchain_withdrawals')
-      .update({
-        status: 'BROADCASTED',
-        tx_hash: txHash,
-        updated_at: new Date().toISOString()
-      })
-      .eq('id', withdrawal.id);
+    // Settle via authoritative complete_onchain_withdrawal RPC
+    await supabaseAdmin.rpc('complete_onchain_withdrawal', {
+      p_withdrawal_id: targetWithdrawalId,
+      p_tx_hash: txHash,
+    });
 
     return NextResponse.json({
       success: true,
-      withdrawalId: withdrawal.id,
+      withdrawalId: targetWithdrawalId,
       txHash,
     });
   } catch (err: any) {

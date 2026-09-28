@@ -12,7 +12,8 @@ console.log('[Worker Scheduler] Multi-Chain HD Custodial Wallet Daemon Started.'
 cron.schedule('* * * * *', async () => {
   try {
     const res = await runDepositIngestion();
-    console.log('[Scheduler: Deposit Ingestion]', new Date().toISOString(), `Total detected: ${res.totalDetected}`);
+    const detectedCount = res.results?.length ?? 0;
+    console.log('[Scheduler: Deposit Ingestion]', new Date().toISOString(), `Total detected: ${detectedCount}`);
   } catch (err: any) {
     console.error('[Scheduler: Deposit Ingestion Error]:', err?.message);
   }
@@ -34,7 +35,8 @@ cron.schedule('* * * * *', async () => {
 cron.schedule('*/5 * * * *', async () => {
   try {
     const sweepRes = await runDepositSweeper();
-    console.log('[Scheduler: Auto-Sweeper]', new Date().toISOString(), `Swept: ${sweepRes.sweptCount}/${sweepRes.candidatesCount}`);
+    const sweptCount = sweepRes.filter((r) => r.status === 'SUCCESS').length;
+    console.log('[Scheduler: Auto-Sweeper]', new Date().toISOString(), `Swept: ${sweptCount}/${sweepRes.length}`);
   } catch (err: any) {
     console.error('[Scheduler: Auto-Sweeper Error]:', err?.message);
   }

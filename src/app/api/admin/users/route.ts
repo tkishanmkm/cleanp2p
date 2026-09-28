@@ -1,10 +1,19 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSupabaseAdminClient } from "@/lib/supabase/server";
+import { verifyServerAdmin } from "@/lib/server-admin-auth";
 
 export const dynamic = "force-dynamic";
 
 export async function GET(req: NextRequest) {
   try {
+    const auth = await verifyServerAdmin(req);
+    if (!auth.authorized) {
+      return (
+        auth.response ||
+        NextResponse.json({ success: false, error: "Unauthorized", users: [] }, { status: 401 })
+      );
+    }
+
     const supabase = getSupabaseAdminClient();
     const { searchParams } = new URL(req.url);
     const query = (searchParams.get("q") || "").trim().toLowerCase();

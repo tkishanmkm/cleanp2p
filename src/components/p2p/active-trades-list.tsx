@@ -141,7 +141,6 @@ export function ActiveTradesList() {
         const isPaid = Boolean(
           t.paid_at ||
           t.marked_paid_at ||
-          t.payment_confirmed_at ||
           rawStatus === 'paid' ||
           rawStatus === 'mark_paid' ||
           rawStatus === 'buyer_marked_paid' ||

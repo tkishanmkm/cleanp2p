@@ -57,9 +57,9 @@ export async function POST(request: Request) {
     }
 
     // 3. Execute Atomic RPC Procedure (Releases Escrow to Buyer & Completes Trade)
-    const { data, error } = await supabase.rpc('complete_p2p_trade', {
+    const { data, error } = await supabase.rpc('release_trade_escrow', {
       p_trade_id: tradeId,
-      p_seller_id: user.id,
+      p_caller_id: user.id,
     });
 
     if (error) {

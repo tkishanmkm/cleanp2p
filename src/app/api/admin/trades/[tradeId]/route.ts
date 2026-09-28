@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSupabaseAdminClient } from "@/lib/supabase/server";
+import { verifyServerAdmin } from "@/lib/server-admin-auth";
 
 export const dynamic = "force-dynamic";
 
@@ -8,6 +9,12 @@ export async function GET(
   { params }: { params: Promise<{ tradeId: string }> | { tradeId: string } }
 ) {
   try {
+    // 1. Mandatory Server-Side Admin Authentication & Authorization
+    const auth = await verifyServerAdmin(req);
+    if (!auth.authorized) {
+      return auth.response!;
+    }
+
     const resolvedParams = typeof (params as any)?.then === "function" ? await params : params;
     const tradeId = resolvedParams.tradeId;
 
@@ -104,14 +111,28 @@ export async function POST(
   { params }: { params: Promise<{ tradeId: string }> | { tradeId: string } }
 ) {
   try {
+    // 1. Mandatory Server-Side Admin Authentication & Authorization FIRST
+    const auth = await verifyServerAdmin(req);
+    if (!auth.authorized) {
+      return auth.response!;
+    }
+
+    const adminEmail = auth.adminEmail || "admin@paxones.com";
+    const adminId = auth.adminId || auth.user.id;
+
     const resolvedParams = typeof (params as any)?.then === "function" ? await params : params;
     const tradeParam = resolvedParams.tradeId;
 
-    const body = await req.json();
-    const { action, message, adminEmail = "admin@paxones.com", reason, interveneAction } = body;
+    if (!tradeParam) {
+      return NextResponse.json({ success: false, error: "Missing trade ID parameter" }, { status: 400 });
+    }
+
+    const body = await req.json().catch(() => ({}));
+    // Note: adminEmail and adminId are NEVER read from body; strictly authoritative from server auth
+    const { action, message, reason, interveneAction } = body;
     const supabase = getSupabaseAdminClient();
 
-    // Fetch trade
+    // Fetch target trade
     let trade: any = null;
     const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(tradeParam);
     if (isUuid) {
@@ -127,7 +148,7 @@ export async function POST(
       return NextResponse.json({ success: false, error: "Trade not found" }, { status: 404 });
     }
 
-    // 1. Moderator Join (Step 20.2: Generic system message without any admin identity)
+    // 1. Moderator Join (Generic system message without exposing admin identity to users)
     if (action === "join") {
       const joinMsg = "Paxones Moderator joined the trade.";
       await supabase.from("trade_chat_messages").insert({
@@ -138,16 +159,18 @@ export async function POST(
 
       // Internal audit log preserves actual admin identity
       await supabase.from("admin_audit_logs").insert({
+        admin_id: adminId,
         admin_email: adminEmail,
         action: "MODERATOR_JOINED_TRADE",
         target_user_id: trade.buyer_id,
+        target_id: trade.id,
         details: { trade_id: trade.id, date: new Date().toISOString() },
       });
 
       return NextResponse.json({ success: true, message: "Joined trade chat as moderator" });
     }
 
-    // 2. Moderator Message (Step 20.1: Displayed strictly as Paxones Moderator without admin identity)
+    // 2. Moderator Message (Displayed strictly as Paxones Moderator without admin identity)
     if (action === "message") {
       if (!message || !message.trim()) {
         return NextResponse.json({ success: false, error: "Message cannot be empty" }, { status: 400 });
@@ -180,130 +203,153 @@ export async function POST(
       return NextResponse.json({ success: true, message: "Moderator message sent" });
     }
 
-    // 3. Moderator Escrow Intervention (Release or Refund - Step 20.3, 20.12, 20.13)
+    // 3. Moderator Escrow Intervention (Release or Refund)
     if (action === "intervene") {
       const isRelease = interveneAction === "release";
       const newStatus = isRelease ? "completed" : "cancelled";
       const cryptoAsset = (trade.crypto || trade.crypto_currency || "USDT").toUpperCase();
-      const cryptoAmount = parseFloat(trade.amount) || 0;
+      const cryptoAmount = parseFloat(trade.amount || trade.crypto_amount) || 0;
       const interventionReason = reason?.trim() || `Administrative moderator ${isRelease ? "release to buyer" : "refund to seller"}`;
 
-      // Update trade status
+      // Invoke canonical settlement RPCs first
+      let rpcExecuted = false;
+      let rpcErrorMsg: string | null = null;
+
+      if (isRelease) {
+        const { data: rpcData, error: rpcErr } = await supabase.rpc("release_trade_escrow", {
+          p_trade_id: trade.id,
+          p_caller_id: adminId,
+        });
+
+        if (rpcErr || (rpcData && rpcData.success === false)) {
+          rpcErrorMsg = rpcErr?.message || rpcData?.message || "Failed to release trade escrow via canonical RPC.";
+          console.warn("[API/ADMIN/TRADE_ACTION] release_trade_escrow RPC notice:", rpcErrorMsg);
+        } else {
+          rpcExecuted = true;
+        }
+      } else {
+        const { data: rpcData, error: rpcErr } = await supabase.rpc("cancel_p2p_trade", {
+          p_trade_id: trade.id,
+          p_caller_id: adminId,
+          p_reason: interventionReason,
+        });
+
+        if (rpcErr || (rpcData && rpcData.success === false)) {
+          rpcErrorMsg = rpcErr?.message || rpcData?.message || "Failed to cancel trade via canonical RPC.";
+          console.warn("[API/ADMIN/TRADE_ACTION] cancel_p2p_trade RPC notice:", rpcErrorMsg);
+        } else {
+          rpcExecuted = true;
+        }
+      }
+
+      // If canonical RPC was not already successful (e.g. legacy trade without wallet_assets mapping),
+      // perform graceful balance adjustment fallback using admin_adjust_balance with audit trail
+      if (!rpcExecuted) {
+        let feeCharged = 0;
+        if (isRelease) {
+          const standardFeePercent = 0.015;
+          const calculatedFee = Number(trade.escrow_fee || (cryptoAmount * standardFeePercent).toFixed(6));
+          feeCharged = calculatedFee;
+
+          const { data: existingFeeTx } = await supabase
+            .from("wallet_transactions")
+            .select("id")
+            .eq("trade_id", trade.id)
+            .eq("tx_type", "escrow_fee")
+            .maybeSingle();
+
+          if (!existingFeeTx && calculatedFee > 0) {
+            await supabase.rpc("admin_adjust_balance", {
+              p_admin_email: adminEmail,
+              p_user_id: trade.seller_id,
+              p_currency: cryptoAsset,
+              p_type: "subtract",
+              p_amount: calculatedFee,
+            });
+
+            await supabase.from("wallet_transactions").insert({
+              user_id: trade.seller_id,
+              trade_id: trade.id,
+              tx_type: "escrow_fee",
+              currency: cryptoAsset,
+              asset_symbol: cryptoAsset,
+              amount: calculatedFee,
+              status: "completed",
+              metadata: {
+                original_escrow_amount: cryptoAmount,
+                final_released_amount: cryptoAmount,
+                fee_destination: "platform_custody",
+                final_outcome: "moderator_release_to_buyer",
+                date: new Date().toISOString(),
+              },
+              created_at: new Date().toISOString(),
+            });
+          }
+
+          // Release funds to buyer
+          await supabase.rpc("admin_adjust_balance", {
+            p_admin_email: adminEmail,
+            p_user_id: trade.buyer_id,
+            p_currency: cryptoAsset,
+            p_type: "add",
+            p_amount: cryptoAmount,
+          });
+        } else {
+          // Refund to seller
+          await supabase.rpc("admin_adjust_balance", {
+            p_admin_email: adminEmail,
+            p_user_id: trade.seller_id,
+            p_currency: cryptoAsset,
+            p_type: "add",
+            p_amount: cryptoAmount,
+          });
+        }
+      }
+
+      // Update trade status and mark dispute resolved
       await supabase
         .from("trades")
         .update({
           status: newStatus,
           is_disputed: false,
+          updated_at: new Date().toISOString(),
         })
         .eq("id", trade.id);
 
-      // Update associated dispute if exists (without exposing admin email to users)
       await supabase
         .from("disputes")
         .update({
           status: "resolved",
           reason: interventionReason,
+          resolved_at: new Date().toISOString(),
         })
         .eq("trade_id", trade.id);
 
-      let feeCharged = 0;
+      // Insert standardized user-facing moderator decision message
+      const decisionMsg = isRelease
+        ? `Paxones Moderator\n\nEscrow released to the buyer:\n${cryptoAmount} ${cryptoAsset}\n\nReason: ${interventionReason}`
+        : `Paxones Moderator\n\nEscrow refunded to the seller:\n${cryptoAmount} ${cryptoAsset}\n\nReason: ${interventionReason}`;
 
-      // Execute balance updates & Escrow Fee Rules
-      if (isRelease) {
-        // Fee calculation: 1.5% platform fee (or existing trade.escrow_fee) charged only from seller (whose coins are locked)
-        const standardFeePercent = 0.015;
-        const calculatedFee = Number(trade.escrow_fee || (cryptoAmount * standardFeePercent).toFixed(6));
-        feeCharged = calculatedFee;
+      await supabase.from("trade_chat_messages").insert({
+        trade_id: trade.id,
+        sender_id: "00000000-0000-0000-0000-000000000000",
+        message: decisionMsg,
+      });
 
-        // Ensure fee is only charged once by checking existing fee transactions for this trade
-        const { data: existingFeeTx } = await supabase
-          .from("wallet_transactions")
-          .select("id")
-          .eq("trade_id", trade.id)
-          .eq("tx_type", "escrow_fee")
-          .maybeSingle();
-
-        if (!existingFeeTx && calculatedFee > 0) {
-          // Deduct escrow fee from the user whose crypto was locked (seller)
-          await supabase.rpc("admin_adjust_balance", {
-            p_admin_email: adminEmail,
-            p_user_id: trade.seller_id,
-            p_currency: cryptoAsset,
-            p_type: "subtract",
-            p_amount: calculatedFee,
-          });
-
-          // Insert immutable financial ledger record for escrow fee
-          await supabase.from("wallet_transactions").insert({
-            user_id: trade.seller_id,
-            trade_id: trade.id,
-            tx_type: "escrow_fee",
-            currency: cryptoAsset,
-            asset_symbol: cryptoAsset,
-            amount: calculatedFee,
-            status: "completed",
-            metadata: {
-              original_escrow_amount: cryptoAmount,
-              final_released_amount: cryptoAmount,
-              fee_destination: "platform_custody",
-              final_outcome: "moderator_release_to_buyer",
-              date: new Date().toISOString(),
-            },
-            created_at: new Date().toISOString(),
-          });
-        }
-
-        // Release full escrow funds to buyer
-        await supabase.rpc("admin_adjust_balance", {
-          p_admin_email: adminEmail,
-          p_user_id: trade.buyer_id,
-          p_currency: cryptoAsset,
-          p_type: "add",
-          p_amount: cryptoAmount,
-        });
-
-        // Insert standardized user-facing moderator decision message
-        const releaseDecisionMsg = `Paxones Moderator\n\nEscrow released to the buyer:\n${cryptoAmount} ${cryptoAsset}\n\nReason: ${interventionReason}`;
-        await supabase.from("trade_chat_messages").insert({
-          trade_id: trade.id,
-          sender_id: "00000000-0000-0000-0000-000000000000",
-          message: releaseDecisionMsg,
-        });
-      } else {
-        // SELLER REFUND — NO ESCROW FEE (Step 20.12)
-        // Full eligible escrow amount returned to seller. Escrow fee is strictly 0.
-        feeCharged = 0;
-
-        // Refund full escrow funds back to seller
-        await supabase.rpc("admin_adjust_balance", {
-          p_admin_email: adminEmail,
-          p_user_id: trade.seller_id,
-          p_currency: cryptoAsset,
-          p_type: "add",
-          p_amount: cryptoAmount,
-        });
-
-        // Insert standardized user-facing moderator decision message
-        const refundDecisionMsg = `Paxones Moderator\n\nEscrow refunded to the seller:\n${cryptoAmount} ${cryptoAsset}\n\nReason: ${interventionReason}`;
-        await supabase.from("trade_chat_messages").insert({
-          trade_id: trade.id,
-          sender_id: "00000000-0000-0000-0000-000000000000",
-          message: refundDecisionMsg,
-        });
-      }
-
-      // Log internal audit trail with actual admin identity (never visible to users)
+      // Log internal audit trail with authoritative admin identity
       await supabase.from("admin_audit_logs").insert({
+        admin_id: adminId,
         admin_email: adminEmail,
         action: isRelease ? "ESCROW_RELEASED_BY_ADMIN" : "ESCROW_REFUNDED_BY_ADMIN",
         target_user_id: isRelease ? trade.buyer_id : trade.seller_id,
+        target_id: trade.id,
         details: {
           trade_id: trade.id,
           action: interveneAction,
           amount: cryptoAmount,
           currency: cryptoAsset,
-          escrow_fee: feeCharged,
           reason: interventionReason,
+          rpc_executed: rpcExecuted,
           date: new Date().toISOString(),
         },
       });
@@ -323,3 +369,4 @@ export async function POST(
     );
   }
 }
+

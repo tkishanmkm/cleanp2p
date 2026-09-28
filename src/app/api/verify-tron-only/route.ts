@@ -44,7 +44,7 @@ export async function GET() {
     p_output_index: 0,
     p_block_number: 62000000,
     p_from_address: 'TFromAddressExample',
-    p_token_contract: 'TXYZopYRdj2D9XRtbG411XZZ3kM5VkAeBf',
+    p_token_contract: process.env.USDT_CONTRACT_TRC20 || 'TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t',
     p_confirmations: 20,
     p_provider: 'verification_test',
   });
@@ -85,7 +85,7 @@ export async function GET() {
     p_output_index: 0,
     p_block_number: 62000000,
     p_from_address: 'TFromAddressExample',
-    p_token_contract: 'TXYZopYRdj2D9XRtbG411XZZ3kM5VkAeBf',
+    p_token_contract: process.env.USDT_CONTRACT_TRC20 || 'TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t',
     p_confirmations: 20,
     p_provider: 'verification_test_2',
   });

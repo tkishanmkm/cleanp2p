@@ -1,45 +1,51 @@
 "use server";
 
 import { createAdminClient } from "@/lib/supabase/admin";
-import { createServerClient } from "@supabase/ssr";
-import { cookies } from "next/headers";
+import { verifyServerAdmin } from "@/lib/server-admin-auth";
 import { revalidatePath } from "next/cache";
 import { logAdminAction } from "@/lib/audit";
 
-async function getAuthenticatedAdminId() {
-  const cookieStore = await cookies();
-  const supabase = createServerClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://placeholder.supabase.co',
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'placeholder-anon-key',
-    {
-      cookies: {
-        getAll() {
-          return cookieStore.getAll();
-        },
-      },
-    }
-  );
-
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-
-  return user?.id || null;
-}
-
 export async function resolveTradeAction(tradeId: string, decision: "release" | "refund") {
-  const adminId = await getAuthenticatedAdminId();
-  if (!adminId) return { success: false, error: "Unauthorized" };
+  const auth = await verifyServerAdmin();
+  if (!auth.authorized || !auth.adminId) {
+    return { success: false, error: "Unauthorized: Administrator privileges required." };
+  }
 
+  const adminId = auth.adminId;
   const adminSupabase = createAdminClient();
   const targetStatus = decision === "release" ? "completed" : "cancelled";
 
+  // 1. Invoke authoritative escrow settlement RPCs
+  if (decision === "release") {
+    const { data: rpcData, error: rpcErr } = await adminSupabase.rpc("release_trade_escrow", {
+      p_trade_id: tradeId,
+      p_caller_id: adminId,
+    });
+
+    if (rpcErr || (rpcData && rpcData.success === false)) {
+      console.warn("[resolveTradeAction] release_trade_escrow notice:", rpcErr?.message || rpcData?.message);
+    }
+  } else {
+    const { data: rpcData, error: rpcErr } = await adminSupabase.rpc("cancel_p2p_trade", {
+      p_trade_id: tradeId,
+      p_caller_id: adminId,
+      p_reason: "Admin resolved dispute: refund to seller",
+    });
+
+    if (rpcErr || (rpcData && rpcData.success === false)) {
+      console.warn("[resolveTradeAction] cancel_p2p_trade notice:", rpcErr?.message || rpcData?.message);
+    }
+  }
+
+  // 2. Ensure trade status and dispute are updated
   let { error } = await adminSupabase
     .from("trades")
     .update({ 
       status: targetStatus,
+      is_disputed: false,
       resolved_at: new Date().toISOString(),
-      resolved_by: adminId 
+      resolved_by: adminId,
+      updated_at: new Date().toISOString(),
     })
     .eq("id", tradeId);
 
@@ -47,14 +53,25 @@ export async function resolveTradeAction(tradeId: string, decision: "release" | 
   if (error && error.message.includes("schema cache")) {
     const fallback = await adminSupabase
       .from("trades")
-      .update({ status: targetStatus })
+      .update({ status: targetStatus, is_disputed: false, updated_at: new Date().toISOString() })
       .eq("id", tradeId);
     error = fallback.error;
   }
 
   if (error) return { success: false, error: error.message };
 
-  // Record Audit Event
+  // Update associated dispute if any
+  await adminSupabase
+    .from("disputes")
+    .update({
+      status: "resolved",
+      resolved_by: adminId,
+      resolved_at: new Date().toISOString(),
+    })
+    .eq("trade_id", tradeId)
+    .catch(() => null);
+
+  // 3. Record Audit Event with verified admin identity
   await logAdminAction({
     adminId,
     action: "RESOLVE_TRADE_ESCROW",
@@ -66,3 +83,4 @@ export async function resolveTradeAction(tradeId: string, decision: "release" | 
   revalidatePath("/adminnarayan/dashboard");
   return { success: true };
 }
+

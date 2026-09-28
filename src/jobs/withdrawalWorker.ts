@@ -13,7 +13,6 @@ import {
 } from '@/lib/blockchain/providers';
 import {
   sendTrc20Transfer,
-  sendTrxTransfer,
   getTronTransactionConfirmations,
   TRON_CONFIG,
   isValidTronAddress,
@@ -49,10 +48,10 @@ export async function checkCircuitBreakers(): Promise<{ allowed: boolean; reason
       .from('platform_settings')
       .select('withdrawals_enabled, global_kill_switch_active, max_single_withdrawal_usd')
       .eq('id', 1)
-      .single();
+      .maybeSingle();
 
     if (error || !settings) {
-      return { allowed: true }; // Proceed if table not present
+      return { allowed: true };
     }
     if (settings.global_kill_switch_active) {
       return { allowed: false, reason: 'Global emergency kill switch is currently active' };
@@ -76,9 +75,7 @@ export async function allocateEvmNonce(
 ): Promise<number> {
   const normNet = normalizeNetworkCode(network);
   try {
-    // 1. Query live on-chain pending count
     const onchainPending = await provider.getTransactionCount(walletAddress, 'pending');
-    // 2. Call database RPC to atomically reserve the next nonce
     const { data: allocatedNonce, error } = await supabaseAdmin.rpc('allocate_hot_wallet_nonce', {
       p_network: normNet,
       p_wallet_address: walletAddress,
@@ -90,7 +87,6 @@ export async function allocateEvmNonce(
   } catch (rpcErr) {
     console.warn('[Nonce Manager] RPC allocate_hot_wallet_nonce failed, falling back to on-chain count:', rpcErr);
   }
-  // Fallback to on-chain pending count
   return await provider.getTransactionCount(walletAddress, 'pending');
 }
 
@@ -98,55 +94,31 @@ export async function allocateEvmNonce(
  * Processes a single pending withdrawal from the onchain_withdrawals queue
  */
 export async function processWithdrawalQueue(): Promise<WithdrawalProcessResult> {
-  // 1. Check platform circuit breakers
   const circuitCheck = await checkCircuitBreakers();
   if (!circuitCheck.allowed) {
     console.warn(`[Withdrawal Worker] Dispatch halted: ${circuitCheck.reason}`);
     return { processed: false, error: circuitCheck.reason };
   }
 
-  // 2. Claim earliest PENDING withdrawal
-  const { data: withdrawal, error } = await supabaseAdmin
-    .from('onchain_withdrawals')
-    .select('*')
-    .eq('status', 'PENDING')
-    .order('created_at', { ascending: true })
-    .limit(1)
-    .single();
+  // Claim earliest PENDING withdrawal atomically
+  const { data: queue, error } = await supabaseAdmin.rpc('claim_pending_withdrawals', {
+    p_limit: 1,
+  });
 
-  if (error || !withdrawal) {
+  if (error || !queue || queue.length === 0) {
     return { processed: false };
   }
 
-  // 3. Atomically transition state to PROCESSING to acquire execution lock
-  const { data: lockedWithdrawals, error: lockError } = await supabaseAdmin
-    .from('onchain_withdrawals')
-    .update({
-      status: 'PROCESSING',
-      updated_at: new Date().toISOString(),
-    })
-    .eq('id', withdrawal.id)
-    .eq('status', 'PENDING')
-    .select();
-
-  if (lockError || !lockedWithdrawals || lockedWithdrawals.length !== 1) {
-    console.warn(`[Withdrawal Worker] Failed to acquire job lock for withdrawal ${withdrawal.id}. Conflict or another worker claimed it.`);
-    return { processed: false, error: 'Failed to acquire job lock' };
-  }
-
-  const network = withdrawal.network || 'ERC20';
+  const withdrawal = queue[0];
+  const network = withdrawal.network || 'TRC20';
   const assetSymbol = (withdrawal.asset_symbol || 'USDT').toUpperCase().trim();
   const amountStr = withdrawal.amount.toString();
   const destination = withdrawal.to_address.trim();
   let isLocalCheckStage = true;
 
   try {
-    // ----------------------------------------------------
-    // BRANCH A: TRON Network (TRC-20 USDT or Native TRX)
-    // ----------------------------------------------------
+    // BRANCH A: TRON Network (TRC-20 USDT)
     if (normalizeNetworkCode(network) === 'TRC20') {
-      let txHash: string;
-      // Pre-broadcast checks
       if (!isValidTronAddress(destination)) {
         throw new Error(`Invalid TRON destination address: ${destination}`);
       }
@@ -155,66 +127,46 @@ export async function processWithdrawalQueue(): Promise<WithdrawalProcessResult>
         throw new Error('TRON hot wallet private key is not configured');
       }
 
-      isLocalCheckStage = false; // Next call will broadcast
+      isLocalCheckStage = false;
 
-      if (assetSymbol === 'TRX') {
-        const res = await sendTrxTransfer({
-          toAddress: destination,
-          amountInTrx: amountStr,
-        });
-        txHash = res.txHash;
-      } else {
-        // Default TRC20 USDT
-        const res = await sendTrc20Transfer({
-          toAddress: destination,
-          amount: amountStr,
-        });
-        txHash = res.txHash;
-      }
+      const res = await sendTrc20Transfer({
+        toAddress: destination,
+        amount: amountStr,
+      });
+      const txHash = res.txHash;
 
-      // Mark BROADCASTED with transaction hash
-      await supabaseAdmin
-        .from('onchain_withdrawals')
-        .update({
-          tx_hash: txHash,
-          status: 'BROADCASTED',
-          updated_at: new Date().toISOString(),
-        })
-        .eq('id', withdrawal.id);
+      await supabaseAdmin.rpc('complete_onchain_withdrawal', {
+        p_withdrawal_id: withdrawal.id,
+        p_tx_hash: txHash,
+      });
 
       console.log(`[Withdrawal Worker] Dispatched TRON payout ${withdrawal.id} (tx: ${txHash})`);
       return {
         processed: true,
         withdrawalId: withdrawal.id,
         txHash,
-        status: 'BROADCASTED',
+        status: 'COMPLETED',
       };
     }
 
-    // ----------------------------------------------------
-    // BRANCH B: EVM Networks (ERC20, BEP20, POLYGON, SEPOLIA)
-    // ----------------------------------------------------
+    // BRANCH B: EVM Networks (ERC20, BEP20)
     const { provider, signer, address } = getEvmHotWalletSigner(network);
     if (!signer || !address) {
       throw new Error(`EVM Hot Wallet signer not available for network ${network}. Check EVM_HOT_WALLET_PRIVATE_KEY.`);
     }
 
-    // 1. Allocate synchronized nonce
     const nonce = await allocateEvmNonce(network, address, provider);
-
-    // 2. Fetch EIP-1559 gas fee overrides
-    const feeOverrides = await getEip1559FeeOverrides(provider, 1.3);
+    const feeOverrides = await getEip1559FeeOverrides(provider, 1.25);
     let tx: ethers.TransactionResponse;
 
-    // 3. Dispatch Native Token vs ERC-20
     const normNet = normalizeNetworkCode(network);
     const chainConfig = SUPPORTED_EVM_CHAINS[normNet];
     const isNativeTransfer = chainConfig && assetSymbol === chainConfig.nativeSymbol;
 
     if (isNativeTransfer) {
-      // Native transfer (ETH, BNB, POL)
+      // Native transfer (ETH)
       const parsedAmount = ethers.parseUnits(amountStr, chainConfig.nativeDecimals);
-      isLocalCheckStage = false; // Next call will broadcast
+      isLocalCheckStage = false;
       tx = await signer.sendTransaction({
         to: destination,
         value: parsedAmount,
@@ -222,7 +174,7 @@ export async function processWithdrawalQueue(): Promise<WithdrawalProcessResult>
         ...feeOverrides,
       });
     } else {
-      // ERC-20 Token Transfer (e.g. USDT)
+      // ERC-20 Token Transfer (USDT ERC20 / BEP20)
       const decimals = getTokenDecimals(network, assetSymbol);
       const contractAddress = getTokenContractAddress(network, assetSymbol);
       if (!contractAddress) {
@@ -230,23 +182,17 @@ export async function processWithdrawalQueue(): Promise<WithdrawalProcessResult>
       }
       const tokenContract = new ethers.Contract(contractAddress, ERC20_ABI, signer);
       const parsedAmount = ethers.parseUnits(amountStr, decimals);
-      isLocalCheckStage = false; // Next call will broadcast
+      isLocalCheckStage = false;
       tx = await tokenContract.transfer(destination, parsedAmount, {
         nonce,
         ...feeOverrides,
       });
     }
 
-    // 4. Update withdrawal record to BROADCASTED
-    await supabaseAdmin
-      .from('onchain_withdrawals')
-      .update({
-        tx_hash: tx.hash,
-        nonce,
-        status: 'BROADCASTED',
-        updated_at: new Date().toISOString(),
-      })
-      .eq('id', withdrawal.id);
+    await supabaseAdmin.rpc('complete_onchain_withdrawal', {
+      p_withdrawal_id: withdrawal.id,
+      p_tx_hash: tx.hash,
+    });
 
     console.log(`[Withdrawal Worker] Broadcasted EVM payout ${withdrawal.id} on ${network} (tx: ${tx.hash}, nonce: ${nonce})`);
     return {
@@ -254,55 +200,36 @@ export async function processWithdrawalQueue(): Promise<WithdrawalProcessResult>
       withdrawalId: withdrawal.id,
       txHash: tx.hash,
       nonce,
-      status: 'BROADCASTED',
+      status: 'COMPLETED',
     };
 
   } catch (err: any) {
     console.error(`[Withdrawal Worker] Failed dispatching withdrawal ${withdrawal.id}:`, err);
 
     if (isLocalCheckStage) {
-      // Stage A: Definitely NOT broadcast. We can perform a safe rollback refund.
-      console.warn(`[Withdrawal Worker] Definitely NOT broadcast: rollback refunding withdrawal ${withdrawal.id}`);
+      console.warn(`[Withdrawal Worker] Pre-broadcast validation failure: refunding withdrawal ${withdrawal.id}`);
       try {
-        const { error: rpcErr } = await supabaseAdmin.rpc('refund_custodial_withdrawal', {
+        await supabaseAdmin.rpc('process_failed_withdrawal', {
           p_withdrawal_id: withdrawal.id,
           p_error_reason: err.message || 'Transaction pre-broadcast validation failure',
         });
-        if (rpcErr) throw rpcErr;
         return {
           processed: true,
           withdrawalId: withdrawal.id,
           status: 'FAILED',
-          error: `Definitely not broadcast. Refund successful: ${err.message}`,
+          error: `Pre-broadcast failure. Refund successful: ${err.message}`,
         };
       } catch (refundErr: any) {
-        console.error(`[Withdrawal Worker] Failed to invoke refund RPC for definitely not broadcast transaction ${withdrawal.id}:`, refundErr);
-        // Fallback update
-        await supabaseAdmin
-          .from('onchain_withdrawals')
-          .update({
-            status: 'FAILED',
-            error_message: `Pre-broadcast failure. Refund failed: ${err.message}. Error: ${refundErr.message || refundErr}`,
-            updated_at: new Date().toISOString(),
-          })
-          .eq('id', withdrawal.id);
+        console.error(`[Withdrawal Worker] Refund RPC failed for ${withdrawal.id}:`, refundErr);
         return {
           processed: true,
           withdrawalId: withdrawal.id,
           status: 'FAILED',
-          error: `Definitely not broadcast, but refund failed: ${err.message}`,
+          error: `Pre-broadcast failure, refund failed: ${err.message}`,
         };
       }
     } else {
-      // Stage B: Ambiguous/unknown broadcast result. Keep PROCESSING, record error, do NOT refund!
-      console.warn(`[Withdrawal Worker] Ambiguous broadcast result for withdrawal ${withdrawal.id}. Keeping PROCESSING to prevent double-spend.`);
-      await supabaseAdmin
-        .from('onchain_withdrawals')
-        .update({
-          error_message: `Ambiguous broadcast result: ${err.message || err}`,
-          updated_at: new Date().toISOString(),
-        })
-        .eq('id', withdrawal.id);
+      console.warn(`[Withdrawal Worker] Ambiguous broadcast result for withdrawal ${withdrawal.id}.`);
       return {
         processed: true,
         withdrawalId: withdrawal.id,
@@ -341,51 +268,70 @@ export async function checkSubmittedWithdrawals(): Promise<{
       const normNet = normalizeNetworkCode(w.network);
 
       if (normNet === 'TRC20') {
-        const { confirmations, isConfirmed, success } = await getTronTransactionConfirmations(w.tx_hash);
+        const { isConfirmed, success } = await getTronTransactionConfirmations(w.tx_hash);
         
         if (isConfirmed) {
-          const { error: confErr } = await supabaseAdmin.rpc('complete_custodial_withdrawal', {
+          const { error: confErr } = await supabaseAdmin.rpc('complete_onchain_withdrawal', {
             p_withdrawal_id: w.id,
             p_tx_hash: w.tx_hash,
           });
           if (!confErr) confirmed++;
-        } else if (confirmations >= TRON_CONFIG.requiredConfirmations && !success) {
-          // Definitively Reverted On-Chain -> trigger dedicated revert refund RPC
-          console.warn(`[Withdrawal Worker] TRON transaction definitively reverted on-chain for withdrawal ${w.id} (tx: ${w.tx_hash})`);
-          const { error: refErr } = await supabaseAdmin.rpc('refund_reverted_custodial_withdrawal', {
+        } else if (!success) {
+          await supabaseAdmin.rpc('process_failed_withdrawal', {
+            p_withdrawal_id: w.id,
+            p_error_reason: `TRON transaction reverted on-chain`,
+          });
+        }
+      } else if (SUPPORTED_EVM_CHAINS[normNet]) {
+        const chain = SUPPORTED_EVM_CHAINS[normNet];
+        const provider = getEvmProvider(normNet);
+        const { confirmations, status } = await getTransactionConfirmations(provider, w.tx_hash);
+
+        if (confirmations >= chain.requiredConfirmations && status !== 0) {
+          const { error: confErr } = await supabaseAdmin.rpc('complete_onchain_withdrawal', {
             p_withdrawal_id: w.id,
             p_tx_hash: w.tx_hash,
-            p_error_reason: `TRON transaction reverted on-chain with confirmations: ${confirmations}`,
           });
-          if (refErr) {
-            console.error(`[Withdrawal Worker] Failed to execute revert-refund RPC for TRON withdrawal ${w.id}:`, refErr);
-          }
+          if (!confErr) confirmed++;
+        } else if (status === 0) {
+          await supabaseAdmin.rpc('process_failed_withdrawal', {
+            p_withdrawal_id: w.id,
+            p_error_reason: `EVM transaction reverted on-chain on network ${w.network}`,
+          });
         }
-      } else {
-        const chain = SUPPORTED_EVM_CHAINS[normNet];
-        if (chain) {
-          const provider = getEvmProvider(normNet);
-          const { confirmations, status } = await getTransactionConfirmations(provider, w.tx_hash);
-
-          // If confirmed and successful on-chain
-          if (confirmations >= (chain.isTestnet ? 1 : 6) && status !== 0) {
-            const { error: confErr } = await supabaseAdmin.rpc('complete_custodial_withdrawal', {
-              p_withdrawal_id: w.id,
-              p_tx_hash: w.tx_hash,
-            });
-            if (!confErr) confirmed++;
-          } else if (status === 0) {
-            // Definitively Reverted On-Chain -> trigger dedicated revert refund RPC
-            console.warn(`[Withdrawal Worker] EVM transaction definitively reverted on-chain for withdrawal ${w.id} (tx: ${w.tx_hash})`);
-            const { error: refErr } = await supabaseAdmin.rpc('refund_reverted_custodial_withdrawal', {
-              p_withdrawal_id: w.id,
-              p_tx_hash: w.tx_hash,
-              p_error_reason: `EVM transaction reverted on-chain on network ${w.network} with confirmations: ${confirmations}`,
-            });
-            if (refErr) {
-              console.error(`[Withdrawal Worker] Failed to execute revert-refund RPC for EVM withdrawal ${w.id}:`, refErr);
+      } else if (normNet === 'BTC') {
+        try {
+          const btcApiBase = process.env.BTC_MEMPOOL_API || 'https://mempool.space/api';
+          const res = await fetch(`${btcApiBase}/tx/${w.tx_hash}`);
+          if (res.ok) {
+            const txData = await res.json();
+            if (txData && txData.status && txData.status.confirmed) {
+              const { error: confErr } = await supabaseAdmin.rpc('complete_onchain_withdrawal', {
+                p_withdrawal_id: w.id,
+                p_tx_hash: w.tx_hash,
+              });
+              if (!confErr) confirmed++;
             }
           }
+        } catch (btcErr) {
+          console.warn(`[Withdrawal Worker] BTC confirmation check error for ${w.tx_hash}:`, btcErr);
+        }
+      } else if (normNet === 'LTC') {
+        try {
+          const ltcApiBase = process.env.LTC_MEMPOOL_API || 'https://litecoinspace.org/api';
+          const res = await fetch(`${ltcApiBase}/tx/${w.tx_hash}`);
+          if (res.ok) {
+            const txData = await res.json();
+            if (txData && txData.status && txData.status.confirmed) {
+              const { error: confErr } = await supabaseAdmin.rpc('complete_onchain_withdrawal', {
+                p_withdrawal_id: w.id,
+                p_tx_hash: w.tx_hash,
+              });
+              if (!confErr) confirmed++;
+            }
+          }
+        } catch (ltcErr) {
+          console.warn(`[Withdrawal Worker] LTC confirmation check error for ${w.tx_hash}:`, ltcErr);
         }
       }
     }
@@ -419,23 +365,3 @@ export async function processAllPendingWithdrawals(maxBatch: number = 20): Promi
 }
 
 export const processPendingWithdrawals = processAllPendingWithdrawals;
-
-let withdrawalWorkerInterval: NodeJS.Timeout | null = null;
-
-export function startWithdrawalWorker(intervalMs: number = 15000): void {
-  if (withdrawalWorkerInterval) return;
-  console.log(`[Withdrawal Worker] Started hot wallet polling worker every ${intervalMs}ms...`);
-  processWithdrawalQueue().catch((e) => console.error('[Withdrawal Worker] Initial cycle error:', e));
-
-  withdrawalWorkerInterval = setInterval(() => {
-    processWithdrawalQueue().catch((e) => console.error('[Withdrawal Worker] Periodic cycle error:', e));
-    checkSubmittedWithdrawals().catch((e) => console.error('[Withdrawal Worker] Confirmation cycle error:', e));
-  }, intervalMs);
-}
-
-export function stopWithdrawalWorker(): void {
-  if (withdrawalWorkerInterval) {
-    clearInterval(withdrawalWorkerInterval);
-    withdrawalWorkerInterval = null;
-  }
-}

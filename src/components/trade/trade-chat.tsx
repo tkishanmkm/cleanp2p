@@ -635,7 +635,7 @@ export function TradeChat({
     if (st === 'cancelled') return 'cancelled';
     if (st === 'disputed' || st === 'dispute') return 'disputed';
     if (st === 'expired') return 'expired';
-    if (t.paid_at || t.marked_paid_at || t.payment_confirmed_at || t.escrow_status === 'PAID' || ['paid', 'buyer_marked_paid', 'payment_sent'].includes(st)) {
+    if (t.paid_at || t.marked_paid_at || t.escrow_status === 'PAID' || ['paid', 'buyer_marked_paid', 'payment_sent'].includes(st)) {
       return 'paid';
     }
     return st || 'active';

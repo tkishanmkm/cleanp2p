@@ -1,36 +1,17 @@
 "use server";
 
 import { createAdminClient } from "@/lib/supabase/admin";
-import { createServerClient } from "@supabase/ssr";
-import { cookies } from "next/headers";
+import { verifyServerAdmin } from "@/lib/server-admin-auth";
 import { revalidatePath } from "next/cache";
 import { logAdminAction } from "@/lib/audit";
 
-async function getAuthenticatedAdminId() {
-  const cookieStore = await cookies();
-  const supabase = createServerClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://placeholder.supabase.co',
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'placeholder-anon-key',
-    {
-      cookies: {
-        getAll() {
-          return cookieStore.getAll();
-        },
-      },
-    }
-  );
-
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-
-  return user?.id || null;
-}
-
 export async function updateAppSettingsAction(formData: FormData) {
-  const adminId = await getAuthenticatedAdminId();
-  if (!adminId) return { success: false, error: "Unauthorized" };
+  const auth = await verifyServerAdmin();
+  if (!auth.authorized || !auth.adminId) {
+    return { success: false, error: "Unauthorized: Administrator privileges required." };
+  }
 
+  const adminId = auth.adminId;
   const adminSupabase = createAdminClient();
 
   const maintenanceMode = formData.get("maintenance_mode") === "on";

@@ -3,6 +3,7 @@ import { createClient } from '@supabase/supabase-js';
 import * as bitcoin from 'bitcoinjs-lib';
 import ECPairFactory from 'ecpair';
 import * as ecc from 'tiny-secp256k1';
+import bs58 from 'bs58';
 
 // Initialize ECPair library for BTC/LTC
 const ECPair = ECPairFactory(ecc);
@@ -41,8 +42,56 @@ const MIN_SWEEP_THRESHOLD_LTC = 0.01;
  * Derives user child keys from DEPOSIT_HD_MNEMONIC
  */
 async function deriveUserKeys(mnemonic: string, derivationIndex: number) {
-  const { deriveAllUserKeysFromMnemonic } = await import('@/lib/hd-derivation-engine');
-  return deriveAllUserKeysFromMnemonic(mnemonic, derivationIndex);
+  const bip39 = await import('@scure/bip39');
+  const { HDKey } = await import('@scure/bip32');
+  const { bech32 } = await import('bech32');
+  const crypto = await import('crypto');
+  const seed = await bip39.mnemonicToSeed(mnemonic.trim());
+  const master = HDKey.fromMasterSeed(seed);
+
+  // BTC BIP84: m/84'/0'/0'/0/index
+  const btcChild = master.derive(`m/84'/0'/0'/0/${derivationIndex}`);
+  const btcPriv = Buffer.from(btcChild.privateKey!).toString('hex');
+  const btcSha = crypto.createHash('sha256').update(btcChild.publicKey!).digest();
+  const btcHash = crypto.createHash('ripemd160').update(btcSha).digest();
+  const btcWords = bech32.toWords(btcHash);
+  btcWords.unshift(0x00);
+  const btcAddress = bech32.encode('bc', btcWords);
+
+  // LTC BIP84: m/84'/2'/0'/0/index
+  const ltcChild = master.derive(`m/84'/2'/0'/0/${derivationIndex}`);
+  const ltcPriv = Buffer.from(ltcChild.privateKey!).toString('hex');
+  const ltcSha = crypto.createHash('sha256').update(ltcChild.publicKey!).digest();
+  const ltcHash = crypto.createHash('ripemd160').update(ltcSha).digest();
+  const ltcWords = bech32.toWords(ltcHash);
+  ltcWords.unshift(0x00);
+  const ltcAddress = bech32.encode('ltc', ltcWords);
+
+  // TRON BIP44: m/44'/195'/0'/0/index
+  const tronChild = master.derive(`m/44'/195'/0'/0/${derivationIndex}`);
+  const tronPriv = Buffer.from(tronChild.privateKey!).toString('hex');
+  const tronUncompressedHex = ethers.SigningKey.computePublicKey(tronChild.publicKey!, false);
+  const tronPubBytes = Buffer.from(tronUncompressedHex.slice(4), 'hex');
+  const tronAddressHash = ethers.keccak256(tronPubBytes);
+  const tronRawAddress = Buffer.concat([Buffer.from([0x41]), Buffer.from(tronAddressHash.slice(-40), 'hex')]);
+  const h1 = crypto.createHash('sha256').update(tronRawAddress).digest();
+  const h2 = crypto.createHash('sha256').update(h1).digest();
+  const tronAddress = bs58.encode(Buffer.concat([tronRawAddress, h2.subarray(0, 4)]));
+
+  // EVM BIP44: m/44'/60'/0'/0/index
+  const evmChild = master.derive(`m/44'/60'/0'/0/${derivationIndex}`);
+  const evmPriv = Buffer.from(evmChild.privateKey!).toString('hex');
+  const evmUncompressedHex = ethers.SigningKey.computePublicKey(evmChild.publicKey!, false);
+  const evmPubBytes = Buffer.from(evmUncompressedHex.slice(4), 'hex');
+  const evmAddressHash = ethers.keccak256(evmPubBytes);
+  const evmAddress = ethers.getAddress(`0x${evmAddressHash.slice(-40)}`);
+
+  return {
+    btc: { privateKey: btcPriv, address: btcAddress },
+    ltc: { privateKey: ltcPriv, address: ltcAddress },
+    tron: { privateKey: tronPriv, address: tronAddress },
+    evm: { privateKey: evmPriv, address: evmAddress },
+  };
 }
 
 /**
@@ -106,6 +155,7 @@ export interface SweepResult {
   txHash: string;
   status: 'SUCCESS' | 'SKIPPED' | 'FAILED';
   error?: string;
+  nonceAllocated?: boolean;
 }
 
 export function getRpcUrlForNetwork(network: string): string {
@@ -1148,7 +1198,7 @@ export async function sweepBtcDepositAddress(
     });
 
     const p2wpkh = bitcoin.payments.p2wpkh({
-      pubkey: keyPair.publicKey,
+      pubkey: Buffer.from(keyPair.publicKey),
       network: bitcoin.networks.bitcoin,
     });
 
@@ -1170,7 +1220,12 @@ export async function sweepBtcDepositAddress(
       value: sweepSat,
     });
 
-    psbt.signAllInputs(keyPair);
+    const btcSigner: bitcoin.Signer = {
+      publicKey: Buffer.from(keyPair.publicKey),
+      sign: (hash: Buffer) => Buffer.from(keyPair.sign(hash)),
+    };
+
+    psbt.signAllInputs(btcSigner);
     psbt.finalizeAllInputs();
 
     const txObj = psbt.extractTransaction();
@@ -1361,7 +1416,7 @@ export async function sweepLtcDepositAddress(
     });
 
     const p2wpkh = bitcoin.payments.p2wpkh({
-      pubkey: keyPair.publicKey,
+      pubkey: Buffer.from(keyPair.publicKey),
       network: LTC_NETWORK as any,
     });
 
@@ -1383,7 +1438,12 @@ export async function sweepLtcDepositAddress(
       value: sweepLit,
     });
 
-    psbt.signAllInputs(keyPair);
+    const ltcSigner: bitcoin.Signer = {
+      publicKey: Buffer.from(keyPair.publicKey),
+      sign: (hash: Buffer) => Buffer.from(keyPair.sign(hash)),
+    };
+
+    psbt.signAllInputs(ltcSigner);
     psbt.finalizeAllInputs();
 
     const txObj = psbt.extractTransaction();
@@ -2176,7 +2236,7 @@ export async function runAutomatedSweeperJob(): Promise<SweepResult[]> {
           // Ignore if already transitioned to RECOVERY_REQUIRED
         }
       } else {
-        console.warn(`[Sweeper Worker ${workerId}] Sweep ${sweepId} failed after nonce allocation. Preserving row and nonce ${allocatedNonce} for safe sequential retry.`);
+        console.warn(`[Sweeper Worker ${workerId}] Sweep ${sweepId} failed after nonce allocation. Preserving row for safe sequential retry.`);
       }
     }
 

@@ -81,7 +81,7 @@ function getRpcUrlForNetwork(network: string): string {
 }
 
 /**
- * Signs and broadcasts a TRON TRC-20 on-chain withdrawal with generous fee limit
+ * Signs and broadcasts a TRON TRC-20 on-chain withdrawal
  */
 export async function processTronWithdrawalOnChain(
   withdrawal: WithdrawalTask,
@@ -113,21 +113,16 @@ export async function processTronWithdrawalOnChain(
   console.log(`[TRON Withdrawal Engine] Sending ${amountNum} TRC20 USDT to ${withdrawal.destination_address}...`);
 
   const txid = await contract.transfer(withdrawal.destination_address, amountSun).send({
-    feeLimit: 50_000_000, // 50 TRX priority fee limit ensures instant execution
+    feeLimit: 50_000_000, // 50 TRX priority fee limit
   });
 
   console.log(`[TRON Withdrawal Engine] Broadcast Successful. TxID: ${txid}`);
 
   try {
-    await supabase
-      .from('withdrawals')
-      .update({
-        tx_hash: txid,
-        txid: txid,
-        status: 'BROADCASTED',
-        broadcasted_at: new Date().toISOString(),
-      })
-      .eq('id', withdrawal.id);
+    await supabase.rpc('complete_onchain_withdrawal', {
+      p_withdrawal_id: withdrawal.id,
+      p_tx_hash: txid,
+    });
   } catch (dbErr) {
     console.warn('[TRON Withdrawal Engine] DB notice on update:', dbErr);
   }
@@ -136,7 +131,7 @@ export async function processTronWithdrawalOnChain(
 }
 
 /**
- * Signs and broadcasts a Bitcoin (BTC Native SegWit) withdrawal with 2X Priority sat/vB fee paid by user
+ * Signs and broadcasts a Bitcoin (BTC Native SegWit) withdrawal
  */
 export async function processBtcWithdrawalOnChain(
   withdrawal: WithdrawalTask,
@@ -158,7 +153,7 @@ export async function processBtcWithdrawalOnChain(
   });
 
   const p2wpkh = bitcoin.payments.p2wpkh({
-    pubkey: keyPair.publicKey,
+    pubkey: Buffer.from(keyPair.publicKey),
     network: bitcoin.networks.bitcoin,
   });
 
@@ -171,7 +166,6 @@ export async function processBtcWithdrawalOnChain(
   const utxos: Array<{ txid: string; vout: number; value: number }> = await utxoRes.json();
   const amountSat = Math.round(Number(withdrawal.amount) * 100_000_000);
 
-  // 2X Priority Fee Rate (e.g. 25 sat/vB)
   const prioritySatPerVb = 25;
   const estimatedVsize = 68 * Math.max(1, utxos.length) + 31 * 2 + 10;
   const networkFeeSat = estimatedVsize * prioritySatPerVb;
@@ -218,7 +212,12 @@ export async function processBtcWithdrawalOnChain(
     });
   }
 
-  psbt.signAllInputs(keyPair);
+  const btcSigner: bitcoin.Signer = {
+    publicKey: Buffer.from(keyPair.publicKey),
+    sign: (hash: Buffer) => Buffer.from(keyPair.sign(hash)),
+  };
+
+  psbt.signAllInputs(btcSigner);
   psbt.finalizeAllInputs();
 
   const rawTxHex = psbt.extractTransaction().toHex();
@@ -239,15 +238,10 @@ export async function processBtcWithdrawalOnChain(
 
   const supabase = getSupabaseAdminClient();
   try {
-    await supabase
-      .from('withdrawals')
-      .update({
-        tx_hash: txid,
-        txid: txid,
-        status: 'BROADCASTED',
-        broadcasted_at: new Date().toISOString(),
-      })
-      .eq('id', withdrawal.id);
+    await supabase.rpc('complete_onchain_withdrawal', {
+      p_withdrawal_id: withdrawal.id,
+      p_tx_hash: txid,
+    });
   } catch (dbErr) {
     console.warn('[BTC Withdrawal Engine] DB notice on update:', dbErr);
   }
@@ -256,7 +250,7 @@ export async function processBtcWithdrawalOnChain(
 }
 
 /**
- * Signs and broadcasts a Litecoin (LTC Native SegWit) withdrawal with 2X Priority lit/vB fee paid by user
+ * Signs and broadcasts a Litecoin (LTC Native SegWit) withdrawal
  */
 export async function processLtcWithdrawalOnChain(
   withdrawal: WithdrawalTask,
@@ -278,7 +272,7 @@ export async function processLtcWithdrawalOnChain(
   });
 
   const p2wpkh = bitcoin.payments.p2wpkh({
-    pubkey: keyPair.publicKey,
+    pubkey: Buffer.from(keyPair.publicKey),
     network: LTC_NETWORK as any,
   });
 
@@ -291,7 +285,6 @@ export async function processLtcWithdrawalOnChain(
   const utxos: Array<{ txid: string; vout: number; value: number }> = await utxoRes.json();
   const amountLit = Math.round(Number(withdrawal.amount) * 100_000_000);
 
-  // 2X Priority Fee Rate for LTC (3 lit/vB)
   const priorityLitPerVb = 3;
   const estimatedVsize = 68 * Math.max(1, utxos.length) + 31 * 2 + 10;
   const networkFeeLit = estimatedVsize * priorityLitPerVb;
@@ -338,7 +331,12 @@ export async function processLtcWithdrawalOnChain(
     });
   }
 
-  psbt.signAllInputs(keyPair);
+  const ltcSigner: bitcoin.Signer = {
+    publicKey: Buffer.from(keyPair.publicKey),
+    sign: (hash: Buffer) => Buffer.from(keyPair.sign(hash)),
+  };
+
+  psbt.signAllInputs(ltcSigner);
   psbt.finalizeAllInputs();
 
   const rawTxHex = psbt.extractTransaction().toHex();
@@ -359,15 +357,10 @@ export async function processLtcWithdrawalOnChain(
 
   const supabase = getSupabaseAdminClient();
   try {
-    await supabase
-      .from('withdrawals')
-      .update({
-        tx_hash: txid,
-        txid: txid,
-        status: 'BROADCASTED',
-        broadcasted_at: new Date().toISOString(),
-      })
-      .eq('id', withdrawal.id);
+    await supabase.rpc('complete_onchain_withdrawal', {
+      p_withdrawal_id: withdrawal.id,
+      p_tx_hash: txid,
+    });
   } catch (dbErr) {
     console.warn('[LTC Withdrawal Engine] DB notice on update:', dbErr);
   }
@@ -396,11 +389,11 @@ export async function processEvmWithdrawalOnChain(
   const network = (withdrawal.network || 'ERC20').toUpperCase();
   const amountStr = String(withdrawal.amount);
 
-  // Calculate 2X Priority Gas Pricing (EIP-1559 and Legacy)
+  // Calculate Priority Gas Pricing
   const feeData = await provider.getFeeData();
-  const gasPrice2X = feeData.gasPrice ? (feeData.gasPrice * 200n) / 100n : undefined;
-  const maxFeePerGas2X = feeData.maxFeePerGas ? (feeData.maxFeePerGas * 200n) / 100n : undefined;
-  const maxPriorityFeePerGas2X = feeData.maxPriorityFeePerGas ? (feeData.maxPriorityFeePerGas * 200n) / 100n : undefined;
+  const gasPrice2X = feeData.gasPrice ? (feeData.gasPrice * 125n) / 100n : undefined;
+  const maxFeePerGas2X = feeData.maxFeePerGas ? (feeData.maxFeePerGas * 125n) / 100n : undefined;
+  const maxPriorityFeePerGas2X = feeData.maxPriorityFeePerGas ? (feeData.maxPriorityFeePerGas * 125n) / 100n : undefined;
 
   const txOverrides: any = {};
   if (maxFeePerGas2X) {
@@ -410,8 +403,8 @@ export async function processEvmWithdrawalOnChain(
     txOverrides.gasPrice = gasPrice2X;
   }
 
-  if (symbol === 'ETH' || symbol === 'BNB' || symbol === 'MATIC' || symbol === 'POL') {
-    // Native Transfer with 2X Gas
+  if (symbol === 'ETH') {
+    // Native Transfer
     const value = ethers.parseEther(amountStr);
 
     txResponse = await wallet.sendTransaction({
@@ -419,25 +412,17 @@ export async function processEvmWithdrawalOnChain(
       value: value,
       ...txOverrides,
     });
-  } else {
-    // Token Transfer (e.g., USDT BEP-20 / USDT ERC-20)
+  } else if (symbol === 'USDT') {
+    // Token Transfer (USDT BEP-20 / USDT ERC-20)
     let tokenContractAddress: string;
     let decimals: number = 6;
 
-    if (symbol === 'USDT') {
-      if (network === 'BEP20' || network === 'BSC' || network === 'BINANCE') {
-        tokenContractAddress = process.env.USDT_CONTRACT_BEP20 || '0x55d398326f99059fF775485246999027B3197955';
-        decimals = 18; // BSC USDT uses 18 decimals
-      } else {
-        tokenContractAddress = process.env.USDT_CONTRACT_ERC20 || '0xdAC17F958D2ee523a2206206994597C13D831ec7';
-        decimals = 6; // Ethereum USDT uses 6 decimals
-      }
+    if (network === 'BEP20' || network === 'BSC' || network === 'BINANCE') {
+      tokenContractAddress = process.env.USDT_CONTRACT_BEP20 || '0x55d398326f99059fF775485246999027B3197955';
+      decimals = 18; // BSC USDT uses 18 decimals
     } else {
-      tokenContractAddress = process.env[`${symbol}_CONTRACT_ADDRESS`] || '';
-    }
-
-    if (!tokenContractAddress) {
-      throw new Error(`Contract address not configured for asset: ${symbol} on network ${network}`);
+      tokenContractAddress = process.env.USDT_CONTRACT_ERC20 || '0xdAC17F958D2ee523a2206206994597C13D831ec7';
+      decimals = 6; // Ethereum USDT uses 6 decimals
     }
 
     const contract = new ethers.Contract(tokenContractAddress, ERC20_ABI, wallet);
@@ -449,35 +434,21 @@ export async function processEvmWithdrawalOnChain(
 
     const parsedAmount = ethers.parseUnits(amountStr, decimals);
     txResponse = await contract.transfer(withdrawal.destination_address, parsedAmount, txOverrides);
+  } else {
+    throw new Error(`Unsupported EVM asset: ${symbol}`);
   }
 
   console.log(`[Withdrawal Engine] Broadcast Successful. TxHash: ${txResponse.hash}`);
 
-  // Record successful broadcast in database (supporting both tables: withdrawals and onchain_withdrawals)
+  // Settle via authoritative complete_onchain_withdrawal RPC
   try {
-    await supabase
-      .from('withdrawals')
-      .update({
-        tx_hash: txResponse.hash,
-        txid: txResponse.hash,
-        status: 'BROADCASTED',
-        broadcasted_at: new Date().toISOString(),
-      })
-      .eq('id', withdrawal.id);
+    await supabase.rpc('complete_onchain_withdrawal', {
+      p_withdrawal_id: withdrawal.id,
+      p_tx_hash: txResponse.hash,
+    });
   } catch (dbErr) {
-    console.warn('[Withdrawal Engine] DB notice on withdrawals update:', dbErr);
+    console.warn('[Withdrawal Engine] DB notice on RPC execution:', dbErr);
   }
-
-  try {
-    await supabase
-      .from('onchain_withdrawals')
-      .update({
-        tx_hash: txResponse.hash,
-        status: 'BROADCASTED',
-        updated_at: new Date().toISOString(),
-      })
-      .eq('id', withdrawal.id);
-  } catch (_) {}
 
   return txResponse.hash;
 }
@@ -498,7 +469,7 @@ export async function signAndBroadcast(withdrawal: WithdrawalRecord): Promise<st
     network: withdrawal.network_code,
   };
 
-  if (normNet === 'TRC20' || normNet === 'TRON' || normAsset === 'TRX') {
+  if (normNet === 'TRC20' || normNet === 'TRON') {
     return processTronWithdrawalOnChain(task);
   }
 
@@ -552,7 +523,7 @@ export async function processPendingWithdrawals(limit: number = 20): Promise<Pro
   for (const item of withdrawals) {
     const attempts = (item.broadcast_attempts || 0) + 1;
     const assetCode = item.asset_symbol || item.asset_code || 'USDT';
-    const networkCode = (item.network || item.network_code || 'ERC20').toUpperCase().trim();
+    const networkCode = (item.network || item.network_code || 'TRC20').toUpperCase().trim();
     const destAddr = item.destination_address;
     const amountNum = Number(item.amount);
 
@@ -577,7 +548,7 @@ export async function processPendingWithdrawals(limit: number = 20): Promise<Pro
 
       let txid: string;
 
-      if (networkCode === 'TRC20' || networkCode === 'TRON' || assetCode === 'TRX') {
+      if (networkCode === 'TRC20' || networkCode === 'TRON') {
         txid = await processTronWithdrawalOnChain(task);
       } else if (networkCode === 'BTC' || assetCode === 'BTC') {
         txid = await processBtcWithdrawalOnChain(task);
@@ -609,15 +580,27 @@ export async function processPendingWithdrawals(limit: number = 20): Promise<Pro
       const errorMsg = broadcastErr instanceof Error ? broadcastErr.message : String(broadcastErr);
       const isPermanentlyFailed = attempts >= 3;
 
-      await supabaseAdmin
-        .from('withdrawals')
-        .update({
-          status: isPermanentlyFailed ? 'failed' : 'processing',
-          broadcast_attempts: attempts,
-          broadcast_error: errorMsg,
-          updated_at: new Date().toISOString(),
-        })
-        .eq('id', item.id);
+      if (isPermanentlyFailed) {
+        // Trigger automated refund via process_failed_withdrawal RPC
+        try {
+          await supabaseAdmin.rpc('process_failed_withdrawal', {
+            p_withdrawal_id: item.id,
+            p_error_reason: errorMsg,
+          });
+        } catch (rpcErr) {
+          console.error('[processPendingWithdrawals] Refund RPC failed:', rpcErr);
+        }
+      } else {
+        await supabaseAdmin
+          .from('withdrawals')
+          .update({
+            status: 'processing',
+            broadcast_attempts: attempts,
+            broadcast_error: errorMsg,
+            updated_at: new Date().toISOString(),
+          })
+          .eq('id', item.id);
+      }
 
       results.push({
         id: item.id,

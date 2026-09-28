@@ -93,16 +93,16 @@ async function performReconciliation() {
 
     const totalDeposits = (deposits || []).reduce((sum, d) => sum + Number(d.amount || 0), 0);
 
-    // b. Withdrawals Sum (amount + gas_fee)
+    // b. Withdrawals Sum (amount + network_fee)
     const { data: withdrawals } = await admin
-      .from('hot_wallet_withdrawals')
-      .select('amount, gas_fee, status')
+      .from('withdrawals')
+      .select('amount, network_fee, status')
       .eq('user_id', userId)
-      .ilike('asset_symbol', asset)
+      .or(`asset_symbol.ilike.${asset},asset_code.ilike.${asset}`)
       .in('status', validWithdrawalStatuses);
 
     const totalWithdrawalsWithFees = (withdrawals || []).reduce(
-      (sum, w) => sum + Number(w.amount || 0) + Number(w.gas_fee || 0),
+      (sum, w) => sum + Number(w.amount || 0) + Number(w.network_fee || 0),
       0
     );
 

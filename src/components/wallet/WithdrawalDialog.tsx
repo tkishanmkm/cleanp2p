@@ -4,6 +4,7 @@ import React, { useState } from 'react';
 import { useWallet } from '@/context/wallet-context';
 import type { CryptoCurrency } from '@/lib/types';
 import { useToast } from '@/hooks/use-toast';
+import { getWithdrawalFeeConfig, resolveWithdrawalFee } from '@/lib/fees';
 
 interface WithdrawalDialogProps {
   isOpen: boolean;
@@ -29,6 +30,9 @@ export function WithdrawalDialog({
   const { requestWithdrawal, refreshBalances } = useWallet();
   const { toast } = useToast();
 
+  const feeConfig = getWithdrawalFeeConfig(assetSymbol, chain);
+  const feeCrypto = feeConfig.feeCrypto;
+
   if (!isOpen) return null;
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -41,8 +45,9 @@ export function WithdrawalDialog({
       return;
     }
 
-    if (numericAmount > availableBalance) {
-      setErrorMsg('Insufficient balance for this withdrawal.');
+    const totalRequired = numericAmount + feeCrypto;
+    if (totalRequired > availableBalance) {
+      setErrorMsg(`Insufficient balance: ${numericAmount} ${assetSymbol} + ${feeCrypto} ${assetSymbol} network fee exceeds available balance (${availableBalance.toFixed(6)} ${assetSymbol}).`);
       return;
     }
 
@@ -55,11 +60,11 @@ export function WithdrawalDialog({
 
     try {
       const crypto = (assetSymbol.toUpperCase() as CryptoCurrency) || 'USDT';
-      await requestWithdrawal(crypto, chain, destinationAddress.trim(), numericAmount, 0);
+      await requestWithdrawal(crypto, chain, destinationAddress.trim(), numericAmount, feeCrypto);
 
       toast({
         title: 'Withdrawal Submitted',
-        description: `Successfully requested withdrawal of ${numericAmount} ${crypto}.`,
+        description: `Successfully requested withdrawal of ${numericAmount} ${crypto} (Fee: ${feeCrypto} ${crypto}).`,
       });
 
       await refreshBalances();
@@ -71,6 +76,7 @@ export function WithdrawalDialog({
       setIsSubmitting(false);
     }
   };
+
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4">

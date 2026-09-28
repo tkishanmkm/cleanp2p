@@ -1,43 +1,31 @@
 "use server";
 
 import { createAdminClient } from "@/lib/supabase/admin";
-import { createServerClient } from "@supabase/ssr";
-import { cookies } from "next/headers";
+import { verifyServerAdmin } from "@/lib/server-admin-auth";
 import { revalidatePath } from "next/cache";
 import { logAdminAction } from "@/lib/audit";
 
-async function getAuthenticatedAdminId() {
-  const cookieStore = await cookies();
-  const supabase = createServerClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://placeholder.supabase.co',
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'placeholder-anon-key',
-    {
-      cookies: {
-        getAll() {
-          return cookieStore.getAll();
-        },
-      },
-    }
-  );
-
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-
-  return user?.id || null;
-}
-
 export async function updateUserRoleAction(userId: string, newRole: "user" | "admin") {
-  const adminId = await getAuthenticatedAdminId();
-  if (!adminId) return { success: false, error: "Unauthorized" };
+  const auth = await verifyServerAdmin();
+  if (!auth.authorized || !auth.adminId) {
+    return { success: false, error: "Unauthorized: Administrator privileges required." };
+  }
 
+  // Strictly block self-role modification / privilege escalation
+  if (userId === auth.adminId) {
+    return { success: false, error: "Forbidden: Administrators cannot modify their own role." };
+  }
+
+  const adminId = auth.adminId;
   const adminSupabase = createAdminClient();
 
   const { error } = await adminSupabase
     .from("profiles")
     .update({ 
       role: newRole,
-      is_admin_account: newRole === "admin"
+      is_admin: newRole === "admin",
+      is_admin_account: newRole === "admin",
+      updated_at: new Date().toISOString()
     })
     .eq("id", userId);
 
@@ -47,12 +35,12 @@ export async function updateUserRoleAction(userId: string, newRole: "user" | "ad
   if (newRole === "admin") {
     await adminSupabase
       .from("app_admins")
-      .upsert({ user_id: userId, granted_at: new Date().toISOString() }, { onConflict: "user_id" });
+      .upsert({ user_id: userId, role: "admin", granted_at: new Date().toISOString() }, { onConflict: "user_id" });
   } else {
     await adminSupabase.from("app_admins").delete().eq("user_id", userId);
   }
 
-  // Record Audit Event
+  // Record Audit Event with verified admin identity
   await logAdminAction({
     adminId,
     action: "UPDATE_USER_ROLE",
@@ -66,9 +54,17 @@ export async function updateUserRoleAction(userId: string, newRole: "user" | "ad
 }
 
 export async function toggleUserSuspensionAction(userId: string, currentSuspendedStatus: boolean) {
-  const adminId = await getAuthenticatedAdminId();
-  if (!adminId) return { success: false, error: "Unauthorized" };
+  const auth = await verifyServerAdmin();
+  if (!auth.authorized || !auth.adminId) {
+    return { success: false, error: "Unauthorized: Administrator privileges required." };
+  }
 
+  // Block self-suspension
+  if (userId === auth.adminId) {
+    return { success: false, error: "Forbidden: Administrators cannot suspend their own account." };
+  }
+
+  const adminId = auth.adminId;
   const adminSupabase = createAdminClient();
   const newStatus = !currentSuspendedStatus;
 
@@ -76,7 +72,8 @@ export async function toggleUserSuspensionAction(userId: string, currentSuspende
     .from("profiles")
     .update({ 
       is_suspended: newStatus,
-      is_banned: newStatus 
+      is_banned: newStatus,
+      updated_at: new Date().toISOString()
     })
     .eq("id", userId);
 
@@ -96,14 +93,26 @@ export async function toggleUserSuspensionAction(userId: string, currentSuspende
 }
 
 export async function toggleUserBanStatus(userId: string, isBanned: boolean) {
-  const adminId = await getAuthenticatedAdminId();
-  if (!adminId) throw new Error("Unauthorized");
+  const auth = await verifyServerAdmin();
+  if (!auth.authorized || !auth.adminId) {
+    throw new Error("Unauthorized: Administrator privileges required.");
+  }
 
+  // Block self-ban
+  if (userId === auth.adminId) {
+    throw new Error("Forbidden: Administrators cannot ban their own account.");
+  }
+
+  const adminId = auth.adminId;
   const adminSupabase = createAdminClient();
 
   const { error } = await adminSupabase
     .from("profiles")
-    .update({ is_banned: isBanned, is_suspended: isBanned })
+    .update({
+      is_banned: isBanned,
+      is_suspended: isBanned,
+      updated_at: new Date().toISOString()
+    })
     .eq("id", userId);
 
   if (error) throw new Error(error.message);
@@ -120,14 +129,20 @@ export async function toggleUserBanStatus(userId: string, isBanned: boolean) {
 }
 
 export async function updateUserBalance(userId: string, newBalance: number) {
-  const adminId = await getAuthenticatedAdminId();
-  if (!adminId) throw new Error("Unauthorized");
+  const auth = await verifyServerAdmin();
+  if (!auth.authorized || !auth.adminId) {
+    throw new Error("Unauthorized: Administrator privileges required.");
+  }
 
+  const adminId = auth.adminId;
   const adminSupabase = createAdminClient();
 
   const { error } = await adminSupabase
     .from("profiles")
-    .update({ wallet_balance: newBalance })
+    .update({
+      wallet_balance: newBalance,
+      updated_at: new Date().toISOString()
+    })
     .eq("id", userId);
 
   if (error) throw new Error(error.message);
@@ -141,3 +156,4 @@ export async function updateUserBalance(userId: string, newBalance: number) {
 
   revalidatePath("/adminnarayan/users");
 }
+

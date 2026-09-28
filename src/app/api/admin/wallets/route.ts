@@ -1,10 +1,16 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSupabaseAdminClient } from "@/lib/supabase/server";
+import { verifyServerAdmin } from "@/lib/server-admin-auth";
 
 export const dynamic = "force-dynamic";
 
 export async function GET(req: NextRequest) {
   try {
+    const auth = await verifyServerAdmin(req);
+    if (!auth.authorized) {
+      return auth.response!;
+    }
+
     const supabase = getSupabaseAdminClient();
 
     // 1. Fetch data in parallel

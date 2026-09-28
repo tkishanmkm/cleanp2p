@@ -600,7 +600,6 @@ export function resolveTradeStatus(t: any): string {
   if (
     t.paid_at ||
     t.marked_paid_at ||
-    t.payment_confirmed_at ||
     String(t.escrow_status || '').toUpperCase() === 'PAID' ||
     raw === 'paid' ||
     raw === 'buyer_marked_paid' ||
@@ -732,7 +731,6 @@ const ActionButtons = ({
       if (trade) {
         trade.marked_paid_at = nowIso;
         trade.paid_at = nowIso;
-        trade.payment_confirmed_at = nowIso;
         trade.escrow_status = 'PAID';
         trade.status = 'paid';
         trade.payment_method = selectedMarkPaidMethod;
@@ -744,7 +742,6 @@ const ActionButtons = ({
             detail: {
               marked_paid_at: nowIso,
               paid_at: nowIso,
-              payment_confirmed_at: nowIso,
               escrow_status: 'PAID',
               status: 'paid',
               payment_method: selectedMarkPaidMethod,

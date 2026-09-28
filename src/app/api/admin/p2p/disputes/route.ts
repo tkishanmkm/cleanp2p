@@ -1,47 +1,17 @@
-import { createClient, getSupabaseAdminClient } from '@/lib/supabase/server';
-import { NextResponse } from 'next/server';
+import { getSupabaseAdminClient } from '@/lib/supabase/server';
+import { verifyServerAdmin } from '@/lib/server-admin-auth';
+import { NextRequest, NextResponse } from 'next/server';
 
 export const dynamic = 'force-dynamic';
 
-export async function POST(request: Request) {
+export async function POST(request: NextRequest) {
   try {
-    const supabase = await createClient();
+    const auth = await verifyServerAdmin(request);
+    if (!auth.authorized) {
+      return auth.response!;
+    }
+
     const supabaseAdmin = getSupabaseAdminClient();
-
-    let user: any = null;
-
-    // Check Bearer authorization header
-    const authHeader = request.headers.get('authorization');
-    if (authHeader && authHeader.startsWith('Bearer ')) {
-      const token = authHeader.replace(/^Bearer\s+/i, '').trim();
-      const { data } = await supabaseAdmin.auth.getUser(token);
-      if (data?.user) {
-        user = data.user;
-      }
-    }
-
-    if (!user) {
-      const { data: { user: cookieUser } } = await supabase.auth.getUser();
-      if (cookieUser) {
-        user = cookieUser;
-      }
-    }
-
-    if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-
-    // Verify Admin Status (check profile role or email)
-    const { data: profile } = await supabaseAdmin
-      .from('profiles')
-      .select('role, is_admin, email')
-      .eq('id', user.id)
-      .maybeSingle();
-
-    const isAdmin = profile?.role === 'admin' || profile?.is_admin === true || user.email === 'thekishanmishrakm@gmail.com';
-
-    if (!isAdmin) {
-      return NextResponse.json({ error: 'Forbidden: Admin access required' }, { status: 403 });
-    }
-
     const { orderId, decision } = await request.json(); // decision: 'RELEASE_TO_BUYER' | 'REFUND_TO_SELLER'
 
     const { data: order, error: orderErr } = await supabaseAdmin

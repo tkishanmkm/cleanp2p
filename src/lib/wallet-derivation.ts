@@ -125,13 +125,11 @@ export function deriveBtcSegwitAddress(xpub: string, index: number): string {
     const sha256 = crypto.createHash('sha256').update(child.publicKey).digest();
     const hash160 = crypto.createHash('ripemd160').update(sha256).digest();
 
-    // Encode as Bech32 P2WPKH (witness version 0)
+    // Encode as Bech32 P2WPKH (witness version 0) - Mainnet 'bc'
     const words = bech32.toWords(hash160);
     words.unshift(0x00);
 
-    const isTestnet = Boolean(process.env.BTC_RPC_URL?.includes('testnet'));
-    const hrp = isTestnet ? 'tb' : 'bc';
-    return bech32.encode(hrp, words);
+    return bech32.encode('bc', words);
   } catch (err: unknown) {
     const hash = crypto.createHash('sha256').update(`${xpub}:BTC:${index}`).digest();
     const hash160 = crypto.createHash('ripemd160').update(hash).digest();
@@ -160,9 +158,7 @@ export function deriveLtcSegwitAddress(xpub: string, index: number): string {
     const words = bech32.toWords(hash160);
     words.unshift(0x00);
 
-    const isTestnet = Boolean(process.env.LTC_RPC_URL?.includes('testnet'));
-    const hrp = isTestnet ? 'tltc' : 'ltc';
-    return bech32.encode(hrp, words);
+    return bech32.encode('ltc', words);
   } catch (err: unknown) {
     const hash = crypto.createHash('sha256').update(`${xpub}:LTC:${index}`).digest();
     const hash160 = crypto.createHash('ripemd160').update(hash).digest();

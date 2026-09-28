@@ -134,8 +134,7 @@ export default function MyTradesPage() {
           rawStatus === 'payment_sent' ||
           escrowStatus === 'paid' ||
           Boolean(raw.paid_at) ||
-          Boolean(raw.marked_paid_at) ||
-          Boolean(raw.payment_confirmed_at)
+          Boolean(raw.marked_paid_at)
         ) {
           effectiveStatus = 'paid';
         } else if (

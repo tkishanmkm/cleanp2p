@@ -75,29 +75,47 @@ export interface RpcResponse<T = unknown> {
 }
 
 /**
- * Invokes the request_withdrawal RPC to lock balance and schedule withdrawal.
+ * Invokes the canonical server-side withdrawal endpoint.
  */
 export async function requestWithdrawal(
   assetCode: string,
   networkCode: string,
   destinationAddress: string,
   amount: number,
-  idempotencyKey: string
+  idempotencyKey: string,
+  totpCode?: string
 ): Promise<RpcResponse<{ success: boolean; withdrawal_id: string; amount: number; network_fee: number; status: string }>> {
   try {
-    const { data, error } = await supabase.rpc('request_withdrawal', {
-      p_asset_code: assetCode,
-      p_network_code: networkCode,
-      p_destination_address: destinationAddress,
-      p_amount: amount,
-      p_idempotency_key: idempotencyKey,
+    const res = await fetch('/api/withdraw', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-idempotency-key': idempotencyKey,
+      },
+      body: JSON.stringify({
+        asset: assetCode,
+        network: networkCode,
+        destinationAddress,
+        amount,
+        totpCode,
+      }),
     });
 
-    if (error) {
-      return { data: null, error: new Error(error.message) };
+    const resData = await res.json();
+    if (!res.ok) {
+      return { data: null, error: new Error(resData.error || 'Withdrawal failed') };
     }
 
-    return { data, error: null };
+    return {
+      data: {
+        success: true,
+        withdrawal_id: resData.withdrawalId,
+        amount: resData.amountRequested,
+        network_fee: resData.networkFee,
+        status: resData.status,
+      },
+      error: null,
+    };
   } catch (err: unknown) {
     return { data: null, error: err instanceof Error ? err : new Error(String(err)) };
   }

@@ -79,7 +79,7 @@ export default function ProfilePage() {
 
       const { data: userTrades } = await supabase
         .from('trades')
-        .select('id, buyer_id, seller_id, fiat_amount, fiat_amount_usd, crypto_amount, status, created_at, paid_at, payment_confirmed_at, released_at, completed_at')
+        .select('id, buyer_id, seller_id, fiat_amount, fiat_amount_usd, crypto_amount, status, created_at, paid_at, released_at, completed_at')
         .or(`buyer_id.eq.${userId},seller_id.eq.${userId}`)
         .in('status', ['completed', 'released', 'COMPLETED', 'RELEASED']);
 
@@ -96,7 +96,7 @@ export default function ProfilePage() {
         for (const t of userTrades) {
           // Average Paid Time: when user is buyer
           if (t.buyer_id === userId) {
-            const paidTimeStr = t.paid_at || t.payment_confirmed_at;
+            const paidTimeStr = t.paid_at;
             if (paidTimeStr && t.created_at) {
               const start = new Date(t.created_at).getTime();
               const end = new Date(paidTimeStr).getTime();
@@ -110,7 +110,7 @@ export default function ProfilePage() {
           // Average Release Time: when user is seller
           if (t.seller_id === userId) {
             const releaseTimeStr = t.released_at || t.completed_at;
-            const paidTimeStr = t.paid_at || t.payment_confirmed_at || t.created_at;
+            const paidTimeStr = t.paid_at || t.created_at;
             if (releaseTimeStr && paidTimeStr) {
               const start = new Date(paidTimeStr).getTime();
               const end = new Date(releaseTimeStr).getTime();

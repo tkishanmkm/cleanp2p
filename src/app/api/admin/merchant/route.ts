@@ -1,28 +1,17 @@
 import { NextResponse, type NextRequest } from 'next/server';
-import { createClient, getSupabaseAdminClient } from '@/utils/supabase/server';
+import { getSupabaseAdminClient } from '@/lib/supabase/server';
+import { verifyServerAdmin } from '@/lib/server-admin-auth';
+
+export const dynamic = 'force-dynamic';
 
 export async function POST(req: NextRequest) {
   try {
-    const supabase = await createClient();
-    const { data: { user } } = await supabase.auth.getUser();
-
-    if (!user) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    const auth = await verifyServerAdmin(req);
+    if (!auth.authorized) {
+      return auth.response!;
     }
 
     const admin = getSupabaseAdminClient();
-
-    // Verify admin privileges
-    const { data: adminProf } = await admin
-      .from('profiles')
-      .select('role, is_admin')
-      .eq('id', user.id)
-      .maybeSingle();
-
-    const isAdmin = adminProf?.is_admin === true || adminProf?.role === 'ADMIN' || adminProf?.role === 'SUPER_ADMIN';
-    if (!isAdmin) {
-      return NextResponse.json({ error: 'Forbidden: Admin access required.' }, { status: 403 });
-    }
 
     const body = await req.json();
     const { userId, tier, depositUsdt, status } = body;

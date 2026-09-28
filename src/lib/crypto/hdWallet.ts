@@ -1,5 +1,5 @@
 import { ethers } from 'ethers';
-import * as bip39 from 'bip39';
+import * as bip39 from '@scure/bip39';
 import * as bitcoin from 'bitcoinjs-lib';
 import TronWeb from 'tronweb';
 
@@ -29,9 +29,12 @@ export function deriveUserWallets(walletIndex: number): DerivedWallets {
 
   // 2. TRON (TRC-20 USDT / TRX) -> Path: m/44'/195'/0'/0/index
   const tronNode = ethers.HDNodeWallet.fromSeed(seed).derivePath(`m/44'/195'/0'/0/${walletIndex}`);
-  const tronAddress = (TronWeb as any).address?.fromPrivateKey
-    ? (TronWeb as any).address.fromPrivateKey(tronNode.privateKey.substring(2))
-    : TronWeb.address.fromPrivateKey(tronNode.privateKey.substring(2));
+  const tronWebAny: any = TronWeb;
+  const tronAddress = tronWebAny?.address?.fromPrivateKey
+    ? tronWebAny.address.fromPrivateKey(tronNode.privateKey.substring(2))
+    : (tronWebAny?.default?.address?.fromPrivateKey
+        ? tronWebAny.default.address.fromPrivateKey(tronNode.privateKey.substring(2))
+        : '');
 
   // 3. Bitcoin (Native SegWit BIP-84 Bech32) -> Path: m/84'/0'/0'/0/index
   const btcNode = ethers.HDNodeWallet.fromSeed(seed).derivePath(`m/84'/0'/0'/0/${walletIndex}`);

@@ -7,8 +7,6 @@ export const publicClient = createPublicClient({
   transport: http(process.env.ETH_RPC_URL || process.env.EVM_RPC_URL || 'https://cloudflare-eth.com'),
 });
 
-export const sepoliaClient = publicClient;
-
 export interface ChainConfig {
   chainId: number;
   name: string;
@@ -231,12 +229,12 @@ export async function getEip1559FeeOverrides(
 }
 
 /**
- * Calculates confirmations for an on-chain transaction
+ * Calculates confirmations and actual gas cost for an on-chain transaction
  */
 export async function getTransactionConfirmations(
   provider: ethers.JsonRpcProvider,
   txHash: string
-): Promise<{ confirmations: number; blockNumber?: number; status?: number }> {
+): Promise<{ confirmations: number; blockNumber?: number; status?: number; actualGasCost?: string }> {
   try {
     const receipt = await provider.getTransactionReceipt(txHash);
     if (!receipt || !receipt.blockNumber) {
@@ -246,10 +244,21 @@ export async function getTransactionConfirmations(
     const currentBlock = await provider.getBlockNumber();
     const confirmations = Math.max(0, currentBlock - receipt.blockNumber + 1);
 
+    // Compute actual on-chain gas cost (gasUsed * effectiveGasPrice)
+    let actualGasCost: string | undefined;
+    try {
+      const gasPrice = receipt.effectiveGasPrice ?? receipt.gasPrice ?? 0n;
+      const gasCostWei = receipt.gasUsed * gasPrice;
+      actualGasCost = ethers.formatEther(gasCostWei);
+    } catch {
+      actualGasCost = undefined;
+    }
+
     return {
       confirmations,
       blockNumber: receipt.blockNumber,
       status: receipt.status ?? undefined,
+      actualGasCost,
     };
   } catch (err) {
     return { confirmations: 0 };

@@ -1,22 +1,50 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createClient } from '@supabase/supabase-js';
+import { createClient, getSupabaseAdminClient } from '@/lib/supabase/server';
+import { verifyServerAdmin } from '@/lib/server-admin-auth';
 import { saveKycAddressToB2 } from '@/lib/b2';
 
 export const dynamic = 'force-dynamic';
 
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://placeholder.supabase.co',
-  process.env.SUPABASE_SERVICE_ROLE_KEY || 'placeholder-key'
-);
-
 export async function POST(req: NextRequest) {
   try {
-    const { userId, country, address, street, city, postalCode, docType, docNumber } =
-      await req.json();
+    // 1. Authenticate caller session
+    const supabaseUser = await createClient();
+    let { data: { user } } = await supabaseUser.auth.getUser();
 
-    if (!userId) {
-      return NextResponse.json({ error: 'userId is required' }, { status: 400 });
+    const authHeader = req.headers.get("authorization");
+    if (!user && authHeader && authHeader.startsWith("Bearer ")) {
+      const token = authHeader.substring(7).trim();
+      if (token) {
+        const adminClient = getSupabaseAdminClient();
+        const { data: tokenData } = await adminClient.auth.getUser(token);
+        if (tokenData?.user) user = tokenData.user;
+      }
     }
+
+    if (!user) {
+      return NextResponse.json(
+        { error: "unauthorized", message: "Authentication session required to initiate KYC." },
+        { status: 401 }
+      );
+    }
+
+    const body = await req.json().catch(() => ({}));
+    const { userId: requestedUserId, country, address, street, city, postalCode, docType, docNumber } = body;
+
+    let targetUserId = user.id;
+    if (requestedUserId && requestedUserId !== user.id) {
+      const adminAuth = await verifyServerAdmin(req);
+      if (!adminAuth.authorized) {
+        return NextResponse.json(
+          { error: "forbidden", message: "Cannot initiate KYC verification for another user." },
+          { status: 403 }
+        );
+      }
+      targetUserId = requestedUserId;
+    }
+
+    const userId = targetUserId;
+    const supabase = getSupabaseAdminClient();
 
     // 1. Fetch user status
     const { data: profile, error } = await supabase

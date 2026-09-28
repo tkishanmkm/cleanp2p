@@ -60,7 +60,7 @@ export async function resolveDispute({
     // Buyer wins: atomic escrow release and credit to buyer
     const { data: rpcData, error: rpcError } = await adminSupabase.rpc('release_trade_escrow', {
       p_trade_id: tradeId,
-      p_seller_id: trade.seller_id,
+      p_caller_id: adminId,
     });
 
     if (rpcError || (rpcData && !rpcData.success)) {

@@ -1,49 +1,63 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase";
-import { createClient } from "@/utils/supabase/server";
+import { createClient, getSupabaseAdminClient } from "@/lib/supabase/server";
+import { verifyServerAdmin } from "@/lib/server-admin-auth";
 
 export const dynamic = "force-dynamic";
 
 const WORKFLOW_ID = "b36ac1aa-29fc-4272-8939-c1d184d072fd";
 
-export async function POST(req: Request) {
+export async function POST(req: NextRequest) {
   try {
-    const body = await req.json().catch(() => ({}));
-    let userId = body?.userId;
+    // 1. Authenticate caller session
+    const supabase = await createClient();
+    let { data: { user } } = await supabase.auth.getUser();
 
-    if (!userId) {
-      try {
-        const supabase = await createClient();
-        const { data: { user } } = await supabase.auth.getUser();
-        if (user?.id) {
-          userId = user.id;
-        }
-      } catch (authErr) {
-        console.warn("Could not retrieve user from session in /api/verify:", authErr);
+    const authHeader = req.headers.get("authorization");
+    if (!user && authHeader && authHeader.startsWith("Bearer ")) {
+      const token = authHeader.substring(7).trim();
+      if (token) {
+        const adminClient = getSupabaseAdminClient();
+        const { data: tokenData } = await adminClient.auth.getUser(token);
+        if (tokenData?.user) user = tokenData.user;
       }
     }
 
-    if (!userId) {
-      return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+    if (!user) {
+      return NextResponse.json({ error: "unauthorized", message: "Authentication required" }, { status: 401 });
+    }
+
+    const body = await req.json().catch(() => ({}));
+    let userId = user.id;
+
+    if (body?.userId && body.userId !== user.id) {
+      const adminAuth = await verifyServerAdmin(req);
+      if (!adminAuth.authorized) {
+        return NextResponse.json(
+          { error: "forbidden", message: "Cannot initiate verification for another user." },
+          { status: 403 }
+        );
+      }
+      userId = body.userId;
     }
 
     // 1. Fetch user record from Supabase
-    const { data: user, error: userError } = await supabaseAdmin
+    const { data: userRecord, error: userError } = await supabaseAdmin
       .from("profiles")
       .select("kyc_attempts, kyc_retry_count, kyc_status, kyc_last_attempt_at, kyc_submitted_at, updated_at")
       .eq("id", userId)
       .single();
 
-    if (userError || !user) {
+    if (userError || !userRecord) {
       return NextResponse.json({ error: "user_not_found" }, { status: 404 });
     }
 
     // 1.1 Check 24-hr under review timeout: if in review for > 24 hours without response, remove under review status
-    const submittedTime = user.kyc_submitted_at ? new Date(user.kyc_submitted_at).getTime() : 0;
+    const submittedTime = userRecord.kyc_submitted_at ? new Date(userRecord.kyc_submitted_at).getTime() : 0;
     const hoursSinceSubmission = (Date.now() - submittedTime) / (1000 * 60 * 60);
-    const normalizedStatus = (user.kyc_status || '').toLowerCase();
+    const normalizedStatus = (userRecord.kyc_status || '').toLowerCase();
 
-    if (['in_review', 'under_review', 'pending_review'].includes(normalizedStatus) && user.kyc_submitted_at && hoursSinceSubmission >= 24) {
+    if (['in_review', 'under_review', 'pending_review'].includes(normalizedStatus) && userRecord.kyc_submitted_at && hoursSinceSubmission >= 24) {
       await supabaseAdmin.from('profiles').update({
         kyc_status: 'not_started',
         didit_session_id: null,
@@ -51,17 +65,17 @@ export async function POST(req: Request) {
         kyc_submitted_at: null,
         updated_at: new Date().toISOString(),
       }).eq('id', userId);
-      user.kyc_status = 'not_started';
+      userRecord.kyc_status = 'not_started';
     }
 
     // 2. Enforce 3-attempt limit within 24 hours
-    const lastAttemptTime = user.kyc_last_attempt_at ? new Date(user.kyc_last_attempt_at).getTime() : 0;
+    const lastAttemptTime = userRecord.kyc_last_attempt_at ? new Date(userRecord.kyc_last_attempt_at).getTime() : 0;
     const hoursSinceLastAttempt = (Date.now() - lastAttemptTime) / (1000 * 60 * 60);
 
-    let currentAttempts = Number(user.kyc_attempts ?? user.kyc_retry_count ?? 0);
+    let currentAttempts = Number(userRecord.kyc_attempts ?? userRecord.kyc_retry_count ?? 0);
 
     // If 24 hours have elapsed since the last failed attempt, reset the rolling attempts counter
-    if (hoursSinceLastAttempt >= 24 && currentAttempts > 0 && user.kyc_status !== 'approved' && user.kyc_status !== 'VERIFIED') {
+    if (hoursSinceLastAttempt >= 24 && currentAttempts > 0 && userRecord.kyc_status !== 'approved' && userRecord.kyc_status !== 'VERIFIED') {
       currentAttempts = 0;
       await supabaseAdmin.from('profiles').update({
         kyc_attempts: 0,
@@ -70,7 +84,7 @@ export async function POST(req: Request) {
       }).eq('id', userId);
     }
 
-    if (currentAttempts >= 3 || user.kyc_status === "SUPPORT_REQUIRED" || user.kyc_status === "permanently_rejected") {
+    if (currentAttempts >= 3 || userRecord.kyc_status === "SUPPORT_REQUIRED" || userRecord.kyc_status === "permanently_rejected") {
       return NextResponse.json(
         {
           error: "max_attempts_exceeded",

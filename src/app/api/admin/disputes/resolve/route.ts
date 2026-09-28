@@ -1,45 +1,19 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createServerClient } from '@supabase/ssr';
-import { createClient as createSupabaseClient } from '@supabase/supabase-js';
+import { getSupabaseAdminClient } from '@/lib/supabase/server';
+import { verifyServerAdmin } from '@/lib/server-admin-auth';
+
+export const dynamic = 'force-dynamic';
 
 export async function POST(req: NextRequest) {
   try {
-    let supabase = createServerClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL!,
-      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-      {
-        cookies: {
-          getAll() {
-            return req.cookies.getAll();
-          },
-        },
-      }
-    );
-
-    const authHeader = req.headers.get('Authorization') || req.headers.get('authorization');
-    if (authHeader && authHeader.startsWith('Bearer ')) {
-      const token = authHeader.substring(7).trim();
-      supabase = createSupabaseClient(
-        process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://placeholder.supabase.co',
-        process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'placeholder-key',
-        { global: { headers: { Authorization: `Bearer ${token}` } } }
-      ) as any;
+    const auth = await verifyServerAdmin(req);
+    if (!auth.authorized) {
+      return auth.response!;
     }
 
-    const { data: { user }, error: authError } = await supabase.auth.getUser();
-    if (authError || !user) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
-
-    // Check admin authorization
-    const { data: isAdmin, error: adminCheckError } = await supabase.rpc('check_is_admin', {
-      p_user_id: user.id,
-      user_uuid: user.id,
-    });
-
-    if (adminCheckError || !isAdmin) {
-      return NextResponse.json({ error: 'Forbidden: Admin privilege required' }, { status: 403 });
-    }
+    const adminId = auth.adminId || auth.user.id;
+    const adminEmail = auth.adminEmail || 'admin@paxones.com';
+    const supabase = getSupabaseAdminClient();
 
     const { disputeId, tradeId, resolution, notes } = await req.json();
 
@@ -51,17 +25,18 @@ export async function POST(req: NextRequest) {
     if (resolution === 'RELEASE') {
       rpcResult = await supabase.rpc('release_trade_escrow', {
         p_trade_id: tradeId,
-        p_caller_id: user.id,
+        p_caller_id: adminId,
       });
     } else {
       rpcResult = await supabase.rpc('cancel_p2p_trade', {
         p_trade_id: tradeId,
-        p_caller_id: user.id,
+        p_caller_id: adminId,
       });
     }
 
-    if (rpcResult.error) {
-      return NextResponse.json({ error: rpcResult.error.message }, { status: 400 });
+    if (rpcResult.error || (rpcResult.data && !rpcResult.data.success)) {
+      const errMsg = rpcResult.error?.message || rpcResult.data?.message || 'Escrow settlement RPC failed';
+      return NextResponse.json({ error: errMsg }, { status: 400 });
     }
 
     // Update dispute record
@@ -69,17 +44,16 @@ export async function POST(req: NextRequest) {
       .from('disputes')
       .update({
         status: 'resolved',
-        resolution_type: resolution,
-        resolved_by_id: user.id,
-        resolution_notes: notes || 'Resolved by admin',
-        updated_at: new Date().toISOString(),
+        resolved_at: new Date().toISOString(),
       })
       .eq('id', disputeId);
 
     // Audit log
     await supabase.from('admin_audit_logs').insert({
-      admin_id: user.id,
+      admin_id: adminId,
+      admin_email: adminEmail,
       action: 'RESOLVE_DISPUTE',
+      target_id: tradeId,
       details: { disputeId, tradeId, resolution, notes },
     });
 
@@ -88,3 +62,4 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: err.message }, { status: 500 });
   }
 }
+

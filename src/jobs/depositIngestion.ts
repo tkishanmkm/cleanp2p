@@ -22,7 +22,7 @@ export const supabaseAdmin = createClient(supabaseUrl, supabaseKey, {
 export const CANONICAL_USDT_CONTRACTS: Record<string, string> = {
   ERC20: process.env.USDT_CONTRACT_ERC20 || '0xdAC17F958D2ee523a2206206994597C13D831ec7',
   BEP20: process.env.USDT_CONTRACT_BEP20 || '0x55d398326f99059fF775485246999027B3197955',
-  TRC20: process.env.USDT_CONTRACT_TRC20 || 'TXYZopYRdj2D9XRtbG411XZZ3kM5VkAeBf',
+  TRC20: process.env.USDT_CONTRACT_TRC20 || 'TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t',
 };
 
 export function getBtcMempoolApi(): string {
@@ -422,18 +422,11 @@ async function scanTronDeposits(
     const tronHost = (process.env.TRON_RPC_URL || TRON_CONFIG.fullHost || 'https://api.trongrid.io').replace(/\/$/, '');
     const contractAddress = process.env.USDT_CONTRACT_TRC20 || TRON_CONFIG.usdtContract || CANONICAL_USDT_CONTRACTS.TRC20;
 
-    // Determine TronGrid REST host (separate from Alchemy or JSON-RPC fullHost)
+    // Determine TronGrid REST host (Mainnet)
     const getTronGridHost = (rpcUrl: string): string => {
       const customGrid = process.env.TRONGRID_API_URL || process.env.TRON_EVENT_SERVER;
       if (customGrid) return customGrid.replace(/\/$/, '');
-      const lower = (rpcUrl || '').toLowerCase();
-      if (lower.includes('nile') || lower.includes('tron-testnet')) {
-        return 'https://nile.trongrid.io';
-      }
-      if (lower.includes('shasta')) {
-        return 'https://api.shasta.trongrid.io';
-      }
-      if (lower.includes('api.trongrid.io')) {
+      if ((rpcUrl || '').toLowerCase().includes('api.trongrid.io')) {
         return rpcUrl.replace(/\/$/, '');
       }
       return 'https://api.trongrid.io';
@@ -454,9 +447,7 @@ async function scanTronDeposits(
       }
     };
     addKnownContract(contractAddress);
-    addKnownContract('TXLAQ63Xg1NAzckPwKHvzw7CSEmLMEqcdj'); // Nile USDT
-    addKnownContract('TXYZopYRdj2D9XRtbG411XZZ3kM5VkAeBf'); // Canonical Nile TRC20 USDT
-    addKnownContract('TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t'); // Mainnet USDT
+    addKnownContract('TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t'); // Mainnet TRC-20 USDT
 
     // Build contract addresses hex filter for eth_getLogs
     const contractAddressesHex: string[] = [];

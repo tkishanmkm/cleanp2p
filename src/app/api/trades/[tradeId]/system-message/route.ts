@@ -172,7 +172,6 @@ export async function POST(
       const isPaidOrCompleted = Boolean(
         trade.paid_at ||
         trade.marked_paid_at ||
-        trade.payment_confirmed_at ||
         trade.escrow_status === 'PAID' ||
         ['paid', 'buyer_marked_paid', 'payment_sent', 'released', 'completed', 'disputed'].includes((trade.status || '').toLowerCase())
       );

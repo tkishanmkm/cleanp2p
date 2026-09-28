@@ -234,16 +234,14 @@ export function getMasterHDKeySync(): HDKey {
 }
 
 /**
- * Derives Bitcoin Native SegWit address (BIP84: m/84'/0'/0'/0/i -> bc1q... for Mainnet, m/84'/1'/0'/0/i -> tb1q... for Testnet4).
+ * Derives Bitcoin Native SegWit address (BIP84: m/84'/0'/0'/0/i -> bc1q... for Mainnet).
  */
 export function deriveBitcoinNativeSegwitAddress(
   masterKey: HDKey,
-  index: number,
-  networkType: 'mainnet' | 'testnet4' = 'mainnet'
+  index: number
 ): string {
-  const isTestnet = networkType === 'testnet4';
-  const basePath = isTestnet ? BIP_PATHS.BTC_TESTNET4 : BIP_PATHS.BTC;
-  const bech32Prefix = isTestnet ? networks.testnet.bech32 : BTC_NETWORK.bech32;
+  const basePath = BIP_PATHS.BTC;
+  const bech32Prefix = BTC_NETWORK.bech32;
 
   try {
     const child = masterKey.derive(`${basePath}/${index}`);
@@ -257,17 +255,15 @@ export function deriveBitcoinNativeSegwitAddress(
 
     return bech32.encode(bech32Prefix, words);
   } catch (err) {
-    if (!isTestnet) {
-      const btcXpub = process.env.BTC_XPUB;
-      if (btcXpub) {
-        const hdkey = HDKey.fromExtendedKey(btcXpub);
-        const child = hdkey.deriveChild(0).deriveChild(index);
-        const sha256 = crypto.createHash('sha256').update(child.publicKey!).digest();
-        const hash160 = crypto.createHash('ripemd160').update(sha256).digest();
-        const words = bech32.toWords(hash160);
-        words.unshift(0x00);
-        return bech32.encode(BTC_NETWORK.bech32, words);
-      }
+    const btcXpub = process.env.BTC_XPUB;
+    if (btcXpub) {
+      const hdkey = HDKey.fromExtendedKey(btcXpub);
+      const child = hdkey.deriveChild(0).deriveChild(index);
+      const sha256 = crypto.createHash('sha256').update(child.publicKey!).digest();
+      const hash160 = crypto.createHash('ripemd160').update(sha256).digest();
+      const words = bech32.toWords(hash160);
+      words.unshift(0x00);
+      return bech32.encode(BTC_NETWORK.bech32, words);
     }
     throw err;
   }

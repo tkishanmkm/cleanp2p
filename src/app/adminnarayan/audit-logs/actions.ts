@@ -1,42 +1,16 @@
 "use server";
 
 import { createAdminClient } from "@/lib/supabase/admin";
-import { createServerClient } from "@supabase/ssr";
-import { cookies } from "next/headers";
+import { verifyServerAdmin } from "@/lib/server-admin-auth";
 
 export async function exportAuditLogsAction(format: "csv" | "json") {
-  const cookieStore = await cookies();
-  const supabase = createServerClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://placeholder.supabase.co',
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'placeholder-anon-key',
-    {
-      cookies: {
-        getAll() {
-          return cookieStore.getAll();
-        },
-      },
-    }
-  );
-
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-
-  if (!user) return { success: false, error: "Unauthorized" };
-
-  // Verify admin access
-  const adminSupabase = createAdminClient();
-  const { data: profile } = await adminSupabase
-    .from("profiles")
-    .select("role")
-    .eq("id", user.id)
-    .single();
-
-  if (!profile || profile.role !== "admin") {
-    return { success: false, error: "Forbidden: Admin permissions required." };
+  const auth = await verifyServerAdmin();
+  if (!auth.authorized || !auth.adminId) {
+    return { success: false, error: "Unauthorized: Admin permissions required." };
   }
 
   // Fetch full log history
+  const adminSupabase = createAdminClient();
   const { data: logs, error } = await adminSupabase
     .from("admin_audit_logs")
     .select(`

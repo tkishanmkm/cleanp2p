@@ -567,13 +567,36 @@ export async function PATCH(req: NextRequest) {
       }
 
       case 'kyc_submission': {
-        const { documentType, country, street, city, postalCode, documentNumber } = data || {};
+        const { documentType, country, street, city, postalCode } = data || {};
         if (!documentType || !country) {
           return NextResponse.json({ error: 'Document type and country are required.' }, { status: 400 });
         }
 
+        // Check if country or KYC is locked
+        const { data: prof } = await admin
+          .from('profiles')
+          .select('kyc_status, is_country_locked, is_verified, id_verified')
+          .eq('id', user.id)
+          .maybeSingle();
+
+        const isVerified =
+          prof?.is_verified ||
+          prof?.id_verified ||
+          prof?.kyc_status?.toUpperCase() === 'VERIFIED' ||
+          prof?.kyc_status?.toUpperCase() === 'APPROVED';
+
+        if (isVerified) {
+          return NextResponse.json(
+            {
+              error: 'KYC documents and address details are locked once verified. Please contact support to update verified information.'
+            },
+            { status: 403 }
+          );
+        }
+
+        // NOTE: kyc_status is strictly managed by authoritative verification pipeline (/api/didit/verify or /api/verify)
+        // Direct manipulation of kyc_status through user settings is strictly prohibited to prevent state bypass
         const updates: any = {
-          kyc_status: 'PENDING',
           country: country.trim().toUpperCase(),
           updated_at: new Date().toISOString(),
         };
@@ -592,7 +615,7 @@ export async function PATCH(req: NextRequest) {
         return NextResponse.json({
           success: true,
           field,
-          message: 'Identity & Address verification details submitted successfully. Status is now PENDING review.'
+          message: 'Identity & Address details saved. Please complete verification through the secure verification portal.'
         });
       }
 

@@ -333,7 +333,7 @@ function WithdrawalsHistory({
         const mapped: DisplayWithdrawal[] = data.map((w: any) => ({
           id: w.id,
           crypto: (w.token_symbol || w.asset_code || w.crypto || 'ETH') as CryptoCurrency,
-          chain: w.chain || w.network_code || 'Sepolia',
+          chain: w.chain || w.network_code || 'ERC20',
           amount: Number(w.amount || 0),
           gasFee: Number(w.gas_fee ?? w.fee ?? w.network_fee ?? 0),
           status: String(w.status || 'CONFIRMED').toLowerCase(),

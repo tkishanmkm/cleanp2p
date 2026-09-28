@@ -1,151 +1,47 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { SYSTEM_CONFIG } from '@/lib/config/env';
-import { createClient, getSupabaseAdminClient } from '@/lib/supabase/server';
-import { ethers } from 'ethers';
+import { executeCanonicalWithdrawal } from '@/lib/services/withdrawalService';
 
 export const dynamic = 'force-dynamic';
 
 export async function POST(req: NextRequest): Promise<NextResponse> {
   try {
-    // 1. Authenticate caller session
-    const supabase = await createClient();
-    const admin = getSupabaseAdminClient();
+    const authHeader = req.headers.get('authorization');
+    const idempotencyKey = req.headers.get('x-idempotency-key');
+    const body = await req.json().catch(() => ({}));
 
-    let { data: { user }, error: authError } = await supabase.auth.getUser();
+    const result = await executeCanonicalWithdrawal({
+      asset: body.asset || body.assetSymbol || body.asset_symbol || body.crypto,
+      amount: body.amount ?? body.amountEth ?? body.amountUsdt,
+      network: body.network || body.chain || body.networkCode,
+      destinationAddress: body.destinationAddress || body.destination_address || body.recipientAddress || body.address || body.toAddress,
+      totpCode: body.totpCode || body.totp_code || body.code,
+      idempotencyKey: idempotencyKey || body.idempotencyKey,
+      authHeader,
+    });
 
-    if (!user && req.headers.get('authorization')) {
-      const token = (req.headers.get('authorization') || '').replace(/^Bearer\s+/i, '').trim();
-      if (token) {
-        const { data: tokenData } = await admin.auth.getUser(token);
-        if (tokenData?.user) {
-          user = tokenData.user;
-          authError = null;
-        }
-      }
-    }
-
-    if (authError || !user) {
-      return NextResponse.json({ error: 'Unauthorized: Session authentication required' }, { status: 401 });
-    }
-
-    const { destinationAddress, amount, asset } = (await req.json().catch(() => ({}))) as {
-      destinationAddress?: string;
-      amount?: number;
-      asset?: string;
-    };
-
-    if (!destinationAddress || !amount || amount <= 0 || !asset) {
-      return NextResponse.json({ error: 'Invalid payload: Valid destination address, positive amount, and asset required.' }, { status: 400 });
-    }
-
-    const cleanAsset = String(asset).toUpperCase().trim();
-    const numericAmount = Number(amount);
-
-    // 2. Check KYC status for withdrawal
-    const { data: userProfile } = await admin
-      .from('profiles')
-      .select('id, is_verified, kyc_status, id_verified, is_banned, is_withdrawal_locked, withdrawals_disabled')
-      .eq('id', user.id)
-      .maybeSingle();
-
-    if (userProfile?.is_banned || userProfile?.is_withdrawal_locked || userProfile?.withdrawals_disabled) {
+    if (!result.success) {
       return NextResponse.json(
-        { error: 'Withdrawals are currently restricted for your account. Please contact support@paxones.com.' },
-        { status: 403 }
+        { error: result.error || result.message },
+        { status: result.statusCode || 400 }
       );
     }
 
-    const isVerified = Boolean(
-      userProfile?.is_verified ||
-      userProfile?.kyc_status === 'approved' ||
-      userProfile?.kyc_status === 'verified' ||
-      userProfile?.id_verified
+    return NextResponse.json({
+      success: true,
+      withdrawalId: result.withdrawalId,
+      status: result.status,
+      asset: result.asset,
+      network: result.network,
+      destinationAddress: result.destinationAddress,
+      amountRequested: result.amountRequested,
+      networkFee: result.networkFee,
+      totalDebited: result.totalDebited,
+      message: result.message,
+    });
+  } catch (err: any) {
+    return NextResponse.json(
+      { error: err.message || 'Internal server error' },
+      { status: 500 }
     );
-
-    if (!isVerified) {
-      return NextResponse.json(
-        { error: 'Identity verification is required before initiating cryptocurrency withdrawals. Please complete Identity Verification in Settings.' },
-        { status: 403 }
-      );
-    }
-
-    // 3. Atomically check balance and lock funds
-    const { error: deductError } = await admin.rpc('deduct_user_balance', {
-      p_user_id: user.id,
-      p_amount: numericAmount,
-      p_asset: cleanAsset,
-    });
-
-    if (deductError) {
-      return NextResponse.json({ error: deductError.message || 'Insufficient spendable balance' }, { status: 400 });
-    }
-
-    let txHash = '';
-    const hasEvmSigner = Boolean(SYSTEM_CONFIG.hotWallets.evm.privateKey && SYSTEM_CONFIG.rpcs.evm);
-
-    if (hasEvmSigner) {
-      try {
-        const provider = new ethers.JsonRpcProvider(SYSTEM_CONFIG.rpcs.evm);
-        const hotWalletSigner = new ethers.Wallet(SYSTEM_CONFIG.hotWallets.evm.privateKey, provider);
-
-        const feeData = await provider.getFeeData();
-        const baseGasPrice = feeData.gasPrice ?? ethers.parseUnits('20', 'gwei');
-        const priorityGasPrice = (baseGasPrice * 200n) / 100n;
-
-        if (cleanAsset === 'ETH') {
-          const tx = await hotWalletSigner.sendTransaction({
-            to: destinationAddress,
-            value: ethers.parseEther(numericAmount.toString()),
-            gasPrice: priorityGasPrice,
-          });
-          txHash = tx.hash;
-        } else {
-          const tokenAddress = SYSTEM_CONFIG.contracts.usdtErc20;
-          const contract = new ethers.Contract(
-            tokenAddress,
-            ['function transfer(address to, uint256 amount) returns (bool)'],
-            hotWalletSigner
-          );
-
-          const tx = await contract.transfer(
-            destinationAddress,
-            ethers.parseUnits(numericAmount.toString(), 6),
-            { gasPrice: priorityGasPrice }
-          );
-          txHash = tx.hash;
-        }
-      } catch (onChainErr) {
-        console.error('On-chain dispatch error (withdrawal logged in DB):', onChainErr);
-      }
-    }
-
-    await admin.from('withdrawals').insert({
-      user_id: user.id,
-      currency: cleanAsset,
-      amount: numericAmount,
-      destination_address: destinationAddress,
-      tx_hash: txHash || null,
-      status: txHash ? 'completed' : 'processing',
-    });
-
-    // Activity Center Notification
-    try {
-      await admin.from('notifications').insert({
-        user_id: user.id,
-        title: 'Withdrawal Processed',
-        message: `Withdrawal of ${numericAmount} ${cleanAsset} to ${destinationAddress.slice(0, 6)}...${destinationAddress.slice(-4)} has been submitted.`,
-        type: 'withdrawal',
-        is_read: false,
-        metadata: { link: '/wallets' },
-        created_at: new Date().toISOString(),
-      });
-    } catch (notifErr) {
-      console.warn('Withdrawal notification insert notice:', notifErr);
-    }
-
-    return NextResponse.json({ success: true, txHash: txHash || 'QUEUED_FOR_BROADCAST' });
-  } catch (err: unknown) {
-    const errorMessage = err instanceof Error ? err.message : 'Withdrawal dispatch failed';
-    return NextResponse.json({ error: errorMessage }, { status: 500 });
   }
 }

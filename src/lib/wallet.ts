@@ -236,7 +236,7 @@ export async function initiateEscrowClaim(
 }
 
 /**
- * Requests a crypto withdrawal via Supabase requestWithdrawal RPC.
+ * Requests a crypto withdrawal via the canonical server-side /api/withdraw gateway.
  */
 export async function requestWithdrawal(
   user: { id: string; userId?: string; displayName?: string },
@@ -245,16 +245,36 @@ export async function requestWithdrawal(
   amount: number,
   address: string,
   fee: number = 0,
-  idempotencyKey?: string
+  idempotencyKey?: string,
+  totpCode?: string
 ): Promise<{ success: boolean; withdrawal_id?: string; status?: string }> {
   const safeKey = idempotencyKey || `with_${user.id}_${crypto}_${Date.now()}`;
   
-  const { data, error } = await requestSupabaseWithdrawal(crypto, chain, address, amount, safeKey);
-  if (error) {
-    throw error;
+  const res = await fetch('/api/withdraw', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'x-idempotency-key': safeKey,
+    },
+    body: JSON.stringify({
+      asset: crypto,
+      chain,
+      destinationAddress: address,
+      amount,
+      totpCode,
+    }),
+  });
+
+  const resData = await res.json();
+  if (!res.ok) {
+    throw new Error(resData.error || 'Withdrawal request failed');
   }
 
-  return data || { success: true, status: 'pending' };
+  return {
+    success: true,
+    withdrawal_id: resData.withdrawalId || resData.withdrawal_id,
+    status: resData.status || 'QUEUED',
+  };
 }
 
 /**

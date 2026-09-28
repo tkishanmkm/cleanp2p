@@ -22,8 +22,8 @@
       "@/*": ["./src/*"]
     }
   },
-  "include": ["next-env.d.ts", "**/*.ts", "**/*.tsx", ".next/types/**/*.ts"],
-  "exclude": ["node_modules"],
+  "include": ["next-env.d.ts", "src/**/*.ts", "src/**/*.tsx", "lib/**/*.ts", "lib/**/*.tsx", "jobs/**/*.ts", "scripts/**/*.ts", ".next/types/**/*.ts"],
+  "exclude": ["node_modules", "tests"],
   "ts-node": {
     "compilerOptions": {
       "module": "CommonJS",

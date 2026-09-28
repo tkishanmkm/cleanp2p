@@ -1,6 +1,7 @@
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { reconcileLedgerVsChain } from '@/jobs/reconciliationWorker';
+import { verifyServerAdmin } from '@/lib/server-admin-auth';
 
 export const dynamic = 'force-dynamic';
 
@@ -14,43 +15,14 @@ const supabaseAdmin = createClient(supabaseUrl, supabaseKey, {
   },
 });
 
-export async function GET(req: Request) {
+export async function GET(req: NextRequest) {
   try {
-    const authHeader = req.headers.get('authorization');
-    if (!authHeader) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
-
-    const token = authHeader.replace(/^Bearer\s+/i, '').trim();
-    const { data: { user }, error: authError } = await supabaseAdmin.auth.getUser(token);
-
-    if (authError || !user) {
-      return NextResponse.json({ error: 'Invalid admin token' }, { status: 401 });
-    }
-
-    // Role verification
-    const { data: profile } = await supabaseAdmin
-      .from('profiles')
-      .select('role, is_admin')
-      .eq('id', user.id)
-      .single();
-
-    const normalizedRole = (profile?.role || '').toUpperCase();
-    const isUserAdmin =
-      normalizedRole === 'ADMIN' ||
-      normalizedRole === 'SUPER_ADMIN' ||
-      Boolean(profile?.is_admin);
-
-    if (!isUserAdmin) {
-      const { data: adminRecord } = await supabaseAdmin
-        .from('app_admins')
-        .select('user_id')
-        .eq('user_id', user.id)
-        .maybeSingle();
-
-      if (!adminRecord) {
-        return NextResponse.json({ error: 'Forbidden: Admin access required' }, { status: 403 });
-      }
+    const auth = await verifyServerAdmin(req);
+    if (!auth.authorized) {
+      return (
+        auth.response ||
+        NextResponse.json({ error: 'Forbidden: Admin access required' }, { status: 403 })
+      );
     }
 
     // 1. Fetch latest system reconciliation report

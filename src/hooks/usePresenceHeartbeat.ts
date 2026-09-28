@@ -31,7 +31,7 @@ export function usePresenceHeartbeat(userId?: string) {
 
     // Set offline on tab unload
     const handleUnload = () => {
-      if (typeof navigator !== 'undefined' && navigator.sendBeacon) {
+      if (typeof navigator !== 'undefined' && typeof navigator.sendBeacon === 'function') {
         supabase.from('profiles').update({ is_online: false }).eq('id', userId);
       }
     };

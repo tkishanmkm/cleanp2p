@@ -11,7 +11,7 @@ export interface TronConfig {
 export const TRON_CONFIG: TronConfig = {
   fullHost: process.env.TRON_RPC_URL || 'https://api.trongrid.io',
   apiKey: process.env.TRON_GRID_API_KEY || process.env.TRONGRID_API_KEY,
-  usdtContract: process.env.USDT_CONTRACT_TRC20 || 'TXYZopYRdj2D9XRtbG411XZZ3kM5VkAeBf',
+  usdtContract: process.env.USDT_CONTRACT_TRC20 || 'TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t',
   usdtDecimals: 6,
   requiredConfirmations: 19,
 };
@@ -140,6 +140,7 @@ export async function getTronTransactionConfirmations(txHash: string): Promise<{
   isConfirmed: boolean;
   success: boolean;
   blockNumber?: number;
+  actualCostTrx?: string;
 }> {
   try {
     const tronWeb = getTronWeb(false);
@@ -154,8 +155,12 @@ export async function getTronTransactionConfirmations(txHash: string): Promise<{
     const currentBlock = await tronWeb.trx.getCurrentBlock();
     const currentHeight = currentBlock.block_header?.raw_data?.number;
 
+    // Actual burned TRX fee (fee in Sun / 1,000,000)
+    const feeSun = Number(txInfo.fee || 0);
+    const actualCostTrx = (feeSun / 1_000_000).toFixed(6);
+
     if (!currentHeight) {
-      return { confirmations: 1, isConfirmed: false, success: !txInfo.receipt?.result };
+      return { confirmations: 1, isConfirmed: false, success: !txInfo.receipt?.result, actualCostTrx };
     }
 
     const confirmations = Math.max(0, currentHeight - txInfo.blockNumber + 1);
@@ -166,6 +171,7 @@ export async function getTronTransactionConfirmations(txHash: string): Promise<{
       isConfirmed: confirmations >= TRON_CONFIG.requiredConfirmations && success,
       success,
       blockNumber: txInfo.blockNumber,
+      actualCostTrx,
     };
   } catch (err) {
     return { confirmations: 0, isConfirmed: false, success: false };

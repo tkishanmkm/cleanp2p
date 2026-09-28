@@ -1,45 +1,18 @@
-import { NextResponse } from 'next/server';
-import { supabaseAdmin } from '@/lib/supabaseAdmin';
+import { NextRequest, NextResponse } from 'next/server';
+import { getSupabaseAdminClient } from '@/lib/supabase/server';
+import { verifyServerAdmin } from '@/lib/server-admin-auth';
 
 export const dynamic = 'force-dynamic';
 
-export async function POST(req: Request) {
+export async function POST(req: NextRequest) {
   try {
-    const authHeader = req.headers.get('authorization');
-    if (!authHeader) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    const auth = await verifyServerAdmin(req);
+    if (!auth.authorized) {
+      return auth.response!;
     }
 
-    // Authenticate Admin User
-    const token = authHeader.replace(/^Bearer\s+/i, '').trim();
-    const { data: { user }, error: authError } = await supabaseAdmin.auth.getUser(token);
-
-    if (authError || !user) {
-      return NextResponse.json({ error: 'Invalid admin session' }, { status: 401 });
-    }
-
-    // Verify Admin Role from profiles/roles table (supporting both uppercase and lowercase)
-    const { data: profile } = await supabaseAdmin
-      .from('profiles')
-      .select('role, is_admin')
-      .eq('id', user.id)
-      .single();
-
-    const normalizedRole = (profile?.role || '').toUpperCase();
-    const isUserAdmin = normalizedRole === 'ADMIN' || normalizedRole === 'SUPER_ADMIN' || Boolean(profile?.is_admin);
-
-    if (!isUserAdmin) {
-      // Also fallback check app_admins table
-      const { data: adminRecord } = await supabaseAdmin
-        .from('app_admins')
-        .select('user_id')
-        .eq('user_id', user.id)
-        .maybeSingle();
-
-      if (!adminRecord) {
-        return NextResponse.json({ error: 'Forbidden: Admin access required' }, { status: 403 });
-      }
-    }
+    const adminId = auth.adminId || auth.user.id;
+    const supabaseAdmin = getSupabaseAdminClient();
 
     const { withdrawalId, action, rejectionReason } = await req.json();
 
@@ -53,7 +26,7 @@ export async function POST(req: Request) {
         .from('onchain_withdrawals')
         .update({
           status: 'PENDING',
-          approved_by: user.id,
+          approved_by: adminId,
           approved_at: new Date().toISOString(),
           updated_at: new Date().toISOString(),
         })
@@ -61,6 +34,15 @@ export async function POST(req: Request) {
         .eq('status', 'NEEDS_APPROVAL');
 
       if (error) throw error;
+
+      await supabaseAdmin
+        .from('withdrawals')
+        .update({
+          status: 'approved',
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', withdrawalId)
+        .catch(() => null);
 
       return NextResponse.json({
         success: true,
@@ -84,3 +66,4 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: err.message }, { status: 500 });
   }
 }
+

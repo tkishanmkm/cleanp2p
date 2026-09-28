@@ -171,7 +171,6 @@ export default function DashboardPage() {
         const isPaid = Boolean(
           raw.paid_at ||
           raw.marked_paid_at ||
-          raw.payment_confirmed_at ||
           rawStatus === 'paid' ||
           rawStatus === 'mark_paid' ||
           rawStatus === 'buyer_marked_paid' ||

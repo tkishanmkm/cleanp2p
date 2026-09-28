@@ -142,11 +142,10 @@ export async function POST(
         }
       }
 
-      // 1. Primary update: record paid_at, marked_paid_at, payment_confirmed_at, escrow_status = 'PAID', and payment_method
+      // 1. Primary update: record paid_at, marked_paid_at, escrow_status = 'PAID', and payment_method
       const updateData: any = {
         paid_at: now,
         marked_paid_at: now,
-        payment_confirmed_at: now,
         escrow_status: 'PAID',
         payment_method: confirmedPaymentMethod,
       };
@@ -212,85 +211,6 @@ export async function POST(
       }
 
       return NextResponse.json({ success: true, message: 'Payment marked successfully.' });
-    }
-
-    if (action === 'EXPIRE_TRADE') {
-      const now = new Date().toISOString();
-
-      // Guard: If trade is already marked paid, released, completed, or disputed, DO NOT expire
-      const isAlreadyPaid = Boolean(
-        trade?.paid_at ||
-        trade?.marked_paid_at ||
-        trade?.payment_confirmed_at ||
-        trade?.escrow_status === 'PAID' ||
-        ['paid', 'buyer_marked_paid', 'payment_sent'].includes((trade?.status || '').toLowerCase())
-      );
-      if (isAlreadyPaid) {
-        return NextResponse.json(
-          { success: false, message: 'Trade was marked as paid and cannot be expired.' },
-          { status: 400 }
-        );
-      }
-
-      if (['completed', 'released', 'disputed', 'cancelled', 'expired'].includes((trade?.status || '').toLowerCase())) {
-        return NextResponse.json(
-          { success: false, message: `Trade is already ${trade.status} and cannot be expired.` },
-          { status: 400 }
-        );
-      }
-
-      // Canonical RPC call
-      const { data: rpcData, error: rpcError } = await adminClient.rpc('expire_p2p_trade', {
-        p_trade_id: actualTradeId,
-      });
-
-      if (rpcError || (rpcData && !rpcData.success)) {
-        const errorMsg = rpcError?.message || rpcData?.message || 'Failed to expire trade.';
-        console.error('expire_p2p_trade RPC failed:', errorMsg);
-        return NextResponse.json({ error: errorMsg }, { status: 400 });
-      }
-
-      // Post official system message in trade chat if not already present
-      try {
-        const { data: existingMsg } = await adminClient
-          .from('trade_messages')
-          .select('id')
-          .eq('trade_id', actualTradeId)
-          .ilike('message', '%TRADE EXPIRED%')
-          .limit(1)
-          .maybeSingle();
-
-        if (!existingMsg) {
-          await insertPaxonesSystemMessage(adminClient, {
-            tradeId: actualTradeId,
-            type: 'TRADE_EXPIRED',
-            buyerUsername: buyerName,
-            sellerUsername: sellerName,
-            coinAmount: trade?.crypto_amount || trade?.amount,
-            coinSymbol: trade?.crypto || trade?.asset_symbol || 'USDT'
-          });
-        }
-      } catch (sysMsgErr) {
-        console.warn('Error inserting expired system message:', sysMsgErr);
-      }
-
-      // Notify both parties
-      const userIds = [trade?.buyer_id, trade?.seller_id].filter(Boolean);
-      for (const uid of userIds) {
-        try {
-          await adminClient.from('notifications').insert({
-            user_id: uid,
-            title: 'Trade Expired',
-            message: `Trade has expired because payment was not confirmed within the countdown window.`,
-            type: 'trade_action',
-            is_read: false,
-            metadata: { link: `/trade/${actualTradeId}` },
-            created_at: now
-          }).select().maybeSingle();
-        } catch {}
-      }
-
-      return NextResponse.json({ success: true, message: rpcData?.message || 'Trade marked as expired.' });
     }
 
     if (action === 'RELEASE_ESCROW') {

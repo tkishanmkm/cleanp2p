@@ -384,7 +384,7 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
 
     (Object.keys(rawBalances) as CryptoCurrency[]).forEach((coin) => {
       const data = rawBalances[coin] || { available: 0, inEscrow: 0, inWithdrawal: 0 };
-      const coinPrice = prices?.[coin] ?? (coin === 'USDT' ? 1 : 0);
+      const coinPrice = (prices as Record<string, number | undefined>)?.[coin] ?? (coin === 'USDT' ? 1 : 0);
       const totalCoin = (data.available || 0) + (data.inEscrow || 0) + (data.inWithdrawal || 0);
       const fiatVal = (data.available || 0) * (coinPrice || 0) * (exchangeRate || 1);
 
@@ -403,14 +403,14 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
   // Compute Platform-Wide Consolidated Values
   const totalAvailableUsdValue = useMemo(() => {
     return (Object.keys(balances) as CryptoCurrency[]).reduce((sum, coin) => {
-      const coinPrice = prices?.[coin] ?? (coin === 'USDT' ? 1 : 0);
+      const coinPrice = (prices as Record<string, number | undefined>)?.[coin] ?? (coin === 'USDT' ? 1 : 0);
       return sum + (balances[coin].available || 0) * coinPrice;
     }, 0);
   }, [balances, prices]);
 
   const totalPortfolioUsdValue = useMemo(() => {
     return (Object.keys(balances) as CryptoCurrency[]).reduce((sum, coin) => {
-      const coinPrice = prices?.[coin] ?? (coin === 'USDT' ? 1 : 0);
+      const coinPrice = (prices as Record<string, number | undefined>)?.[coin] ?? (coin === 'USDT' ? 1 : 0);
       return sum + (balances[coin].total || 0) * coinPrice;
     }, 0);
   }, [balances, prices]);

@@ -41,7 +41,7 @@ export function TransactionHistory() {
         id: d.id || d.tx_hash,
         type: 'deposit',
         asset: d.asset_symbol || d.asset || d.asset_code || 'ETH',
-        chain: d.network || d.chain || d.network_code || 'SEPOLIA',
+        chain: d.network || d.chain || d.network_code || 'ERC20',
         amount: Number(d.amount || 0),
         status: (d.status === 'credited' || d.status === 'confirmed' || d.status === 'CONFIRMED') ? 'completed' : 'pending',
         destination_address: d.address || d.to_address || d.deposit_address,

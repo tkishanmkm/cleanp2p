@@ -234,10 +234,9 @@ export async function resolveDispute(
       throw new Error(errorMsg);
     }
   } else {
-    const sellerId = trade.sellerId || (trade as any).seller_id;
     const { data: rpcData, error: rpcError } = await supabase.rpc('release_trade_escrow', {
       p_trade_id: trade.id,
-      p_seller_id: sellerId,
+      p_caller_id: adminId,
     });
 
     if (rpcError || (rpcData && !rpcData.success)) {
@@ -254,7 +253,6 @@ export async function resolveDispute(
       winner_id: winnerId,
       resolved_by: adminId,
       resolution_note: `Dispute awarded to ${winnerUsername} by moderator.`,
-      updated_at: new Date().toISOString(),
     })
     .eq('id', dispute.id);
 
@@ -412,10 +410,9 @@ export async function adminMarkTradeAsPaid(_db: any, trade: Trade, adminId: stri
 }
 
 export async function adminReleaseFunds(_db: any, trade: Trade, adminId: string, reason: string) {
-  const sellerId = trade.sellerId || (trade as any).seller_id;
   const { data: rpcData, error: rpcError } = await supabase.rpc('release_trade_escrow', {
     p_trade_id: trade.id,
-    p_seller_id: sellerId,
+    p_caller_id: adminId,
   });
 
   if (rpcError || (rpcData && !rpcData.success)) {

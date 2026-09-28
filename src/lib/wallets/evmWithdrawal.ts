@@ -2,6 +2,7 @@ import { ethers } from 'ethers';
 
 const ERC20_TRANSFER_ABI = [
   'function transfer(address to, uint256 amount) returns (bool)',
+  'function decimals() view returns (uint8)',
 ];
 
 // Sequential lock to protect against nonce race conditions during concurrent execution
@@ -10,7 +11,8 @@ let withdrawalLock: Promise<any> = Promise.resolve();
 export async function executeHotWalletWithdrawal(
   toAddress: string,
   amountUnits: string,
-  tokenContractAddress: string
+  tokenContractAddress: string,
+  decimals: number = 6
 ): Promise<string> {
   // 1. Checksum address validation to protect against malformed inputs
   let validRecipient: string;
@@ -20,8 +22,8 @@ export async function executeHotWalletWithdrawal(
     throw new Error(`Invalid recipient EVM address: ${toAddress}`);
   }
 
-  const rpcUrl = process.env.EVM_RPC_URL;
-  const privateKey = process.env.EVM_HOT_WALLET_PRIVATE_KEY;
+  const rpcUrl = process.env.ETH_RPC_URL || process.env.EVM_RPC_URL;
+  const privateKey = process.env.EVM_HOT_WALLET_PRIVATE_KEY || process.env.HOT_WALLET_PRIVATE_KEY;
 
   if (!rpcUrl || !privateKey) {
     throw new Error('EVM RPC URL or Hot Wallet Private Key is not configured.');
@@ -38,8 +40,7 @@ export async function executeHotWalletWithdrawal(
         const wallet = new ethers.Wallet(formattedPrivateKey, provider);
         const contract = new ethers.Contract(tokenContractAddress, ERC20_TRANSFER_ABI, wallet);
 
-        // Standard 6 decimals for USDT
-        const amountWei = ethers.parseUnits(amountUnits, 6);
+        const amountWei = ethers.parseUnits(amountUnits, decimals);
 
         console.log(`[Hot Wallet] Estimating gas and nonce for withdrawal of ${amountUnits} USDT to ${validRecipient}...`);
 

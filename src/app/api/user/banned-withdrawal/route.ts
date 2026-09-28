@@ -1,12 +1,14 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
-import { supabaseAdmin } from '@/lib/supabaseAdmin';
+import { getSupabaseAdminClient } from '@/lib/supabase/server';
+import { executeCanonicalWithdrawal } from '@/lib/services/withdrawalService';
 
 export const dynamic = 'force-dynamic';
 
 export async function POST(req: NextRequest) {
   try {
     const supabase = await createClient();
+    const supabaseAdmin = getSupabaseAdminClient();
     const { data: { user }, error: authError } = await supabase.auth.getUser();
 
     if (authError || !user) {
@@ -15,104 +17,61 @@ export async function POST(req: NextRequest) {
 
     const userId = user.id;
 
-    // Verify user is banned
+    // Verify user profile is marked as banned
     const { data: profile } = await supabaseAdmin
       .from('profiles')
-      .select('id, is_banned, status, ban_reason, suspension_reason')
+      .select('id, is_banned, status, account_status')
       .eq('id', userId)
-      .single();
+      .maybeSingle();
 
-    if (!profile || (!profile.is_banned && profile.status !== 'banned')) {
+    if (!profile || (!profile.is_banned && profile.status !== 'banned' && profile.account_status !== 'banned')) {
       return NextResponse.json({ error: 'Only banned accounts can use final withdrawal.' }, { status: 403 });
     }
 
-    const { currency, address, network } = await req.json();
+    const body = await req.json().catch(() => ({}));
+    const { currency, address, network, totpCode } = body;
 
     if (!currency || !address || typeof address !== 'string' || address.trim().length < 8) {
       return NextResponse.json({ error: 'Valid cryptocurrency and destination wallet address are required.' }, { status: 400 });
     }
 
-    // Fetch user wallet for this currency
-    const { data: wallet } = await supabaseAdmin
-      .from('wallets')
-      .select('*')
+    const assetSymbol = String(currency).toUpperCase().trim();
+
+    // Fetch authoritative spendable balance from public.wallet_assets
+    const { data: assetRow } = await supabaseAdmin
+      .from('wallet_assets')
+      .select('balance')
       .eq('user_id', userId)
-      .ilike('currency', currency)
+      .eq('asset_symbol', assetSymbol)
       .maybeSingle();
 
-    const currentBalance = Number(wallet?.balance || 0);
-
+    const currentBalance = Number(assetRow?.balance || 0);
     if (currentBalance <= 0) {
-      return NextResponse.json({ error: `No available balance for ${currency} to withdraw.` }, { status: 400 });
+      return NextResponse.json({ error: `No spendable balance for ${assetSymbol} to withdraw.` }, { status: 400 });
     }
 
-    // Per requirement: only MAX coin can be selected per coin (100% of available balance)
-    const withdrawalAmount = currentBalance;
+    // Delegate through canonical withdrawal pipeline
+    const authHeader = req.headers.get('authorization');
+    const result = await executeCanonicalWithdrawal({
+      asset: assetSymbol,
+      amount: currentBalance,
+      network: network || (assetSymbol === 'USDT' ? 'TRC20' : assetSymbol),
+      destinationAddress: address.trim(),
+      totpCode,
+      authHeader,
+    });
 
-    // Deduct standard nominal gas fee if possible, otherwise sweep entire balance
-    const gasFee = Math.min(0.0005, withdrawalAmount * 0.01);
-    const netAmount = Math.max(0, withdrawalAmount - gasFee);
-
-    // Try RPC first if available in database
-    try {
-      const { data: rpcData, error: rpcErr } = await supabase.rpc('execute_final_withdrawal', {
-        p_user_id: userId,
-        p_currency: currency,
-        p_network: network || 'Mainnet',
-        p_address: address.trim(),
-        p_gas_fee: gasFee,
-      });
-
-      if (!rpcErr && rpcData) {
-        return NextResponse.json({
-          success: true,
-          status: 'Queued',
-          message: `Final withdrawal of full ${currency} balance (${withdrawalAmount}) queued to ${address.trim()}.`,
-          data: rpcData
-        });
-      }
-    } catch (rpcEx) {
-      console.warn('execute_final_withdrawal RPC call not found or error, proceeding with direct transaction:', rpcEx);
-    }
-
-    // Direct transaction fallback:
-    // 1. Zero out wallet balance
-    const { error: walletUpdateErr } = await supabaseAdmin
-      .from('wallets')
-      .update({
-        balance: 0,
-        updated_at: new Date().toISOString(),
-      })
-      .eq('id', wallet.id);
-
-    if (walletUpdateErr) {
-      return NextResponse.json({ error: 'Failed to deduct wallet balance.' }, { status: 500 });
-    }
-
-    // 2. Insert record into withdrawals / transactions table if available
-    try {
-      await supabaseAdmin.from('withdrawals').insert({
-        user_id: userId,
-        amount: netAmount,
-        currency: currency.toUpperCase(),
-        crypto: currency.toUpperCase(),
-        destination_address: address.trim(),
-        network: network || 'Mainnet',
-        status: 'PENDING',
-        fee: gasFee,
-        is_final_banned_withdrawal: true,
-        created_at: new Date().toISOString(),
-      });
-    } catch (insertErr) {
-      console.warn('Withdrawal table insert notice:', insertErr);
+    if (!result.success) {
+      return NextResponse.json({ error: result.error || result.message }, { status: result.statusCode || 400 });
     }
 
     return NextResponse.json({
       success: true,
       status: 'Queued',
-      amount: withdrawalAmount,
-      currency,
-      message: `Final one-time withdrawal of ${withdrawalAmount} ${currency} has been queued successfully.`
+      amount: currentBalance,
+      currency: assetSymbol,
+      withdrawalId: result.withdrawalId,
+      message: `Final withdrawal of full ${assetSymbol} balance queued to ${address.trim()}.`,
     });
   } catch (err: any) {
     console.error('Final withdrawal fatal error:', err);

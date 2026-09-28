@@ -187,7 +187,7 @@ function RecentTradeNotificationRow({ trade, currentUserId }: { trade: any; curr
   const isDisputed = Boolean(trade.is_disputed || rawStatus === 'disputed' || rawStatus === 'dispute' || escrowStatus === 'disputed');
   const isCompleted = Boolean(trade.completed_at || trade.released_at || rawStatus === 'completed' || rawStatus === 'released' || escrowStatus === 'completed' || escrowStatus === 'released');
   const isCancelled = Boolean(trade.cancelled_at || rawStatus === 'cancelled' || rawStatus === 'canceled' || escrowStatus === 'cancelled');
-  const isPaid = Boolean(trade.paid_at || trade.marked_paid_at || trade.payment_confirmed_at || rawStatus === 'paid' || rawStatus === 'mark_paid' || rawStatus === 'buyer_marked_paid' || escrowStatus === 'paid');
+  const isPaid = Boolean(trade.paid_at || trade.marked_paid_at || rawStatus === 'paid' || rawStatus === 'mark_paid' || rawStatus === 'buyer_marked_paid' || escrowStatus === 'paid');
   const isExplicitExpired = Boolean(trade.expired_at || rawStatus === 'expired' || escrowStatus === 'expired');
 
   const createdAtMs = trade.createdAt || trade.created_at ? new Date(trade.createdAt || trade.created_at).getTime() : 0;

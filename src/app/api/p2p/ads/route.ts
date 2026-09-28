@@ -57,33 +57,6 @@ export async function POST(request: NextRequest) {
       authError = cookieAuth.error;
     }
 
-    // Fallback: If client transmitted user_id in payload, check profile existence
-    if (!user && body?.user_id) {
-      try {
-        const admin = getSupabaseAdminClient();
-        const { data: profile } = await admin
-          .from('profiles')
-          .select('id, username, full_name, email')
-          .eq('id', body.user_id)
-          .maybeSingle();
-
-        if (profile) {
-          user = {
-            id: profile.id,
-            email: profile.email || `${profile.username || 'trader'}@thepax.org`,
-            user_metadata: {
-              display_name: profile.full_name || profile.username || 'Trader',
-              full_name: profile.full_name,
-              username: profile.username,
-            },
-          };
-          authError = null;
-        }
-      } catch (err) {
-        console.warn('Profile fallback auth lookup failed:', err);
-      }
-    }
-
     if (!user) {
       return NextResponse.json(
         { 

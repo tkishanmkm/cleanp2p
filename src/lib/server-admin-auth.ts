@@ -14,7 +14,7 @@ export interface AdminAuthResult {
  * Checks server-side cookies, Bearer tokens, profiles table, app_metadata, and app_admins table.
  * Never trusts request body parameters or client headers for identity.
  */
-export async function verifyServerAdmin(req: NextRequest): Promise<AdminAuthResult> {
+export async function verifyServerAdmin(req?: NextRequest): Promise<AdminAuthResult> {
   try {
     const supabase = await createClient();
     const adminClient = getSupabaseAdminClient();
@@ -22,7 +22,7 @@ export async function verifyServerAdmin(req: NextRequest): Promise<AdminAuthResu
     // 1. Check session from cookies or Bearer Authorization header
     let { data: { user }, error: userError } = await supabase.auth.getUser();
 
-    if (!user && req.headers.get("authorization")) {
+    if (!user && req && req.headers?.get("authorization")) {
       const authHeader = req.headers.get("authorization") || "";
       const token = authHeader.replace(/^Bearer\s+/i, "").trim();
       if (token) {

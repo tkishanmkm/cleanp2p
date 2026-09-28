@@ -17,7 +17,7 @@ export async function middleware(request: NextRequest) {
           getAll() {
             return request.cookies.getAll();
           },
-          setAll(cookiesToSet) {
+          setAll(cookiesToSet: Array<{ name: string; value: string; options?: any }>) {
             cookiesToSet.forEach(({ name, value }) =>
               request.cookies.set(name, value)
             );
@@ -79,9 +79,13 @@ export async function middleware(request: NextRequest) {
 
       // Fallback: Check if verify_admin_login or check_is_admin returns true
       if (userRole !== 'admin') {
-        const { data: isAdmin } = await supabase.rpc('check_is_admin', { p_user_id: user.id }).catch(() => ({ data: false }));
-        if (isAdmin) {
-          userRole = 'admin';
+        try {
+          const { data: isAdmin } = await supabase.rpc('check_is_admin', { p_user_id: user.id });
+          if (isAdmin) {
+            userRole = 'admin';
+          }
+        } catch (_) {
+          // ignore RPC error
         }
       }
 

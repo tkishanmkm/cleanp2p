@@ -1,9 +1,10 @@
 import { createPublicClient, http } from 'viem';
-import { sepolia } from 'viem/chains';
+import { mainnet } from 'viem/chains';
 
 export const publicClient = createPublicClient({
-  chain: sepolia,
-  transport: http(process.env.ETH_SEPOLIA_RPC_URL || 'https://eth-sepolia.g.alchemy.com/v2/alch_60h82hz17l-PYtgn20DyU'),
+  chain: mainnet,
+  transport: http(process.env.ETH_RPC_URL || process.env.EVM_RPC_URL || 'https://cloudflare-eth.com'),
 });
 
-export const sepoliaClient = publicClient;
+export const ethMainnetClient = publicClient;
+export const sepoliaClient = publicClient; // backwards-compatible alias pointing to mainnet client
