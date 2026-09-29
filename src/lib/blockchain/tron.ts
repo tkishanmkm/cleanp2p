@@ -155,9 +155,11 @@ export async function getTronTransactionConfirmations(txHash: string): Promise<{
     const currentBlock = await tronWeb.trx.getCurrentBlock();
     const currentHeight = currentBlock.block_header?.raw_data?.number;
 
-    // Actual burned TRX fee (fee in Sun / 1,000,000)
-    const feeSun = Number(txInfo.fee || 0);
-    const actualCostTrx = (feeSun / 1_000_000).toFixed(6);
+    // Actual burned TRX fee (fee in Sun / 1,000,000) using exact integer arithmetic
+    const feeSun = BigInt(txInfo.fee || 0);
+    const wholeTrx = feeSun / 1000000n;
+    const fractionSun = (feeSun % 1000000n).toString().padStart(6, '0');
+    const actualCostTrx = `${wholeTrx}.${fractionSun}`;
 
     if (!currentHeight) {
       return { confirmations: 1, isConfirmed: false, success: !txInfo.receipt?.result, actualCostTrx };

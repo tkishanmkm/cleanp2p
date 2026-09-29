@@ -122,6 +122,8 @@ export async function processTronWithdrawalOnChain(
     await supabase.rpc('complete_onchain_withdrawal', {
       p_withdrawal_id: withdrawal.id,
       p_tx_hash: txid,
+      p_actual_gas_amount: 0,
+      p_gas_asset: 'TRX',
     });
   } catch (dbErr) {
     console.warn('[TRON Withdrawal Engine] DB notice on update:', dbErr);
@@ -238,9 +240,12 @@ export async function processBtcWithdrawalOnChain(
 
   const supabase = getSupabaseAdminClient();
   try {
+    const feeBtc = Number((networkFeeSat / 1e8).toFixed(8));
     await supabase.rpc('complete_onchain_withdrawal', {
       p_withdrawal_id: withdrawal.id,
       p_tx_hash: txid,
+      p_actual_gas_amount: feeBtc,
+      p_gas_asset: 'BTC',
     });
   } catch (dbErr) {
     console.warn('[BTC Withdrawal Engine] DB notice on update:', dbErr);
@@ -357,9 +362,12 @@ export async function processLtcWithdrawalOnChain(
 
   const supabase = getSupabaseAdminClient();
   try {
+    const feeLtc = Number((networkFeeLit / 1e8).toFixed(8));
     await supabase.rpc('complete_onchain_withdrawal', {
       p_withdrawal_id: withdrawal.id,
       p_tx_hash: txid,
+      p_actual_gas_amount: feeLtc,
+      p_gas_asset: 'LTC',
     });
   } catch (dbErr) {
     console.warn('[LTC Withdrawal Engine] DB notice on update:', dbErr);
@@ -442,9 +450,12 @@ export async function processEvmWithdrawalOnChain(
 
   // Settle via authoritative complete_onchain_withdrawal RPC
   try {
+    const gasAsset = (withdrawal.network_code || '').toUpperCase().includes('BEP') || (withdrawal.network_code || '').toUpperCase().includes('BSC') ? 'BNB' : 'ETH';
     await supabase.rpc('complete_onchain_withdrawal', {
       p_withdrawal_id: withdrawal.id,
       p_tx_hash: txResponse.hash,
+      p_actual_gas_amount: 0,
+      p_gas_asset: gasAsset,
     });
   } catch (dbErr) {
     console.warn('[Withdrawal Engine] DB notice on RPC execution:', dbErr);

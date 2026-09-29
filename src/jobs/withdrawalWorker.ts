@@ -291,12 +291,15 @@ export async function checkSubmittedWithdrawals(): Promise<{
       const normNet = normalizeNetworkCode(w.network);
 
       if (normNet === 'TRC20') {
-        const { isConfirmed, success } = await getTronTransactionConfirmations(w.tx_hash);
+        const { isConfirmed, success, actualCostTrx } = await getTronTransactionConfirmations(w.tx_hash);
         
-        if (isConfirmed) {
+        if (isConfirmed && success) {
+          const actualTrxStr = actualCostTrx && actualCostTrx.trim().length > 0 ? actualCostTrx.trim() : '0';
           const { error: confErr } = await supabaseAdmin.rpc('complete_onchain_withdrawal', {
             p_withdrawal_id: w.id,
             p_tx_hash: w.tx_hash,
+            p_actual_gas_amount: actualTrxStr,
+            p_gas_asset: 'TRX',
           });
           if (!confErr) confirmed++;
         } else if (!success) {
@@ -309,12 +312,16 @@ export async function checkSubmittedWithdrawals(): Promise<{
       } else if (SUPPORTED_EVM_CHAINS[normNet]) {
         const chain = SUPPORTED_EVM_CHAINS[normNet];
         const provider = getEvmProvider(normNet);
-        const { confirmations, status } = await getTransactionConfirmations(provider, w.tx_hash);
+        const { confirmations, status, actualGasCost } = await getTransactionConfirmations(provider, w.tx_hash);
+        const gasAsset = normNet === 'BEP20' ? 'BNB' : 'ETH';
 
         if (confirmations >= chain.requiredConfirmations && status !== 0) {
+          const actualGasStr = actualGasCost && actualGasCost.trim().length > 0 ? actualGasCost.trim() : '0';
           const { error: confErr } = await supabaseAdmin.rpc('complete_onchain_withdrawal', {
             p_withdrawal_id: w.id,
             p_tx_hash: w.tx_hash,
+            p_actual_gas_amount: actualGasStr,
+            p_gas_asset: gasAsset,
           });
           if (!confErr) confirmed++;
         } else if (status === 0) {
@@ -331,9 +338,28 @@ export async function checkSubmittedWithdrawals(): Promise<{
           if (res.ok) {
             const txData = await res.json();
             if (txData && txData.status && txData.status.confirmed) {
+              let actualFeeBtc = '0';
+              if (typeof txData.fee === 'number' && txData.fee >= 0) {
+                const feeSat = BigInt(txData.fee);
+                const whole = feeSat / 100000000n;
+                const fraction = (feeSat % 100000000n).toString().padStart(8, '0');
+                actualFeeBtc = `${whole}.${fraction}`;
+              } else if (Array.isArray(txData.vin) && Array.isArray(txData.vout)) {
+                const inputSumSat = txData.vin.reduce((acc: bigint, v: any) => acc + BigInt(v.prevout?.value || 0), 0n);
+                const outputSumSat = txData.vout.reduce((acc: bigint, v: any) => acc + BigInt(v.value || 0), 0n);
+                if (inputSumSat >= outputSumSat) {
+                  const feeSat = inputSumSat - outputSumSat;
+                  const whole = feeSat / 100000000n;
+                  const fraction = (feeSat % 100000000n).toString().padStart(8, '0');
+                  actualFeeBtc = `${whole}.${fraction}`;
+                }
+              }
+
               const { error: confErr } = await supabaseAdmin.rpc('complete_onchain_withdrawal', {
                 p_withdrawal_id: w.id,
                 p_tx_hash: w.tx_hash,
+                p_actual_gas_amount: actualFeeBtc,
+                p_gas_asset: 'BTC',
               });
               if (!confErr) confirmed++;
             }
@@ -348,9 +374,28 @@ export async function checkSubmittedWithdrawals(): Promise<{
           if (res.ok) {
             const txData = await res.json();
             if (txData && txData.status && txData.status.confirmed) {
+              let actualFeeLtc = '0';
+              if (typeof txData.fee === 'number' && txData.fee >= 0) {
+                const feeLit = BigInt(txData.fee);
+                const whole = feeLit / 100000000n;
+                const fraction = (feeLit % 100000000n).toString().padStart(8, '0');
+                actualFeeLtc = `${whole}.${fraction}`;
+              } else if (Array.isArray(txData.vin) && Array.isArray(txData.vout)) {
+                const inputSumLit = txData.vin.reduce((acc: bigint, v: any) => acc + BigInt(v.prevout?.value || 0), 0n);
+                const outputSumLit = txData.vout.reduce((acc: bigint, v: any) => acc + BigInt(v.value || 0), 0n);
+                if (inputSumLit >= outputSumLit) {
+                  const feeLit = inputSumLit - outputSumLit;
+                  const whole = feeLit / 100000000n;
+                  const fraction = (feeLit % 100000000n).toString().padStart(8, '0');
+                  actualFeeLtc = `${whole}.${fraction}`;
+                }
+              }
+
               const { error: confErr } = await supabaseAdmin.rpc('complete_onchain_withdrawal', {
                 p_withdrawal_id: w.id,
                 p_tx_hash: w.tx_hash,
+                p_actual_gas_amount: actualFeeLtc,
+                p_gas_asset: 'LTC',
               });
               if (!confErr) confirmed++;
             }
