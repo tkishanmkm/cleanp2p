@@ -571,6 +571,51 @@ export async function PUT(
       }
     }
 
+    // Authoritative Server-Side ±50% Reference Market Price Validation for Edited Ads
+    const effectiveAsset = String(updatedAsset || existingAd.asset_symbol || existingAd.asset || existingAd.crypto || 'USDT').toUpperCase().trim();
+    const effectiveFiat = String(updatedFiat || existingAd.fiat_symbol || existingAd.fiat_currency || existingAd.fiat || 'USD').toUpperCase().trim();
+
+    if (isFixed) {
+      const effectiveEditPrice = price !== undefined ? price : Number(existingAd.price ?? existingAd.unit_price ?? 0);
+      if (effectiveEditPrice <= 0) {
+        return NextResponse.json({ error: 'Valid fixed price is required for fixed-rate ads.' }, { status: 400 });
+      }
+
+      const { data: marketRow, error: marketError } = await admin
+        .from('crypto_market_prices')
+        .select('price_in_fiat, updated_at')
+        .eq('asset_symbol', effectiveAsset)
+        .eq('fiat_symbol', effectiveFiat)
+        .maybeSingle();
+
+      if (marketError || !marketRow || !marketRow.price_in_fiat || Number(marketRow.price_in_fiat) <= 0) {
+        return NextResponse.json(
+          { error: `Market reference price is currently unavailable for ${effectiveAsset}/${effectiveFiat}. Please try again later.` },
+          { status: 400 }
+        );
+      }
+
+      const refPrice = Number(marketRow.price_in_fiat);
+      const minAllowedPrice = refPrice * 0.50;
+      const maxAllowedPrice = refPrice * 1.50;
+
+      if (effectiveEditPrice < minAllowedPrice || effectiveEditPrice > maxAllowedPrice) {
+        return NextResponse.json(
+          {
+            error: `Fixed price must be within ±50% of the reference market price (${minAllowedPrice.toFixed(2)} - ${maxAllowedPrice.toFixed(2)} ${effectiveFiat}).`,
+          },
+          { status: 400 }
+        );
+      }
+    } else if (margin !== undefined) {
+      if (margin < -50 || margin > 50) {
+        return NextResponse.json(
+          { error: 'Margin percentage for dynamic pricing must be between -50% and +50%.' },
+          { status: 400 }
+        );
+      }
+    }
+
     // 5. Build Table-Specific Payloads & Execute Exact Update on Resolved Primary ID
     let updatedRow: any = null;
     let updateError: any = null;

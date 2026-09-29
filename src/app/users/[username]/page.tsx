@@ -2,6 +2,7 @@ import React from 'react';
 import { notFound } from 'next/navigation';
 import { getSupabaseAdminClient } from '@/lib/supabase/server';
 import UserProfileClient from './UserProfileClient';
+import { getIdentityVerificationState } from '@/utils/userPrivacy';
 
 interface PageProps {
   params: Promise<{ username: string }> | { username: string };
@@ -313,16 +314,7 @@ export default async function UserProfilePage({ params }: PageProps) {
     (profile.email && !profile.email.includes('placeholder'))
   );
 
-  const kycStatusRaw = (profile.kyc_status || profile.identity_status || '').toUpperCase();
-  const isIdVerified = Boolean(
-    profile.is_id_verified ||
-    profile.id_verified ||
-    kycStatusRaw === 'VERIFIED' ||
-    kycStatusRaw === 'APPROVED' ||
-    profile.verification_tier === 2 ||
-    profile.verification_tier === 'TIER_2'
-  );
-
+  const verification = getIdentityVerificationState(profile);
   const countryCode = (profile.country || profile.country_code || 'US').toUpperCase();
 
   return (
@@ -335,8 +327,9 @@ export default async function UserProfilePage({ params }: PageProps) {
         is_online: profile.is_online ?? false,
         username: profile.username || username,
         is_email_verified: isEmailVerified,
-        is_id_verified: isIdVerified,
-        kyc_status: kycStatusRaw || (isIdVerified ? 'VERIFIED' : 'UNVERIFIED'),
+        is_id_verified: verification.isVerified,
+        kyc_status: verification.isVerified ? 'VERIFIED' : verification.isPending ? 'PENDING' : 'UNVERIFIED',
+        verification_tier: verification.tier,
         country: countryCode,
       }}
       buyAds={buyAds}

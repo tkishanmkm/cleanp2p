@@ -24,7 +24,7 @@ import { createClient } from '@/lib/supabase/client';
 import { useAuth } from '@/components/providers/auth-provider';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { formatCurrencyValue } from '@/utils/userPrivacy';
+import { formatCurrencyValue, getIdentityVerificationState } from '@/utils/userPrivacy';
 
 interface AccountData {
   id: string;
@@ -73,27 +73,75 @@ export default function ProfilePage() {
         .eq('id', userId)
         .maybeSingle();
 
-      // 2. Fetch live completed trades with full timestamp records for real calculations
-      let completedTradesCount = profile?.completed_trades || 0;
-      let totalVolumeFiat = profile?.total_trade_volume_usd || profile?.trade_volume || 0;
+      // 2. Fetch live market prices from DB for conversion
+      const { data: dbMarketPrices } = await supabase
+        .from('crypto_market_prices')
+        .select('asset_symbol, fiat_symbol, price_in_fiat');
+
+      const marketRates: Record<string, number> = {};
+      if (dbMarketPrices && dbMarketPrices.length > 0) {
+        for (const mp of dbMarketPrices) {
+          const assetSym = String(mp.asset_symbol || '').toUpperCase();
+          const fiatSym = String(mp.fiat_symbol || '').toUpperCase();
+          const price = Number(mp.price_in_fiat);
+          if (!isNaN(price) && price > 0) {
+            marketRates[`${assetSym}_${fiatSym}`] = price;
+            if (assetSym === 'USDT') {
+              marketRates[fiatSym] = price;
+            }
+          }
+        }
+      }
+
+      // 3. Fetch live completed/released trades with full timestamp records
+      let completedTradesCount = 0;
+      let totalVolumeUSD = 0;
 
       const { data: userTrades } = await supabase
         .from('trades')
-        .select('id, buyer_id, seller_id, fiat_amount, fiat_amount_usd, crypto_amount, status, created_at, paid_at, released_at, completed_at')
+        .select('id, buyer_id, seller_id, fiat_amount, crypto_amount, amount, fiat_currency, crypto, asset_code, status, created_at, paid_at, released_at, completed_at')
         .or(`buyer_id.eq.${userId},seller_id.eq.${userId}`)
         .in('status', ['completed', 'released', 'COMPLETED', 'RELEASED']);
 
       const paymentTimes: number[] = [];
       const releaseTimes: number[] = [];
+      const processedTradeIds = new Set<string>();
 
       if (userTrades && userTrades.length > 0) {
-        completedTradesCount = userTrades.length;
-        totalVolumeFiat = userTrades.reduce((acc: number, t: any) => {
-          const val = Number(t.fiat_amount || t.fiat_amount_usd || 0);
-          return acc + (isNaN(val) ? 0 : val);
-        }, 0);
-
         for (const t of userTrades) {
+          if (!t.id || processedTradeIds.has(t.id)) continue;
+          processedTradeIds.add(t.id);
+
+          completedTradesCount += 1;
+
+          const asset = String(t.asset_code || t.crypto || 'USDT').toUpperCase();
+          const fiat = String(t.fiat_currency || 'USD').toUpperCase();
+          const cryptoAmt = Number(t.crypto_amount ?? t.amount ?? 0);
+          const fiatAmt = Number(t.fiat_amount ?? 0);
+
+          let tradeUsd = 0;
+          if (fiat === 'USD' && fiatAmt > 0) {
+            tradeUsd = fiatAmt;
+          } else if (asset === 'USDT' && cryptoAmt > 0) {
+            tradeUsd = cryptoAmt;
+          } else {
+            const fiatToUsdRate = marketRates[fiat];
+            if (fiatToUsdRate && fiatToUsdRate > 0 && fiatAmt > 0) {
+              tradeUsd = fiatAmt / fiatToUsdRate;
+            } else {
+              const cryptoUsdRate = marketRates[`${asset}_USD`];
+              if (cryptoUsdRate && cryptoUsdRate > 0 && cryptoAmt > 0) {
+                tradeUsd = cryptoAmt * cryptoUsdRate;
+              } else {
+                console.warn(`[Profile Volume] Missing market rate for trade ${t.id} (${asset}/${fiat}), counted as 0`);
+              }
+            }
+          }
+
+          if (!isNaN(tradeUsd) && tradeUsd > 0) {
+            totalVolumeUSD += tradeUsd;
+          }
+
           // Average Paid Time: when user is buyer
           if (t.buyer_id === userId) {
             const paidTimeStr = t.paid_at;
@@ -120,6 +168,19 @@ export default function ProfilePage() {
               }
             }
           }
+        }
+      }
+
+      // 4. Convert USD Volume into user's preferred currency
+      const preferredFiat = String(profile?.preferred_currency || profile?.preferred_fiat || 'USD').toUpperCase();
+      let displayVolume = totalVolumeUSD;
+
+      if (preferredFiat !== 'USD') {
+        const preferredRate = marketRates[preferredFiat] || marketRates[`USDT_${preferredFiat}`];
+        if (preferredRate && preferredRate > 0) {
+          displayVolume = totalVolumeUSD * preferredRate;
+        } else {
+          console.warn(`[Profile Volume] Rate for ${preferredFiat} unavailable, displaying raw USD`);
         }
       }
 
@@ -190,8 +251,8 @@ export default function ProfilePage() {
         full_name: profile?.full_name || (user as any)?.user_metadata?.full_name || profile?.username || 'Trader',
         username: profile?.username || (user as any)?.user_metadata?.username || 'user',
         email: user.email || profile?.email || '',
-        preferred_fiat: profile?.preferred_fiat || profile?.preferred_currency || 'USD',
-        total_volume: totalVolumeFiat,
+        preferred_fiat: preferredFiat,
+        total_volume: displayVolume,
         completed_trades: completedTradesCount,
         avg_payment_time: realAvgPaymentTime,
         avg_release_time: realAvgReleaseTime,
@@ -201,6 +262,9 @@ export default function ProfilePage() {
         is_2fa_enabled: Boolean(profile?.is_2fa_enabled || profile?.is_mfa_enabled),
         kyc_status: profile?.kyc_status || 'NOT_SUBMITTED',
         verification_tier: profile?.verification_tier || 1,
+        is_verified: profile?.is_verified,
+        id_verified: profile?.id_verified,
+        is_id_verified: profile?.is_id_verified,
       });
     } catch (err) {
       console.error('Failed to load full private profile:', err);
@@ -427,7 +491,7 @@ export default function ProfilePage() {
               <div className="flex justify-between py-1.5">
                 <span className="text-slate-500">Verification Tier</span>
                 <span className="font-semibold text-emerald-600 dark:text-emerald-400">
-                  {account.kyc_status === 'VERIFIED' || account.kyc_status === 'approved' ? 'Tier 2 (Verified - No Limits)' : 'Tier 1 ($1,000 USD Limit)'}
+                  {getIdentityVerificationState(account).tierLabel}
                 </span>
               </div>
             </CardContent>

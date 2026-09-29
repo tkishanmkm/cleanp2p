@@ -299,32 +299,11 @@ export default function SettingsPage() {
   const [password2faOtp, setPassword2faOtp] = useState('');
   const [secQuestionOtp, setSecQuestionOtp] = useState('');
 
-  const [sessions, setSessions] = useState<any[]>([
-    {
-      id: 'current-session',
-      device: 'Chrome on macOS',
-      userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36',
-      ip: '198.51.100.24',
-      country: 'US',
-      countryName: 'United States',
-      lastActive: 'Active now (Current Session)',
-      isCurrent: true,
-    },
-    {
-      id: 'session-mobile-1',
-      device: 'Safari on iOS',
-      userAgent: 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_4 like Mac OS X) AppleWebKit/605.1.15',
-      ip: '104.28.212.89',
-      country: 'GB',
-      countryName: 'United Kingdom',
-      lastActive: '2 hours ago',
-      isCurrent: false,
-    },
-  ]);
+  const [sessions, setSessions] = useState<any[]>([]);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
-    const ua = navigator.userAgent;
+    const ua = navigator.userAgent || '';
     let browser = 'Web Browser';
     if (ua.includes('Firefox')) browser = 'Mozilla Firefox';
     else if (ua.includes('Edg')) browser = 'Microsoft Edge';
@@ -338,28 +317,17 @@ export default function SettingsPage() {
     else if (ua.includes('Android')) os = 'Android Mobile';
     else if (ua.includes('iPhone') || ua.includes('iPad')) os = 'iOS Device';
 
-    const userCountry = profile?.country || 'US';
+    const userCountry = profile?.country || null;
 
     setSessions([
       {
         id: 'current-session',
         device: `${browser} on ${os}`,
         userAgent: ua,
-        ip: '198.51.100.24',
         country: userCountry,
-        countryName: profile?.country || 'United States',
+        countryName: profile?.country || null,
         lastActive: 'Active now (Current Session)',
         isCurrent: true,
-      },
-      {
-        id: 'session-mobile-1',
-        device: 'Safari Mobile on iOS',
-        userAgent: 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_4 like Mac OS X) AppleWebKit/605.1.15',
-        ip: '104.28.212.89',
-        country: 'GB',
-        countryName: 'United Kingdom',
-        lastActive: '2 hours ago',
-        isCurrent: false,
       },
     ]);
   }, [profile?.country]);
@@ -2838,13 +2806,15 @@ export default function SettingsPage() {
                                     )}
                                   </div>
                                   <div className="flex items-center gap-3 text-[11px] text-muted-foreground flex-wrap">
-                                    <span className="flex items-center gap-1.5 font-medium text-foreground">
-                                      <FlagIcon countryCode={sess.country || 'US'} className="w-4 h-3 rounded-xs inline-block" />
-                                      <span>{sess.countryName || sess.country || 'Unknown'}</span>
-                                    </span>
-                                    <span>•</span>
-                                    <span className="font-mono">{sess.ip}</span>
-                                    <span>•</span>
+                                    {sess.country && (
+                                      <>
+                                        <span className="flex items-center gap-1.5 font-medium text-foreground">
+                                          <FlagIcon countryCode={sess.country} className="w-4 h-3 rounded-xs inline-block" />
+                                          <span>{sess.countryName || sess.country}</span>
+                                        </span>
+                                        <span>•</span>
+                                      </>
+                                    )}
                                     <span>{sess.lastActive}</span>
                                   </div>
                                 </div>
@@ -2864,7 +2834,10 @@ export default function SettingsPage() {
                               ) : (
                                 <button
                                   type="button"
-                                  onClick={() => {
+                                  onClick={async () => {
+                                    try {
+                                      await (supabase.auth as any).signOut({ scope: 'others' });
+                                    } catch {}
                                     setSessions((prev) => prev.filter((s) => s.id !== sess.id));
                                     notify('success', `Session revoked for ${sess.device}.`);
                                   }}
@@ -2892,7 +2865,10 @@ export default function SettingsPage() {
                         <button
                           type="button"
                           id="sign-out-all-sessions-btn"
-                          onClick={() => {
+                          onClick={async () => {
+                            try {
+                              await (supabase.auth as any).signOut({ scope: 'others' });
+                            } catch {}
                             setSessions((prev) => prev.filter((s) => s.isCurrent));
                             notify('success', 'All other devices logged out successfully.');
                           }}

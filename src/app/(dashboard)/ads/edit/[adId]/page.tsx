@@ -408,7 +408,7 @@ export default function EditAdPage() {
   const [currentMarketPrice, setCurrentMarketPrice] = useState<number>(1.0);
   const [rateType, setRateType] = useState<'market' | 'fixed'>('market');
   const [ratePercent, setRatePercent] = useState('1.5');
-  const [fixedPrice, setFixedPrice] = useState('1.015');
+  const [fixedPrice, setFixedPrice] = useState('');
   const [minAmount, setMinAmount] = useState('10');
   const [maxAmount, setMaxAmount] = useState('1000');
   const [paymentWindow, setPaymentWindow] = useState('30');
@@ -730,6 +730,27 @@ export default function EditAdPage() {
       const calculatedPrice = rateType === 'market'
         ? (currentMarketPrice || 1.0) * (1 + marginPercentage / 100)
         : Number(fixedPrice);
+
+      if (rateType === 'fixed') {
+        const numFixed = Number(fixedPrice);
+        if (isNaN(numFixed) || numFixed <= 0) {
+          toast.error('Please enter a valid fixed price greater than 0.', { id: toastId });
+          setIsSubmitting(false);
+          return;
+        }
+        if (currentMarketPrice > 0) {
+          const minAllowed = currentMarketPrice * 0.50;
+          const maxAllowed = currentMarketPrice * 1.50;
+          if (numFixed < minAllowed || numFixed > maxAllowed) {
+            toast.error(
+              `Fixed price must be within ±50% of market reference price (${minAllowed.toFixed(2)} - ${maxAllowed.toFixed(2)} ${fiat.code})`,
+              { id: toastId }
+            );
+            setIsSubmitting(false);
+            return;
+          }
+        }
+      }
 
       const updatePayload = {
         type: adType.toUpperCase(),
@@ -1167,7 +1188,7 @@ export default function EditAdPage() {
                 <div className="flex items-center justify-between">
                   <label className="block text-xs font-medium text-gray-700 dark:text-gray-300">Fixed Price</label>
                   <span className="text-[11px] text-gray-500 dark:text-gray-400">
-                    Market base: <strong className="text-gray-700 dark:text-gray-300">{fiat.code} {currentMarketPrice ? currentMarketPrice.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '100.00'}</strong>
+                    Market base: <strong className="text-gray-700 dark:text-gray-300">{fiat.code} {currentMarketPrice ? currentMarketPrice.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '—'}</strong>
                   </span>
                 </div>
                 <div className="relative">
@@ -1176,12 +1197,25 @@ export default function EditAdPage() {
                     step="0.01"
                     value={fixedPrice}
                     onChange={(e) => setFixedPrice(e.target.value)}
+                    placeholder={currentMarketPrice ? currentMarketPrice.toFixed(2) : ''}
                     className="w-full pl-3 pr-12 py-2.5 border border-gray-200 dark:border-gray-700 bg-white dark:bg-[#202026] text-gray-900 dark:text-white rounded-lg text-sm focus:outline-none focus:ring-1 focus:ring-[#9273fc]"
                   />
                   <span className="absolute right-3 top-3 text-xs text-gray-400 font-semibold">
                     {fiat.code}
                   </span>
                 </div>
+                {currentMarketPrice > 0 && (
+                  <div className="flex items-center justify-between text-[11px] text-gray-400">
+                    <span>Allowed (±50%): {(currentMarketPrice * 0.5).toFixed(2)} – {(currentMarketPrice * 1.5).toFixed(2)} {fiat.code}</span>
+                    <button
+                      type="button"
+                      onClick={() => setFixedPrice(currentMarketPrice.toFixed(crypto === 'USDT' ? 2 : 4))}
+                      className="underline text-[#9273fc] hover:text-purple-600 cursor-pointer"
+                    >
+                      Reset to Market
+                    </button>
+                  </div>
+                )}
               </div>
             )}
 

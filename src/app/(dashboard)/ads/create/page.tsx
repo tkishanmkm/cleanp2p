@@ -387,7 +387,7 @@ export default function CreateP2PAdPage() {
   const [currentMarketPrice, setCurrentMarketPrice] = useState<number>(1.0);
   const [rateType, setRateType] = useState<'market' | 'fixed'>('market');
   const [ratePercent, setRatePercent] = useState('1.5');
-  const [fixedPrice, setFixedPrice] = useState('1.015');
+  const [fixedPrice, setFixedPrice] = useState('');
   const [minAmount, setMinAmount] = useState('10');
   const [maxAmount, setMaxAmount] = useState('1000');
   const [paymentWindow, setPaymentWindow] = useState('30');
@@ -460,13 +460,12 @@ export default function CreateP2PAdPage() {
         }
 
         const finalPrice = getBaseMarketPrice(crypto, fiat.code, fetchedPrice);
-        if (!isCancelled) {
+        if (!isCancelled && finalPrice > 0) {
           setCurrentMarketPrice(finalPrice);
-          // If in fixed mode and fixedPrice has not been set yet, initialize it
+          // If in fixed mode and fixedPrice has not been set or is empty, initialize it dynamically
           setFixedPrice((prev) => {
-            if (!prev || prev === '0' || prev === '0.00') {
-              const margin = parseFloat(ratePercent) || 0;
-              return (finalPrice * (1 + margin / 100)).toFixed(2);
+            if (!prev || prev === '0' || prev === '0.00' || prev === '1.015') {
+              return finalPrice.toFixed(crypto === 'USDT' ? 2 : 4);
             }
             return prev;
           });
@@ -699,6 +698,27 @@ export default function CreateP2PAdPage() {
       const calculatedPrice = pricingType === 'FLOAT'
         ? marketPrice * (1 + (marginPercentage / 100))
         : Number(fixedPrice);
+
+      if (pricingType !== 'FLOAT') {
+        const numFixed = Number(fixedPrice);
+        if (isNaN(numFixed) || numFixed <= 0) {
+          toast.error('Please enter a valid fixed price greater than 0.', { id: toastId });
+          setIsSubmitting(false);
+          return;
+        }
+        if (marketPrice > 0) {
+          const minAllowed = marketPrice * 0.50;
+          const maxAllowed = marketPrice * 1.50;
+          if (numFixed < minAllowed || numFixed > maxAllowed) {
+            toast.error(
+              `Fixed price must be within ±50% of market price (${minAllowed.toFixed(2)} - ${maxAllowed.toFixed(2)} ${fiatSymbol})`,
+              { id: toastId }
+            );
+            setIsSubmitting(false);
+            return;
+          }
+        }
+      }
 
       const adPayload = {
         user_id: userId,
@@ -1156,7 +1176,7 @@ export default function CreateP2PAdPage() {
                 <div className="flex items-center justify-between">
                   <label className="block text-xs font-medium text-gray-700 dark:text-gray-300">Fixed Price</label>
                   <span className="text-[11px] text-gray-500 dark:text-gray-400">
-                    Market base: <strong className="text-gray-700 dark:text-gray-300">{fiat.code} {currentMarketPrice ? currentMarketPrice.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '100.00'}</strong> (+{ratePercent || '1.5'}% auto-adjusted)
+                    Market base: <strong className="text-gray-700 dark:text-gray-300">{fiat.code} {currentMarketPrice ? currentMarketPrice.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '—'}</strong>
                   </span>
                 </div>
                 <div className="relative">
@@ -1165,12 +1185,25 @@ export default function CreateP2PAdPage() {
                     step="0.01"
                     value={fixedPrice}
                     onChange={(e) => setFixedPrice(e.target.value)}
+                    placeholder={currentMarketPrice ? currentMarketPrice.toFixed(2) : ''}
                     className="w-full pl-3 pr-12 py-2.5 border border-gray-200 dark:border-gray-700 bg-white dark:bg-[#202026] text-gray-900 dark:text-white rounded-lg text-sm focus:outline-none focus:ring-1 focus:ring-[#9273fc]"
                   />
                   <span className="absolute right-3 top-3 text-xs text-gray-400 font-semibold">
                     {fiat.code}
                   </span>
                 </div>
+                {currentMarketPrice > 0 && (
+                  <div className="flex items-center justify-between text-[11px] text-gray-400">
+                    <span>Allowed (±50%): {(currentMarketPrice * 0.5).toFixed(2)} – {(currentMarketPrice * 1.5).toFixed(2)} {fiat.code}</span>
+                    <button
+                      type="button"
+                      onClick={() => setFixedPrice(currentMarketPrice.toFixed(crypto === 'USDT' ? 2 : 4))}
+                      className="underline text-[#9273fc] hover:text-purple-600 cursor-pointer"
+                    >
+                      Reset to Market
+                    </button>
+                  </div>
+                )}
               </div>
             )}
 

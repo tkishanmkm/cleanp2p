@@ -126,20 +126,75 @@ export function parsePaymentMethods(methods: unknown): string[] {
  * Currency Symbol Formatting Helper
  */
 export function formatCurrencyValue(amount: number, fiatSymbol?: string | null): string {
-  const symbol = (fiatSymbol || 'INR').toUpperCase();
+  const symbol = (fiatSymbol || 'USD').toUpperCase();
   const symbolMap: Record<string, string> = {
-    INR: '₹',
     USD: '$',
     EUR: '€',
     GBP: '£',
+    INR: '₹',
     AED: 'AED ',
     CAD: 'CA$',
     AUD: 'AU$',
     JPY: '¥',
+    CHF: 'CHF ',
+    SGD: 'SG$',
+    NGN: '₦',
+    KES: 'KSh ',
+    BRL: 'R$',
   };
   const prefix = symbolMap[symbol] || `${symbol} `;
-  return `${prefix}${Number(amount || 0).toLocaleString('en-IN', {
+  const locale = symbol === 'INR' ? 'en-IN' : 'en-US';
+  return `${prefix}${Number(amount || 0).toLocaleString(locale, {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   })}`;
+}
+
+export interface VerificationState {
+  isVerified: boolean;
+  isPending: boolean;
+  isRejected: boolean;
+  tier: 1 | 2;
+  tierLabel: string;
+  statusLabel: string;
+}
+
+/**
+ * CANONICAL IDENTITY VERIFICATION HELPER
+ * Normalizes user verification / KYC state across all UI surfaces and profile views.
+ */
+export function getIdentityVerificationState(profile?: any): VerificationState {
+  if (!profile) {
+    return {
+      isVerified: false,
+      isPending: false,
+      isRejected: false,
+      tier: 1,
+      tierLabel: 'Tier 1 ($1,000 USD Limit)',
+      statusLabel: 'Unverified',
+    };
+  }
+
+  const rawStatus = String(profile.kyc_status || profile.id_status || profile.verification_status || '').toLowerCase().trim();
+  const rawTier = Number(profile.verification_tier) || (String(profile.verification_tier).toUpperCase() === 'TIER_2' ? 2 : 1);
+
+  const isVerified = Boolean(
+    profile.is_verified === true ||
+    profile.id_verified === true ||
+    profile.is_id_verified === true ||
+    ['approved', 'verified'].includes(rawStatus) ||
+    rawTier === 2
+  );
+
+  const isPending = !isVerified && ['pending', 'submitted', 'in_review'].includes(rawStatus);
+  const isRejected = !isVerified && ['rejected', 'declined', 'permanently_rejected'].includes(rawStatus);
+
+  return {
+    isVerified,
+    isPending,
+    isRejected,
+    tier: isVerified ? 2 : 1,
+    tierLabel: isVerified ? 'Tier 2 (Verified - No Limits)' : 'Tier 1 ($1,000 USD Limit)',
+    statusLabel: isVerified ? 'Verified' : isPending ? 'In Review' : isRejected ? 'Declined' : 'Unverified',
+  };
 }

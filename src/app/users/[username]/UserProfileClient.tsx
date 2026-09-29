@@ -25,6 +25,7 @@ import UserAvatar from '@/components/common/UserAvatar';
 import { getPresenceStatus, formatJoinedDate, usePresenceStatus } from '@/lib/presence';
 import { createClient } from '@/utils/supabase/client';
 import { countries } from '@/lib/countries';
+import { getIdentityVerificationState } from '@/utils/userPrivacy';
 
 interface UserProfileClientProps {
   profile: {
@@ -215,9 +216,13 @@ export default function UserProfileClient({
           .maybeSingle();
 
         if (latest) {
+          const verification = getIdentityVerificationState(latest);
           setProfile((prev) => ({
             ...prev,
             ...latest,
+            is_id_verified: verification.isVerified,
+            kyc_status: verification.isVerified ? 'VERIFIED' : verification.isPending ? 'PENDING' : 'UNVERIFIED',
+            verification_tier: verification.tier,
             last_seen: latest.last_seen || latest.last_seen_at || latest.last_active || prev.last_seen,
             last_seen_at: latest.last_seen_at || latest.last_seen || prev.last_seen_at,
             last_active: latest.last_active || latest.last_seen || prev.last_active,
@@ -349,31 +354,40 @@ export default function UserProfileClient({
                 )}
 
                 {/* ID / KYC Verification Badge */}
-                {profile.is_id_verified ? (
-                  <span
-                    id="badge-id-verified"
-                    className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold bg-blue-50 text-blue-700 dark:bg-blue-950/50 dark:text-blue-300 border border-blue-200 dark:border-blue-800/80"
-                  >
-                    <ShieldCheck className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
-                    ID Verified
-                  </span>
-                ) : profile.kyc_status === 'PENDING' ? (
-                  <span
-                    id="badge-id-pending"
-                    className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold bg-amber-50 text-amber-700 dark:bg-amber-950/50 dark:text-amber-300 border border-amber-200 dark:border-amber-800/80"
-                  >
-                    <Clock className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" />
-                    ID Verification Pending
-                  </span>
-                ) : (
-                  <span
-                    id="badge-id-unverified"
-                    className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-medium bg-neutral-100 text-neutral-600 dark:bg-neutral-800/80 dark:text-neutral-400 border border-neutral-200 dark:border-neutral-700"
-                  >
-                    <ShieldAlert className="w-3.5 h-3.5 opacity-70" />
-                    ID Unverified
-                  </span>
-                )}
+                {(() => {
+                  const v = getIdentityVerificationState(profile);
+                  if (v.isVerified) {
+                    return (
+                      <span
+                        id="badge-id-verified"
+                        className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold bg-blue-50 text-blue-700 dark:bg-blue-950/50 dark:text-blue-300 border border-blue-200 dark:border-blue-800/80"
+                      >
+                        <ShieldCheck className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
+                        ID Verified
+                      </span>
+                    );
+                  }
+                  if (v.isPending) {
+                    return (
+                      <span
+                        id="badge-id-pending"
+                        className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold bg-amber-50 text-amber-700 dark:bg-amber-950/50 dark:text-amber-300 border border-amber-200 dark:border-amber-800/80"
+                      >
+                        <Clock className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" />
+                        ID Verification Pending
+                      </span>
+                    );
+                  }
+                  return (
+                    <span
+                      id="badge-id-unverified"
+                      className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-medium bg-neutral-100 text-neutral-600 dark:bg-neutral-800/80 dark:text-neutral-400 border border-neutral-200 dark:border-neutral-700"
+                    >
+                      <ShieldAlert className="w-3.5 h-3.5 opacity-70" />
+                      ID Unverified
+                    </span>
+                  );
+                })()}
 
                 {/* Country of Origin Badge */}
                 <span

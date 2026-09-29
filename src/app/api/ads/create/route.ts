@@ -174,6 +174,51 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: 'Maximum trade limit must be greater than or equal to minimum limit.' }, { status: 400 });
     }
 
+    // Authoritative Server-Side ±50% Reference Market Price Validation
+    const isFixedPricing = String(cleanPayload.pricing_type || cleanPayload.rate_type || '').toUpperCase() === 'FIXED' || Boolean(cleanPayload.is_fixed);
+
+    if (isFixedPricing) {
+      if (effectivePrice === null || effectivePrice <= 0) {
+        return NextResponse.json({ error: 'Valid fixed price is required for fixed-rate ads.' }, { status: 400 });
+      }
+
+      const { data: marketRow, error: marketError } = await supabase
+        .from('crypto_market_prices')
+        .select('price_in_fiat, updated_at')
+        .eq('asset_symbol', rawAsset)
+        .eq('fiat_symbol', rawFiat)
+        .maybeSingle();
+
+      if (marketError || !marketRow || !marketRow.price_in_fiat || Number(marketRow.price_in_fiat) <= 0) {
+        return NextResponse.json(
+          { error: `Market reference price is currently unavailable for ${rawAsset}/${rawFiat}. Please try again later.` },
+          { status: 400 }
+        );
+      }
+
+      const refPrice = Number(marketRow.price_in_fiat);
+      const minAllowedPrice = refPrice * 0.50;
+      const maxAllowedPrice = refPrice * 1.50;
+
+      if (effectivePrice < minAllowedPrice || effectivePrice > maxAllowedPrice) {
+        return NextResponse.json(
+          {
+            error: `Fixed price must be within ±50% of the reference market price (${minAllowedPrice.toFixed(2)} - ${maxAllowedPrice.toFixed(2)} ${rawFiat}).`,
+          },
+          { status: 400 }
+        );
+      }
+    } else {
+      // Floating/margin pricing validation (-50% to +50%)
+      const marginPct = cleanPayload.margin_percentage !== undefined ? Number(cleanPayload.margin_percentage) : 0;
+      if (marginPct < -50 || marginPct > 50) {
+        return NextResponse.json(
+          { error: 'Margin percentage for dynamic pricing must be between -50% and +50%.' },
+          { status: 400 }
+        );
+      }
+    }
+
     // 6. Server-Side SELL Ad Spendable Balance Validation against public.wallet_assets
     if (resolvedDirection === 'SELL') {
       let requiredCrypto = 0;

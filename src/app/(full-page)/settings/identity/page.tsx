@@ -5,6 +5,7 @@ import { createClient } from '@/utils/supabase/client';
 import { ShieldCheck, UserCheck, AlertTriangle, UploadCloud, ExternalLink, ArrowLeft } from 'lucide-react';
 import Link from 'next/link';
 import { KYCVerifyButton } from '@/components/KYCVerifyButton';
+import { getIdentityVerificationState } from '@/utils/userPrivacy';
 
 export default function IdentitySettingsPage() {
   const supabase = createClient();
@@ -77,7 +78,8 @@ export default function IdentitySettingsPage() {
   }
 
   const totalTraded = Number(profile?.total_traded_usd || 0.0);
-  const isVerified = profile?.kyc_status === 'APPROVED';
+  const verification = getIdentityVerificationState(profile);
+  const isVerified = verification.isVerified;
 
   return (
     <div className="max-w-2xl mx-auto p-4 sm:p-6 space-y-8 text-white">
