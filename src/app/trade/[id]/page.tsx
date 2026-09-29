@@ -88,28 +88,6 @@ export default function TradePage() {
         if (canonicalTradeId && cleanParam !== canonicalTradeId && typeof window !== 'undefined') {
           window.history.replaceState(null, '', `/trade/${canonicalTradeId}`);
         }
-
-        // Auto-expire check on load if timer has passed
-        const curStatus = (tradeData.status || '').toLowerCase();
-        if (curStatus === 'active' || curStatus === 'pending') {
-          const createdAtMs = tradeData.created_at ? new Date(tradeData.created_at).getTime() : Date.now();
-          const windowMins = Number(tradeData.payment_window_minutes || 30);
-          const expiresMs = tradeData.expires_at || tradeData.expiresAt 
-            ? new Date(tradeData.expires_at || tradeData.expiresAt).getTime() 
-            : createdAtMs + (windowMins * 60 * 1000);
-
-          if (Date.now() >= expiresMs) {
-            // Expire immediately in background
-            const tradeIdent = tradeData.id || canonicalTradeId;
-            fetch(`/api/trades/${tradeIdent}/actions`, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ action: 'EXPIRE_TRADE' })
-            }).then(() => {
-              setTrade((prev: any) => prev ? { ...prev, status: 'EXPIRED' } : prev);
-            }).catch(console.warn);
-          }
-        }
       }
 
       // 3. Determine counterparty & role

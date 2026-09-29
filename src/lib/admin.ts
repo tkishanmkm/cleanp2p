@@ -398,7 +398,17 @@ export async function adminCancelTrade(_db: any, trade: Trade, adminId: string, 
 }
 
 export async function adminMarkTradeAsPaid(_db: any, trade: Trade, adminId: string, reason: string) {
-  await markTradeAsPaid(trade.id);
+  const { data: rpcData, error: rpcError } = await supabase.rpc('mark_p2p_trade_paid', {
+    p_trade_id: trade.id,
+    p_caller_id: adminId,
+  });
+
+  if (rpcError || (rpcData && !rpcData.success)) {
+    const errorMsg = rpcError?.message || rpcData?.message || 'Admin mark_p2p_trade_paid RPC failed.';
+    console.error('adminMarkTradeAsPaid RPC error:', errorMsg);
+    throw new Error(errorMsg);
+  }
+
   await supabase.from('admin_logs').insert([
     {
       admin_id: adminId,

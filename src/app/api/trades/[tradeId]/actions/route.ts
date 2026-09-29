@@ -71,9 +71,29 @@ export async function POST(
     if (action === 'MARK_PAID') {
       const now = new Date().toISOString();
 
-      // Ensure caller is the buyer or party to the trade
-      if (trade?.buyer_id && trade.buyer_id !== user.id) {
+      if (!trade) {
+        return NextResponse.json({ error: 'Trade not found.' }, { status: 404 });
+      }
+
+      // Ensure caller is strictly the buyer derived from the database record
+      if (trade.buyer_id !== user.id) {
         return NextResponse.json({ error: 'Only the buyer can mark this trade as paid.' }, { status: 403 });
+      }
+
+      // Check current trade state before marking paid
+      const rawStatus = String(trade.status || '').toLowerCase();
+      const rawEscrowStatus = String(trade.escrow_status || '').toLowerCase();
+
+      if (['completed', 'released'].includes(rawStatus) || ['completed', 'released'].includes(rawEscrowStatus)) {
+        return NextResponse.json({ error: 'Cannot mark paid: trade is already completed or released.' }, { status: 400 });
+      }
+
+      if (['cancelled', 'canceled', 'expired'].includes(rawStatus) || ['cancelled', 'expired'].includes(rawEscrowStatus)) {
+        return NextResponse.json({ error: `Cannot mark paid: trade is already ${rawStatus || rawEscrowStatus}.` }, { status: 400 });
+      }
+
+      if (['disputed', 'dispute'].includes(rawStatus) || rawEscrowStatus === 'disputed') {
+        return NextResponse.json({ error: 'Cannot mark paid: trade is currently in dispute.' }, { status: 400 });
       }
 
       // Fetch ad payment methods to validate
@@ -89,18 +109,16 @@ export async function POST(
           return NextResponse.json({ error: 'Failed to verify trade payment methods.' }, { status: 500 });
         }
 
-        if (!adRecord) {
-          return NextResponse.json({ error: 'Associated advertisement could not be found to verify payment methods.' }, { status: 400 });
-        }
-
-        if (Array.isArray(adRecord.payment_methods)) {
-          allowedMethods = adRecord.payment_methods;
-        } else if (typeof adRecord.payment_methods === 'string') {
-          try {
-            const parsed = JSON.parse(adRecord.payment_methods);
-            allowedMethods = Array.isArray(parsed) ? parsed : [adRecord.payment_methods];
-          } catch {
-            allowedMethods = [adRecord.payment_methods];
+        if (adRecord) {
+          if (Array.isArray(adRecord.payment_methods)) {
+            allowedMethods = adRecord.payment_methods;
+          } else if (typeof adRecord.payment_methods === 'string') {
+            try {
+              const parsed = JSON.parse(adRecord.payment_methods);
+              allowedMethods = Array.isArray(parsed) ? parsed : [adRecord.payment_methods];
+            } catch {
+              allowedMethods = [adRecord.payment_methods];
+            }
           }
         }
       }
@@ -132,45 +150,20 @@ export async function POST(
           confirmedPaymentMethod = allowedMethods[0];
         }
       } else {
-        // CASE B: ad lookup succeeded but payment_methods is empty/null, or trade has no adId
-        if (requestedPaymentMethod) {
-          confirmedPaymentMethod = requestedPaymentMethod;
-        } else if (trade?.payment_method) {
-          confirmedPaymentMethod = trade.payment_method;
-        } else {
-          return NextResponse.json({ error: 'Please select the payment method used to make payment.' }, { status: 400 });
-        }
+        confirmedPaymentMethod = requestedPaymentMethod || trade.payment_method || 'Bank Transfer';
       }
 
-      // 1. Primary update: record paid_at, marked_paid_at, escrow_status = 'PAID', and payment_method
-      const updateData: any = {
-        paid_at: now,
-        marked_paid_at: now,
-        escrow_status: 'PAID',
-        payment_method: confirmedPaymentMethod,
-      };
+      // Execute Atomic Database RPC mark_p2p_trade_paid
+      const { data: rpcData, error: rpcError } = await adminClient.rpc('mark_p2p_trade_paid', {
+        p_trade_id: actualTradeId,
+        p_caller_id: user.id,
+        p_payment_method: confirmedPaymentMethod,
+      });
 
-      let q = adminClient.from('trades').update(updateData);
-      if (isActualUuid) q = q.eq('id', actualTradeId);
-      else q = q.eq('trade_id', tradeId);
-      const { error: updateError } = await q;
-
-      if (updateError) {
-        console.error('Failed to mark trade as paid via timestamps/escrow_status:', updateError);
-        return NextResponse.json({ error: updateError.message || 'Failed to update trade status to paid.' }, { status: 400 });
-      }
-
-      // 2. Also attempt updating status: 'paid' (or uppercase 'PAID') if the database schema allows it
-      try {
-        let qStatus = adminClient.from('trades').update({ status: 'paid', payment_method: confirmedPaymentMethod });
-        if (isActualUuid) qStatus = qStatus.eq('id', actualTradeId);
-        else qStatus = qStatus.eq('trade_id', tradeId);
-        const { error: statusErr } = await qStatus;
-        if (statusErr) {
-          console.warn('Status enum update warning (recorded via escrow_status and paid_at):', statusErr.message);
-        }
-      } catch (err: any) {
-        console.warn('Status enum update exception caught:', err.message);
+      if (rpcError || (rpcData && !rpcData.success)) {
+        const errorMsg = rpcError?.message || rpcData?.message || 'Failed to mark trade as paid.';
+        console.error('mark_p2p_trade_paid RPC failed:', errorMsg);
+        return NextResponse.json({ error: errorMsg }, { status: 400 });
       }
 
       // Also sync p2p_trades if applicable
@@ -344,6 +337,96 @@ export async function POST(
       }
 
       return NextResponse.json({ success: true, message: rpcData?.message || 'Trade cancelled successfully.' });
+    }
+
+    if (action === 'EXPIRE_TRADE') {
+      const now = new Date().toISOString();
+
+      if (!trade) {
+        return NextResponse.json({ error: 'Trade not found.' }, { status: 404 });
+      }
+
+      // Check caller authorization: buyer, seller, or admin
+      const isParticipant = user.id === trade.buyer_id || user.id === trade.seller_id;
+      const isAdmin = userRole === 'admin' || user.app_metadata?.role === 'admin' || user.user_metadata?.role === 'admin';
+
+      if (!isParticipant && !isAdmin) {
+        return NextResponse.json({ error: 'Unauthorized: Only trade participants or administrators can trigger trade expiration.' }, { status: 403 });
+      }
+
+      // Check terminal status
+      const rawStatus = String(trade.status || '').toLowerCase();
+      const rawEscrowStatus = String(trade.escrow_status || '').toUpperCase();
+
+      if (
+        ['completed', 'released', 'cancelled', 'expired'].includes(rawStatus) ||
+        ['COMPLETED', 'RELEASED', 'CANCELLED', 'EXPIRED'].includes(rawEscrowStatus) ||
+        trade.cancelled_at ||
+        trade.released_at ||
+        trade.completed_at ||
+        trade.expired_at
+      ) {
+        return NextResponse.json({ error: `Cannot expire trade: Trade is already in terminal '${rawStatus || rawEscrowStatus}' state.` }, { status: 400 });
+      }
+
+      // Check paid or disputed guard
+      const isPaid = Boolean(
+        trade.paid_at ||
+        trade.marked_paid_at ||
+        rawEscrowStatus === 'PAID' ||
+        ['paid', 'buyer_marked_paid', 'payment_sent'].includes(rawStatus)
+      );
+      const isDisputed = Boolean(rawStatus === 'disputed' || rawEscrowStatus === 'DISPUTED' || trade.is_disputed);
+
+      if (isPaid) {
+        return NextResponse.json({ error: 'Cannot expire trade: Payment has already been marked by the buyer.' }, { status: 400 });
+      }
+
+      if (isDisputed) {
+        return NextResponse.json({ error: 'Cannot expire trade: A dispute is active on this trade.' }, { status: 400 });
+      }
+
+      // Check expiration timestamp
+      if (!trade.expires_at || new Date(trade.expires_at).getTime() > Date.now()) {
+        return NextResponse.json({ error: 'Trade payment window has not expired yet.' }, { status: 400 });
+      }
+
+      // Canonical RPC call
+      const { data: rpcData, error: rpcError } = await adminClient.rpc('expire_p2p_trade', {
+        p_trade_id: actualTradeId,
+      });
+
+      if (rpcError || (rpcData && !rpcData.success)) {
+        const errorMsg = rpcError?.message || rpcData?.message || 'Failed to expire trade.';
+        console.error('expire_p2p_trade RPC failed:', errorMsg);
+        return NextResponse.json({ error: errorMsg }, { status: 400 });
+      }
+
+      try {
+        await insertPaxonesSystemMessage(adminClient, {
+          tradeId: actualTradeId,
+          type: 'TRADE_EXPIRED',
+        });
+      } catch (msgErr) {
+        console.warn('System message insert warning:', msgErr);
+      }
+
+      const participantIds = [trade.buyer_id, trade.seller_id].filter(Boolean);
+      for (const pid of participantIds) {
+        try {
+          await adminClient.from('notifications').insert({
+            user_id: pid,
+            title: 'Trade Expired',
+            message: 'Trade payment window expired. Any locked escrow deposit has been refunded to the seller.',
+            type: 'trade_action',
+            is_read: false,
+            metadata: { link: `/trade/${actualTradeId}` },
+            created_at: now,
+          }).select().maybeSingle();
+        } catch (_) {}
+      }
+
+      return NextResponse.json({ success: true, message: rpcData?.message || 'Trade expired successfully.' });
     }
 
     return NextResponse.json({ error: 'Invalid action' }, { status: 400 });

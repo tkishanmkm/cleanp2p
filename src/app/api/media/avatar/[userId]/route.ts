@@ -46,15 +46,33 @@ export async function GET(
       const { data: profile } = await admin
         .from('profiles')
         .select('avatar_url, photo_url')
-        .or(`id.eq.${userId},user_id.eq.${userId}`)
+        .eq('id', userId)
         .maybeSingle();
 
       if (profile) {
         profileFound = true;
         avatarUrl = profile.avatar_url || profile.photo_url || null;
       }
+
+      if (!profileFound) {
+        const { data: profByUsername } = await admin
+          .from('profiles')
+          .select('avatar_url, photo_url')
+          .ilike('username', userId)
+          .maybeSingle();
+
+        if (profByUsername) {
+          profileFound = true;
+          avatarUrl = profByUsername.avatar_url || profByUsername.photo_url || null;
+        }
+      }
     } catch (dbErr) {
       console.warn('Profile fetch error in avatar media proxy:', dbErr);
+    }
+
+    if (avatarUrl && typeof avatarUrl === 'string') {
+      avatarUrl = avatarUrl.trim();
+      if (avatarUrl === '') avatarUrl = null;
     }
 
     // 2. Handle base64 data URIs

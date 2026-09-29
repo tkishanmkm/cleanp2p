@@ -114,7 +114,22 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'You are not a participant in this trade' }, { status: 403 });
     }
 
+    // Verify trade is completed/released before feedback can be given
+    const rawStatus = String(trade.status || '').toLowerCase();
+    const rawEscrowStatus = String(trade.escrow_status || '').toUpperCase();
+    const isCompleted =
+      ['completed', 'released'].includes(rawStatus) ||
+      ['COMPLETED', 'RELEASED'].includes(rawEscrowStatus) ||
+      Boolean(trade.completed_at || trade.released_at);
+
+    if (!isCompleted) {
+      return NextResponse.json({ error: 'Feedback can only be submitted for completed or released trades.' }, { status: 400 });
+    }
+
     const effectiveCounterpartId = counterpartId || (user.id === buyerId ? sellerId : buyerId);
+    if (user.id === effectiveCounterpartId) {
+      return NextResponse.json({ error: 'Cannot submit feedback for yourself.' }, { status: 400 });
+    }
 
     // Get current user's username
     const { data: userProfile } = await admin

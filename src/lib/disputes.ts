@@ -75,79 +75,48 @@ export async function openDispute(
 
   // Determine server or client context
   const isServer = typeof window === 'undefined';
-  const supabase = isServer ? await createServerClient() : clientSupabase;
+  const fullReason = explanation ? `${reason}: ${explanation}` : reason;
 
-  // 1. Update trade status
-  await supabase
-    .from('trades')
-    .update({ status: 'disputed' })
-    .eq('id', tradeId);
+  if (!isServer) {
+    // 1. Client context: dispatch through secure canonical API route
+    const res = await fetch(`/api/trades/${tradeId}/dispute`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ reason: fullReason }),
+    });
 
-  // 2. Fetch trade details if missing
-  const { data: tradeData } = await supabase
-    .from('trades')
-    .select('*')
-    .eq('id', tradeId)
-    .maybeSingle();
-
-  const buyerId = tradeData?.buyer_id;
-  const sellerId = tradeData?.seller_id;
-  tradePublicId = tradePublicId || (tradeData as any)?.public_id || (tradeData as any)?.publicId || tradeData?.id || tradeId;
-  paymentMethod = paymentMethod || tradeData?.payment_method || tradeData?.paymentMethod || '';
-
-  // Get opener username if needed
-  if (openerId && (!openerUsername || openerUsername === 'User')) {
-    const { data: opProf } = await supabase.from('profiles').select('username').eq('id', openerId).maybeSingle();
-    if (opProf?.username) openerUsername = opProf.username;
+    const resData = await res.json().catch(() => ({}));
+    if (!res.ok || resData.error) {
+      throw new Error(resData.error || 'Failed to open dispute.');
+    }
+    return;
   }
 
-  // 3. Insert dispute record
-  await supabase.from('disputes').insert([
-    {
-      trade_id: tradeId,
-      opened_by: openerId,
-      reason: reason,
-      explanation: explanation,
-      status: 'open',
-      created_at: new Date().toISOString(),
-    },
-  ]);
-
-  // 4. Official Paxones Dispute System Message in chat
-  await insertPaxonesSystemMessage(supabase, {
-    tradeId,
-    type: 'TRADE_DISPUTED',
-    openerUsername: openerUsername,
-    disputeReason: reason,
-    disputeExplanation: explanation,
-    paymentMethod: paymentMethod
+  // 2. Server context: execute canonical atomic RPC
+  const supabase = await createServerClient();
+  const { data: rpcData, error: rpcError } = await supabase.rpc('raise_trade_dispute', {
+    p_trade_id: tradeId,
+    p_user_id: openerId || null,
+    p_reason: fullReason,
   });
 
-  // 5. Notifications
-  const opponentId = openerId === buyerId ? sellerId : buyerId;
-  const notifications = [
-    {
-      user_id: openerId,
-      title: 'Dispute Opened',
-      message: `You have successfully opened a dispute for trade ${tradePublicId}. Please upload your evidence in the trade chat.`,
-      type: 'dispute',
-      metadata: { link: `/trade/${tradeId}` },
-      is_read: false,
-      created_at: new Date().toISOString(),
-    },
-  ];
-
-  if (opponentId) {
-    notifications.push({
-      user_id: opponentId,
-      title: 'Trade Disputed',
-      message: `Dispute opened on trade ${tradePublicId}. Reason: "${reason}". Please submit counter-evidence in the chat.`,
-      type: 'dispute',
-      metadata: { link: `/trade/${tradeId}` },
-      is_read: false,
-      created_at: new Date().toISOString(),
-    });
+  if (rpcError || (rpcData && !rpcData.success)) {
+    throw new Error(rpcError?.message || rpcData?.message || 'Failed to raise dispute via canonical RPC.');
   }
 
-  await supabase.from('notifications').insert(notifications);
+  try {
+    const { data: tradeData } = await supabase.from('trades').select('buyer_id, seller_id').eq('id', tradeId).maybeSingle();
+    const pIds = [tradeData?.buyer_id, tradeData?.seller_id].filter(Boolean);
+    for (const pid of pIds) {
+      await supabase.from('notifications').insert({
+        user_id: pid,
+        title: 'Trade Disputed',
+        message: `Dispute opened for trade: ${fullReason}`,
+        type: 'dispute',
+        is_read: false,
+        metadata: { link: `/trade/${tradeId}` },
+        created_at: new Date().toISOString(),
+      });
+    }
+  } catch (_) {}
 }

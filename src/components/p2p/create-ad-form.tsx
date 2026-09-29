@@ -245,34 +245,62 @@ export function CreateAdForm({ ad }: CreateAdFormProps) {
     return () => { isMounted = false; };
   }, [adCreatorId]);
 
-  const form = useForm<AdFormValues>({
-    resolver: zodResolver(adFormSchema),
-    shouldUnregister: false,
-    defaultValues: ad
-      ? {
-        ...ad,
-        ratePercent: ad.ratePercent ?? 5,
-        paymentTimeLimit: ad.paymentTimeLimit || 30,
-        minCompletedTrades: ad.minCompletedTrades || 0,
-        paymentMethods: ad.paymentMethods || [],
-        tags: ad.tags || [],
-        targetedCountries: ad.targetedCountries || [],
-        blockedCountries: ad.blockedCountries || [],
-      }
-      : {
+  const initialValues = useMemo<AdFormValues>(() => {
+    if (!ad) {
+      return {
         adType: 'buy',
-        crypto: "BTC",
+        crypto: "USDT",
         fiatCurrency: "USD",
         paymentMethods: [],
         rateType: "market",
         ratePercent: 5,
         paymentTimeLimit: 30,
         minCompletedTrades: 0,
+        minAmount: 10,
+        maxAmount: 1000,
+        terms: '',
         tags: [],
         targetedCountries: [],
         blockedCountries: [],
-      },
+      };
+    }
+
+    const resolvedAdType = String(ad.adType || (ad as any).type || (ad as any).ad_type || 'buy').toLowerCase().includes('sell') ? 'sell' : 'buy';
+    const resolvedCrypto = String(ad.crypto || (ad as any).asset_symbol || (ad as any).crypto_symbol || (ad as any).asset || (ad as any).coin || 'USDT').toUpperCase();
+    const resolvedFiat = String(ad.fiatCurrency || (ad as any).fiat_symbol || (ad as any).fiat_currency || (ad as any).fiat || (ad as any).currency || 'USD').toUpperCase();
+    const resolvedRateType = (ad.rateType || (ad as any).rate_type || (ad as any).pricing_type === 'FIXED' || (ad as any).is_fixed) ? (((ad as any).pricing_type === 'FLOAT' || (ad as any).rate_type === 'market') ? 'market' : 'fixed') : 'market';
+
+    return {
+      adType: resolvedAdType as 'buy' | 'sell',
+      crypto: resolvedCrypto,
+      fiatCurrency: resolvedFiat,
+      paymentMethods: ad.paymentMethods || (ad as any).payment_methods || [],
+      rateType: resolvedRateType as 'market' | 'fixed',
+      ratePercent: ad.ratePercent ?? (ad as any).rate_percent ?? (ad as any).margin ?? 5,
+      fixedRate: ad.fixedRate ?? (ad as any).fixed_rate ?? (ad as any).price ?? (ad as any).unit_price,
+      minAmount: Number(ad.minAmount ?? (ad as any).min_amount ?? (ad as any).min_limit ?? 10),
+      maxAmount: Number(ad.maxAmount ?? (ad as any).max_amount ?? (ad as any).max_limit ?? 1000),
+      paymentTimeLimit: Number(ad.paymentTimeLimit || (ad as any).payment_time_limit || (ad as any).payment_window || 30),
+      minCompletedTrades: Number(ad.minCompletedTrades || (ad as any).min_completed_trades || 0),
+      terms: ad.terms || (ad as any).terms_conditions || '',
+      offerLabel: ad.offerLabel || (ad as any).offer_label || '',
+      tags: ad.tags || (ad as any).offer_tags || [],
+      targetedCountries: ad.targetedCountries || (ad as any).targeted_countries || [],
+      blockedCountries: ad.blockedCountries || (ad as any).blocked_countries || [],
+    };
+  }, [ad]);
+
+  const form = useForm<AdFormValues>({
+    resolver: zodResolver(adFormSchema),
+    shouldUnregister: false,
+    defaultValues: initialValues,
   });
+
+  useEffect(() => {
+    if (ad) {
+      form.reset(initialValues);
+    }
+  }, [ad, initialValues, form]);
 
   const watchedAdType = form.watch('adType');
   const watchedCrypto = form.watch('crypto');

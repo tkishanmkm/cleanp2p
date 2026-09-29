@@ -677,44 +677,6 @@ export function TradeChat({
   const isBuyer = currentUserId === (trade?.buyerId || trade?.buyer_id);
   const userRoleLabel = isBuyer ? 'Buyer' : 'Seller';
 
-  // Auto-expire trade and post system message if timer is finished
-  useEffect(() => {
-    let isMounted = true;
-    const triggerExpire = async () => {
-      if (isExpired && tradeStatus !== 'expired' && tradeId) {
-        try {
-          // Post official system message for expiration
-          await fetch(`/api/trades/${encodeURIComponent(tradeId)}/system-message`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              type: 'TRADE_EXPIRED',
-              metadata: {
-                buyerUsername: isBuyer ? currentProfileUsername : (opponent?.username || 'Buyer'),
-                sellerUsername: isBuyer ? (opponent?.username || 'Seller') : currentProfileUsername,
-                coinAmount: trade?.crypto_amount || trade?.amount,
-                coinSymbol: trade?.crypto || trade?.asset_symbol || 'USDT'
-              }
-            })
-          }).catch(() => {});
-
-          // Trigger trade status update and backend expiration handler
-          await fetch(`/api/trades/${encodeURIComponent(tradeId)}/actions`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ action: 'EXPIRE_TRADE' })
-          });
-        } catch (e) {
-          console.error('Failed to auto-expire trade in chat:', e);
-        }
-      }
-    };
-    triggerExpire();
-    return () => {
-      isMounted = false;
-    };
-  }, [isExpired, tradeStatus, tradeId, isBuyer, opponent?.username, trade?.crypto_amount, trade?.amount, trade?.crypto, trade?.asset_symbol]);
-
   // Persist duration_seconds to trade record upon completion
   useEffect(() => {
     if (isTradeStopped && tradeId) {

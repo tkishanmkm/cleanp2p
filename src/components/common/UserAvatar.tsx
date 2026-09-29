@@ -34,15 +34,21 @@ export default function UserAvatar({
     '2xl': 'w-24 h-24 text-2xl',
   }
 
+  // Sanitize candidate sources
+  const cleanAvatarUrl = avatarUrl && typeof avatarUrl === 'string' && avatarUrl.trim() !== '' ? avatarUrl.trim() : null
+  const cleanPhotoUrl = photoUrl && typeof photoUrl === 'string' && photoUrl.trim() !== '' ? photoUrl.trim() : null
+  const cleanPhotoURL = photoURL && typeof photoURL === 'string' && photoURL.trim() !== '' ? photoURL.trim() : null
+  const cleanUserId = userId && typeof userId === 'string' && userId.trim() !== '' ? userId.trim() : null
+
   // Resolve best source
-  const src = avatarUrl || photoUrl || photoURL || (userId ? `/api/media/avatar/${userId}` : null)
+  const src = cleanAvatarUrl || cleanPhotoUrl || cleanPhotoURL || (cleanUserId ? `/api/media/avatar/${cleanUserId}` : null)
 
   useEffect(() => {
     setHasError(false)
   }, [src])
 
-  const initials = username
-    ? username.replace(/[^a-zA-Z0-9]/g, '').slice(0, 2).toUpperCase()
+  const initials = username && typeof username === 'string' && username.trim() !== ''
+    ? username.replace(/[^a-zA-Z0-9]/g, '').slice(0, 2).toUpperCase() || 'PX'
     : 'PX'
 
   if (src && !hasError) {
@@ -60,7 +66,7 @@ export default function UserAvatar({
   // Fallback avatar with clean initials
   return (
     <div
-      className={`${sizeClasses[size]} rounded-full bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-200 font-bold flex items-center justify-center overflow-hidden border border-neutral-200 dark:border-neutral-700 shrink-0 ${className}`}
+      className={`${sizeClasses[size]} rounded-full bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-200 font-bold flex items-center justify-center overflow-hidden border border-neutral-200 dark:border-neutral-700 shrink-0 select-none ${className}`}
     >
       <span>{initials}</span>
     </div>

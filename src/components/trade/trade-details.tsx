@@ -477,7 +477,30 @@ function OpenDisputeDialog({
     }
     setIsSubmitting(true);
     try {
-      await disputeTrade(trade, finalReason, explanation, currentUserId, currentUsername);
+      const fullReason = `${finalReason}: ${explanation.trim()}`;
+      const res = await fetch(`/api/trades/${trade.id}/dispute`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ reason: fullReason }),
+      });
+      const data = await res.json();
+      if (!res.ok || data.error) {
+        throw new Error(data.error || 'Failed to open dispute');
+      }
+
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(
+          new CustomEvent('trade-updated', {
+            detail: {
+              status: 'disputed',
+              escrow_status: 'DISPUTED',
+              is_disputed: true,
+              dispute_reason: fullReason,
+            },
+          })
+        );
+      }
+
       toast({ title: 'Dispute Opened', description: 'A moderator has been assigned to this trade.' });
       setIsOpen(false);
     } catch (err: any) {
@@ -706,14 +729,19 @@ const ActionButtons = ({
     tradeStatus === 'payment_sent' || 
     isTradeInDispute
   );
-  // Buyer can cancel when: active/pending, marked paid, or in dispute (with mandatory confirmation checkbox)
-  const canBuyerCancel = !isTradeExpired && !isTerminal && isBuyer && (
-    tradeStatus === 'active' || 
-    tradeStatus === 'pending' || 
+  // CRITICAL ESCROW RULE: Buyer can cancel ONLY when the trade is in an active/pending UNPAID state,
+  // before payment is marked or sent, and when no dispute is active.
+  const isPaidOrMarked = Boolean(
+    trade?.paid_at || 
+    trade?.marked_paid_at || 
     tradeStatus === 'paid' || 
     tradeStatus === 'buyer_marked_paid' || 
-    tradeStatus === 'payment_sent' || 
-    isTradeInDispute
+    tradeStatus === 'payment_sent' ||
+    String(trade?.escrow_status || '').toUpperCase() === 'PAID'
+  );
+  const canBuyerCancel = !isTradeExpired && !isTerminal && !isTradeInDispute && !isPaidOrMarked && isBuyer && (
+    tradeStatus === 'active' || 
+    tradeStatus === 'pending'
   );
 
   const handleMarkAsPaid = async () => {
@@ -811,6 +839,15 @@ const ActionButtons = ({
   };
 
   const handleCancelTrade = async () => {
+    if (isPaidOrMarked || isTradeInDispute || isTerminal) {
+      toast({
+        variant: 'destructive',
+        title: 'Cancellation Prohibited',
+        description: 'Trades that have been marked as paid, are in dispute, or are completed/cancelled cannot be cancelled.',
+      });
+      return;
+    }
+
     setIsSubmittingAction(true);
     try {
       const res = await fetch(`/api/trades/${trade.id}/actions`, {
@@ -970,19 +1007,17 @@ const ActionButtons = ({
           <AlertDialog>
             <AlertDialogTrigger asChild>
               <Button variant="outline" size="sm" className="w-full text-xs font-bold text-destructive border-destructive/30 hover:bg-destructive/10">
-                <XCircle className="mr-1.5 h-3.5 w-3.5" /> {isTradeInDispute ? 'Cancel Trade (Withdraw Dispute)' : 'Cancel Trade'}
+                <XCircle className="mr-1.5 h-3.5 w-3.5" /> Cancel Trade
               </Button>
             </AlertDialogTrigger>
             <AlertDialogContent className="sm:max-w-md">
               <AlertDialogHeader>
                 <AlertDialogTitle className="text-base text-destructive flex items-center gap-2">
                   <AlertCircle className="h-5 w-5" />
-                  {isTradeInDispute ? 'Cancel Trade & Close Dispute?' : 'Are you sure you want to cancel this trade?'}
+                  Are you sure you want to cancel this trade?
                 </AlertDialogTitle>
                 <AlertDialogDescription className="text-xs text-foreground/80">
-                  {isTradeInDispute
-                    ? 'Cancelling will close this dispute immediately and return the full locked crypto balance (including escrow fee) back to the seller. Only confirm if you agree to cancel this transaction.'
-                    : 'Only confirm cancellation if you have not made the required payment. False cancellation information may affect dispute resolution and account status.'}
+                  Only confirm cancellation if you have not made the required payment. The locked escrow deposit will be immediately returned to the seller.
                 </AlertDialogDescription>
               </AlertDialogHeader>
               <div className="space-y-3 py-2">
@@ -994,9 +1029,7 @@ const ActionButtons = ({
                     className="mt-0.5"
                   />
                   <Label htmlFor="did-not-pay-check" className="text-xs font-semibold leading-snug cursor-pointer">
-                    {isTradeInDispute
-                      ? 'I confirm that I want to cancel this trade and return locked funds to the seller'
-                      : 'I confirm that I have not sent payment'}
+                    I confirm that I have not sent payment
                   </Label>
                 </div>
               </div>
@@ -1008,7 +1041,7 @@ const ActionButtons = ({
                   className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
                 >
                   {isSubmittingAction && <Loader2 className="h-4 w-4 animate-spin mr-1.5" />}
-                  {isTradeInDispute ? 'Confirm & Close Dispute' : 'Confirm Cancellation'}
+                  Confirm Cancellation
                 </AlertDialogAction>
               </AlertDialogFooter>
             </AlertDialogContent>
@@ -1708,27 +1741,6 @@ export function TradeDetails({
   const isExpired = tradeStatus === 'expired' || (isCountdownActive && (paymentTimeRemaining.isFinished || (dynamicExpiresDate.getTime() > 0 && dynamicExpiresDate.getTime() <= Date.now())));
   const effectiveTradeStatus = isExpired ? 'expired' : tradeStatus;
   const showReopen = ['cancelled', 'expired'].includes(effectiveTradeStatus);
-
-  useEffect(() => {
-    let isMounted = true;
-    const expireTrade = async () => {
-      if (isExpired && tradeStatus !== 'expired' && trade?.id) {
-        try {
-          await fetch(`/api/trades/${trade.id}/actions`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ action: 'EXPIRE_TRADE' })
-          });
-        } catch (e) {
-          console.error('Failed to auto-expire trade:', e);
-        }
-      }
-    };
-    expireTrade();
-    return () => {
-      isMounted = false;
-    };
-  }, [isExpired, tradeStatus, trade?.id]);
 
   const showFeedbackSection = effectiveTradeStatus === 'released' || effectiveTradeStatus === 'completed';
   const showActions = !isExpired && (

@@ -289,20 +289,17 @@ export async function cancelTrade(
     const tradeId = typeof tradeOrId === 'string' ? tradeOrId : tradeOrId?.id || tradeOrId?.tradeId;
     const cancelReason = reason || 'Cancelled by buyer.';
     
-    await supabase
-      .from('trades')
-      .update({
-        status: 'cancelled',
-        cancellation_reason: cancelReason,
-        updated_at: new Date().toISOString(),
-      })
-      .eq('id', tradeId);
-
-    // Insert official Paxones system message into trade_messages
-    await insertPaxonesSystemMessage(supabase, {
-      tradeId,
-      type: 'TRADE_CANCELLED'
+    // Dispatch to canonical trade actions API route which executes cancel_p2p_trade RPC
+    const res = await fetch(`/api/trades/${encodeURIComponent(tradeId)}/actions`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'CANCEL_TRADE', reason: cancelReason }),
     });
+
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || data.error) {
+      throw new Error(data.error || 'Failed to cancel trade.');
+    }
 
     return { success: true };
   } catch (err) {
@@ -318,59 +315,42 @@ export async function addReceiptToTrade(
   tradeId: string,
   receiptUrl: string
 ): Promise<void> {
-  await supabase
-    .from('trades')
-    .update({
-      payment_receipt_url: receiptUrl,
-      updated_at: new Date().toISOString(),
-    })
-    .eq('id', tradeId);
+  try {
+    await supabase.from('trade_messages').insert([
+      {
+        trade_id: tradeId,
+        message: 'Payment proof / receipt uploaded.',
+        media_url: receiptUrl,
+        media_type: 'image',
+        created_at: new Date().toISOString(),
+      },
+    ]);
+  } catch (e) {
+    console.warn('addReceiptToTrade fallback error:', e);
+  }
 }
 
 /**
  * Marks a trade as paid in Supabase.
  */
 export async function markTradeAsPaid(
-  tradeOrId: any
+  tradeOrId: any,
+  paymentMethod?: string
 ): Promise<{ success: boolean }> {
   try {
     const tradeId = typeof tradeOrId === 'string' ? tradeOrId : tradeOrId?.id || tradeOrId?.tradeId;
 
-    const { data: tradeData } = await supabase
-      .from('trades')
-      .select('*')
-      .eq('id', tradeId)
-      .maybeSingle();
-
-    await supabase
-      .from('trades')
-      .update({
-        status: 'paid',
-        paid_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-      })
-      .eq('id', tradeId);
-
-    // Fetch usernames for roles
-    let buyerName = 'Buyer';
-    let sellerName = 'Seller';
-
-    if (tradeData?.buyer_id) {
-      const { data: bp } = await supabase.from('profiles').select('username').eq('id', tradeData.buyer_id).maybeSingle();
-      if (bp?.username) buyerName = bp.username;
-    }
-    if (tradeData?.seller_id) {
-      const { data: sp } = await supabase.from('profiles').select('username').eq('id', tradeData.seller_id).maybeSingle();
-      if (sp?.username) sellerName = sp.username;
-    }
-
-    // Insert official Paxones system message
-    await insertPaxonesSystemMessage(supabase, {
-      tradeId,
-      type: 'MARKED_PAID',
-      buyerUsername: buyerName,
-      sellerUsername: sellerName
+    // Dispatch to canonical trade actions API route which executes mark_p2p_trade_paid RPC
+    const res = await fetch(`/api/trades/${encodeURIComponent(tradeId)}/actions`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'MARK_PAID', paymentMethod }),
     });
+
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || data.error) {
+      throw new Error(data.error || 'Failed to mark trade as paid.');
+    }
 
     return { success: true };
   } catch (err) {
@@ -380,72 +360,24 @@ export async function markTradeAsPaid(
 }
 
 /**
- * @deprecated Legacy non-atomic escrow release helper.
- * All active financial settlements now use canonical RPC public.release_trade_escrow.
+ * Escrow release helper routing to canonical release_trade_escrow RPC.
  */
 export async function releaseFundsFromEscrow(
-  tradeId: string
+  tradeId: string,
+  totpCode?: string
 ): Promise<{ success: boolean }> {
   try {
-    const { data: tradeData } = await supabase
-      .from('trades')
-      .select('*')
-      .eq('id', tradeId)
-      .maybeSingle();
-
-    await supabase
-      .from('trades')
-      .update({
-        status: 'released',
-        released_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-      })
-      .eq('id', tradeId);
-
-    // Increment completed_trades in profiles table for buyer and seller
-    let buyerName = 'buyer';
-    let sellerName = 'seller';
-
-    if (tradeData?.buyer_id) {
-      const { data: bProf } = await supabase
-        .from('profiles')
-        .select('completed_trades, username')
-        .eq('id', tradeData.buyer_id)
-        .maybeSingle();
-      if (bProf?.username) buyerName = bProf.username;
-      await supabase
-        .from('profiles')
-        .update({ completed_trades: (bProf?.completed_trades || 0) + 1 })
-        .eq('id', tradeData.buyer_id);
-    }
-
-    if (tradeData?.seller_id) {
-      const { data: sProf } = await supabase
-        .from('profiles')
-        .select('completed_trades, username')
-        .eq('id', tradeData.seller_id)
-        .maybeSingle();
-      if (sProf?.username) sellerName = sProf.username;
-      await supabase
-        .from('profiles')
-        .update({ completed_trades: (sProf?.completed_trades || 0) + 1 })
-        .eq('id', tradeData.seller_id);
-    }
-
-    await completeEscrow(tradeId);
-
-    const coinAmount = Number(tradeData?.amount ?? tradeData?.crypto_amount ?? 0);
-    const coinSymbol = tradeData?.crypto ?? tradeData?.asset_symbol ?? 'BTC';
-
-    // Insert official Paxones Completed system message
-    await insertPaxonesSystemMessage(supabase, {
-      tradeId,
-      type: 'TRADE_COMPLETED',
-      sellerUsername: sellerName,
-      buyerUsername: buyerName,
-      coinAmount: coinAmount,
-      coinSymbol: coinSymbol
+    // Dispatch to canonical trade actions API route which executes release_trade_escrow RPC
+    const res = await fetch(`/api/trades/${encodeURIComponent(tradeId)}/actions`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'RELEASE_ESCROW', totpCode: (totpCode || '').trim() }),
     });
+
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || data.error) {
+      throw new Error(data.error || 'Failed to release funds from escrow.');
+    }
 
     return { success: true };
   } catch (err) {
@@ -456,20 +388,19 @@ export async function releaseFundsFromEscrow(
 
 /**
  * Claims escrow funds for a trade.
+ * In the canonical model, release_trade_escrow credits wallet_assets atomically in database.
  */
 export async function claimFundsForTrade(
   _dbOrClient: any,
   trade: any,
   buyerId: string
 ): Promise<void> {
-  const tradeId = typeof trade === 'string' ? trade : trade?.id;
-  await supabase
-    .from('trades')
-    .update({
-      claimed_by_buyer: true,
-      updated_at: new Date().toISOString(),
-    })
-    .eq('id', tradeId);
+  if (typeof window !== 'undefined') {
+    const tradeId = typeof trade === 'string' ? trade : trade?.id;
+    try {
+      sessionStorage.setItem(`trade_funds_claimed_${tradeId}_${buyerId}`, 'true');
+    } catch {}
+  }
 }
 
 /**

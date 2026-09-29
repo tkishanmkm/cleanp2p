@@ -207,6 +207,7 @@ export async function POST(req: NextRequest) {
       p_payment_method: resolvedPaymentMethod,
       p_trade_ref: shortRef,
       p_idempotency_key: idempotencyKey,
+      p_caller_id: user.id,
     });
 
     if (rpcError) {

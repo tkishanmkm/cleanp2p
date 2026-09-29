@@ -56,7 +56,7 @@ export default async function AdDetailPage({ params }: PageProps) {
   }
 
   // 2. Fetch Profile safely with admin fallback
-  const sellerUserId = ad.user_id || ad.userId
+  const sellerUserId = ad.user_id || ad.userId || ad.seller_id || ad.creator_id || ad.user?.id || ad.user?.userId || (typeof ad.user === 'string' ? ad.user : null)
   let advertiserProfile: any = null
   if (sellerUserId) {
     try {
@@ -70,32 +70,36 @@ export default async function AdDetailPage({ params }: PageProps) {
       console.warn('Error fetching profile:', err)
     }
 
-    if (!advertiserProfile && ad.user_display_name) {
+    if (!advertiserProfile && (ad.user_display_name || ad.username || ad.user?.username)) {
+      const lookupName = ad.user_display_name || ad.username || ad.user?.username
       try {
         const { data: prof } = await adminClient
           .from('profiles')
           .select('*')
-          .ilike('username', ad.user_display_name)
+          .ilike('username', lookupName)
           .maybeSingle()
         advertiserProfile = prof
       } catch {}
     }
   }
 
+  const rawUsername = advertiserProfile?.username || advertiserProfile?.display_name || ad.user_display_name || ad.username || ad.user?.username || 'Trader';
+  const rawAvatarUrl = advertiserProfile?.avatar_url || advertiserProfile?.photo_url || ad.avatar_url || ad.user_avatar_url || ad.photo_url || ad.photoURL || ad.user?.photoURL || ad.user?.avatar_url || (sellerUserId ? `/api/media/avatar/${sellerUserId}` : null);
+
   if (advertiserProfile) {
     advertiserProfile = {
       ...advertiserProfile,
       id: advertiserProfile.id || sellerUserId,
-      username: advertiserProfile.username || ad.user_display_name || ad.username || 'Trader',
-      avatar_url: advertiserProfile.avatar_url || advertiserProfile.photo_url || ad.avatar_url || ad.user_avatar_url || ad.photo_url || (sellerUserId ? `/api/media/avatar/${sellerUserId}` : null),
-      photo_url: advertiserProfile.photo_url || advertiserProfile.avatar_url || ad.photo_url || ad.user_avatar_url || (sellerUserId ? `/api/media/avatar/${sellerUserId}` : null),
+      username: rawUsername,
+      avatar_url: rawAvatarUrl,
+      photo_url: rawAvatarUrl,
     };
   } else {
     advertiserProfile = {
       id: sellerUserId,
-      username: ad.user_display_name || ad.username || 'Trader',
-      avatar_url: ad.avatar_url || ad.user_avatar_url || ad.photo_url || ad.photoURL || (sellerUserId ? `/api/media/avatar/${sellerUserId}` : null),
-      photo_url: ad.photo_url || ad.avatar_url || ad.user_avatar_url || (sellerUserId ? `/api/media/avatar/${sellerUserId}` : null),
+      username: rawUsername,
+      avatar_url: rawAvatarUrl,
+      photo_url: rawAvatarUrl,
       created_at: ad.created_at || ad.createdAt
     };
   }

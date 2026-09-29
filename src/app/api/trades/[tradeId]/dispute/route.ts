@@ -74,66 +74,16 @@ export async function POST(
     const now = new Date().toISOString();
     const disputeReason = reason || 'Non-responsive counterparty or payment issue';
 
-    // Call stored RPC procedure if available
-    let rpcSucceeded = false;
-    let rpcResult: any = null;
+    // Execute Atomic Dispute Opening via Canonical Database RPC
+    const { data: rpcData, error: rpcError } = await supabase.rpc('raise_trade_dispute', {
+      p_trade_id: actualTradeId,
+      p_user_id: user.id,
+      p_reason: disputeReason,
+    });
 
-    try {
-      const { data, error } = await supabase.rpc('raise_trade_dispute', {
-        p_trade_id: actualTradeId,
-        p_user_id: user.id,
-        p_reason: disputeReason,
-      });
-
-      if (!error && data) {
-        rpcSucceeded = true;
-        rpcResult = data;
-      } else if (error && error.code !== 'PGRST202') {
-        if (!data?.success && error.message) {
-          return NextResponse.json({ error: error.message }, { status: 400 });
-        }
-      }
-    } catch (e) {
-      console.warn('raise_trade_dispute RPC failed, using direct update fallback:', e);
-    }
-
-    if (!rpcSucceeded) {
-      // Direct fallback: Update trade record
-      let updateQuery = supabase
-        .from('trades')
-        .update({
-          status: 'DISPUTED',
-          disputed_at: now,
-          dispute_reason: disputeReason,
-          disputed_by: user.id,
-        });
-
-      if (isActualUuid) {
-        updateQuery = updateQuery.eq('id', actualTradeId);
-      } else {
-        updateQuery = updateQuery.eq('trade_id', tradeId);
-      }
-
-      const { error: updateError } = await updateQuery;
-      if (updateError) {
-        return NextResponse.json({ error: updateError.message }, { status: 400 });
-      }
-    }
-
-    // Also record in disputes table if available
-    try {
-      await supabase.from('disputes').insert([
-        {
-          trade_id: actualTradeId,
-          opened_by: user.id,
-          reason: disputeReason,
-          explanation: disputeReason,
-          status: 'open',
-          created_at: now,
-        },
-      ]);
-    } catch (dErr) {
-      console.warn('Insert into disputes table skipped:', dErr);
+    if (rpcError || (rpcData && !rpcData.success)) {
+      const errorMsg = rpcError?.message || rpcData?.message || 'Failed to open dispute.';
+      return NextResponse.json({ error: errorMsg }, { status: 400 });
     }
 
     // Service-role admin client for official system message and notification insertion

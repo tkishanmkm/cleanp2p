@@ -3,8 +3,12 @@ import { NextRequest, NextResponse } from 'next/server';
 import { revalidatePath } from 'next/cache';
 import { findAdById } from '@/lib/ad-lookup';
 import { resolveTradeType } from '@/utils/p2p-helpers';
+import { verifyServerAdmin } from '@/lib/server-admin-auth';
+import { FIAT_CURRENCIES } from '@/lib/currencies';
 
 export const dynamic = 'force-dynamic';
+
+const VALID_SUPPORTED_ASSETS = ['USDT', 'BTC', 'ETH', 'LTC'];
 
 function formatPresence(lastActive?: string | null): string {
   if (!lastActive) return 'Online';
@@ -29,49 +33,20 @@ export async function GET(
     let ad = resolved?.ad || null;
 
     if (!ad) {
-      // Fallback dummy ad object for mock/dev previews
-      const fallbackObj = {
-        id: adId,
-        userId: 'trader_1',
-        type: 'SELL',
-        asset: 'BTC',
-        fiat_currency: 'USD',
-        price: 64250,
-        pricing_type: 'FLOAT' as const,
-        margin_percent: 1.5,
-        status: 'ACTIVE' as const,
-        min_limit: 100,
-        max_limit: 5000,
-        available_amount: 0.5,
-        payment_methods: ['Bank Transfer', 'Wise', 'PayPal'],
-        offer_tags: ['Fast release', 'Instant release', 'Instant verification'],
-        terms_conditions: 'Please make payment accurately as per trade terms. Release takes less than 5 minutes once payment is verified.',
-        trader_presence: 'Online',
-        // backward compatibility
-        adType: 'sell',
-        crypto: 'BTC',
-        fiatCurrency: 'USD',
-        rateType: 'floating',
-        ratePercent: 1.5,
-        minAmount: 100,
-        maxAmount: 5000,
-        offerLabel: 'Fast & Secure Release',
-        terms: 'Please make payment accurately as per trade terms.',
-        tags: ['Fast release', 'Instant release'],
-      };
-      return NextResponse.json({ ...fallbackObj, ad: fallbackObj });
+      return NextResponse.json({ error: 'Advertisement not found.' }, { status: 404 });
     }
 
     // Fetch user profile for presence and trader info using admin client
     const admin = getSupabaseAdminClient();
     let presence = 'Online';
     let profileData: any = null;
-    if (ad.user_id) {
+    const adOwnerUserId = ad.user_id || ad.userId || ad.seller_id || ad.creator_id || ad.user?.id;
+    if (adOwnerUserId) {
       try {
         const { data: profile } = await admin
           .from('profiles')
           .select('*')
-          .eq('id', ad.user_id)
+          .eq('id', adOwnerUserId)
           .maybeSingle();
         if (profile) {
           profileData = profile;
@@ -107,13 +82,41 @@ export async function GET(
     const requireFullName = Boolean(ad.require_full_name_verified);
     const requireVerified = Boolean(ad.require_verified_users);
 
+    const assetSym = (
+      ad.asset_symbol ||
+      ad.crypto_symbol ||
+      ad.crypto_currency ||
+      ad.crypto ||
+      ad.asset ||
+      ad.coin ||
+      'USDT'
+    ).toUpperCase();
+
+    const fiatSym = (
+      ad.fiat_symbol ||
+      ad.fiat_currency ||
+      ad.fiatCurrency ||
+      ad.fiat ||
+      ad.currency ||
+      'USD'
+    ).toUpperCase();
+
     const formatted = {
       ...ad,
       id: ad.id,
-      userId: ad.user_id,
+      userId: adOwnerUserId,
       type: (ad.type || ad.ad_type || 'SELL').toUpperCase(),
-      asset: ad.crypto || ad.asset || ad.coin || 'BTC',
-      fiat_currency: ad.fiat_currency || ad.fiat || 'USD',
+      asset: assetSym,
+      asset_symbol: assetSym,
+      crypto: assetSym,
+      crypto_symbol: assetSym,
+      crypto_currency: assetSym,
+      coin: assetSym,
+      fiat_currency: fiatSym,
+      fiat_symbol: fiatSym,
+      fiatCurrency: fiatSym,
+      fiat: fiatSym,
+      currency: fiatSym,
       price: priceVal || 1000,
       pricing_type: (ad.rate_type === 'fixed' || ad.pricing_type === 'FIXED' || ad.is_fixed) ? 'FIXED' : 'FLOAT',
       rate_type: (ad.rate_type === 'fixed' || ad.pricing_type === 'FIXED' || ad.is_fixed) ? 'fixed' : 'market',
@@ -157,7 +160,7 @@ export async function GET(
         last_seen: profileData.last_seen || profileData.last_seen_at || profileData.last_active,
         last_seen_at: profileData.last_seen_at || profileData.last_seen || profileData.last_active,
       } : {
-        id: ad.user_id,
+        id: adOwnerUserId,
         username: ad.user_display_name || 'Trader',
         completed_trades: 0,
         positive_feedback: 0,
@@ -165,8 +168,6 @@ export async function GET(
       },
       // Legacy compatibility
       adType: (ad.ad_type || ad.type || 'sell').toLowerCase(),
-      crypto: ad.crypto || ad.asset || 'BTC',
-      fiatCurrency: ad.fiat_currency || ad.fiat || 'USD',
       rateType: (ad.rate_type === 'fixed' || ad.pricing_type === 'FIXED' || ad.is_fixed) ? 'fixed' : 'market',
       fixedRate: ad.fixed_rate ?? ad.price,
       ratePercent: Number(ad.rate_percent || ad.margin || 0),
@@ -195,30 +196,89 @@ export async function DELETE(
 ) {
   try {
     const rawParams = await Promise.resolve(context.params);
-    const adId = rawParams.adId;
-    const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(adId);
+    const adId = (rawParams.adId || '').trim();
+    if (!adId) {
+      return NextResponse.json({ error: 'Advertisement ID is required.' }, { status: 400 });
+    }
+
+    const supabase = await createClient();
     const admin = getSupabaseAdminClient();
 
+    // 1. Authenticate Requesting User
+    const authHeader = request.headers.get('Authorization') || request.headers.get('authorization');
+    const bearerToken = authHeader?.startsWith('Bearer ') ? authHeader.substring(7).trim() : null;
+
+    let user: any = null;
+    let authError: any = null;
+
+    if (bearerToken) {
+      const tokenAuth = await supabase.auth.getUser(bearerToken);
+      user = tokenAuth.data?.user;
+      authError = tokenAuth.error;
+    }
+
+    if (!user) {
+      const cookieAuth = await supabase.auth.getUser();
+      user = cookieAuth.data?.user;
+      authError = cookieAuth.error;
+    }
+
+    if (authError || !user) {
+      return NextResponse.json(
+        { error: 'Unauthorized. Please log in to manage your advertisement.' },
+        { status: 401 }
+      );
+    }
+
+    // 2. Resolve Target Advertisement
+    const resolved = await findAdById(adId);
+    const existingAd = resolved?.ad || null;
+    const targetTable = resolved?.tableName || null;
+
+    if (!existingAd || !targetTable) {
+      return NextResponse.json({ error: 'Advertisement not found.' }, { status: 404 });
+    }
+
+    // 3. Authorization Check: Ensure authenticated user is the ad owner or an authorized administrator
+    const adOwnerId = existingAd.user_id || existingAd.userId;
+    const isOwner = adOwnerId && String(adOwnerId) === String(user.id);
+    const adminAuth = await verifyServerAdmin(request);
+    const isAdmin = adminAuth.authorized;
+
+    if (!isOwner && !isAdmin) {
+      return NextResponse.json(
+        { error: 'Forbidden. You do not have permission to delete this advertisement.' },
+        { status: 403 }
+      );
+    }
+
+    // 4. Perform Soft-Delete & Deletion on resolved target ID
+    const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(existingAd.id || adId);
+    const targetId = existingAd.id || adId;
+
     if (isUuid) {
-      await admin.from('p2p_ads').update({ status: 'DELETED', active: false, updated_at: new Date().toISOString() }).eq('id', adId);
-      await admin.from('ads').update({ status: 'DELETED', is_active: false, updated_at: new Date().toISOString() }).eq('id', adId);
-      await admin.from('p2p_ads').delete().eq('id', adId);
-      await admin.from('ads').delete().eq('id', adId);
+      await admin.from('p2p_ads').update({ status: 'DELETED', active: false, updated_at: new Date().toISOString() }).eq('id', targetId);
+      await admin.from('ads').update({ status: 'DELETED', is_active: false, updated_at: new Date().toISOString() }).eq('id', targetId);
+      await admin.from('p2p_ads').delete().eq('id', targetId);
+      await admin.from('ads').delete().eq('id', targetId);
     } else {
-      await admin.from('p2p_ads').update({ status: 'DELETED', active: false, updated_at: new Date().toISOString() }).or(`public_ad_id.eq.${adId},public_id.eq.${adId}`);
-      await admin.from('ads').update({ status: 'DELETED', is_active: false, updated_at: new Date().toISOString() }).or(`public_id.eq.${adId},public_ad_id.eq.${adId}`);
-      await admin.from('p2p_ads').delete().or(`public_ad_id.eq.${adId},public_id.eq.${adId}`);
-      await admin.from('ads').delete().or(`public_id.eq.${adId},public_ad_id.eq.${adId}`);
+      await admin.from('p2p_ads').update({ status: 'DELETED', active: false, updated_at: new Date().toISOString() }).or(`public_ad_id.eq.${targetId},public_id.eq.${targetId}`);
+      await admin.from('ads').update({ status: 'DELETED', is_active: false, updated_at: new Date().toISOString() }).or(`public_id.eq.${targetId},public_ad_id.eq.${targetId}`);
+      await admin.from('p2p_ads').delete().or(`public_ad_id.eq.${targetId},public_id.eq.${targetId}`);
+      await admin.from('ads').delete().or(`public_id.eq.${targetId},public_ad_id.eq.${targetId}`);
     }
 
     try {
       revalidatePath('/my-ads');
       revalidatePath('/buy');
       revalidatePath('/sell');
+      revalidatePath(`/ad/${adId}`);
+      revalidatePath(`/ads/${adId}`);
     } catch {}
 
     return NextResponse.json({ success: true, message: 'Ad deleted successfully.' });
   } catch (err: any) {
+    console.error('Error in DELETE /api/ads/[adId]:', err);
     return NextResponse.json({ error: err.message || 'Failed to delete ad' }, { status: 500 });
   }
 }
@@ -229,44 +289,136 @@ export async function PATCH(
 ) {
   try {
     const rawParams = await Promise.resolve(context.params);
-    const adId = rawParams.adId;
-    const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(adId);
-    const body = await request.json();
+    const adId = (rawParams.adId || '').trim();
+    if (!adId) {
+      return NextResponse.json({ error: 'Advertisement ID is required.' }, { status: 400 });
+    }
+
+    const supabase = await createClient();
     const admin = getSupabaseAdminClient();
 
-    const newStatus = body.status || (body.active ? 'ACTIVE' : 'INACTIVE');
-    const isActive = newStatus === 'ACTIVE' || Boolean(body.active);
+    // 1. Authenticate Requesting User
+    const authHeader = request.headers.get('Authorization') || request.headers.get('authorization');
+    const bearerToken = authHeader?.startsWith('Bearer ') ? authHeader.substring(7).trim() : null;
+
+    let user: any = null;
+    let authError: any = null;
+
+    if (bearerToken) {
+      const tokenAuth = await supabase.auth.getUser(bearerToken);
+      user = tokenAuth.data?.user;
+      authError = tokenAuth.error;
+    }
+
+    if (!user) {
+      const cookieAuth = await supabase.auth.getUser();
+      user = cookieAuth.data?.user;
+      authError = cookieAuth.error;
+    }
+
+    if (authError || !user) {
+      return NextResponse.json(
+        { error: 'Unauthorized. Please log in to update advertisement status.' },
+        { status: 401 }
+      );
+    }
+
+    // 2. Resolve Target Advertisement
+    const resolved = await findAdById(adId);
+    const existingAd = resolved?.ad || null;
+    const targetTable = resolved?.tableName || null;
+
+    if (!existingAd || !targetTable) {
+      return NextResponse.json({ error: 'Advertisement not found.' }, { status: 404 });
+    }
+
+    // 3. Authorization Check: Ensure authenticated user is the ad owner or an authorized administrator
+    const adOwnerId = existingAd.user_id || existingAd.userId;
+    const isOwner = adOwnerId && String(adOwnerId) === String(user.id);
+    const adminAuth = await verifyServerAdmin(request);
+    const isAdmin = adminAuth.authorized;
+
+    if (!isOwner && !isAdmin) {
+      return NextResponse.json(
+        { error: 'Forbidden. You do not have permission to modify this advertisement.' },
+        { status: 403 }
+      );
+    }
+
+    // 4. Parse & Strictly Validate Allowlisted Fields
+    const body = await request.json();
+
+    // Never trust client-supplied identity fields in PATCH body
+    delete body.user_id;
+    delete body.userId;
+    delete body.owner_id;
+    delete body.seller_id;
+    delete body.creator_id;
+    delete body.is_admin;
+    delete body.admin;
+    delete body.role;
+
+    let isActive: boolean;
+    let newStatus: string;
+
+    if (body.active !== undefined) {
+      isActive = Boolean(body.active);
+      newStatus = isActive ? 'ACTIVE' : 'INACTIVE';
+    } else if (body.status !== undefined) {
+      const requestedStatus = String(body.status).toUpperCase().trim();
+      
+      // Ordinary users can only set status to ACTIVE or INACTIVE
+      if (!isAdmin && requestedStatus !== 'ACTIVE' && requestedStatus !== 'INACTIVE') {
+        return NextResponse.json(
+          { error: 'Forbidden: Ordinary users may only set advertisement status to ACTIVE or INACTIVE.' },
+          { status: 403 }
+        );
+      }
+      newStatus = requestedStatus;
+      isActive = newStatus === 'ACTIVE';
+    } else {
+      return NextResponse.json(
+        { error: 'Missing active or status field in PATCH request.' },
+        { status: 400 }
+      );
+    }
+
+    const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(existingAd.id || adId);
+    const targetId = existingAd.id || adId;
 
     if (isUuid) {
       await admin
         .from('p2p_ads')
         .update({ active: isActive, status: newStatus, updated_at: new Date().toISOString() })
-        .eq('id', adId);
+        .eq('id', targetId);
 
       await admin
         .from('ads')
         .update({ status: newStatus, is_active: isActive, updated_at: new Date().toISOString() })
-        .eq('id', adId);
+        .eq('id', targetId);
     } else {
       await admin
         .from('p2p_ads')
         .update({ active: isActive, status: newStatus, updated_at: new Date().toISOString() })
-        .or(`public_ad_id.eq.${adId},public_id.eq.${adId}`);
+        .or(`public_ad_id.eq.${targetId},public_id.eq.${targetId}`);
 
       await admin
         .from('ads')
         .update({ status: newStatus, is_active: isActive, updated_at: new Date().toISOString() })
-        .or(`public_id.eq.${adId},public_ad_id.eq.${adId}`);
+        .or(`public_id.eq.${targetId},public_ad_id.eq.${targetId}`);
     }
 
     try {
       revalidatePath('/my-ads');
       revalidatePath('/buy');
       revalidatePath('/sell');
+      revalidatePath(`/ad/${adId}`);
+      revalidatePath(`/ads/${adId}`);
     } catch {}
 
     return NextResponse.json({ success: true, status: newStatus, active: isActive });
   } catch (err: any) {
+    console.error('Error in PATCH /api/ads/[adId]:', err);
     return NextResponse.json({ error: err.message || 'Failed to update ad' }, { status: 500 });
   }
 }
@@ -292,25 +444,19 @@ export async function PUT(
     let user: any = null;
     let authError: any = null;
 
-    // Check service role bypass if calling with service role key
-    const isServiceRole = bearerToken && (
-      bearerToken === process.env.SUPABASE_SERVICE_ROLE_KEY || 
-      bearerToken === process.env.NEXT_PUBLIC_SUPABASE_SERVICE_ROLE_KEY
-    );
-
-    if (bearerToken && !isServiceRole) {
+    if (bearerToken) {
       const tokenAuth = await supabase.auth.getUser(bearerToken);
       user = tokenAuth.data?.user;
       authError = tokenAuth.error;
     }
 
-    if (!user && !isServiceRole) {
+    if (!user) {
       const cookieAuth = await supabase.auth.getUser();
       user = cookieAuth.data?.user;
       authError = cookieAuth.error;
     }
 
-    // 2. Resolve the Ad Record across tables (ads, p2p_ads, offers) and all ID formats (UUID, cuid/nanoid, public_id, public_ad_id)
+    // 2. Resolve the Ad Record across tables (ads, p2p_ads, offers)
     const resolved = await findAdById(adId);
     const existingAd = resolved?.ad || null;
     const targetTable = resolved?.tableName || null;
@@ -319,21 +465,20 @@ export async function PUT(
       return NextResponse.json({ error: 'Advertisement not found.' }, { status: 404 });
     }
 
-    // 3. Authorization Check: Ensure authenticated user is the ad owner
+    // 3. Authorization Check: Ensure authenticated user is the ad owner or authorized admin
     const adOwnerId = existingAd.user_id || existingAd.userId;
+    const isOwner = adOwnerId && String(adOwnerId) === String(user?.id);
+    const adminAuth = await verifyServerAdmin(request);
+    const isAdmin = adminAuth.authorized;
 
-    if (isServiceRole) {
-      user = { id: adOwnerId, is_admin: true };
-    }
-
-    if (!user) {
+    if (!user && !isAdmin) {
       return NextResponse.json(
         { error: 'Unauthorized. Please log in to edit your advertisement.' },
         { status: 401 }
       );
     }
 
-    if (!adOwnerId || String(adOwnerId) !== String(user.id)) {
+    if (!isOwner && !isAdmin) {
       return NextResponse.json(
         { error: 'Forbidden. You do not have permission to edit this advertisement.' },
         { status: 403 }
@@ -342,6 +487,18 @@ export async function PUT(
 
     // 4. Parse & Sanitize Edit Payload
     const body = await request.json();
+
+    // Strip client-controlled identity and administrative fields to prevent spoofing
+    delete body.user_id;
+    delete body.userId;
+    delete body.owner_id;
+    delete body.seller_id;
+    delete body.creator_id;
+    delete body.is_admin;
+    delete body.admin;
+    delete body.role;
+    delete body.verification_status;
+    delete body.is_verified;
 
     const price = body.price !== undefined && body.price !== null && body.price !== '' ? Number(body.price) : undefined;
     const unitPrice = body.unit_price !== undefined && body.unit_price !== null && body.unit_price !== '' ? Number(body.unit_price) : price;
@@ -354,6 +511,16 @@ export async function PUT(
     const margin = body.margin !== undefined && body.margin !== null && body.margin !== '' 
       ? Number(body.margin) 
       : (body.rate_percent !== undefined && body.rate_percent !== null && body.rate_percent !== '' ? Number(body.rate_percent) : undefined);
+
+    if (price !== undefined && price <= 0) {
+      return NextResponse.json({ error: 'Price must be greater than 0.' }, { status: 400 });
+    }
+    if (minAmount !== undefined && minAmount <= 0) {
+      return NextResponse.json({ error: 'Minimum limit must be greater than 0.' }, { status: 400 });
+    }
+    if (minAmount !== undefined && maxAmount !== undefined && maxAmount < minAmount) {
+      return NextResponse.json({ error: 'Maximum limit must be greater than or equal to minimum limit.' }, { status: 400 });
+    }
 
     const paymentMethods = Array.isArray(body.payment_methods) 
       ? body.payment_methods 
@@ -378,6 +545,32 @@ export async function PUT(
 
     const timestamp = new Date().toISOString();
 
+    const updatedAsset = body.asset || body.asset_symbol || body.crypto || body.crypto_symbol || body.coin;
+    const updatedFiat = body.fiat || body.fiat_symbol || body.fiat_currency || body.fiatCurrency || body.currency;
+
+    // Validate crypto asset if updated
+    if (updatedAsset) {
+      const normAsset = String(updatedAsset).toUpperCase().trim();
+      if (!VALID_SUPPORTED_ASSETS.includes(normAsset)) {
+        return NextResponse.json(
+          { error: `Unsupported cryptocurrency '${normAsset}'. Supported assets are: ${VALID_SUPPORTED_ASSETS.join(', ')}.` },
+          { status: 400 }
+        );
+      }
+    }
+
+    // Validate fiat currency if updated
+    if (updatedFiat) {
+      const normFiat = String(updatedFiat).toUpperCase().trim();
+      const isValidFiat = FIAT_CURRENCIES.some(f => f.code.toUpperCase() === normFiat);
+      if (!isValidFiat) {
+        return NextResponse.json(
+          { error: `Unsupported fiat currency '${normFiat}'.` },
+          { status: 400 }
+        );
+      }
+    }
+
     // 5. Build Table-Specific Payloads & Execute Exact Update on Resolved Primary ID
     let updatedRow: any = null;
     let updateError: any = null;
@@ -386,6 +579,15 @@ export async function PUT(
       const adsPayload: Record<string, any> = {
         updated_at: timestamp,
       };
+      if (updatedAsset) {
+        adsPayload.asset = String(updatedAsset).toUpperCase();
+        adsPayload.asset_symbol = String(updatedAsset).toUpperCase();
+      }
+      if (updatedFiat) {
+        adsPayload.fiat = String(updatedFiat).toUpperCase();
+        adsPayload.fiat_symbol = String(updatedFiat).toUpperCase();
+        adsPayload.fiat_currency = String(updatedFiat).toUpperCase();
+      }
       if (price !== undefined) adsPayload.price = price;
       if (minAmount !== undefined) adsPayload.min_limit = minAmount;
       if (maxAmount !== undefined) {
@@ -423,6 +625,16 @@ export async function PUT(
       const p2pPayload: Record<string, any> = {
         updated_at: timestamp,
       };
+      if (updatedAsset) {
+        p2pPayload.asset = String(updatedAsset).toUpperCase();
+        p2pPayload.asset_symbol = String(updatedAsset).toUpperCase();
+        p2pPayload.crypto = String(updatedAsset).toUpperCase();
+      }
+      if (updatedFiat) {
+        p2pPayload.fiat = String(updatedFiat).toUpperCase();
+        p2pPayload.fiat_symbol = String(updatedFiat).toUpperCase();
+        p2pPayload.fiat_currency = String(updatedFiat).toUpperCase();
+      }
       if (price !== undefined) {
         p2pPayload.price = price;
         p2pPayload.unit_price = unitPrice ?? price;
@@ -472,7 +684,7 @@ export async function PUT(
       }
     }
 
-    // 6. Verify Rows Affected: Never report success if zero rows updated
+    // 6. Verify Rows Affected
     if (updateError) {
       console.error('[PUT /api/ads/[adId]] Database update error:', updateError);
       return NextResponse.json(

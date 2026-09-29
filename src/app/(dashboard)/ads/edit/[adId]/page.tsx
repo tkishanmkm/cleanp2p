@@ -537,17 +537,35 @@ export default function EditAdPage() {
         }
 
         if (isMounted) {
-          const loadedSide = String(ad.type || ad.adType || ad.side || 'BUY').toUpperCase();
+          const loadedSide = String(ad.type || ad.adType || ad.side || ad.ad_type || 'BUY').toUpperCase();
           setAdType(loadedSide.includes('SELL') ? 'sell' : 'buy');
 
-          const loadedCoin = (ad.asset || ad.crypto || ad.coin || 'USDT').toUpperCase();
+          const loadedCoin = (
+            ad.asset_symbol ||
+            ad.crypto_symbol ||
+            ad.crypto_currency ||
+            ad.asset ||
+            ad.crypto ||
+            ad.coin ||
+            'USDT'
+          ).toUpperCase();
           setCrypto(loadedCoin);
 
-          const loadedFiatCode = (ad.fiat_currency || ad.fiatCurrency || ad.fiat || 'USD').toUpperCase();
-          const matchedFiat = FIAT_CURRENCIES.find((f) => f.code === loadedFiatCode) || {
-            name: `${loadedFiatCode} Currency`,
+          const loadedFiatCode = (
+            ad.fiat_symbol ||
+            ad.fiat_currency ||
+            ad.fiatCurrency ||
+            ad.fiat ||
+            ad.currency ||
+            'USD'
+          ).toUpperCase();
+
+          const matchedPopular = POPULAR_FIATS.find((f) => f.code === loadedFiatCode);
+          const matchedFromList = FIAT_CURRENCIES.find((f) => f.code === loadedFiatCode);
+          const matchedFiat = matchedPopular || {
+            name: matchedFromList?.name || `${loadedFiatCode} Currency`,
             code: loadedFiatCode,
-            flag: 'us',
+            flag: loadedFiatCode.slice(0, 2).toLowerCase(),
           };
           setFiat(matchedFiat);
 
@@ -556,9 +574,11 @@ export default function EditAdPage() {
           
           if (ad.rate_percent !== undefined) setRatePercent(String(ad.rate_percent));
           else if (ad.margin !== undefined) setRatePercent(String(ad.margin));
+          else if (ad.margin_percent !== undefined) setRatePercent(String(ad.margin_percent));
           
           if (ad.price) setFixedPrice(String(ad.price));
           else if (ad.unit_price) setFixedPrice(String(ad.unit_price));
+          else if (ad.fixed_rate) setFixedPrice(String(ad.fixed_rate));
 
           const minVal = ad.min_amount ?? ad.min_limit ?? ad.minAmount ?? 10;
           const maxVal = ad.max_amount ?? ad.max_limit ?? ad.maxAmount ?? 1000;
@@ -709,6 +729,14 @@ export default function EditAdPage() {
         : Number(fixedPrice);
 
       const updatePayload = {
+        type: adType.toUpperCase(),
+        ad_type: adType.toUpperCase(),
+        asset: crypto.toUpperCase(),
+        asset_symbol: crypto.toUpperCase(),
+        crypto: crypto.toUpperCase(),
+        fiat: fiat.code.toUpperCase(),
+        fiat_symbol: fiat.code.toUpperCase(),
+        fiat_currency: fiat.code.toUpperCase(),
         pricing_type: pricingType,
         rate_type: rateType,
         is_fixed: rateType === 'fixed',

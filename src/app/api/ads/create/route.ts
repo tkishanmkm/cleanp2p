@@ -1,8 +1,11 @@
 import { NextResponse } from 'next/server';
 import { createClient, getSupabaseAdminClient } from '@/utils/supabase/server';
 import { resolveTradeType } from '@/utils/p2p-helpers';
+import { FIAT_CURRENCIES } from '@/lib/currencies';
 
 export const dynamic = 'force-dynamic';
+
+const VALID_SUPPORTED_ASSETS = ['USDT', 'BTC', 'ETH', 'LTC'];
 
 export async function POST(req: Request) {
   try {
@@ -29,7 +32,7 @@ export async function POST(req: Request) {
     }
 
     if (authError || !user) {
-      console.error('[Auth Error Details]:', authError?.message);
+      console.error('[Auth Error Details in /api/ads/create]:', authError?.message);
       return NextResponse.json(
         { 
           error: 'No active session found! Please refresh or log in again.', 
@@ -63,24 +66,81 @@ export async function POST(req: Request) {
 
     const formData = await req.json();
 
-    // 2. Sanitize and cast boolean/numeric payload fields before hitting Supabase
-    // This directly addresses PostgreSQL error 22P02 (invalid input syntax for type numeric)
+    // 2. Strip all client-controlled identity and administrative fields to prevent spoofing
+    const strippedFormData = { ...formData };
+    delete strippedFormData.user_id;
+    delete strippedFormData.userId;
+    delete strippedFormData.owner_id;
+    delete strippedFormData.seller_id;
+    delete strippedFormData.creator_id;
+    delete strippedFormData.is_admin;
+    delete strippedFormData.admin;
+    delete strippedFormData.role;
+    delete strippedFormData.verification_status;
+    delete strippedFormData.is_verified;
+
+    // 3. Validate Supported Crypto Asset (USDT, BTC, ETH, LTC)
+    const rawAsset = (
+      strippedFormData.crypto || 
+      strippedFormData.asset || 
+      strippedFormData.asset_symbol || 
+      strippedFormData.crypto_symbol || 
+      strippedFormData.coin || 
+      'USDT'
+    ).toString().toUpperCase().trim();
+
+    if (!VALID_SUPPORTED_ASSETS.includes(rawAsset)) {
+      return NextResponse.json(
+        { 
+          error: `Unsupported cryptocurrency '${rawAsset}'. Supported assets are: ${VALID_SUPPORTED_ASSETS.join(', ')}.` 
+        },
+        { status: 400 }
+      );
+    }
+
+    // 4. Validate Supported Fiat Currency
+    const rawFiat = (
+      strippedFormData.fiatCurrency || 
+      strippedFormData.fiat || 
+      strippedFormData.fiat_currency || 
+      strippedFormData.fiat_symbol || 
+      strippedFormData.currency || 
+      'USD'
+    ).toString().toUpperCase().trim();
+
+    const isValidFiat = FIAT_CURRENCIES.some(f => f.code.toUpperCase() === rawFiat);
+    if (!isValidFiat) {
+      return NextResponse.json(
+        { 
+          error: `Unsupported fiat currency '${rawFiat}'. Please select a valid supported currency.` 
+        },
+        { status: 400 }
+      );
+    }
+
+    // 5. Sanitize and cast boolean/numeric payload fields before database operations
     const cleanPayload: Record<string, any> = {
-      ...formData,
-      price: formData.price !== undefined && formData.price !== null && formData.price !== '' ? Number(formData.price) : null,
-      margin: formData.margin !== undefined && formData.margin !== null && formData.margin !== '' ? Number(formData.margin) : (formData.price_margin ? Number(formData.price_margin) : null),
-      min_amount: formData.min_amount !== undefined && formData.min_amount !== null && formData.min_amount !== '' ? Number(formData.min_amount) : (formData.min_order ? Number(formData.min_order) : null),
-      max_amount: formData.max_amount !== undefined && formData.max_amount !== null && formData.max_amount !== '' ? Number(formData.max_amount) : (formData.max_order ? Number(formData.max_order) : null),
-      // Ensure boolean flags are strictly boolean
-      is_fixed: Boolean(formData.is_fixed ?? (typeof formData.fixed_rate === 'boolean' ? formData.fixed_rate : false)),
+      ...strippedFormData,
+      asset: rawAsset,
+      asset_symbol: rawAsset,
+      crypto: rawAsset,
+      crypto_symbol: rawAsset,
+      coin: rawAsset,
+      fiat: rawFiat,
+      fiat_currency: rawFiat,
+      fiat_symbol: rawFiat,
+      currency: rawFiat,
+      price: strippedFormData.price !== undefined && strippedFormData.price !== null && strippedFormData.price !== '' ? Number(strippedFormData.price) : null,
+      margin: strippedFormData.margin !== undefined && strippedFormData.margin !== null && strippedFormData.margin !== '' ? Number(strippedFormData.margin) : (strippedFormData.price_margin ? Number(strippedFormData.price_margin) : null),
+      min_amount: strippedFormData.min_amount !== undefined && strippedFormData.min_amount !== null && strippedFormData.min_amount !== '' ? Number(strippedFormData.min_amount) : (strippedFormData.min_order ? Number(strippedFormData.min_order) : null),
+      max_amount: strippedFormData.max_amount !== undefined && strippedFormData.max_amount !== null && strippedFormData.max_amount !== '' ? Number(strippedFormData.max_amount) : (strippedFormData.max_order ? Number(strippedFormData.max_order) : null),
+      is_fixed: Boolean(strippedFormData.is_fixed ?? (typeof strippedFormData.fixed_rate === 'boolean' ? strippedFormData.fixed_rate : false)),
     };
 
-    // If fixed_rate was submitted as a boolean, remove or cast it to avoid 22P02 if fixed_rate column is NUMERIC
     if (typeof cleanPayload.fixed_rate === 'boolean') {
       delete cleanPayload.fixed_rate;
     }
 
-    // Cast optional numeric columns cleanly
     if (cleanPayload.min_order !== undefined) cleanPayload.min_order = cleanPayload.min_order ? Number(cleanPayload.min_order) : null;
     if (cleanPayload.max_order !== undefined) cleanPayload.max_order = cleanPayload.max_order ? Number(cleanPayload.max_order) : null;
     if (cleanPayload.total_amount !== undefined) cleanPayload.total_amount = cleanPayload.total_amount ? Number(cleanPayload.total_amount) : null;
@@ -102,14 +162,63 @@ export async function POST(req: Request) {
     cleanPayload.trade_type = resolvedDirection;
     cleanPayload.type = cleanPayload.type ? String(cleanPayload.type).toUpperCase() : resolvedDirection;
 
-    // Attach user_id
+    // Validate min/max and price constraints
+    const effectivePrice = cleanPayload.price !== null && cleanPayload.price !== undefined ? cleanPayload.price : (cleanPayload.fixed_rate ? Number(cleanPayload.fixed_rate) : null);
+    if (effectivePrice !== null && effectivePrice <= 0) {
+      return NextResponse.json({ error: 'Ad price must be greater than 0.' }, { status: 400 });
+    }
+    if (cleanPayload.min_amount !== null && cleanPayload.min_amount <= 0) {
+      return NextResponse.json({ error: 'Minimum trade limit must be greater than 0.' }, { status: 400 });
+    }
+    if (cleanPayload.min_amount !== null && cleanPayload.max_amount !== null && cleanPayload.max_amount < cleanPayload.min_amount) {
+      return NextResponse.json({ error: 'Maximum trade limit must be greater than or equal to minimum limit.' }, { status: 400 });
+    }
+
+    // 6. Server-Side SELL Ad Spendable Balance Validation against public.wallet_assets
+    if (resolvedDirection === 'SELL') {
+      let requiredCrypto = 0;
+      if (cleanPayload.available_amount && cleanPayload.available_amount > 0) {
+        requiredCrypto = cleanPayload.available_amount;
+      } else if (cleanPayload.total_amount && cleanPayload.total_amount > 0) {
+        requiredCrypto = cleanPayload.total_amount;
+      } else if (cleanPayload.max_amount && effectivePrice && effectivePrice > 0) {
+        requiredCrypto = cleanPayload.max_amount / effectivePrice;
+      } else if (cleanPayload.min_amount && effectivePrice && effectivePrice > 0) {
+        requiredCrypto = cleanPayload.min_amount / effectivePrice;
+      }
+
+      // Query authoritative spendable balance from public.wallet_assets
+      const { data: assetWallet, error: walletError } = await supabase
+        .from('wallet_assets')
+        .select('balance, in_escrow')
+        .eq('user_id', user.id)
+        .eq('asset_symbol', rawAsset)
+        .maybeSingle();
+
+      const spendableBalance = Number(assetWallet?.balance || 0);
+
+      if (walletError || spendableBalance <= 0 || (requiredCrypto > 0 && spendableBalance < requiredCrypto)) {
+        return NextResponse.json(
+          {
+            error: `Insufficient spendable balance in your ${rawAsset} wallet. You have ${spendableBalance.toFixed(8)} ${rawAsset} available, but require at least ${requiredCrypto.toFixed(8)} ${rawAsset} to post this SELL advertisement.`,
+            code: 'INSUFFICIENT_SPENDABLE_BALANCE',
+            required: requiredCrypto,
+            available: spendableBalance,
+            asset: rawAsset,
+          },
+          { status: 400 }
+        );
+      }
+    }
+
+    // 7. Attach strictly authenticated server user_id
     cleanPayload.user_id = user.id;
 
     // Determine target table
     const targetTable = cleanPayload.table || (cleanPayload.title && cleanPayload.description ? 'ads' : 'p2p_ads');
     delete cleanPayload.table;
 
-    // 3. Wrap insertion logic in a clear try/catch to expose the REAL database error
+    // 8. Execute Authorized Database Insert without service-role escape hatch
     let { data, error: dbError } = await supabase
       .from(targetTable)
       .insert([cleanPayload])
@@ -133,44 +242,24 @@ export async function POST(req: Request) {
       }
     }
 
-    // If RLS blocked user with standard anon client, try service role admin client as fallback
-    if (dbError && (dbError.code === '42501' || dbError.message?.toLowerCase().includes('row-level security'))) {
-      try {
-        const adminClient = getSupabaseAdminClient();
-        const adminResult = await adminClient
-          .from(targetTable)
-          .insert([cleanPayload])
-          .select()
-          .single();
-
-        if (!adminResult.error) {
-          data = adminResult.data;
-          dbError = null;
-        }
-      } catch (adminErr) {
-        console.warn('Admin fallback failed:', adminErr);
-      }
-    }
-
+    // If RLS or authorization denies operation, fail-closed without service role bypass
     if (dbError) {
-      // Expose the REAL database error
-      console.error('[Real Database Error]:', dbError);
+      console.error('[Database Insert Error in /api/ads/create]:', dbError);
+      const isRlsError = dbError.code === '42501' || dbError.message?.toLowerCase().includes('row-level security');
       return NextResponse.json(
         { 
-          error: 'Failed to create ad in database', 
-          realError: dbError.message, 
-          hint: dbError.hint,
+          error: isRlsError ? 'Access denied: You do not have permission to create this advertisement.' : 'Failed to create ad in database.', 
           code: dbError.code,
-          details: dbError.details 
+          details: dbError.message 
         }, 
-        { status: 400 }
+        { status: isRlsError ? 403 : 400 }
       );
     }
 
     return NextResponse.json({ success: true, data });
 
   } catch (err: any) {
-    console.error('[Unhandled Server Error]:', err);
+    console.error('[Unhandled Server Error in /api/ads/create]:', err);
     return NextResponse.json(
       { error: err.message || 'Internal Server Error' }, 
       { status: 500 }

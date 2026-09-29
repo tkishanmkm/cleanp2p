@@ -32,7 +32,7 @@ export async function POST(
     // 1. Fetch trade and authorize
     const { data: trade, error: tradeErr } = await supabase
       .from('trades')
-      .select('id, buyer_id, seller_id, status')
+      .select('id, buyer_id, seller_id, status, escrow_status, completed_at, released_at')
       .eq('id', tradeId)
       .single();
 
@@ -40,7 +40,14 @@ export async function POST(
       return NextResponse.json({ error: 'Trade not found' }, { status: 404 });
     }
 
-    if (trade.status !== 'COMPLETED' && trade.status !== 'RELEASED') {
+    const rawStatus = String(trade.status || '').toLowerCase();
+    const rawEscrowStatus = String(trade.escrow_status || '').toUpperCase();
+    const isCompleted =
+      ['completed', 'released'].includes(rawStatus) ||
+      ['COMPLETED', 'RELEASED'].includes(rawEscrowStatus) ||
+      Boolean(trade.completed_at || trade.released_at);
+
+    if (!isCompleted) {
       return NextResponse.json({ error: 'Feedback only allowed for completed trades' }, { status: 400 });
     }
 

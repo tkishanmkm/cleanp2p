@@ -723,6 +723,7 @@ export async function createTradeOrderWithEscrow(input: {
       p_payment_method: resolvedPaymentMethod,
       p_trade_ref: shortTradeId,
       p_idempotency_key: null,
+      p_caller_id: user.id,
     });
 
     if (rpcError) {
