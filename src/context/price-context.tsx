@@ -4,7 +4,7 @@ import React, { createContext, useContext, useState, useEffect, ReactNode, useCa
 import type { CryptoCurrency } from '@/lib/types';
 
 interface PriceContextType {
-  prices: Record<CryptoCurrency, number>;
+  prices: Partial<Record<CryptoCurrency, number>>;
   fiatRates: Record<string, number>;
   isLoading: boolean;
   loadingPrice: boolean;
@@ -13,46 +13,13 @@ interface PriceContextType {
 
 const PriceContext = createContext<PriceContextType | undefined>(undefined);
 
-const FALLBACK_PRICES: Record<CryptoCurrency, number> = {
-  BTC: 89500,
-  ETH: 2650,
-  LTC: 72,
-  USDT: 1,
-  BNB: 680,
-  MATIC: 0.45,
-  TRX: 0.15,
-};
-
-const FALLBACK_FIAT_RATES: Record<string, number> = {
-  USD: 1,
-  EUR: 0.92,
-  GBP: 0.78,
-  INR: 86.8,
-  CAD: 1.38,
-  AUD: 1.52,
-  JPY: 154.2,
-  CNY: 7.24,
-  AED: 3.67,
-  SAR: 3.75,
-  BRL: 5.65,
-  RUB: 96.5,
-  TRY: 34.5,
-  NGN: 1550,
-  KES: 129,
-  GHS: 15.8,
-  PKR: 278,
-  BDT: 120,
-  VND: 25400,
-  THB: 34.2,
-  IDR: 15900,
-  MYR: 4.45,
-  PHP: 58.5,
-  SGD: 1.34,
-};
-
 export function PriceProvider({ children }: { children: ReactNode }) {
-  const [prices, setPrices] = useState<Record<CryptoCurrency, number>>(FALLBACK_PRICES);
-  const [fiatRates, setFiatRates] = useState<Record<string, number>>(FALLBACK_FIAT_RATES);
+  const [prices, setPrices] = useState<Partial<Record<CryptoCurrency, number>>>({
+    USDT: 1.0,
+  });
+  const [fiatRates, setFiatRates] = useState<Record<string, number>>({
+    USD: 1.0,
+  });
   const [isLoading, setIsLoading] = useState(false);
   const isFetchingRef = useRef(false);
 
@@ -87,16 +54,16 @@ export function PriceProvider({ children }: { children: ReactNode }) {
           }
         }
       } catch {
-        // Internal endpoint unreachable (e.g. dev startup or offline), fallback quietly
+        // Internal endpoint unreachable
       }
 
-      // 2. Secondary fallback: Public ticker if internal had no crypto prices
+      // 2. Secondary live fetch: Public Binance ticker if internal DB is not yet seeded
       if (Object.keys(newPrices).length === 0) {
         try {
           const controller = new AbortController();
           const timeoutId = setTimeout(() => controller.abort(), 4000);
           const binanceRes = await fetch(
-            'https://api.binance.com/api/v3/ticker/price?symbols=%5B%22BTCUSDT%22,%22ETHUSDT%22,%22LTCUSDT%22%5D',
+            'https://api.binance.com/api/v3/ticker/price?symbols=%5B%22BTCUSDT%22,%22ETHUSDT%22,%22LTCUSDT%22,%22BNBUSDT%22,%22TRXUSDT%22%5D',
             { cache: 'no-store', signal: controller.signal }
           );
           clearTimeout(timeoutId);
@@ -111,11 +78,11 @@ export function PriceProvider({ children }: { children: ReactNode }) {
                   newPrices[sym] = p;
                 }
               });
-              newPrices.USDT = 1;
+              newPrices.USDT = 1.0;
             }
           }
         } catch {
-          // Keep default fallback prices
+          // Keep current state
         }
       }
 
@@ -128,7 +95,7 @@ export function PriceProvider({ children }: { children: ReactNode }) {
         }));
       }
 
-      // 4. Fiat exchange rates fetch with timeout and error protection
+      // 4. Live fiat exchange rates fetch from live exchange rate provider
       try {
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), 4000);
@@ -141,18 +108,27 @@ export function PriceProvider({ children }: { children: ReactNode }) {
         if (fiatRes.ok) {
           const fiatData = await fiatRes.json();
           if (fiatData?.result === 'success' && fiatData.rates) {
-            newFiatRates = { USD: 1, ...fiatData.rates };
+            newFiatRates = { USD: 1.0, ...fiatData.rates };
           }
         }
       } catch {
-        // Ignore fiat network errors; fallback rates will remain in place
+        // Fallback to secondary live provider
+        try {
+          const secRes = await fetch('https://api.frankfurter.app/latest?from=USD', { cache: 'no-store' });
+          if (secRes.ok) {
+            const secData = await secRes.json();
+            if (secData?.rates) {
+              newFiatRates = { USD: 1.0, ...secData.rates };
+            }
+          }
+        } catch {}
       }
 
       if (newFiatRates) {
         setFiatRates((prev) => ({ ...prev, ...newFiatRates }));
       }
     } catch (err) {
-      console.warn('Notice: Market prices refresh could not complete, using cached prices.', err);
+      console.warn('Notice: Market prices refresh could not complete live fetch.', err);
     } finally {
       setIsLoading(false);
       isFetchingRef.current = false;

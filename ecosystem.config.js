@@ -1,10 +1,8 @@
 module.exports = {
   apps: [
     {
-      name: 'hot-wallet-scheduler',
-      script: 'src/jobs/scheduler.ts',
-      interpreter: 'node',
-      interpreter_args: '-r ts-node/register',
+      name: 'paxones-background-worker',
+      script: 'dist/worker.js',
       instances: 1,
       autorestart: true,
       watch: false,
@@ -15,3 +13,4 @@ module.exports = {
     },
   ],
 };
+

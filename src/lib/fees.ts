@@ -27,18 +27,12 @@ export interface AuthoritativeFeeResult {
   multiplier: number;
 }
 
-const FALLBACK_CRYPTO_USD_PRICES: Record<string, number> = {
-  BTC: 65000,
-  ETH: 3500,
-  USDT: 1.0,
-  USDC: 1.0,
-  TRX: 0.15,
-  BNB: 580,
-  LTC: 85,
-};
-
 /**
- * Retrieves authoritative real-time USD exchange price for supported cryptocurrencies
+ * Retrieves authoritative real-time USD exchange price for supported cryptocurrencies.
+ * Priority:
+ * 1. Live crypto_market_prices table in database
+ * 2. Live CoinGecko ticker API
+ * 3. Live Binance ticker API
  */
 export async function getAuthoritativeAssetUsdPrice(cryptoCode: string): Promise<number> {
   const asset = (cryptoCode || 'USDT').toUpperCase().trim();
@@ -46,6 +40,24 @@ export async function getAuthoritativeAssetUsdPrice(cryptoCode: string): Promise
     return 1.0;
   }
 
+  // 1. Try querying latest price from database
+  try {
+    const admin = getSupabaseAdminClient();
+    const { data } = await admin
+      .from('crypto_market_prices')
+      .select('price_in_fiat')
+      .eq('asset_symbol', asset)
+      .eq('fiat_symbol', 'USD')
+      .maybeSingle();
+
+    if (data && typeof data.price_in_fiat === 'number' && data.price_in_fiat > 0) {
+      return data.price_in_fiat;
+    }
+  } catch {
+    // Continue to live API
+  }
+
+  // 2. Try live CoinGecko API
   try {
     const coinGeckoId =
       asset === 'BTC' ? 'bitcoin' :
@@ -62,14 +74,28 @@ export async function getAuthoritativeAssetUsdPrice(cryptoCode: string): Promise
     if (res.ok) {
       const data = await res.json();
       if (data && data[coinGeckoId]?.usd) {
-        return Number(data[coinGeckoId].usd);
+        const p = Number(data[coinGeckoId].usd);
+        if (!isNaN(p) && p > 0) return p;
       }
     }
   } catch {
-    // Graceful fallback to static anchor
+    // Continue to live Binance
   }
 
-  return FALLBACK_CRYPTO_USD_PRICES[asset] || 1.0;
+  // 3. Try live Binance API
+  try {
+    const res = await fetch(`https://api.binance.com/api/v3/ticker/price?symbol=${asset}USDT`);
+    if (res.ok) {
+      const data = await res.json();
+      if (data && data.price) {
+        const p = parseFloat(data.price);
+        if (!isNaN(p) && p > 0) return p;
+      }
+    }
+  } catch {}
+
+  // Default fallback if unavailable
+  return 1.0;
 }
 
 /**

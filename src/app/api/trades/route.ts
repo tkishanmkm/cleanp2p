@@ -121,7 +121,14 @@ export async function POST(req: NextRequest) {
     }
 
     // 2. Resolve unit price & amounts
-    const unitPrice = Number(customRate ?? ad.fixed_rate ?? ad.price ?? 1);
+    const rawPrice = customRate ?? ad.fixed_rate ?? ad.price;
+    const unitPrice = Number(rawPrice);
+    if (!rawPrice || isNaN(unitPrice) || unitPrice <= 0) {
+      return NextResponse.json(
+        { error: 'Advertisement unit price is invalid or market price is unavailable.' },
+        { status: 400 }
+      );
+    }
     let calculatedCrypto = parseFloat(rawCrypto);
     let numericFiat = parseFloat(rawFiat);
 

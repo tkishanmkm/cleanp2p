@@ -93,7 +93,14 @@ export async function POST(req: Request) {
     }
 
     // 3. Resolve numerical amounts with exact precision
-    const unitPrice = Number(customPrice ?? ad.fixed_rate ?? ad.price ?? 1);
+    const rawPrice = customPrice ?? ad.fixed_rate ?? ad.price;
+    const unitPrice = Number(rawPrice);
+    if (!rawPrice || isNaN(unitPrice) || unitPrice <= 0) {
+      return NextResponse.json(
+        { error: 'Advertisement unit price is invalid or market price is unavailable.' },
+        { status: 400 }
+      );
+    }
     let calculatedCrypto = parseFloat(rawCrypto);
     let numericFiat = parseFloat(rawFiat);
 

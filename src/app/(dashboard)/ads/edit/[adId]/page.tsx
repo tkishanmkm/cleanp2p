@@ -470,8 +470,11 @@ export default function EditAdPage() {
       }
       const coin = (coinSymbol || 'USDT').toUpperCase() as CryptoCurrency;
       const fiatUpper = (fiatCode || 'USD').toUpperCase();
-      const liveUsdPrice = prices[coin] ?? (coin === 'USDT' ? 1.0 : coin === 'BTC' ? 89500 : coin === 'ETH' ? 2650 : 72);
-      const liveFiatRate = fiatRates[fiatUpper] ?? (fiatUpper === 'INR' ? 95.6 : fiatUpper === 'EUR' ? 0.92 : fiatUpper === 'GBP' ? 0.78 : 1.0);
+      const liveUsdPrice = prices[coin];
+      const liveFiatRate = fiatRates[fiatUpper];
+      if (typeof liveUsdPrice !== 'number' || liveUsdPrice <= 0 || typeof liveFiatRate !== 'number' || liveFiatRate <= 0) {
+        return 0;
+      }
       const computed = liveUsdPrice * liveFiatRate;
       return Number(computed.toFixed(coin === 'USDT' ? 2 : 4));
     },

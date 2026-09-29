@@ -83,7 +83,14 @@ export async function POST(req: NextRequest) {
     }
 
     // 3. Resolve numerical values and authoritative parameters
-    const unitPrice = Number(price ?? ad.fixed_rate ?? ad.price ?? 1);
+    const rawPrice = price ?? ad.fixed_rate ?? ad.price;
+    const unitPrice = Number(rawPrice);
+    if (!rawPrice || isNaN(unitPrice) || unitPrice <= 0) {
+      return NextResponse.json(
+        { error: 'Advertisement unit price is invalid or market price is unavailable.' },
+        { status: 400 }
+      );
+    }
     let calculatedCrypto = parseFloat(crypto_amount);
     let numericFiat = parseFloat(fiat_amount);
 

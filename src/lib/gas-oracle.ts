@@ -13,27 +13,30 @@ export interface NetworkGasFee {
   updated_at: string;
 }
 
-// Fallback Crypto USD Price Estimates
-const FALLBACK_CRYPTO_USD_PRICES: Record<string, number> = {
-  BTC: 65000,
-  ETH: 3500,
-  USDT: 1.0,
-  USDC: 1.0,
-  TRX: 0.15,
-  LTC: 85,
-  SOL: 150,
-  MATIC: 0.55,
-  POLYGON: 0.55,
-  BNB: 580,
-  BSC: 580,
-  ARBITRUM: 0.75,
-};
-
 /**
- * Helper to fetch live crypto USD price from CoinGecko or fallback.
+ * Helper to fetch live crypto USD price from database or live market providers.
  */
 async function getAssetUsdPrice(cryptoCode: string): Promise<number> {
   const asset = cryptoCode.toUpperCase();
+  if (asset === 'USDT' || asset === 'USDC') {
+    return 1.0;
+  }
+
+  // 1. Check live crypto_market_prices table in database
+  try {
+    const { data } = await supabase
+      .from('crypto_market_prices')
+      .select('price_in_fiat')
+      .eq('asset_symbol', asset)
+      .eq('fiat_symbol', 'USD')
+      .maybeSingle();
+
+    if (data && typeof data.price_in_fiat === 'number' && data.price_in_fiat > 0) {
+      return data.price_in_fiat;
+    }
+  } catch {}
+
+  // 2. Live CoinGecko fetch
   try {
     const res = await fetch(
       `https://api.coingecko.com/api/v3/simple/price?ids=${
@@ -47,6 +50,8 @@ async function getAssetUsdPrice(cryptoCode: string): Promise<number> {
           ? 'litecoin'
           : asset === 'SOL'
           ? 'solana'
+          : asset === 'BNB' || asset === 'BSC'
+          ? 'binancecoin'
           : 'tether'
       }&vs_currencies=usd`,
       { next: { revalidate: 300 } }
@@ -55,13 +60,26 @@ async function getAssetUsdPrice(cryptoCode: string): Promise<number> {
       const data = await res.json();
       const firstKey = Object.keys(data)[0];
       if (firstKey && data[firstKey]?.usd) {
-        return Number(data[firstKey].usd);
+        const p = Number(data[firstKey].usd);
+        if (!isNaN(p) && p > 0) return p;
       }
     }
-  } catch {
-    // Ignore and fallback
-  }
-  return FALLBACK_CRYPTO_USD_PRICES[asset] || 1.0;
+  } catch {}
+
+  // 3. Live Binance fetch
+  try {
+    const binanceSymbol = asset === 'BSC' ? 'BNBUSDT' : `${asset}USDT`;
+    const res = await fetch(`https://api.binance.com/api/v3/ticker/price?symbol=${binanceSymbol}`);
+    if (res.ok) {
+      const data = await res.json();
+      if (data && data.price) {
+        const p = parseFloat(data.price);
+        if (!isNaN(p) && p > 0) return p;
+      }
+    }
+  } catch {}
+
+  return 1.0;
 }
 
 /**

@@ -6,6 +6,9 @@ import { startConfirmationsWorker, stopConfirmationsWorker } from './jobs/confir
 import { startWithdrawalWorker, stopWithdrawalWorker } from './jobs/withdrawalWorker';
 import { checkHotWalletBalance } from './jobs/hotWalletMonitor';
 import { processExpiredP2PTrades } from './jobs/p2pExpiryWorker';
+import { runDepositSweeper } from './jobs/sweeperWorker';
+import { runMarketPriceUpdate } from './jobs/priceUpdaterWorker';
+import { reconcileLedgerVsChain } from './jobs/reconciliationWorker';
 import { SUPPORTED_EVM_CHAINS, getEvmProvider } from './lib/blockchain/providers';
 
 console.log('====================================================');
@@ -104,7 +107,7 @@ async function initializeBlockchainListeners(): Promise<void> {
 function initializeScheduledJobs(): void {
   console.log('[Cron] Initializing scheduled cron daemons...');
 
-  // Hot Wallet Balance & Reserve Monitor: every 15 minutes
+  // 1. Hot Wallet Balance & Reserve Monitor: every 15 minutes
   cron.schedule('*/15 * * * *', async () => {
     try {
       console.log('[Cron: Hot Wallet] Auditing hot wallet balances...');
@@ -114,7 +117,7 @@ function initializeScheduledJobs(): void {
     }
   });
 
-  // P2P Expiry Daemon: auto-cancellation & escrow refund every minute
+  // 2. P2P Expiry Daemon: auto-cancellation & escrow refund every minute
   cron.schedule('* * * * *', async () => {
     try {
       await processExpiredP2PTrades();
@@ -123,7 +126,44 @@ function initializeScheduledJobs(): void {
     }
   });
 
-  // Worker Health Heartbeat: every 5 minutes
+  // 3. Auto-sweep confirmed user balances to Hot Wallet every 5 minutes
+  cron.schedule('*/5 * * * *', async () => {
+    try {
+      const sweepRes = await runDepositSweeper();
+      const sweptCount = sweepRes.filter((r) => r.status === 'SUCCESS').length;
+      console.log('[Cron: Auto-Sweeper]', new Date().toISOString(), `Swept: ${sweptCount}/${sweepRes.length}`);
+    } catch (err: any) {
+      console.error('[Cron: Auto-Sweeper Error]:', err?.message);
+    }
+  });
+
+  // 4. Market Price Updater: fetch live crypto/fiat rates and update DB every 5 minutes
+  cron.schedule('*/5 * * * *', async () => {
+    try {
+      console.log('[Cron: Market Prices] Updating live crypto/fiat market prices...');
+      const res = await runMarketPriceUpdate();
+      if (res.success) {
+        console.log('[Cron: Market Prices]', new Date().toISOString(), `Updated ${res.records_updated} price pairs across ${res.live_crypto_assets} assets and ${res.total_fiats} fiats.`);
+      } else {
+        console.warn('[Cron: Market Prices Notice]:', res.error);
+      }
+    } catch (err: any) {
+      console.error('[Cron: Market Prices Error]:', err?.message);
+    }
+  });
+
+  // 5. System Reconciliation: ledger vs on-chain reserve audit every 15 minutes
+  cron.schedule('*/15 * * * *', async () => {
+    try {
+      console.log('[Cron: Reconciliation] Auditing ledger vs on-chain balances...');
+      const report = await reconcileLedgerVsChain('USDT');
+      console.log('[Cron: Reconciliation]', new Date().toISOString(), `Balanced: ${report.isBalanced}, Liability: ${report.totalDbLiability.toFixed(2)} USDT, On-Chain: ${report.onChainHotWalletBalance.toFixed(2)} USDT, Discrepancy: ${report.discrepancy.toFixed(2)} USDT.`);
+    } catch (err: any) {
+      console.error('[Cron: Reconciliation Error]:', err?.message);
+    }
+  });
+
+  // 6. Worker Health Heartbeat: every 5 minutes
   cron.schedule('*/5 * * * *', () => {
     const memory = process.memoryUsage();
     console.log('[Worker Heartbeat]', {
