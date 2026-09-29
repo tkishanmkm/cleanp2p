@@ -170,10 +170,26 @@ export async function PATCH(
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
+    // Resolve ad across ads / p2p_ads using universal resolver
+    const resolved = await findAdById(id);
+    const existingAd = resolved?.ad || null;
+
+    if (!existingAd) {
+      return NextResponse.json({ error: 'Advertisement not found.' }, { status: 404 });
+    }
+
+    const adOwnerId = existingAd.user_id || existingAd.userId;
+    if (adOwnerId && String(adOwnerId) !== String(user.id)) {
+      return NextResponse.json({ error: 'Forbidden. You do not own this advertisement.' }, { status: 403 });
+    }
+
     const rawBody = await request.json();
 
     // Sanitize payload data types
     const body: Record<string, any> = { ...rawBody };
+    delete body.user_id;
+    delete body.userId;
+
     if (body.price !== undefined && body.price !== null && body.price !== '') body.price = Number(body.price);
     if (body.margin !== undefined && body.margin !== null && body.margin !== '') {
       body.rate_percent = Number(body.margin);
@@ -184,73 +200,60 @@ export async function PATCH(
     if (body.max_amount !== undefined && body.max_amount !== null && body.max_amount !== '') body.max_amount = Number(body.max_amount);
     if (body.min_limit !== undefined && body.min_limit !== null && body.min_limit !== '') body.min_limit = Number(body.min_limit);
     if (body.max_limit !== undefined && body.max_limit !== null && body.max_limit !== '') body.max_limit = Number(body.max_limit);
-    if (body.terms !== undefined) {
-      body.terms_conditions = String(body.terms);
-      delete body.terms;
-    }
-    if (body.tags !== undefined) {
-      body.offer_tags = body.tags;
-      delete body.tags;
-    }
-    if (body.is_fixed !== undefined) delete body.is_fixed;
-    if (typeof body.fixed_rate === 'boolean') delete body.fixed_rate;
 
-    const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id);
-    let updateQuery = supabase
-      .from('p2p_ads')
-      .update({ ...body, updated_at: new Date().toISOString() })
-      .eq('user_id', user.id);
+    const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(existingAd.id || id);
+    const targetUuid = existingAd.id || id;
+    const targetPublicId = existingAd.public_ad_id || existingAd.public_id || existingAd.ad_id || id;
+
+    const supabaseAdmin = createClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL || 'https://placeholder.supabase.co',
+      process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'placeholder-anon-key'
+    );
+
+    const updatePayload = {
+      ...body,
+      updated_at: new Date().toISOString(),
+    };
+
+    let updatedResult: any = null;
 
     if (isUuid) {
-      updateQuery = updateQuery.eq('id', id);
-    } else {
-      updateQuery = updateQuery.or(`public_ad_id.eq.${id},public_id.eq.${id},id.eq.${id}`);
-    }
-
-    const { data, error } = await updateQuery.select().single();
-
-    // Also sync update to public.ads table
-    try {
-      const supabaseAdmin = createClient(
-        process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL || 'https://placeholder.supabase.co',
-        process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'placeholder-anon-key'
-      );
-      if (isUuid) {
-        await supabaseAdmin.from('ads').update({
-          status: body.status || (body.active ? 'ACTIVE' : 'INACTIVE'),
-          is_active: body.active ?? (body.status === 'ACTIVE'),
-          price: body.price,
-          min_limit: body.min_limit ?? body.min_amount,
-          max_limit: body.max_limit ?? body.max_amount,
-        }).eq('id', id);
-      }
-    } catch (syncErr) {
-      console.warn('Sync ads table update notice:', syncErr);
-    }
-
-    if (error) {
-      // Fallback update via admin if RLS blocked user
-      const supabaseAdmin = createClient(
-        process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL || 'https://placeholder.supabase.co',
-        process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'placeholder-anon-key'
-      );
-      let adminUpdate = supabaseAdmin
+      const { data: p2pRes } = await supabaseAdmin
         .from('p2p_ads')
-        .update({ ...body, updated_at: new Date().toISOString() })
-        .eq('user_id', user.id);
-      if (isUuid) {
-        adminUpdate = adminUpdate.eq('id', id);
-      } else {
-        adminUpdate = adminUpdate.or(`public_ad_id.eq.${id},public_id.eq.${id},id.eq.${id}`);
-      }
-      const { data: adminData, error: adminErr } = await adminUpdate.select().single();
-      if (adminErr) {
-        return NextResponse.json({ error: error.message }, { status: 400 });
-      }
-      return NextResponse.json({ success: true, data: adminData });
+        .update(updatePayload)
+        .eq('id', targetUuid)
+        .select()
+        .maybeSingle();
+      updatedResult = p2pRes;
+
+      await supabaseAdmin.from('ads').update({
+        status: body.status || (body.active ? 'ACTIVE' : 'INACTIVE'),
+        is_active: body.active ?? (body.status === 'ACTIVE'),
+        price: body.price,
+        min_limit: body.min_limit ?? body.min_amount,
+        max_limit: body.max_limit ?? body.max_amount,
+        updated_at: new Date().toISOString(),
+      }).eq('id', targetUuid);
+    } else {
+      const { data: p2pRes } = await supabaseAdmin
+        .from('p2p_ads')
+        .update(updatePayload)
+        .or(`public_ad_id.eq.${targetPublicId},public_id.eq.${targetPublicId},ad_id.eq.${targetPublicId}`)
+        .select()
+        .maybeSingle();
+      updatedResult = p2pRes;
+
+      await supabaseAdmin.from('ads').update({
+        status: body.status || (body.active ? 'ACTIVE' : 'INACTIVE'),
+        is_active: body.active ?? (body.status === 'ACTIVE'),
+        price: body.price,
+        min_limit: body.min_limit ?? body.min_amount,
+        max_limit: body.max_limit ?? body.max_amount,
+        updated_at: new Date().toISOString(),
+      }).or(`public_id.eq.${targetPublicId},public_ad_id.eq.${targetPublicId},ad_id.eq.${targetPublicId}`);
     }
 
-    return NextResponse.json({ success: true, data });
+    return NextResponse.json({ success: true, data: updatedResult || existingAd });
   } catch (err: any) {
     console.error('Error updating ad:', err);
     return NextResponse.json({ error: err.message || 'Internal Server Error' }, { status: 500 });
@@ -265,7 +268,6 @@ export async function DELETE(
   try {
     const resolvedParams = await Promise.resolve(params);
     const { id } = resolvedParams;
-    const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id);
 
     const cookieHeader = cookies();
     const cookieStore = typeof (cookieHeader as any)?.then === 'function' ? await cookieHeader : cookieHeader;
@@ -315,34 +317,38 @@ export async function DELETE(
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    let deleteQuery = supabase
-      .from('p2p_ads')
-      .delete()
-      .eq('user_id', user.id);
+    // Resolve ad across ads / p2p_ads using universal resolver
+    const resolved = await findAdById(id);
+    const existingAd = resolved?.ad || null;
 
-    if (isUuid) {
-      deleteQuery = deleteQuery.eq('id', id);
-    } else {
-      deleteQuery = deleteQuery.or(`public_ad_id.eq.${id},public_id.eq.${id},id.eq.${id}`);
+    if (!existingAd) {
+      return NextResponse.json({ error: 'Advertisement not found.' }, { status: 404 });
     }
 
-    const { error } = await deleteQuery;
+    const adOwnerId = existingAd.user_id || existingAd.userId;
+    if (adOwnerId && String(adOwnerId) !== String(user.id)) {
+      return NextResponse.json({ error: 'Forbidden. You do not own this advertisement.' }, { status: 403 });
+    }
 
-    // Delete or mark inactive in ads table and fallback to admin if needed
+    const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(existingAd.id || id);
+    const targetUuid = existingAd.id || id;
+    const targetPublicId = existingAd.public_ad_id || existingAd.public_id || existingAd.ad_id || id;
+
     const supabaseAdmin = createClient(
       process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL || 'https://placeholder.supabase.co',
       process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'placeholder-anon-key'
     );
 
-    try {
-      if (isUuid) {
-        await supabaseAdmin.from('ads').delete().eq('id', id).eq('user_id', user.id);
-        await supabaseAdmin.from('p2p_ads').delete().eq('id', id).eq('user_id', user.id);
-      } else {
-        await supabaseAdmin.from('p2p_ads').delete().or(`public_ad_id.eq.${id},public_id.eq.${id},id.eq.${id}`).eq('user_id', user.id);
-      }
-    } catch (adminDelErr) {
-      console.warn('Admin ad deletion notice:', adminDelErr);
+    if (isUuid) {
+      await supabaseAdmin.from('p2p_ads').update({ status: 'DELETED', active: false, is_active: false, updated_at: new Date().toISOString() }).eq('id', targetUuid);
+      await supabaseAdmin.from('ads').update({ status: 'DELETED', is_active: false, updated_at: new Date().toISOString() }).eq('id', targetUuid);
+      await supabaseAdmin.from('p2p_ads').delete().eq('id', targetUuid);
+      await supabaseAdmin.from('ads').delete().eq('id', targetUuid);
+    } else {
+      await supabaseAdmin.from('p2p_ads').update({ status: 'DELETED', active: false, is_active: false, updated_at: new Date().toISOString() }).or(`public_ad_id.eq.${targetPublicId},public_id.eq.${targetPublicId},ad_id.eq.${targetPublicId}`);
+      await supabaseAdmin.from('ads').update({ status: 'DELETED', is_active: false, updated_at: new Date().toISOString() }).or(`public_id.eq.${targetPublicId},public_ad_id.eq.${targetPublicId},ad_id.eq.${targetPublicId}`);
+      await supabaseAdmin.from('p2p_ads').delete().or(`public_ad_id.eq.${targetPublicId},public_id.eq.${targetPublicId},ad_id.eq.${targetPublicId}`);
+      await supabaseAdmin.from('ads').delete().or(`public_id.eq.${targetPublicId},public_ad_id.eq.${targetPublicId},ad_id.eq.${targetPublicId}`);
     }
 
     return NextResponse.json({ success: true, message: 'Ad deleted successfully.' });

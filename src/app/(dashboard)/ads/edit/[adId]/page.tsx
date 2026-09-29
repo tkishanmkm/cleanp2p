@@ -563,10 +563,9 @@ export default function EditAdPage() {
             'USD'
           ).toUpperCase();
 
-          const matchedPopular = POPULAR_FIATS.find((f) => f.code === loadedFiatCode);
           const matchedFromList = FIAT_CURRENCIES.find((f) => f.code === loadedFiatCode);
-          const matchedFiat = matchedPopular || {
-            name: matchedFromList?.name || `${loadedFiatCode} Currency`,
+          const matchedFiat = matchedFromList || {
+            name: `${loadedFiatCode} Currency`,
             code: loadedFiatCode,
             flag: loadedFiatCode.slice(0, 2).toLowerCase(),
           };
@@ -786,9 +785,18 @@ export default function EditAdPage() {
         require_verified_users: requireVerifiedUsers,
       };
 
+      const { data: { session: freshSession } } = await supabase.auth.getSession();
+      const headers: Record<string, string> = {
+        'Content-Type': 'application/json',
+      };
+      if (freshSession?.access_token) {
+        headers['Authorization'] = `Bearer ${freshSession.access_token}`;
+      }
+
       const res = await fetch(`/api/ads/${adId}`, {
         method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
+        headers,
+        credentials: 'include',
         body: JSON.stringify(updatePayload),
       });
 

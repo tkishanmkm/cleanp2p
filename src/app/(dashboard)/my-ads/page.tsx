@@ -138,7 +138,8 @@ export default function MyAdsPage() {
         description: `Your ad has been ${!currentStatus ? "activated" : "deactivated"}.`,
       });
     } catch (e: any) {
-      toast({ variant: "destructive", title: "Update Failed", description: e.message });
+      toast({ variant: "destructive", title: "Update Failed", description: e.message || "Failed to update ad status." });
+      fetchMyAds();
     }
   };
 
@@ -151,7 +152,8 @@ export default function MyAdsPage() {
         description: "Your ad has been removed from public listings.",
       });
     } catch (e: any) {
-      toast({ variant: "destructive", title: "Delete Failed", description: e.message });
+      toast({ variant: "destructive", title: "Delete Failed", description: e.message || "Failed to delete ad." });
+      fetchMyAds();
     }
   };
 

@@ -53,103 +53,49 @@ export async function updateAd(_db: any, adId: string, adData: Partial<Omit<P2PA
 }
 
 export async function updateAdStatus(_db: any, adId: string, active: boolean) {
-  try {
-    const { data: { session } } = await supabase.auth.getSession();
-    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-    if (session?.access_token) {
-      headers['Authorization'] = `Bearer ${session.access_token}`;
-    }
-
-    const res = await fetch(`/api/p2p/ads/${adId}`, {
-      method: 'PATCH',
-      headers,
-      credentials: 'include',
-      body: JSON.stringify({
-        status: active ? 'ACTIVE' : 'OFFLINE',
-        active,
-        is_active: active,
-      }),
-    });
-
-    if (res.ok) {
-      const json = await res.json();
-      return json.data;
-    }
-  } catch (err) {
-    console.warn('API PATCH failed, falling back to direct query:', err);
+  const { data: { session } } = await supabase.auth.getSession();
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  if (session?.access_token) {
+    headers['Authorization'] = `Bearer ${session.access_token}`;
   }
 
-  // Resilient direct Supabase queries across schema variants
-  try {
-    const { data, error } = await supabase
-      .from('p2p_ads')
-      .update({ active, status: active ? 'ACTIVE' : 'OFFLINE', is_active: active })
-      .eq('id', adId)
-      .select();
+  // Call canonical status update endpoint
+  const res = await fetch(`/api/ads/${adId}`, {
+    method: 'PATCH',
+    headers,
+    credentials: 'include',
+    body: JSON.stringify({
+      status: active ? 'ACTIVE' : 'INACTIVE',
+      active,
+      is_active: active,
+    }),
+  });
 
-    if (!error) return data;
-  } catch (err) {
-    console.warn('p2p_ads status update notice:', err);
+  if (!res.ok) {
+    const errorData = await res.json().catch(() => ({}));
+    throw new Error(errorData.error || errorData.message || `Failed to update advertisement status (HTTP ${res.status})`);
   }
 
-  try {
-    const { data } = await supabase
-      .from('p2p_ads')
-      .update({ is_active: active })
-      .eq('id', adId)
-      .select();
-    if (data) return data;
-  } catch (e) {
-    console.warn('p2p_ads is_active fallback notice:', e);
-  }
-
-  try {
-    const { data } = await supabase
-      .from('ads')
-      .update({ is_active: active, status: active ? 'ACTIVE' : 'INACTIVE' })
-      .eq('id', adId)
-      .select();
-    return data;
-  } catch (e) {
-    console.warn('ads table fallback notice:', e);
-  }
+  const json = await res.json();
+  return json;
 }
 
 export async function softDeleteAd(_db: any, adId: string) {
-  try {
-    const { data: { session } } = await supabase.auth.getSession();
-    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-    if (session?.access_token) {
-      headers['Authorization'] = `Bearer ${session.access_token}`;
-    }
-
-    const res = await fetch(`/api/p2p/ads/${adId}`, {
-      method: 'DELETE',
-      headers,
-      credentials: 'include',
-    });
-
-    if (res.ok) {
-      return { success: true };
-    }
-  } catch (err) {
-    console.warn('API DELETE failed, falling back to direct query:', err);
+  const { data: { session } } = await supabase.auth.getSession();
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  if (session?.access_token) {
+    headers['Authorization'] = `Bearer ${session.access_token}`;
   }
 
-  try {
-    const { error } = await supabase
-      .from('p2p_ads')
-      .delete()
-      .eq('id', adId);
-    if (!error) return { success: true };
-  } catch (e) {
-    console.warn('Direct delete p2p_ads notice:', e);
-  }
+  const res = await fetch(`/api/ads/${adId}`, {
+    method: 'DELETE',
+    headers,
+    credentials: 'include',
+  });
 
-  try {
-    await supabase.from('ads').delete().eq('id', adId);
-  } catch (e) {
-    console.warn('Direct delete ads notice:', e);
+  if (!res.ok) {
+    const errorData = await res.json().catch(() => ({}));
+    throw new Error(errorData.error || errorData.message || `Failed to delete advertisement (HTTP ${res.status})`);
   }
 
   return { success: true };
