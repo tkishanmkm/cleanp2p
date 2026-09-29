@@ -212,6 +212,7 @@ export async function processWithdrawalQueue(): Promise<WithdrawalProcessResult>
         await supabaseAdmin.rpc('process_failed_withdrawal', {
           p_withdrawal_id: withdrawal.id,
           p_error_reason: err.message || 'Transaction pre-broadcast validation failure',
+          p_is_verified_unbroadcast: true,
         });
         return {
           processed: true,
@@ -229,19 +230,41 @@ export async function processWithdrawalQueue(): Promise<WithdrawalProcessResult>
         };
       }
     } else {
-      console.warn(`[Withdrawal Worker] Ambiguous broadcast result for withdrawal ${withdrawal.id}.`);
+      console.warn(`[Withdrawal Worker] Ambiguous broadcast result for withdrawal ${withdrawal.id}. Transitioning to AMBIGUOUS_BROADCAST and preserving funds reservation.`);
+      try {
+        await supabaseAdmin
+          .from('onchain_withdrawals')
+          .update({
+            status: 'AMBIGUOUS_BROADCAST',
+            error_message: `Ambiguous broadcast error: ${err.message}`,
+            updated_at: new Date().toISOString(),
+          })
+          .eq('id', withdrawal.id);
+
+        await supabaseAdmin
+          .from('withdrawals')
+          .update({
+            status: 'AMBIGUOUS_BROADCAST',
+            broadcast_error: `Ambiguous broadcast error: ${err.message}`,
+            updated_at: new Date().toISOString(),
+          })
+          .eq('id', withdrawal.id);
+      } catch (statusErr) {
+        console.error(`[Withdrawal Worker] Failed setting AMBIGUOUS_BROADCAST status for ${withdrawal.id}:`, statusErr);
+      }
+
       return {
         processed: true,
         withdrawalId: withdrawal.id,
-        status: 'PROCESSING',
-        error: `Ambiguous broadcast error: ${err.message}`,
+        status: 'AMBIGUOUS_BROADCAST',
+        error: `Ambiguous broadcast error: ${err.message}. Funds remain reserved in in_withdrawal pending manual/reconciliation resolution.`,
       };
     }
   }
 }
 
 /**
- * Checks previously BROADCASTED or PROCESSING withdrawals and confirms them once confirmations are met
+ * Checks previously BROADCASTED, PROCESSING, or AMBIGUOUS_BROADCAST withdrawals and confirms them once confirmations are met
  */
 export async function checkSubmittedWithdrawals(): Promise<{
   checked: number;
@@ -254,7 +277,7 @@ export async function checkSubmittedWithdrawals(): Promise<{
     const { data: pendingTxs, error } = await supabaseAdmin
       .from('onchain_withdrawals')
       .select('*')
-      .in('status', ['BROADCASTED', 'PROCESSING'])
+      .in('status', ['BROADCASTED', 'PROCESSING', 'AMBIGUOUS_BROADCAST'])
       .not('tx_hash', 'is', null)
       .limit(30);
 
@@ -280,6 +303,7 @@ export async function checkSubmittedWithdrawals(): Promise<{
           await supabaseAdmin.rpc('process_failed_withdrawal', {
             p_withdrawal_id: w.id,
             p_error_reason: `TRON transaction reverted on-chain`,
+            p_is_verified_unbroadcast: true,
           });
         }
       } else if (SUPPORTED_EVM_CHAINS[normNet]) {
@@ -297,6 +321,7 @@ export async function checkSubmittedWithdrawals(): Promise<{
           await supabaseAdmin.rpc('process_failed_withdrawal', {
             p_withdrawal_id: w.id,
             p_error_reason: `EVM transaction reverted on-chain on network ${w.network}`,
+            p_is_verified_unbroadcast: true,
           });
         }
       } else if (normNet === 'BTC') {
@@ -344,24 +369,92 @@ export async function checkSubmittedWithdrawals(): Promise<{
 
 /**
  * Processes all pending withdrawals in sequence up to maxBatch
+ * Enforces PostgreSQL distributed singleton advisory lock to ensure only one active dispatcher
  */
 export async function processAllPendingWithdrawals(maxBatch: number = 20): Promise<{
   totalProcessed: number;
   results: WithdrawalProcessResult[];
+  locked?: boolean;
 }> {
+  // Acquire distributed singleton advisory lock
+  let hasLock = false;
+  try {
+    const { data: lockAcquired, error: lockErr } = await supabaseAdmin.rpc('acquire_withdrawal_worker_lock');
+    if (!lockErr && lockAcquired === true) {
+      hasLock = true;
+    } else if (!lockErr && lockAcquired === false) {
+      console.warn('[Withdrawal Worker Singleton] Another worker instance is currently holding the dispatch lease. Exiting batch run.');
+      return { totalProcessed: 0, results: [], locked: true };
+    }
+  } catch (lockRpcErr) {
+    // If RPC is unavailable, proceed defensively
+    hasLock = false;
+  }
+
   const results: WithdrawalProcessResult[] = [];
   let count = 0;
 
-  while (count < maxBatch) {
-    const res = await processWithdrawalQueue();
-    if (!res.processed) {
-      break;
+  try {
+    while (count < maxBatch) {
+      const res = await processWithdrawalQueue();
+      if (!res.processed) {
+        break;
+      }
+      results.push(res);
+      count++;
     }
-    results.push(res);
-    count++;
+  } finally {
+    if (hasLock) {
+      try {
+        await supabaseAdmin.rpc('release_withdrawal_worker_lock');
+      } catch (unlockErr) {
+        console.warn('[Withdrawal Worker Singleton] Notice on lock release:', unlockErr);
+      }
+    }
   }
 
   return { totalProcessed: count, results };
 }
 
 export const processPendingWithdrawals = processAllPendingWithdrawals;
+
+let workerTimer: NodeJS.Timeout | null = null;
+let isWorkerRunning = false;
+
+/**
+ * Starts continuous background withdrawal worker loop
+ */
+export function startWithdrawalWorker(intervalMs: number = 15000): void {
+  if (workerTimer) return;
+  isWorkerRunning = true;
+  console.log(`[Withdrawal Worker] Service started with interval ${intervalMs}ms`);
+
+  const runLoop = async () => {
+    if (!isWorkerRunning) return;
+    try {
+      await processAllPendingWithdrawals(10);
+      await checkSubmittedWithdrawals();
+    } catch (err) {
+      console.error('[Withdrawal Worker Loop Error]:', err);
+    } finally {
+      if (isWorkerRunning) {
+        workerTimer = setTimeout(runLoop, intervalMs);
+      }
+    }
+  };
+
+  workerTimer = setTimeout(runLoop, 1000);
+}
+
+/**
+ * Stops continuous background withdrawal worker loop
+ */
+export function stopWithdrawalWorker(): void {
+  isWorkerRunning = false;
+  if (workerTimer) {
+    clearTimeout(workerTimer);
+    workerTimer = null;
+  }
+  console.log('[Withdrawal Worker] Service stopped');
+}
+

@@ -373,6 +373,7 @@ export async function POST(req: NextRequest) {
         await supabase.rpc('process_failed_withdrawal', {
           p_withdrawal_id: item.id,
           p_error_reason: errorMsg,
+          p_is_verified_unbroadcast: true,
         });
 
         processedResults.push({

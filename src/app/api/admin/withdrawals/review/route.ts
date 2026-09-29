@@ -53,6 +53,7 @@ export async function POST(req: NextRequest) {
       const { error: rpcError } = await supabaseAdmin.rpc('process_failed_withdrawal', {
         p_withdrawal_id: withdrawalId,
         p_error_reason: rejectionReason || 'Rejected by administrator during security review.',
+        p_is_verified_unbroadcast: true,
       });
 
       if (rpcError) throw rpcError;

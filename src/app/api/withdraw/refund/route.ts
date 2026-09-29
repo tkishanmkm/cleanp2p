@@ -27,6 +27,7 @@ export async function POST(req: Request) {
     const { error: rpcError } = await supabaseAdmin.rpc('process_failed_withdrawal', {
       p_withdrawal_id: withdrawalId,
       p_error_reason: reason || 'Manual refund requested',
+      p_is_verified_unbroadcast: true,
     });
 
     if (rpcError) {

@@ -586,6 +586,7 @@ export async function processPendingWithdrawals(limit: number = 20): Promise<Pro
           await supabaseAdmin.rpc('process_failed_withdrawal', {
             p_withdrawal_id: item.id,
             p_error_reason: errorMsg,
+            p_is_verified_unbroadcast: true,
           });
         } catch (rpcErr) {
           console.error('[processPendingWithdrawals] Refund RPC failed:', rpcErr);

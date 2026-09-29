@@ -258,7 +258,7 @@ export async function reconcileLedgerVsChain(assetSymbol = 'USDT'): Promise<Reco
     );
   }
 
-  // 2. Log Low Gas Token Alerts
+  // 3. Log Low Gas Token Alerts
   for (const gas of gasStatuses) {
     if (!gas.isSufficient) {
       await createSystemAlert(
@@ -271,6 +271,9 @@ export async function reconcileLedgerVsChain(assetSymbol = 'USDT'): Promise<Reco
     }
   }
 
+  // 4. Detect and Alert on Individual Orphan / Ambiguous Withdrawals (> 15 mins)
+  await detectAndAlertOrphanWithdrawals();
+
   return {
     assetSymbol,
     totalDbUserBalance,
@@ -282,3 +285,54 @@ export async function reconcileLedgerVsChain(assetSymbol = 'USDT'): Promise<Reco
     gasStatuses,
   };
 }
+
+/**
+ * Detects individual orphaned or ambiguous processing withdrawals (> 15 minutes old)
+ * and logs high-priority alerts without mutating financial state.
+ */
+export async function detectAndAlertOrphanWithdrawals(): Promise<number> {
+  const fifteenMinutesAgo = new Date(Date.now() - 15 * 60 * 1000).toISOString();
+
+  try {
+    const { data: orphans, error } = await supabaseAdmin
+      .from('onchain_withdrawals')
+      .select('id, user_id, amount, asset_symbol, network, status, tx_hash, created_at, updated_at')
+      .in('status', ['PROCESSING', 'AMBIGUOUS_BROADCAST'])
+      .lt('updated_at', fifteenMinutesAgo)
+      .limit(50);
+
+    if (error || !orphans || orphans.length === 0) {
+      return 0;
+    }
+
+    for (const item of orphans) {
+      const ageMinutes = Math.round((Date.now() - new Date(item.updated_at || item.created_at).getTime()) / 60000);
+      const isAmbiguous = item.status === 'AMBIGUOUS_BROADCAST' || !item.tx_hash;
+
+      await createSystemAlert(
+        'WORKER_ERROR',
+        'CRITICAL',
+        `Orphan Withdrawal Detected: ${item.id}`,
+        `Withdrawal ${item.id} (${item.amount} ${item.asset_symbol} on ${item.network}) has been in ${item.status} for ${ageMinutes}m with ${item.tx_hash ? `tx_hash ${item.tx_hash}` : 'NULL tx_hash'}. Manual explorer verification required.`,
+        {
+          withdrawal_id: item.id,
+          user_id: item.user_id,
+          amount: item.amount,
+          asset: item.asset_symbol,
+          network: item.network,
+          status: item.status,
+          tx_hash: item.tx_hash,
+          age_minutes: ageMinutes,
+          is_ambiguous: isAmbiguous,
+          action_required: 'Check blockchain explorer before manual completion or refund.',
+        }
+      );
+    }
+
+    return orphans.length;
+  } catch (err: any) {
+    console.error('[Orphan Detector Error]:', err.message);
+    return 0;
+  }
+}
+
