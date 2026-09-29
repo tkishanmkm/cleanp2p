@@ -67,11 +67,11 @@ export default function IdentitySettingsPage() {
 
   if (loading) {
     return (
-      <div className="max-w-2xl mx-auto p-6 space-y-4">
+      <div className="max-w-2xl mx-auto p-4 sm:p-6 space-y-4">
         <div className="animate-pulse space-y-4">
-          <div className="h-8 bg-slate-800 rounded w-1/3"></div>
-          <div className="h-32 bg-slate-800 rounded-xl"></div>
-          <div className="h-48 bg-slate-800 rounded-xl"></div>
+          <div className="h-8 bg-slate-200 dark:bg-slate-800 rounded w-1/3"></div>
+          <div className="h-32 bg-slate-200 dark:bg-slate-800 rounded-xl"></div>
+          <div className="h-48 bg-slate-200 dark:bg-slate-800 rounded-xl"></div>
         </div>
       </div>
     );
@@ -82,15 +82,15 @@ export default function IdentitySettingsPage() {
   const isVerified = verification.isVerified;
 
   return (
-    <div className="max-w-2xl mx-auto p-4 sm:p-6 space-y-8 text-white">
-      <div className="flex items-center justify-between border-b border-slate-800 pb-4">
+    <div className="max-w-2xl mx-auto p-4 sm:p-6 space-y-6 sm:space-y-8 text-slate-900 dark:text-slate-100">
+      <div className="flex items-center justify-between border-b border-slate-200 dark:border-slate-800 pb-4">
         <div>
           <div className="flex items-center gap-2 mb-1">
-            <Link href="/settings" className="text-slate-400 hover:text-slate-200 transition text-sm flex items-center gap-1">
+            <Link href="/settings" className="text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-200 transition text-sm flex items-center gap-1 font-medium">
               <ArrowLeft className="w-4 h-4" /> Settings
             </Link>
           </div>
-          <h1 className="text-2xl font-bold">Identity & Verification</h1>
+          <h1 className="text-2xl font-bold text-slate-900 dark:text-white">Identity & Verification</h1>
         </div>
       </div>
 
@@ -98,8 +98,8 @@ export default function IdentitySettingsPage() {
         <div
           className={`p-3 rounded-lg text-xs flex items-center gap-2 border ${
             toastMessage.type === 'success'
-              ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300'
-              : 'bg-rose-500/10 border-rose-500/30 text-rose-300'
+              ? 'bg-emerald-50 dark:bg-emerald-500/10 border-emerald-200 dark:border-emerald-500/30 text-emerald-800 dark:text-emerald-300'
+              : 'bg-rose-50 dark:bg-rose-500/10 border-rose-200 dark:border-rose-500/30 text-rose-800 dark:text-rose-300'
           }`}
         >
           {toastMessage.text}
@@ -107,12 +107,12 @@ export default function IdentitySettingsPage() {
       )}
 
       {/* 1. Profile Picture Section */}
-      <div className="bg-slate-900 border border-slate-800 rounded-xl p-6 flex flex-col sm:flex-row items-center sm:items-start gap-6">
+      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-5 sm:p-6 flex flex-col sm:flex-row items-center sm:items-start gap-6 shadow-xs">
         <div className="relative">
           <img
             src={`/api/media/avatar/${profile?.id}?t=${avatarKey}`}
             alt="User DP"
-            className="w-20 h-20 rounded-full object-cover border-2 border-emerald-500/30 bg-slate-800"
+            className="w-20 h-20 rounded-full object-cover border-2 border-emerald-500/30 bg-slate-100 dark:bg-slate-800"
             onError={(e) => {
               // fallback gracefully
               (e.target as HTMLImageElement).src = `https://api.dicebear.com/7.x/identicon/svg?seed=${profile?.id || 'user'}`;
@@ -120,13 +120,13 @@ export default function IdentitySettingsPage() {
           />
         </div>
         <div className="flex-1 text-center sm:text-left">
-          <h2 className="font-semibold text-lg flex items-center justify-center sm:justify-start gap-2">
-            <UserCheck className="w-5 h-5 text-emerald-400" /> Profile Picture (DP)
+          <h2 className="font-semibold text-lg flex items-center justify-center sm:justify-start gap-2 text-slate-900 dark:text-white">
+            <UserCheck className="w-5 h-5 text-emerald-600 dark:text-emerald-400" /> Profile Picture (DP)
           </h2>
-          <p className="text-xs text-slate-400 mb-3 mt-1">
+          <p className="text-xs text-slate-500 dark:text-slate-400 mb-3 mt-1">
             Publicly visible across ads, trade chats, and your user profile.
           </p>
-          <label className="cursor-pointer inline-flex items-center gap-2 px-4 py-2 bg-slate-800 hover:bg-slate-700 text-xs font-semibold rounded-lg border border-slate-700 text-emerald-400 transition shadow-xs">
+          <label className="cursor-pointer inline-flex items-center gap-2 px-4 py-2 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-xs font-semibold rounded-lg border border-slate-200 dark:border-slate-700 text-emerald-700 dark:text-emerald-400 transition shadow-xs">
             <UploadCloud className="w-4 h-4" />
             {uploadingDp ? 'Uploading...' : 'Change DP'}
             <input
@@ -141,19 +141,19 @@ export default function IdentitySettingsPage() {
       </div>
 
       {/* 2. KYC Verification & Trading Limits Section */}
-      <div className="bg-slate-900 border border-slate-800 rounded-xl p-6 space-y-5">
+      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-5 sm:p-6 space-y-5 shadow-xs">
         <div className="flex justify-between items-center">
           <div>
-            <h2 className="font-semibold text-lg flex items-center gap-2">
-              <ShieldCheck className="w-5 h-5 text-emerald-400" /> KYC Verification
+            <h2 className="font-semibold text-lg flex items-center gap-2 text-slate-900 dark:text-white">
+              <ShieldCheck className="w-5 h-5 text-emerald-600 dark:text-emerald-400" /> KYC Verification
             </h2>
-            <p className="text-xs text-slate-400 mt-0.5">Powered by Secure Identity Verification Service</p>
+            <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">Powered by Secure Identity Verification Service</p>
           </div>
           <span
             className={`px-3 py-1 text-xs font-bold rounded-full ${
               isVerified
-                ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
-                : 'bg-amber-500/20 text-amber-400 border border-amber-500/30'
+                ? 'bg-emerald-50 dark:bg-emerald-500/20 text-emerald-700 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-500/30'
+                : 'bg-amber-50 dark:bg-amber-500/20 text-amber-700 dark:text-amber-400 border border-amber-200 dark:border-amber-500/30'
             }`}
           >
             {isVerified ? '✓ Verified' : profile?.kyc_status || 'Not Verified'}
@@ -161,15 +161,15 @@ export default function IdentitySettingsPage() {
         </div>
 
         {/* Progress & Limits */}
-        <div className="bg-slate-950 p-4 rounded-lg border border-slate-800 space-y-2">
+        <div className="bg-slate-50 dark:bg-slate-950 p-4 rounded-lg border border-slate-200 dark:border-slate-800 space-y-2">
           <div className="flex justify-between text-xs font-medium">
-            <span className="text-slate-400">Trading Volume Limit:</span>
-            <span>{isVerified ? 'No platform-imposed limit' : `$${totalTraded.toFixed(2)} / $1,000.00 USD`}</span>
+            <span className="text-slate-500 dark:text-slate-400">Trading Volume Limit:</span>
+            <span className="text-slate-900 dark:text-slate-100 font-semibold">{isVerified ? 'No platform-imposed limit' : `$${totalTraded.toFixed(2)} / $1,000.00 USD`}</span>
           </div>
           {!isVerified && (
-            <div className="w-full bg-slate-800 rounded-full h-2">
+            <div className="w-full bg-slate-200 dark:bg-slate-800 rounded-full h-2">
               <div
-                className="bg-emerald-400 h-2 rounded-full transition-all"
+                className="bg-emerald-500 dark:bg-emerald-400 h-2 rounded-full transition-all"
                 style={{ width: `${Math.min((totalTraded / 1000) * 100, 100)}%` }}
               />
             </div>
@@ -183,6 +183,7 @@ export default function IdentitySettingsPage() {
                 userId={profile?.id || ''}
                 initialStatus={profile?.kyc_status || 'NOT_STARTED'}
                 initialAttempts={profile?.kyc_attempts ?? profile?.kyc_retry_count ?? 0}
+                className="inline-flex items-center justify-center px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-semibold text-xs rounded-lg transition disabled:opacity-50 cursor-pointer shadow-xs"
                 onSuccess={() => {
                   loadProfile();
                   setToastMessage({ type: 'success', text: 'Verification submitted! Processing status...' });
@@ -190,12 +191,12 @@ export default function IdentitySettingsPage() {
               />
               <Link
                 href="/support?reason=kyc_help"
-                className="inline-flex items-center gap-1.5 px-4 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 font-semibold text-xs rounded-lg border border-slate-700 transition"
+                className="inline-flex items-center gap-1.5 px-4 py-2.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 font-semibold text-xs rounded-lg border border-slate-200 dark:border-slate-700 transition"
               >
                 Contact Support
               </Link>
             </div>
-            <p className="text-[11px] text-slate-400">
+            <p className="text-[11px] text-slate-500 dark:text-slate-400 leading-relaxed">
               Unverified accounts are limited to $1,000 in total cumulative trades. Verification is processed via automated biometric identity verification. If rejected, you have 3 attempts per 24 hours before needing support assistance.
             </p>
           </div>
