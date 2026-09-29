@@ -1,7 +1,7 @@
 import { createClient, getSupabaseAdminClient } from '@/utils/supabase/server';
 import { NextRequest, NextResponse } from 'next/server';
 import { revalidatePath } from 'next/cache';
-import { findAdById } from '@/lib/ad-lookup';
+import { findAdById, resolveBothTargetRows } from '@/lib/ad-lookup';
 import { resolveTradeType } from '@/utils/p2p-helpers';
 import { verifyServerAdmin } from '@/lib/server-admin-auth';
 import { FIAT_CURRENCIES } from '@/lib/currencies';
@@ -252,20 +252,71 @@ export async function DELETE(
       );
     }
 
-    // 4. Perform Soft-Delete & Deletion on resolved target ID
-    const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(existingAd.id || adId);
-    const targetId = existingAd.id || adId;
+    // 4. Perform Soft-Delete & Deletion on independently resolved target IDs
+    const { p2pAdsRow, adsRow } = await resolveBothTargetRows(existingAd, adId, admin);
 
-    if (isUuid) {
-      await admin.from('p2p_ads').update({ status: 'DELETED', active: false, updated_at: new Date().toISOString() }).eq('id', targetId);
-      await admin.from('ads').update({ status: 'DELETED', is_active: false, updated_at: new Date().toISOString() }).eq('id', targetId);
-      await admin.from('p2p_ads').delete().eq('id', targetId);
-      await admin.from('ads').delete().eq('id', targetId);
-    } else {
-      await admin.from('p2p_ads').update({ status: 'DELETED', active: false, updated_at: new Date().toISOString() }).or(`public_ad_id.eq.${targetId},public_id.eq.${targetId}`);
-      await admin.from('ads').update({ status: 'DELETED', is_active: false, updated_at: new Date().toISOString() }).or(`public_id.eq.${targetId},public_ad_id.eq.${targetId}`);
-      await admin.from('p2p_ads').delete().or(`public_ad_id.eq.${targetId},public_id.eq.${targetId}`);
-      await admin.from('ads').delete().or(`public_id.eq.${targetId},public_ad_id.eq.${targetId}`);
+    let p2pMutated = false;
+    let adsMutated = false;
+
+    if (p2pAdsRow) {
+      await admin
+        .from('p2p_ads')
+        .update({ status: 'DELETED', active: false, is_active: false, updated_at: new Date().toISOString() })
+        .eq('id', p2pAdsRow.id);
+
+      const { data: p2pDel, error: p2pErr } = await admin
+        .from('p2p_ads')
+        .delete()
+        .eq('id', p2pAdsRow.id)
+        .select('id');
+
+      if (!p2pErr && p2pDel && p2pDel.length > 0) {
+        p2pMutated = true;
+      } else {
+        const { data: p2pCheck } = await admin
+          .from('p2p_ads')
+          .select('status')
+          .eq('id', p2pAdsRow.id)
+          .maybeSingle();
+        if (p2pCheck && p2pCheck.status === 'DELETED') {
+          p2pMutated = true;
+        }
+      }
+    }
+
+    if (adsRow) {
+      await admin
+        .from('ads')
+        .update({ status: 'DELETED', is_active: false, updated_at: new Date().toISOString() })
+        .eq('id', adsRow.id);
+
+      const { data: adsDel, error: adsErr } = await admin
+        .from('ads')
+        .delete()
+        .eq('id', adsRow.id)
+        .select('id');
+
+      if (!adsErr && adsDel && adsDel.length > 0) {
+        adsMutated = true;
+      } else {
+        const { data: adsCheck } = await admin
+          .from('ads')
+          .select('status')
+          .eq('id', adsRow.id)
+          .maybeSingle();
+        if (adsCheck && adsCheck.status === 'DELETED') {
+          adsMutated = true;
+        }
+      }
+    }
+
+    if (!p2pAdsRow && !adsRow) {
+      return NextResponse.json({ error: 'Advertisement record not found.' }, { status: 404 });
+    }
+
+    if ((p2pAdsRow && !p2pMutated) || (adsRow && !adsMutated)) {
+      console.error('[DELETE /api/ads/[adId]] Failed row mutation:', { p2pRowId: p2pAdsRow?.id, p2pMutated, adsRowId: adsRow?.id, adsMutated });
+      return NextResponse.json({ error: 'Failed to delete advertisement record.' }, { status: 500 });
     }
 
     try {
@@ -383,29 +434,52 @@ export async function PATCH(
       );
     }
 
-    const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(existingAd.id || adId);
-    const targetId = existingAd.id || adId;
+    // 5. Independently resolve both target rows
+    const { p2pAdsRow, adsRow } = await resolveBothTargetRows(existingAd, adId, admin);
 
-    if (isUuid) {
-      await admin
+    let p2pMutated = false;
+    let adsMutated = false;
+
+    if (p2pAdsRow) {
+      const { data: p2pRes, error: p2pErr } = await admin
         .from('p2p_ads')
-        .update({ active: isActive, status: newStatus, updated_at: new Date().toISOString() })
-        .eq('id', targetId);
+        .update({
+          active: isActive,
+          is_active: isActive,
+          status: newStatus,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', p2pAdsRow.id)
+        .select('id');
 
-      await admin
-        .from('ads')
-        .update({ status: newStatus, is_active: isActive, updated_at: new Date().toISOString() })
-        .eq('id', targetId);
-    } else {
-      await admin
-        .from('p2p_ads')
-        .update({ active: isActive, status: newStatus, updated_at: new Date().toISOString() })
-        .or(`public_ad_id.eq.${targetId},public_id.eq.${targetId}`);
+      if (!p2pErr && p2pRes && p2pRes.length > 0) {
+        p2pMutated = true;
+      }
+    }
 
-      await admin
+    if (adsRow) {
+      const { data: adsRes, error: adsErr } = await admin
         .from('ads')
-        .update({ status: newStatus, is_active: isActive, updated_at: new Date().toISOString() })
-        .or(`public_id.eq.${targetId},public_ad_id.eq.${targetId}`);
+        .update({
+          is_active: isActive,
+          status: newStatus,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', adsRow.id)
+        .select('id');
+
+      if (!adsErr && adsRes && adsRes.length > 0) {
+        adsMutated = true;
+      }
+    }
+
+    if (!p2pAdsRow && !adsRow) {
+      return NextResponse.json({ error: 'Advertisement not found.' }, { status: 404 });
+    }
+
+    if ((p2pAdsRow && !p2pMutated) || (adsRow && !adsMutated)) {
+      console.error('[PATCH /api/ads/[adId]] Failed row status update:', { p2pRowId: p2pAdsRow?.id, p2pMutated, adsRowId: adsRow?.id, adsMutated });
+      return NextResponse.json({ error: 'Failed to update advertisement status.' }, { status: 500 });
     }
 
     try {
@@ -616,11 +690,14 @@ export async function PUT(
       }
     }
 
-    // 5. Build Table-Specific Payloads & Execute Exact Update on Resolved Primary ID
-    let updatedRow: any = null;
-    let updateError: any = null;
+    // 5. Build Table-Specific Payloads & Execute Exact Update on Independently Resolved Target Rows
+    const { p2pAdsRow, adsRow } = await resolveBothTargetRows(existingAd, adId, admin);
 
-    if (targetTable === 'ads' || targetTable === 'offers') {
+    let p2pUpdated = false;
+    let adsUpdated = false;
+    let lastUpdatedRow: any = null;
+
+    if (adsRow) {
       const adsPayload: Record<string, any> = {
         updated_at: timestamp,
       };
@@ -656,17 +733,18 @@ export async function PUT(
       adsPayload.payment_window = paymentWindow;
 
       const { data, error } = await admin
-        .from(targetTable)
+        .from('ads')
         .update(adsPayload)
-        .eq('id', existingAd.id)
+        .eq('id', adsRow.id)
         .select();
 
-      if (error) {
-        updateError = error;
-      } else if (data && data.length > 0) {
-        updatedRow = data[0];
+      if (!error && data && data.length > 0) {
+        adsUpdated = true;
+        lastUpdatedRow = data[0];
       }
-    } else if (targetTable === 'p2p_ads') {
+    }
+
+    if (p2pAdsRow) {
       const p2pPayload: Record<string, any> = {
         updated_at: timestamp,
       };
@@ -719,32 +797,28 @@ export async function PUT(
       const { data, error } = await admin
         .from('p2p_ads')
         .update(p2pPayload)
-        .eq('id', existingAd.id)
+        .eq('id', p2pAdsRow.id)
         .select();
 
-      if (error) {
-        updateError = error;
-      } else if (data && data.length > 0) {
-        updatedRow = data[0];
+      if (!error && data && data.length > 0) {
+        p2pUpdated = true;
+        if (!lastUpdatedRow) lastUpdatedRow = data[0];
       }
     }
 
-    // 6. Verify Rows Affected
-    if (updateError) {
-      console.error('[PUT /api/ads/[adId]] Database update error:', updateError);
-      return NextResponse.json(
-        { error: updateError.message || 'Database error occurred while updating advertisement.' },
-        { status: 400 }
-      );
+    if (!p2pAdsRow && !adsRow) {
+      return NextResponse.json({ error: 'Advertisement not found.' }, { status: 404 });
     }
 
-    if (!updatedRow) {
-      console.error('[PUT /api/ads/[adId]] Zero rows updated for ad:', existingAd.id);
+    if ((p2pAdsRow && !p2pUpdated) || (adsRow && !adsUpdated)) {
+      console.error('[PUT /api/ads/[adId]] Zero rows updated for target advertisement.');
       return NextResponse.json(
         { error: 'Update failed: no advertisement record was modified.' },
         { status: 500 }
       );
     }
+
+    const updatedRow = lastUpdatedRow;
 
     // 7. Invalidate Caches
     try {

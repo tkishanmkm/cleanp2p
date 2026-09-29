@@ -213,3 +213,114 @@ export async function findAdById(rawId: string): Promise<ResolvedAdResult | null
 
   return null;
 }
+
+export interface TargetRowsResult {
+  p2pAdsRow: any | null;
+  adsRow: any | null;
+  ownerId: string | null;
+}
+
+/**
+ * Given a resolved ad object (from findAdById) and the raw identifier requested by the client,
+ * independently resolves the exact matching database record for `p2p_ads` and `ads` tables.
+ * This guarantees that even if `p2p_ads.id` and `ads.id` are DIFFERENT UUIDs for the same
+ * logical advertisement (e.g. matched via public_ad_id or public_id), mutations update/delete
+ * the exact primary key row in EACH table.
+ */
+export async function resolveBothTargetRows(
+  existingAd: any,
+  rawId: string,
+  overrideAdminClient?: any
+): Promise<TargetRowsResult> {
+  const adminClient = overrideAdminClient || getSupabaseAdminClient();
+  const ownerId = existingAd?.user_id || existingAd?.userId || existingAd?.seller_id || existingAd?.creator_id || null;
+
+  const candidateIdsSet = new Set<string>();
+  if (rawId && typeof rawId === 'string' && rawId.trim()) {
+    candidateIdsSet.add(rawId.trim().replace(/^#/, ''));
+  }
+
+  if (existingAd) {
+    ['id', 'public_ad_id', 'ad_id', 'public_id', 'offer_id'].forEach((key) => {
+      const val = existingAd[key];
+      if (val && typeof val === 'string' && val.trim()) {
+        candidateIdsSet.add(val.trim());
+      }
+    });
+  }
+
+  const candidateIds = Array.from(candidateIdsSet);
+
+  async function findRowInTable(tableName: 'ads' | 'p2p_ads'): Promise<any | null> {
+    for (const cid of candidateIds) {
+      const isUuid = isValidUUID(cid);
+      if (isUuid) {
+        try {
+          const { data, error } = await adminClient
+            .from(tableName)
+            .select('*')
+            .eq('id', cid)
+            .maybeSingle();
+          if (data && !error && (!ownerId || String(data.user_id || data.userId || '') === String(ownerId))) {
+            return data;
+          }
+        } catch {}
+      }
+
+      for (const col of ['public_ad_id', 'public_id', 'ad_id', 'offer_id']) {
+        try {
+          const { data, error } = await adminClient
+            .from(tableName)
+            .select('*')
+            .eq(col, cid)
+            .maybeSingle();
+          if (data && !error && (!ownerId || String(data.user_id || data.userId || '') === String(ownerId))) {
+            return data;
+          }
+        } catch {}
+      }
+
+      if (!isUuid) {
+        try {
+          const { data, error } = await adminClient
+            .from(tableName)
+            .select('*')
+            .eq('id', cid)
+            .maybeSingle();
+          if (data && !error && (!ownerId || String(data.user_id || data.userId || '') === String(ownerId))) {
+            return data;
+          }
+        } catch {}
+      }
+    }
+
+    if (ownerId) {
+      try {
+        const { data } = await adminClient
+          .from(tableName)
+          .select('*')
+          .eq('user_id', ownerId)
+          .limit(100);
+
+        if (Array.isArray(data)) {
+          const matched = data.find((row: any) => {
+            const rIds = [row.id, row.public_ad_id, row.public_id, row.ad_id, row.offer_id]
+              .filter(Boolean)
+              .map((v) => String(v).trim().toLowerCase());
+            return candidateIds.some((cid) => rIds.includes(cid.toLowerCase()));
+          });
+          if (matched) return matched;
+        }
+      } catch {}
+    }
+
+    return null;
+  }
+
+  const [p2pAdsRow, adsRow] = await Promise.all([
+    findRowInTable('p2p_ads'),
+    findRowInTable('ads'),
+  ]);
+
+  return { p2pAdsRow, adsRow, ownerId };
+}

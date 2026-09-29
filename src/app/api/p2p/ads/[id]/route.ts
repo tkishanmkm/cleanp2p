@@ -2,7 +2,7 @@ import { createServerClient } from '@supabase/ssr';
 import { createClient } from '@supabase/supabase-js';
 import { cookies } from 'next/headers';
 import { NextResponse, type NextRequest } from 'next/server';
-import { findAdById } from '@/lib/ad-lookup';
+import { findAdById, resolveBothTargetRows } from '@/lib/ad-lookup';
 
 export const dynamic = 'force-dynamic';
 
@@ -201,56 +201,67 @@ export async function PATCH(
     if (body.min_limit !== undefined && body.min_limit !== null && body.min_limit !== '') body.min_limit = Number(body.min_limit);
     if (body.max_limit !== undefined && body.max_limit !== null && body.max_limit !== '') body.max_limit = Number(body.max_limit);
 
-    const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(existingAd.id || id);
-    const targetUuid = existingAd.id || id;
-    const targetPublicId = existingAd.public_ad_id || existingAd.public_id || existingAd.ad_id || id;
-
     const supabaseAdmin = createClient(
       process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL || 'https://placeholder.supabase.co',
       process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'placeholder-anon-key'
     );
 
-    const updatePayload = {
-      ...body,
-      updated_at: new Date().toISOString(),
-    };
+    const { p2pAdsRow, adsRow } = await resolveBothTargetRows(existingAd, id, supabaseAdmin);
 
+    let p2pMutated = false;
+    let adsMutated = false;
     let updatedResult: any = null;
 
-    if (isUuid) {
-      const { data: p2pRes } = await supabaseAdmin
+    if (p2pAdsRow) {
+      const p2pPayload = {
+        ...body,
+        updated_at: new Date().toISOString(),
+      };
+      const { data: p2pRes, error: p2pErr } = await supabaseAdmin
         .from('p2p_ads')
-        .update(updatePayload)
-        .eq('id', targetUuid)
+        .update(p2pPayload)
+        .eq('id', p2pAdsRow.id)
         .select()
         .maybeSingle();
-      updatedResult = p2pRes;
 
-      await supabaseAdmin.from('ads').update({
-        status: body.status || (body.active ? 'ACTIVE' : 'INACTIVE'),
-        is_active: body.active ?? (body.status === 'ACTIVE'),
-        price: body.price,
-        min_limit: body.min_limit ?? body.min_amount,
-        max_limit: body.max_limit ?? body.max_amount,
+      if (!p2pErr && p2pRes) {
+        p2pMutated = true;
+        updatedResult = p2pRes;
+      }
+    }
+
+    if (adsRow) {
+      const newStatus = body.status || (body.active ? 'ACTIVE' : 'INACTIVE');
+      const isActive = body.active ?? (newStatus === 'ACTIVE');
+      const adsPayload: Record<string, any> = {
+        status: newStatus,
+        is_active: isActive,
         updated_at: new Date().toISOString(),
-      }).eq('id', targetUuid);
-    } else {
-      const { data: p2pRes } = await supabaseAdmin
-        .from('p2p_ads')
-        .update(updatePayload)
-        .or(`public_ad_id.eq.${targetPublicId},public_id.eq.${targetPublicId},ad_id.eq.${targetPublicId}`)
+      };
+      if (body.price !== undefined) adsPayload.price = body.price;
+      if (body.min_limit !== undefined || body.min_amount !== undefined) adsPayload.min_limit = body.min_limit ?? body.min_amount;
+      if (body.max_limit !== undefined || body.max_amount !== undefined) adsPayload.max_limit = body.max_limit ?? body.max_amount;
+
+      const { data: adsRes, error: adsErr } = await supabaseAdmin
+        .from('ads')
+        .update(adsPayload)
+        .eq('id', adsRow.id)
         .select()
         .maybeSingle();
-      updatedResult = p2pRes;
 
-      await supabaseAdmin.from('ads').update({
-        status: body.status || (body.active ? 'ACTIVE' : 'INACTIVE'),
-        is_active: body.active ?? (body.status === 'ACTIVE'),
-        price: body.price,
-        min_limit: body.min_limit ?? body.min_amount,
-        max_limit: body.max_limit ?? body.max_amount,
-        updated_at: new Date().toISOString(),
-      }).or(`public_id.eq.${targetPublicId},public_ad_id.eq.${targetPublicId},ad_id.eq.${targetPublicId}`);
+      if (!adsErr && adsRes) {
+        adsMutated = true;
+        if (!updatedResult) updatedResult = adsRes;
+      }
+    }
+
+    if (!p2pAdsRow && !adsRow) {
+      return NextResponse.json({ error: 'Advertisement not found.' }, { status: 404 });
+    }
+
+    if ((p2pAdsRow && !p2pMutated) || (adsRow && !adsMutated)) {
+      console.error('[PATCH /api/p2p/ads/[id]] Target update failed:', { p2pRowId: p2pAdsRow?.id, p2pMutated, adsRowId: adsRow?.id, adsMutated });
+      return NextResponse.json({ error: 'Failed to update advertisement.' }, { status: 500 });
     }
 
     return NextResponse.json({ success: true, data: updatedResult || existingAd });
@@ -330,25 +341,75 @@ export async function DELETE(
       return NextResponse.json({ error: 'Forbidden. You do not own this advertisement.' }, { status: 403 });
     }
 
-    const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(existingAd.id || id);
-    const targetUuid = existingAd.id || id;
-    const targetPublicId = existingAd.public_ad_id || existingAd.public_id || existingAd.ad_id || id;
-
     const supabaseAdmin = createClient(
       process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL || 'https://placeholder.supabase.co',
       process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'placeholder-anon-key'
     );
 
-    if (isUuid) {
-      await supabaseAdmin.from('p2p_ads').update({ status: 'DELETED', active: false, is_active: false, updated_at: new Date().toISOString() }).eq('id', targetUuid);
-      await supabaseAdmin.from('ads').update({ status: 'DELETED', is_active: false, updated_at: new Date().toISOString() }).eq('id', targetUuid);
-      await supabaseAdmin.from('p2p_ads').delete().eq('id', targetUuid);
-      await supabaseAdmin.from('ads').delete().eq('id', targetUuid);
-    } else {
-      await supabaseAdmin.from('p2p_ads').update({ status: 'DELETED', active: false, is_active: false, updated_at: new Date().toISOString() }).or(`public_ad_id.eq.${targetPublicId},public_id.eq.${targetPublicId},ad_id.eq.${targetPublicId}`);
-      await supabaseAdmin.from('ads').update({ status: 'DELETED', is_active: false, updated_at: new Date().toISOString() }).or(`public_id.eq.${targetPublicId},public_ad_id.eq.${targetPublicId},ad_id.eq.${targetPublicId}`);
-      await supabaseAdmin.from('p2p_ads').delete().or(`public_ad_id.eq.${targetPublicId},public_id.eq.${targetPublicId},ad_id.eq.${targetPublicId}`);
-      await supabaseAdmin.from('ads').delete().or(`public_id.eq.${targetPublicId},public_ad_id.eq.${targetPublicId},ad_id.eq.${targetPublicId}`);
+    const { p2pAdsRow, adsRow } = await resolveBothTargetRows(existingAd, id, supabaseAdmin);
+
+    let p2pMutated = false;
+    let adsMutated = false;
+
+    if (p2pAdsRow) {
+      await supabaseAdmin
+        .from('p2p_ads')
+        .update({ status: 'DELETED', active: false, is_active: false, updated_at: new Date().toISOString() })
+        .eq('id', p2pAdsRow.id);
+
+      const { data: p2pDel, error: p2pErr } = await supabaseAdmin
+        .from('p2p_ads')
+        .delete()
+        .eq('id', p2pAdsRow.id)
+        .select('id');
+
+      if (!p2pErr && p2pDel && p2pDel.length > 0) {
+        p2pMutated = true;
+      } else {
+        const { data: p2pCheck } = await supabaseAdmin
+          .from('p2p_ads')
+          .select('status')
+          .eq('id', p2pAdsRow.id)
+          .maybeSingle();
+        if (p2pCheck && p2pCheck.status === 'DELETED') {
+          p2pMutated = true;
+        }
+      }
+    }
+
+    if (adsRow) {
+      await supabaseAdmin
+        .from('ads')
+        .update({ status: 'DELETED', is_active: false, updated_at: new Date().toISOString() })
+        .eq('id', adsRow.id);
+
+      const { data: adsDel, error: adsErr } = await supabaseAdmin
+        .from('ads')
+        .delete()
+        .eq('id', adsRow.id)
+        .select('id');
+
+      if (!adsErr && adsDel && adsDel.length > 0) {
+        adsMutated = true;
+      } else {
+        const { data: adsCheck } = await supabaseAdmin
+          .from('ads')
+          .select('status')
+          .eq('id', adsRow.id)
+          .maybeSingle();
+        if (adsCheck && adsCheck.status === 'DELETED') {
+          adsMutated = true;
+        }
+      }
+    }
+
+    if (!p2pAdsRow && !adsRow) {
+      return NextResponse.json({ error: 'Advertisement not found.' }, { status: 404 });
+    }
+
+    if ((p2pAdsRow && !p2pMutated) || (adsRow && !adsMutated)) {
+      console.error('[DELETE /api/p2p/ads/[id]] Target delete failed:', { p2pRowId: p2pAdsRow?.id, p2pMutated, adsRowId: adsRow?.id, adsMutated });
+      return NextResponse.json({ error: 'Failed to delete advertisement record.' }, { status: 500 });
     }
 
     return NextResponse.json({ success: true, message: 'Ad deleted successfully.' });

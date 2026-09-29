@@ -1,7 +1,7 @@
 import { createClient, getSupabaseAdminClient } from '@/utils/supabase/server';
 import { NextRequest, NextResponse } from 'next/server';
 import { revalidatePath } from 'next/cache';
-import { findAdById } from '@/lib/ad-lookup';
+import { findAdById, resolveBothTargetRows } from '@/lib/ad-lookup';
 import { verifyServerAdmin } from '@/lib/server-admin-auth';
 
 export const dynamic = 'force-dynamic';
@@ -71,30 +71,52 @@ export async function PATCH(
     const newStatus = body.status ? String(body.status).toUpperCase().trim() : (body.active ? 'ACTIVE' : 'INACTIVE');
     const isActive = newStatus === 'ACTIVE';
 
-    const targetUuid = existingAd.id || adId;
-    const targetPublicId = existingAd.public_ad_id || existingAd.public_id || existingAd.ad_id || adId;
-    const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(targetUuid);
+    // 4. Independently resolve both target rows
+    const { p2pAdsRow, adsRow } = await resolveBothTargetRows(existingAd, adId, admin);
 
-    if (isUuid) {
-      await admin
+    let p2pMutated = false;
+    let adsMutated = false;
+
+    if (p2pAdsRow) {
+      const { data: p2pRes, error: p2pErr } = await admin
         .from('p2p_ads')
-        .update({ active: isActive, is_active: isActive, status: newStatus, updated_at: new Date().toISOString() })
-        .eq('id', targetUuid);
+        .update({
+          active: isActive,
+          is_active: isActive,
+          status: newStatus,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', p2pAdsRow.id)
+        .select('id');
 
-      await admin
-        .from('ads')
-        .update({ status: newStatus, is_active: isActive, updated_at: new Date().toISOString() })
-        .eq('id', targetUuid);
-    } else {
-      await admin
-        .from('p2p_ads')
-        .update({ active: isActive, is_active: isActive, status: newStatus, updated_at: new Date().toISOString() })
-        .or(`public_ad_id.eq.${targetPublicId},public_id.eq.${targetPublicId},ad_id.eq.${targetPublicId}`);
+      if (!p2pErr && p2pRes && p2pRes.length > 0) {
+        p2pMutated = true;
+      }
+    }
 
-      await admin
+    if (adsRow) {
+      const { data: adsRes, error: adsErr } = await admin
         .from('ads')
-        .update({ status: newStatus, is_active: isActive, updated_at: new Date().toISOString() })
-        .or(`public_id.eq.${targetPublicId},public_ad_id.eq.${targetPublicId},ad_id.eq.${targetPublicId}`);
+        .update({
+          is_active: isActive,
+          status: newStatus,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', adsRow.id)
+        .select('id');
+
+      if (!adsErr && adsRes && adsRes.length > 0) {
+        adsMutated = true;
+      }
+    }
+
+    if (!p2pAdsRow && !adsRow) {
+      return NextResponse.json({ error: 'Advertisement not found.' }, { status: 404 });
+    }
+
+    if ((p2pAdsRow && !p2pMutated) || (adsRow && !adsMutated)) {
+      console.error('[PATCH /api/ads/[adId]/toggle] Failed row status update:', { p2pRowId: p2pAdsRow?.id, p2pMutated, adsRowId: adsRow?.id, adsMutated });
+      return NextResponse.json({ error: 'Failed to update advertisement status.' }, { status: 500 });
     }
 
     try {
