@@ -690,60 +690,14 @@ export async function PUT(
       }
     }
 
-    // 5. Build Table-Specific Payloads & Execute Exact Update on Independently Resolved Target Rows
+    // 5. Build Table-Specific Payloads & Execute Update on Target Rows
     const { p2pAdsRow, adsRow } = await resolveBothTargetRows(existingAd, adId, admin);
 
     let p2pUpdated = false;
     let adsUpdated = false;
     let lastUpdatedRow: any = null;
 
-    if (adsRow) {
-      const adsPayload: Record<string, any> = {
-        updated_at: timestamp,
-      };
-      if (updatedAsset) {
-        adsPayload.asset = String(updatedAsset).toUpperCase();
-        adsPayload.asset_symbol = String(updatedAsset).toUpperCase();
-      }
-      if (updatedFiat) {
-        adsPayload.fiat = String(updatedFiat).toUpperCase();
-        adsPayload.fiat_symbol = String(updatedFiat).toUpperCase();
-        adsPayload.fiat_currency = String(updatedFiat).toUpperCase();
-      }
-      if (price !== undefined) adsPayload.price = price;
-      if (minAmount !== undefined) adsPayload.min_limit = minAmount;
-      if (maxAmount !== undefined) {
-        adsPayload.max_limit = maxAmount;
-        adsPayload.total_amount = maxAmount;
-      }
-      if (paymentMethods !== undefined) adsPayload.payment_methods = paymentMethods;
-      if (termsText !== undefined) adsPayload.terms = termsText;
-      if (offerLabel !== undefined) {
-        adsPayload.offer_label = offerLabel;
-        adsPayload.label = offerLabel;
-      }
-      if (rawTags !== undefined) {
-        adsPayload.tags = rawTags;
-        adsPayload.ad_tags = rawTags;
-      }
-      if (directionFromPayload) {
-        adsPayload.trade_type = directionFromPayload;
-        adsPayload.type = directionFromPayload;
-      }
-      adsPayload.payment_window = paymentWindow;
-
-      const { data, error } = await admin
-        .from('ads')
-        .update(adsPayload)
-        .eq('id', adsRow.id)
-        .select();
-
-      if (!error && data && data.length > 0) {
-        adsUpdated = true;
-        lastUpdatedRow = data[0];
-      }
-    }
-
+    // 5a. Update Canonical p2p_ads Table (Authoritative)
     if (p2pAdsRow) {
       const p2pPayload: Record<string, any> = {
         updated_at: timestamp,
@@ -802,7 +756,40 @@ export async function PUT(
 
       if (!error && data && data.length > 0) {
         p2pUpdated = true;
-        if (!lastUpdatedRow) lastUpdatedRow = data[0];
+        lastUpdatedRow = data[0];
+      } else if (error) {
+        console.error('[PUT /api/ads/[adId]] Canonical p2p_ads update error:', error);
+      }
+    }
+
+    // 5b. Update Legacy ads Table Mirror (Strictly limited to supported columns)
+    if (adsRow) {
+      try {
+        const adsPayload: Record<string, any> = {
+          updated_at: timestamp,
+        };
+        if (price !== undefined) adsPayload.price = price;
+        if (minAmount !== undefined) adsPayload.min_limit = minAmount;
+        if (maxAmount !== undefined) adsPayload.max_limit = maxAmount;
+        if (paymentMethods !== undefined) adsPayload.payment_methods = paymentMethods;
+        if (termsText !== undefined) adsPayload.terms = termsText;
+        if (directionFromPayload) adsPayload.type = directionFromPayload;
+        adsPayload.payment_window = paymentWindow;
+
+        const { data, error } = await admin
+          .from('ads')
+          .update(adsPayload)
+          .eq('id', adsRow.id)
+          .select('id');
+
+        if (!error && data && data.length > 0) {
+          adsUpdated = true;
+          if (!lastUpdatedRow) lastUpdatedRow = data[0];
+        } else if (error) {
+          console.warn('[PUT /api/ads/[adId]] Legacy ads mirror update warning (ignored for canonical result):', error.message);
+        }
+      } catch (legacyErr: any) {
+        console.warn('[PUT /api/ads/[adId]] Legacy ads update exception (ignored for canonical result):', legacyErr?.message);
       }
     }
 
@@ -810,8 +797,18 @@ export async function PUT(
       return NextResponse.json({ error: 'Advertisement not found.' }, { status: 404 });
     }
 
-    if ((p2pAdsRow && !p2pUpdated) || (adsRow && !adsUpdated)) {
-      console.error('[PUT /api/ads/[adId]] Zero rows updated for target advertisement.');
+    // Authoritative Success Check:
+    // If canonical p2p_ads row exists, canonical update MUST succeed.
+    // If only legacy ads row exists, legacy update MUST succeed.
+    const overallSuccess = p2pAdsRow ? p2pUpdated : adsUpdated;
+
+    if (!overallSuccess) {
+      console.error('[PUT /api/ads/[adId]] Canonical advertisement record update failed:', {
+        p2pAdsRowId: p2pAdsRow?.id,
+        p2pUpdated,
+        adsRowId: adsRow?.id,
+        adsUpdated,
+      });
       return NextResponse.json(
         { error: 'Update failed: no advertisement record was modified.' },
         { status: 500 }

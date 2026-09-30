@@ -75,12 +75,12 @@ BEGIN
     IF v_ad_uuid IS NOT NULL THEN
         SELECT * INTO v_ad
         FROM public.p2p_ads
-        WHERE id = v_ad_uuid OR public_ad_id = p_ad_id OR public_id = p_ad_id
+        WHERE id = v_ad_uuid OR public_ad_id = p_ad_id
         LIMIT 1;
     ELSE
         SELECT * INTO v_ad
         FROM public.p2p_ads
-        WHERE public_ad_id = p_ad_id OR public_id = p_ad_id OR id::TEXT = p_ad_id
+        WHERE public_ad_id = p_ad_id OR id::TEXT = p_ad_id
         LIMIT 1;
     END IF;
 
@@ -88,12 +88,12 @@ BEGIN
         IF v_ad_uuid IS NOT NULL THEN
             SELECT * INTO v_ad
             FROM public.ads
-            WHERE id = v_ad_uuid OR public_id = p_ad_id OR public_ad_id = p_ad_id
+            WHERE id = v_ad_uuid OR public_ad_id = p_ad_id
             LIMIT 1;
         ELSE
             SELECT * INTO v_ad
             FROM public.ads
-            WHERE public_id = p_ad_id OR public_ad_id = p_ad_id OR id::TEXT = p_ad_id
+            WHERE public_ad_id = p_ad_id OR id::TEXT = p_ad_id
             LIMIT 1;
         END IF;
     END IF;

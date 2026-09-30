@@ -55,7 +55,7 @@ export async function POST(req: NextRequest) {
     if (isIdUUID) {
       p2pQuery = p2pQuery.or(`id.eq.${ad_id},public_ad_id.eq.${ad_id}`);
     } else {
-      p2pQuery = p2pQuery.or(`public_ad_id.eq.${ad_id},public_id.eq.${ad_id},id.eq.${ad_id}`);
+      p2pQuery = p2pQuery.or(`public_ad_id.eq.${ad_id},id.eq.${ad_id}`);
     }
     const { data: p2pAd } = await p2pQuery.maybeSingle();
 
@@ -66,7 +66,7 @@ export async function POST(req: NextRequest) {
         const { data: primaryAd } = await supabase.from('ads').select('*').eq('id', ad_id).maybeSingle();
         if (primaryAd) ad = primaryAd;
       } else {
-        const { data: primaryAd } = await supabase.from('ads').select('*').or(`public_id.eq.${ad_id},public_ad_id.eq.${ad_id}`).maybeSingle();
+        const { data: primaryAd } = await supabase.from('ads').select('*').or(`public_ad_id.eq.${ad_id},id.eq.${ad_id}`).maybeSingle();
         if (primaryAd) ad = primaryAd;
       }
     }

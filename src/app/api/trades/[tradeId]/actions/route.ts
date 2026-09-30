@@ -100,8 +100,8 @@ export async function POST(
       let allowedMethods: string[] = [];
       const adId = trade?.ad_id || trade?.advertisement_id || trade?.ad_public_id || trade?.adId;
       if (adId) {
-        let adQuery = adminClient.from('ads').select('payment_methods');
-        adQuery = adQuery.or(`id.eq.${adId},public_id.eq.${adId},public_ad_id.eq.${adId}`);
+        let adQuery = adminClient.from('p2p_ads').select('payment_methods');
+        adQuery = adQuery.or(`id.eq.${adId},public_ad_id.eq.${adId}`);
         const { data: adRecord, error: adQueryError } = await adQuery.maybeSingle();
 
         if (adQueryError) {

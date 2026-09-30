@@ -127,15 +127,15 @@ export default function MyAdsPage() {
     fetchMyAds();
   }, [fetchMyAds]);
 
-  const handleStatusToggle = async (adId: string, currentStatus: boolean) => {
+  const handleStatusToggle = async (adId: string, isNewStatusActive: boolean) => {
     try {
-      await updateAdStatus(null, adId, !currentStatus);
+      await updateAdStatus(null, adId, isNewStatusActive);
       setAds((prev) =>
-        prev.map((a) => (a.id === adId ? { ...a, active: !currentStatus, status: !currentStatus ? 'ACTIVE' : 'INACTIVE' } : a))
+        prev.map((a) => (a.id === adId ? { ...a, active: isNewStatusActive, status: isNewStatusActive ? 'ACTIVE' : 'INACTIVE' } : a))
       );
       toast({
         title: "Ad Updated",
-        description: `Your ad has been ${!currentStatus ? "activated" : "deactivated"}.`,
+        description: `Your ad has been ${isNewStatusActive ? "activated" : "deactivated"}.`,
       });
     } catch (e: any) {
       toast({ variant: "destructive", title: "Update Failed", description: e.message || "Failed to update ad status." });
