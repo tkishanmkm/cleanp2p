@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { createClient, getSupabaseAdminClient } from '@/utils/supabase/server';
 import { createClient as createSupabaseClient } from '@supabase/supabase-js';
 import { generateTradeId } from '@/lib/id-generator';
+import { sendNewTradeNotificationEmail } from '@/lib/email/tradeEmailService';
 
 export const dynamic = 'force-dynamic';
 
@@ -204,6 +205,8 @@ export async function POST(req: Request) {
 
     const tradeId = rpcResult.trade_id;
     const publicId = rpcResult.public_id || tradeRef;
+    const sellerId = rpcResult.seller_id || ad.user_id;
+    const buyerId = rpcResult.buyer_id || user.id;
 
     if (tradeId && resolvedPaymentMethod) {
       const adminClient = getSupabaseAdminClient();
@@ -211,6 +214,30 @@ export async function POST(req: Request) {
         .from('trades')
         .update({ payment_method: resolvedPaymentMethod })
         .eq('id', tradeId);
+    }
+
+    // Send Email Notification to Seller (Non-blocking & Duplicate-Protected)
+    if (!rpcResult.message?.includes('idempotent replay') && sellerId) {
+      try {
+        void sendNewTradeNotificationEmail({
+          tradeId: String(tradeId),
+          publicId: String(publicId),
+          sellerId: String(sellerId),
+          buyerId: String(buyerId),
+          cryptoAmount: calculatedCrypto,
+          fiatAmount: numericFiat,
+          fiatCurrency: resolvedFiatCurrency,
+          asset: String(rpcResult.asset || ad.crypto || 'USDT'),
+          price: unitPrice,
+          paymentMethod: resolvedPaymentMethod,
+          status: 'pending',
+          createdAt: new Date().toISOString(),
+        }).catch((emailErr) => {
+          console.error('[Trades/Initiate] Email notification failure notice:', emailErr);
+        });
+      } catch (emailTriggerErr) {
+        console.error('[Trades/Initiate] Email trigger notice:', emailTriggerErr);
+      }
     }
 
     return NextResponse.json({

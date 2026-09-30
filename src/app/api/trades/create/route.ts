@@ -1,6 +1,7 @@
 import { createClient } from '@/utils/supabase/server';
 import { NextRequest, NextResponse } from 'next/server';
 import { generateTradeId } from '@/lib/id-generator';
+import { sendNewTradeNotificationEmail } from '@/lib/email/tradeEmailService';
 
 export const dynamic = 'force-dynamic';
 
@@ -298,6 +299,30 @@ export async function POST(req: NextRequest) {
       }
     } catch (notifErr) {
       console.warn('Trade notification creation notice:', notifErr);
+    }
+
+    // 11. Send Email Notification to Seller (Non-blocking & Duplicate-Protected)
+    if (!rpcResult.message?.includes('idempotent replay') && sellerId) {
+      try {
+        void sendNewTradeNotificationEmail({
+          tradeId: String(tradeId),
+          publicId: String(publicId),
+          sellerId: String(sellerId),
+          buyerId: String(buyerId || user.id),
+          cryptoAmount: calculatedCrypto,
+          fiatAmount: numericFiat,
+          fiatCurrency: resolvedFiatCurrency,
+          asset: String(rpcResult.asset || ad.crypto || 'USDT'),
+          price: unitPrice,
+          paymentMethod: resolvedPaymentMethod,
+          status: 'pending',
+          createdAt: nowIso,
+        }).catch((emailErr) => {
+          console.error('[Trade Creation] Email notification failure notice:', emailErr);
+        });
+      } catch (emailTriggerErr) {
+        console.error('[Trade Creation] Email trigger notice:', emailTriggerErr);
+      }
     }
 
     return NextResponse.json({

@@ -1,6 +1,7 @@
 import { createClient } from '@/utils/supabase/server';
 import { NextRequest, NextResponse } from 'next/server';
 import { generateTradeId } from '@/lib/id-generator';
+import { sendNewTradeNotificationEmail } from '@/lib/email/tradeEmailService';
 
 export const dynamic = 'force-dynamic';
 
@@ -145,12 +146,41 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // 7. Return Created Trade Details
+    // 7. Send Email Notification to Seller (Non-blocking & Duplicate-Protected)
+    const tradeId = data?.trade_id ?? data?.id;
+    const publicId = data?.public_id || tradeRef;
+    const sellerId = data?.seller_id || ad.user_id;
+    const buyerId = data?.buyer_id || user.id;
+
+    if (!data?.message?.includes('idempotent replay') && sellerId && tradeId) {
+      try {
+        void sendNewTradeNotificationEmail({
+          tradeId: String(tradeId),
+          publicId: String(publicId),
+          sellerId: String(sellerId),
+          buyerId: String(buyerId),
+          cryptoAmount: calculatedCrypto,
+          fiatAmount: numericFiat,
+          fiatCurrency: resolvedFiatCurrency,
+          asset: String(data?.asset || ad.crypto || 'USDT'),
+          price: unitPrice,
+          paymentMethod: resolvedPaymentMethod,
+          status: 'pending',
+          createdAt: new Date().toISOString(),
+        }).catch((emailErr) => {
+          console.error('[P2P/Trade/Initiate] Email notification failure notice:', emailErr);
+        });
+      } catch (emailTriggerErr) {
+        console.error('[P2P/Trade/Initiate] Email trigger notice:', emailTriggerErr);
+      }
+    }
+
+    // 8. Return Created Trade Details
     return NextResponse.json({
       success: true,
-      tradeId: data?.trade_id ?? data?.id,
-      id: data?.trade_id ?? data?.id,
-      publicId: data?.public_id || tradeRef,
+      tradeId: tradeId,
+      id: tradeId,
+      publicId: publicId,
       fiatAmount: data?.fiat_amount ?? numericFiat,
       data,
     });
