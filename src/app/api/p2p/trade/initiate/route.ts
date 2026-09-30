@@ -117,7 +117,7 @@ export async function POST(request: NextRequest) {
       : ['Bank Transfer'];
     const resolvedPaymentMethod = customPaymentMethod || paymentMethods[0] || 'Bank Transfer';
     const resolvedFiatCurrency = customFiatCurrency || ad.fiat_currency || ad.fiat || 'USD';
-    const adIdentifier = String(ad.id || ad.public_ad_id || ad.public_id || adId);
+    const adIdentifier = String(ad.id || ad.public_ad_id || adId);
 
     // 6. Execute Atomic Database RPC (Locks Escrow & Creates Trade)
     const { data, error } = await supabase.rpc('initiate_trade_with_escrow', {

@@ -203,7 +203,7 @@ export async function POST(req: NextRequest) {
     const resolvedPaymentMethod = payment_method || paymentMethods[0] || 'Bank Transfer';
     const resolvedFiatCurrency = fiat_currency || ad.fiat_currency || ad.fiat || 'USD';
     const shortRef = trade_ref || generateTradeId();
-    const adIdentifier = String(ad.id || ad.public_ad_id || ad.public_id || ad_id);
+    const adIdentifier = String(ad.id || ad.public_ad_id || ad_id);
 
     // 8. Execute Atomic Escrow Lock & Trade Creation via Canonical Database RPC
     const { data: rpcResult, error: rpcError } = await supabase.rpc('initiate_trade_with_escrow', {
@@ -275,25 +275,39 @@ export async function POST(req: NextRequest) {
     // 10. Send Activity Center & Trade Request Notifications
     try {
       const formattedCoin = (rpcResult.asset || ad.crypto || 'USDT').toUpperCase();
-      if (sellerId) {
+      const tradeLink = `/trade/${publicId || tradeId}`;
+
+      // Prevent duplicate trade-created notifications on retry
+      const { data: existingNotifs } = await supabase
+        .from('notifications')
+        .select('id, user_id')
+        .eq('metadata->>link', tradeLink)
+        .eq('type', 'trade_initiated')
+        .limit(2);
+
+      const notifiedUsers = new Set((existingNotifs || []).map((n: any) => n.user_id));
+
+      if (sellerId && !notifiedUsers.has(sellerId)) {
         await supabase.from('notifications').insert({
           user_id: sellerId,
           title: 'Trade Request Initiated',
           message: `New trade request #${publicId} opened: ${calculatedCrypto.toFixed(4)} ${formattedCoin} for ${numericFiat.toFixed(2)} ${resolvedFiatCurrency}.`,
           type: 'trade_initiated',
           is_read: false,
-          metadata: { link: `/trade/${tradeId}` },
+          read: false,
+          metadata: { link: tradeLink },
           created_at: nowIso,
         });
       }
-      if (buyerId && buyerId !== sellerId) {
+      if (buyerId && buyerId !== sellerId && !notifiedUsers.has(buyerId)) {
         await supabase.from('notifications').insert({
           user_id: buyerId,
           title: 'Trade Request Initiated',
           message: `Trade #${publicId} opened successfully. Awaiting payment/escrow confirmation.`,
           type: 'trade_initiated',
           is_read: false,
-          metadata: { link: `/trade/${tradeId}` },
+          read: false,
+          metadata: { link: tradeLink },
           created_at: nowIso,
         });
       }

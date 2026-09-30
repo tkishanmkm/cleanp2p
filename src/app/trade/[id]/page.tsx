@@ -152,36 +152,26 @@ export default function TradePage() {
       const rawAdRef = tradeData.ad_id || tradeData.adId || tradeData.public_ad_id || tradeData.ad_public_id || tradeData.ad;
       let adResult: any = null;
 
-      const adTables = ['p2p_ads', 'ads'];
+      const isUuidAd = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(String(rawAdRef || '').trim());
 
       if (rawAdRef) {
-        for (const table of adTables) {
-          if (adResult) break;
+        if (isUuidAd) {
           try {
-            const { data } = await supabase.from(table).select('*').eq('id', String(rawAdRef)).maybeSingle();
+            const { data } = await supabase.from('p2p_ads').select('*').eq('id', String(rawAdRef).trim()).maybeSingle();
             if (data) adResult = data;
           } catch {}
-
           if (!adResult) {
             try {
-              const { data } = await supabase.from(table).select('*').eq('public_id', String(rawAdRef)).maybeSingle();
+              const { data } = await supabase.from('ads').select('*').eq('id', String(rawAdRef).trim()).maybeSingle();
               if (data) adResult = data;
             } catch {}
           }
-
-          if (!adResult) {
-            try {
-              const { data } = await supabase.from(table).select('*').eq('public_ad_id', String(rawAdRef)).maybeSingle();
-              if (data) adResult = data;
-            } catch {}
-          }
-
-          if (!adResult) {
-            try {
-              const { data } = await supabase.from(table).select('*').eq('ad_id', String(rawAdRef)).maybeSingle();
-              if (data) adResult = data;
-            } catch {}
-          }
+        }
+        if (!adResult) {
+          try {
+            const { data } = await supabase.from('p2p_ads').select('*').eq('public_ad_id', String(rawAdRef).trim()).maybeSingle();
+            if (data) adResult = data;
+          } catch {}
         }
       }
 

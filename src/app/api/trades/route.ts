@@ -154,7 +154,7 @@ export async function POST(req: NextRequest) {
       : ['Bank Transfer'];
     const resolvedPaymentMethod = customPaymentMethod || paymentMethods[0] || 'Bank Transfer';
     const resolvedFiatCurrency = customFiat || ad.fiat_currency || ad.fiat || 'USD';
-    const adIdentifier = String(ad.id || ad.public_ad_id || ad.public_id || adId);
+    const adIdentifier = String(ad.id || ad.public_ad_id || adId);
 
     // 4. Call Canonical Atomic Database RPC
     const { data: rpcResult, error: rpcError } = await supabase.rpc('initiate_trade_with_escrow', {

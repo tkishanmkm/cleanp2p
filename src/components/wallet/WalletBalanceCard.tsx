@@ -24,7 +24,7 @@ export function WalletBalanceCard({
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
           <span className="text-xs font-semibold uppercase tracking-wider text-gray-400">
-            Available {symbol} Balance
+            Spendable {symbol} Balance
           </span>
           <div className="text-3xl font-extrabold tracking-tight text-white mt-1">
             {isLoading ? (
@@ -33,6 +33,11 @@ export function WalletBalanceCard({
               `${assetData.available.toFixed(4)} ${symbol}`
             )}
           </div>
+          {assetData.inEscrow > 0 && (
+            <div className="text-xs text-amber-400 mt-1.5 font-medium flex items-center gap-1.5">
+              <span>🔒 In Active P2P Escrow: {assetData.inEscrow.toFixed(4)} {symbol} (Not spendable)</span>
+            </div>
+          )}
         </div>
 
         <div className="flex items-center gap-3">

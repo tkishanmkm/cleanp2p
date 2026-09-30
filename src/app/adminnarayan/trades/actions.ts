@@ -23,7 +23,9 @@ export async function resolveTradeAction(tradeId: string, decision: "release" | 
     });
 
     if (rpcErr || (rpcData && rpcData.success === false)) {
-      console.warn("[resolveTradeAction] release_trade_escrow notice:", rpcErr?.message || rpcData?.message);
+      const errorMsg = rpcErr?.message || rpcData?.message || "Failed to execute escrow release via canonical RPC.";
+      console.error("[resolveTradeAction] release_trade_escrow failure:", errorMsg);
+      return { success: false, error: errorMsg };
     }
   } else {
     const { data: rpcData, error: rpcErr } = await adminSupabase.rpc("cancel_p2p_trade", {
@@ -33,7 +35,9 @@ export async function resolveTradeAction(tradeId: string, decision: "release" | 
     });
 
     if (rpcErr || (rpcData && rpcData.success === false)) {
-      console.warn("[resolveTradeAction] cancel_p2p_trade notice:", rpcErr?.message || rpcData?.message);
+      const errorMsg = rpcErr?.message || rpcData?.message || "Failed to execute trade cancellation via canonical RPC.";
+      console.error("[resolveTradeAction] cancel_p2p_trade failure:", errorMsg);
+      return { success: false, error: errorMsg };
     }
   }
 

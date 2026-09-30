@@ -4,6 +4,7 @@ import { createClient } from '@/lib/supabase/server';
 import { getSupabaseAdminClient } from '@/lib/supabase/server';
 import { generateTradeId } from '@/lib/id-generator';
 import { findAdById } from '@/lib/ad-lookup';
+import { sendNewTradeNotificationEmail } from '@/lib/email/tradeEmailService';
 
 export interface ActionResponse<T> {
   data: T | null;
@@ -764,6 +765,82 @@ export async function createTradeOrderWithEscrow(input: {
         .update({ payment_method: resolvedPaymentMethod })
         .eq('id', tradeId);
     }
+
+    // 9. Insert Activity Center In-App Notifications for counterparties
+    try {
+      const nowIso = new Date().toISOString();
+      const formattedCoin = String(rpcResult.asset || assetSymbol || 'USDT').toUpperCase();
+      const cryptoVal = Number(rpcResult.crypto_amount ?? baseCryptoAmount);
+      const fiatVal = Number(rpcResult.fiat_amount ?? fiatAmount);
+      const fiatCurr = String(rpcResult.fiat_currency || fiatSymbol || 'USD').toUpperCase();
+      const tradeLink = `/trade/${resolvedPublicId || tradeId}`;
+
+      // Prevent duplicate trade-created notifications on retry
+      const { data: existingNotifs } = await adminClient
+        .from('notifications')
+        .select('id, user_id')
+        .eq('metadata->>link', tradeLink)
+        .eq('type', 'trade_initiated')
+        .limit(2);
+
+      const notifiedUsers = new Set((existingNotifs || []).map((n: any) => n.user_id));
+
+      if (resolvedSellerId && !notifiedUsers.has(resolvedSellerId)) {
+        await adminClient.from('notifications').insert({
+          user_id: resolvedSellerId,
+          title: 'Trade Request Initiated',
+          message: `New trade #${resolvedPublicId} opened: ${cryptoVal.toFixed(4)} ${formattedCoin} for ${fiatVal.toFixed(2)} ${fiatCurr}.`,
+          type: 'trade_initiated',
+          is_read: false,
+          read: false,
+          metadata: { link: tradeLink },
+          created_at: nowIso,
+        });
+      }
+
+      if (resolvedBuyerId && resolvedBuyerId !== resolvedSellerId && !notifiedUsers.has(resolvedBuyerId)) {
+        await adminClient.from('notifications').insert({
+          user_id: resolvedBuyerId,
+          title: 'Trade Request Initiated',
+          message: `Trade #${resolvedPublicId} opened successfully. Awaiting payment/escrow confirmation.`,
+          type: 'trade_initiated',
+          is_read: false,
+          read: false,
+          metadata: { link: tradeLink },
+          created_at: nowIso,
+        });
+      }
+    } catch (notifErr) {
+      console.warn('[createTradeOrderWithEscrow] Notification creation notice:', notifErr);
+    }
+
+    // 10. Dispatch Non-blocking Email Notification to Counterparties
+    void sendNewTradeNotificationEmail({
+      tradeId: String(tradeId),
+      publicId: resolvedPublicId,
+      sellerId: resolvedSellerId,
+      buyerId: resolvedBuyerId,
+      cryptoAmount: Number(rpcResult.crypto_amount ?? baseCryptoAmount),
+      fiatAmount: Number(rpcResult.fiat_amount ?? fiatAmount),
+      fiatCurrency: String(rpcResult.fiat_currency || fiatSymbol),
+      asset: String(rpcResult.asset || assetSymbol),
+      price: Number(price),
+      paymentMethod: String(resolvedPaymentMethod),
+      status: 'pending',
+      createdAt: new Date().toISOString(),
+    }).then((result) => {
+      if (!result.success) {
+        console.error(
+          '[createTradeOrderWithEscrow] Email notification failure:',
+          result.error
+        );
+      }
+    }).catch((emailErr) => {
+      console.error(
+        '[createTradeOrderWithEscrow] Email notification exception:',
+        emailErr
+      );
+    });
 
     return { data: { orderId: tradeId }, error: null };
   } catch (err: any) {

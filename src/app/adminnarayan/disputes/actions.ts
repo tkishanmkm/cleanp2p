@@ -1,22 +1,15 @@
 "use server";
 
 import { createAdminClient } from "@/lib/supabase/admin";
-import { createClient } from "@/lib/supabase/server";
+import { verifyServerAdmin } from "@/lib/server-admin-auth";
 import { revalidatePath } from "next/cache";
 
 async function verifyAdmin() {
-  const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) throw new Error("Unauthorized");
-
-  const { data: profile } = await supabase
-    .from("profiles")
-    .select("role")
-    .eq("id", user.id)
-    .single();
-
-  if (profile?.role !== "admin") throw new Error("Unauthorized");
-  return user.id;
+  const auth = await verifyServerAdmin();
+  if (!auth.authorized || !auth.adminId) {
+    throw new Error("Unauthorized: Administrator privileges required.");
+  }
+  return auth.adminId;
 }
 
 export async function resolveDispute({

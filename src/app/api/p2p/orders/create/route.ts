@@ -143,7 +143,7 @@ export async function POST(req: NextRequest) {
     const resolvedPaymentMethod = paymentMethod || paymentMethods[0] || 'Bank Transfer';
     const resolvedFiatCurrency = fiatCurrency || ad.fiat_currency || ad.fiat || 'USD';
     const shortRef = tradeRef || generateTradeId();
-    const adIdentifier = String(ad.id || ad.public_ad_id || ad.public_id || adId);
+    const adIdentifier = String(ad.id || ad.public_ad_id || adId);
 
     // 3. Call Atomic Database RPC initiate_trade_with_escrow
     const { data, error } = await supabase.rpc('initiate_trade_with_escrow', {

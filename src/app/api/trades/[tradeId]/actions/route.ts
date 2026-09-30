@@ -96,34 +96,61 @@ export async function POST(
         return NextResponse.json({ error: 'Cannot mark paid: trade is currently in dispute.' }, { status: 400 });
       }
 
-      // Fetch ad payment methods to validate
+      // 1. Read the trade's already stored payment_method
+      const tradeStoredMethod = typeof trade?.payment_method === 'string' ? trade.payment_method.trim() : '';
+
+      // 2. Fetch ad payment methods defensively across p2p_ads and ads tables
       let allowedMethods: string[] = [];
       const adId = trade?.ad_id || trade?.advertisement_id || trade?.ad_public_id || trade?.adId;
-      if (adId) {
-        let adQuery = adminClient.from('p2p_ads').select('payment_methods');
-        adQuery = adQuery.or(`id.eq.${adId},public_ad_id.eq.${adId}`);
-        const { data: adRecord, error: adQueryError } = await adQuery.maybeSingle();
+      const publicAdId = trade?.public_ad_id || trade?.ad_public_id;
 
-        if (adQueryError) {
-          console.error('Error querying ad payment methods:', adQueryError);
-          return NextResponse.json({ error: 'Failed to verify trade payment methods.' }, { status: 500 });
-        }
+      if (adId || publicAdId) {
+        try {
+          const rawAdRef = String(adId || publicAdId).trim();
+          const isAdUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(rawAdRef);
+          let adRecord: any = null;
 
-        if (adRecord) {
-          if (Array.isArray(adRecord.payment_methods)) {
-            allowedMethods = adRecord.payment_methods;
-          } else if (typeof adRecord.payment_methods === 'string') {
-            try {
-              const parsed = JSON.parse(adRecord.payment_methods);
-              allowedMethods = Array.isArray(parsed) ? parsed : [adRecord.payment_methods];
-            } catch {
-              allowedMethods = [adRecord.payment_methods];
+          // A. Lookup in p2p_ads safely without invalid UUID syntax errors
+          let p2pAdQuery = adminClient.from('p2p_ads').select('payment_methods');
+          if (isAdUuid) {
+            p2pAdQuery = p2pAdQuery.or(`id.eq.${rawAdRef},public_ad_id.eq.${rawAdRef}`);
+          } else {
+            p2pAdQuery = p2pAdQuery.eq('public_ad_id', rawAdRef);
+          }
+          const { data: p2pData } = await p2pAdQuery.maybeSingle();
+          if (p2pData) adRecord = p2pData;
+
+          // B. If not found in p2p_ads, check legacy public.ads
+          if (!adRecord) {
+            let legacyAdQuery = adminClient.from('ads').select('payment_methods');
+            legacyAdQuery = legacyAdQuery.or(`id.eq.${rawAdRef},public_ad_id.eq.${rawAdRef}`);
+            const { data: legacyData } = await legacyAdQuery.maybeSingle();
+            if (legacyData) adRecord = legacyData;
+          }
+
+          if (adRecord?.payment_methods) {
+            if (Array.isArray(adRecord.payment_methods)) {
+              allowedMethods = adRecord.payment_methods;
+            } else if (typeof adRecord.payment_methods === 'string') {
+              try {
+                const parsed = JSON.parse(adRecord.payment_methods);
+                allowedMethods = Array.isArray(parsed) ? parsed : [adRecord.payment_methods];
+              } catch {
+                allowedMethods = [adRecord.payment_methods];
+              }
             }
           }
+        } catch (adLookupErr) {
+          console.warn('[actions/MARK_PAID] Notice resolving advertisement payment methods:', adLookupErr);
         }
       }
 
       allowedMethods = allowedMethods.filter((m: any) => typeof m === 'string' && m.trim().length > 0);
+
+      // If ad lookup yielded no payment methods but the trade has an agreed payment_method, use that
+      if (allowedMethods.length === 0 && tradeStoredMethod) {
+        allowedMethods = [tradeStoredMethod];
+      }
 
       const requestedPaymentMethod = typeof (body.paymentMethod || body.payment_method) === 'string'
         ? (body.paymentMethod || body.payment_method).trim()
@@ -132,13 +159,18 @@ export async function POST(
       let confirmedPaymentMethod = '';
       if (allowedMethods.length > 1) {
         if (!requestedPaymentMethod) {
-          return NextResponse.json({ error: 'Please select the payment method used to make payment.' }, { status: 400 });
+          if (tradeStoredMethod && allowedMethods.some((m) => m.trim().toLowerCase() === tradeStoredMethod.toLowerCase())) {
+            confirmedPaymentMethod = tradeStoredMethod;
+          } else {
+            return NextResponse.json({ error: 'Please select the payment method used to make payment.' }, { status: 400 });
+          }
+        } else {
+          const matched = allowedMethods.find((m) => m.trim().toLowerCase() === requestedPaymentMethod.toLowerCase());
+          if (!matched) {
+            return NextResponse.json({ error: `Selected payment method "${requestedPaymentMethod}" is not supported by this trade.` }, { status: 400 });
+          }
+          confirmedPaymentMethod = matched;
         }
-        const matched = allowedMethods.find((m) => m.trim().toLowerCase() === requestedPaymentMethod.toLowerCase());
-        if (!matched) {
-          return NextResponse.json({ error: `Selected payment method "${requestedPaymentMethod}" is not supported by this trade.` }, { status: 400 });
-        }
-        confirmedPaymentMethod = matched;
       } else if (allowedMethods.length === 1) {
         if (requestedPaymentMethod) {
           const matched = allowedMethods.find((m) => m.trim().toLowerCase() === requestedPaymentMethod.toLowerCase());
@@ -150,7 +182,7 @@ export async function POST(
           confirmedPaymentMethod = allowedMethods[0];
         }
       } else {
-        confirmedPaymentMethod = requestedPaymentMethod || trade.payment_method || 'Bank Transfer';
+        confirmedPaymentMethod = requestedPaymentMethod || tradeStoredMethod || 'Bank Transfer';
       }
 
       // Execute Atomic Database RPC mark_p2p_trade_paid

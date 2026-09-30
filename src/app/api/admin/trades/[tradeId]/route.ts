@@ -242,68 +242,15 @@ export async function POST(
         }
       }
 
-      // If canonical RPC was not already successful (e.g. legacy trade without wallet_assets mapping),
-      // perform graceful balance adjustment fallback using admin_adjust_balance with audit trail
+      // If canonical RPC was not successful, fail closed immediately to prevent desynchronization
       if (!rpcExecuted) {
-        let feeCharged = 0;
-        if (isRelease) {
-          const standardFeePercent = 0.015;
-          const calculatedFee = Number(trade.escrow_fee || (cryptoAmount * standardFeePercent).toFixed(6));
-          feeCharged = calculatedFee;
-
-          const { data: existingFeeTx } = await supabase
-            .from("wallet_transactions")
-            .select("id")
-            .eq("trade_id", trade.id)
-            .eq("tx_type", "escrow_fee")
-            .maybeSingle();
-
-          if (!existingFeeTx && calculatedFee > 0) {
-            await supabase.rpc("admin_adjust_balance", {
-              p_admin_email: adminEmail,
-              p_user_id: trade.seller_id,
-              p_currency: cryptoAsset,
-              p_type: "subtract",
-              p_amount: calculatedFee,
-            });
-
-            await supabase.from("wallet_transactions").insert({
-              user_id: trade.seller_id,
-              trade_id: trade.id,
-              tx_type: "escrow_fee",
-              currency: cryptoAsset,
-              asset_symbol: cryptoAsset,
-              amount: calculatedFee,
-              status: "completed",
-              metadata: {
-                original_escrow_amount: cryptoAmount,
-                final_released_amount: cryptoAmount,
-                fee_destination: "platform_custody",
-                final_outcome: "moderator_release_to_buyer",
-                date: new Date().toISOString(),
-              },
-              created_at: new Date().toISOString(),
-            });
-          }
-
-          // Release funds to buyer
-          await supabase.rpc("admin_adjust_balance", {
-            p_admin_email: adminEmail,
-            p_user_id: trade.buyer_id,
-            p_currency: cryptoAsset,
-            p_type: "add",
-            p_amount: cryptoAmount,
-          });
-        } else {
-          // Refund to seller
-          await supabase.rpc("admin_adjust_balance", {
-            p_admin_email: adminEmail,
-            p_user_id: trade.seller_id,
-            p_currency: cryptoAsset,
-            p_type: "add",
-            p_amount: cryptoAmount,
-          });
-        }
+        return NextResponse.json(
+          {
+            success: false,
+            error: rpcErrorMsg || `Failed to execute ${isRelease ? "escrow release" : "escrow refund"} via canonical settlement RPC.`,
+          },
+          { status: 400 }
+        );
       }
 
       // Update trade status and mark dispute resolved

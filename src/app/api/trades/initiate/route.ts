@@ -164,7 +164,7 @@ export async function POST(req: Request) {
     }
 
     const resolvedFiatCurrency = customFiatCurrency || ad.fiat_currency || ad.fiat || 'USD';
-    const adIdentifier = String(ad.id || ad.public_ad_id || ad.public_id || adId);
+    const adIdentifier = String(ad.id || ad.public_ad_id || adId);
 
     // 5. Call Canonical Atomic Database RPC
     console.log('[DEBUG] Calling initiate_trade_with_escrow RPC with user ID:', user?.id);

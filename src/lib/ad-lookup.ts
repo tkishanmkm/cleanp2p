@@ -81,98 +81,33 @@ export async function findAdById(rawId: string): Promise<ResolvedAdResult | null
     }
   }
 
-  // 3. Search public_ad_id column
-  for (const table of candidateTables) {
-    try {
-      const { data, error } = await adminClient
-        .from(table)
-        .select('*')
-        .eq('public_ad_id', cleanId)
-        .maybeSingle();
-      if (data && !error) return { ad: data, tableName: table };
-    } catch {}
+  // 3. Search public_ad_id column on p2p_ads
+  try {
+    const { data, error } = await adminClient
+      .from('p2p_ads')
+      .select('*')
+      .eq('public_ad_id', cleanId)
+      .maybeSingle();
+    if (data && !error) return { ad: data, tableName: 'p2p_ads' };
+  } catch {}
 
-    try {
-      const { data, error } = await adminClient
-        .from(table)
-        .select('*')
-        .eq('public_ad_id', upperId)
-        .maybeSingle();
-      if (data && !error) return { ad: data, tableName: table };
-    } catch {}
+  try {
+    const { data, error } = await adminClient
+      .from('p2p_ads')
+      .select('*')
+      .eq('public_ad_id', upperId)
+      .maybeSingle();
+    if (data && !error) return { ad: data, tableName: 'p2p_ads' };
+  } catch {}
 
-    try {
-      const { data, error } = await adminClient
-        .from(table)
-        .select('*')
-        .ilike('public_ad_id', cleanId)
-        .maybeSingle();
-      if (data && !error) return { ad: data, tableName: table };
-    } catch {}
-  }
-
-  // 4. Search ad_id column
-  for (const table of candidateTables) {
-    try {
-      const { data, error } = await adminClient
-        .from(table)
-        .select('*')
-        .eq('ad_id', cleanId)
-        .maybeSingle();
-      if (data && !error) return { ad: data, tableName: table };
-    } catch {}
-
-    try {
-      const { data, error } = await adminClient
-        .from(table)
-        .select('*')
-        .eq('ad_id', upperId)
-        .maybeSingle();
-      if (data && !error) return { ad: data, tableName: table };
-    } catch {}
-
-    try {
-      const { data, error } = await adminClient
-        .from(table)
-        .select('*')
-        .ilike('ad_id', cleanId)
-        .maybeSingle();
-      if (data && !error) return { ad: data, tableName: table };
-    } catch {}
-  }
-
-  // 5. Search public_id column
-  for (const table of candidateTables) {
-    try {
-      const { data, error } = await adminClient
-        .from(table)
-        .select('*')
-        .eq('public_id', cleanId)
-        .maybeSingle();
-      if (data && !error) return { ad: data, tableName: table };
-    } catch {}
-
-    try {
-      const { data, error } = await adminClient
-        .from(table)
-        .select('*')
-        .eq('public_id', upperId)
-        .maybeSingle();
-      if (data && !error) return { ad: data, tableName: table };
-    } catch {}
-  }
-
-  // 6. Search offer_id column
-  for (const table of candidateTables) {
-    try {
-      const { data, error } = await adminClient
-        .from(table)
-        .select('*')
-        .eq('offer_id', cleanId)
-        .maybeSingle();
-      if (data && !error) return { ad: data, tableName: table };
-    } catch {}
-  }
+  try {
+    const { data, error } = await adminClient
+      .from('p2p_ads')
+      .select('*')
+      .ilike('public_ad_id', cleanId)
+      .maybeSingle();
+    if (data && !error) return { ad: data, tableName: 'p2p_ads' };
+  } catch {}
 
   // 7. Broad fallback: Fetch all active / recent ads and check in-memory match across any ID field
   for (const table of candidateTables) {
@@ -267,25 +202,12 @@ export async function resolveBothTargetRows(
         } catch {}
       }
 
-      for (const col of ['public_ad_id', 'public_id', 'ad_id', 'offer_id']) {
+      if (tableName === 'p2p_ads') {
         try {
           const { data, error } = await adminClient
-            .from(tableName)
+            .from('p2p_ads')
             .select('*')
-            .eq(col, cid)
-            .maybeSingle();
-          if (data && !error && (!ownerId || String(data.user_id || data.userId || '') === String(ownerId))) {
-            return data;
-          }
-        } catch {}
-      }
-
-      if (!isUuid) {
-        try {
-          const { data, error } = await adminClient
-            .from(tableName)
-            .select('*')
-            .eq('id', cid)
+            .eq('public_ad_id', cid)
             .maybeSingle();
           if (data && !error && (!ownerId || String(data.user_id || data.userId || '') === String(ownerId))) {
             return data;
@@ -304,7 +226,7 @@ export async function resolveBothTargetRows(
 
         if (Array.isArray(data)) {
           const matched = data.find((row: any) => {
-            const rIds = [row.id, row.public_ad_id, row.public_id, row.ad_id, row.offer_id]
+            const rIds = [row.id, row.public_ad_id]
               .filter(Boolean)
               .map((v) => String(v).trim().toLowerCase());
             return candidateIds.some((cid) => rIds.includes(cid.toLowerCase()));

@@ -11,6 +11,7 @@ interface EmailPayload {
   to: string;
   subject: string;
   html: string;
+  text?: string;
 }
 
 function isValidEmail(email: string): boolean {
@@ -110,7 +111,7 @@ Deno.serve(async (req: Request) => {
       );
     }
 
-    const { to, subject, html } = body;
+    const { to, subject, html, text } = body;
 
     if (!to || !isValidEmail(to)) {
       return new Response(
@@ -164,6 +165,7 @@ Deno.serve(async (req: Request) => {
       to: to.trim(),
       subject: subject.trim(),
       html: html,
+      ...(text && typeof text === "string" ? { text: text.trim() } : {}),
     });
 
     console.log(`[send-email] Success: Email dispatched to ${to.trim()} (Message ID: ${info.messageId})`);

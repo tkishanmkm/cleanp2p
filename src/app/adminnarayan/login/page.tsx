@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, Suspense } from "react";
+import { useState, useEffect, useRef, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
@@ -8,6 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { AlertCircle, ShieldAlert, Loader2 } from "lucide-react";
 import { Logo } from "@/components/logo";
+import { ResponsiveHCaptcha, ResponsiveHCaptchaRef } from "@/components/auth/responsive-hcaptcha";
 import Link from "next/link";
 
 function AdminLoginForm() {
@@ -21,8 +22,10 @@ function AdminLoginForm() {
   );
   const [loading, setLoading] = useState(false);
   const [statusMessage, setStatusMessage] = useState("");
-  const [existingAdmin, setExistingAdmin] = useState<{ email: string; id: string } | null>(null);
+  const [existingAdmin, setExistingAdmin] = useState<{ id: string } | null>(null);
   const [checkingExisting, setCheckingExisting] = useState(true);
+  const [captchaToken, setCaptchaToken] = useState("");
+  const captchaRef = useRef<ResponsiveHCaptchaRef>(null);
 
   const redirectTo = searchParams.get("redirectTo") || "/adminnarayan/dashboard";
 
@@ -43,7 +46,7 @@ function AdminLoginForm() {
             { user_uuid: user.id }
           );
           if (verificationResult?.[0]?.is_valid && isMounted) {
-            setExistingAdmin({ email: user.email || "", id: user.id });
+            setExistingAdmin({ id: user.id });
           }
         }
       } catch {} finally {
@@ -66,16 +69,36 @@ function AdminLoginForm() {
 
     try {
       const formData = new FormData(e.currentTarget);
-      const email = formData.get("email") as string;
+      const email = (formData.get("email") as string)?.trim();
       const password = formData.get("password") as string;
 
       if (!email || !password) {
         throw new Error("Please enter both email and password.");
       }
 
+      if (!captchaToken) {
+        throw new Error("Please complete the security CAPTCHA verification challenge.");
+      }
+
+      setStatusMessage("Validating security challenge...");
+      const captchaRes = await fetch("/api/admin/auth/verify-captcha", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ token: captchaToken }),
+      });
+      const captchaData = await captchaRes.json().catch(() => ({}));
+      if (!captchaRes.ok || !captchaData?.success) {
+        captchaRef.current?.resetCaptcha();
+        setCaptchaToken("");
+        throw new Error(captchaData?.error || "Security CAPTCHA validation failed. Please try again.");
+      }
+
       const { data, error: signInError } = await supabase.auth.signInWithPassword({
         email,
         password,
+        options: {
+          captchaToken,
+        },
       });
 
       if (signInError || !data.user) {
@@ -106,7 +129,7 @@ function AdminLoginForm() {
       }
 
       setStatusMessage("Access confirmed! Navigating to dashboard...");
-      setExistingAdmin({ email: data.user.email || email, id: data.user.id });
+      setExistingAdmin({ id: data.user.id });
 
       // Navigate smoothly to dashboard
       router.push(redirectTo);
@@ -120,6 +143,8 @@ function AdminLoginForm() {
       }, 800);
     } catch (err: any) {
       await supabase.auth.signOut().catch(() => {});
+      captchaRef.current?.resetCaptcha();
+      setCaptchaToken("");
       setLoading(false);
       setStatusMessage("");
       const message = err.message || "An unexpected error occurred.";
@@ -134,6 +159,8 @@ function AdminLoginForm() {
       await supabase.auth.signOut();
     } catch {}
     setExistingAdmin(null);
+    setCaptchaToken("");
+    captchaRef.current?.resetCaptcha();
     setLoading(false);
   };
 
@@ -171,7 +198,7 @@ function AdminLoginForm() {
             <div className="p-4 bg-blue-950/60 border border-blue-600/40 rounded-lg space-y-3">
               <div className="flex items-center gap-2 text-sm text-blue-200">
                 <div className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-                <span>Signed in as <strong>{existingAdmin.email}</strong> (Admin)</span>
+                <span>Signed in with Administrator Access</span>
               </div>
               <Button
                 id="continue-to-dashboard-btn"
@@ -207,8 +234,7 @@ function AdminLoginForm() {
                 <Input
                   name="email"
                   type="email"
-                  placeholder="admin@example.com"
-                  defaultValue="tkishanmkm@gmail.com"
+                  placeholder="Enter your email"
                   required
                   className="bg-slate-900 border-slate-700 text-white"
                 />
@@ -222,6 +248,19 @@ function AdminLoginForm() {
                   placeholder="••••••••"
                   required
                   className="bg-slate-900 border-slate-700 text-white"
+                />
+              </div>
+
+              {/* Security CAPTCHA Protection */}
+              <div className="flex justify-center pt-1 pb-1 overflow-hidden">
+                <ResponsiveHCaptcha
+                  ref={captchaRef}
+                  onVerify={(token) => setCaptchaToken(token)}
+                  onExpire={() => setCaptchaToken("")}
+                  onError={() => {
+                    setCaptchaToken("");
+                    console.warn("[Admin Login] CAPTCHA challenge error");
+                  }}
                 />
               </div>
 

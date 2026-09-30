@@ -76,6 +76,70 @@ function formatUsername(name: string, fallback: string): string {
   return trimmed.startsWith('@') ? trimmed : `@${trimmed}`;
 }
 
+function buildTradeEmailPlainText(params: {
+  recipientRole: 'buyer' | 'seller';
+  tradeId: string;
+  publicId: string;
+  buyerUsername: string;
+  sellerUsername: string;
+  formattedCrypto: string;
+  formattedAsset: string;
+  formattedFiat: string;
+  formattedFiatCurrency: string;
+  formattedPrice: string;
+  paymentMethod: string;
+  dateFormattedUtc: string;
+  tradeUrl: string;
+}): string {
+  const {
+    recipientRole,
+    tradeId,
+    publicId,
+    buyerUsername,
+    sellerUsername,
+    formattedCrypto,
+    formattedAsset,
+    formattedFiat,
+    formattedFiatCurrency,
+    formattedPrice,
+    paymentMethod,
+    dateFormattedUtc,
+    tradeUrl,
+  } = params;
+
+  const displayRefId = publicId || tradeId;
+  const roleText =
+    recipientRole === 'buyer'
+      ? 'Your P2P trade request has been successfully initiated on Paxones. The crypto asset is safely locked in escrow.'
+      : 'A new P2P trade request has been initiated with you on Paxones. The crypto asset is safely locked in escrow.';
+
+  return `
+New P2P Trade Initiated — Paxones
+
+${roleText}
+
+Trade Details:
+----------------------------------------
+Trade ID:       ${displayRefId}
+Buyer:          ${buyerUsername}
+Seller:         ${sellerUsername}
+Asset:          ${formattedCrypto} ${formattedAsset}
+Fiat Amount:    ${formattedFiat} ${formattedFiatCurrency}
+Exchange Rate:  ${formattedPrice} ${formattedFiatCurrency} / ${formattedAsset}
+Payment Method: ${paymentMethod || 'Bank Transfer'}
+Created (UTC):  ${dateFormattedUtc}
+
+View and manage your trade securely on Paxones:
+${tradeUrl}
+
+Security Notice:
+Never share your password, private keys, seed phrase, or 2FA codes with anyone.
+If you didn't initiate or expect this trade, please review your account and contact support@paxones.com.
+
+© 2026 Paxones. Secure Peer-to-Peer Crypto Marketplace.
+`.trim();
+}
+
 function buildTradeEmailHtml(params: {
   recipientRole: 'buyer' | 'seller';
   tradeId: string;
@@ -294,13 +358,21 @@ export async function sendNewTradeNotificationEmail(
     const sellerUsername = formatUsername(rawSellerUsername, 'Seller');
     const buyerUsername = formatUsername(rawBuyerUsername, 'Buyer');
 
-    // 2. Construct Authenticated Trade URL
-    const appUrl = (
+    // 2. Construct Canonical Authenticated Trade URL
+    // The production URL MUST always resolve to https://paxones.com/trade/{canonicalPublicTradeId}
+    // Strictly prevent development / AI Studio / localhost internal preview hostnames from leaking into customer emails
+    const configuredSiteUrl = (
+      process.env.NEXT_PUBLIC_SITE_URL ||
+      process.env.SITE_URL ||
       process.env.NEXT_PUBLIC_APP_URL ||
       process.env.APP_URL ||
       'https://paxones.com'
-    ).replace(/\/$/, '');
-    const tradeUrl = `${appUrl}/trade/${encodeURIComponent(tradeId || publicId)}`;
+    ).trim().replace(/\/$/, '');
+
+    const isInternalPreview = /ais-|aistudio|google\.com|run\.app|localhost|127\.0\.0\.1/i.test(configuredSiteUrl);
+    const baseSiteUrl = isInternalPreview ? 'https://paxones.com' : (configuredSiteUrl || 'https://paxones.com');
+    const canonicalPublicTradeId = String(publicId || tradeId);
+    const tradeUrl = `${baseSiteUrl}/trade/${encodeURIComponent(canonicalPublicTradeId)}`;
 
     // Format numbers
     const formattedCrypto = Number(cryptoAmount || 0).toLocaleString('en-US', {
@@ -379,6 +451,22 @@ export async function sendNewTradeNotificationEmail(
           tradeUrl,
         });
 
+        const plainText = buildTradeEmailPlainText({
+          recipientRole: target.role,
+          tradeId,
+          publicId,
+          buyerUsername,
+          sellerUsername,
+          formattedCrypto,
+          formattedAsset,
+          formattedFiat,
+          formattedFiatCurrency,
+          formattedPrice,
+          paymentMethod,
+          dateFormattedUtc,
+          tradeUrl,
+        });
+
         const response = await fetch(edgeFunctionUrl, {
           method: 'POST',
           headers: {
@@ -389,6 +477,7 @@ export async function sendNewTradeNotificationEmail(
             to: target.email,
             subject: `Paxones P2P Trade Initiated — ${publicId || tradeId}`,
             html,
+            text: plainText,
           }),
         });
 
