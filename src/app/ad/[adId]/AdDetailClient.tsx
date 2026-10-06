@@ -30,7 +30,6 @@ const ASSET_ICONS: Record<string, string> = {
   SOL: 'https://assets.coingecko.com/coins/images/4128/small/solana.png',
   BNB: 'https://assets.coingecko.com/coins/images/825/small/bnb-icon2_2x.png',
   TRX: 'https://assets.coingecko.com/coins/images/1094/small/tron-logo.png',
-  MATIC: 'https://assets.coingecko.com/coins/images/4713/small/polygon.png',
   DOGE: 'https://assets.coingecko.com/coins/images/5/small/dogecoin.png',
   XRP: 'https://assets.coingecko.com/coins/images/44/small/xrp-symbol-white-128.png',
 }

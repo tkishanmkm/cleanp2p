@@ -241,7 +241,7 @@ export async function runConfirmationsWorker(): Promise<ConfirmationWorkerResult
           });
         } else {
           const parsedRes = typeof rpcData === 'string' ? JSON.parse(rpcData) : rpcData;
-          const isCredited = parsedRes?.status === 'credited';
+          const isCredited = parsedRes?.status === 'credited' || parsedRes?.status === 'CONFIRMED' || parsedRes?.status === 'ALREADY_CREDITED';
 
           if (isCredited) {
             result.confirmedCount++;

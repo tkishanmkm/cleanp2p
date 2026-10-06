@@ -480,8 +480,6 @@ async function handleProvisioning(req: NextRequest) {
             net === 'ERC20' ||
             net === 'ETH' ||
             net === 'BSC' ||
-            net === 'POLYGON' ||
-            net === 'ARBITRUM' ||
             rec.address?.startsWith('0x')
           );
         } else if (chainCategory === 'BTC') {

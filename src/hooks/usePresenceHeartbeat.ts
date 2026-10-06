@@ -15,7 +15,7 @@ export function usePresenceHeartbeat(userId?: string) {
           .from('profiles')
           .update({
             is_online: true,
-            last_seen: new Date().toISOString()
+            last_seen_at: new Date().toISOString()
           })
           .eq('id', userId);
       } catch (err) {

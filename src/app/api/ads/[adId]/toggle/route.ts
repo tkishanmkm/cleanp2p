@@ -67,6 +67,11 @@ export async function PATCH(
       );
     }
 
+    if (!isAdmin) {
+      const { assertPlatformControlAllowed } = await import('@/lib/platform-guard');
+      await assertPlatformControlAllowed('new_ad', { userId: user.id });
+    }
+
     const body = await request.json();
     const newStatus = body.status ? String(body.status).toUpperCase().trim() : (body.active ? 'ACTIVE' : 'INACTIVE');
     const isActive = newStatus === 'ACTIVE';
@@ -82,7 +87,6 @@ export async function PATCH(
         .from('p2p_ads')
         .update({
           active: isActive,
-          is_active: isActive,
           status: newStatus,
           updated_at: new Date().toISOString(),
         })
@@ -91,22 +95,31 @@ export async function PATCH(
 
       if (!p2pErr && p2pRes && p2pRes.length > 0) {
         p2pMutated = true;
+      } else {
+        console.error('[PATCH /api/ads/[adId]/toggle] Canonical p2p_ads update failed:', p2pErr?.message);
       }
     }
 
     if (adsRow) {
-      const { data: adsRes, error: adsErr } = await admin
-        .from('ads')
-        .update({
-          is_active: isActive,
-          status: newStatus,
-          updated_at: new Date().toISOString(),
-        })
-        .eq('id', adsRow.id)
-        .select('id');
+      try {
+        const { data: adsRes, error: adsErr } = await admin
+          .from('ads')
+          .update({
+            active: isActive,
+            is_active: isActive,
+            status: newStatus,
+            updated_at: new Date().toISOString(),
+          })
+          .eq('id', adsRow.id)
+          .select('id');
 
-      if (!adsErr && adsRes && adsRes.length > 0) {
-        adsMutated = true;
+        if (!adsErr && adsRes && adsRes.length > 0) {
+          adsMutated = true;
+        } else {
+          console.warn('[PATCH /api/ads/[adId]/toggle] Legacy ads mirror update warning:', adsErr?.message);
+        }
+      } catch (legacyErr: any) {
+        console.warn('[PATCH /api/ads/[adId]/toggle] Legacy ads update exception:', legacyErr?.message);
       }
     }
 
@@ -114,8 +127,12 @@ export async function PATCH(
       return NextResponse.json({ error: 'Advertisement not found.' }, { status: 404 });
     }
 
-    if ((p2pAdsRow && !p2pMutated) || (adsRow && !adsMutated)) {
-      console.error('[PATCH /api/ads/[adId]/toggle] Failed row status update:', { p2pRowId: p2pAdsRow?.id, p2pMutated, adsRowId: adsRow?.id, adsMutated });
+    // Canonical p2p_ads is authoritative. If p2pAdsRow exists, canonical p2p update must succeed.
+    // If only legacy adsRow exists, ads update must succeed.
+    const overallSuccess = p2pAdsRow ? p2pMutated : adsMutated;
+
+    if (!overallSuccess) {
+      console.error('[PATCH /api/ads/[adId]/toggle] Failed canonical row status update:', { p2pRowId: p2pAdsRow?.id, p2pMutated, adsRowId: adsRow?.id, adsMutated });
       return NextResponse.json({ error: 'Failed to update advertisement status.' }, { status: 500 });
     }
 

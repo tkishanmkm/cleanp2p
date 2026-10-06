@@ -510,17 +510,18 @@ export default function SettingsPage() {
           }
         }
       } else {
-        // Direct client fallback
-        const { data: { user } } = await supabase.auth.getUser();
-        if (user) {
-          setUserId(user.id);
-          setUserEmail(user.email || '');
-          const { data: p } = await supabase.from('profiles').select('*').eq('id', user.id).maybeSingle();
+        // Fetch owner profile via secure server endpoint
+        const res = await fetch('/api/user/profile');
+        if (res.ok) {
+          const profileRes = await res.json();
+          const p = profileRes.profile;
           if (p) {
             setProfile(p);
+            setUserId(p.id);
+            setUserEmail(p.email || '');
             setAvatarUrl(p.avatar_url || p.photo_url || null);
             setUsername(p.username || '');
-            setFullName(p.full_name || '');
+            setFullName(p.full_name || p.name || '');
             setDob(p.dob || p.date_of_birth || '');
             setNameVisibility(p.name_visibility || 'FULL');
             setCurrency(p.preferred_currency || 'USD');

@@ -53,7 +53,6 @@ export async function GET(req: NextRequest) {
     const hotWallets = [];
     const chainsToCheck = ['BEP20'];
     if (process.env.ETH_RPC_URL || process.env.EVM_RPC_URL) chainsToCheck.push('ERC20');
-    if (process.env.POLYGON_RPC_URL) chainsToCheck.push('POLYGON');
     if (process.env.TRON_HOT_WALLET_ADDRESS) chainsToCheck.push('TRC20');
 
     for (const chain of chainsToCheck) {

@@ -32,16 +32,16 @@ export async function GET(req: NextRequest) {
       );
     }
 
-    // 2. Fetch wallets, deposits, withdrawals, trades, ads, disputes in parallel
+    // 2. Fetch wallet_assets, deposits, withdrawals, trades, ads, disputes in parallel
     const [
-      { data: wallets },
+      { data: walletAssets },
       { data: deposits },
       { data: withdrawals },
       { data: trades },
       { data: ads },
       { data: disputes },
     ] = await Promise.all([
-      supabase.from("wallets").select("*"),
+      supabase.from("wallet_assets").select("*"),
       supabase.from("deposits").select("id, user_id, amount, crypto, status, tx_id"),
       supabase.from("withdrawals").select("id, user_id, amount, crypto, status, txid"),
       supabase.from("trades").select("id, trade_id, buyer_id, seller_id, crypto, amount, status"),
@@ -51,9 +51,15 @@ export async function GET(req: NextRequest) {
 
     // Aggregate user-level financial and activity metrics
     const walletMap = new Map<string, any[]>();
-    (wallets || []).forEach((w: any) => {
+    (walletAssets || []).forEach((w: any) => {
       if (!walletMap.has(w.user_id)) walletMap.set(w.user_id, []);
-      walletMap.get(w.user_id)!.push(w);
+      walletMap.get(w.user_id)!.push({
+        currency: w.asset_symbol || "USDT",
+        balance: parseFloat(w.balance) || 0,
+        locked_balance: parseFloat(w.locked_balance || 0),
+        in_escrow: parseFloat(w.in_escrow || 0),
+        in_withdrawal: parseFloat(w.in_withdrawal || 0),
+      });
     });
 
     // Deposits total per user per currency

@@ -86,35 +86,7 @@ export async function confirmAndReleaseEscrow({
 }
 
 /**
- * 2. Direct RPC Client invocation helper (Alternative direct-to-database method)
- */
-export async function releaseP2PEscrowDirect(
-  tradeId: string,
-  sellerId: string,
-  buyerId: string,
-  amount: number,
-  asset: string
-): Promise<{ success: boolean; data?: any; error?: string }> {
-  const supabase = createClient();
-
-  const { data, error } = await supabase.rpc('release_p2p_escrow', {
-    p_trade_id: tradeId,
-    p_seller_id: sellerId,
-    p_buyer_id: buyerId,
-    p_amount: amount,
-    p_asset: asset,
-  });
-
-  if (error) {
-    console.error('[Direct RPC Error]:', error.message);
-    return { success: false, error: error.message };
-  }
-
-  return { success: true, data };
-}
-
-/**
- * 3. Subscribes to live realtime chat messages for an active trade / order.
+ * 2. Subscribes to live realtime chat messages for an active trade / order.
  */
 export function subscribeToOrderChat(
   orderIdOrTradeId: string,

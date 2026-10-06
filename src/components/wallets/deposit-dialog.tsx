@@ -79,7 +79,7 @@ function mapChainForProvisioning(assetCode: string, chainCode: string): 'EVM' | 
     return 'TRON';
   }
 
-  // 4. EVM Default (BNB, ETH, ERC20, BEP20, BSC, Polygon, Arbitrum, EVM)
+  // 4. EVM Default (ETH, ERC20, BEP20, BSC)
   return 'EVM';
 }
 
@@ -159,7 +159,7 @@ export function DepositDialog({ open, onOpenChange, asset, wallet }: DepositDial
           } else if (normChain === 'TRC20' || normChain === 'TRON' || normChain === 'TRX' || normAsset === 'TRX') {
             selectedAddr = data.addresses.tron || data.addresses.USDT_TRC20 || '';
           } else {
-            // EVM chains (ERC20, BEP20, ETH, Arbitrum, Base, Polygon)
+            // EVM chains (ERC20, BEP20, ETH)
             selectedAddr = data.addresses.evm || data.addresses.ETH || data.addresses.USDT_ERC20 || data.addresses.USDT_BEP20 || '';
           }
 

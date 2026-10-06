@@ -99,7 +99,7 @@ export async function getHotWalletOnchainBalance(
     }
   }
 
-  // 2. EVM Chains (BSC, ERC20, POLYGON, SEPOLIA)
+  // 2. EVM Chains (BSC, ERC20)
   const chainConfig = SUPPORTED_EVM_CHAINS[normNet];
   if (!chainConfig) {
     return {

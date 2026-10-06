@@ -21,46 +21,48 @@ export async function POST(req: NextRequest) {
     }
 
     if (action === 'APPROVE') {
-      // Transition from NEEDS_APPROVAL -> PENDING so worker picks it up
-      const { error } = await supabaseAdmin
-        .from('onchain_withdrawals')
-        .update({
-          status: 'PENDING',
-          approved_by: adminId,
-          approved_at: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
-        })
-        .eq('id', withdrawalId)
-        .eq('status', 'NEEDS_APPROVAL');
+      // Call authoritative approve_withdrawal RPC (verifies admin status and transitions state atomically)
+      const { data: rpcData, error: rpcError } = await supabaseAdmin.rpc('approve_withdrawal', {
+        p_withdrawal_id: withdrawalId,
+        p_admin_id: adminId,
+      });
 
-      if (error) throw error;
-
-      await supabaseAdmin
-        .from('withdrawals')
-        .update({
-          status: 'approved',
-          updated_at: new Date().toISOString(),
-        })
-        .eq('id', withdrawalId)
-        .catch(() => null);
+      if (rpcError) {
+        return NextResponse.json({ error: rpcError.message || 'Failed to approve withdrawal' }, { status: 400 });
+      }
 
       return NextResponse.json({
         success: true,
-        message: 'Withdrawal approved and dispatched to dispatch queue.',
+        data: rpcData,
+        message: 'Withdrawal approved and queued for broadcast.',
       });
     } else {
-      // Call refund procedure to unlock user balance
-      const { error: rpcError } = await supabaseAdmin.rpc('process_failed_withdrawal', {
+      // Call authoritative refund procedure to safely return liability to available balance
+      const { data: refundData, error: rpcError } = await supabaseAdmin.rpc('process_failed_withdrawal', {
         p_withdrawal_id: withdrawalId,
         p_error_reason: rejectionReason || 'Rejected by administrator during security review.',
-        p_is_verified_unbroadcast: true,
       });
 
-      if (rpcError) throw rpcError;
+      if (rpcError) {
+        return NextResponse.json({ error: rpcError.message || 'Failed to reject withdrawal' }, { status: 400 });
+      }
+
+      // Record Admin Rejection in Audit Log
+      await supabaseAdmin.from('admin_audit_logs').insert({
+        admin_id: adminId,
+        admin_email: auth.adminEmail || 'admin@paxones.com',
+        action: 'ADMIN_REJECTED_WITHDRAWAL',
+        details: {
+          withdrawal_id: withdrawalId,
+          rejection_reason: rejectionReason || 'Rejected by administrator during security review.',
+        },
+        created_at: new Date().toISOString(),
+      }).catch(() => null);
 
       return NextResponse.json({
         success: true,
-        message: 'Withdrawal rejected and funds refunded to user.',
+        data: refundData,
+        message: 'Withdrawal rejected and funds safely returned to user wallet.',
       });
     }
   } catch (err: any) {

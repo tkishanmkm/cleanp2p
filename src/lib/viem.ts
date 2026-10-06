@@ -1,1 +1,1 @@
-export { publicClient, sepoliaClient } from './blockchain/viem';
+export { publicClient, ethMainnetClient } from './blockchain/viem';

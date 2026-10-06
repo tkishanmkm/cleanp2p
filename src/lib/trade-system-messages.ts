@@ -10,7 +10,8 @@ export type SystemMessageType =
   | 'TRADE_DISPUTED'
   | 'TRADE_REPORTED'
   | 'USER_BLOCKED'
-  | 'FEEDBACK_LEFT';
+  | 'FEEDBACK_LEFT'
+  | 'MODERATOR_JOINED';
 
 export type PaymentCategory =
   | 'bank_transfer'
@@ -1836,6 +1837,9 @@ export function formatSystemMessageContent(
         `Buyer @${buyerUsername} has marked the trade as paid. ` +
         `@${sellerUsername}, please validate payment in your receiving account before releasing.`
       );
+
+    case 'MODERATOR_JOINED':
+      return 'Paxones Moderator joined the trade chat.';
 
     case 'MESSAGE_BLOCKED':
       return `Message blocked: For your security, off-platform communication or trading instructions are not permitted in Paxones Trade Chat. Please keep all trade-related communication within Paxones.`;

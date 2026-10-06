@@ -16,7 +16,8 @@ export async function GET(
 
     // 1. Query public profile / profiles table
     let profile: any = null;
-    let query = supabaseAdmin.from('profiles').select('*');
+    const PUBLIC_PROFILE_COLUMNS = 'id, username, display_name, avatar_url, photo_url, country, is_verified, id_verified, kyc_status, is_online, last_seen_at, created_at, total_completed_trades, completed_trades, trade_volume, positive_feedback, negative_feedback, feedback_score';
+    let query = supabaseAdmin.from('profiles').select(PUBLIC_PROFILE_COLUMNS);
     if (isUuid) {
       query = query.or(`id.eq.${cleanUsername},username.ilike.${cleanUsername}`);
     } else {

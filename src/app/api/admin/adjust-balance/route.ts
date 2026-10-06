@@ -64,15 +64,15 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ success: false, error: "Target user not found in database." }, { status: 404 });
     }
 
-    // 4. Fetch existing wallet balance
-    const { data: existingWallet } = await supabase
-      .from("wallets")
+    // 4. Fetch existing authoritative wallet balance from wallet_assets
+    const { data: existingAsset } = await supabase
+      .from("wallet_assets")
       .select("*")
       .eq("user_id", profile.id)
-      .eq("currency", cleanCurrency)
+      .eq("asset_symbol", cleanCurrency)
       .maybeSingle();
 
-    const currentBalance = existingWallet ? parseFloat(existingWallet.balance) || 0 : 0;
+    const currentBalance = existingAsset ? parseFloat(existingAsset.balance) || 0 : 0;
 
     if (cleanAction === "subtract" && currentBalance < numAmount) {
       return NextResponse.json({
@@ -81,58 +81,52 @@ export async function POST(req: NextRequest) {
       }, { status: 400 });
     }
 
-    // 5. Execute atomic balance adjustment via RPC
-    let newBalance: number = currentBalance;
-    let rpcSuccess = false;
+    // 5. Execute authoritative balance adjustment on wallet_assets
+    const newBalance: number = cleanAction === "add" ? currentBalance + numAmount : Math.max(0, currentBalance - numAmount);
 
-    try {
-      const { data: rpcData, error: rpcError } = await supabase.rpc("admin_adjust_balance", {
-        p_admin_email: adminEmail,
-        p_user_id: profile.id,
-        p_currency: cleanCurrency,
-        p_type: cleanAction,
-        p_amount: numAmount,
-      });
-
-      if (!rpcError && rpcData) {
-        rpcSuccess = true;
-        newBalance = typeof rpcData.new_balance === "number" ? rpcData.new_balance : (
-          cleanAction === "add" ? currentBalance + numAmount : Math.max(0, currentBalance - numAmount)
-        );
-      }
-    } catch (err) {
-      console.warn("[ADJUST_BALANCE] RPC call failed, using safe atomic update fallback:", err);
-    }
-
-    // Safe fallback if RPC was not available or threw
-    if (!rpcSuccess) {
-      newBalance = cleanAction === "add" ? currentBalance + numAmount : Math.max(0, currentBalance - numAmount);
-      if (existingWallet) {
-        await supabase
-          .from("wallets")
-          .update({
-            balance: newBalance,
-            total_balance: newBalance,
-            updated_at: new Date().toISOString(),
-          })
-          .eq("id", existingWallet.id);
-      } else {
-        await supabase.from("wallets").insert({
-          user_id: profile.id,
-          currency: cleanCurrency,
+    if (existingAsset) {
+      const { error: waUpdateErr } = await supabase
+        .from("wallet_assets")
+        .update({
           balance: newBalance,
-          total_balance: newBalance,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", existingAsset.id);
+
+      if (waUpdateErr) {
+        console.error("[ADJUST_BALANCE] wallet_assets update error:", waUpdateErr);
+        return NextResponse.json({ success: false, error: "Failed to update authoritative wallet balance." }, { status: 500 });
+      }
+    } else {
+      const { error: waInsertErr } = await supabase
+        .from("wallet_assets")
+        .insert({
+          user_id: profile.id,
+          asset_symbol: cleanCurrency,
+          balance: newBalance,
+          locked_balance: 0,
+          reserved_balance: 0,
+          in_escrow: 0,
+          in_withdrawal: 0,
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
         });
+
+      if (waInsertErr) {
+        console.error("[ADJUST_BALANCE] wallet_assets insert error:", waInsertErr);
+        return NextResponse.json({ success: false, error: "Failed to initialize authoritative wallet balance." }, { status: 500 });
       }
     }
 
-    // 6. Create Ledger Entry in ledger_entries
+    // 6. Create Ledger Entry in authoritative ledger_entries
     try {
       await supabase.from("ledger_entries").insert({
         user_id: profile.id,
         crypto: cleanCurrency,
+        asset: cleanCurrency,
         amount: cleanAction === "add" ? numAmount : -numAmount,
         type: `admin_${cleanAction}`,
+        status: "completed",
         reference_id: `ADJ-${Date.now()}`,
         balance_after: newBalance,
         metadata: {

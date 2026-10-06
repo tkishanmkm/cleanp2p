@@ -5,6 +5,7 @@ import { getSupabaseAdminClient } from '@/utils/supabase/server';
 import { generateAdId } from '@/lib/id-generator';
 import { calculateMinimumFiatAmount } from '@/lib/currency';
 import { resolveTradeType } from '@/utils/p2p-helpers';
+import { assertPlatformControlAllowed } from '@/lib/platform-guard';
 
 export const dynamic = 'force-dynamic';
 
@@ -67,6 +68,16 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // Platform Guard Check
+    try {
+      await assertPlatformControlAllowed('new_ad', { userId: user.id });
+    } catch (guardErr: any) {
+      return NextResponse.json(
+        { error: guardErr.message || 'Creating new advertisements is temporarily disabled.', code: guardErr.code || 'PLATFORM_AD_CREATION_DISABLED' },
+        { status: guardErr.statusCode || 403 }
+      );
+    }
+
     // Ensure public.profiles record exists for user.id to guarantee foreign key integrity
     try {
       const admin = getSupabaseAdminClient();
@@ -119,6 +130,51 @@ export async function POST(request: NextRequest) {
     const paymentMethods = Array.isArray(body.payment_methods) && body.payment_methods.length > 0
       ? body.payment_methods
       : (Array.isArray(body.paymentMethods) ? body.paymentMethods : ['Bank Transfer']);
+
+    // Authoritative Server-Side ±50% Reference Market Price Validation (Applies to both BUY and SELL ads)
+    const isFixedPricing = pricingType === 'FIXED' || body.rate_type === 'fixed' || Boolean(body.is_fixed);
+
+    if (isFixedPricing) {
+      if (priceVal === null || isNaN(priceVal) || priceVal <= 0) {
+        return NextResponse.json({ error: 'Valid fixed price is required for fixed-rate ads.' }, { status: 400 });
+      }
+
+      const adminClient = getSupabaseAdminClient();
+      const { data: marketRow, error: marketError } = await adminClient
+        .from('crypto_market_prices')
+        .select('price_in_fiat, updated_at')
+        .eq('asset_symbol', coinType)
+        .eq('fiat_symbol', fiatType)
+        .maybeSingle();
+
+      if (marketError || !marketRow || !marketRow.price_in_fiat || Number(marketRow.price_in_fiat) <= 0) {
+        return NextResponse.json(
+          { error: `Market reference price is currently unavailable for ${coinType}/${fiatType}. Please try again later.` },
+          { status: 400 }
+        );
+      }
+
+      const refPrice = Number(marketRow.price_in_fiat);
+      const minAllowedPrice = refPrice * 0.50;
+      const maxAllowedPrice = refPrice * 1.50;
+
+      if (priceVal < minAllowedPrice || priceVal > maxAllowedPrice) {
+        return NextResponse.json(
+          {
+            error: `Fixed price must be within ±50% of the reference market price (${minAllowedPrice.toFixed(2)} - ${maxAllowedPrice.toFixed(2)} ${fiatType}).`,
+          },
+          { status: 400 }
+        );
+      }
+    } else {
+      // Floating/margin pricing validation (-50% to +50%)
+      if (marginVal < -50 || marginVal > 50) {
+        return NextResponse.json(
+          { error: 'Margin percentage for dynamic pricing must be between -50% and +50%.' },
+          { status: 400 }
+        );
+      }
+    }
 
     // BALANCE VALIDATION: If user is creating a SELL ad (offering to sell coin), check that minimum limit in coin is present in their account
     if (adSide === 'SELL') {

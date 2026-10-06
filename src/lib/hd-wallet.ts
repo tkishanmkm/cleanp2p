@@ -7,19 +7,16 @@ import {
   deriveTronAddressFromXpub,
 } from '@/lib/crypto/hd-derivation';
 
-// Standard derivation path templates per asset / network
+// Standard derivation path templates per asset / network (Production 6 networks)
 export const STANDARD_DERIVATION_PATHS: Record<string, string> = {
   BTC: "m/84'/0'/0'/0",
   ETH: "m/44'/60'/0'/0",
   ERC20: "m/44'/60'/0'/0",
-  POLYGON: "m/44'/60'/0'/0",
-  ARBITRUM: "m/44'/60'/0'/0",
   BSC: "m/44'/60'/0'/0",
+  BEP20: "m/44'/60'/0'/0",
   TRX: "m/44'/195'/0'/0",
   TRC20: "m/44'/195'/0'/0",
   LTC: "m/84'/2'/0'/0",
-  SOL: "m/44'/501'/0'/0",
-  XMR: "m/44'/128'/0'/0",
 };
 
 // Base58 Alphabet
@@ -186,13 +183,12 @@ export async function deriveHDAddress(
 
   let address: string;
 
-  // 1. EVM Networks (Ethereum, ERC20, Polygon, Arbitrum, BSC, Base)
+  // 1. EVM Networks (Ethereum, ERC20, BSC, BEP20)
   if (
     net === 'ERC20' ||
     net === 'ETH' ||
-    net === 'POLYGON' ||
-    net === 'ARBITRUM' ||
     net === 'BSC' ||
+    net === 'BEP20' ||
     asset === 'ETH' ||
     (asset === 'USDC' && net === 'ERC20')
   ) {

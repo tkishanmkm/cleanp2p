@@ -131,7 +131,7 @@ export async function GET(req: NextRequest) {
         ltcDerivationPath: "m/84'/2'/0'/0/1",
         tronDerivationPath: "m/44'/195'/0'/0/1",
         evmAddressReusedFor: ['ETH', 'USDT_ERC20', 'USDT_BEP20'],
-        allowedChainNetworks: ['ethereum', 'arbitrum', 'base', 'polygon', 'bitcoin', 'ERC20', 'BEP20', 'TRC20'],
+        allowedChainNetworks: ['ERC20', 'BEP20', 'TRC20', 'BTC', 'LTC', 'ETH'],
         derivedAt: new Date().toISOString(),
       },
     });

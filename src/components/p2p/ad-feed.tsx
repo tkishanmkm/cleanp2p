@@ -40,8 +40,9 @@ export function AdFeed({ type }: { type?: "BUY" | "SELL" }) {
             profiles (
               id,
               username,
-              full_name,
-              last_active
+              display_name,
+              is_online,
+              last_seen_at
             )
           `)
           .eq("is_active", true)
@@ -84,7 +85,7 @@ export function AdFeed({ type }: { type?: "BUY" | "SELL" }) {
             const userIds = Array.from(new Set(p2pData.map((d: any) => d.user_id).filter(Boolean)));
             const { data: profiles } = await supabase
               .from("profiles")
-              .select("id, username, full_name, last_active")
+              .select("id, username, display_name, is_online, last_seen_at")
               .in("id", userIds);
 
             const profileMap = new Map((profiles || []).map((p: any) => [p.id, p]));

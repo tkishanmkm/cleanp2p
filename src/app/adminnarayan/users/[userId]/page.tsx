@@ -28,6 +28,7 @@ import {
   Filter
 } from "lucide-react";
 import { formatUtcDateTime, formatCompactUtc } from "@/lib/date-utils";
+import { freezeUserAction, unfreezeUserAction } from "@/app/adminnarayan/users/actions";
 
 export default function AdminUserDetailsPage({ params }: { params?: Promise<{ userId: string }> | { userId: string } }) {
   const routeParams = useParams();
@@ -72,6 +73,10 @@ export default function AdminUserDetailsPage({ params }: { params?: Promise<{ us
   // Status Form
   const [targetStatus, setTargetStatus] = useState<"Active" | "Restricted" | "Suspended" | "Banned">("Active");
   const [statusReason, setStatusReason] = useState("");
+
+  // Freeze Modal Form
+  const [showFreezeModal, setShowFreezeModal] = useState(false);
+  const [freezeReasonInput, setFreezeReasonInput] = useState("");
 
   // Tab
   const [activeTab, setActiveTab] = useState<"wallets" | "deposits" | "withdrawals" | "trades" | "ads" | "transactions" | "audit">("wallets");
@@ -158,7 +163,7 @@ export default function AdminUserDetailsPage({ params }: { params?: Promise<{ us
       { data: txData },
       { data: aData },
     ] = await Promise.all([
-      supabase.from("wallets").select("*").eq("user_id", actualId),
+      supabase.from("wallet_assets").select("*").eq("user_id", actualId),
       supabase.from("deposits").select("*").eq("user_id", actualId).order("created_at", { ascending: false }),
       supabase.from("withdrawals").select("*").eq("user_id", actualId).order("created_at", { ascending: false }),
       supabase.from("trades").select("*").or(`buyer_id.eq.${actualId},seller_id.eq.${actualId}`).order("created_at", { ascending: false }),
@@ -167,7 +172,18 @@ export default function AdminUserDetailsPage({ params }: { params?: Promise<{ us
       supabase.from("admin_audit_logs").select("*").eq("target_user_id", actualId).order("created_at", { ascending: false }),
     ]);
 
-    if (wData) setWallets(wData);
+    if (wData) {
+      setWallets(
+        wData.map((w: any) => ({
+          ...w,
+          currency: w.asset_symbol || "USDT",
+          balance: parseFloat(w.balance) || 0,
+          locked_balance: parseFloat(w.locked_balance || 0),
+          in_escrow: parseFloat(w.in_escrow || 0),
+          in_withdrawal: parseFloat(w.in_withdrawal || 0),
+        }))
+      );
+    }
     if (dData) setDeposits(dData);
     if (wdData) setWithdrawals(wdData);
     if (tData) setTrades(tData);
@@ -287,6 +303,50 @@ export default function AdminUserDetailsPage({ params }: { params?: Promise<{ us
     }
   }
 
+  async function handleEmergencyFreeze() {
+    const targetId = profile?.id || userId;
+    if (!freezeReasonInput.trim()) {
+      return alert("Please enter an explicit reason for the emergency freeze.");
+    }
+
+    setActionLoading(true);
+    try {
+      const res = await freezeUserAction(targetId, freezeReasonInput.trim());
+      if (!res.success) {
+        throw new Error(res.error || "Failed to apply emergency freeze.");
+      }
+      alert("Emergency freeze applied successfully to user.");
+      setShowFreezeModal(false);
+      setFreezeReasonInput("");
+      fetchUserData();
+    } catch (err: any) {
+      alert(`Emergency freeze error: ${err.message}`);
+    } finally {
+      setActionLoading(false);
+    }
+  }
+
+  async function handleEmergencyUnfreeze() {
+    const targetId = profile?.id || userId;
+    if (!confirm("Are you sure you want to lift the emergency freeze from this user? All previous ban/restriction statuses will remain intact.")) {
+      return;
+    }
+
+    setActionLoading(true);
+    try {
+      const res = await unfreezeUserAction(targetId, "Admin unfreeze from user detail panel");
+      if (!res.success) {
+        throw new Error(res.error || "Failed to lift emergency freeze.");
+      }
+      alert("Emergency freeze lifted successfully.");
+      fetchUserData();
+    } catch (err: any) {
+      alert(`Emergency unfreeze error: ${err.message}`);
+    } finally {
+      setActionLoading(false);
+    }
+  }
+
   if (loading) {
     return (
       <div className="p-8 text-center text-slate-400">
@@ -347,6 +407,12 @@ export default function AdminUserDetailsPage({ params }: { params?: Promise<{ us
               }`}>
                 {userStatus}
               </span>
+              {profile.is_emergency_frozen && (
+                <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-bold bg-rose-950 text-rose-300 border border-rose-700 animate-pulse">
+                  <ShieldAlert className="w-3.5 h-3.5 text-rose-400" />
+                  EMERGENCY FROZEN
+                </span>
+              )}
             </div>
             <p className="text-xs text-slate-400 font-mono mt-0.5">
               Email: <span className="text-slate-200">{profile.email}</span> | Username: <span className="text-blue-400 font-semibold">@{profile.username || "None"}</span> | UUID: {profile.id}
@@ -356,6 +422,25 @@ export default function AdminUserDetailsPage({ params }: { params?: Promise<{ us
 
         {/* Action Controls */}
         <div className="flex flex-wrap items-center gap-2">
+          {profile.is_emergency_frozen ? (
+            <button
+              onClick={handleEmergencyUnfreeze}
+              disabled={actionLoading}
+              className="inline-flex items-center gap-1.5 bg-emerald-700 hover:bg-emerald-600 text-white text-xs font-semibold px-3 py-2 rounded-lg shadow-md transition-colors disabled:opacity-50"
+            >
+              <UserCheck className="w-3.5 h-3.5" />
+              Lift Emergency Freeze
+            </button>
+          ) : (
+            <button
+              onClick={() => setShowFreezeModal(true)}
+              disabled={actionLoading}
+              className="inline-flex items-center gap-1.5 bg-rose-700 hover:bg-rose-600 text-white text-xs font-semibold px-3 py-2 rounded-lg shadow-md transition-colors disabled:opacity-50"
+            >
+              <UserX className="w-3.5 h-3.5" />
+              Apply Emergency Freeze
+            </button>
+          )}
           <button
             onClick={() => setShowAdjustModal(true)}
             className="inline-flex items-center gap-1.5 bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold px-3 py-2 rounded-lg shadow-md transition-colors"
@@ -1185,6 +1270,70 @@ export default function AdminUserDetailsPage({ params }: { params?: Promise<{ us
                   className="px-4 py-2 bg-blue-600 text-white rounded-lg text-xs font-semibold hover:bg-blue-500 disabled:opacity-50"
                 >
                   {actionLoading ? "Updating..." : "Save Status"}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Apply Emergency Freeze Modal */}
+      {showFreezeModal && (
+        <div className="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-50 backdrop-blur-sm">
+          <div className="bg-slate-900 border border-rose-800 text-white p-6 rounded-2xl max-w-md w-full space-y-4 shadow-2xl">
+            <div className="flex justify-between items-start border-b border-rose-900/60 pb-3">
+              <div>
+                <h2 className="text-lg font-bold flex items-center gap-2 text-rose-300">
+                  <ShieldAlert className="w-5 h-5 text-rose-400" />
+                  Apply Emergency Freeze
+                </h2>
+                <p className="text-xs text-slate-400 font-mono mt-0.5">{profile.email}</p>
+              </div>
+              <button onClick={() => setShowFreezeModal(false)} className="text-slate-400 hover:text-white">✕</button>
+            </div>
+
+            <div className="p-3 bg-rose-950/60 border border-rose-800/80 rounded-lg text-xs text-rose-200 space-y-1">
+              <p className="font-bold flex items-center gap-1 text-rose-300">
+                <AlertTriangle className="w-4 h-4 text-amber-400" />
+                Security Warning
+              </p>
+              <p>
+                An emergency freeze immediately halts new trade creation, withdrawals, internal transfers, and ad creation for this user.
+              </p>
+              <p className="text-slate-300 text-[11px] pt-1">
+                Note: Existing active trades will remain accessible so locked escrow can be settled normally. User funds are NOT wiped or deleted.
+              </p>
+            </div>
+
+            <div className="space-y-3">
+              <div>
+                <label className="text-xs font-semibold text-slate-300">
+                  Explicit Freeze Reason <span className="text-rose-400">*</span>
+                </label>
+                <textarea
+                  required
+                  rows={3}
+                  value={freezeReasonInput}
+                  onChange={(e) => setFreezeReasonInput(e.target.value)}
+                  placeholder="Enter security investigation or compliance reason..."
+                  className="w-full p-2.5 bg-slate-950 border border-slate-800 rounded-lg mt-1 text-xs text-white focus:border-rose-500 focus:outline-none"
+                />
+              </div>
+
+              <div className="flex justify-end space-x-2 pt-3 border-t border-slate-800">
+                <button
+                  type="button"
+                  onClick={() => setShowFreezeModal(false)}
+                  className="px-4 py-2 bg-slate-800 text-slate-300 rounded-lg text-xs"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleEmergencyFreeze}
+                  disabled={actionLoading || !freezeReasonInput.trim()}
+                  className="px-4 py-2 bg-rose-600 text-white rounded-lg text-xs font-semibold hover:bg-rose-500 disabled:opacity-50"
+                >
+                  {actionLoading ? "Freezing..." : "Confirm Emergency Freeze"}
                 </button>
               </div>
             </div>

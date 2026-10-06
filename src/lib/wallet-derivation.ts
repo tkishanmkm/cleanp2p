@@ -11,7 +11,7 @@ import { getOrDeriveUserDepositAddresses } from '@/lib/hd-derivation-engine';
 // ============================================================================
 
 export type SupportedChain = 'EVM' | 'BTC' | 'TRON' | 'LTC';
-export type SupportedNetwork = 'ERC20' | 'BEP20' | 'TRC20' | 'BTC' | 'LTC' | 'TRON' | 'POLYGON' | 'ARBITRUM';
+export type SupportedNetwork = 'ERC20' | 'BEP20' | 'TRC20' | 'BTC' | 'LTC' | 'TRON';
 export type SupportedAsset = 'BTC' | 'ETH' | 'USDT' | 'TRX' | 'LTC';
 
 export interface HDAddressResult {

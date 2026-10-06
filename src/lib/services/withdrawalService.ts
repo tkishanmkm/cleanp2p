@@ -1,6 +1,8 @@
 import { createClient, getSupabaseAdminClient } from '@/lib/supabase/server';
 import { ethers } from 'ethers';
 import { verify2FAOTP } from '@/lib/2fa';
+import { assertPlatformControlAllowed } from '@/lib/platform-guard';
+import { hasPendingWithdrawalApproval, checkPasswordChangeHold } from '@/lib/withdrawal-security';
 import {
   resolveAuthoritativeWithdrawalFee,
   calculateWithdrawalUsdEquivalent,
@@ -104,6 +106,19 @@ export interface WithdrawalServiceResult {
  * Unified Canonical Server-Side Withdrawal Gateway
  */
 export async function executeCanonicalWithdrawal(input: WithdrawalRequestInput): Promise<WithdrawalServiceResult> {
+  // Authoritative server-side platform guard: check if withdrawals are allowed
+  try {
+    await assertPlatformControlAllowed('withdrawal');
+  } catch (guardErr: any) {
+    return {
+      success: false,
+      status: 'REJECTED',
+      error: guardErr.message || 'Withdrawals are temporarily disabled by administrator.',
+      message: guardErr.message || 'Withdrawals are temporarily disabled by administrator.',
+      statusCode: guardErr.statusCode || 403,
+    };
+  }
+
   const supabaseAdmin = getSupabaseAdminClient();
 
   // 1. Check Global Emergency Pause
@@ -174,6 +189,30 @@ export async function executeCanonicalWithdrawal(input: WithdrawalRequestInput):
       status: 'ACCOUNT_RESTRICTED',
       error: 'ACCOUNT_RESTRICTED: Withdrawals are restricted on your account. Please contact support@paxones.com.',
       message: 'Account restricted. Contact support.',
+      statusCode: 403,
+    };
+  }
+
+  // Enforce Authoritative Password-Change Security Hold
+  const pwdHold = await checkPasswordChangeHold(user.id);
+  if (pwdHold.isHeld) {
+    return {
+      success: false,
+      status: 'PASSWORD_WITHDRAWAL_HOLD',
+      error: `PASSWORD_WITHDRAWAL_HOLD: Withdrawals are temporarily suspended following a recent password change for security reasons. Please try again in ${pwdHold.remainingHours} hour(s).`,
+      message: `Withdrawals are temporarily held for security after a password change. Remaining hold: ${pwdHold.remainingHours} hour(s).`,
+      statusCode: 403,
+    };
+  }
+
+  // Enforce Active Pending Approval Lockout (Single In-Flight Pending Approval Withdrawal)
+  const isPendingApproval = await hasPendingWithdrawalApproval(user.id);
+  if (isPendingApproval) {
+    return {
+      success: false,
+      status: 'WITHDRAWAL_APPROVAL_PENDING',
+      error: 'WITHDRAWAL_APPROVAL_PENDING: Your previous withdrawal is awaiting administrator approval. You cannot create another withdrawal until it is approved or rejected.',
+      message: 'Your previous withdrawal is awaiting administrator approval. You cannot create another withdrawal until it is approved or rejected.',
       statusCode: 403,
     };
   }

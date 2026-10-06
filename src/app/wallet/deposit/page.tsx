@@ -142,7 +142,7 @@ const ASSET_OPTIONS: AssetOption[] = [
     borderColor: 'border-blue-200 dark:border-blue-800',
     minDeposit: '0.01 LTC',
     confirmations: '6 Block Confirmations',
-    warning: 'Send only Litecoin (LTC) to this native SegWit address (starting with ltc1 or tltc1).',
+    warning: 'Send only Litecoin (LTC) to this native SegWit address (starting with ltc1).',
     derivationPathKey: "m/84'/2'/0'/0",
   },
 ];

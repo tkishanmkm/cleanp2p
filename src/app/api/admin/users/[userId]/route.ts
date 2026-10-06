@@ -42,7 +42,7 @@ export async function GET(
 
     // 2. Fetch associated records
     const [
-      { data: wallets },
+      { data: walletAssets },
       { data: depositAddresses },
       { data: deposits },
       { data: withdrawals },
@@ -52,7 +52,7 @@ export async function GET(
       { data: transactions },
       { data: auditLogs },
     ] = await Promise.all([
-      supabase.from("wallets").select("*").eq("user_id", userId),
+      supabase.from("wallet_assets").select("*").eq("user_id", userId),
       supabase.from("deposit_addresses").select("*").eq("user_id", userId),
       supabase.from("deposits").select("*").eq("user_id", userId).order("created_at", { ascending: false }),
       supabase.from("withdrawals").select("*").eq("user_id", userId).order("created_at", { ascending: false }),
@@ -75,28 +75,39 @@ export async function GET(
       addressMap.set((addr.currency || addr.crypto || 'USDT').toUpperCase(), addr);
     });
 
-    const enrichedWallets = (wallets || []).map((w: any) => {
-      const curr = (w.currency || "USDT").toUpperCase();
+    const enrichedWallets = (walletAssets || []).map((w: any) => {
+      const curr = (w.asset_symbol || "USDT").toUpperCase();
       const addrInfo = addressMap.get(curr);
       const balance = parseFloat(w.balance) || 0;
-      const reserved = parseFloat(w.locked_balance || w.reserved_balance || 0) || 0;
+      const reserved = parseFloat(w.locked_balance || w.reserved_balance || w.in_escrow || 0) || 0;
       return {
-        ...w,
+        id: w.id,
+        user_id: w.user_id,
         currency: curr,
         balance,
         reserved_balance: reserved,
-        available_balance: Math.max(0, balance - reserved),
-        deposit_address: w.address || addrInfo?.address || null,
-        network: w.network || addrInfo?.network || "DEFAULT",
+        available_balance: balance,
+        in_escrow: parseFloat(w.in_escrow || 0) || 0,
+        in_withdrawal: parseFloat(w.in_withdrawal || 0) || 0,
+        deposit_address: addrInfo?.address || null,
+        network: addrInfo?.network || "DEFAULT",
+        updated_at: w.updated_at,
       };
     });
 
-    const balances: Record<string, { balance: number; reserved: number; available: number }> = {};
-    enrichedWallets.forEach((w: any) => {
-      balances[w.currency] = {
-        balance: w.balance,
-        reserved: w.reserved_balance,
-        available: w.available_balance,
+    const balances: Record<string, { balance: number; reserved: number; available: number; in_escrow: number; in_withdrawal: number }> = {};
+    (walletAssets || []).forEach((w: any) => {
+      const curr = (w.asset_symbol || "USDT").toUpperCase();
+      const bal = parseFloat(w.balance) || 0;
+      const reserved = parseFloat(w.locked_balance || w.reserved_balance || 0) || 0;
+      const inEscrow = parseFloat(w.in_escrow || 0) || 0;
+      const inWithdrawal = parseFloat(w.in_withdrawal || 0) || 0;
+      balances[curr] = {
+        balance: bal,
+        reserved: reserved + inEscrow + inWithdrawal,
+        available: bal,
+        in_escrow: inEscrow,
+        in_withdrawal: inWithdrawal,
       };
     });
 
@@ -230,6 +241,8 @@ export async function POST(
           is_suspended: isSuspended,
           ban_reason: isBanned ? (reason || "Admin administrative ban") : null,
           banned_at: isBanned ? new Date().toISOString() : null,
+          status_operation_id: null,
+          updated_at: new Date().toISOString(),
         })
         .eq("id", userId);
 

@@ -5,6 +5,7 @@ import { getSupabaseAdminClient } from '@/lib/supabase/server';
 import { generateTradeId } from '@/lib/id-generator';
 import { findAdById } from '@/lib/ad-lookup';
 import { sendNewTradeNotificationEmail } from '@/lib/email/tradeEmailService';
+import { assertPlatformControlAllowed } from '@/lib/platform-guard';
 
 export interface ActionResponse<T> {
   data: T | null;
@@ -446,6 +447,19 @@ export async function createAd(formData: any): Promise<ActionResponse<any>> {
 
     const userId = user.id;
 
+    // Check platform controls for creating new ads
+    try {
+      await assertPlatformControlAllowed('new_ad', { userId });
+    } catch (guardErr: any) {
+      return {
+        data: null,
+        error: {
+          message: guardErr.message || 'Creating new advertisements is temporarily disabled.',
+          code: guardErr.code || 'PLATFORM_AD_CREATION_DISABLED',
+        },
+      };
+    }
+
     const { data, error } = await supabase
       .from('ads')
       .insert({
@@ -507,6 +521,19 @@ export async function createTradeOrderWithEscrow(input: {
       return {
         data: null,
         error: { message: 'Please log in to initiate a trade.', code: '401' },
+      };
+    }
+
+    // Check platform controls for initiating new trades
+    try {
+      await assertPlatformControlAllowed('trade', { userId: user.id });
+    } catch (guardErr: any) {
+      return {
+        data: null,
+        error: {
+          message: guardErr.message || 'Initiating new trades is temporarily disabled.',
+          code: guardErr.code || 'PLATFORM_TRADING_DISABLED',
+        },
       };
     }
 

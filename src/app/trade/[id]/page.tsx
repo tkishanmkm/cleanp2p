@@ -177,6 +177,7 @@ export default function TradePage() {
 
       // Fallback: If ad still not found by direct ID, search participants' recent ad matching the trade crypto & fiat
       if (!adResult) {
+        const adTables = ['p2p_ads', 'ads'] as const;
         const participantIds = [tradeData.seller_id, tradeData.buyer_id, tradeData.sellerId, tradeData.buyerId].filter(Boolean);
         for (const pId of participantIds) {
           if (adResult) break;

@@ -1,9 +1,23 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { extractClientTelemetry, logSecurityEvent } from '@/lib/telemetry';
+import { assertPlatformControlAllowed } from '@/lib/platform-guard';
 
 export async function POST(req: NextRequest) {
   try {
+    // 0. Authoritative Platform Control Guard for Signups
+    try {
+      await assertPlatformControlAllowed('signup');
+    } catch (guardErr: any) {
+      return NextResponse.json(
+        {
+          error: guardErr.message || 'New user registration is temporarily disabled by administrator.',
+          code: guardErr.code || 'PLATFORM_SIGNUP_DISABLED',
+        },
+        { status: guardErr.statusCode || 403 }
+      );
+    }
+
     const body = await req.json();
     const { name, dob, email, userId, deviceFingerprint } = body;
     const telemetry = extractClientTelemetry(req);

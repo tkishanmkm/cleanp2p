@@ -170,6 +170,16 @@ export async function PATCH(
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
+    try {
+      const { assertUserNotEmergencyFrozen } = await import('@/lib/user-freeze');
+      await assertUserNotEmergencyFrozen(user.id);
+    } catch (freezeErr: any) {
+      return NextResponse.json(
+        { error: freezeErr.message || 'Your account is under an emergency security freeze.', code: 'USER_EMERGENCY_FROZEN' },
+        { status: 403 }
+      );
+    }
+
     // Resolve ad across ads / p2p_ads using universal resolver
     const resolved = await findAdById(id);
     const existingAd = resolved?.ad || null;
@@ -212,11 +222,72 @@ export async function PATCH(
     let adsMutated = false;
     let updatedResult: any = null;
 
+    const hasStatus = body.status !== undefined || body.active !== undefined || body.is_active !== undefined;
+    let newStatus: string | undefined = undefined;
+    let isActive: boolean | undefined = undefined;
+
+    if (hasStatus) {
+      if (body.active !== undefined) {
+        isActive = Boolean(body.active);
+        newStatus = isActive ? 'ACTIVE' : 'INACTIVE';
+      } else if (body.is_active !== undefined) {
+        isActive = Boolean(body.is_active);
+        newStatus = isActive ? 'ACTIVE' : 'INACTIVE';
+      } else if (body.status !== undefined) {
+        newStatus = String(body.status).toUpperCase().trim();
+        isActive = newStatus === 'ACTIVE';
+      }
+    }
+
     if (p2pAdsRow) {
-      const p2pPayload = {
-        ...body,
+      // Explicit allowlisted update payload for canonical public.p2p_ads
+      const p2pPayload: Record<string, any> = {
         updated_at: new Date().toISOString(),
       };
+
+      if (newStatus !== undefined && isActive !== undefined) {
+        p2pPayload.status = newStatus;
+        p2pPayload.active = isActive;
+      }
+
+      if (body.price !== undefined) {
+        p2pPayload.price = body.price;
+        p2pPayload.unit_price = body.price;
+      }
+      if (body.min_limit !== undefined || body.min_amount !== undefined) {
+        const minL = body.min_limit ?? body.min_amount;
+        p2pPayload.min_limit = minL;
+        p2pPayload.min_amount = minL;
+      }
+      if (body.max_limit !== undefined || body.max_amount !== undefined) {
+        const maxL = body.max_limit ?? body.max_amount;
+        p2pPayload.max_limit = maxL;
+        p2pPayload.max_amount = maxL;
+        p2pPayload.available_amount = maxL;
+      }
+      if (body.rate_percent !== undefined) {
+        p2pPayload.rate_percent = body.rate_percent;
+        p2pPayload.price_margin = body.rate_percent;
+      }
+      if (body.pricing_type !== undefined) p2pPayload.pricing_type = body.pricing_type;
+      if (body.rate_type !== undefined) p2pPayload.rate_type = body.rate_type;
+      if (body.payment_methods !== undefined) p2pPayload.payment_methods = body.payment_methods;
+      if (body.terms_conditions !== undefined || body.terms !== undefined) p2pPayload.terms_conditions = body.terms_conditions || body.terms;
+      if (body.offer_label !== undefined || body.label !== undefined) p2pPayload.offer_label = body.offer_label || body.label;
+      if (body.offer_tags !== undefined || body.tags !== undefined) p2pPayload.offer_tags = body.offer_tags || body.tags;
+      if (body.payment_window !== undefined || body.payment_window_minutes !== undefined) {
+        const pw = Number(body.payment_window ?? body.payment_window_minutes);
+        p2pPayload.payment_window = pw;
+        p2pPayload.payment_window_minutes = pw;
+        p2pPayload.payment_time_limit = pw;
+      }
+      if (body.require_full_name_verified !== undefined) p2pPayload.require_full_name_verified = Boolean(body.require_full_name_verified);
+      if (body.require_verified_users !== undefined) p2pPayload.require_verified_users = Boolean(body.require_verified_users);
+      if (body.min_completed_trades !== undefined) p2pPayload.min_completed_trades = parseInt(String(body.min_completed_trades), 10) || 0;
+
+      // Ensure is_active NEVER reaches p2p_ads
+      delete p2pPayload.is_active;
+
       const { data: p2pRes, error: p2pErr } = await supabaseAdmin
         .from('p2p_ads')
         .update(p2pPayload)
@@ -227,31 +298,42 @@ export async function PATCH(
       if (!p2pErr && p2pRes) {
         p2pMutated = true;
         updatedResult = p2pRes;
+      } else {
+        console.error('[PATCH /api/p2p/ads/[id]] Canonical p2p_ads update failed:', p2pErr?.message);
       }
     }
 
     if (adsRow) {
-      const newStatus = body.status || (body.active ? 'ACTIVE' : 'INACTIVE');
-      const isActive = body.active ?? (newStatus === 'ACTIVE');
-      const adsPayload: Record<string, any> = {
-        status: newStatus,
-        is_active: isActive,
-        updated_at: new Date().toISOString(),
-      };
-      if (body.price !== undefined) adsPayload.price = body.price;
-      if (body.min_limit !== undefined || body.min_amount !== undefined) adsPayload.min_limit = body.min_limit ?? body.min_amount;
-      if (body.max_limit !== undefined || body.max_amount !== undefined) adsPayload.max_limit = body.max_limit ?? body.max_amount;
+      try {
+        const adsPayload: Record<string, any> = {
+          updated_at: new Date().toISOString(),
+        };
+        if (newStatus !== undefined && isActive !== undefined) {
+          adsPayload.status = newStatus;
+          adsPayload.is_active = isActive;
+        }
+        if (body.price !== undefined) adsPayload.price = body.price;
+        if (body.min_limit !== undefined || body.min_amount !== undefined) adsPayload.min_limit = body.min_limit ?? body.min_amount;
+        if (body.max_limit !== undefined || body.max_amount !== undefined) adsPayload.max_limit = body.max_limit ?? body.max_amount;
+        if (body.payment_methods !== undefined) adsPayload.payment_methods = body.payment_methods;
+        if (body.terms_conditions !== undefined || body.terms !== undefined) adsPayload.terms = body.terms_conditions || body.terms;
+        if (body.offer_label !== undefined || body.label !== undefined) adsPayload.offer_label = body.offer_label || body.label;
 
-      const { data: adsRes, error: adsErr } = await supabaseAdmin
-        .from('ads')
-        .update(adsPayload)
-        .eq('id', adsRow.id)
-        .select()
-        .maybeSingle();
+        const { data: adsRes, error: adsErr } = await supabaseAdmin
+          .from('ads')
+          .update(adsPayload)
+          .eq('id', adsRow.id)
+          .select()
+          .maybeSingle();
 
-      if (!adsErr && adsRes) {
-        adsMutated = true;
-        if (!updatedResult) updatedResult = adsRes;
+        if (!adsErr && adsRes) {
+          adsMutated = true;
+          if (!updatedResult) updatedResult = adsRes;
+        } else {
+          console.warn('[PATCH /api/p2p/ads/[id]] Legacy ads mirror update warning:', adsErr?.message);
+        }
+      } catch (legacyErr: any) {
+        console.warn('[PATCH /api/p2p/ads/[id]] Legacy ads update exception:', legacyErr?.message);
       }
     }
 
@@ -259,7 +341,11 @@ export async function PATCH(
       return NextResponse.json({ error: 'Advertisement not found.' }, { status: 404 });
     }
 
-    if ((p2pAdsRow && !p2pMutated) || (adsRow && !adsMutated)) {
+    // Canonical p2p_ads is authoritative. If p2pAdsRow exists, canonical p2p update must succeed.
+    // If only legacy adsRow exists, ads update must succeed.
+    const overallSuccess = p2pAdsRow ? p2pMutated : adsMutated;
+
+    if (!overallSuccess) {
       console.error('[PATCH /api/p2p/ads/[id]] Target update failed:', { p2pRowId: p2pAdsRow?.id, p2pMutated, adsRowId: adsRow?.id, adsMutated });
       return NextResponse.json({ error: 'Failed to update advertisement.' }, { status: 500 });
     }
@@ -352,10 +438,14 @@ export async function DELETE(
     let adsMutated = false;
 
     if (p2pAdsRow) {
-      await supabaseAdmin
-        .from('p2p_ads')
-        .update({ status: 'DELETED', active: false, is_active: false, updated_at: new Date().toISOString() })
-        .eq('id', p2pAdsRow.id);
+      try {
+        await supabaseAdmin
+          .from('p2p_ads')
+          .update({ status: 'DELETED', active: false, updated_at: new Date().toISOString() })
+          .eq('id', p2pAdsRow.id);
+      } catch (softErr: any) {
+        console.warn('[DELETE /api/p2p/ads/[id]] p2p_ads soft-delete warning:', softErr?.message);
+      }
 
       const { data: p2pDel, error: p2pErr } = await supabaseAdmin
         .from('p2p_ads')
@@ -378,10 +468,14 @@ export async function DELETE(
     }
 
     if (adsRow) {
-      await supabaseAdmin
-        .from('ads')
-        .update({ status: 'DELETED', is_active: false, updated_at: new Date().toISOString() })
-        .eq('id', adsRow.id);
+      try {
+        await supabaseAdmin
+          .from('ads')
+          .update({ status: 'DELETED', is_active: false, updated_at: new Date().toISOString() })
+          .eq('id', adsRow.id);
+      } catch (softErr: any) {
+        console.warn('[DELETE /api/p2p/ads/[id]] Legacy ads soft-delete warning:', softErr?.message);
+      }
 
       const { data: adsDel, error: adsErr } = await supabaseAdmin
         .from('ads')
@@ -407,7 +501,9 @@ export async function DELETE(
       return NextResponse.json({ error: 'Advertisement not found.' }, { status: 404 });
     }
 
-    if ((p2pAdsRow && !p2pMutated) || (adsRow && !adsMutated)) {
+    const overallDeleteSuccess = p2pAdsRow ? p2pMutated : adsMutated;
+
+    if (!overallDeleteSuccess) {
       console.error('[DELETE /api/p2p/ads/[id]] Target delete failed:', { p2pRowId: p2pAdsRow?.id, p2pMutated, adsRowId: adsRow?.id, adsMutated });
       return NextResponse.json({ error: 'Failed to delete advertisement record.' }, { status: 500 });
     }

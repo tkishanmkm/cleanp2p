@@ -110,9 +110,16 @@ export function AdCard({ ad, marketPriceUsd: propMarketPriceUsd, fiatExchangeRat
     ? `${pricePremium >= 0 ? '+' : ''}${(pricePremium * 100).toFixed(2)}%`
     : null;
 
-  const priceBadgeClass = pricePremium >= 0 
-    ? 'bg-red-100 text-red-800 dark:bg-red-950/50 dark:text-red-300' 
-    : 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/50 dark:text-emerald-300';
+  // Marketplace-aware color semantics:
+  // /buy (Seller ad): price above market (+%) means buyer pays more -> RED; price below market (-%) means discount -> GREEN
+  // /sell (Buyer ad): price above market (+%) means seller receives more -> GREEN; price below market (-%) means seller receives less -> RED
+  const isAdvantageous = isAdTypeBuy
+    ? pricePremium >= 0
+    : pricePremium < 0;
+
+  const priceBadgeClass = isAdvantageous 
+    ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/50 dark:text-emerald-300' 
+    : 'bg-red-100 text-red-800 dark:bg-red-950/50 dark:text-red-300';
 
   const buttonLabel = isAdTypeBuy ? 'Sell' : 'Buy';
   const buttonColorClass = buttonLabel === 'Buy'

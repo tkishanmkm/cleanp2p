@@ -17,8 +17,9 @@ export function useUserProfile(userId: string | undefined) {
 
       try {
         // Fetch Profile Info & Computed Stats in parallel
+        const PUBLIC_PROFILE_COLUMNS = 'id, username, display_name, avatar_url, photo_url, country, is_verified, id_verified, kyc_status, is_online, last_seen_at, created_at, total_completed_trades, completed_trades, trade_volume, positive_feedback, negative_feedback, feedback_score';
         const [profileRes, statsRes] = await Promise.all([
-          supabase.from("profiles").select("*").eq("id", userId).maybeSingle(),
+          supabase.from("profiles").select(PUBLIC_PROFILE_COLUMNS).eq("id", userId).maybeSingle(),
           supabase.from("user_account_stats").select("*").eq("user_id", userId).maybeSingle()
         ]);
 

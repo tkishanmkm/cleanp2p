@@ -23,10 +23,10 @@ export default function IdentitySettingsPage() {
 
   async function loadProfile() {
     try {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (user) {
-        const { data } = await supabase.from('profiles').select('*').eq('id', user.id).single();
-        setProfile(data);
+      const res = await fetch('/api/user/profile');
+      if (res.ok) {
+        const data = await res.json();
+        setProfile(data.profile);
       }
     } catch (err) {
       console.error('Error loading profile:', err);

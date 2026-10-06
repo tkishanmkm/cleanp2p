@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient, getSupabaseAdminClient } from "@/lib/supabase/server";
+import { ADMIN_2FA_COOKIE_NAME, verifyAdmin2FASessionToken } from "@/lib/admin-2fa-session";
 
 export interface AdminAuthResult {
   authorized: boolean;
@@ -12,7 +13,8 @@ export interface AdminAuthResult {
 /**
  * Authoritatively verifies that the incoming request is made by an authenticated administrator.
  * Checks server-side cookies, Bearer tokens, profiles table, app_metadata, and app_admins table.
- * Never trusts request body parameters or client headers for identity.
+ * If Admin 2FA is enabled, strictly verifies the cryptographic pax_admin_2fa_session cookie.
+ * Never trusts request body parameters or client headers for identity or 2FA verification.
  */
 export async function verifyServerAdmin(req?: NextRequest): Promise<AdminAuthResult> {
   try {
@@ -53,14 +55,16 @@ export async function verifyServerAdmin(req?: NextRequest): Promise<AdminAuthRes
     }
 
     // Check profiles table
-    if (!isAdmin) {
-      const { data: profile } = await adminClient
-        .from("profiles")
-        .select("role, is_admin, email")
-        .eq("id", user.id)
-        .maybeSingle();
+    let adminProfile: any = null;
+    const { data: profile } = await adminClient
+      .from("profiles")
+      .select("role, is_admin, is_admin_account, email, admin_2fa_enabled, is_2fa_enabled, admin_2fa_recovery_updated_at")
+      .eq("id", user.id)
+      .maybeSingle();
 
-      if (profile && (profile.role === "admin" || profile.is_admin === true)) {
+    if (profile) {
+      adminProfile = profile;
+      if (profile.role === "admin" || profile.is_admin === true || profile.is_admin_account === true) {
         isAdmin = true;
       }
     }
@@ -98,6 +102,44 @@ export async function verifyServerAdmin(req?: NextRequest): Promise<AdminAuthRes
           { status: 403 }
         ),
       };
+    }
+
+    // 3. Admin 2FA Enforcement Gate
+    const is2FAEnabled = Boolean(adminProfile?.admin_2fa_enabled || adminProfile?.is_2fa_enabled);
+
+    if (is2FAEnabled) {
+      // Extract cookie from NextRequest or Supabase cookies
+      let sessionCookie: string | undefined;
+      if (req) {
+        sessionCookie = req.cookies.get(ADMIN_2FA_COOKIE_NAME)?.value;
+      }
+
+      if (!sessionCookie) {
+        // Fallback to checking Next.js headers cookie string
+        const cookieHeader = req?.headers.get("cookie") || "";
+        const match = cookieHeader.match(new RegExp(`(?:^|; )${ADMIN_2FA_COOKIE_NAME}=([^;]*)`));
+        if (match) {
+          sessionCookie = decodeURIComponent(match[1]);
+        }
+      }
+
+      const securityVersion = adminProfile?.admin_2fa_recovery_updated_at || user.id;
+      const verification = verifyAdmin2FASessionToken(sessionCookie, user.id, securityVersion);
+
+      if (!verification.valid) {
+        return {
+          authorized: false,
+          response: NextResponse.json(
+            {
+              success: false,
+              error: "Admin 2FA verification required. Please complete two-factor authentication.",
+              code: "2FA_REQUIRED",
+              details: verification.reason,
+            },
+            { status: 403 }
+          ),
+        };
+      }
     }
 
     return {

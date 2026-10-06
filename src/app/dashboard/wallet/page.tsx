@@ -90,7 +90,7 @@ export default function WalletDashboard() {
         <h2 className="text-lg font-semibold">Your Deposit Addresses</h2>
         <div className="space-y-3">
           <div>
-            <label className="text-xs text-muted-foreground block">EVM (Ethereum / Arbitrum / Base / Polygon)</label>
+            <label className="text-xs text-muted-foreground block">EVM (Ethereum / BNB Smart Chain)</label>
             <div className="flex items-center gap-2 mt-1">
               <input readOnly value={wallet?.evm_address || ''} className="w-full p-2 border rounded font-mono text-sm bg-muted" />
               <img

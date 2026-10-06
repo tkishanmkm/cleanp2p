@@ -260,6 +260,7 @@ export function AdminShell({
       badgeVariant: "secondary" as const,
     },
     { href: "/adminnarayan/settings", label: "Platform Settings", icon: Settings },
+    { href: "/adminnarayan/security", label: "Security & 2FA", icon: Shield },
     { href: "/adminnarayan/audit-logs", label: "Audit Logs", icon: ClipboardList },
     { href: "/adminnarayan/appearance", label: "Appearance", icon: Brush },
   ];

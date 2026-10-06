@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { createClient, getSupabaseAdminClient } from '@/utils/supabase/server';
 import { resolveTradeType } from '@/utils/p2p-helpers';
 import { FIAT_CURRENCIES } from '@/lib/currencies';
+import { assertPlatformControlAllowed } from '@/lib/platform-guard';
 
 export const dynamic = 'force-dynamic';
 
@@ -39,6 +40,16 @@ export async function POST(req: Request) {
           details: authError?.message 
         }, 
         { status: 401 }
+      );
+    }
+
+    // Platform Guard Check
+    try {
+      await assertPlatformControlAllowed('new_ad', { userId: user.id });
+    } catch (guardErr: any) {
+      return NextResponse.json(
+        { error: guardErr.message || 'Creating new advertisements is temporarily disabled.', code: guardErr.code || 'PLATFORM_AD_CREATION_DISABLED' },
+        { status: guardErr.statusCode || 403 }
       );
     }
 

@@ -17,7 +17,6 @@ const CRYPTO_ICONS: Record<string, { symbolChar: string; bg: string; text: strin
   SOL: { symbolChar: '◎', bg: 'bg-purple-500/15 dark:bg-purple-500/20', text: 'text-purple-600 dark:text-purple-400', border: 'border-purple-500/30', name: 'Solana' },
   BNB: { symbolChar: '🔶', bg: 'bg-yellow-500/15 dark:bg-yellow-500/20', text: 'text-yellow-600 dark:text-yellow-400', border: 'border-yellow-500/30', name: 'BNB' },
   TRX: { symbolChar: '⚡', bg: 'bg-red-500/15 dark:bg-red-500/20', text: 'text-red-600 dark:text-red-400', border: 'border-red-500/30', name: 'TRON' },
-  MATIC: { symbolChar: '⬡', bg: 'bg-violet-500/15 dark:bg-violet-500/20', text: 'text-violet-600 dark:text-violet-400', border: 'border-violet-500/30', name: 'Polygon' },
   DOGE: { symbolChar: 'Ð', bg: 'bg-amber-600/15 dark:bg-amber-600/20', text: 'text-amber-700 dark:text-amber-500', border: 'border-amber-600/30', name: 'Dogecoin' },
   XRP: { symbolChar: '✕', bg: 'bg-cyan-500/15 dark:bg-cyan-500/20', text: 'text-cyan-600 dark:text-cyan-400', border: 'border-cyan-500/30', name: 'Ripple' },
 };

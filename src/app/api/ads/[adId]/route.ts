@@ -259,10 +259,14 @@ export async function DELETE(
     let adsMutated = false;
 
     if (p2pAdsRow) {
-      await admin
-        .from('p2p_ads')
-        .update({ status: 'DELETED', active: false, is_active: false, updated_at: new Date().toISOString() })
-        .eq('id', p2pAdsRow.id);
+      try {
+        await admin
+          .from('p2p_ads')
+          .update({ status: 'DELETED', active: false, updated_at: new Date().toISOString() })
+          .eq('id', p2pAdsRow.id);
+      } catch (softErr: any) {
+        console.warn('[DELETE /api/ads/[adId]] p2p_ads soft-delete warning:', softErr?.message);
+      }
 
       const { data: p2pDel, error: p2pErr } = await admin
         .from('p2p_ads')
@@ -285,10 +289,14 @@ export async function DELETE(
     }
 
     if (adsRow) {
-      await admin
-        .from('ads')
-        .update({ status: 'DELETED', is_active: false, updated_at: new Date().toISOString() })
-        .eq('id', adsRow.id);
+      try {
+        await admin
+          .from('ads')
+          .update({ status: 'DELETED', is_active: false, updated_at: new Date().toISOString() })
+          .eq('id', adsRow.id);
+      } catch (softErr: any) {
+        console.warn('[DELETE /api/ads/[adId]] Legacy ads soft-delete warning:', softErr?.message);
+      }
 
       const { data: adsDel, error: adsErr } = await admin
         .from('ads')
@@ -314,7 +322,9 @@ export async function DELETE(
       return NextResponse.json({ error: 'Advertisement record not found.' }, { status: 404 });
     }
 
-    if ((p2pAdsRow && !p2pMutated) || (adsRow && !adsMutated)) {
+    const overallDeleteSuccess = p2pAdsRow ? p2pMutated : adsMutated;
+
+    if (!overallDeleteSuccess) {
       console.error('[DELETE /api/ads/[adId]] Failed row mutation:', { p2pRowId: p2pAdsRow?.id, p2pMutated, adsRowId: adsRow?.id, adsMutated });
       return NextResponse.json({ error: 'Failed to delete advertisement record.' }, { status: 500 });
     }
@@ -445,7 +455,6 @@ export async function PATCH(
         .from('p2p_ads')
         .update({
           active: isActive,
-          is_active: isActive,
           status: newStatus,
           updated_at: new Date().toISOString(),
         })
@@ -454,22 +463,31 @@ export async function PATCH(
 
       if (!p2pErr && p2pRes && p2pRes.length > 0) {
         p2pMutated = true;
+      } else {
+        console.error('[PATCH /api/ads/[adId]] Canonical p2p_ads update failed:', p2pErr?.message);
       }
     }
 
     if (adsRow) {
-      const { data: adsRes, error: adsErr } = await admin
-        .from('ads')
-        .update({
-          is_active: isActive,
-          status: newStatus,
-          updated_at: new Date().toISOString(),
-        })
-        .eq('id', adsRow.id)
-        .select('id');
+      try {
+        const { data: adsRes, error: adsErr } = await admin
+          .from('ads')
+          .update({
+            active: isActive,
+            is_active: isActive,
+            status: newStatus,
+            updated_at: new Date().toISOString(),
+          })
+          .eq('id', adsRow.id)
+          .select('id');
 
-      if (!adsErr && adsRes && adsRes.length > 0) {
-        adsMutated = true;
+        if (!adsErr && adsRes && adsRes.length > 0) {
+          adsMutated = true;
+        } else {
+          console.warn('[PATCH /api/ads/[adId]] Legacy ads table mirror update warning:', adsErr?.message);
+        }
+      } catch (legacyErr: any) {
+        console.warn('[PATCH /api/ads/[adId]] Legacy ads table update exception:', legacyErr?.message);
       }
     }
 
@@ -477,8 +495,12 @@ export async function PATCH(
       return NextResponse.json({ error: 'Advertisement not found.' }, { status: 404 });
     }
 
-    if ((p2pAdsRow && !p2pMutated) || (adsRow && !adsMutated)) {
-      console.error('[PATCH /api/ads/[adId]] Failed row status update:', { p2pRowId: p2pAdsRow?.id, p2pMutated, adsRowId: adsRow?.id, adsMutated });
+    // Canonical p2p_ads is authoritative. If p2pAdsRow exists, canonical p2p update must succeed.
+    // If only legacy adsRow exists, ads update must succeed.
+    const overallSuccess = p2pAdsRow ? p2pMutated : adsMutated;
+
+    if (!overallSuccess) {
+      console.error('[PATCH /api/ads/[adId]] Failed canonical row status update:', { p2pRowId: p2pAdsRow?.id, p2pMutated, adsRowId: adsRow?.id, adsMutated });
       return NextResponse.json({ error: 'Failed to update advertisement status.' }, { status: 500 });
     }
 

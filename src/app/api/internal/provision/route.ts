@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseAdminClient } from '@/lib/supabase/server';
 import { getOrProvisionHDDepositAddress, STANDARD_DERIVATION_PATHS } from '@/lib/hd-wallet';
 
-// Recognized network and asset identifiers
+// Recognized network and asset identifiers (Production networks only)
 const VALID_NETWORKS = new Set([
   'BTC',
   'ETH',
@@ -10,11 +10,8 @@ const VALID_NETWORKS = new Set([
   'TRC20',
   'TRX',
   'LTC',
-  'SOL',
-  'POLYGON',
-  'ARBITRUM',
   'BSC',
-  'XMR',
+  'BEP20',
 ]);
 
 const VALID_ASSETS = new Set([
@@ -24,10 +21,7 @@ const VALID_ASSETS = new Set([
   'USDC',
   'TRX',
   'LTC',
-  'SOL',
-  'XMR',
   'BNB',
-  'MATIC',
 ]);
 
 export async function POST(req: NextRequest) {

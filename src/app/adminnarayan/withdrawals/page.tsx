@@ -55,10 +55,16 @@ import { useAdminStatus } from '@/hooks/use-admin-status';
 import { Input } from '@/components/ui/input';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 
-const statusColors: Record<Withdrawal['status'], string> = {
+const statusColors: Record<string, string> = {
   pending: 'border-yellow-500/50 text-yellow-600 bg-yellow-50',
+  pending_approval: 'border-amber-500/80 text-amber-700 bg-amber-50 font-semibold',
+  PENDING_APPROVAL: 'border-amber-500/80 text-amber-700 bg-amber-50 font-semibold',
+  queued: 'border-blue-500/50 text-blue-600 bg-blue-50',
+  processing: 'border-blue-500/50 text-blue-600 bg-blue-50',
   approved: 'border-green-500/50 text-green-600 bg-green-50',
+  completed: 'border-emerald-500/50 text-emerald-600 bg-emerald-50',
   declined: 'border-red-500/50 text-red-600 bg-red-50',
+  failed: 'border-red-500/50 text-red-600 bg-red-50',
   cancelled: 'border-gray-500/50 text-gray-600 bg-gray-50',
 };
 
@@ -272,7 +278,15 @@ export default function AdminWithdrawalsPage() {
   }, [allWithdrawals, searchTerm]);
 
   const pendingWithdrawals = useMemo(() => {
-    return filteredWithdrawals?.filter((w) => w.status === 'pending') || null;
+    return (
+      filteredWithdrawals?.filter(
+        (w) =>
+          w.status === 'pending' ||
+          w.status === 'pending_approval' ||
+          w.status === 'PENDING_APPROVAL' ||
+          w.status === 'queued'
+      ) || null
+    );
   }, [filteredWithdrawals]);
 
   const handleApprove = async () => {
@@ -286,24 +300,18 @@ export default function AdminWithdrawalsPage() {
         console.warn('Could not retrieve Supabase session token:', err);
       }
 
-      let apiSucceeded = false;
-      if (token) {
-        const res = await fetch('/api/admin/withdrawals/approve', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${token}`,
-          },
-          body: JSON.stringify({ withdrawalId: selectedWithdrawal.id }),
-        });
+      const res = await fetch('/api/admin/withdrawals/approve', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify({ withdrawalId: selectedWithdrawal.id }),
+      });
 
-        if (res.ok) {
-          apiSucceeded = true;
-        }
-      }
-
-      if (!apiSucceeded && user) {
-        await approveWithdrawal(null, selectedWithdrawal, user.uid);
+      const resData = await res.json().catch(() => ({}));
+      if (!res.ok || !resData.success) {
+        throw new Error(resData.error || 'Failed to approve withdrawal.');
       }
 
       toast({
@@ -329,10 +337,35 @@ export default function AdminWithdrawalsPage() {
   const handleDecline = async () => {
     if (!selectedWithdrawal || !user) return;
     try {
-      await declineWithdrawal(null, selectedWithdrawal, user.uid);
+      let token = '';
+      try {
+        const { data: sessionData } = await supabase.auth.getSession();
+        token = sessionData.session?.access_token || '';
+      } catch (err) {
+        console.warn('Could not retrieve Supabase session token:', err);
+      }
+
+      const res = await fetch('/api/admin/withdrawals/review', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify({
+          withdrawalId: selectedWithdrawal.id,
+          action: 'REJECT',
+          rejectionReason: 'Rejected by administrator during security review.',
+        }),
+      });
+
+      const resData = await res.json().catch(() => ({}));
+      if (!res.ok || !resData.success) {
+        throw new Error(resData.error || 'Failed to decline withdrawal.');
+      }
+
       toast({
         title: 'Withdrawal Declined',
-        description: `Funds have been returned to user ${selectedWithdrawal.userDisplayName}.`,
+        description: `Funds have been safely returned to user ${selectedWithdrawal.userDisplayName}.`,
       });
       setAllWithdrawals(
         (withdrawals) =>

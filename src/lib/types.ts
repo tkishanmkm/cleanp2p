@@ -1,6 +1,6 @@
 'use client';
 
-export type CryptoCurrency = 'BTC' | 'ETH' | 'LTC' | 'USDT' | 'BNB' | 'MATIC' | 'TRX';
+export type CryptoCurrency = 'BTC' | 'ETH' | 'LTC' | 'USDT' | 'BNB' | 'TRX';
 
 export interface CurrencyConfig {
   code: string;
@@ -201,15 +201,28 @@ export type TradeChatMessage = {
 
 export type Dispute = {
   id: string;
-  tradeId: string;
-  openedBy: string;
-  reason: string;
-  explanation: string;
-  status: 'open' | 'resolved' | 'cancelled';
-  resolvedBy?: string;
-  winnerId?: string;
+  trade_id?: string;
+  tradeId?: string;
+  opened_by?: string;
+  openedBy?: string;
+  reason?: string;
+  explanation?: string;
+  status: 'open' | 'resolved' | 'cancelled' | 'pending' | 'in_review' | string;
+  resolution?: string;
+  resolution_reason?: string;
+  resolutionReason?: string;
+  resolution_note?: string;
   resolutionNote?: string;
-  createdAt: string;
+  winner_id?: string;
+  winnerId?: string;
+  resolved_by?: string;
+  resolvedBy?: string;
+  resolved_at?: string;
+  resolvedAt?: string;
+  created_at?: string;
+  createdAt?: string;
+  updated_at?: string;
+  updatedAt?: string;
 };
 
 export type Feedback = {

@@ -166,7 +166,6 @@ export function buildDepositAddressRow(
 
 export const BIP_PATHS = {
   BTC: "m/84'/0'/0'/0",     // Native SegWit Mainnet (BIP84)
-  BTC_TESTNET4: "m/84'/1'/0'/0", // Native SegWit Testnet4 (BIP84)
   ETH: "m/44'/60'/0'/0",     // EVM (ETH, USDT ERC-20, USDT BEP-20)
   LTC: "m/84'/2'/0'/0",      // Native SegWit Litecoin (BIP84)
   TRON: "m/44'/195'/0'/0",   // TRON / USDT TRC-20 (BIP44)

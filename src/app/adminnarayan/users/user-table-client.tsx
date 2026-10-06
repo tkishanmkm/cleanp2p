@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { updateUserBalance } from "./actions";
+import Link from "next/link";
 import { UserRoleToggle } from "./user-role-toggle";
 import { UserSuspendToggle } from "./user-suspend-toggle";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -11,7 +11,6 @@ import { Badge } from "@/components/ui/badge";
 
 export function UserTableClient({ initialProfiles }: { initialProfiles: any[] }) {
   const [search, setSearch] = useState("");
-  const [loadingId, setLoadingId] = useState<string | null>(null);
 
   const filteredProfiles = initialProfiles.filter(
     (p) =>
@@ -19,22 +18,6 @@ export function UserTableClient({ initialProfiles }: { initialProfiles: any[] })
       p.user_id?.toLowerCase().includes(search.toLowerCase()) ||
       p.id?.toLowerCase().includes(search.toLowerCase())
   );
-
-  const handleBalanceUpdate = async (id: string, currentBalance: number) => {
-    const input = prompt("Enter new wallet balance:", currentBalance.toString());
-    if (input === null) return;
-    const newBalance = parseFloat(input);
-    if (isNaN(newBalance)) return alert("Invalid balance amount.");
-
-    setLoadingId(id);
-    try {
-      await updateUserBalance(id, newBalance);
-    } catch (err: any) {
-      alert(`Error updating balance: ${err.message}`);
-    } finally {
-      setLoadingId(null);
-    }
-  };
 
   return (
     <div className="space-y-4">
@@ -52,7 +35,6 @@ export function UserTableClient({ initialProfiles }: { initialProfiles: any[] })
               <TableHead>User ID / Name</TableHead>
               <TableHead>Role</TableHead>
               <TableHead>Status</TableHead>
-              <TableHead>Wallet Balance</TableHead>
               <TableHead className="text-right">Actions</TableHead>
             </TableRow>
           </TableHeader>
@@ -81,18 +63,12 @@ export function UserTableClient({ initialProfiles }: { initialProfiles: any[] })
                     <UserSuspendToggle userId={user.id} isSuspended={!!user.is_banned} />
                   </div>
                 </TableCell>
-                <TableCell className="font-mono">
-                  ${user.wallet_balance?.toFixed(2) || "0.00"}
-                </TableCell>
                 <TableCell className="text-right space-x-2">
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    disabled={loadingId === user.id}
-                    onClick={() => handleBalanceUpdate(user.id, user.wallet_balance || 0)}
-                  >
-                    Adjust Balance
-                  </Button>
+                  <Link href={`/adminnarayan/users/${user.id}`}>
+                    <Button size="sm" variant="outline">
+                      View Details
+                    </Button>
+                  </Link>
                 </TableCell>
               </TableRow>
             ))}

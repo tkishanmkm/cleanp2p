@@ -87,6 +87,27 @@ export async function GET(
       .eq("trade_id", trade.id)
       .maybeSingle();
 
+    // 5. Check if any moderator has joined this trade
+    let hasModeratorJoined = false;
+    try {
+      const { data: part } = await supabase
+        .from("trade_moderator_participations")
+        .select("id")
+        .eq("trade_id", trade.id)
+        .limit(1);
+      if (part && part.length > 0) {
+        hasModeratorJoined = true;
+      }
+    } catch (_) {}
+
+    if (!hasModeratorJoined) {
+      hasModeratorJoined = messageList.some(
+        (m: any) =>
+          m.message === "Paxones Moderator joined the trade chat." ||
+          (typeof m.message === "string" && m.message.includes("Paxones Moderator joined"))
+      );
+    }
+
     return NextResponse.json({
       success: true,
       trade: {
@@ -96,6 +117,7 @@ export async function GET(
         dispute: dispute || null,
       },
       messages: messageList,
+      hasModeratorJoined,
     });
   } catch (err: any) {
     console.error("[API/ADMIN/TRADE] Error:", err);
@@ -150,24 +172,118 @@ export async function POST(
 
     // 1. Moderator Join (Generic system message without exposing admin identity to users)
     if (action === "join") {
-      const joinMsg = "Paxones Moderator joined the trade.";
+      // Check idempotency first: verify if moderator already joined or join message already exists
+      let alreadyJoined = false;
+      try {
+        const { data: existingPart } = await supabase
+          .from("trade_moderator_participations")
+          .select("id")
+          .eq("trade_id", trade.id)
+          .maybeSingle();
+
+        if (existingPart) {
+          alreadyJoined = true;
+        }
+      } catch (_) {}
+
+      if (!alreadyJoined) {
+        const { data: existingMsg } = await supabase
+          .from("trade_messages")
+          .select("id")
+          .eq("trade_id", trade.id)
+          .eq("message", "Paxones Moderator joined the trade chat.")
+          .limit(1);
+
+        if (existingMsg && existingMsg.length > 0) {
+          alreadyJoined = true;
+        }
+      }
+
+      if (alreadyJoined) {
+        return NextResponse.json({
+          success: true,
+          message: "Paxones Moderator has already joined this trade chat.",
+          alreadyJoined: true,
+        });
+      }
+
+      // Record moderator participation
+      try {
+        await supabase.from("trade_moderator_participations").upsert(
+          {
+            trade_id: trade.id,
+            moderator_id: adminId,
+            joined_at: new Date().toISOString(),
+          },
+          { onConflict: "trade_id,moderator_id" }
+        );
+      } catch (partErr) {
+        console.warn("[Moderator Join] Participation table notice:", partErr);
+      }
+
+      const exactJoinMessage = "Paxones Moderator joined the trade chat.";
+      const systemUuid = "00000000-0000-0000-0000-000000000000";
+      const nowIso = new Date().toISOString();
+
+      // Insert into trade_messages (authoritative stream read by buyer/seller chat client)
+      await supabase.from("trade_messages").insert({
+        trade_id: trade.id,
+        sender_id: systemUuid,
+        sender_username: "Paxones Moderator",
+        message: exactJoinMessage,
+        is_moderator: true,
+        visibility: "all",
+        created_at: nowIso,
+      });
+
+      // Also insert into trade_chat_messages for compatibility
       await supabase.from("trade_chat_messages").insert({
         trade_id: trade.id,
-        sender_id: "00000000-0000-0000-0000-000000000000",
-        message: joinMsg,
+        sender_id: systemUuid,
+        message: exactJoinMessage,
+        is_system_message: true,
+        created_at: nowIso,
       });
 
       // Internal audit log preserves actual admin identity
       await supabase.from("admin_audit_logs").insert({
         admin_id: adminId,
         admin_email: adminEmail,
-        action: "MODERATOR_JOINED_TRADE",
+        action: "TRADE_MODERATOR_JOINED",
         target_user_id: trade.buyer_id,
         target_id: trade.id,
-        details: { trade_id: trade.id, date: new Date().toISOString() },
+        details: {
+          trade_id: trade.id,
+          dispute_id: trade.dispute?.id || null,
+          admin_id: adminId,
+          admin_email: adminEmail,
+          timestamp: nowIso,
+        },
+        created_at: nowIso,
       });
 
-      return NextResponse.json({ success: true, message: "Joined trade chat as moderator" });
+      // Notify both participants
+      const participantIds = [trade.buyer_id, trade.seller_id].filter(Boolean);
+      for (const pid of participantIds) {
+        try {
+          await supabase.from("notifications").insert({
+            user_id: pid,
+            title: "Moderator Joined Trade",
+            message: "Paxones Moderator joined the trade chat.",
+            link: `/trade/${trade.id}`,
+            is_read: false,
+            created_at: nowIso,
+          });
+        } catch (notifErr) {
+          console.warn("Moderator join notification insert error:", notifErr);
+        }
+      }
+
+      return NextResponse.json({
+        success: true,
+        message: "Paxones Moderator joined the trade chat.",
+        alreadyJoined: false,
+      });
     }
 
     // 2. Moderator Message (Displayed strictly as Paxones Moderator without admin identity)
@@ -176,11 +292,27 @@ export async function POST(
         return NextResponse.json({ success: false, error: "Message cannot be empty" }, { status: 400 });
       }
 
-      // Stored cleanly as moderator message; user-facing identity is Paxones Moderator
+      const cleanMessage = message.trim();
+      const nowIso = new Date().toISOString();
+
+      // Insert into trade_messages with is_moderator: true and sender_username: Paxones Moderator
+      await supabase.from("trade_messages").insert({
+        trade_id: trade.id,
+        sender_id: adminId,
+        sender_username: "Paxones Moderator",
+        message: cleanMessage,
+        is_moderator: true,
+        visibility: "all",
+        created_at: nowIso,
+      });
+
+      // Also insert into trade_chat_messages
       await supabase.from("trade_chat_messages").insert({
         trade_id: trade.id,
-        sender_id: "00000000-0000-0000-0000-000000000000",
-        message: message.trim(),
+        sender_id: adminId,
+        message: cleanMessage,
+        is_system_message: false,
+        created_at: nowIso,
       });
 
       // Also notify both trade participants in Activity Center
@@ -190,10 +322,10 @@ export async function POST(
           await supabase.from("notifications").insert({
             user_id: pid,
             title: "New Moderator Message",
-            message: `A Paxones Moderator posted in Trade: "${message.trim().slice(0, 100)}"`,
+            message: `Paxones Moderator: "${cleanMessage.slice(0, 100)}"`,
             link: `/trade/${trade.id}`,
             is_read: false,
-            created_at: new Date().toISOString(),
+            created_at: nowIso,
           });
         } catch (notifErr) {
           console.warn("Moderator message notification insert error:", notifErr);

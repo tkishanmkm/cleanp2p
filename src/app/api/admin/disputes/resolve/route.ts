@@ -39,12 +39,27 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: errMsg }, { status: 400 });
     }
 
+    // Fetch trade to resolve counterparty winner ID
+    const { data: trade } = await supabase
+      .from('trades')
+      .select('id, buyer_id, seller_id')
+      .eq('id', tradeId)
+      .maybeSingle();
+
+    const winnerId = resolution === 'RELEASE' ? trade?.buyer_id : trade?.seller_id;
+
     // Update dispute record
     await supabase
       .from('disputes')
       .update({
         status: 'resolved',
+        winner_id: winnerId,
+        resolution: resolution === 'RELEASE' ? 'RELEASE_TO_BUYER' : 'REFUND_TO_SELLER',
+        resolution_reason: notes || (resolution === 'RELEASE' ? 'Dispute awarded to Buyer' : 'Dispute refunded to Seller'),
+        resolution_note: notes || (resolution === 'RELEASE' ? 'Dispute awarded to Buyer' : 'Dispute refunded to Seller'),
+        resolved_by: adminId,
         resolved_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
       })
       .eq('id', disputeId);
 

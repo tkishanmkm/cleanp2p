@@ -67,13 +67,20 @@ export async function POST(
       return NextResponse.json({ error: errorMsg }, { status: 400 });
     }
 
-    // Update disputes record to resolved
+    // Update disputes record to resolved with full audit metadata
+    const winnerId = resolution === 'RELEASE_TO_BUYER' ? trade?.buyer_id : trade?.seller_id;
     try {
       await adminClient
         .from('disputes')
         .update({
           status: 'resolved',
+          winner_id: winnerId,
+          resolution: resolution,
+          resolution_reason: notes || (resolution === 'RELEASE_TO_BUYER' ? 'Dispute awarded to Buyer by moderator' : 'Dispute refunded to Seller by moderator'),
+          resolution_note: notes || (resolution === 'RELEASE_TO_BUYER' ? 'Dispute awarded to Buyer by moderator' : 'Dispute refunded to Seller by moderator'),
+          resolved_by: adminId,
           resolved_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
         })
         .eq('trade_id', actualTradeId);
     } catch (dErr) {

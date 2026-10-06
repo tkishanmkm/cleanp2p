@@ -128,6 +128,32 @@ function AdminLoginForm() {
         throw new Error(`Access Denied: ${check?.error_msg || "Insufficient privileges."}`);
       }
 
+      // Check 2FA requirement
+      setStatusMessage("Checking two-factor security requirement...");
+      let is2FAEnabled = false;
+      try {
+        const secRes = await fetch("/api/admin/security/status");
+        const secData = await secRes.json();
+        if (secData.success && secData.state?.is2FAEnabled) {
+          is2FAEnabled = true;
+        }
+      } catch (e) {
+        console.warn("2FA status fetch error:", e);
+      }
+
+      if (is2FAEnabled) {
+        setStatusMessage("Two-factor authentication required. Redirecting to security challenge...");
+        const challengeUrl = `/adminnarayan/login/challenge?redirectTo=${encodeURIComponent(redirectTo)}`;
+        router.push(challengeUrl);
+        router.refresh();
+        setTimeout(() => {
+          if (window.location.pathname === "/adminnarayan/login") {
+            window.location.assign(challengeUrl);
+          }
+        }, 500);
+        return;
+      }
+
       setStatusMessage("Access confirmed! Navigating to dashboard...");
       setExistingAdmin({ id: data.user.id });
 

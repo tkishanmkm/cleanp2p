@@ -266,11 +266,9 @@ async function deriveDepositAddress(
     network === 'ERC20' ||
     network === 'BEP20' ||
     network === 'BSC' ||
-    network === 'POLYGON' ||
-    network === 'ARBITRUM' ||
     asset === 'ETH';
 
-  // 1. EVM Assets (ETH, BSC, USDT BEP20, USDT ERC20, Polygon, Arbitrum)
+  // 1. EVM Assets (ETH, BSC, USDT BEP20, USDT ERC20)
   if (isEVM) {
     try {
       if (process.env.EVM_XPUB) {

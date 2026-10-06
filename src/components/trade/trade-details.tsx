@@ -84,6 +84,7 @@ import {
   CheckCircle2,
   ShieldCheck,
   XCircle,
+  Trophy,
   Tag
 } from 'lucide-react';
 import { BtcLogo, EthLogo, LtcLogo, UsdtLogo } from '@/components/icons';
@@ -1815,6 +1816,48 @@ export function TradeDetails({
   const publicTradeId = trade?.trade_id || trade?.public_id || trade?.tradeId || formatTradeId(trade?.id);
   const badgeStatusClass = statusColors[effectiveTradeStatus as keyof typeof statusColors] || statusColors.expired;
 
+  // Role-Aware Dispute Resolution Outcome Calculation
+  const hasDispute = Boolean(
+    resolvedDispute ||
+    trade?.dispute ||
+    trade?.disputed_at ||
+    trade?.dispute_reason ||
+    trade?.is_disputed ||
+    tradeStatus === 'disputed' ||
+    tradeStatus === 'dispute'
+  );
+
+  const isDisputeResolved = Boolean(
+    hasDispute && (
+      resolvedDispute?.status === 'resolved' ||
+      resolvedDispute?.status === 'RESOLVED' ||
+      ['released', 'completed', 'cancelled'].includes(effectiveTradeStatus)
+    )
+  );
+
+  const resolvedWinnerId = resolvedDispute?.winner_id || (
+    effectiveTradeStatus === 'released' || effectiveTradeStatus === 'completed'
+      ? buyerId
+      : effectiveTradeStatus === 'cancelled'
+        ? sellerId
+        : null
+  );
+
+  const isUserWinner = Boolean(
+    isDisputeResolved &&
+    resolvedWinnerId &&
+    currentUser?.id &&
+    String(resolvedWinnerId) === String(currentUser.id)
+  );
+
+  const isUserLoser = Boolean(
+    isDisputeResolved &&
+    resolvedWinnerId &&
+    currentUser?.id &&
+    String(resolvedWinnerId) !== String(currentUser.id) &&
+    (currentUser.id === buyerId || currentUser.id === sellerId)
+  );
+
   return (
     <Card className="flex flex-col h-full shadow-none border-0 rounded-none bg-card text-card-foreground">
       <CardHeader className="p-4 border-b border-border/60">
@@ -1834,7 +1877,37 @@ export function TradeDetails({
       {/* Independent Scrollable Area for Trade Details */}
       <ScrollArea className="flex-1 min-h-0 p-4">
         <div className="space-y-4 pr-3">
-          {effectiveTradeStatus === 'paid' && (
+          {/* Role-Aware Dispute Won Banner */}
+          {isUserWinner && (
+            <div className="rounded-xl border-2 border-emerald-500/50 bg-emerald-500/15 dark:bg-emerald-950/40 p-3.5 text-xs text-emerald-950 dark:text-emerald-100 shadow-sm space-y-1">
+              <div className="flex items-center gap-2 font-bold text-emerald-700 dark:text-emerald-300 text-sm">
+                <Trophy className="h-4.5 w-4.5 text-emerald-600 dark:text-emerald-400 shrink-0" />
+                <span>🏆 YOU WON DISPUTE</span>
+              </div>
+              <p className="text-xs text-emerald-900/90 dark:text-emerald-200 leading-relaxed">
+                {isBuying
+                  ? "The moderator resolved the dispute in your favor. The escrowed crypto has been released and credited to your wallet."
+                  : "The moderator resolved the dispute in your favor. The escrowed funds have been refunded to your wallet."}
+              </p>
+            </div>
+          )}
+
+          {/* Role-Aware Dispute Lost Banner */}
+          {isUserLoser && (
+            <div className="rounded-xl border-2 border-rose-500/50 bg-rose-500/15 dark:bg-rose-950/40 p-3.5 text-xs text-rose-950 dark:text-rose-100 shadow-sm space-y-1">
+              <div className="flex items-center gap-2 font-bold text-rose-700 dark:text-rose-300 text-sm">
+                <XCircle className="h-4.5 w-4.5 text-rose-600 dark:text-rose-400 shrink-0" />
+                <span>❌ YOU LOST DISPUTE</span>
+              </div>
+              <p className="text-xs text-rose-900/90 dark:text-rose-200 leading-relaxed">
+                {isBuying
+                  ? "The moderator resolved the dispute in favor of the seller. Escrowed crypto was refunded to the seller."
+                  : "The moderator resolved the dispute in favor of the buyer. Escrowed crypto was released to the buyer."}
+              </p>
+            </div>
+          )}
+
+          {effectiveTradeStatus === 'paid' && !isDisputeResolved && (
             <div className={cn(
               "rounded-xl border p-3.5 text-xs font-medium space-y-1",
               isBuying
@@ -2064,7 +2137,7 @@ export function TradeDetails({
             )}
           </div>
 
-          {resolvedDispute && (
+          {isDisputeResolved && (
             <div className="space-y-1 rounded-xl border border-border/60 p-3 bg-muted/10">
               <h4 className="text-xs font-bold text-foreground uppercase tracking-wider mb-2">
                 Dispute Resolution
@@ -2072,13 +2145,47 @@ export function TradeDetails({
               <DetailRow
                 label="Awarded To"
                 boldLabel
-                value={resolvedDispute.winner_id === buyerId ? 'Buyer' : 'Seller'}
+                value={resolvedWinnerId === buyerId ? 'Buyer' : 'Seller'}
                 valueClass="font-bold text-primary"
               />
               <DetailRow
-                label="Outcome"
-                value={<span className="capitalize">{tradeStatus === 'released' ? 'Released to Buyer' : 'Returned to Seller'}</span>}
+                label="Your Result"
+                boldLabel
+                value={
+                  isUserWinner ? (
+                    <span className="font-bold text-emerald-600 dark:text-emerald-400 flex items-center gap-1">
+                      <Trophy className="h-3.5 w-3.5" /> Won Dispute
+                    </span>
+                  ) : isUserLoser ? (
+                    <span className="font-bold text-rose-600 dark:text-rose-400 flex items-center gap-1">
+                      <XCircle className="h-3.5 w-3.5" /> Lost Dispute
+                    </span>
+                  ) : (
+                    <span className="capitalize">{resolvedWinnerId === buyerId ? 'Awarded to Buyer' : 'Awarded to Seller'}</span>
+                  )
+                }
               />
+              <DetailRow
+                label="Outcome"
+                value={<span className="capitalize">{effectiveTradeStatus === 'released' || effectiveTradeStatus === 'completed' ? 'Released to Buyer' : 'Returned to Seller'}</span>}
+              />
+              {(resolvedDispute?.resolution_reason || resolvedDispute?.resolution_note || resolvedDispute?.resolution) && (
+                <DetailRow
+                  label="Decision Notes"
+                  value={resolvedDispute.resolution_reason || resolvedDispute.resolution_note || resolvedDispute.resolution}
+                />
+              )}
+              {(resolvedDispute?.resolved_at || resolvedDispute?.resolvedAt) && (
+                <DetailRow
+                  label="Resolved At"
+                  boldLabel
+                  value={
+                    <span className="font-[Arial,Helvetica,sans-serif] text-xs font-medium text-foreground" title={formatUtcDateTime(resolvedDispute.resolved_at || resolvedDispute.resolvedAt)}>
+                      {formatDateArial(resolvedDispute.resolved_at || resolvedDispute.resolvedAt, timezone)}
+                    </span>
+                  }
+                />
+              )}
             </div>
           )}
 

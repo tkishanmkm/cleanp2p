@@ -73,6 +73,7 @@ export async function toggleUserSuspensionAction(userId: string, currentSuspende
     .update({ 
       is_suspended: newStatus,
       is_banned: newStatus,
+      status_operation_id: null,
       updated_at: new Date().toISOString()
     })
     .eq("id", userId);
@@ -111,6 +112,7 @@ export async function toggleUserBanStatus(userId: string, isBanned: boolean) {
     .update({
       is_banned: isBanned,
       is_suspended: isBanned,
+      status_operation_id: null,
       updated_at: new Date().toISOString()
     })
     .eq("id", userId);
@@ -128,32 +130,70 @@ export async function toggleUserBanStatus(userId: string, isBanned: boolean) {
   revalidatePath("/adminnarayan/dashboard");
 }
 
-export async function updateUserBalance(userId: string, newBalance: number) {
+export async function freezeUserAction(targetUserId: string, reason: string) {
   const auth = await verifyServerAdmin();
   if (!auth.authorized || !auth.adminId) {
-    throw new Error("Unauthorized: Administrator privileges required.");
+    return { success: false, error: "Unauthorized: Administrator privileges required." };
   }
 
-  const adminId = auth.adminId;
+  if (targetUserId === auth.adminId) {
+    return { success: false, error: "Forbidden: Administrators cannot apply an emergency freeze to their own account." };
+  }
+
+  const cleanReason = (reason || "").trim();
+  if (!cleanReason) {
+    return { success: false, error: "Reason required: An explicit reason must be provided for an emergency freeze." };
+  }
+
   const adminSupabase = createAdminClient();
 
-  const { error } = await adminSupabase
-    .from("profiles")
-    .update({
-      wallet_balance: newBalance,
-      updated_at: new Date().toISOString()
-    })
-    .eq("id", userId);
+  // Execute canonical DB RPC admin_freeze_user strictly
+  try {
+    const { data: rpcData, error: rpcErr } = await adminSupabase.rpc("admin_freeze_user", {
+      p_target_user_id: targetUserId,
+      p_reason: cleanReason,
+    });
 
-  if (error) throw new Error(error.message);
-
-  await logAdminAction({
-    adminId,
-    action: "UPDATE_USER_BALANCE",
-    targetId: userId,
-    details: { new_balance: newBalance },
-  });
+    if (rpcErr) {
+      return { success: false, error: rpcErr.message };
+    }
+  } catch (err: any) {
+    return { success: false, error: err?.message || "Failed to apply emergency freeze." };
+  }
 
   revalidatePath("/adminnarayan/users");
+  revalidatePath(`/adminnarayan/users/${targetUserId}`);
+  revalidatePath("/adminnarayan/dashboard");
+  return { success: true };
 }
+
+export async function unfreezeUserAction(targetUserId: string, reason?: string) {
+  const auth = await verifyServerAdmin();
+  if (!auth.authorized || !auth.adminId) {
+    return { success: false, error: "Unauthorized: Administrator privileges required." };
+  }
+
+  const cleanReason = (reason || "").trim() || "Admin unfreeze";
+  const adminSupabase = createAdminClient();
+
+  // Execute canonical DB RPC admin_unfreeze_user strictly
+  try {
+    const { data: rpcData, error: rpcErr } = await adminSupabase.rpc("admin_unfreeze_user", {
+      p_target_user_id: targetUserId,
+      p_reason: cleanReason,
+    });
+
+    if (rpcErr) {
+      return { success: false, error: rpcErr.message };
+    }
+  } catch (err: any) {
+    return { success: false, error: err?.message || "Failed to lift emergency freeze." };
+  }
+
+  revalidatePath("/adminnarayan/users");
+  revalidatePath(`/adminnarayan/users/${targetUserId}`);
+  revalidatePath("/adminnarayan/dashboard");
+  return { success: true };
+}
+
 

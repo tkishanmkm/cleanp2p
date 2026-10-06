@@ -7,4 +7,3 @@ export const publicClient = createPublicClient({
 });
 
 export const ethMainnetClient = publicClient;
-export const sepoliaClient = publicClient; // backwards-compatible alias pointing to mainnet client

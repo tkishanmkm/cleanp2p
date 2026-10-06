@@ -20,7 +20,8 @@ export default async function UserProfilePage({ params }: PageProps) {
   const isUuid = /^[0-9a-fA-F-]{32,36}$/.test(username);
 
   // 1. Fetch Target Profile
-  let profileQuery = supabase.from('profiles').select('*');
+  const PUBLIC_PROFILE_COLUMNS = 'id, username, display_name, avatar_url, photo_url, country, is_verified, id_verified, kyc_status, is_online, last_seen_at, created_at, total_completed_trades, completed_trades, trade_volume, positive_feedback, negative_feedback, feedback_score';
+  let profileQuery = supabase.from('profiles').select(PUBLIC_PROFILE_COLUMNS);
   if (isUuid) {
     profileQuery = profileQuery.or(`id.eq.${username},username.ilike.${username}`);
   } else {

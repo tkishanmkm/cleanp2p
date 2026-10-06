@@ -116,6 +116,15 @@ export async function POST(req: Request) {
       );
     }
 
+    // Atomically record password change timestamp for withdrawal security hold
+    await admin
+      .from('profiles')
+      .update({
+        password_changed_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', authUser.id);
+
     return NextResponse.json({
       success: true,
       message: 'Password updated successfully. You can now log in with your new credentials.',

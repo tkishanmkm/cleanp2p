@@ -1,4 +1,5 @@
 import { getSupabaseAdminClient } from '@/lib/supabase/server';
+import { assertPlatformControlAllowed } from '@/lib/platform-guard';
 
 export interface CreateTradeWithEscrowParams {
   adId: string;
@@ -26,6 +27,9 @@ export async function createTradeWithEscrow({
   tradeRef,
   idempotencyKey,
 }: CreateTradeWithEscrowParams) {
+  // Authoritative server-side platform guard: check if trading is allowed
+  await assertPlatformControlAllowed('trade');
+
   const supabase = getSupabaseAdminClient();
 
   const { data, error } = await supabase.rpc('initiate_trade_with_escrow', {

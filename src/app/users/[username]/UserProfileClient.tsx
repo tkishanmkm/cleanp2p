@@ -209,9 +209,10 @@ export default function UserProfileClient({
     // 1. Fetch latest profile immediately on mount to prevent stale SSR cache
     const fetchLatestProfile = async () => {
       try {
+        const PUBLIC_PROFILE_COLUMNS = 'id, username, display_name, avatar_url, photo_url, country, is_verified, id_verified, kyc_status, is_online, last_seen_at, created_at, avg_payment_time_mins, avg_payment_minutes, avg_pay_time, avg_release_time_mins, avg_release_minutes, avg_release_time, total_completed_trades, completed_trades, trade_volume, positive_feedback, negative_feedback, feedback_score';
         const { data: latest } = await supabase
           .from('profiles')
-          .select('*')
+          .select(PUBLIC_PROFILE_COLUMNS)
           .eq('id', initialProfile.id)
           .maybeSingle();
 

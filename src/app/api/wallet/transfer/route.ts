@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient, getSupabaseAdminClient } from '@/lib/supabase/server';
 import { verify2FAOTP } from '@/lib/2fa';
+import { assertPlatformControlAllowed } from '@/lib/platform-guard';
+import { hasPendingWithdrawalApproval } from '@/lib/withdrawal-security';
 
 export async function POST(req: NextRequest) {
   try {
@@ -9,6 +11,25 @@ export async function POST(req: NextRequest) {
 
     if (authError || !user) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+
+    // Pending Withdrawal Approval Lockout Check
+    const isWithdrawalPending = await hasPendingWithdrawalApproval(user.id);
+    if (isWithdrawalPending) {
+      return NextResponse.json({
+        error: 'Your previous withdrawal is awaiting administrator approval. You cannot initiate transfers until it is approved or rejected.',
+        code: 'WITHDRAWAL_APPROVAL_PENDING',
+      }, { status: 403 });
+    }
+
+    // Platform Guard Check
+    try {
+      await assertPlatformControlAllowed('transfer', { userId: user.id });
+    } catch (guardErr: any) {
+      return NextResponse.json(
+        { error: guardErr.message || 'Internal transfers are temporarily disabled.', code: guardErr.code || 'PLATFORM_TRANSFERS_DISABLED' },
+        { status: guardErr.statusCode || 403 }
+      );
     }
 
     const admin = getSupabaseAdminClient();
@@ -38,10 +59,10 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Invalid transfer payload. Recipient and positive amount required.' }, { status: 400 });
     }
 
-    // 1. Fetch sender profile & check banned / restricted status
+    // 1. Fetch sender profile & check banned / restricted / emergency frozen status
     const { data: senderProfile } = await admin
       .from('profiles')
-      .select('id, username, is_banned, is_restricted, account_status, is_2fa_enabled, is_mfa_enabled, two_factor_secret, security_answer_hash')
+      .select('id, username, is_banned, is_restricted, is_emergency_frozen, account_status, is_2fa_enabled, is_mfa_enabled, two_factor_secret, security_answer_hash')
       .eq('id', user.id)
       .maybeSingle();
 
@@ -49,16 +70,21 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Sender profile not found.' }, { status: 404 });
     }
 
-    // Block sender if banned or restricted
+    // Block sender if banned, restricted, or emergency frozen
     if (
       senderProfile.is_banned ||
       senderProfile.is_restricted ||
+      senderProfile.is_emergency_frozen ||
       senderProfile.account_status === 'suspended' ||
       senderProfile.account_status === 'banned' ||
-      senderProfile.account_status === 'restricted'
+      senderProfile.account_status === 'restricted' ||
+      senderProfile.account_status === 'frozen'
     ) {
       return NextResponse.json({
-        error: 'Your account is restricted or banned. You cannot send or receive transfers.',
+        error: senderProfile.is_emergency_frozen
+          ? 'USER_EMERGENCY_FROZEN: Your account is under an individual emergency freeze. Transfers are disabled.'
+          : 'Your account is restricted or banned. You cannot send or receive transfers.',
+        code: senderProfile.is_emergency_frozen ? 'USER_EMERGENCY_FROZEN' : 'ACCOUNT_RESTRICTED'
       }, { status: 403 });
     }
 
@@ -198,16 +224,18 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'You cannot transfer funds to yourself.' }, { status: 400 });
     }
 
-    // Block recipient if banned or restricted
+    // Block recipient if banned, restricted, or emergency frozen
     if (
       recipientProfile.is_banned ||
       recipientProfile.is_restricted ||
+      (recipientProfile as any).is_emergency_frozen ||
       recipientProfile.account_status === 'suspended' ||
       recipientProfile.account_status === 'banned' ||
-      recipientProfile.account_status === 'restricted'
+      recipientProfile.account_status === 'restricted' ||
+      recipientProfile.account_status === 'frozen'
     ) {
       return NextResponse.json({
-        error: `Cannot transfer: Recipient @${recipientProfile.username} is banned or restricted on the platform.`,
+        error: `Cannot transfer: Recipient @${recipientProfile.username} is restricted or frozen on the platform.`,
       }, { status: 403 });
     }
 
@@ -280,11 +308,14 @@ export async function POST(req: NextRequest) {
     const transferId = String(transferData.public_id || transferData.transfer_id);
     const dbTransferId = String(transferData.transfer_id);
     const grossAmount = Number(transferData.gross_amount);
-    const netAmount = Number(transferData.net_amount);
-    const feeAmount = Number(transferData.fee_amount);
+    const netAmount = Number(transferData.net_amount || transferData.gross_amount);
+    const feeAmount = Number(transferData.fee_amount || transferData.fee || 0);
+    const totalDeduction = transferData.total_deduction != null 
+      ? Number(transferData.total_deduction) 
+      : Number((grossAmount + feeAmount).toFixed(8));
     const senderBalanceAfter = transferData.sender_balance_after != null ? Number(transferData.sender_balance_after) : undefined;
     const recipientBalanceAfter = transferData.recipient_balance_after != null ? Number(transferData.recipient_balance_after) : undefined;
-    const transferStatus = String(transferData.status || 'completed').toLowerCase();
+    const transferStatus = String(transferData.status || 'confirmed').toLowerCase();
 
     // 5. Dispatch confirmation notification for sender only on new transfer (not replay)
     if (!isIdempotentReplay) {
@@ -292,7 +323,7 @@ export async function POST(req: NextRequest) {
         await admin.from('notifications').insert({
           user_id: user.id,
           title: 'Transfer Sent',
-          message: `Successfully transferred ${grossAmount} ${coinSymbol} to @${recipientName} (Net: ${netAmount} ${coinSymbol}, 1.5% Fee: ${feeAmount} ${coinSymbol}).`,
+          message: `Successfully transferred ${grossAmount} ${coinSymbol} to @${recipientName} (1.5% Fee: ${feeAmount} ${coinSymbol}, Total Deducted: ${totalDeduction} ${coinSymbol}).`,
           type: 'transfer',
           is_read: false,
           metadata: { link: '/wallet' },
@@ -305,7 +336,7 @@ export async function POST(req: NextRequest) {
 
     const message = isIdempotentReplay
       ? `Transfer was already completed previously (ID: ${transferId}).`
-      : `Successfully transferred ${grossAmount} ${coinSymbol} to @${recipientName} (Net: ${netAmount} ${coinSymbol}, 1.5% Fee: ${feeAmount} ${coinSymbol}).`;
+      : `Successfully transferred ${grossAmount} ${coinSymbol} to @${recipientName} (1.5% Fee: ${feeAmount} ${coinSymbol}, Total Deducted: ${totalDeduction} ${coinSymbol}).`;
 
     return NextResponse.json({
       success: true,
@@ -319,7 +350,8 @@ export async function POST(req: NextRequest) {
       netAmount,
       fee: feeAmount,
       feeAmount,
-      totalDeduction: grossAmount,
+      totalDeduction,
+      total_deduction: totalDeduction,
       crypto: coinSymbol,
       asset: coinSymbol,
       senderUsername: senderName,

@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createServerClient } from '@supabase/ssr';
 import { generateTradeId } from '@/lib/id-generator';
+import { assertPlatformControlAllowed } from '@/lib/platform-guard';
+import { hasPendingWithdrawalApproval } from '@/lib/withdrawal-security';
 
 function isValidUUID(str: any): boolean {
   if (!str || typeof str !== 'string') return false;
@@ -24,6 +26,25 @@ export async function POST(req: NextRequest) {
     const { data: { user }, error: authError } = await supabase.auth.getUser();
     if (authError || !user) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+
+    // Pending Withdrawal Approval Lockout Check
+    const isWithdrawalPending = await hasPendingWithdrawalApproval(user.id);
+    if (isWithdrawalPending) {
+      return NextResponse.json({
+        error: 'Your previous withdrawal is awaiting administrator approval. You cannot initiate new P2P trades until it is approved or rejected.',
+        code: 'WITHDRAWAL_APPROVAL_PENDING',
+      }, { status: 403 });
+    }
+
+    // Platform Guard Check
+    try {
+      await assertPlatformControlAllowed('trade', { userId: user.id });
+    } catch (guardErr: any) {
+      return NextResponse.json(
+        { error: guardErr.message || 'Trading is temporarily disabled.', code: guardErr.code || 'PLATFORM_TRADING_DISABLED' },
+        { status: guardErr.statusCode || 403 }
+      );
     }
 
     const body = await req.json();

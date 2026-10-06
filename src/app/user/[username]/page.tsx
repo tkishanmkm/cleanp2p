@@ -27,7 +27,7 @@ export default function UserProfilePage() {
       const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(targetUsername);
       let query = supabase
         .from('profiles')
-        .select('id, username, is_online, last_seen, created_at');
+        .select('id, username, is_online, last_seen_at, created_at');
 
       if (isUuid) {
         query = query.or(`username.eq.${targetUsername},id.eq.${targetUsername}`);

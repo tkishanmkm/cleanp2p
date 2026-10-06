@@ -37,134 +37,14 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
-  try {
-    const authHeader = req.headers.get('authorization');
-    const expectedSecret = SYSTEM_CONFIG.secrets.depositWorker;
-
-    if (expectedSecret && authHeader !== `Bearer ${expectedSecret}`) {
-      return NextResponse.json({ error: 'Unauthorized: Invalid worker secret' }, { status: 401 });
-    }
-
-    const body = await req.json();
-    const { userId, walletIndex, amount, asset, txHash } = body;
-
-    if (!userId || walletIndex === undefined || !amount || !asset || !txHash) {
-      return NextResponse.json(
-        { error: 'Missing required parameters: userId, walletIndex, amount, asset, txHash' },
-        { status: 400 }
-      );
-    }
-
-    // 1. Prevent duplicate processing
-    const { data: existingTx } = await supabase
-      .from('deposits')
-      .select('id, status')
-      .eq('tx_hash', txHash)
-      .maybeSingle();
-
-    if (existingTx) {
-      return NextResponse.json({ message: 'Transaction already processed', depositId: existingTx.id }, { status: 200 });
-    }
-
-    // 2. Re-derive child private key for this user
-    let userKeys: any = null;
-    if (SYSTEM_CONFIG.mnemonic) {
-      userKeys = await deriveUserKeys(SYSTEM_CONFIG.mnemonic, Number(walletIndex));
-    }
-
-    // 3. Record deposit via canonical atomic RPC
-    const isEvmAsset = ['ETH', 'USDT_ERC20', 'USDT_BEP20', 'USDT', 'BNB', 'POL'].includes(asset);
-    const normNet = asset === 'USDT_BEP20' ? 'BEP20' : asset === 'USDT_TRC20' ? 'TRC20' : 'ERC20';
-    const assetSymbol = asset === 'ETH' ? 'ETH' : 'USDT';
-    const tokenContract = normNet === 'BEP20' ? '0x55d398326f99059fF775485246999027B3197955' : '0xdAC17F958D2ee523a2206206994597C13D831ec7';
-
-    let userAddress = userKeys?.evm?.address;
-    if (!userAddress) {
-      const { data: profile } = await supabase.from('profiles').select('evm_deposit_address').eq('id', userId).maybeSingle();
-      userAddress = profile?.evm_deposit_address;
-    }
-
-    if (userAddress) {
-      const { error: dbError } = await supabase.rpc('process_deposit_atomic', {
-        p_destination_address: userAddress,
-        p_asset_symbol: assetSymbol,
-        p_network_code: normNet,
-        p_amount: Number(amount),
-        p_tx_hash: txHash,
-        p_output_index: 0,
-        p_block_number: null,
-        p_from_address: null,
-        p_token_contract: assetSymbol === 'USDT' ? tokenContract : null,
-        p_confirmations: 12,
-        p_provider: 'deposit_sweep_worker',
-      });
-
-      if (dbError) {
-        console.error('Database process_deposit_atomic error:', dbError);
-        return NextResponse.json({ error: dbError.message || 'Database error processing deposit' }, { status: 500 });
-      }
-    }
-
-    let sweepTxHash: string | null = null;
-    if (isEvmAsset && userKeys && SYSTEM_CONFIG.hotWallets.evm.address && SYSTEM_CONFIG.rpcs.evm) {
-      try {
-        const provider = new ethers.JsonRpcProvider(SYSTEM_CONFIG.rpcs.evm);
-        const userSigner = new ethers.Wallet(userKeys.evm.privateKey, provider);
-
-        if (asset === 'ETH' || asset === 'BNB' || asset === 'POL') {
-          const balance = await provider.getBalance(userKeys.evm.address);
-          const feeData = await provider.getFeeData();
-          const gasPrice = feeData.gasPrice || ethers.parseUnits('20', 'gwei');
-          const gasLimit = BigInt(21000);
-          const fee = gasPrice * gasLimit;
-
-          if (balance > fee) {
-            const tx = await userSigner.sendTransaction({
-              to: SYSTEM_CONFIG.hotWallets.evm.address,
-              value: balance - fee,
-            });
-            sweepTxHash = tx.hash;
-          }
-        } else {
-          // Token Sweep (USDT ERC20 / BEP20)
-          const tokenAddress =
-            asset === 'USDT_BEP20'
-              ? SYSTEM_CONFIG.contracts.usdtBep20
-              : SYSTEM_CONFIG.contracts.usdtErc20;
-
-          if (tokenAddress) {
-            const tokenContract = new ethers.Contract(
-              tokenAddress,
-              [
-                'function transfer(address to, uint256 amount) returns (bool)',
-                'function balanceOf(address) view returns (uint256)',
-              ],
-              userSigner
-            );
-
-            const tokenBalance = await tokenContract.balanceOf(userKeys.evm.address);
-            if (tokenBalance > BigInt(0)) {
-              const tx = await tokenContract.transfer(SYSTEM_CONFIG.hotWallets.evm.address, tokenBalance);
-              sweepTxHash = tx.hash;
-            }
-          }
-        }
-      } catch (sweepError) {
-        console.warn('Auto-sweep non-fatal notice (funds safely credited in DB):', sweepError);
-      }
-    }
-
-    return NextResponse.json({
-      success: true,
-      status: 'Credited and Swept',
-      userId,
-      amount,
-      asset,
-      txHash,
-      sweepTxHash,
-    });
-  } catch (err: any) {
-    console.error('Deposit sweep worker error:', err);
-    return NextResponse.json({ error: err.message || 'Internal server error' }, { status: 500 });
-  }
+  return NextResponse.json(
+    {
+      error: 'DEPRECATED_ENDPOINT',
+      message: 'Direct transaction broadcast via legacy deposit-sweep POST is decommissioned. All on-chain deposits must be ingested via canonical depositIngestion workers, and all sweeps must be orchestrated via the hardened sweeperWorker (runDepositSweeper) with pre-broadcast persistence.',
+      decommissioned: true,
+      timestamp: new Date().toISOString(),
+    },
+    { status: 410 }
+  );
 }
+

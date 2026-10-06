@@ -9,7 +9,7 @@ export interface Transaction {
   asset: string;
   chain: string;
   amount: number;
-  status: 'pending' | 'processing' | 'completed' | 'failed';
+  status: 'pending' | 'pending_approval' | 'PENDING_APPROVAL' | 'queued' | 'processing' | 'completed' | 'failed' | 'declined' | 'rejected' | 'cancelled' | string;
   destination_address?: string;
   network_fee?: number;
   tx_hash?: string;
@@ -91,14 +91,26 @@ export function TransactionHistory() {
   }, []);
 
   const getStatusBadge = (status: Transaction['status']) => {
-    switch (status) {
+    const s = String(status || '').toLowerCase();
+    switch (s) {
       case 'completed':
+      case 'confirmed':
         return <span className="rounded bg-emerald-900/40 px-2 py-0.5 text-xs text-emerald-300 border border-emerald-700/50">Completed</span>;
+      case 'pending_approval':
+        return <span className="rounded bg-amber-950/80 px-2 py-0.5 text-xs text-amber-300 border border-amber-600/70 font-medium">Awaiting Admin Approval</span>;
+      case 'queued':
+        return <span className="rounded bg-blue-900/40 px-2 py-0.5 text-xs text-blue-300 border border-blue-700/50">Queued</span>;
       case 'processing':
       case 'pending':
         return <span className="rounded bg-amber-900/40 px-2 py-0.5 text-xs text-amber-300 border border-amber-700/50">Processing</span>;
       case 'failed':
+      case 'declined':
+      case 'rejected':
         return <span className="rounded bg-red-900/40 px-2 py-0.5 text-xs text-red-300 border border-red-700/50">Failed</span>;
+      case 'cancelled':
+        return <span className="rounded bg-gray-800 px-2 py-0.5 text-xs text-gray-400 border border-gray-700">Cancelled</span>;
+      default:
+        return <span className="rounded bg-gray-800 px-2 py-0.5 text-xs text-gray-300 border border-gray-700 capitalize">{status}</span>;
     }
   };
 
@@ -209,6 +221,14 @@ export function TransactionHistory() {
                 <span className="text-gray-400">Status</span>
                 <span>{getStatusBadge(selectedTx.status)}</span>
               </div>
+              {(selectedTx.status === 'PENDING_APPROVAL' || selectedTx.status === 'pending_approval') && (
+                <div className="pt-3 pb-1">
+                  <div className="p-3 rounded-lg bg-amber-950/40 border border-amber-800/60 text-xs text-amber-200/90 leading-relaxed">
+                    <p className="font-semibold text-amber-300 mb-1">Security Review In Progress</p>
+                    <p>This withdrawal is awaiting administrator approval because it exceeded the configured security threshold.</p>
+                  </div>
+                </div>
+              )}
               {selectedTx.tx_hash && (
                 <div className="flex justify-between pt-2">
                   <span className="text-gray-400">Tx Hash</span>

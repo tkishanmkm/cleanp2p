@@ -16,7 +16,6 @@ export const CHAINS: Record<CryptoCurrency, string[]> = {
   LTC: ['LTC'],
   USDT: ['ERC20', 'TRC20', 'BEP20'],
   BNB: [], // Kept for type consistency, but no longer a primary asset
-  MATIC: [], // Kept for type consistency, but no longer a primary asset
   TRX: [], // Kept for type consistency, but no longer a primary asset
 };
 

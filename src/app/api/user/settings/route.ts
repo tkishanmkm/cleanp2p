@@ -559,10 +559,19 @@ export async function PATCH(req: NextRequest) {
           return NextResponse.json({ error: pwErr.message }, { status: 400 });
         }
 
+        // Atomically record password change timestamp for withdrawal security hold
+        await admin
+          .from('profiles')
+          .update({
+            password_changed_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+          })
+          .eq('id', user.id);
+
         return NextResponse.json({
           success: true,
           field,
-          message: 'Password updated successfully.'
+          message: 'Password updated successfully. A temporary 24-hour security hold has been applied to withdrawals.',
         });
       }
 

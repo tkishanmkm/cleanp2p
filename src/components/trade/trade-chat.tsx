@@ -269,13 +269,19 @@ function PaxonesSystemMessageBubble({
   const isMessageBlocked = text.includes('Message blocked:') || text.includes('off-platform communication');
   const isPaid = text.includes('confirmed payment') || text.includes('Marked as Paid') || text.includes('marked as paid');
   const isSecurityReminder = text.includes('Paxones Security Reminder');
+  const isModeratorJoined = text.includes('Paxones Moderator joined the trade chat') || text.includes('Paxones Moderator joined');
 
   let title = 'Paxones System';
   let badgeClass = 'bg-primary/10 text-primary border-primary/20';
   let containerClass = 'bg-muted/60 border-border/80 text-foreground';
   let IconComponent = ShieldCheck;
 
-  if (isInitiated) {
+  if (isModeratorJoined) {
+    title = 'Paxones Moderator';
+    badgeClass = 'bg-purple-500/20 text-purple-700 dark:text-purple-300 border-purple-500/40 font-bold';
+    containerClass = 'bg-purple-500/10 border-purple-500/30 text-purple-950 dark:text-purple-100 font-semibold';
+    IconComponent = ShieldAlert;
+  } else if (isInitiated) {
     title = 'Trade Initiated';
     badgeClass = 'bg-primary/20 text-primary border-primary/40 font-bold';
     containerClass = 'bg-primary/10 border-primary/30 text-foreground';
@@ -840,6 +846,7 @@ export function TradeChat({
         let sysKey = '';
         if (text.includes('TRADE EXPIRED') || text.includes('PAYMENT TIME EXCEEDED')) sysKey = 'SYS_EXPIRED';
         else if (text.includes('TRADE INITIATED') || text.includes('PAXONES ESCROW SECURED') || text.includes('safely held in Paxones Escrow')) sysKey = 'SYS_INITIATED';
+        else if (text.includes('Paxones Moderator joined the trade chat') || text.includes('Paxones Moderator joined')) sysKey = 'SYS_MODERATOR_JOINED';
         else if (text.includes('Trade cancelled')) sysKey = 'SYS_CANCELLED';
         else if (text.includes('Trade is now in dispute')) sysKey = 'SYS_DISPUTED';
         else if (text.includes('sold') && text.includes('successfully to @')) sysKey = 'SYS_RELEASED';

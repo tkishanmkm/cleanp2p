@@ -149,7 +149,11 @@ export async function setUserBanStatus(
 ) {
   await supabase
     .from('profiles')
-    .update({ is_banned: isBanned })
+    .update({ 
+      is_banned: isBanned,
+      status_operation_id: null,
+      updated_at: new Date().toISOString()
+    })
     .eq('id', userId);
 
   await supabase.from('admin_logs').insert([

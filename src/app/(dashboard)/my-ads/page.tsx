@@ -131,7 +131,7 @@ export default function MyAdsPage() {
     try {
       await updateAdStatus(null, adId, isNewStatusActive);
       setAds((prev) =>
-        prev.map((a) => (a.id === adId ? { ...a, active: isNewStatusActive, status: isNewStatusActive ? 'ACTIVE' : 'INACTIVE' } : a))
+        prev.map((a) => (a.id === adId ? { ...a, active: isNewStatusActive, is_active: isNewStatusActive, status: isNewStatusActive ? 'ACTIVE' : 'INACTIVE' } : a))
       );
       toast({
         title: "Ad Updated",

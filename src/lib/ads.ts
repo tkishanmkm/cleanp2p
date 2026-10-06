@@ -67,7 +67,6 @@ export async function updateAdStatus(_db: any, adId: string, active: boolean) {
     body: JSON.stringify({
       status: active ? 'ACTIVE' : 'INACTIVE',
       active,
-      is_active: active,
     }),
   });
 

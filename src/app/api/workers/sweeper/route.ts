@@ -1,141 +1,27 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { SYSTEM_CONFIG } from '@/lib/config/env';
-import { deriveUserKeys } from '@/lib/crypto/hd-engine';
-import { createClient } from '@supabase/supabase-js';
-import { ethers } from 'ethers';
 
-interface SweepQueueItem {
-  id: string;
-  user_id: string;
-  wallet_index: number;
-  asset: string;
-  deposit_address: string;
-  amount: number;
-  tx_hash: string;
-  status: string;
-}
+export const dynamic = 'force-dynamic';
 
-const supabaseAdmin = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://placeholder.supabase.co',
-  process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'placeholder-key'
-);
-
+/**
+ * DECOMMISSIONED: Legacy sweeper worker endpoint
+ * This route formerly processed the unhardened `sweep_queue` table and performed
+ * direct unpersisted gas funding and token transfers.
+ * It is permanently decommissioned to guarantee strict idempotency, pre-broadcast
+ * persistence, and centralized reconciliation via the hardened `runDepositSweeper`.
+ */
 export async function POST(req: NextRequest): Promise<NextResponse> {
-  const secretKey =
-    process.env.CRON_SECRET_KEY?.trim() ||
-    process.env.CRON_SECRET?.trim() ||
-    process.env.DEPOSIT_WORKER_SECRET?.trim() ||
-    SYSTEM_CONFIG.secrets.cron;
-
-  const authHeader = req.headers.get('authorization');
-  const token = authHeader?.replace(/^Bearer\s+/i, '').trim();
-  const urlKey = req.nextUrl.searchParams.get('key');
-  const serviceKey = req.headers.get('x-service-key') || req.headers.get('x-worker-secret');
-
-  const isAuthed = !secretKey || token === secretKey || urlKey === secretKey || serviceKey === secretKey;
-
-  if (!isAuthed) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-  }
-
-  const provider = new ethers.JsonRpcProvider(SYSTEM_CONFIG.rpcs.evm);
-  const hotWalletSigner = SYSTEM_CONFIG.hotWallets.evm.privateKey
-    ? new ethers.Wallet(SYSTEM_CONFIG.hotWallets.evm.privateKey, provider)
-    : null;
-
-  // STAGE 1: GAS ORACLE
-  const { data: pendingGasItems } = await supabaseAdmin
-    .from('sweep_queue')
-    .select('*')
-    .eq('status', 'PENDING_GAS')
-    .limit(10);
-
-  const typedPendingItems = (pendingGasItems || []) as SweepQueueItem[];
-
-  if (hotWalletSigner) {
-    for (const item of typedPendingItems) {
-      try {
-        const feeData = await provider.getFeeData();
-        const gasPrice = feeData.gasPrice ?? ethers.parseUnits('20', 'gwei');
-        const requiredGas = gasPrice * 65000n;
-
-        const gasTx = await hotWalletSigner.sendTransaction({
-          to: item.deposit_address,
-          value: requiredGas,
-        });
-
-        await supabaseAdmin.rpc('mark_gas_funded', {
-          p_sweep_id: item.id,
-          p_gas_tx_hash: gasTx.hash,
-        });
-      } catch (err: unknown) {
-        console.error(`Gas funding failed for sweep ID ${item.id}:`, err);
-      }
-    }
-  }
-
-  // STAGE 2: TOKEN SWEEPER
-  const { data: readyToSweepItems } = await supabaseAdmin
-    .from('sweep_queue')
-    .select('*')
-    .eq('status', 'GAS_FUNDED')
-    .limit(10);
-
-  const typedSweepItems = (readyToSweepItems || []) as SweepQueueItem[];
-
-  for (const item of typedSweepItems) {
-    try {
-      const userKeys = await deriveUserKeys(SYSTEM_CONFIG.mnemonic, item.wallet_index ?? 0);
-      const userSigner = new ethers.Wallet(userKeys.evm.privateKey, provider);
-
-      let sweepTxHash = '';
-
-      if (item.asset === 'ETH') {
-        const balance = await provider.getBalance(item.deposit_address);
-        const feeData = await provider.getFeeData();
-        const gasPrice = feeData.gasPrice ?? ethers.parseUnits('20', 'gwei');
-        const fee = gasPrice * 21000n;
-
-        if (balance > fee) {
-          const tx = await userSigner.sendTransaction({
-            to: SYSTEM_CONFIG.hotWallets.evm.address,
-            value: balance - fee,
-          });
-          sweepTxHash = tx.hash;
-        }
-      } else {
-        const tokenAddress = SYSTEM_CONFIG.contracts.usdtErc20;
-        const tokenContract = new ethers.Contract(
-          tokenAddress,
-          ['function transfer(address to, uint256 amount) returns (bool)', 'function balanceOf(address) view returns (uint256)'],
-          userSigner
-        );
-
-        const tokenBalance = (await tokenContract.balanceOf(item.deposit_address)) as bigint;
-        if (tokenBalance > 0n) {
-          const tx = await tokenContract.transfer(SYSTEM_CONFIG.hotWallets.evm.address, tokenBalance);
-          sweepTxHash = tx.hash;
-        }
-      }
-
-      if (sweepTxHash) {
-        await supabaseAdmin.rpc('mark_swept', {
-          p_sweep_id: item.id,
-          p_sweep_tx_hash: sweepTxHash,
-        });
-      }
-    } catch (err: unknown) {
-      console.error(`Sweep transaction failed for item ID ${item.id}:`, err);
-    }
-  }
-
-  return NextResponse.json({
-    success: true,
-    processedGas: typedPendingItems.length,
-    processedSweeps: typedSweepItems.length,
-  });
+  return NextResponse.json(
+    {
+      error: 'DEPRECATED_ENDPOINT',
+      message: 'Legacy sweep_queue worker endpoint is decommissioned to protect against unpersisted broadcasts and duplicate gas funding. All deposit sweeps must execute via the hardened sweeper worker (runDepositSweeper).',
+      decommissioned: true,
+      timestamp: new Date().toISOString(),
+    },
+    { status: 410 }
+  );
 }
 
 export async function GET(req: NextRequest): Promise<NextResponse> {
   return POST(req);
 }
+

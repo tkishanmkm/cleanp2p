@@ -16,7 +16,6 @@ export function usePresence(userId?: string) {
           await supabase
             .from('profiles')
             .update({ 
-              last_seen: new Date().toISOString(), 
               last_seen_at: new Date().toISOString(),
               is_online: true 
             })
@@ -27,7 +26,6 @@ export function usePresence(userId?: string) {
           await supabase
             .from('profiles')
             .update({ 
-              last_seen: new Date().toISOString(), 
               last_seen_at: new Date().toISOString(),
               is_online: true 
             })

@@ -380,7 +380,9 @@ export async function POST(
 
       // Check caller authorization: buyer, seller, or admin
       const isParticipant = user.id === trade.buyer_id || user.id === trade.seller_id;
-      const isAdmin = userRole === 'admin' || user.app_metadata?.role === 'admin' || user.user_metadata?.role === 'admin';
+      const isAdmin =
+        user.app_metadata?.role === 'admin' ||
+        user.user_metadata?.role === 'admin';
 
       if (!isParticipant && !isAdmin) {
         return NextResponse.json({ error: 'Unauthorized: Only trade participants or administrators can trigger trade expiration.' }, { status: 403 });

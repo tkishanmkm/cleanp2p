@@ -83,6 +83,7 @@ export async function GET(req: NextRequest) {
         to_address: withdrawal.destination_address || withdrawal.to_address || '',
         tx_hash: withdrawal.tx_hash || withdrawal.txid || 'processing',
         status: (withdrawal.status || 'pending').toLowerCase(),
+        raw_status: withdrawal.status || 'pending',
         created_at: withdrawal.created_at || new Date().toISOString(),
         updated_at: withdrawal.updated_at || null,
       };

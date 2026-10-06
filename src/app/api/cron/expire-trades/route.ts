@@ -28,14 +28,14 @@ export async function GET(req: NextRequest) {
     const { data, error } = await supabaseAdmin.rpc('cancel_expired_p2p_trades');
 
     if (error) {
-      console.error('[Expire Trades Error]:', error);
-      return NextResponse.json({ error: error.message }, { status: 400 });
+      console.error('[Expire Trades Error]:', error.message);
+      return NextResponse.json({ error: error.message }, { status: 500 });
     }
 
     return NextResponse.json({
       success: true,
       timestamp: new Date().toISOString(),
-      cancelled_count: data || 0,
+      result: data,
     });
   } catch (err: any) {
     console.error('[Expire Trades Exception]:', err.message);
@@ -46,4 +46,6 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   return GET(req);
 }
+
+
 

@@ -15,7 +15,7 @@ export async function GET(req: NextRequest) {
 
     // 1. Fetch data in parallel
     const [
-      { data: wallets, error: walletsErr },
+      { data: walletAssets, error: waErr },
       { data: activeTrades, error: tradesErr },
       { data: pendingWithdrawals, error: withErr },
       { data: deposits, error: depErr },
@@ -24,7 +24,7 @@ export async function GET(req: NextRequest) {
       { data: depositAddresses },
       { data: profiles },
     ] = await Promise.all([
-      supabase.from("wallets").select("*"),
+      supabase.from("wallet_assets").select("*"),
       supabase.from("trades").select("*").in("status", ["active", "escrow_locked", "disputed"]),
       supabase.from("withdrawals").select("*").in("status", ["pending", "queued", "approved", "broadcasting"]),
       supabase.from("deposits").select("*"),
@@ -36,8 +36,8 @@ export async function GET(req: NextRequest) {
 
     // 2. Determine all supported cryptocurrencies
     const supportedCurrencies = new Set<string>(["BTC", "ETH", "USDT", "LTC", "TRX"]);
-    (wallets || []).forEach((w: any) => {
-      if (w.currency) supportedCurrencies.add(w.currency.toUpperCase());
+    (walletAssets || []).forEach((w: any) => {
+      if (w.asset_symbol) supportedCurrencies.add(w.asset_symbol.toUpperCase());
     });
     (adminMainWallets || []).forEach((mw: any) => {
       if (mw.currency) supportedCurrencies.add(mw.currency.toUpperCase());
@@ -66,9 +66,9 @@ export async function GET(req: NextRequest) {
       };
     });
 
-    // Sum Available balances from user wallets
-    (wallets || []).forEach((w: any) => {
-      const c = (w.currency || "USDT").toUpperCase();
+    // Sum Available balances from authoritative wallet_assets
+    (walletAssets || []).forEach((w: any) => {
+      const c = (w.asset_symbol || "USDT").toUpperCase();
       if (!systemBalances[c]) {
         systemBalances[c] = { currency: c, available: 0, escrow: 0, pendingWithdrawal: 0, total: 0, userCount: 0 };
       }
@@ -142,9 +142,9 @@ export async function GET(req: NextRequest) {
     }
 
     // 6. Operational metrics
-    const totalUserWallets = (wallets || []).length;
+    const totalUserWallets = (walletAssets || []).length;
     const totalUsers = (profiles || []).length;
-    const distinctUsersWithWallets = new Set((wallets || []).map((w: any) => w.user_id)).size;
+    const distinctUsersWithWallets = new Set((walletAssets || []).map((w: any) => w.user_id)).size;
     const totalDepositAddresses = (depositAddresses || []).length;
 
     return NextResponse.json({

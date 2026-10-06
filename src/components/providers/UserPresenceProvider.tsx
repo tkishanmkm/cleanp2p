@@ -12,7 +12,7 @@ export function useUserPresence(userId?: string | null) {
       try {
         await supabase
           .from('profiles')
-          .update({ is_online: true, last_seen: new Date().toISOString() })
+          .update({ is_online: true, last_seen_at: new Date().toISOString() })
           .eq('id', userId);
       } catch (err) {
         console.warn('Presence update error:', err);
@@ -23,7 +23,7 @@ export function useUserPresence(userId?: string | null) {
       try {
         await supabase
           .from('profiles')
-          .update({ is_online: false, last_seen: new Date().toISOString() })
+          .update({ is_online: false, last_seen_at: new Date().toISOString() })
           .eq('id', userId);
       } catch (err) {
         console.warn('Presence offline error:', err);
@@ -71,7 +71,7 @@ export default function UserPresenceProvider({ children }: { children: React.Rea
             .from('profiles')
             .update({
               is_online: true,
-              last_seen: new Date().toISOString(),
+              last_seen_at: new Date().toISOString(),
             })
             .eq('id', session.user.id);
         } catch (error) {
@@ -91,7 +91,7 @@ export default function UserPresenceProvider({ children }: { children: React.Rea
         if (supabaseUrl && navigator.sendBeacon) {
           const payload = JSON.stringify({
             is_online: false,
-            last_seen: new Date().toISOString()
+            last_seen_at: new Date().toISOString()
           });
 
           const url = `${supabaseUrl}/rest/v1/profiles?id=eq.${session.user.id}`;

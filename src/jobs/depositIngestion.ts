@@ -33,14 +33,10 @@ export function getBtcMempoolApi(): string {
     return process.env.BTC_MEMPOOL_API.trim();
   }
 
-  const network =
-    (process.env.BTC_NETWORK || 'mainnet').toLowerCase().trim();
-
-  if (network === 'testnet4') {
-    return 'https://mempool.space/testnet4/api';
-  }
-
-  return 'https://mempool.space/api';
+  return (
+    process.env.BTC_MEMPOOL_API?.trim() ||
+    'https://mempool.space/api'
+  );
 }
 
 export interface IngestionResult {
@@ -84,12 +80,8 @@ export async function getMonitoredAddresses(): Promise<{
           normNet === 'BTC' ||
           normAsset === 'BTC' ||
           clean.startsWith('bc1') ||
-          clean.startsWith('tb1') ||
           clean.startsWith('1') ||
-          clean.startsWith('3') ||
-          clean.startsWith('m') ||
-          clean.startsWith('n') ||
-          clean.startsWith('2')
+          clean.startsWith('3')
         ) {
           btcAddresses.add(clean);
         } else if (normNet === 'LTC' || normAsset === 'LTC' || clean.startsWith('ltc1') || clean.startsWith('L') || clean.startsWith('M')) {
@@ -118,12 +110,8 @@ export async function getMonitoredAddresses(): Promise<{
           normNet === 'BTC' ||
           normCoin === 'BTC' ||
           clean.startsWith('bc1') ||
-          clean.startsWith('tb1') ||
           clean.startsWith('1') ||
-          clean.startsWith('3') ||
-          clean.startsWith('m') ||
-          clean.startsWith('n') ||
-          clean.startsWith('2')
+          clean.startsWith('3')
         ) {
           btcAddresses.add(clean);
         } else if (normNet === 'LTC' || normCoin === 'LTC' || clean.startsWith('ltc1') || clean.startsWith('L') || clean.startsWith('M')) {
@@ -152,12 +140,8 @@ export async function getMonitoredAddresses(): Promise<{
           normNet === 'BTC' ||
           normCoin === 'BTC' ||
           clean.startsWith('bc1') ||
-          clean.startsWith('tb1') ||
           clean.startsWith('1') ||
-          clean.startsWith('3') ||
-          clean.startsWith('m') ||
-          clean.startsWith('n') ||
-          clean.startsWith('2')
+          clean.startsWith('3')
         ) {
           btcAddresses.add(clean);
         } else if (normNet === 'LTC' || normCoin === 'LTC' || clean.startsWith('ltc1') || clean.startsWith('L') || clean.startsWith('M')) {
@@ -1127,7 +1111,7 @@ export async function runDepositIngestion(): Promise<{
       const provider = getEvmProvider(netKey);
       const latestBlock = await provider.getBlockNumber();
       // Scan a safe trailing block window of 100 blocks
-      const scanWindow = chain.isTestnet ? 50 : 100;
+      const scanWindow = 100;
       const fromBlock = Math.max(0, latestBlock - scanWindow);
 
       netResult.scannedBlocks = latestBlock - fromBlock;

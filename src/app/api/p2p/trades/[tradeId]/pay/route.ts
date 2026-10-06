@@ -24,45 +24,23 @@ export async function POST(
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    // Fetch existing trade to validate status and permissions
-    const { data: trade, error: fetchError } = await supabase
-      .from('p2p_trades')
-      .select('*')
-      .eq('id', tradeId)
-      .single();
+    // Execute atomic mark_p2p_trade_paid RPC on canonical public.trades
+    const body = await req.json().catch(() => ({}));
+    const paymentMethod = typeof (body.paymentMethod || body.payment_method) === 'string'
+      ? (body.paymentMethod || body.payment_method).trim()
+      : null;
 
-    if (fetchError || !trade) {
-      return NextResponse.json({ error: 'Trade not found' }, { status: 404 });
+    const { data, error } = await supabase.rpc('mark_p2p_trade_paid', {
+      p_trade_id: tradeId,
+      p_caller_id: user.id,
+      p_payment_method: paymentMethod,
+    });
+
+    if (error) {
+      return NextResponse.json({ error: error.message }, { status: 400 });
     }
 
-    if (trade.buyer_id !== user.id) {
-      return NextResponse.json({ error: 'Only the buyer can mark a trade as paid' }, { status: 403 });
-    }
-
-    if (trade.status !== 'PENDING_PAYMENT') {
-      return NextResponse.json(
-        { error: `Cannot transition from state '${trade.status}' to 'PAID'` },
-        { status: 400 }
-      );
-    }
-
-    // Transition state to PAID
-    const { data: updatedTrade, error: updateError } = await supabase
-      .from('p2p_trades')
-      .update({
-        status: 'PAID',
-        paid_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-      })
-      .eq('id', tradeId)
-      .select()
-      .single();
-
-    if (updateError) {
-      return NextResponse.json({ error: updateError.message }, { status: 400 });
-    }
-
-    return NextResponse.json({ success: true, trade: updatedTrade });
+    return NextResponse.json({ success: true, data });
   } catch (err: any) {
     return NextResponse.json({ error: err.message }, { status: 500 });
   }
