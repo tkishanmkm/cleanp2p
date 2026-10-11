@@ -36,6 +36,8 @@ interface UserProfileClientProps {
     country?: string | null;
     is_email_verified?: boolean;
     is_id_verified?: boolean;
+    is_verified?: boolean | null;
+    verification_tier?: string | number | null;
     kyc_status?: string | null;
     created_at?: string | null;
     last_seen_at?: string | null;
