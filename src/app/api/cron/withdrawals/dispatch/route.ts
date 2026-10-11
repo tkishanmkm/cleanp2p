@@ -1,16 +1,22 @@
 import { NextResponse } from 'next/server';
 import { processPendingWithdrawals } from '@/jobs/withdrawalWorker';
+import { verifyWorkerAuth } from '@/lib/security/worker-auth';
 
 export const dynamic = 'force-dynamic';
 
 export async function GET(req: Request) {
   try {
-    const authHeader = req.headers.get('authorization');
-    const isValidSecret =
-      authHeader === `Bearer ${process.env.WORKER_SECRET}` ||
-      (Boolean(process.env.CRON_SECRET) && authHeader === `Bearer ${process.env.CRON_SECRET}`);
+    const auth = verifyWorkerAuth(req, {
+      allowedSecrets: [
+        process.env.WORKER_SECRET,
+        process.env.CRON_SECRET,
+        process.env.CRON_SECRET_KEY,
+        process.env.WITHDRAWAL_WORKER_SECRET,
+      ],
+      customHeaderNames: ['x-cron-secret', 'x-worker-secret'],
+    });
 
-    if (!isValidSecret) {
+    if (!auth.authorized) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 

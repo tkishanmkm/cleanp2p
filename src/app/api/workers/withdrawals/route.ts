@@ -1,22 +1,22 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { processWithdrawalQueue, processAllPendingWithdrawals } from '@/jobs/withdrawalWorker';
+import { verifyWorkerAuth } from '@/lib/security/worker-auth';
 
 export const dynamic = 'force-dynamic';
 
 function isAuthorized(req: NextRequest): boolean {
-  const secretKey =
-    process.env.WITHDRAWAL_WORKER_SECRET?.trim() ||
-    process.env.CRON_SECRET_KEY?.trim() ||
-    process.env.DEPOSIT_WORKER_SECRET?.trim();
+  const result = verifyWorkerAuth(req, {
+    allowedSecrets: [
+      process.env.WITHDRAWAL_WORKER_SECRET,
+      process.env.WORKER_SECRET,
+      process.env.CRON_SECRET_KEY,
+      process.env.CRON_SECRET,
+    ],
+    customHeaderNames: ['x-service-key', 'x-worker-secret', 'x-withdrawal-worker-secret'],
+    checkQueryParam: true,
+  });
 
-  if (!secretKey) return true; // Allow in development if not explicitly configured
-
-  const authHeader = req.headers.get('authorization');
-  const token = authHeader?.replace(/^Bearer\s+/i, '').trim();
-  const urlKey = req.nextUrl.searchParams.get('key');
-  const serviceKey = req.headers.get('x-service-key') || req.headers.get('x-worker-secret');
-
-  return token === secretKey || urlKey === secretKey || serviceKey === secretKey;
+  return result.authorized;
 }
 
 export async function GET(req: NextRequest) {

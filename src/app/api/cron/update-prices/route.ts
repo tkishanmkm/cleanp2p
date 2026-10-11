@@ -1,16 +1,22 @@
 import { NextResponse } from 'next/server';
 import { runMarketPriceUpdate } from '@/jobs/priceUpdaterWorker';
+import { verifyWorkerAuth } from '@/lib/security/worker-auth';
 
 export const dynamic = 'force-dynamic';
 
 export async function GET(request: Request) {
   try {
     // 1. Authorization Verification
-    const { searchParams } = new URL(request.url);
-    const authHeader = request.headers.get('authorization');
-    const secretKey = searchParams.get('key') || authHeader?.replace('Bearer ', '');
+    const auth = verifyWorkerAuth(request, {
+      allowedSecrets: [
+        process.env.CRON_SECRET_KEY,
+        process.env.CRON_SECRET,
+      ],
+      customHeaderNames: ['x-service-key', 'x-worker-secret'],
+      checkQueryParam: true,
+    });
 
-    if (process.env.CRON_SECRET_KEY && secretKey !== process.env.CRON_SECRET_KEY) {
+    if (!auth.authorized) {
       return NextResponse.json({ error: 'Unauthorized request' }, { status: 401 });
     }
 
@@ -30,4 +36,3 @@ export async function GET(request: Request) {
     return NextResponse.json({ success: false, error: err.message }, { status: 500 });
   }
 }
-

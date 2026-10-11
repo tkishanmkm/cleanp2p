@@ -1,14 +1,13 @@
 import { getBrowserClient } from '@/lib/supabaseClient';
-import { createClient as createSupabaseClient, type SupabaseClient } from '@supabase/supabase-js';
+import { type SupabaseClient } from '@supabase/supabase-js';
+import { supabaseAdmin as authoritativeAdmin } from '@/lib/supabaseAdmin';
 
 export function createClient() {
   return getBrowserClient();
 }
 
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL || 'https://placeholder.supabase.co';
-const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'placeholder-key';
-
-export const supabaseAdmin: SupabaseClient = createSupabaseClient(
-  supabaseUrl,
-  supabaseKey
-);
+/**
+ * Re-exports authoritative supabaseAdmin client with service_role privileges.
+ * Strictly throws if SUPABASE_SERVICE_ROLE_KEY is missing.
+ */
+export const supabaseAdmin: SupabaseClient = authoritativeAdmin;

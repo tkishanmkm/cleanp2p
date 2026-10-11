@@ -6,6 +6,7 @@ import { generateTradeId } from '@/lib/id-generator';
 import { findAdById } from '@/lib/ad-lookup';
 import { sendNewTradeNotificationEmail } from '@/lib/email/tradeEmailService';
 import { assertPlatformControlAllowed } from '@/lib/platform-guard';
+import { isTier2User } from '@/lib/kyc';
 
 export interface ActionResponse<T> {
   data: T | null;
@@ -460,11 +461,32 @@ export async function createAd(formData: any): Promise<ActionResponse<any>> {
       };
     }
 
+    const adTypeResolved = String(formData.type || formData.adType || 'SELL').toUpperCase();
+    if (adTypeResolved === 'SELL') {
+      const { data: creatorProfile } = await adminClient
+        .from('profiles')
+        .select('is_verified, id_verified, is_id_verified, kyc_status, verification_tier')
+        .eq('id', userId)
+        .maybeSingle();
+
+      const isTier2 = isTier2User(creatorProfile);
+
+      if (!isTier2) {
+        return {
+          data: null,
+          error: {
+            message: 'KYC verification is required to sell.',
+            code: 'KYC_REQUIRED',
+          },
+        };
+      }
+    }
+
     const { data, error } = await supabase
       .from('ads')
       .insert({
         user_id: userId,
-        type: formData.type || formData.adType || 'SELL',
+        type: adTypeResolved,
         asset_symbol: formData.crypto || formData.asset_symbol || 'USDT',
         fiat_symbol: formData.fiat || formData.fiat_symbol || 'USD',
         price: formData.price ? Number(formData.price) : 0,
@@ -506,6 +528,8 @@ export async function createTradeOrderWithEscrow(input: {
   adId: string;
   fiatAmount: number;
   paymentMethod?: string;
+  idempotencyKey?: string;
+  tradeRef?: string;
 }): Promise<ActionResponse<{ orderId: string }>> {
   try {
     const supabase = await createClient();
@@ -644,6 +668,60 @@ export async function createTradeOrderWithEscrow(input: {
     const sellerId = isInitiatorSelling ? user.id : adOwnerId;
     const buyerId = isInitiatorSelling ? adOwnerId : user.id;
 
+    // 5.1 Enforce KYC Tier 1 / Tier 2 Business Rules
+    // Seller MUST be Tier 2
+    const { data: sellerProf } = await adminClient
+      .from('profiles')
+      .select('is_verified, id_verified, is_id_verified, kyc_status, verification_tier')
+      .eq('id', sellerId)
+      .maybeSingle();
+
+    const isSellerTier2 = isTier2User(sellerProf);
+
+    if (!isSellerTier2) {
+      return {
+        data: null,
+        error: {
+          message: 'KYC verification is required to sell.',
+          code: 'KYC_REQUIRED',
+        },
+      };
+    }
+
+    // Buyer: If Tier 1, cumulative BUY volume capped at $1,000.00
+    const { data: buyerProf } = await adminClient
+      .from('profiles')
+      .select('is_verified, id_verified, is_id_verified, kyc_status, verification_tier')
+      .eq('id', buyerId)
+      .maybeSingle();
+
+    const isBuyerTier2 = isTier2User(buyerProf);
+
+    if (!isBuyerTier2) {
+      const { data: existingBuyerTrades } = await adminClient
+        .from('trades')
+        .select('fiat_amount, crypto_amount, price, unit_price, status')
+        .eq('buyer_id', buyerId);
+
+      const NON_QUALIFYING = new Set(['cancelled', 'canceled', 'expired', 'failed', 'rejected']);
+      let cumBuys = 0;
+      for (const t of existingBuyerTrades || []) {
+        if (!NON_QUALIFYING.has(String(t.status || '').toLowerCase().trim())) {
+          cumBuys += Number(t.fiat_amount) || (Number(t.crypto_amount || 0) * Number(t.price ?? t.unit_price ?? 1.0));
+        }
+      }
+
+      if ((cumBuys + fiatAmount) > 1000.00) {
+        return {
+          data: null,
+          error: {
+            message: 'Tier 1 accounts can buy up to $1,000 cumulatively. Complete KYC to increase your buy limit.',
+            code: 'KYC_TIER1_BUY_LIMIT_EXCEEDED',
+          },
+        };
+      }
+    }
+
     // Check Seller available balance comprehensively
     const sellerBalanceInfo = await fetchUserCryptoBalance(sellerId, assetSymbol);
     let currentSellerAvail = sellerBalanceInfo.available;
@@ -739,7 +817,14 @@ export async function createTradeOrderWithEscrow(input: {
     }
 
     // 8. Execute Atomic Escrow Lock & Trade Creation via Canonical Database RPC
-    const shortTradeId = generateTradeId();
+    const shortTradeId = input.tradeRef || generateTradeId();
+    const resolvedIdempotencyKey = input.idempotencyKey?.trim();
+    if (!resolvedIdempotencyKey) {
+      return {
+        data: null,
+        error: { message: 'Idempotency key is required to initiate trade order.', code: 'IDEMPOTENCY_KEY_REQUIRED' },
+      };
+    }
     const adIdentifier = String(ad.id || ad.public_ad_id || ad.public_id || cleanAdId);
 
     const { data: rpcResult, error: rpcError } = await adminClient.rpc('initiate_trade_with_escrow', {
@@ -750,7 +835,7 @@ export async function createTradeOrderWithEscrow(input: {
       p_price: price,
       p_payment_method: resolvedPaymentMethod,
       p_trade_ref: shortTradeId,
-      p_idempotency_key: null,
+      p_idempotency_key: resolvedIdempotencyKey,
       p_caller_id: user.id,
     });
 

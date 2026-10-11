@@ -700,7 +700,7 @@ const ActionButtons = ({
           const supabase = createClient();
           const { data } = await supabase
             .from('profiles')
-            .select('is_2fa_enabled, is_mfa_enabled, two_factor_secret')
+            .select('is_2fa_enabled, is_mfa_enabled, two_factor_enabled')
             .or(`id.eq.${currentUserId},user_id.eq.${currentUserId}`)
             .maybeSingle();
           if (data) {
@@ -710,7 +710,8 @@ const ActionButtons = ({
                 data.is_2fa_enabled === 'true' ||
                 data.is_mfa_enabled === true ||
                 data.is_mfa_enabled === 'true' ||
-                Boolean(data.two_factor_secret && String(data.two_factor_secret).trim().length > 0)
+                data.two_factor_enabled === true ||
+                data.two_factor_enabled === 'true'
               )
             );
           }

@@ -4,6 +4,7 @@ import { generateTradeId } from '@/lib/id-generator';
 import { sendNewTradeNotificationEmail } from '@/lib/email/tradeEmailService';
 import { assertPlatformControlAllowed } from '@/lib/platform-guard';
 import { hasPendingWithdrawalApproval } from '@/lib/withdrawal-security';
+import { isTier2User } from '@/lib/kyc';
 
 export const dynamic = 'force-dynamic';
 
@@ -62,10 +63,18 @@ export async function POST(req: NextRequest) {
     } = body;
 
     const idempotencyKey =
-      idempotency_key ||
+      (idempotency_key ||
+      body.idempotencyKey ||
       req.headers.get('x-idempotency-key') ||
       req.headers.get('idempotency-key') ||
-      null;
+      '').trim();
+
+    if (!idempotencyKey) {
+      return NextResponse.json({
+        error: 'Idempotency key is required to create a trade.',
+        code: 'IDEMPOTENCY_KEY_REQUIRED',
+      }, { status: 400 });
+    }
 
     if (!ad_id) {
       return NextResponse.json({ error: 'Advertisement ID is required.' }, { status: 400 });
@@ -156,11 +165,7 @@ export async function POST(req: NextRequest) {
       user.user_metadata?.full_name?.trim() ||
       user.user_metadata?.name?.trim()
     );
-    const isKycVerified = Boolean(
-      buyerProfile?.is_verified ||
-      buyerProfile?.kyc_status === 'approved' ||
-      buyerProfile?.kyc_status === 'verified'
-    );
+    const isKycVerified = isTier2User(buyerProfile);
 
     if (ad.require_full_name_verified && !hasFullName) {
       return NextResponse.json(

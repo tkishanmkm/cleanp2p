@@ -170,7 +170,7 @@ export function getIdentityVerificationState(profile?: any): VerificationState {
       isPending: false,
       isRejected: false,
       tier: 1,
-      tierLabel: 'Tier 1 ($1,000 USD Limit)',
+      tierLabel: 'Tier 1 ($1,000 USD Buy Limit)',
       statusLabel: 'Unverified',
     };
   }
@@ -194,7 +194,7 @@ export function getIdentityVerificationState(profile?: any): VerificationState {
     isPending,
     isRejected,
     tier: isVerified ? 2 : 1,
-    tierLabel: isVerified ? 'Tier 2 (Verified - No Limits)' : 'Tier 1 ($1,000 USD Limit)',
+    tierLabel: isVerified ? 'Tier 2 (Verified — Unlimited)' : 'Tier 1 ($1,000 USD Buy Limit)',
     statusLabel: isVerified ? 'Verified' : isPending ? 'In Review' : isRejected ? 'Declined' : 'Unverified',
   };
 }

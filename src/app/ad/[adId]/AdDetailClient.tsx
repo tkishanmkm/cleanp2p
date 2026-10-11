@@ -86,6 +86,17 @@ export default function AdDetailClient({ ad, advertiser, stats }: AdDetailClient
   const [cryptoInput, setCryptoInput] = useState<string>('')
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false)
   const [errorMsg, setErrorMsg] = useState<string | null>(null)
+  const [idempotencyKey, setIdempotencyKey] = useState<string>(() => {
+    if (typeof window !== 'undefined' && window.sessionStorage) {
+      const cleanAdId = String(ad.public_ad_id || ad.public_id || ad.id || '').replace(/^#/, '').trim();
+      const existing = window.sessionStorage.getItem(`pax_p2p_idemp_${cleanAdId}`);
+      if (existing && existing.length >= 8) return existing;
+      const fresh = (typeof crypto !== 'undefined' && crypto.randomUUID) ? crypto.randomUUID() : 'idemp_' + Math.random().toString(36).substring(2);
+      window.sessionStorage.setItem(`pax_p2p_idemp_${cleanAdId}`, fresh);
+      return fresh;
+    }
+    return (typeof crypto !== 'undefined' && crypto.randomUUID) ? crypto.randomUUID() : 'idemp_' + Math.random().toString(36).substring(2);
+  })
 
   // Asset & Currency Normalization
   const asset = (ad.asset_symbol || ad.asset || ad.crypto || ad.crypto_symbol || ad.cryptoSymbol || ad.coin || ad.crypto_currency || 'BTC').toUpperCase()
@@ -172,6 +183,7 @@ export default function AdDetailClient({ ad, advertiser, stats }: AdDetailClient
         adId: cleanAdId,
         fiatAmount: fiatVal,
         paymentMethod: selectedPaymentMethod || paymentMethods[0] || 'Bank Transfer',
+        idempotencyKey,
       })
       if (res.error) {
         setErrorMsg(res.error.message)
@@ -179,8 +191,14 @@ export default function AdDetailClient({ ad, advertiser, stats }: AdDetailClient
         return
       }
       if (res.data?.orderId) {
+        if (typeof window !== 'undefined' && window.sessionStorage) {
+          window.sessionStorage.removeItem(`pax_p2p_idemp_${cleanAdId}`);
+        }
         router.push(`/trade/${res.data.orderId}`)
       } else {
+        if (typeof window !== 'undefined' && window.sessionStorage) {
+          window.sessionStorage.removeItem(`pax_p2p_idemp_${cleanAdId}`);
+        }
         router.push('/trade')
       }
     } catch (err: any) {

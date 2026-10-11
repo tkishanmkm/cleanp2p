@@ -66,11 +66,18 @@ export async function POST(req: Request) {
     const customFiatCurrency = body.fiatCurrency || body.fiat_currency;
     const tradeRef = body.tradeRef || body.trade_ref || generateTradeId();
     const idempotencyKey =
-      body.idempotencyKey ||
+      (body.idempotencyKey ||
       body.idempotency_key ||
       req.headers.get('x-idempotency-key') ||
       req.headers.get('idempotency-key') ||
-      null;
+      '').trim();
+
+    if (!idempotencyKey) {
+      return NextResponse.json({
+        error: 'Idempotency key is required to initiate a trade.',
+        code: 'IDEMPOTENCY_KEY_REQUIRED',
+      }, { status: 400 });
+    }
 
     if (!adId) {
       return NextResponse.json({ error: 'Advertisement ID is required' }, { status: 400 });

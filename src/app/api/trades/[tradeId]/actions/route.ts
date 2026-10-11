@@ -259,12 +259,12 @@ export async function POST(
       // 2FA check for sensitive trade release operation
       const { data: sellerProfile } = await adminClient
         .from('profiles')
-        .select('is_2fa_enabled, is_mfa_enabled, two_factor_secret, security_answer_hash')
+        .select('is_2fa_enabled, is_mfa_enabled, two_factor_enabled, totp_secret, two_factor_secret')
         .eq('id', user.id)
         .maybeSingle();
 
-      const is2faActive = Boolean(sellerProfile?.is_2fa_enabled || sellerProfile?.is_mfa_enabled);
-      const secret = sellerProfile?.two_factor_secret || sellerProfile?.security_answer_hash;
+      const is2faActive = Boolean(sellerProfile?.is_2fa_enabled || sellerProfile?.is_mfa_enabled || sellerProfile?.two_factor_enabled);
+      const secret = sellerProfile?.totp_secret || sellerProfile?.two_factor_secret;
 
       if (is2faActive) {
         if (!totpCode) {

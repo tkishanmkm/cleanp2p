@@ -1,29 +1,21 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { SYSTEM_CONFIG } from '@/lib/config/env';
-import { deriveUserKeys } from '@/lib/crypto/hd-engine';
-import { createClient } from '@supabase/supabase-js';
-import { ethers } from 'ethers';
-
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://placeholder.supabase.co',
-  process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'placeholder-key'
-);
+import { verifyWorkerAuth } from '@/lib/security/worker-auth';
 
 export const dynamic = 'force-dynamic';
 
 export async function GET(req: NextRequest) {
   try {
-    const authHeader = req.headers.get('authorization');
-    const token = authHeader?.replace(/^Bearer\s+/i, '').trim();
-    const urlKey = req.nextUrl.searchParams.get('key');
-    const expectedSecret =
-      process.env.CRON_SECRET_KEY?.trim() ||
-      process.env.CRON_SECRET?.trim() ||
-      process.env.DEPOSIT_WORKER_SECRET?.trim() ||
-      SYSTEM_CONFIG.secrets.depositWorker ||
-      SYSTEM_CONFIG.secrets.cron;
+    const auth = verifyWorkerAuth(req, {
+      allowedSecrets: [
+        process.env.CRON_SECRET_KEY,
+        process.env.CRON_SECRET,
+        process.env.DEPOSIT_WORKER_SECRET,
+      ],
+      customHeaderNames: ['x-worker-secret', 'x-service-key'],
+      checkQueryParam: true,
+    });
 
-    if (expectedSecret && token !== expectedSecret && urlKey !== expectedSecret) {
+    if (!auth.authorized) {
       return NextResponse.json({ error: 'Unauthorized: Invalid worker secret' }, { status: 401 });
     }
 
@@ -47,4 +39,3 @@ export async function POST(req: NextRequest) {
     { status: 410 }
   );
 }
-

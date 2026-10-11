@@ -3,6 +3,7 @@ import { createClient, getSupabaseAdminClient } from '@/utils/supabase/server';
 import { resolveTradeType } from '@/utils/p2p-helpers';
 import { FIAT_CURRENCIES } from '@/lib/currencies';
 import { assertPlatformControlAllowed } from '@/lib/platform-guard';
+import { isTier2User } from '@/lib/kyc';
 
 export const dynamic = 'force-dynamic';
 
@@ -172,6 +173,29 @@ export async function POST(req: Request) {
     }
     cleanPayload.trade_type = resolvedDirection;
     cleanPayload.type = cleanPayload.type ? String(cleanPayload.type).toUpperCase() : resolvedDirection;
+
+    // Enforce Tier 2 KYC for SELL ads (Tier 1 is blocked from selling)
+    if (cleanPayload.type === 'SELL' || resolvedDirection === 'SELL') {
+      const admin = getSupabaseAdminClient();
+      const { data: creatorProf } = await admin
+        .from('profiles')
+        .select('is_verified, id_verified, is_id_verified, kyc_status, verification_tier')
+        .eq('id', user.id)
+        .maybeSingle();
+
+      const isCreatorTier2 = isTier2User(creatorProf);
+
+      if (!isCreatorTier2) {
+        return NextResponse.json(
+          {
+            error: 'KYC verification is required to sell.',
+            code: 'KYC_REQUIRED',
+            requires_kyc: true,
+          },
+          { status: 403 }
+        );
+      }
+    }
 
     // Validate min/max and price constraints
     const effectivePrice = cleanPayload.price !== null && cleanPayload.price !== undefined ? cleanPayload.price : (cleanPayload.fixed_rate ? Number(cleanPayload.fixed_rate) : null);

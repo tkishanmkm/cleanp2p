@@ -1,6 +1,8 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { createClient, getSupabaseAdminClient } from '@/utils/supabase/server';
 import { verify2FAOTP } from '@/lib/2fa';
+import { encryptUserTOTPSecret } from '@/lib/user-2fa-crypto';
+import { isTier2User } from '@/lib/kyc';
 
 const RESERVED_USERNAMES = ['admin', 'support', 'help', 'system', 'official', 'security', 'p2p', 'moderator'];
 
@@ -366,12 +368,12 @@ export async function PATCH(req: NextRequest) {
         // Check if 2FA is enabled; if so, require 2FA OTP verification
         const { data: currentProf } = await admin
           .from('profiles')
-          .select('is_2fa_enabled, is_mfa_enabled, two_factor_secret, security_answer_hash')
+          .select('is_2fa_enabled, is_mfa_enabled, two_factor_enabled, totp_secret, two_factor_secret')
           .eq('id', user.id)
           .maybeSingle();
 
-        const is2faActive = Boolean(currentProf?.is_2fa_enabled || currentProf?.is_mfa_enabled);
-        const userSecret = currentProf?.two_factor_secret || currentProf?.security_answer_hash;
+        const is2faActive = Boolean(currentProf?.is_2fa_enabled || currentProf?.is_mfa_enabled || currentProf?.two_factor_enabled);
+        const userSecret = currentProf?.totp_secret || currentProf?.two_factor_secret;
 
         if (is2faActive) {
           const cleanCode = code ? code.toString().trim() : '';
@@ -380,6 +382,13 @@ export async function PATCH(req: NextRequest) {
               error: 'Security Enforcement: 4-8 digit 2FA OTP code is required to modify security questions.',
               requires2FA: true,
             }, { status: 400 });
+          }
+
+          if (!userSecret) {
+            return NextResponse.json({
+              error: '2FA is active but credentials cannot be verified. Please re-enroll in Settings.',
+              requires2FA: true,
+            }, { status: 403 });
           }
 
           const isValid = verify2FAOTP(userSecret, cleanCode, true);
@@ -418,12 +427,12 @@ export async function PATCH(req: NextRequest) {
 
         const { data: currentProf } = await admin
           .from('profiles')
-          .select('is_2fa_enabled, is_mfa_enabled, two_factor_secret, security_answer_hash')
+          .select('is_2fa_enabled, is_mfa_enabled, two_factor_enabled, totp_secret, two_factor_secret')
           .eq('id', user.id)
           .maybeSingle();
 
-        const is2faActive = Boolean(currentProf?.is_2fa_enabled || currentProf?.is_mfa_enabled);
-        const existingSecret = currentProf?.two_factor_secret || currentProf?.security_answer_hash;
+        const is2faActive = Boolean(currentProf?.is_2fa_enabled || currentProf?.is_mfa_enabled || currentProf?.two_factor_enabled);
+        const existingSecret = currentProf?.totp_secret || currentProf?.two_factor_secret;
 
         if (enabled) {
           if (!code || !/^\d{4,8}$/.test(code)) {
@@ -432,13 +441,16 @@ export async function PATCH(req: NextRequest) {
             }, { status: 400 });
           }
           const validSecret = secret || existingSecret;
-          if (validSecret) {
-            const isValid = verify2FAOTP(validSecret, code, true);
-            if (!isValid) {
-              return NextResponse.json({
-                error: 'Invalid authenticator code. Please check the time on your device and try again.'
-              }, { status: 400 });
-            }
+          if (!validSecret) {
+            return NextResponse.json({
+              error: '2FA key missing. Please generate a new key before enabling.'
+            }, { status: 400 });
+          }
+          const isValid = verify2FAOTP(validSecret, code, true);
+          if (!isValid) {
+            return NextResponse.json({
+              error: 'Invalid authenticator code. Please check the time on your device and try again.'
+            }, { status: 400 });
           }
         } else {
           // Mandatory 2FA OTP verification when disabling 2FA
@@ -449,14 +461,18 @@ export async function PATCH(req: NextRequest) {
                 requires2FA: true,
               }, { status: 400 });
             }
-            if (existingSecret) {
-              const isValid = verify2FAOTP(existingSecret, code, true);
-              if (!isValid) {
-                return NextResponse.json({
-                  error: 'Invalid authenticator OTP code.',
-                  requires2FA: true,
-                }, { status: 401 });
-              }
+            if (!existingSecret) {
+              return NextResponse.json({
+                error: '2FA is active but key is missing. Contact support.',
+                requires2FA: true,
+              }, { status: 403 });
+            }
+            const isValid = verify2FAOTP(existingSecret, code, true);
+            if (!isValid) {
+              return NextResponse.json({
+                error: 'Invalid authenticator OTP code.',
+                requires2FA: true,
+              }, { status: 401 });
             }
           }
         }
@@ -464,12 +480,17 @@ export async function PATCH(req: NextRequest) {
         const updates: any = {
           is_2fa_enabled: enabled,
           is_mfa_enabled: enabled,
+          two_factor_enabled: enabled,
           updated_at: new Date().toISOString(),
         };
 
-        if (enabled && secret) {
-          updates.two_factor_secret = secret;
+        if (enabled && (secret || existingSecret)) {
+          const rawSec = secret || existingSecret;
+          const encSec = encryptUserTOTPSecret(rawSec);
+          updates.totp_secret = encSec;
+          updates.two_factor_secret = encSec;
         } else if (!enabled) {
+          updates.totp_secret = null;
           updates.two_factor_secret = null;
         }
 
@@ -524,12 +545,12 @@ export async function PATCH(req: NextRequest) {
         // 2FA check
         const { data: currentProf } = await admin
           .from('profiles')
-          .select('is_2fa_enabled, is_mfa_enabled, two_factor_secret, security_answer_hash')
+          .select('is_2fa_enabled, is_mfa_enabled, two_factor_enabled, totp_secret, two_factor_secret')
           .eq('id', user.id)
           .maybeSingle();
 
-        const is2faActive = Boolean(currentProf?.is_2fa_enabled || currentProf?.is_mfa_enabled);
-        const userSecret = currentProf?.two_factor_secret || currentProf?.security_answer_hash;
+        const is2faActive = Boolean(currentProf?.is_2fa_enabled || currentProf?.is_mfa_enabled || currentProf?.two_factor_enabled);
+        const userSecret = currentProf?.totp_secret || currentProf?.two_factor_secret;
 
         if (is2faActive) {
           const cleanCode = code ? code.toString().trim() : '';
@@ -540,14 +561,19 @@ export async function PATCH(req: NextRequest) {
             }, { status: 400 });
           }
 
-          if (userSecret) {
-            const isValid = verify2FAOTP(userSecret, cleanCode, true);
-            if (!isValid) {
-              return NextResponse.json({
-                error: 'Invalid 2FA authentication code.',
-                requires2FA: true,
-              }, { status: 401 });
-            }
+          if (!userSecret) {
+            return NextResponse.json({
+              error: '2FA is active but credentials cannot be verified. Please re-enroll in Settings.',
+              requires2FA: true,
+            }, { status: 403 });
+          }
+
+          const isValid = verify2FAOTP(userSecret, cleanCode, true);
+          if (!isValid) {
+            return NextResponse.json({
+              error: 'Invalid 2FA authentication code.',
+              requires2FA: true,
+            }, { status: 401 });
           }
         }
 
@@ -588,11 +614,7 @@ export async function PATCH(req: NextRequest) {
           .eq('id', user.id)
           .maybeSingle();
 
-        const isVerified =
-          prof?.is_verified ||
-          prof?.id_verified ||
-          prof?.kyc_status?.toUpperCase() === 'VERIFIED' ||
-          prof?.kyc_status?.toUpperCase() === 'APPROVED';
+        const isVerified = isTier2User(prof);
 
         if (isVerified) {
           return NextResponse.json(

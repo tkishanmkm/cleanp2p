@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createClient, getSupabaseAdminClient } from '@/lib/supabase/server';
 import { verifyServerAdmin } from '@/lib/server-admin-auth';
 import { saveKycAddressToB2 } from '@/lib/b2';
+import { isTier2User } from '@/lib/kyc';
 
 export const dynamic = 'force-dynamic';
 
@@ -62,12 +63,23 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Account is banned from performing KYC' }, { status: 403 });
     }
 
-    if (profile.kyc_status === 'approved' || profile.is_verified || profile.id_verified) {
+    const isApprovedTier2 = isTier2User(profile);
+    if (isApprovedTier2) {
       return NextResponse.json({
         success: true,
         message: 'Account is already verified with Tier 2 privileges.',
         status: 'approved',
       });
+    }
+
+    // Sanitize residual flags if user is not actually Tier 2
+    if (profile.is_verified || profile.id_verified) {
+      await supabase
+        .from('profiles')
+        .update({ is_verified: false, id_verified: false, updated_at: new Date().toISOString() })
+        .eq('id', userId);
+      profile.is_verified = false;
+      profile.id_verified = false;
     }
 
     const lastAttemptTime = profile.kyc_last_attempt_at || profile.kyc_submitted_at;

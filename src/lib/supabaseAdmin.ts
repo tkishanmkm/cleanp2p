@@ -1,18 +1,45 @@
-import { createClient } from '@supabase/supabase-js';
+import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 
-const supabaseUrl =
-  process.env.NEXT_PUBLIC_SUPABASE_URL ||
-  process.env.SUPABASE_URL ||
-  'https://placeholder.supabase.co';
+let _cachedClient: SupabaseClient | null = null;
 
-const supabaseKey =
-  process.env.SUPABASE_SERVICE_ROLE_KEY ||
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ||
-  'placeholder-key';
+/**
+ * Returns a server-side Supabase client with authoritative service_role privileges.
+ * Strictly throws if SUPABASE_SERVICE_ROLE_KEY is missing or configured with a placeholder.
+ * Never falls back to the public anonymous key.
+ */
+export function getAuthoritativeAdminClient(): SupabaseClient {
+  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY?.trim();
+  if (!serviceKey || serviceKey === 'placeholder-key' || serviceKey === 'placeholder-anon-key') {
+    throw new Error(
+      'SUPABASE_SERVICE_ROLE_KEY is required for supabaseAdmin but is missing or not configured.'
+    );
+  }
 
-export const supabaseAdmin = createClient(supabaseUrl, supabaseKey, {
-  auth: {
-    persistSession: false,
-    autoRefreshToken: false,
+  if (!_cachedClient) {
+    const supabaseUrl =
+      process.env.NEXT_PUBLIC_SUPABASE_URL?.trim() ||
+      process.env.SUPABASE_URL?.trim() ||
+      'https://placeholder.supabase.co';
+
+    _cachedClient = createClient(supabaseUrl, serviceKey, {
+      auth: {
+        persistSession: false,
+        autoRefreshToken: false,
+      },
+    });
+  }
+
+  return _cachedClient;
+}
+
+/**
+ * Lazy proxy around the authoritative admin client to prevent build-time module evaluation
+ * failures while ensuring that runtime operations fail closed without falling back to anon key.
+ */
+export const supabaseAdmin: SupabaseClient = new Proxy({} as SupabaseClient, {
+  get(_target, prop) {
+    const client = getAuthoritativeAdminClient();
+    const val = (client as any)[prop];
+    return typeof val === 'function' ? val.bind(client) : val;
   },
 });

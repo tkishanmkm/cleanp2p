@@ -32,6 +32,11 @@ export async function createTradeWithEscrow({
 
   const supabase = getSupabaseAdminClient();
 
+  const resolvedIdempotencyKey = idempotencyKey?.trim();
+  if (!resolvedIdempotencyKey) {
+    throw new Error('Idempotency key is required to initiate trade with escrow.');
+  }
+
   const { data, error } = await supabase.rpc('initiate_trade_with_escrow', {
     p_ad_id: String(adId),
     p_crypto_amount: Number(cryptoAmount),
@@ -40,7 +45,7 @@ export async function createTradeWithEscrow({
     p_price: Number(price),
     p_payment_method: String(paymentMethod),
     p_trade_ref: tradeRef ?? null,
-    p_idempotency_key: idempotencyKey ?? null,
+    p_idempotency_key: resolvedIdempotencyKey,
   });
 
   if (error) {

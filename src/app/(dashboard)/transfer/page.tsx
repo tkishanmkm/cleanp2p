@@ -71,7 +71,7 @@ export default function TransferPage() {
         try {
           const { data } = await supabase
             .from('profiles')
-            .select('is_2fa_enabled, is_mfa_enabled, two_factor_secret')
+            .select('is_2fa_enabled, is_mfa_enabled, two_factor_enabled')
             .or(`id.eq.${authUser.uid},user_id.eq.${authUser.uid}`)
             .maybeSingle();
           if (data) {
@@ -80,7 +80,8 @@ export default function TransferPage() {
               data.is_2fa_enabled === 'true' ||
               data.is_mfa_enabled === true ||
               data.is_mfa_enabled === 'true' ||
-              Boolean(data.two_factor_secret && String(data.two_factor_secret).trim().length > 0)
+              data.two_factor_enabled === true ||
+              data.two_factor_enabled === 'true'
             );
             setIs2faEnabledState(has2fa);
           }
@@ -94,6 +95,13 @@ export default function TransferPage() {
 
   const is2faActive = Boolean(
     is2faEnabledState ?? (profile?.is_2fa_enabled || profile?.is_mfa_enabled)
+  );
+  const isSenderTier2 = Boolean(
+    profile?.is_verified === true ||
+    profile?.id_verified === true ||
+    profile?.is_id_verified === true ||
+    ['approved', 'verified'].includes(String(profile?.kyc_status || '').toLowerCase().trim()) ||
+    ['2', 'tier_2', 'tier2'].includes(String(profile?.verification_tier || '').toLowerCase().trim())
   );
   const isSenderRestricted = Boolean(
     profile?.is_banned ||
@@ -269,6 +277,17 @@ export default function TransferPage() {
                 <span>Your account is restricted or banned. You cannot send or receive cryptocurrency transfers.</span>
               </div>
             )}
+            {!isSenderTier2 && (
+              <div className="p-3 mb-4 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-700 dark:text-amber-400 text-xs font-semibold flex flex-col gap-1.5">
+                <div className="flex items-center gap-2">
+                  <Shield className="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0" />
+                  <span>KYC verification is required to transfer funds out.</span>
+                </div>
+                <Link href="/settings" className="text-blue-600 dark:text-blue-400 underline text-xs">
+                  Complete Identity Verification (Tier 2) in Settings &rarr;
+                </Link>
+              </div>
+            )}
             <Form {...form}>
               <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
                 <FormField
@@ -282,7 +301,7 @@ export default function TransferPage() {
                           id="recipient-username-input"
                           placeholder="Search username (e.g. quickbot.65)"
                           {...field}
-                          disabled={isSenderRestricted}
+                          disabled={isSenderRestricted || !isSenderTier2}
                           autoComplete="off"
                           className="font-medium"
                         />

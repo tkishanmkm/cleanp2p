@@ -81,18 +81,27 @@ export default function AdminMainWalletPage() {
     const reason = prompt("Enter reason for rejection:");
     if (!reason) return;
 
-    const { error } = await supabase.rpc("admin_reject_queued_withdrawal", {
-      p_admin_email: adminEmail,
-      p_withdrawal_id: withdrawalId,
-      p_reason: reason,
-    });
+    try {
+      const res = await fetch("/api/admin/withdrawals/review", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          withdrawalId,
+          action: "REJECT",
+          rejectionReason: reason,
+        }),
+      });
 
-    if (error) {
-      alert(`Error rejecting withdrawal: ${error.message}`);
-    } else {
-      alert("Withdrawal rejected and funds restored to user wallet.");
-      fetchQueuedWithdrawals();
-      fetchMainWallets();
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        alert(`Error rejecting withdrawal: ${data.error || "Request failed"}`);
+      } else {
+        alert("Withdrawal rejected and funds restored to user wallet.");
+        fetchQueuedWithdrawals();
+        fetchMainWallets();
+      }
+    } catch (err: any) {
+      alert(`Error rejecting withdrawal: ${err.message || "Network error"}`);
     }
   }
 

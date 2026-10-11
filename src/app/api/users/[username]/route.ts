@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabase';
+import { isTier2User } from '@/lib/kyc';
 
 export const dynamic = 'force-dynamic';
 
@@ -51,15 +52,7 @@ export async function GET(
       (profile.email && !profile.email.includes('placeholder'))
     );
 
-    const kycStatus = (profile.kyc_status || profile.identity_status || '').toUpperCase();
-    const isIdVerified = Boolean(
-      profile.is_id_verified ||
-      profile.id_verified ||
-      kycStatus === 'VERIFIED' ||
-      kycStatus === 'APPROVED' ||
-      profile.verification_tier === 2 ||
-      profile.verification_tier === 'TIER_2'
-    );
+    const isIdVerified = isTier2User(profile);
 
     // 3. Feedback statistics
     let feedbacks: any[] = [];

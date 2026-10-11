@@ -3,6 +3,7 @@ import { createClient, getSupabaseAdminClient } from '@/lib/supabase/server';
 import { verify2FAOTP } from '@/lib/2fa';
 import { assertPlatformControlAllowed } from '@/lib/platform-guard';
 import { hasPendingWithdrawalApproval } from '@/lib/withdrawal-security';
+import { isTier2User } from '@/lib/kyc';
 
 export async function POST(req: NextRequest) {
   try {
@@ -50,10 +51,17 @@ export async function POST(req: NextRequest) {
     const coinSymbol = String(asset || crypto || 'USDT').toUpperCase().trim();
     const numericAmount = Number(amount);
 
-    // Extract or generate cryptographically secure idempotency key
+    // Extract and validate client idempotency key
     const headerIdempotencyKey = req.headers.get('x-idempotency-key') || req.headers.get('idempotency-key');
     const rawKey = String(bodyIdempotencyKey || idempotency_key || requestId || headerIdempotencyKey || '').trim();
-    const idempotencyKey = rawKey && rawKey.length >= 8 && rawKey.length <= 128 ? rawKey : globalThis.crypto.randomUUID();
+    const idempotencyKey = rawKey && rawKey.length >= 8 && rawKey.length <= 128 ? rawKey : null;
+
+    if (!idempotencyKey) {
+      return NextResponse.json({
+        error: 'Idempotency key is required for transfer execution (must be between 8 and 128 characters).',
+        code: 'IDEMPOTENCY_KEY_REQUIRED'
+      }, { status: 400 });
+    }
 
     if (!targetIdentifier || !coinSymbol || isNaN(numericAmount) || numericAmount <= 0) {
       return NextResponse.json({ error: 'Invalid transfer payload. Recipient and positive amount required.' }, { status: 400 });
@@ -62,7 +70,7 @@ export async function POST(req: NextRequest) {
     // 1. Fetch sender profile & check banned / restricted / emergency frozen status
     const { data: senderProfile } = await admin
       .from('profiles')
-      .select('id, username, is_banned, is_restricted, is_emergency_frozen, account_status, is_2fa_enabled, is_mfa_enabled, two_factor_secret, security_answer_hash')
+      .select('id, username, is_banned, is_restricted, is_emergency_frozen, account_status, is_2fa_enabled, is_mfa_enabled, two_factor_enabled, totp_secret, two_factor_secret, is_verified, id_verified, is_id_verified, kyc_status, verification_tier')
       .eq('id', user.id)
       .maybeSingle();
 
@@ -88,9 +96,20 @@ export async function POST(req: NextRequest) {
       }, { status: 403 });
     }
 
+    // 1b. Enforce Tier 2 KYC for Transfer OUT (Tier 1 is blocked)
+    const isSenderTier2 = isTier2User(senderProfile);
+
+    if (!isSenderTier2) {
+      return NextResponse.json({
+        error: 'KYC verification is required to transfer funds out.',
+        code: 'KYC_REQUIRED',
+        requires_kyc: true,
+      }, { status: 403 });
+    }
+
     // 2. Conditional 2FA check (only if enabled on sender profile)
-    const is2faActive = Boolean(senderProfile?.is_2fa_enabled || senderProfile?.is_mfa_enabled);
-    const secret = senderProfile?.two_factor_secret || senderProfile?.security_answer_hash;
+    const is2faActive = Boolean(senderProfile?.is_2fa_enabled || senderProfile?.is_mfa_enabled || senderProfile?.two_factor_enabled);
+    const secret = senderProfile?.totp_secret || senderProfile?.two_factor_secret;
 
     if (is2faActive) {
       if (!totpCode || typeof totpCode !== 'string' || totpCode.trim().length < 4) {

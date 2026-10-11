@@ -1,6 +1,7 @@
 import { createServerClient } from '@supabase/ssr';
 import { NextResponse, type NextRequest } from 'next/server';
 import { ADMIN_2FA_COOKIE_NAME, verifyAdmin2FASessionToken } from '@/lib/admin-2fa-session';
+import { USER_2FA_COOKIE_NAME, verifyUser2FASessionToken } from '@/lib/user-2fa-session';
 
 export async function middleware(request: NextRequest) {
   let supabaseResponse = NextResponse.next({ request });
@@ -261,6 +262,51 @@ export async function middleware(request: NextRequest) {
 
             url.pathname = '/adminnarayan/login/challenge';
             url.searchParams.set('redirectTo', request.nextUrl.pathname);
+            return NextResponse.redirect(url);
+          }
+        }
+      }
+    } else if (user) {
+      // 5. User 2FA Enforcement Gate for authenticated regular users
+      const isUser2FAExemptRoute =
+        url.pathname.startsWith('/login') ||
+        url.pathname.startsWith('/auth') ||
+        url.pathname.startsWith('/api/auth') ||
+        url.pathname.startsWith('/api/webhooks') ||
+        url.pathname.startsWith('/api/cron') ||
+        url.pathname.startsWith('/api/didit/webhook') ||
+        url.pathname.startsWith('/api/kyc/webhook') ||
+        url.pathname === '/dashboard/banned' ||
+        url.pathname === '/unauthorized';
+
+      if (!isUser2FAExemptRoute) {
+        const { data: userProf } = await supabase
+          .from('profiles')
+          .select('is_2fa_enabled, is_mfa_enabled, two_factor_enabled, updated_at')
+          .eq('id', user.id)
+          .maybeSingle();
+
+        const isUser2FAActive = Boolean(
+          userProf?.is_2fa_enabled ||
+          userProf?.is_mfa_enabled ||
+          userProf?.two_factor_enabled
+        );
+
+        if (isUser2FAActive) {
+          const sessionCookie = request.cookies.get(USER_2FA_COOKIE_NAME)?.value;
+          const securityVersion = userProf?.updated_at || user.id;
+          const verification = verifyUser2FASessionToken(sessionCookie, user.id, securityVersion);
+
+          if (!verification.valid) {
+            if (url.pathname.startsWith('/api/')) {
+              return NextResponse.json(
+                { success: false, error: 'User 2FA verification required.', code: '2FA_REQUIRED' },
+                { status: 403 }
+              );
+            }
+
+            url.pathname = '/auth/2fa';
+            url.searchParams.set('next', request.nextUrl.pathname + (request.nextUrl.search || ''));
             return NextResponse.redirect(url);
           }
         }

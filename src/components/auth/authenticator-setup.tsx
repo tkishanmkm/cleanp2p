@@ -43,13 +43,8 @@ export default function AuthenticatorSetup({
       const uri = data.otpauth_url || `otpauth://totp/${encodeURIComponent(issuer)}:${encodeURIComponent(accountName)}?secret=${data.secret}&issuer=${encodeURIComponent(issuer)}`;
       setTotpUri(uri);
     } catch (err: any) {
-      console.warn('2FA generation notice:', err);
-      const randomSecret = Array.from({ length: 32 }, () =>
-        'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567'[Math.floor(Math.random() * 32)]
-      ).join('');
-      const fallbackUri = `otpauth://totp/${encodeURIComponent(issuer)}:${encodeURIComponent(accountName)}?secret=${randomSecret}&issuer=${encodeURIComponent(issuer)}`;
-      setManualSecret(randomSecret);
-      setTotpUri(fallbackUri);
+      console.error('2FA generation error:', err);
+      setError(err.message || 'Failed to generate 2FA key. Please try again.');
     } finally {
       setLoading(false);
     }

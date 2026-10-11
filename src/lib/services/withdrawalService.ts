@@ -9,6 +9,7 @@ import {
   getAuthoritativeAssetUsdPrice,
 } from '@/lib/fees';
 import { isValidTronAddress } from '@/lib/blockchain/tron';
+import { isTier2User } from '@/lib/kyc';
 
 export const SUPPORTED_ASSETS = ['USDT', 'BTC', 'ETH', 'LTC'] as const;
 export const SUPPORTED_NETWORKS: Record<string, string[]> = {
@@ -172,7 +173,7 @@ export async function executeCanonicalWithdrawal(input: WithdrawalRequestInput):
   // 3. User Profile Verification & Security Checks
   const { data: userProfile } = await supabaseAdmin
     .from('profiles')
-    .select('id, is_verified, kyc_status, id_verified, is_2fa_enabled, is_mfa_enabled, two_factor_secret, security_answer_hash, is_banned, is_on_hold, is_withdrawal_locked, account_status')
+    .select('id, is_verified, kyc_status, id_verified, is_2fa_enabled, is_mfa_enabled, two_factor_enabled, totp_secret, two_factor_secret, is_banned, is_on_hold, is_withdrawal_locked, account_status')
     .eq('id', user.id)
     .maybeSingle();
 
@@ -217,27 +218,22 @@ export async function executeCanonicalWithdrawal(input: WithdrawalRequestInput):
     };
   }
 
-  // Enforce Authoritative KYC Identity Verification
-  const isKycVerified = Boolean(
-    userProfile?.is_verified ||
-    userProfile?.kyc_status === 'approved' ||
-    userProfile?.kyc_status === 'verified' ||
-    userProfile?.id_verified
-  );
+  // Enforce Authoritative KYC Identity Verification (Tier 2 required)
+  const isKycVerified = isTier2User(userProfile);
 
   if (!isKycVerified) {
     return {
       success: false,
       status: 'KYC_REQUIRED',
-      error: 'KYC_REQUIRED: Identity verification is required before initiating cryptocurrency withdrawals.',
-      message: 'Identity verification required before withdrawing.',
+      error: 'KYC_REQUIRED: KYC verification is required to withdraw funds.',
+      message: 'KYC verification is required to withdraw funds.',
       statusCode: 403,
     };
   }
 
   // Enforce Authoritative 2FA TOTP Verification
-  const is2faActive = Boolean(userProfile?.is_2fa_enabled || userProfile?.is_mfa_enabled);
-  const secret = userProfile?.two_factor_secret || userProfile?.security_answer_hash;
+  const is2faActive = Boolean(userProfile?.is_2fa_enabled || userProfile?.is_mfa_enabled || userProfile?.two_factor_enabled);
+  const secret = userProfile?.totp_secret || userProfile?.two_factor_secret;
 
   if (is2faActive) {
     if (!input.totpCode || typeof input.totpCode !== 'string' || input.totpCode.trim().length < 4) {

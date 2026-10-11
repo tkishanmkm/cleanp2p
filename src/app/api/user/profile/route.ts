@@ -1,5 +1,6 @@
 import { createClient, getSupabaseAdminClient } from '@/lib/supabase/server';
 import { NextResponse, type NextRequest } from 'next/server';
+import { isTier2User } from '@/lib/kyc';
 
 export const dynamic = 'force-dynamic';
 
@@ -96,13 +97,7 @@ export async function GET(request: NextRequest) {
       // ignore dynamic calculation error
     }
 
-    const isIdVerified = Boolean(
-      profile.id_verified || 
-      profile.is_verified || 
-      profile.kyc_status === 'VERIFIED' || 
-      profile.kyc_status === 'APPROVED' || 
-      profile.verification_tier === 2
-    );
+    const isIdVerified = isTier2User(profile);
 
     return NextResponse.json({
       profile: {

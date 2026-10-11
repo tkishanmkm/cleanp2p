@@ -322,8 +322,10 @@ export async function POST(
         .from("profiles")
         .update({
           kyc_status: "NOT_SUBMITTED",
-          kyc_attempts: 0,
+          is_verified: false,
+          id_verified: false,
           is_id_verified: false,
+          kyc_attempts: 0,
           verification_tier: 1,
           kyc_vendor_session_id: null,
           kyc_retry_after: null,
@@ -346,6 +348,8 @@ export async function POST(
         .from("profiles")
         .update({
           kyc_status: "VERIFIED",
+          is_verified: true,
+          id_verified: true,
           is_id_verified: true,
           verification_tier: 2,
         })
@@ -367,8 +371,11 @@ export async function POST(
         .from("profiles")
         .update({
           kyc_status: "UNVERIFIED",
+          is_verified: false,
+          id_verified: false,
           is_id_verified: false,
           verification_tier: 1,
+          is_kyc_locked: false,
         })
         .eq("id", userId);
 

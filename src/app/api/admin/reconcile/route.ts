@@ -1,26 +1,23 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createClient } from '@supabase/supabase-js';
 import { runFinancialReconciliation } from '@/lib/security/reconciliation';
 import { verifyServerAdmin } from '@/lib/server-admin-auth';
+import { getSupabaseAdminClient } from '@/lib/supabase/server';
+import { verifyWorkerAuth } from '@/lib/security/worker-auth';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
 
-const supabaseAdmin = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL || 'https://placeholder.supabase.co',
-  process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'placeholder-key',
-  { auth: { persistSession: false, autoRefreshToken: false } }
-);
-
 function isCronAuthorized(req: NextRequest): boolean {
-  const cronSecret = process.env.CRON_SECRET || process.env.CRON_SECRET_KEY || process.env.WORKER_SECRET;
-  if (!cronSecret || cronSecret.trim().length === 0) return false;
+  const result = verifyWorkerAuth(req, {
+    allowedSecrets: [
+      process.env.CRON_SECRET,
+      process.env.CRON_SECRET_KEY,
+      process.env.WORKER_SECRET,
+    ],
+    customHeaderNames: ['x-cron-secret'],
+  });
 
-  const authHeader = req.headers.get('authorization');
-  const xCronHeader = req.headers.get('x-cron-secret');
-
-  const bearerToken = authHeader?.startsWith('Bearer ') ? authHeader.substring(7).trim() : null;
-  return bearerToken === cronSecret || xCronHeader === cronSecret;
+  return result.authorized;
 }
 
 export async function POST(req: NextRequest) {
@@ -48,6 +45,7 @@ export async function POST(req: NextRequest) {
       adminUserId = adminAuth.adminId || adminAuth.user?.id;
     }
 
+    const supabaseAdmin = getSupabaseAdminClient();
     const ip = req.headers.get('x-forwarded-for')?.split(',')[0] || '127.0.0.1';
 
     // 3. Execute financial reconciliation sweep

@@ -1,11 +1,15 @@
 import { NextResponse } from 'next/server';
 import { runDepositIngestion } from '@/jobs/depositIngestion';
+import { verifyWorkerAuth } from '@/lib/security/worker-auth';
 
 export async function POST(request: Request) {
   try {
-    const authHeader = request.headers.get('authorization');
-    const workerSecret = process.env.DEPOSIT_WORKER_SECRET;
-    if (workerSecret && authHeader !== `Bearer ${workerSecret}`) {
+    const auth = verifyWorkerAuth(request, {
+      allowedSecrets: [process.env.DEPOSIT_WORKER_SECRET],
+      customHeaderNames: ['x-worker-secret', 'x-deposit-worker-secret'],
+    });
+
+    if (!auth.authorized) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 

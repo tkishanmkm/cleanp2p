@@ -3,6 +3,7 @@ import { createServerClient } from '@supabase/ssr';
 import { generateTradeId } from '@/lib/id-generator';
 import { assertPlatformControlAllowed } from '@/lib/platform-guard';
 import { hasPendingWithdrawalApproval } from '@/lib/withdrawal-security';
+import { isTier2User } from '@/lib/kyc';
 
 function isValidUUID(str: any): boolean {
   if (!str || typeof str !== 'string') return false;
@@ -60,10 +61,17 @@ export async function POST(req: NextRequest) {
     } = body;
 
     const resolvedIdempotencyKey =
-      idempotencyKey ||
+      (idempotencyKey ||
       req.headers.get('x-idempotency-key') ||
       req.headers.get('idempotency-key') ||
-      null;
+      '').trim();
+
+    if (!resolvedIdempotencyKey) {
+      return NextResponse.json({
+        error: 'Idempotency key is required to create a trade order.',
+        code: 'IDEMPOTENCY_KEY_REQUIRED',
+      }, { status: 400 });
+    }
 
     if (!adId || !cryptoAmount || Number(cryptoAmount) <= 0) {
       return NextResponse.json({ error: 'Invalid order parameters. adId and positive cryptoAmount are required.' }, { status: 400 });
@@ -117,11 +125,7 @@ export async function POST(req: NextRequest) {
         user.user_metadata?.full_name?.trim() ||
         user.user_metadata?.name?.trim()
       );
-      const isKycVerified = Boolean(
-        profile?.is_verified ||
-        profile?.kyc_status === 'approved' ||
-        profile?.kyc_status === 'verified'
-      );
+      const isKycVerified = isTier2User(profile);
 
       if (ad.require_full_name_verified && !hasFullName) {
         return NextResponse.json(

@@ -376,6 +376,8 @@ export async function POST(req: NextRequest) {
       // User is under review
       await supabase.from('profiles').update({
         kyc_status: 'in_review',
+        is_verified: false,
+        id_verified: false,
         updated_at: new Date().toISOString(),
       }).eq('id', userId);
 
@@ -414,6 +416,8 @@ export async function POST(req: NextRequest) {
       if (newRetries >= 3) {
         await supabase.from('profiles').update({
           kyc_status: 'permanently_rejected',
+          is_verified: false,
+          id_verified: false,
           kyc_retry_count: newRetries,
           kyc_attempts: newRetries,
           kyc_last_attempt_at: new Date().toISOString(),
@@ -451,6 +455,8 @@ export async function POST(req: NextRequest) {
       } else {
         await supabase.from('profiles').update({
           kyc_status: 'declined',
+          is_verified: false,
+          id_verified: false,
           kyc_retry_count: newRetries,
           kyc_attempts: newRetries,
           kyc_last_attempt_at: new Date().toISOString(),
@@ -487,6 +493,8 @@ export async function POST(req: NextRequest) {
     } else if (overallStatus === 'resubmitted') {
       await supabase.from('profiles').update({
         kyc_status: 'resubmit_required',
+        is_verified: false,
+        id_verified: false,
         updated_at: new Date().toISOString(),
       }).eq('id', userId);
 
@@ -549,6 +557,13 @@ export async function POST(req: NextRequest) {
         console.warn('Non-fatal: notification failed:', notifErr);
       }
     } else if (overallStatus === 'abandoned' || overallStatus === 'expired') {
+      await supabase.from('profiles').update({
+        kyc_status: overallStatus,
+        is_verified: false,
+        id_verified: false,
+        updated_at: new Date().toISOString(),
+      }).eq('id', userId);
+
       if (sessionId) {
         await supabase
           .from('kyc_verifications')

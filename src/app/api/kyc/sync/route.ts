@@ -101,19 +101,19 @@ async function handleSync(req: NextRequest) {
 
     const currentStatus = (profile.kyc_status || 'NOT_STARTED').toLowerCase();
 
-    // If already verified/approved, ensure all flags are set and return
-    if (currentStatus === 'approved' || currentStatus === 'verified' || profile.is_verified || profile.id_verified) {
-      if (!profile.id_verified || !profile.is_verified || !profile.is_kyc_locked) {
-        await admin.from('profiles').update({
-          kyc_status: 'approved',
-          id_verified: true,
-          is_verified: true,
-          is_kyc_locked: true,
-          is_country_locked: Boolean(profile.country),
-          updated_at: new Date().toISOString(),
-        }).eq('id', targetUserId);
-      }
+    // Sanitize any residual legacy verification flags if user is not approved/verified
+    if ((profile.is_verified || profile.id_verified) && currentStatus !== 'approved' && currentStatus !== 'verified') {
+      await admin.from('profiles').update({
+        is_verified: false,
+        id_verified: false,
+        updated_at: new Date().toISOString(),
+      }).eq('id', targetUserId);
+      profile.is_verified = false;
+      profile.id_verified = false;
+    }
 
+    // If already verified/approved in canonical state, return confirmed status
+    if (currentStatus === 'approved' || currentStatus === 'verified') {
       return NextResponse.json({
         success: true,
         is_verified: true,
@@ -261,6 +261,8 @@ async function handleSync(req: NextRequest) {
 
         await admin.from('profiles').update({
           kyc_status: newStatus,
+          is_verified: false,
+          id_verified: false,
           kyc_retry_count: attempts,
           kyc_attempts: attempts,
           updated_at: new Date().toISOString(),
@@ -281,6 +283,8 @@ async function handleSync(req: NextRequest) {
     if (isUnderReview && hoursSinceSubmission >= 24) {
       await admin.from('profiles').update({
         kyc_status: 'not_started',
+        is_verified: false,
+        id_verified: false,
         didit_session_id: null,
         kyc_vendor_session_id: null,
         updated_at: new Date().toISOString(),

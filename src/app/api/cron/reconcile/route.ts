@@ -1,21 +1,21 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { reconcileLedgerVsChain } from '@/jobs/reconciliationWorker';
+import { verifyWorkerAuth } from '@/lib/security/worker-auth';
 
 export const dynamic = 'force-dynamic';
 
 function isAuthorized(req: NextRequest): boolean {
-  const secretKey =
-    process.env.CRON_SECRET_KEY?.trim() ||
-    process.env.CRON_SECRET?.trim() ||
-    process.env.WORKER_SECRET?.trim();
-  if (!secretKey) return true;
+  const result = verifyWorkerAuth(req, {
+    allowedSecrets: [
+      process.env.CRON_SECRET_KEY,
+      process.env.CRON_SECRET,
+      process.env.WORKER_SECRET,
+    ],
+    customHeaderNames: ['x-service-key', 'x-worker-secret'],
+    checkQueryParam: true,
+  });
 
-  const authHeader = req.headers.get('authorization');
-  const token = authHeader?.replace(/^Bearer\s+/i, '').trim();
-  const urlKey = req.nextUrl.searchParams.get('key');
-  const serviceKey = req.headers.get('x-service-key') || req.headers.get('x-worker-secret');
-
-  return token === secretKey || urlKey === secretKey || serviceKey === secretKey;
+  return result.authorized;
 }
 
 export async function GET(req: NextRequest) {
@@ -37,4 +37,3 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   return GET(req);
 }
-

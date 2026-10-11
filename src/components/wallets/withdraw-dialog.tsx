@@ -18,6 +18,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '.
 import { useAuth } from '@/components/providers/auth-provider';
 import { getCachedGasFees, type NetworkGasFee } from '@/lib/gas-oracle';
 import { supabase } from '@/lib/supabase/client';
+import { isTier2User } from '@/lib/kyc';
 
 const withdrawSchema = z.object({
   address: z.string().min(1, "Recipient address is required."),
@@ -49,6 +50,10 @@ export function WithdrawDialog({ open, onOpenChange, asset, userWallets }: Withd
     return Boolean(is2faEnabledState || profile?.is_2fa_enabled || profile?.is_mfa_enabled);
   }, [is2faEnabledState, profile]);
 
+  const isTier2 = useMemo(() => {
+    return isTier2User(profile);
+  }, [profile]);
+
   // Check 2FA state from database on open
   useEffect(() => {
     if (open && (user?.uid || user?.id)) {
@@ -57,7 +62,7 @@ export function WithdrawDialog({ open, onOpenChange, asset, userWallets }: Withd
         try {
           const { data } = await supabase
             .from('profiles')
-            .select('is_2fa_enabled, is_mfa_enabled, two_factor_secret')
+            .select('is_2fa_enabled, is_mfa_enabled, two_factor_enabled')
             .or(`id.eq.${uid},user_id.eq.${uid}`)
             .maybeSingle();
           if (data) {
@@ -67,7 +72,8 @@ export function WithdrawDialog({ open, onOpenChange, asset, userWallets }: Withd
                 data.is_2fa_enabled === 'true' ||
                 data.is_mfa_enabled === true ||
                 data.is_mfa_enabled === 'true' ||
-                Boolean(data.two_factor_secret && String(data.two_factor_secret).trim().length > 0)
+                data.two_factor_enabled === true ||
+                data.two_factor_enabled === 'true'
               )
             );
           }
@@ -487,11 +493,24 @@ export function WithdrawDialog({ open, onOpenChange, asset, userWallets }: Withd
               />
             )}
 
+            {!isTier2 && (
+              <div className="flex flex-col gap-1.5 p-3 bg-amber-500/10 border border-amber-500/20 text-amber-700 dark:text-amber-400 rounded-md text-xs font-semibold">
+                <div className="flex items-center gap-1.5">
+                  <AlertCircle className="h-4 w-4 shrink-0" />
+                  <span>KYC verification is required to withdraw funds.</span>
+                </div>
+                <a href="/settings" className="text-blue-600 dark:text-blue-400 underline text-xs">
+                  Complete Identity Verification (Tier 2) in Settings &rarr;
+                </a>
+              </div>
+            )}
+
             <Button
               id="confirm-withdrawal-button"
               type="submit"
               disabled={
                 isLoading ||
+                !isTier2 ||
                 isInsufficientBalance ||
                 !numericWatchedAmount ||
                 numericWatchedAmount <= 0 ||

@@ -170,6 +170,13 @@ function P2PMarketplaceContent() {
   const [showAcceptable, setShowAcceptable] = useState(searchParams.get('acceptable') === 'true');
   const [rememberFilters, setRememberFilters] = useState(false);
 
+  const isTier2 = Boolean(
+    currentUserData?.is_verified === true ||
+    currentUserData?.id_verified === true ||
+    ['approved', 'verified'].includes(String(currentUserData?.kyc_status || '').toLowerCase().trim()) ||
+    ['2', 'tier_2', 'tier2'].includes(String(currentUserData?.verification_tier || '').toLowerCase().trim())
+  );
+
   // Guided Tour State & Dynamic Positioning
   const [tourStep, setTourStep] = useState<number | null>(null);
   const [tooltipPos, setTooltipPos] = useState<{ top: number; left: number }>({ top: 0, left: 0 });
@@ -824,6 +831,20 @@ function P2PMarketplaceContent() {
           id="tour-offers-list"
           className={cn("bg-card text-card-foreground rounded-xl border border-border p-4 sm:p-6 shadow-sm transition-all duration-300", tourStep === 5 && "ring-4 ring-amber-400 scale-[1.01] shadow-2xl z-40")}
         >
+          {currentUserData && !isTier2 && (
+            <div className="mb-6 p-3.5 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-900 dark:text-amber-200 text-xs flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 shadow-xs">
+              <div className="flex items-center gap-2">
+                <ShieldCheck className="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0" />
+                <span>
+                  <strong>Tier 1 Account:</strong> KYC verification (Tier 2) is required to sell cryptocurrency.
+                </span>
+              </div>
+              <Link href="/settings" className="text-amber-600 dark:text-amber-400 font-semibold underline hover:opacity-80 shrink-0">
+                Verify Identity in Settings &rarr;
+              </Link>
+            </div>
+          )}
+
           <div className="flex justify-between items-center mb-6 border-b border-border pb-4">
               <div>
                 <h2 className="text-xl font-bold text-foreground">

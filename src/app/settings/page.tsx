@@ -490,8 +490,7 @@ export default function SettingsPage() {
 
         // Preferences
         setCurrency(p.preferred_currency || 'USD');
-        setIs2faEnabled(Boolean(p.is_2fa_enabled));
-        if (p.two_factor_secret) setTwoFactorSecret(p.two_factor_secret);
+        setIs2faEnabled(Boolean(p.is_2fa_enabled || p.is_mfa_enabled || p.two_factor_enabled));
         if (p.security_question) setSecQuestion(p.security_question);
 
         // Read local storage preferences
@@ -946,16 +945,8 @@ export default function SettingsPage() {
       const uri = data.otpauth_url || `otpauth://totp/Paxones:${encodeURIComponent(username || userEmail || 'User')}?secret=${data.secret}&issuer=Paxones`;
       setTotpUri(uri);
     } catch (err: any) {
-      console.warn('MFA generate notice:', err);
-      const randomSecret = Array.from({ length: 32 }, () =>
-        'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567'[Math.floor(Math.random() * 32)]
-      ).join('');
-      const issuer = 'Paxones';
-      const label = encodeURIComponent(username || userEmail || 'User');
-      const fallbackUri = `otpauth://totp/${encodeURIComponent(issuer)}:${label}?secret=${randomSecret}&issuer=${encodeURIComponent(issuer)}`;
-      setManualSecret(randomSecret);
-      setTwoFactorSecret(randomSecret);
-      setTotpUri(fallbackUri);
+      console.error('MFA generate error:', err);
+      setMfaError(err.message || 'Failed to generate 2FA key. Please try again.');
     } finally {
       setMfaLoading(false);
     }

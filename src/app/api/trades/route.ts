@@ -97,11 +97,18 @@ export async function POST(req: NextRequest) {
     const customPaymentMethod = body.paymentMethod || body.payment_method;
     const tradeRef = body.tradeRef || body.trade_ref || generateTradeId();
     const idempotencyKey =
-      body.idempotencyKey ||
+      (body.idempotencyKey ||
       body.idempotency_key ||
       req.headers.get('x-idempotency-key') ||
       req.headers.get('idempotency-key') ||
-      null;
+      '').trim();
+
+    if (!idempotencyKey) {
+      return NextResponse.json({
+        error: 'Idempotency key is required to initiate a trade.',
+        code: 'IDEMPOTENCY_KEY_REQUIRED',
+      }, { status: 400 });
+    }
 
     if (!adId) {
       return NextResponse.json({ error: 'Missing required trade parameter: adId' }, { status: 400 });

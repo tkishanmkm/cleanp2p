@@ -1,24 +1,27 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createClient } from '@supabase/supabase-js';
 import { ethers } from 'ethers';
+import { getSupabaseAdminClient } from '@/lib/supabase/server';
+import { verifyWorkerAuth } from '@/lib/security/worker-auth';
 
 export const maxDuration = 10;
 export const dynamic = 'force-dynamic';
 
-const supabaseAdmin = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL || 'https://placeholder.supabase.co',
-  process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'placeholder-anon-key',
-  { auth: { persistSession: false, autoRefreshToken: false } }
-);
-
 export async function POST(req: NextRequest) {
   try {
-    const authHeader = req.headers.get('authorization');
-    const validSecret = process.env.WORKER_SECRET || process.env.CRON_SECRET || process.env.WITHDRAWAL_WORKER_SECRET;
-    
-    if (validSecret && authHeader !== `Bearer ${validSecret}`) {
+    const auth = verifyWorkerAuth(req, {
+      allowedSecrets: [
+        process.env.WITHDRAWAL_WORKER_SECRET,
+        process.env.WORKER_SECRET,
+        process.env.CRON_SECRET,
+      ],
+      customHeaderNames: ['x-worker-secret', 'x-withdrawal-worker-secret'],
+    });
+
+    if (!auth.authorized) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
+
+    const supabaseAdmin = getSupabaseAdminClient();
 
     // Atomically claim the next pending withdrawal via PostgreSQL SKIP LOCKED
     const { data: withdrawal, error: claimErr } = await supabaseAdmin

@@ -58,14 +58,34 @@ export function TransferDialog({ open, onOpenChange, asset }: TransferDialogProp
   const [resolvedRecipient, setResolvedRecipient] = useState<RecipientInfo | null>(null);
   const [isResolving, setIsResolving] = useState(false);
   const [is2faEnabledState, setIs2faEnabledState] = useState<boolean | null>(null);
-  const [idempotencyKey, setIdempotencyKey] = useState<string>(() => globalThis.crypto.randomUUID());
+  const [idempotencyKey, setIdempotencyKey] = useState<string>(() => {
+    if (typeof window !== 'undefined' && window.sessionStorage) {
+      const existing = window.sessionStorage.getItem('pax_transfer_idemp');
+      if (existing && existing.length >= 8) return existing;
+      const fresh = globalThis.crypto.randomUUID();
+      window.sessionStorage.setItem('pax_transfer_idemp', fresh);
+      return fresh;
+    }
+    return globalThis.crypto.randomUUID();
+  });
 
   const coin = asset || 'USDT';
 
-  // Generate a fresh idempotency key each time the transfer dialog opens
+  // Manage durable idempotency key when dialog opens
   useEffect(() => {
     if (open) {
-      setIdempotencyKey(globalThis.crypto.randomUUID());
+      if (typeof window !== 'undefined' && window.sessionStorage) {
+        const existing = window.sessionStorage.getItem('pax_transfer_idemp');
+        if (existing && existing.length >= 8) {
+          setIdempotencyKey(existing);
+        } else {
+          const fresh = globalThis.crypto.randomUUID();
+          window.sessionStorage.setItem('pax_transfer_idemp', fresh);
+          setIdempotencyKey(fresh);
+        }
+      } else {
+        setIdempotencyKey(globalThis.crypto.randomUUID());
+      }
     }
   }, [open]);
 
@@ -77,7 +97,7 @@ export function TransferDialog({ open, onOpenChange, asset }: TransferDialogProp
         try {
           const { data } = await supabase
             .from('profiles')
-            .select('is_2fa_enabled, is_mfa_enabled, two_factor_secret')
+            .select('is_2fa_enabled, is_mfa_enabled, two_factor_enabled')
             .or(`id.eq.${uid},user_id.eq.${uid}`)
             .maybeSingle();
           if (data) {
@@ -86,7 +106,8 @@ export function TransferDialog({ open, onOpenChange, asset }: TransferDialogProp
               data.is_2fa_enabled === 'true' ||
               data.is_mfa_enabled === true ||
               data.is_mfa_enabled === 'true' ||
-              Boolean(data.two_factor_secret && String(data.two_factor_secret).trim().length > 0)
+              data.two_factor_enabled === true ||
+              data.two_factor_enabled === 'true'
             );
             setIs2faEnabledState(has2fa);
           }
@@ -314,6 +335,9 @@ export function TransferDialog({ open, onOpenChange, asset }: TransferDialogProp
         });
       }
 
+      if (typeof window !== 'undefined' && window.sessionStorage) {
+        window.sessionStorage.removeItem('pax_transfer_idemp');
+      }
       await refreshBalances();
       onOpenChange(false);
     } catch (err: any) {

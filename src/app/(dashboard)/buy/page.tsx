@@ -169,6 +169,39 @@ function P2PMarketplaceContent() {
   const [showRecentlyActive, setShowRecentlyActive] = useState(searchParams.get('recentlyActive') === 'true');
   const [showAcceptable, setShowAcceptable] = useState(searchParams.get('acceptable') === 'true');
   const [rememberFilters, setRememberFilters] = useState(false);
+  const [remainingBuyAllowance, setRemainingBuyAllowance] = useState<number | null>(null);
+
+  const isTier2 = Boolean(
+    currentUserData?.is_verified === true ||
+    currentUserData?.id_verified === true ||
+    ['approved', 'verified'].includes(String(currentUserData?.kyc_status || '').toLowerCase().trim()) ||
+    ['2', 'tier_2', 'tier2'].includes(String(currentUserData?.verification_tier || '').toLowerCase().trim())
+  );
+
+  useEffect(() => {
+    if (currentUserData?.id && !isTier2) {
+      const fetchAllowance = async () => {
+        try {
+          const { data: buyTrades } = await supabase
+            .from('trades')
+            .select('fiat_amount, crypto_amount, price, unit_price, status')
+            .eq('buyer_id', currentUserData.id);
+
+          const NON_QUALIFYING = new Set(['cancelled', 'canceled', 'expired', 'failed', 'rejected']);
+          let cumBuys = 0;
+          for (const t of buyTrades || []) {
+            if (!NON_QUALIFYING.has(String(t.status || '').toLowerCase().trim())) {
+              cumBuys += Number(t.fiat_amount) || (Number(t.crypto_amount || 0) * Number(t.price ?? t.unit_price ?? 1.0));
+            }
+          }
+          setRemainingBuyAllowance(Math.max(0, 1000 - cumBuys));
+        } catch (err) {
+          console.warn('Allowance fetch warning:', err);
+        }
+      };
+      fetchAllowance();
+    }
+  }, [currentUserData?.id, isTier2]);
 
   // Guided Tour State & Dynamic Positioning
   const [tourStep, setTourStep] = useState<number | null>(null);
@@ -824,6 +857,20 @@ function P2PMarketplaceContent() {
           id="tour-offers-list"
           className={cn("bg-card text-card-foreground rounded-xl border border-border p-4 sm:p-6 shadow-sm transition-all duration-300", tourStep === 5 && "ring-4 ring-amber-400 scale-[1.01] shadow-2xl z-40")}
         >
+          {currentUserData && !isTier2 && remainingBuyAllowance !== null && (
+            <div className="mb-6 p-3.5 rounded-xl bg-blue-500/10 border border-blue-500/20 text-blue-900 dark:text-blue-200 text-xs flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 shadow-xs">
+              <div className="flex items-center gap-2">
+                <ShieldCheck className="w-4 h-4 text-blue-600 dark:text-blue-400 shrink-0" />
+                <span>
+                  <strong>Tier 1 Buy Limit:</strong> ${remainingBuyAllowance.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} remaining of $1,000.00 USD cumulative limit.
+                </span>
+              </div>
+              <Link href="/settings" className="text-blue-600 dark:text-blue-400 font-semibold underline hover:opacity-80 shrink-0">
+                Complete KYC for Unlimited Buying &rarr;
+              </Link>
+            </div>
+          )}
+
           <div className="flex justify-between items-center mb-6 border-b border-border pb-4">
               <div>
                 <h2 className="text-xl font-bold text-foreground">

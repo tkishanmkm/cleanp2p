@@ -12,12 +12,29 @@ export async function GET(request: Request) {
     console.error('OAuth Callback Error:', error, errorDescription);
   }
 
+  let requires2FA = false;
+
   if (code) {
     try {
       const supabase = await createClient();
       const { data, error: exchangeErr } = await supabase.auth.exchangeCodeForSession(code);
       if (!exchangeErr && data?.user) {
         const user = data.user;
+
+        try {
+          const { data: user2FAProfile } = await supabase
+            .from('profiles')
+            .select('is_2fa_enabled, is_mfa_enabled, two_factor_enabled')
+            .eq('id', user.id)
+            .maybeSingle();
+
+          requires2FA = Boolean(
+            user2FAProfile?.is_2fa_enabled ||
+            user2FAProfile?.is_mfa_enabled ||
+            user2FAProfile?.two_factor_enabled
+          );
+        } catch (_) {}
+
         try {
           const { data: profile } = await supabase
             .from('profiles')
@@ -97,11 +114,16 @@ export async function GET(request: Request) {
   </div>
   <script>
     try {
+      var req2FA = ${requires2FA ? 'true' : 'false'};
       if (window.opener) {
-        window.opener.postMessage({ type: 'OAUTH_AUTH_SUCCESS' }, '*');
-        setTimeout(function() { window.close(); }, 600);
+        window.opener.postMessage({ type: req2FA ? 'OAUTH_2FA_REQUIRED' : 'OAUTH_AUTH_SUCCESS' }, '*');
+        if (req2FA) {
+          window.location.href = '/auth/2fa';
+        } else {
+          setTimeout(function() { window.close(); }, 600);
+        }
       } else {
-        window.location.href = '/buy';
+        window.location.href = req2FA ? '/auth/2fa' : '/buy';
       }
     } catch (e) {
       window.location.href = '/buy';

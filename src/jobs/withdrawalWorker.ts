@@ -1,4 +1,3 @@
-import { createClient } from '@supabase/supabase-js';
 import { ethers } from 'ethers';
 import {
   getEvmHotWalletSigner,
@@ -19,16 +18,8 @@ import {
   getTronWeb,
 } from '@/lib/blockchain/tron';
 
-// Initialize Supabase admin client with service role
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL || 'https://placeholder.supabase.co';
-const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'placeholder-key';
-
-export const supabaseAdmin = createClient(supabaseUrl, supabaseKey, {
-  auth: {
-    persistSession: false,
-    autoRefreshToken: false,
-  },
-});
+import { supabaseAdmin } from '@/lib/supabaseAdmin';
+export { supabaseAdmin };
 
 export interface WithdrawalProcessResult {
   processed: boolean;

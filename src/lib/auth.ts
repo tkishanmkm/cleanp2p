@@ -509,7 +509,7 @@ export async function getUserProfile(userId: string): Promise<UserProfile | null
       data.is_mfa_enabled === true ||
       data.is_mfa_enabled === 'true' ||
       data.two_factor_enabled === true ||
-      Boolean(data.two_factor_secret && String(data.two_factor_secret).trim().length > 0)
+      data.two_factor_enabled === 'true'
     );
 
     return {
@@ -532,7 +532,7 @@ export async function getUserProfile(userId: string): Promise<UserProfile | null
       is_mfa_enabled: is2fa,
       two_factor_enabled: is2fa,
       has_2fa: is2fa,
-      two_factor_secret: data.two_factor_secret || null,
+      two_factor_secret: null,
       is_banned: Boolean(data.is_banned),
       is_restricted: Boolean(data.is_restricted),
       account_status: data.account_status || data.status || 'active',

@@ -37,11 +37,17 @@ export async function createClient() {
 export const createRouteHandlerClient = (_options?: any) => createClient();
 
 export function getSupabaseAdminClient(): SupabaseClient {
+  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY?.trim();
+  if (!serviceKey || serviceKey === 'placeholder-key' || serviceKey === 'placeholder-anon-key') {
+    throw new Error(
+      'SUPABASE_SERVICE_ROLE_KEY is required for privileged admin operations but is missing or not configured.'
+    );
+  }
+
   if (!serverAdminClient) {
     const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL || 'https://placeholder.supabase.co';
-    const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'placeholder-key';
 
-    serverAdminClient = createSupabaseClient(supabaseUrl, supabaseKey, {
+    serverAdminClient = createSupabaseClient(supabaseUrl, serviceKey, {
       auth: {
         autoRefreshToken: false,
         persistSession: false,

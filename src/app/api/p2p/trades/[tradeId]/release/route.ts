@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createServerClient } from '@supabase/ssr';
+import { getSupabaseAdminClient } from '@/lib/supabase/server';
 import { verify2FAOTP } from '@/lib/2fa';
 
 export async function POST(
@@ -28,15 +29,19 @@ export async function POST(
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
+    const adminClient = getSupabaseAdminClient();
+
     // 2FA check for sensitive trade release operation
-    const { data: sellerProfile } = await supabase
+    const { data: sellerProfile } = await adminClient
       .from('profiles')
-      .select('is_2fa_enabled, is_mfa_enabled, two_factor_secret, security_answer_hash')
+      .select('is_2fa_enabled, is_mfa_enabled, two_factor_enabled, totp_secret, two_factor_secret')
       .eq('id', user.id)
       .maybeSingle();
 
-    const is2faActive = Boolean(sellerProfile?.is_2fa_enabled || sellerProfile?.is_mfa_enabled);
-    const secret = sellerProfile?.two_factor_secret || sellerProfile?.security_answer_hash;
+    const is2faActive = Boolean(
+      sellerProfile?.is_2fa_enabled || sellerProfile?.is_mfa_enabled || sellerProfile?.two_factor_enabled
+    );
+    const secret = sellerProfile?.totp_secret || sellerProfile?.two_factor_secret;
 
     if (is2faActive) {
       if (!totpCode) {
@@ -51,8 +56,8 @@ export async function POST(
       }
     }
 
-    // Execute atomic escrow release procedure
-    const { data, error } = await supabase.rpc('release_trade_escrow', {
+    // Execute atomic escrow release procedure via service_role client
+    const { data, error } = await adminClient.rpc('release_trade_escrow', {
       p_trade_id: tradeId,
       p_caller_id: user.id,
     });

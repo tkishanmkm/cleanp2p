@@ -43,13 +43,23 @@ export async function createClient() {
 
 /**
  * Creates or returns a server-side Supabase admin client with service role credentials.
+ * Strictly requires SUPABASE_SERVICE_ROLE_KEY and never falls back to the public anon key.
  */
 export function getSupabaseAdminClient(): SupabaseClient {
-  if (!serverAdminClient) {
-    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL || 'https://eaiwgfxoiwxepinvcykg.supabase.co';
-    const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'placeholder-key';
+  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY?.trim();
+  if (!serviceKey || serviceKey === 'placeholder-key' || serviceKey === 'placeholder-anon-key') {
+    throw new Error(
+      'SUPABASE_SERVICE_ROLE_KEY is required for privileged admin operations but is missing or not configured.'
+    );
+  }
 
-    serverAdminClient = createSupabaseClient(supabaseUrl, supabaseKey, {
+  if (!serverAdminClient) {
+    const supabaseUrl =
+      process.env.NEXT_PUBLIC_SUPABASE_URL?.trim() ||
+      process.env.SUPABASE_URL?.trim() ||
+      'https://eaiwgfxoiwxepinvcykg.supabase.co';
+
+    serverAdminClient = createSupabaseClient(supabaseUrl, serviceKey, {
       auth: {
         autoRefreshToken: false,
         persistSession: false,

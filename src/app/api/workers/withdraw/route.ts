@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { ethers } from 'ethers';
-import { createClient } from '@supabase/supabase-js';
 import * as TronWebLib from 'tronweb';
+import { getSupabaseAdminClient } from '@/lib/supabase/server';
+import { verifyWorkerAuth } from '@/lib/security/worker-auth';
 
 export const dynamic = 'force-dynamic';
 
@@ -33,19 +34,7 @@ const ERC20_ABI = [
 ];
 
 function getAdminClient() {
-  const supabaseUrl =
-    process.env.NEXT_PUBLIC_SUPABASE_URL ||
-    process.env.SUPABASE_URL ||
-    'https://placeholder.supabase.co';
-
-  const serviceKey =
-    process.env.SUPABASE_SERVICE_ROLE_KEY ||
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ||
-    'placeholder-key';
-
-  return createClient(supabaseUrl, serviceKey, {
-    auth: { persistSession: false, autoRefreshToken: false },
-  });
+  return getSupabaseAdminClient();
 }
 
 function getEvmRpcUrl(network: string): { url: string; providerName: string } {
@@ -239,17 +228,15 @@ async function processLtcWithdrawal(
 
 export async function POST(req: NextRequest) {
   try {
-    const expectedSecret = process.env.WITHDRAWAL_WORKER_SECRET || process.env.WORKER_SECRET;
-    const authHeader = req.headers.get('authorization');
-    const customHeader = req.headers.get('x-withdrawal-worker-secret');
+    const auth = verifyWorkerAuth(req, {
+      allowedSecrets: [
+        process.env.WITHDRAWAL_WORKER_SECRET,
+        process.env.WORKER_SECRET,
+      ],
+      customHeaderNames: ['x-withdrawal-worker-secret', 'x-worker-secret'],
+    });
 
-    const token = authHeader?.startsWith('Bearer ')
-      ? authHeader.replace(/^Bearer\s+/i, '').trim()
-      : null;
-
-    const providedSecret = token || customHeader;
-
-    if (expectedSecret && providedSecret !== expectedSecret) {
+    if (!auth.authorized) {
       return NextResponse.json(
         { success: false, error: 'Unauthorized: invalid WITHDRAWAL_WORKER_SECRET' },
         { status: 401 }

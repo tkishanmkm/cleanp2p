@@ -1,18 +1,19 @@
 import { NextResponse } from 'next/server';
 import { getSupabaseAdminClient } from '@/lib/supabase/server';
+import { verifyWorkerAuth } from '@/lib/security/worker-auth';
 
 export const dynamic = 'force-dynamic';
 
 export async function POST(req: Request) {
-  const expectedSecret =
-    process.env.WORKER_SECRET?.trim() ||
-    process.env.WITHDRAWAL_WORKER_SECRET?.trim();
+  const auth = verifyWorkerAuth(req, {
+    allowedSecrets: [
+      process.env.WITHDRAWAL_WORKER_SECRET,
+      process.env.WORKER_SECRET,
+    ],
+    customHeaderNames: ['x-worker-secret', 'x-withdrawal-worker-secret'],
+  });
 
-  const secret =
-    req.headers.get('x-worker-secret') ||
-    req.headers.get('authorization')?.replace(/^Bearer\s+/i, '').trim();
-
-  if (expectedSecret && secret !== expectedSecret) {
+  if (!auth.authorized) {
     return NextResponse.json({ error: 'Unauthorized worker' }, { status: 401 });
   }
 

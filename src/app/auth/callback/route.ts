@@ -91,6 +91,29 @@ export async function GET(request: NextRequest) {
           console.error('[Auth Callback] Failed to trigger wallet provisioning:', err);
         }
 
+        // Check if user has 2FA enabled; if so, redirect to 2FA challenge before protected routes
+        try {
+          const { data: user2FAProfile } = await supabase
+            .from('profiles')
+            .select('is_2fa_enabled, is_mfa_enabled, two_factor_enabled')
+            .eq('id', user.id)
+            .maybeSingle();
+
+          const is2FAActive = Boolean(
+            user2FAProfile?.is_2fa_enabled ||
+            user2FAProfile?.is_mfa_enabled ||
+            user2FAProfile?.two_factor_enabled
+          );
+
+          if (is2FAActive) {
+            const challengeUrl = new URL(`${origin}/auth/2fa`);
+            challengeUrl.searchParams.set('next', next.startsWith('/') ? next : '/dashboard');
+            return NextResponse.redirect(challengeUrl.toString());
+          }
+        } catch (err2fa) {
+          console.error('[Auth Callback] Error checking 2FA state:', err2fa);
+        }
+
         const destination = next.startsWith('/') ? `${origin}${next}` : `${origin}/dashboard`;
         return NextResponse.redirect(destination);
       }

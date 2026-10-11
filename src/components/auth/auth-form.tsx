@@ -274,30 +274,30 @@ export function AuthForm({ mode }: AuthFormProps) {
 
   const handleVerifyLogin2FA = async (e: React.FormEvent) => {
     e.preventDefault();
-    const cleanCode = twoFaCode.replace(/[\s-]+/g, '').trim();
-    if (!cleanCode || cleanCode.length < 4 || cleanCode.length > 8) {
-      setErrorMsg('Please enter a valid 4-8 digit OTP code from your authenticator app.');
+    const cleanCode = twoFaCode.trim();
+    if (!cleanCode || cleanCode.length < 4) {
+      setErrorMsg('Please enter a valid 6-digit OTP code or recovery code.');
       return;
     }
 
     setVerifying2FA(true);
     setErrorMsg('');
     try {
-      const res = await fetch('/api/auth/2fa/verify', {
+      const res = await fetch('/api/auth/2fa/login-verify', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          userId: pendingUserId,
           code: cleanCode,
+          next: '/buy',
         }),
       });
 
       const data = await res.json();
-      if (!res.ok || data.error) {
+      if (!res.ok || !data.success) {
         throw new Error(data.error || 'Invalid 2FA verification code');
       }
 
-      window.location.href = '/buy';
+      window.location.href = data.redirect || '/buy';
     } catch (err: any) {
       setErrorMsg(err.message || '2FA verification failed. Please try again.');
     } finally {
