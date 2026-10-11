@@ -2,53 +2,55 @@ import { NextRequest, NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
 import { createServerClient } from '@supabase/ssr';
 import { createClient } from '@supabase/supabase-js';
-import { SYSTEM_CONFIG } from '@/lib/config/env';
 import { deriveUserKeys, deriveEvmAddress } from '@/lib/crypto/hd-engine';
 
 export { deriveEvmAddress };
 export const dynamic = 'force-dynamic';
 
-const supabaseAdmin = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://placeholder.supabase.co',
-  process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'placeholder-key',
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL || '';
+const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
+
+const supabaseAuthClient = createClient(
+  supabaseUrl || 'https://placeholder.supabase.co',
+  supabaseAnonKey || 'placeholder-anon-key',
   { auth: { persistSession: false, autoRefreshToken: false } }
 );
 
-async function resolveUserId(req: NextRequest): Promise<string | null> {
-  let userId = req.headers.get('x-user-id');
-  if (userId) return userId;
-
+async function resolveAuthenticatedUserId(req: NextRequest): Promise<string | null> {
+  // Never trust caller-supplied x-user-id or user_id query parameters.
   const authHeader = req.headers.get('authorization');
-  if (authHeader && authHeader.startsWith('Bearer ')) {
+  if (authHeader?.match(/^Bearer\s+/i)) {
     const token = authHeader.replace(/^Bearer\s+/i, '').trim();
-    try {
-      const { data } = await supabaseAdmin.auth.getUser(token);
-      if (data?.user?.id) return data.user.id;
-    } catch {}
+    const { data, error } = await supabaseAuthClient.auth.getUser(token);
+    if (!error && data.user?.id) return data.user.id;
   }
 
-  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
-  const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
-  if (supabaseUrl && supabaseAnonKey) {
-    try {
-      const cookieStore = cookies();
-      const ssrSupabase = createServerClient(supabaseUrl, supabaseAnonKey, {
-        cookies: { getAll: () => cookieStore.getAll() },
-      });
-      const { data: { user } } = await ssrSupabase.auth.getUser();
-      if (user?.id) return user.id;
-    } catch {}
+  if (!supabaseUrl || !supabaseAnonKey) return null;
+
+  try {
+    const cookieStore = await cookies();
+    const ssrSupabase = createServerClient(supabaseUrl, supabaseAnonKey, {
+      cookies: {
+        getAll: () => cookieStore.getAll(),
+        setAll: () => {
+          // This route only reads the session; it does not refresh or write cookies.
+        },
+      },
+    });
+    const { data, error } = await ssrSupabase.auth.getUser();
+    if (!error && data.user?.id) return data.user.id;
+  } catch {
+    // Fail closed when session verification fails.
   }
 
-  const { searchParams } = new URL(req.url);
-  return searchParams.get('user_id');
+  return null;
 }
 
 import { getOrDeriveUserDepositAddresses } from '@/lib/hd-derivation-engine';
 
 export async function GET(req: NextRequest): Promise<NextResponse> {
   try {
-    const userId = await resolveUserId(req);
+    const userId = await resolveAuthenticatedUserId(req);
     if (!userId) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
@@ -63,7 +65,6 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
         tron: result.addresses.USDT_TRC20,
         btc: result.addresses.BTC,
         ltc: result.addresses.LTC,
-        // Standard uppercase mappings for all frontend components
         BTC: result.addresses.BTC,
         ETH: result.addresses.ETH,
         LTC: result.addresses.LTC,
@@ -72,8 +73,9 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
         USDT_TRC20: result.addresses.USDT_TRC20,
       },
     });
-  } catch (err: any) {
-    return NextResponse.json({ error: err?.message || 'Failed to retrieve deposit address' }, { status: 500 });
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : 'Failed to retrieve deposit address';
+    return NextResponse.json({ error: message }, { status: 500 });
   }
 }
 
