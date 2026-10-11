@@ -17,8 +17,8 @@ const authClient = createClient(
 
 async function resolveAuthenticatedUserId(req: NextRequest): Promise<string | null> {
   const authHeader = req.headers.get('authorization');
-  if (authHeader?.match(/^Bearer\s+/i)) {
-    const token = authHeader.replace(/^Bearer\s+/i, '').trim();
+  if (authHeader?.match(/^Bearer\\s+/i)) {
+    const token = authHeader.replace(/^Bearer\\s+/i, '').trim();
     const { data, error } = await authClient.auth.getUser(token);
     if (!error && data.user?.id) return data.user.id;
   }
@@ -55,6 +55,12 @@ function resolveCanonicalAddress(addresses: Record<string, string>, symbol: stri
   return key ? addresses[key] || null : null;
 }
 
+function addressesMatch(symbol: string, existingAddress: string, canonicalAddress: string): boolean {
+  // EVM and Bech32 addresses are case-insensitive; TRON Base58 addresses are case-sensitive.
+  if (symbol === 'USDT_TRC20') return existingAddress === canonicalAddress;
+  return existingAddress.toLowerCase() === canonicalAddress.toLowerCase();
+}
+
 export async function POST(req: NextRequest): Promise<NextResponse> {
   try {
     const userId = await resolveAuthenticatedUserId(req);
@@ -86,7 +92,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     if (readError) throw readError;
 
     if (existingWallet) {
-      if (existingWallet.deposit_address && String(existingWallet.deposit_address).toLowerCase() !== depositAddress.toLowerCase()) {
+      if (existingWallet.deposit_address && !addressesMatch(symbol, String(existingWallet.deposit_address), depositAddress)) {
         return NextResponse.json({
           success: false,
           error: 'A legacy deposit address differs from the canonical derived address. The record was not overwritten; manual reconciliation is required before changing it.',
