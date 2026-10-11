@@ -73,10 +73,10 @@ export async function POST(req: NextRequest) {
       message: 'Withdrawal approval request completed.',
     }, { headers: { 'Cache-Control': 'no-store' } });
   } catch (err: unknown) {
-    const message = err instanceof Error ? err.message : 'Unknown server error.';
+    console.error('[Withdrawal Approval] Unexpected server error:', err);
     return NextResponse.json(
-      { error: `Internal Server Error: ${message}` },
-      { status: 500 }
+      { error: 'Internal server error.' },
+      { status: 500, headers: { 'Cache-Control': 'no-store' } }
     );
   }
 }
