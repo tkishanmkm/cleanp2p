@@ -696,7 +696,8 @@ export async function PUT(
       fiat_currency: effectiveFiat,
       pricing_type: pricingType,
       is_fixed: isFixed,
-      price: price !== undefined ? price : (existingAd.price ?? existingAd.unit_price),
+      price: price !== undefined ? price : (existingAd.price ?? existingAd.unit_price ?? existingAd.fixed_rate),
+      fixed_rate: existingAd.fixed_rate,
       margin: effectiveMargin,
       rate_percent: effectiveMargin,
     });
@@ -705,7 +706,7 @@ export async function PUT(
     }
 
     if (isFixed) {
-      const effectiveEditPrice = price !== undefined ? price : Number(existingAd.price ?? existingAd.unit_price ?? 0);
+      const effectiveEditPrice = price !== undefined ? price : Number(existingAd.price ?? existingAd.unit_price ?? existingAd.fixed_rate ?? 0);
       if (!Number.isFinite(effectiveEditPrice) || effectiveEditPrice <= 0) {
         return NextResponse.json({ error: 'Valid fixed price is required for fixed-rate ads.' }, { status: 400 });
       }
@@ -715,16 +716,18 @@ export async function PUT(
         .select('price_in_fiat, updated_at')
         .eq('asset_symbol', effectiveAsset)
         .eq('fiat_symbol', effectiveFiat)
+        .order('updated_at', { ascending: false, nullsFirst: false })
+        .limit(1)
         .maybeSingle();
 
-      if (marketError || !marketRow || !marketRow.price_in_fiat || Number(marketRow.price_in_fiat) <= 0) {
+      const refPrice = Number(marketRow?.price_in_fiat);
+      if (marketError || !marketRow || !Number.isFinite(refPrice) || refPrice <= 0) {
         return NextResponse.json(
           { error: `Market reference price is currently unavailable for ${effectiveAsset}/${effectiveFiat}. Please try again later.` },
           { status: 400 }
         );
       }
 
-      const refPrice = Number(marketRow.price_in_fiat);
       const minAllowedPrice = refPrice * 0.50;
       const maxAllowedPrice = refPrice * 1.50;
 

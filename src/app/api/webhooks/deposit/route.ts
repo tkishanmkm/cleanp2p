@@ -186,6 +186,10 @@ export async function POST(req: Request) {
           processedResults.push({ txHash, logIndex, status: 'ignored', message: 'Transfer contract does not match the canonical USDT contract.' });
           continue;
         }
+      } else if (item.tokenContract) {
+        // Native coin credits must not be inferred from arbitrary token-contract events.
+        processedResults.push({ txHash, logIndex, status: 'ignored', message: 'Token-contract event is not eligible for native-asset credit.' });
+        continue;
       }
 
       // Delegate credit and recording atomically to canonical process_deposit_atomic RPC
