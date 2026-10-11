@@ -149,7 +149,8 @@ export function AdminSidebar() {
             {settingsItems.map((item) => (
               <SidebarMenuItem key={item.label}>
                 <Link href={item.href}>
-                  <SidebarMenuButton isActive={pathname === item.href} icon={<item.icon />} tooltip={item.label}>
+                  <SidebarMenuButton isActive={pathname === item.href} tooltip={item.label}>
+                    <item.icon className="mr-2 h-4 w-4" />
                     <span className="flex-grow">{item.label}</span>
                   </SidebarMenuButton>
                 </Link>
