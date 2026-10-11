@@ -280,7 +280,7 @@ export async function POST(
       }
 
       // Canonical RPC call
-      const { data: rpcData, error: rpcError } = await adminClient.rpc('release_trade_escrow', {
+      const { data: rpcData, error: rpcError } = await supabase.rpc('release_trade_escrow', {
         p_trade_id: actualTradeId,
         p_caller_id: user.id,
       });
