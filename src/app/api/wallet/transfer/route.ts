@@ -49,7 +49,11 @@ export async function POST(req: NextRequest) {
     
     const targetIdentifier = String(recipientInput || recipientUsername || '').trim();
     const coinSymbol = String(asset || crypto || 'USDT').toUpperCase().trim();
-    const numericAmount = Number(amount);
+    const numericAmount = typeof amount === 'number'
+      ? amount
+      : typeof amount === 'string' && amount.trim().length > 0
+        ? Number(amount)
+        : Number.NaN;
 
     // Extract and validate client idempotency key
     const headerIdempotencyKey = req.headers.get('x-idempotency-key') || req.headers.get('idempotency-key');
@@ -63,7 +67,7 @@ export async function POST(req: NextRequest) {
       }, { status: 400 });
     }
 
-    if (!targetIdentifier || !coinSymbol || isNaN(numericAmount) || numericAmount <= 0) {
+    if (!targetIdentifier || !coinSymbol || !Number.isFinite(numericAmount) || numericAmount <= 0) {
       return NextResponse.json({ error: 'Invalid transfer payload. Recipient and positive amount required.' }, { status: 400 });
     }
 
