@@ -292,77 +292,19 @@ export async function getAdDetails(adId: string): Promise<ActionResponse<any>> {
       }
     }
 
-    // 5. If still not in database, provide a fully-functional fallback advertisement object
     if (!ad) {
-      ad = {
-        id: adId,
-        public_id: adId,
-        public_ad_id: adId,
-        user_id: 'trader_verified_1',
-        type: 'SELL',
-        ad_type: 'SELL',
-        crypto: 'BTC',
-        asset_symbol: 'BTC',
-        fiat: 'USD',
-        fiat_currency: 'USD',
-        fiat_symbol: 'USD',
-        price: 64250,
-        unit_price: 64250,
-        fixed_rate: 64250,
-        pricing_type: 'FLOAT',
-        margin_percent: 1.5,
-        rate_percent: 1.5,
-        status: 'ACTIVE',
-        active: true,
-        min_limit: 10,
-        max_limit: 5000,
-        min_amount: 10,
-        max_amount: 5000,
-        total_amount: 0.5,
-        available_amount: 0.5,
-        payment_methods: ['Bank Transfer', 'Wise', 'PayPal', 'Revolut'],
-        offer_tags: ['Fast release', 'Verified trader', 'Instant escrow'],
-        terms_conditions: 'Trade securely with escrow protection. Please complete payment using your verified payment method. Coins are released immediately upon payment confirmation.',
-        trader_presence: 'Online',
-        profiles: {
-          id: 'trader_verified_1',
-          username: 'VerifiedTrader',
-          full_name: 'Verified Trader',
-          avatar_url: null,
-          is_online: true,
-          is_verified: true,
-          kyc_status: 'approved',
-          feedback_score: 99.4,
-          positive_feedback: 412,
-          negative_feedback: 2,
-          completed_trades: 410,
-          avg_release_minutes: 3.5,
-          avg_payment_minutes: 4.2,
-          created_at: new Date(Date.now() - 1000 * 60 * 60 * 24 * 180).toISOString(),
-        },
+      return {
+        data: null,
+        error: { message: 'Advertisement not found or no longer available.', code: 'AD_NOT_FOUND' },
       };
-      profileData = ad.profiles;
     }
 
     const sellerId = ad.user_id;
     const assetSymbol = (ad.asset_symbol || ad.crypto || ad.asset || 'BTC').toUpperCase();
 
-    // 6. Fetch trader's current wallet balance for the ad asset
-    let creatorCryptoBalance = Number(ad.total_amount ?? ad.available_amount ?? 0.5);
-    if (sellerId && sellerId !== 'trader_verified_1') {
-      try {
-        const balanceInfo = await fetchUserCryptoBalance(sellerId, assetSymbol);
-        if (balanceInfo.available > 0) {
-          creatorCryptoBalance = balanceInfo.available;
-        }
-      } catch (err) {
-        console.warn('Failed to fetch creator wallet balance:', err);
-      }
-    }
-
     // 7. Fetch trade statistics for the ad creator
-    let totalTrades = Number(profileData?.completed_trades || 120);
-    let completedTrades = Number(profileData?.completed_trades || 118);
+    let totalTrades = Number(profileData?.total_trades ?? profileData?.completed_trades ?? 0);
+    let completedTrades = Number(profileData?.completed_trades ?? 0);
     let totalReleaseMinutes = 0;
 
     if (sellerId && sellerId !== 'trader_verified_1') {
@@ -396,10 +338,10 @@ export async function getAdDetails(adId: string): Promise<ActionResponse<any>> {
 
     const avgReleaseTime = completedTrades > 0 && totalReleaseMinutes > 0
       ? totalReleaseMinutes / completedTrades
-      : Number(profileData?.avg_release_minutes || 3.5);
+      : Number(profileData?.avg_release_minutes || 0);
     const completionRate = totalTrades > 0
       ? (completedTrades / totalTrades) * 100
-      : Number(profileData?.feedback_score || 99);
+      : Number(profileData?.feedback_score || 0);
 
     // 8. Return normalized, type-safe payload
     const normalizedProfile = Array.isArray(ad.profiles) ? ad.profiles[0] : ad.profiles || ad.user || profileData;
@@ -407,7 +349,6 @@ export async function getAdDetails(adId: string): Promise<ActionResponse<any>> {
     return {
       data: {
         ...ad,
-        creator_crypto_balance: creatorCryptoBalance,
         profiles: normalizedProfile || null,
         user: normalizedProfile || null,
         sellerStats: {
