@@ -204,7 +204,7 @@ export default function AdminAdsPage() {
                       <TableCell className="font-mono text-xs">{ad.publicAdId || ad.id}</TableCell>
                       <TableCell>
                         <Link
-                          href={ad.user?.username ? `/users/${ad.user.username}` : '#'}
+                          href={ad.user?.username ? `/users/${ad.user?.username || 'Unknown seller'}` : '#'}
                           className="hover:underline font-medium"
                           onClick={(e) => e.stopPropagation()}
                         >
