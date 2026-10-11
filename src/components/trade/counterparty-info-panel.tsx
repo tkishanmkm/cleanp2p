@@ -127,7 +127,7 @@ export function CounterpartyInfoPanel({
             setIsBlockedByThem(
               targetBlocked.includes(currentUser.id) ||
               targetBlocked.includes(currentUser.user_metadata?.username) ||
-              targetBlocked.includes(currentUser.email?.split('@')[0])
+              targetBlocked.includes(currentUser.email?.split('@')[0] || '__no_email__')
             );
           }
         }
