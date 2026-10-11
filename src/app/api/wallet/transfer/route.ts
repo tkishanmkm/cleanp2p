@@ -142,7 +142,7 @@ export async function POST(req: NextRequest) {
     if (!recipientProfile && isUuid) {
       const { data: profById } = await admin
         .from('profiles')
-        .select('id, username, is_banned, is_restricted, account_status')
+        .select('id, username, is_banned, is_restricted, is_emergency_frozen, account_status')
         .eq('id', cleanTarget)
         .maybeSingle();
       if (profById) {
@@ -154,7 +154,7 @@ export async function POST(req: NextRequest) {
     if (!recipientProfile) {
       const { data: profByEmail } = await admin
         .from('profiles')
-        .select('id, username, is_banned, is_restricted, account_status')
+        .select('id, username, is_banned, is_restricted, is_emergency_frozen, account_status')
         .or(`email.ilike.${cleanTarget},full_name.ilike.${cleanTarget}`)
         .maybeSingle();
       if (profByEmail) {
@@ -173,7 +173,7 @@ export async function POST(req: NextRequest) {
       if (depAddr?.user_id) {
         const { data: profByAddr } = await admin
           .from('profiles')
-          .select('id, username, is_banned, is_restricted, account_status')
+          .select('id, username, is_banned, is_restricted, is_emergency_frozen, account_status')
           .eq('id', depAddr.user_id)
           .maybeSingle();
         if (profByAddr) {
