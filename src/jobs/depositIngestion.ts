@@ -298,12 +298,13 @@ async function scanEvmNativeDeposits(
             if (transfers?.transfers && Array.isArray(transfers.transfers) && transfers.transfers.length > 0) {
               for (const tx of transfers.transfers) {
                 const txHash = tx.hash;
-                const rawTransferValue = String(tx.value ?? '0');
                 let formattedNativeAmount: string;
                 try {
-                  const parsedValue = ethers.parseUnits(rawTransferValue, chainConfig.nativeDecimals);
-                  if (parsedValue <= 0n) continue;
-                  formattedNativeAmount = ethers.formatUnits(parsedValue, chainConfig.nativeDecimals);
+                  const rawValue = tx.rawContract?.value
+                    ? BigInt(tx.rawContract.value)
+                    : ethers.parseUnits(String(tx.value ?? '0'), chainConfig.nativeDecimals);
+                  if (rawValue <= 0n) continue;
+                  formattedNativeAmount = ethers.formatUnits(rawValue, chainConfig.nativeDecimals);
                 } catch {
                   continue;
                 }
@@ -811,20 +812,20 @@ async function scanBtcDeposits(
       if (!Array.isArray(txs)) continue;
 
       for (const tx of txs) {
-        let outputAmountSat = 0;
+        let outputAmountSat = 0n;
         let voutIndex = 0;
 
         for (let i = 0; i < (tx.vout || []).length; i++) {
           const out = tx.vout[i];
           if (out.scriptpubkey_address === btcAddr) {
-            outputAmountSat += out.value || 0;
+            outputAmountSat += BigInt(out.value || 0);
             voutIndex = i;
           }
         }
 
-        if (outputAmountSat > 0) {
+        if (outputAmountSat > 0n) {
           detected++;
-          const btcAmount = ethers.formatUnits(BigInt(outputAmountSat), 8);
+          const btcAmount = ethers.formatUnits(outputAmountSat, 8);
           const isConfirmed = tx.status?.confirmed === true;
           const blockHeight = tx.status?.block_height;
           let confirmations = isConfirmed ? 2 : 0;
@@ -886,20 +887,20 @@ async function scanLtcDeposits(
       if (!Array.isArray(txs)) continue;
 
       for (const tx of txs) {
-        let outputAmountLit = 0;
+        let outputAmountLit = 0n;
         let voutIndex = 0;
 
         for (let i = 0; i < (tx.vout || []).length; i++) {
           const out = tx.vout[i];
           if (out.scriptpubkey_address === ltcAddr) {
-            outputAmountLit += out.value || 0;
+            outputAmountLit += BigInt(out.value || 0);
             voutIndex = i;
           }
         }
 
-        if (outputAmountLit > 0) {
+        if (outputAmountLit > 0n) {
           detected++;
-          const ltcAmount = ethers.formatUnits(BigInt(outputAmountLit), 8);
+          const ltcAmount = ethers.formatUnits(outputAmountLit, 8);
           const isConfirmed = tx.status?.confirmed === true;
           const blockHeight = tx.status?.block_height;
           let confirmations = isConfirmed ? 6 : 0;
@@ -1006,7 +1007,7 @@ export async function refreshPendingDepositConfirmations(): Promise<{
               p_destination_address: destinationAddress,
               p_asset_symbol: 'BTC',
               p_network_code: 'BTC',
-              p_amount: Number(dep.amount),
+              p_amount: String(dep.amount),
               p_tx_hash: dep.tx_hash,
               p_output_index: outputIndex,
               p_block_number: statusData.block_height || null,
@@ -1032,7 +1033,7 @@ export async function refreshPendingDepositConfirmations(): Promise<{
               p_destination_address: destinationAddress,
               p_asset_symbol: 'LTC',
               p_network_code: 'LTC',
-              p_amount: Number(dep.amount),
+              p_amount: String(dep.amount),
               p_tx_hash: dep.tx_hash,
               p_output_index: outputIndex,
               p_block_number: statusData.block_height || null,
@@ -1060,7 +1061,7 @@ export async function refreshPendingDepositConfirmations(): Promise<{
               p_destination_address: destinationAddress,
               p_asset_symbol: assetSymbol,
               p_network_code: normNet,
-              p_amount: Number(dep.amount),
+              p_amount: String(dep.amount),
               p_tx_hash: dep.tx_hash,
               p_output_index: outputIndex,
               p_block_number: receipt.blockNumber,
