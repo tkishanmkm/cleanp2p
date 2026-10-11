@@ -802,6 +802,16 @@ async function scanBtcDeposits(
   }
 
   const btcApiBase = getBtcMempoolApi();
+  let btcTipHeight: number | null = null;
+  try {
+    const tipResponse = await fetch(`${btcApiBase}/blocks/tip/height`);
+    if (tipResponse.ok) {
+      const parsedTip = Number((await tipResponse.text()).trim());
+      if (Number.isSafeInteger(parsedTip) && parsedTip >= 0) btcTipHeight = parsedTip;
+    }
+  } catch {
+    // Without an authoritative tip height, keep confirmations at zero.
+  }
 
   for (const btcAddr of Array.from(monitoredBtcAddresses)) {
     try {
@@ -828,7 +838,9 @@ async function scanBtcDeposits(
           const btcAmount = ethers.formatUnits(outputAmountSat, 8);
           const isConfirmed = tx.status?.confirmed === true;
           const blockHeight = tx.status?.block_height;
-          let confirmations = isConfirmed ? 2 : 0;
+          const confirmations = isConfirmed && blockHeight !== undefined && btcTipHeight !== null && btcTipHeight >= blockHeight
+            ? btcTipHeight - blockHeight + 1
+            : 0;
 
           const { data, error } = await supabaseAdmin.rpc('process_deposit_atomic', {
             p_destination_address: btcAddr,
@@ -848,7 +860,7 @@ async function scanBtcDeposits(
             errors.push(`RPC error for BTC deposit ${tx.txid}: ${error.message}`);
           } else {
             const res = typeof data === 'string' ? JSON.parse(data) : data;
-            if (res?.status === 'credited' || (res?.success && confirmations >= 2)) {
+            if (res?.status === 'credited') {
               credited++;
             }
           }
@@ -877,6 +889,16 @@ async function scanLtcDeposits(
   }
 
   const ltcApiBase = process.env.LTC_MEMPOOL_API || 'https://litecoinspace.org/api';
+  let ltcTipHeight: number | null = null;
+  try {
+    const tipResponse = await fetch(`${ltcApiBase}/blocks/tip/height`);
+    if (tipResponse.ok) {
+      const parsedTip = Number((await tipResponse.text()).trim());
+      if (Number.isSafeInteger(parsedTip) && parsedTip >= 0) ltcTipHeight = parsedTip;
+    }
+  } catch {
+    // Without an authoritative tip height, keep confirmations at zero.
+  }
 
   for (const ltcAddr of Array.from(monitoredLtcAddresses)) {
     try {
@@ -903,7 +925,9 @@ async function scanLtcDeposits(
           const ltcAmount = ethers.formatUnits(outputAmountLit, 8);
           const isConfirmed = tx.status?.confirmed === true;
           const blockHeight = tx.status?.block_height;
-          let confirmations = isConfirmed ? 6 : 0;
+          const confirmations = isConfirmed && blockHeight !== undefined && ltcTipHeight !== null && ltcTipHeight >= blockHeight
+            ? ltcTipHeight - blockHeight + 1
+            : 0;
 
           const { data, error } = await supabaseAdmin.rpc('process_deposit_atomic', {
             p_destination_address: ltcAddr,
@@ -923,7 +947,7 @@ async function scanLtcDeposits(
             errors.push(`RPC error for LTC deposit ${tx.txid}: ${error.message}`);
           } else {
             const res = typeof data === 'string' ? JSON.parse(data) : data;
-            if (res?.status === 'credited' || (res?.success && confirmations >= 6)) {
+            if (res?.status === 'credited') {
               credited++;
             }
           }
@@ -1002,7 +1026,11 @@ export async function refreshPendingDepositConfirmations(): Promise<{
           const res = await fetch(`${btcApiBase}/tx/${dep.tx_hash}/status`);
           if (res.ok) {
             const statusData = await res.json();
-            const confs = statusData.confirmed ? 2 : 0;
+            const tipRes = await fetch(`${btcApiBase}/blocks/tip/height`);
+            const tipHeight = tipRes.ok ? Number((await tipRes.text()).trim()) : NaN;
+            const confs = statusData.confirmed && Number.isSafeInteger(tipHeight) && statusData.block_height != null && tipHeight >= statusData.block_height
+              ? tipHeight - statusData.block_height + 1
+              : 0;
             const { data, error: rpcErr } = await supabaseAdmin.rpc('process_deposit_atomic', {
               p_destination_address: destinationAddress,
               p_asset_symbol: 'BTC',
@@ -1028,7 +1056,11 @@ export async function refreshPendingDepositConfirmations(): Promise<{
           const res = await fetch(`${ltcApiBase}/tx/${dep.tx_hash}/status`);
           if (res.ok) {
             const statusData = await res.json();
-            const confs = statusData.confirmed ? 6 : 0;
+            const tipRes = await fetch(`${ltcApiBase}/blocks/tip/height`);
+            const tipHeight = tipRes.ok ? Number((await tipRes.text()).trim()) : NaN;
+            const confs = statusData.confirmed && Number.isSafeInteger(tipHeight) && statusData.block_height != null && tipHeight >= statusData.block_height
+              ? tipHeight - statusData.block_height + 1
+              : 0;
             const { data, error: rpcErr } = await supabaseAdmin.rpc('process_deposit_atomic', {
               p_destination_address: destinationAddress,
               p_asset_symbol: 'LTC',
