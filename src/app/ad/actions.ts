@@ -640,9 +640,15 @@ export async function createTradeOrderWithEscrow(input: {
     const isInitiatorSelling = isBuyAd;
     const isAdSell = !isBuyAd;
 
-    const adOwnerId = ad.user_id || ad.seller_id || ad.advertiser_id || (ad.profiles && ad.profiles.id) || 'trader_verified_1';
-    const sellerId = isInitiatorSelling ? user.id : adOwnerId;
-    const buyerId = isInitiatorSelling ? adOwnerId : user.id;
+    const adOwnerId = ad.user_id || ad.seller_id || ad.advertiser_id || (ad.profiles && ad.profiles.id);
+    if (!isValidUUID(String(adOwnerId || ''))) {
+      return {
+        data: null,
+        error: { message: 'Advertisement seller identity is invalid.', code: 'INVALID_AD_OWNER' },
+      };
+    }
+    const sellerId = isInitiatorSelling ? user.id : String(adOwnerId);
+    const buyerId = isInitiatorSelling ? String(adOwnerId) : user.id;
 
     // 5.1 Enforce KYC Tier 1 / Tier 2 Business Rules
     // Seller MUST be Tier 2
