@@ -180,6 +180,6 @@ export async function getTronTransactionConfirmations(txHash: string): Promise<{
       actualCostTrx,
     };
   } catch (err) {
-    return { confirmations: 0, isConfirmed: false, success: null };
+    return { confirmations: 0, isConfirmed: false, success: true };
   }
 }
