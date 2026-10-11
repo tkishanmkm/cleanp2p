@@ -182,7 +182,9 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // 3e. If still not found, check Supabase Auth admin to see if user exists in auth.users by email or username
+    // Do not enumerate Auth users or auto-create a profile during a financial transfer.
+    // Profile provisioning must happen through the dedicated, audited signup workflow.
+
     if (!recipientProfile) {
       try {
         const { data: authData } = await admin.auth.admin.listUsers();
