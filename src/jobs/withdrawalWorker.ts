@@ -421,19 +421,25 @@ export async function processAllPendingWithdrawals(maxBatch: number = 20): Promi
   results: WithdrawalProcessResult[];
   locked?: boolean;
 }> {
-  // Acquire distributed singleton advisory lock
+  // Fail closed: this function promises singleton dispatch. If the database
+  // cannot confirm ownership of the lock, do not claim or broadcast payouts.
   let hasLock = false;
   try {
     const { data: lockAcquired, error: lockErr } = await supabaseAdmin.rpc('acquire_withdrawal_worker_lock');
-    if (!lockErr && lockAcquired === true) {
-      hasLock = true;
-    } else if (!lockErr && lockAcquired === false) {
-      console.warn('[Withdrawal Worker Singleton] Another worker instance is currently holding the dispatch lease. Exiting batch run.');
+    if (lockErr) {
+      console.error('[Withdrawal Worker Singleton] Lock acquisition failed; refusing to dispatch withdrawals.', {
+        code: lockErr.code,
+      });
       return { totalProcessed: 0, results: [], locked: true };
     }
+    if (lockAcquired !== true) {
+      console.warn('[Withdrawal Worker Singleton] Lock was not acquired; refusing to dispatch withdrawals.');
+      return { totalProcessed: 0, results: [], locked: true };
+    }
+    hasLock = true;
   } catch (lockRpcErr) {
-    // If RPC is unavailable, proceed defensively
-    hasLock = false;
+    console.error('[Withdrawal Worker Singleton] Lock RPC unavailable; refusing to dispatch withdrawals.', lockRpcErr);
+    return { totalProcessed: 0, results: [], locked: true };
   }
 
   const results: WithdrawalProcessResult[] = [];
