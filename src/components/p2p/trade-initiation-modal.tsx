@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase/client";
 import {
@@ -53,6 +53,7 @@ export function TradeInitiationModal({ ad, isOpen, onClose }: TradeInitiationMod
   const [loading, setLoading] = useState<boolean>(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [sellerAvailableBalance, setSellerAvailableBalance] = useState<number>(0);
+  const idempotencyRef = useRef<{ fingerprint: string; key: string } | null>(null);
 
   const availablePaymentMethods = Array.isArray(ad?.payment_methods) && ad.payment_methods.length > 0
     ? ad.payment_methods
@@ -175,8 +176,14 @@ export function TradeInitiationModal({ ad, isOpen, onClose }: TradeInitiationMod
       }
 
       const paymentMethod = selectedPaymentMethod || availablePaymentMethods[0] || "Bank Transfer";
+      const requestFingerprint = [ad.id, numericCrypto.toFixed(8), numericFiat.toFixed(2), paymentMethod].join(':');
+      if (!idempotencyRef.current || idempotencyRef.current.fingerprint !== requestFingerprint) {
+        idempotencyRef.current = { fingerprint: requestFingerprint, key: crypto.randomUUID() };
+      }
+      const idempotencyKey = idempotencyRef.current.key;
 
-      // 1. First attempt trade creation via secure backend API route
+      // Only the server RPC may create the trade and lock escrow. Reuse the same
+      // key for retries of this exact request so a lost response cannot duplicate a trade.
       let tradeId: string | null = null;
       try {
         const response = await fetch('/api/trades/initiate', {
@@ -185,7 +192,7 @@ export function TradeInitiationModal({ ad, isOpen, onClose }: TradeInitiationMod
           body: JSON.stringify({
             adId: ad.id,
             // Server derives buyer/seller from the authenticated session and ad ownership.
-            idempotencyKey: crypto.randomUUID(),
+            idempotencyKey,
             cryptoAmount: numericCrypto,
             cryptoSymbol: ad.asset_symbol,
             rate: ad.price,
