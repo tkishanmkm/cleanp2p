@@ -424,7 +424,10 @@ export async function PATCH(
     let newStatus: string;
 
     if (body.active !== undefined) {
-      isActive = Boolean(body.active);
+      if (typeof body.active !== 'boolean' && body.active !== 'true' && body.active !== 'false') {
+        return NextResponse.json({ error: 'The active field must be a boolean.' }, { status: 400 });
+      }
+      isActive = body.active === true || body.active === 'true';
       newStatus = isActive ? 'ACTIVE' : 'INACTIVE';
     } else if (body.status !== undefined) {
       const requestedStatus = String(body.status).toUpperCase().trim();
@@ -624,7 +627,13 @@ export async function PUT(
     if (margin !== undefined && !Number.isFinite(margin)) {
       return NextResponse.json({ error: 'Margin must be a finite number.' }, { status: 400 });
     }
-    if (minAmount !== undefined && maxAmount !== undefined && maxAmount < minAmount) {
+    const effectiveMinAmount = minAmount ?? Number(existingAd.min_amount ?? existingAd.min_limit ?? 0);
+    const effectiveMaxAmount = maxAmount ?? Number(existingAd.max_amount ?? existingAd.max_limit ?? Number.POSITIVE_INFINITY);
+    if (
+      Number.isFinite(effectiveMinAmount) &&
+      effectiveMinAmount > 0 &&
+      effectiveMaxAmount < effectiveMinAmount
+    ) {
       return NextResponse.json({ error: 'Maximum limit must be greater than or equal to minimum limit.' }, { status: 400 });
     }
 
