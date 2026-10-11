@@ -26,14 +26,17 @@ export async function GET(request: Request) {
       // Session fetch failed or not present
     }
 
-    if (!effectiveUserId && paramUserId) {
-      effectiveUserId = paramUserId;
-    }
-
     if (!effectiveUserId) {
       return NextResponse.json(
         { success: false, error: 'Unauthorized: User not found' },
         { status: 401 }
+      );
+    }
+
+    if (paramUserId && paramUserId !== effectiveUserId) {
+      return NextResponse.json(
+        { success: false, error: 'Forbidden: Cannot access another user wallet balance' },
+        { status: 403 }
       );
     }
 
