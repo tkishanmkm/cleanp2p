@@ -22,7 +22,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     if (!result.success) {
       return NextResponse.json(
         { error: result.error || result.message },
-        { status: result.statusCode || 400 }
+        { status: result.statusCode || 400, headers: { 'Cache-Control': 'no-store' } }
       );
     }
 
@@ -37,11 +37,11 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       networkFee: result.networkFee,
       totalDebited: result.totalDebited,
       message: result.message,
-    });
-  } catch (err: any) {
+    }, { headers: { 'Cache-Control': 'no-store' } });
+  } catch {
     return NextResponse.json(
-      { error: err.message || 'Internal server error' },
-      { status: 500 }
+      { error: 'Withdrawal request could not be processed. Please try again later.' },
+      { status: 500, headers: { 'Cache-Control': 'no-store' } }
     );
   }
 }
