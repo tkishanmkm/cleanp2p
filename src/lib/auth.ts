@@ -40,6 +40,7 @@ export interface UserProfile {
   feedbackScore?: number;
   avgReleaseTime?: number;
   badges?: string[];
+  blockedUsers?: string[];
   lastActive?: string | Date;
   btc_balance?: number;
   eth_balance?: number;
@@ -563,6 +564,7 @@ export async function getUserProfile(userId: string): Promise<UserProfile | null
       feedbackScore: Number(data.feedback_score ?? data.feedbackScore ?? 0),
       avgReleaseTime: Number(data.avg_release_time ?? data.avg_release_minutes ?? data.avgReleaseTime ?? 0),
       badges: Array.isArray(data.badges) ? data.badges : [],
+      blockedUsers: Array.isArray(data.blocked_users) ? data.blocked_users : [],
       lastActive: data.last_active || data.updated_at || new Date().toISOString(),
       btc_balance: btcVal,
       eth_balance: ethVal,
