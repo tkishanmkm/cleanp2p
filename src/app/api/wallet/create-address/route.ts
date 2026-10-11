@@ -17,8 +17,8 @@ const authClient = createClient(
 
 async function resolveAuthenticatedUserId(req: NextRequest): Promise<string | null> {
   const authHeader = req.headers.get('authorization');
-  if (authHeader?.match(/^Bearer\\s+/i)) {
-    const token = authHeader.replace(/^Bearer\\s+/i, '').trim();
+  if (authHeader?.match(/^Bearer\s+/i)) {
+    const token = authHeader.replace(/^Bearer\s+/i, '').trim();
     const { data, error } = await authClient.auth.getUser(token);
     if (!error && data.user?.id) return data.user.id;
   }
