@@ -173,7 +173,7 @@ async function performReconciliation() {
         .eq('asset_symbol', asset);
 
       // Record audit log
-      await admin
+      const { error: auditLogError } = await admin
         .from('audit_logs')
         .insert({
           action: 'LEDGER_DISCREPANCY_AUTO_FREEZE',
@@ -187,7 +187,8 @@ async function performReconciliation() {
           },
           created_at: new Date().toISOString(),
         })
-        .catch((e: any) => console.warn('Audit log insert notice:', e.message));
+        ;
+      if (auditLogError) console.warn('Audit log insert notice:', auditLogError.message);
 
       record.frozen = true;
       flaggedAccounts.push(record);
