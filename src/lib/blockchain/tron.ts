@@ -148,7 +148,8 @@ export async function getTronTransactionConfirmations(txHash: string): Promise<{
     // Get transaction info
     const txInfo = await tronWeb.trx.getTransactionInfo(txHash);
     if (!txInfo || !txInfo.blockNumber) {
-      return { confirmations: 0, isConfirmed: false, success: false };
+      // A missing transaction-info response is an unknown state, not proof of failure.
+      return { confirmations: 0, isConfirmed: false, success: true };
     }
 
     // Get current block
