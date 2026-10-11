@@ -58,7 +58,7 @@ export async function pauseAllAds(adminId: string, adminEmail: string): Promise<
         is_active: false,
       })
       .eq("is_active", true)
-      .catch(() => {});
+      ;
 
     // Save timestamp in system_settings
     await supabase
