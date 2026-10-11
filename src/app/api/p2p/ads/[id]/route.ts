@@ -188,16 +188,23 @@ export async function PATCH(
     let adsMutated = false;
     let updatedResult: any = null;
 
+    for (const flagName of ['active', 'is_active'] as const) {
+      const flag = body[flagName];
+      if (flag !== undefined && typeof flag !== 'boolean' && flag !== 'true' && flag !== 'false') {
+        return NextResponse.json({ error: `${flagName} must be a boolean.` }, { status: 400 });
+      }
+    }
+
     const hasStatus = body.status !== undefined || body.active !== undefined || body.is_active !== undefined;
     let newStatus: string | undefined = undefined;
     let isActive: boolean | undefined = undefined;
 
     if (hasStatus) {
       if (body.active !== undefined) {
-        isActive = Boolean(body.active);
+        isActive = body.active === true || body.active === 'true';
         newStatus = isActive ? 'ACTIVE' : 'INACTIVE';
       } else if (body.is_active !== undefined) {
-        isActive = Boolean(body.is_active);
+        isActive = body.is_active === true || body.is_active === 'true';
         newStatus = isActive ? 'ACTIVE' : 'INACTIVE';
       } else if (body.status !== undefined) {
         newStatus = String(body.status).toUpperCase().trim();
@@ -229,7 +236,6 @@ export async function PATCH(
         const maxL = body.max_limit ?? body.max_amount;
         p2pPayload.max_limit = maxL;
         p2pPayload.max_amount = maxL;
-        p2pPayload.available_amount = maxL;
       }
       if (body.rate_percent !== undefined) {
         p2pPayload.rate_percent = body.rate_percent;
