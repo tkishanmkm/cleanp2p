@@ -154,6 +154,10 @@ export type User = {
   id: string;
   userId: string;
   oldUserId?: string;
+  username?: string;
+  email?: string;
+  displayName?: string;
+  isSuspended?: boolean;
   fullName: string;
   dob: string;
   country?: string;
