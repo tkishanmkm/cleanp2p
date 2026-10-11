@@ -66,6 +66,7 @@ export function TradeInitiationModal({ ad, isOpen, onClose }: TradeInitiationMod
   // Reset inputs and fetch seller balance when modal opens with a new ad
   useEffect(() => {
     if (isOpen && ad) {
+      idempotencyRef.current = null;
       setFiatAmount("");
       setCryptoAmount("");
       setErrorMsg(null);
