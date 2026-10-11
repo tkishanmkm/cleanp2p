@@ -426,7 +426,7 @@ export async function POST(
       }
 
       // Canonical RPC call
-      const { data: rpcData, error: rpcError } = await supabase.rpc('expire_p2p_trade', {
+      const { data: rpcData, error: rpcError } = await adminClient.rpc('expire_p2p_trade', {
         p_trade_id: actualTradeId,
       });
 
