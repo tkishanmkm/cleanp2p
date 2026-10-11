@@ -126,13 +126,23 @@ export async function executeCanonicalWithdrawal(input: WithdrawalRequestInput):
   const supabaseAdmin = getSupabaseAdminClient();
 
   // 1. Check Global Emergency Pause
-  const { data: settings } = await supabaseAdmin
+  const { data: settings, error: settingsError } = await supabaseAdmin
     .from('platform_settings')
     .select('global_kill_switch_active, withdrawals_enabled, max_single_withdrawal_usd, withdrawal_approval_threshold_usd, daily_withdrawal_limit_usd')
     .eq('id', 1)
     .maybeSingle();
 
-  if (settings && (settings.global_kill_switch_active || !settings.withdrawals_enabled)) {
+  if (settingsError || !settings) {
+    return {
+      success: false,
+      status: 'PLATFORM_SETTINGS_UNAVAILABLE',
+      error: 'Withdrawal controls could not be verified. Please try again later.',
+      message: 'Withdrawals are temporarily unavailable while platform controls are verified.',
+      statusCode: 503,
+    };
+  }
+
+  if (settings.global_kill_switch_active || !settings.withdrawals_enabled) {
     return {
       success: false,
       status: 'REJECTED',
@@ -382,21 +392,47 @@ export async function executeCanonicalWithdrawal(input: WithdrawalRequestInput):
   // RULE B: ROLLING 24-HOUR DAILY WITHDRAWAL LIMIT
   // =========================================================================
   const oneDayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
-  const { data: past24hWithdrawals } = await supabaseAdmin
-    .from('withdrawals')
-    .select('amount, asset_symbol, created_at')
-    .eq('user_id', user.id)
-    .gte('created_at', oneDayAgo)
-    .in('status', ['completed', 'processing', 'QUEUED', 'PENDING_APPROVAL', 'APPROVED', 'approved', 'pending']);
+  const [legacyWithdrawalsResult, onchainWithdrawalsResult] = await Promise.all([
+    supabaseAdmin
+      .from('withdrawals')
+      .select('id, amount, asset_symbol, created_at, status')
+      .eq('user_id', user.id)
+      .gte('created_at', oneDayAgo)
+      .in('status', ['completed', 'COMPLETED', 'processing', 'PROCESSING', 'QUEUED', 'PENDING_APPROVAL', 'APPROVED', 'approved', 'pending', 'PENDING']),
+    supabaseAdmin
+      .from('onchain_withdrawals')
+      .select('id, amount, asset_symbol, created_at, status')
+      .eq('user_id', user.id)
+      .gte('created_at', oneDayAgo)
+      .in('status', ['NEEDS_APPROVAL', 'needs_approval', 'PENDING_APPROVAL', 'pending_approval', 'PENDING', 'pending', 'QUEUED', 'BROADCASTED', 'PROCESSING', 'AMBIGUOUS_BROADCAST', 'COMPLETED', 'CONFIRMED']),
+  ]);
+
+  if (legacyWithdrawalsResult.error || onchainWithdrawalsResult.error) {
+    return {
+      success: false,
+      status: 'WITHDRAWAL_HISTORY_UNAVAILABLE',
+      error: 'Withdrawal history could not be verified. Please try again later.',
+      message: 'Withdrawals are temporarily unavailable while limits are verified.',
+      statusCode: 503,
+    };
+  }
+
+  // The legacy and on-chain tables may contain the same withdrawal ID. Count each
+  // operation once, preferring the canonical on-chain row when IDs overlap.
+  const withdrawalsById = new Map<string, { amount: number | string; asset_symbol: string | null }>();
+  for (const w of legacyWithdrawalsResult.data || []) {
+    withdrawalsById.set(String(w.id), { amount: w.amount, asset_symbol: w.asset_symbol });
+  }
+  for (const w of onchainWithdrawalsResult.data || []) {
+    withdrawalsById.set(String(w.id), { amount: w.amount, asset_symbol: w.asset_symbol });
+  }
 
   let rolling24hUsd = 0;
-  if (past24hWithdrawals && past24hWithdrawals.length > 0) {
-    for (const w of past24hWithdrawals) {
-      const wAsset = w.asset_symbol || 'USDT';
-      const wAmount = Number(w.amount || 0);
-      const wUsd = await calculateWithdrawalUsdEquivalent(wAsset, wAmount);
-      rolling24hUsd += wUsd;
-    }
+  for (const w of withdrawalsById.values()) {
+    const wAsset = w.asset_symbol || 'USDT';
+    const wAmount = Number(w.amount || 0);
+    const wUsd = await calculateWithdrawalUsdEquivalent(wAsset, wAmount);
+    rolling24hUsd += wUsd;
   }
 
   if (rolling24hUsd + usdEquivalent > dailyLimitUsd) {
