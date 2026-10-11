@@ -32,19 +32,43 @@ export async function POST(req: NextRequest) {
     });
 
     if (rpcError) {
+      console.error('[Withdrawal Approval] RPC failed:', {
+        code: rpcError.code,
+        details: rpcError.details,
+        hint: rpcError.hint,
+      });
       return NextResponse.json(
-        { error: rpcError.message || 'Failed to approve withdrawal' },
-        { status: 400 }
+        { error: 'Failed to approve withdrawal.' },
+        { status: 400, headers: { 'Cache-Control': 'no-store' } }
+      );
+    }
+
+    // SECURITY DEFINER RPCs may return a business-level rejection as JSON
+    // without raising a Postgres error. Never report approval unless its
+    // returned result indicates success.
+    const result =
+      approvalResult && typeof approvalResult === 'object'
+        ? approvalResult as Record<string, unknown>
+        : null;
+    if (
+      result &&
+      (result.success === false ||
+        result.approved === false ||
+        ['FAILED', 'REJECTED', 'ERROR'].includes(String(result.status || '').toUpperCase()))
+    ) {
+      return NextResponse.json(
+        { error: 'Withdrawal was not approved.', code: String(result.code || 'WITHDRAWAL_NOT_APPROVED') },
+        { status: 409, headers: { 'Cache-Control': 'no-store' } }
       );
     }
 
     return NextResponse.json({
       success: true,
-      status: 'QUEUED',
+      status: typeof result?.status === 'string' ? result.status : 'QUEUED',
       withdrawalId,
       approvedBy: callerId,
-      message: 'Withdrawal approved and queued for broadcast.',
-    });
+      message: 'Withdrawal approval request completed.',
+    }, { headers: { 'Cache-Control': 'no-store' } });
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : 'Unknown server error.';
     return NextResponse.json(
