@@ -51,20 +51,23 @@ export async function POST(req: NextRequest) {
         ? approvalResult as Record<string, unknown>
         : null;
     if (
-      result &&
-      (result.success === false ||
-        result.approved === false ||
-        ['FAILED', 'REJECTED', 'ERROR'].includes(String(result.status || '').toUpperCase()))
+      !result ||
+      result.success !== true ||
+      result.approved === false ||
+      ['FAILED', 'REJECTED', 'ERROR'].includes(String(result.status || '').toUpperCase())
     ) {
       return NextResponse.json(
-        { error: 'Withdrawal was not approved.', code: String(result.code || 'WITHDRAWAL_NOT_APPROVED') },
+        {
+          error: 'Withdrawal was not approved.',
+          code: String(result?.code || 'WITHDRAWAL_NOT_APPROVED'),
+        },
         { status: 409, headers: { 'Cache-Control': 'no-store' } }
       );
     }
 
     return NextResponse.json({
       success: true,
-      status: typeof result?.status === 'string' ? result.status : 'QUEUED',
+      status: typeof result.status === 'string' ? result.status : 'QUEUED',
       withdrawalId,
       approvedBy: callerId,
       message: 'Withdrawal approval request completed.',
