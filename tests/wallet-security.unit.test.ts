@@ -1,10 +1,6 @@
 import assert from 'node:assert/strict';
 import { verifyWorkerAuth } from '../src/lib/security/worker-auth';
-import {
-  normalizeNetwork,
-  validateDestinationAddress,
-  SUPPORTED_ASSETS,
-} from '../src/lib/services/withdrawalService';
+import { getSupabaseAdminClient } from '../src/lib/supabase/server';
 import { POST as disabledDepositPost } from '../src/app/api/wallet/deposit/route';
 
 async function main() {
@@ -33,14 +29,21 @@ async function main() {
     'incorrect worker secret must be rejected'
   );
 
-  assert.equal(normalizeNetwork('TRON'), 'TRC20');
-  assert.equal(normalizeNetwork('BSC'), 'BEP20');
-  assert.equal(normalizeNetwork('BITCOIN'), 'BTC');
-
-  const validEvm = '0x000000000000000000000000000000000000dead';
-  assert.equal(validateDestinationAddress(validEvm, 'ERC20').valid, true);
-  assert.equal(validateDestinationAddress('not-an-address', 'ERC20').valid, false);
-  assert.deepEqual([...SUPPORTED_ASSETS], ['USDT']);
+  const previousServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  try {
+    delete process.env.SUPABASE_SERVICE_ROLE_KEY;
+    assert.throws(
+      () => getSupabaseAdminClient(),
+      /SUPABASE_SERVICE_ROLE_KEY is required/,
+      'privileged Supabase client must fail closed without a service-role key'
+    );
+  } finally {
+    if (previousServiceRoleKey === undefined) {
+      delete process.env.SUPABASE_SERVICE_ROLE_KEY;
+    } else {
+      process.env.SUPABASE_SERVICE_ROLE_KEY = previousServiceRoleKey;
+    }
+  }
 
   const disabledDepositResponse = await disabledDepositPost();
   assert.equal(disabledDepositResponse.status, 503);
