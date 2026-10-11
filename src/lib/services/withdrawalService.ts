@@ -10,6 +10,7 @@ import {
 } from '@/lib/fees';
 import { isValidTronAddress } from '@/lib/blockchain/tron';
 import { isTier2User } from '@/lib/kyc';
+import { parseWithdrawalAmount } from '@/lib/wallet/amount-validation';
 
 // The live canonical custodial withdrawal RPC currently supports USDT only.
 // Do not route other assets through the legacy request_withdrawal function,
@@ -282,26 +283,13 @@ export async function executeCanonicalWithdrawal(input: WithdrawalRequestInput):
     };
   }
 
-  // USDT uses 6 decimal places on the supported withdrawal networks.
-  // Reject partial parses (for example "10abc"), exponent notation, NaN, and Infinity.
-  const amountText = typeof rawAmount === 'number' ? String(rawAmount) : String(rawAmount).trim();
-  if (!/^(?:\d+(?:\\.\d{0,6})?|\\.\d{1,6})$/.test(amountText)) {
+  const parsedAmount = parseWithdrawalAmount(rawAmount);
+  if (parsedAmount === null) {
     return {
       success: false,
       status: 'INVALID_AMOUNT',
       error: 'Amount must be a positive decimal with at most 6 decimal places',
       message: 'Invalid withdrawal amount',
-      statusCode: 400,
-    };
-  }
-
-  const parsedAmount = Number(amountText);
-  if (!Number.isFinite(parsedAmount) || parsedAmount <= 0) {
-    return {
-      success: false,
-      status: 'INVALID_AMOUNT',
-      error: 'Amount must be a positive number',
-      message: 'Amount must be a positive number',
       statusCode: 400,
     };
   }
