@@ -116,8 +116,8 @@ export default function AdminAdsPage() {
     const lower = searchTerm.toLowerCase();
     return ads.filter(
       (ad) =>
-        ad.publicAdId.toLowerCase().includes(lower) ||
-        ad.user.username.toLowerCase().includes(lower) ||
+        (ad.publicAdId || ad.id || '').toLowerCase().includes(lower) ||
+        (ad.user?.username || '').toLowerCase().includes(lower) ||
         ad.crypto.toLowerCase().includes(lower) ||
         ad.fiatCurrency.toLowerCase().includes(lower)
     );
@@ -201,10 +201,10 @@ export default function AdminAdsPage() {
                 {!isLoading &&
                   filteredAds?.map((ad) => (
                     <TableRow key={ad.id} onClick={() => handleRowClick(ad)} className="cursor-pointer">
-                      <TableCell className="font-mono text-xs">{ad.publicAdId}</TableCell>
+                      <TableCell className="font-mono text-xs">{ad.publicAdId || ad.id}</TableCell>
                       <TableCell>
                         <Link
-                          href={`/users/${ad.user.username}`}
+                          href={ad.user?.username ? `/users/${ad.user.username}` : '#'}
                           className="hover:underline font-medium"
                           onClick={(e) => e.stopPropagation()}
                         >
@@ -264,7 +264,7 @@ export default function AdminAdsPage() {
                   <CardContent className="text-sm space-y-2">
                     <div className="flex justify-between">
                       <span className="text-muted-foreground">User</span>
-                      <span className="font-medium">{ad.user.username}</span>
+                      <span className="font-medium">{ad.user?.username || 'Unknown seller'}</span>
                     </div>
                     <div className="flex justify-between">
                       <span className="text-muted-foreground">Price</span>
@@ -304,7 +304,7 @@ export default function AdminAdsPage() {
             <div className="space-y-4 py-4 text-sm">
               <div className="flex justify-between items-center">
                 <span className="text-muted-foreground">User</span>
-                <span className="font-medium">{selectedAd.user.username}</span>
+                <span className="font-medium">{selectedAd.user?.username || 'Unknown seller'}</span>
               </div>
               {selectedAd.offerLabel && (
                 <div className="flex justify-between items-center">
