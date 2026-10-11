@@ -40,6 +40,8 @@ interface UserProfileClientProps {
     created_at?: string | null;
     last_seen_at?: string | null;
     last_seen?: string | null;
+    last_active?: string | null;
+    is_online?: boolean;
     merchant_tier?: string | null;
     bio?: string | null;
   };
@@ -224,9 +226,9 @@ export default function UserProfileClient({
             is_id_verified: verification.isVerified,
             kyc_status: verification.isVerified ? 'VERIFIED' : verification.isPending ? 'PENDING' : 'UNVERIFIED',
             verification_tier: verification.tier,
-            last_seen: latest.last_seen || latest.last_seen_at || latest.last_active || prev.last_seen,
-            last_seen_at: latest.last_seen_at || latest.last_seen || prev.last_seen_at,
-            last_active: latest.last_active || latest.last_seen || prev.last_active,
+            last_seen: latest.last_seen_at || prev.last_seen,
+            last_seen_at: latest.last_seen_at || prev.last_seen_at,
+            last_active: latest.last_seen_at || prev.last_active,
             is_online: latest.is_online ?? prev.is_online,
           }));
         }
