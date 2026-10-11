@@ -26,15 +26,18 @@ function mapStatusToDbValues(statusInput: string): string[] {
 export async function GET(req: NextRequest) {
   try {
     const supabase = await createClient();
-    const { data: { user } } = await supabase.auth.getUser();
+    const { data: { user }, error: authError } = await supabase.auth.getUser();
+
+    if (authError || !user) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
 
     const { searchParams } = new URL(req.url);
     const requestedUserId = searchParams.get('user_id');
-    const targetUserId = user?.id || requestedUserId;
-
-    if (!targetUserId) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    if (requestedUserId && requestedUserId !== user.id) {
+      return NextResponse.json({ error: 'Forbidden: cannot access another user deposit history.' }, { status: 403 });
     }
+    const targetUserId = user.id;
 
     const rawPage = parseInt(searchParams.get('page') || '1', 10);
     const rawLimit = parseInt(searchParams.get('limit') || '50', 10);
