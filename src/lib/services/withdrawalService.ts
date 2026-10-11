@@ -285,7 +285,7 @@ export async function executeCanonicalWithdrawal(input: WithdrawalRequestInput):
   // USDT uses 6 decimal places on the supported withdrawal networks.
   // Reject partial parses (for example "10abc"), exponent notation, NaN, and Infinity.
   const amountText = typeof rawAmount === 'number' ? String(rawAmount) : String(rawAmount).trim();
-  if (!/^(?:\\d+(?:\\.\\d{0,6})?|\\.\\d{1,6})$/.test(amountText)) {
+  if (!/^(?:\d+(?:\\.\d{0,6})?|\\.\d{1,6})$/.test(amountText)) {
     return {
       success: false,
       status: 'INVALID_AMOUNT',
