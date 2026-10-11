@@ -186,7 +186,7 @@ export async function POST(
       }
 
       // Execute Atomic Database RPC mark_p2p_trade_paid
-      const { data: rpcData, error: rpcError } = await adminClient.rpc('mark_p2p_trade_paid', {
+      const { data: rpcData, error: rpcError } = await supabase.rpc('mark_p2p_trade_paid', {
         p_trade_id: actualTradeId,
         p_caller_id: user.id,
         p_payment_method: confirmedPaymentMethod,
@@ -331,7 +331,7 @@ export async function POST(
       const now = new Date().toISOString();
 
       // Canonical RPC call
-      const { data: rpcData, error: rpcError } = await adminClient.rpc('cancel_p2p_trade', {
+      const { data: rpcData, error: rpcError } = await supabase.rpc('cancel_p2p_trade', {
         p_trade_id: actualTradeId,
         p_caller_id: user.id,
       });
@@ -426,7 +426,7 @@ export async function POST(
       }
 
       // Canonical RPC call
-      const { data: rpcData, error: rpcError } = await adminClient.rpc('expire_p2p_trade', {
+      const { data: rpcData, error: rpcError } = await supabase.rpc('expire_p2p_trade', {
         p_trade_id: actualTradeId,
       });
 
