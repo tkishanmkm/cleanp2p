@@ -35,7 +35,7 @@ export async function GET(
   { params }: { params: Promise<{ tradeId: string }> | { tradeId: string } }
 ) {
   try {
-    const resolvedParams = typeof (params as any)?.then === 'function' ? await params : params;
+    const resolvedParams = await Promise.resolve(params);
     const tradeParam = resolvedParams.tradeId;
 
     if (!tradeParam) {
