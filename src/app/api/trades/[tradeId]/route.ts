@@ -145,7 +145,7 @@ export async function GET(
         .order('created_at', { ascending: true }),
     ]);
 
-    const rawList = [...(chatMsgs || [])];
+    const rawList: Array<Record<string, any>> = [...((chatMsgs || []) as Array<Record<string, any>>)];
     const seenTexts = new Set(rawList.map((m: any) => `${m.sender_id}:${m.message}:${m.created_at}`));
     (legacyMsgs || []).forEach((lm: any) => {
       const key = `${lm.sender_id}:${lm.message}:${lm.created_at}`;
