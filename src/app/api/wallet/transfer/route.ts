@@ -123,14 +123,14 @@ export async function POST(req: NextRequest) {
     }
 
     // 3. Resolve recipient: Can be username, profile ID, user's email, or user's deposit address
-    let recipientProfile: { id: string; username: string; is_banned?: boolean; is_restricted?: boolean; account_status?: string } | null = null;
+    let recipientProfile: { id: string; username: string; is_banned?: boolean; is_restricted?: boolean; is_emergency_frozen?: boolean; account_status?: string } | null = null;
     const cleanTarget = targetIdentifier.replace(/^@/, '').trim();
     const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(cleanTarget);
 
     // 3a. Check by exact / case-insensitive username in profiles
     const { data: profByUsername } = await admin
       .from('profiles')
-      .select('id, username, is_banned, is_restricted, account_status')
+      .select('id, username, is_banned, is_restricted, is_emergency_frozen, account_status')
       .ilike('username', cleanTarget)
       .maybeSingle();
 
@@ -247,7 +247,7 @@ export async function POST(req: NextRequest) {
     if (
       recipientProfile.is_banned ||
       recipientProfile.is_restricted ||
-      (recipientProfile as any).is_emergency_frozen ||
+      recipientProfile.is_emergency_frozen ||
       recipientProfile.account_status === 'suspended' ||
       recipientProfile.account_status === 'banned' ||
       recipientProfile.account_status === 'restricted' ||
