@@ -5,6 +5,7 @@ import { generateTradeId } from '@/lib/id-generator';
 import { sendNewTradeNotificationEmail } from '@/lib/email/tradeEmailService';
 import { assertPlatformControlAllowed } from '@/lib/platform-guard';
 import { hasPendingWithdrawalApproval } from '@/lib/withdrawal-security';
+import { resolveAuthoritativeAdQuote } from '@/lib/p2p/authoritativeAdQuote';
 
 export const dynamic = 'force-dynamic';
 
@@ -62,8 +63,6 @@ export async function POST(req: Request) {
     const rawFiat = body.fiatAmount ?? body.fiat_amount;
     const rawCrypto = body.cryptoAmount ?? body.crypto_amount;
     const customPaymentMethod = body.paymentMethod || body.payment_method;
-    const customPrice = body.price || body.rate;
-    const customFiatCurrency = body.fiatCurrency || body.fiat_currency;
     const tradeRef = body.tradeRef || body.trade_ref || generateTradeId();
     const idempotencyKey =
       (body.idempotencyKey ||
@@ -122,14 +121,15 @@ export async function POST(req: Request) {
     }
 
     // 3. Resolve numerical amounts with exact precision
-    const rawPrice = customPrice ?? ad.fixed_rate ?? ad.price;
-    const unitPrice = Number(rawPrice);
-    if (!rawPrice || isNaN(unitPrice) || unitPrice <= 0) {
+    const adQuote = await resolveAuthoritativeAdQuote(ad);
+    if (!adQuote) {
       return NextResponse.json(
         { error: 'Advertisement unit price is invalid or market price is unavailable.' },
         { status: 400 }
       );
     }
+    const unitPrice = adQuote.price;
+    const resolvedFiatCurrency = adQuote.fiatCurrency;
     let calculatedCrypto = parseFloat(rawCrypto);
     let numericFiat = parseFloat(rawFiat);
 
@@ -191,7 +191,6 @@ export async function POST(req: Request) {
       resolvedPaymentMethod = trimmedCustom || 'Bank Transfer';
     }
 
-    const resolvedFiatCurrency = customFiatCurrency || ad.fiat_currency || ad.fiat || 'USD';
     const adIdentifier = String(ad.id || ad.public_ad_id || adId);
 
     // 5. Call Canonical Atomic Database RPC
@@ -253,10 +252,10 @@ export async function POST(req: Request) {
           sellerId: String(sellerId),
           buyerId: String(buyerId),
           cryptoAmount: calculatedCrypto,
-          fiatAmount: numericFiat,
+          fiatAmount: Number(rpcResult?.fiat_amount ?? numericFiat),
           fiatCurrency: resolvedFiatCurrency,
           asset: String(rpcResult.asset || ad.crypto || 'USDT'),
-          price: unitPrice,
+          price: Number(rpcResult?.price ?? unitPrice),
           paymentMethod: resolvedPaymentMethod,
           status: 'pending',
           createdAt: new Date().toISOString(),
