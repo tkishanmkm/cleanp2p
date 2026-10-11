@@ -54,33 +54,7 @@ export async function GET(
       }
     }
 
-    // Fetch creator's wallet balance for the ad coin
-    let creatorBalance: number | null = null;
-    const coin = (ad.crypto || ad.coin || ad.asset || 'USDT').toUpperCase();
-
-    if (creatorId) {
-      try {
-        const { data: wallet } = await supabaseAdmin
-          .from('user_wallets')
-          .select('available_balance, balance, locked_balance')
-          .eq('user_id', creatorId)
-          .ilike('asset_symbol', coin)
-          .maybeSingle();
-
-        if (wallet) {
-          const avail = Number(wallet.available_balance ?? (Number(wallet.balance || 0) - Number(wallet.locked_balance || 0)));
-          creatorBalance = Math.max(0, avail);
-        } else if (creatorProfile) {
-          const colKey = `${coin.toLowerCase()}_balance`;
-          if (creatorProfile[colKey] !== undefined) {
-            creatorBalance = Number(creatorProfile[colKey] || 0);
-          }
-        }
-      } catch (wErr) {
-        console.warn('Wallet balance fetch error in /api/p2p/ads/[id]:', wErr);
-      }
-    }
-
+    // Never expose a seller's private wallet balance through a public ad endpoint.
     // STRICT USERNAME ENFORCEMENT: lowercase letters, numbers, dot, underscore only
     const username = creatorProfile?.username || ad.user_display_name || 'trader';
     const lastActive = creatorProfile?.last_seen || creatorProfile?.last_seen_at || creatorProfile?.last_active || creatorProfile?.updated_at || null;
@@ -104,7 +78,6 @@ export async function GET(
           avg_pay_time: creatorProfile?.avg_pay_time || null,
           avg_payment_minutes: creatorProfile?.avg_payment_minutes || null,
         },
-        creatorCryptoBalance: creatorBalance,
       },
     });
   } catch (err: any) {
