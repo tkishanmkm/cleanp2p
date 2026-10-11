@@ -62,6 +62,8 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
     ETH: { available: 0, inEscrow: 0, inWithdrawal: 0 },
     LTC: { available: 0, inEscrow: 0, inWithdrawal: 0 },
     USDT: { available: 0, inEscrow: 0, inWithdrawal: 0 },
+    BNB: { available: 0, inEscrow: 0, inWithdrawal: 0 },
+    TRX: { available: 0, inEscrow: 0, inWithdrawal: 0 },
   });
 
   const [isLoading, setIsLoading] = useState<boolean>(true);
@@ -91,6 +93,8 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
         ETH: { available: 0, inEscrow: 0, inWithdrawal: 0 },
         LTC: { available: 0, inEscrow: 0, inWithdrawal: 0 },
         USDT: { available: 0, inEscrow: 0, inWithdrawal: 0 },
+        BNB: { available: 0, inEscrow: 0, inWithdrawal: 0 },
+        TRX: { available: 0, inEscrow: 0, inWithdrawal: 0 },
       };
 
       // 1. Primary: Server-side API endpoint with admin privileges and RLS bypass
