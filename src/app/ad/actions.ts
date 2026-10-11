@@ -433,6 +433,7 @@ export async function getAdDetails(adId: string): Promise<ActionResponse<any>> {
 export async function createAd(formData: any): Promise<ActionResponse<any>> {
   try {
     const supabase = await createClient();
+    const adminClient = getSupabaseAdminClient();
 
     const { data: { user }, error: authError } = await supabase.auth.getUser();
 
@@ -574,40 +575,15 @@ export async function createTradeOrderWithEscrow(input: {
       }
     }
 
-    // C. If still not found, construct fallback active advertisement object so trade creation can succeed seamlessly
     if (!ad) {
-      ad = {
-        id: cleanAdId,
-        public_id: cleanAdId,
-        public_ad_id: cleanAdId,
-        user_id: 'trader_verified_1',
-        type: 'SELL',
-        ad_type: 'SELL',
-        crypto: 'BTC',
-        asset_symbol: 'BTC',
-        fiat: 'USD',
-        fiat_currency: 'USD',
-        fiat_symbol: 'USD',
-        price: 64250,
-        unit_price: 64250,
-        fixed_rate: 64250,
-        pricing_type: 'FLOAT',
-        margin_percent: 1.5,
-        status: 'ACTIVE',
-        active: true,
-        is_active: true,
-        min_limit: 10,
-        max_limit: 10000,
-        min_amount: 10,
-        max_amount: 10000,
-        total_amount: 1.0,
-        available_amount: 1.0,
-        payment_methods: ['Bank Transfer', 'Revolut', 'Wise'],
+      return {
+        data: null,
+        error: { message: 'Advertisement not found or no longer available.', code: 'AD_NOT_FOUND' },
       };
     }
 
     // Rule: Users cannot open trades on their own ads (unless it is a system/demo ad)
-    if (ad.user_id === user.id && ad.user_id !== 'trader_verified_1') {
+    if (ad.user_id === user.id) {
       return {
         data: null,
         error: {
@@ -725,10 +701,6 @@ export async function createTradeOrderWithEscrow(input: {
     // Check Seller available balance comprehensively
     const sellerBalanceInfo = await fetchUserCryptoBalance(sellerId, assetSymbol);
     let currentSellerAvail = sellerBalanceInfo.available;
-
-    if (isAdSell && Number(ad.total_amount || 0) > currentSellerAvail) {
-      currentSellerAvail = Number(ad.total_amount);
-    }
 
     // Effective max limit check
     let effectiveMaxLimit = maxLimit;
@@ -861,6 +833,9 @@ export async function createTradeOrderWithEscrow(input: {
     }
 
     const tradeId = rpcResult.trade_id || rpcResult.id;
+    const resolvedPublicId = String(rpcResult.public_id || rpcResult.trade_public_id || tradeId || '');
+    const resolvedSellerId = sellerId;
+    const resolvedBuyerId = buyerId;
     if (!tradeId) {
       return {
         data: null,
