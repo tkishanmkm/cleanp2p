@@ -75,3 +75,8 @@ export function getSupabaseAdminClient(): SupabaseClient {
 
   return serverAdminClient;
 }
+
+/** Backwards-compatible name for server-only privileged operations. */
+export function createAdminClient(): SupabaseClient {
+  return getSupabaseAdminClient();
+}
