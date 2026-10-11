@@ -42,7 +42,7 @@ export async function checkCircuitBreakers(): Promise<{ allowed: boolean; reason
       .maybeSingle();
 
     if (error || !settings) {
-      return { allowed: true };
+      return { allowed: false, reason: 'Unable to verify platform withdrawal controls; dispatch is paused fail-closed' };
     }
     if (settings.global_kill_switch_active) {
       return { allowed: false, reason: 'Global emergency kill switch is currently active' };
@@ -52,7 +52,7 @@ export async function checkCircuitBreakers(): Promise<{ allowed: boolean; reason
     }
     return { allowed: true };
   } catch (err) {
-    return { allowed: true };
+    return { allowed: false, reason: 'Unable to verify platform withdrawal controls; dispatch is paused fail-closed' };
   }
 }
 
@@ -65,20 +65,22 @@ export async function allocateEvmNonce(
   provider: ethers.JsonRpcProvider
 ): Promise<number> {
   const normNet = normalizeNetworkCode(network);
-  try {
-    const onchainPending = await provider.getTransactionCount(walletAddress, 'pending');
-    const { data: allocatedNonce, error } = await supabaseAdmin.rpc('allocate_hot_wallet_nonce', {
-      p_network: normNet,
-      p_wallet_address: walletAddress,
-      p_onchain_pending_nonce: onchainPending,
-    });
-    if (!error && allocatedNonce !== null && allocatedNonce !== undefined) {
-      return Number(allocatedNonce);
-    }
-  } catch (rpcErr) {
-    console.warn('[Nonce Manager] RPC allocate_hot_wallet_nonce failed, falling back to on-chain count:', rpcErr);
+  const onchainPending = await provider.getTransactionCount(walletAddress, 'pending');
+  const { data: allocatedNonce, error } = await supabaseAdmin.rpc('allocate_hot_wallet_nonce', {
+    p_network: normNet,
+    p_wallet_address: walletAddress,
+    p_onchain_pending_nonce: onchainPending,
+  });
+  if (error || allocatedNonce === null || allocatedNonce === undefined) {
+    // Never broadcast using an uncoordinated fallback nonce: concurrent workers
+    // could reuse it and create ambiguous or duplicate payout attempts.
+    throw new Error('Authoritative nonce allocation failed; refusing to broadcast withdrawal.');
   }
-  return await provider.getTransactionCount(walletAddress, 'pending');
+  const nonce = Number(allocatedNonce);
+  if (!Number.isSafeInteger(nonce) || nonce < 0) {
+    throw new Error('Authoritative nonce allocator returned an invalid nonce.');
+  }
+  return nonce;
 }
 
 /**
@@ -106,6 +108,7 @@ export async function processWithdrawalQueue(): Promise<WithdrawalProcessResult>
   const amountStr = withdrawal.amount.toString();
   const destination = withdrawal.to_address.trim();
   let isLocalCheckStage = true;
+  let broadcastTxHash: string | null = null;
 
   try {
     // BRANCH A: TRON Network (TRC-20 USDT)
@@ -125,11 +128,13 @@ export async function processWithdrawalQueue(): Promise<WithdrawalProcessResult>
         amount: amountStr,
       });
       const txHash = res.txHash;
+      broadcastTxHash = txHash;
 
-      await supabaseAdmin.rpc('complete_onchain_withdrawal', {
+      const { error: completionError } = await supabaseAdmin.rpc('complete_onchain_withdrawal', {
         p_withdrawal_id: withdrawal.id,
         p_tx_hash: txHash,
       });
+      if (completionError) throw new Error(`TRON transaction broadcast as ${txHash}, but database completion failed: ${completionError.message}`);
 
       console.log(`[Withdrawal Worker] Dispatched TRON payout ${withdrawal.id} (tx: ${txHash})`);
       return {
@@ -180,10 +185,12 @@ export async function processWithdrawalQueue(): Promise<WithdrawalProcessResult>
       });
     }
 
-    await supabaseAdmin.rpc('complete_onchain_withdrawal', {
+    broadcastTxHash = tx.hash;
+    const { error: completionError } = await supabaseAdmin.rpc('complete_onchain_withdrawal', {
       p_withdrawal_id: withdrawal.id,
       p_tx_hash: tx.hash,
     });
+    if (completionError) throw new Error(`EVM transaction broadcast as ${tx.hash}, but database completion failed: ${completionError.message}`);
 
     console.log(`[Withdrawal Worker] Broadcasted EVM payout ${withdrawal.id} on ${network} (tx: ${tx.hash}, nonce: ${nonce})`);
     return {
@@ -227,6 +234,7 @@ export async function processWithdrawalQueue(): Promise<WithdrawalProcessResult>
           .from('onchain_withdrawals')
           .update({
             status: 'AMBIGUOUS_BROADCAST',
+            ...(broadcastTxHash ? { tx_hash: broadcastTxHash } : {}),
             error_message: `Ambiguous broadcast error: ${err.message}`,
             updated_at: new Date().toISOString(),
           })
@@ -236,6 +244,7 @@ export async function processWithdrawalQueue(): Promise<WithdrawalProcessResult>
           .from('withdrawals')
           .update({
             status: 'AMBIGUOUS_BROADCAST',
+            ...(broadcastTxHash ? { tx_hash: broadcastTxHash } : {}),
             broadcast_error: `Ambiguous broadcast error: ${err.message}`,
             updated_at: new Date().toISOString(),
           })
