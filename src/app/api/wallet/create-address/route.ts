@@ -3,7 +3,7 @@ import { cookies } from 'next/headers';
 import { createServerClient } from '@supabase/ssr';
 import { createClient } from '@supabase/supabase-js';
 import { getSupabaseAdminClient } from '@/lib/supabase/server';
-import { getOrDeriveUserDepositAddresses } from '@/lib/hd-derivation-engine';
+import { getOrDeriveUserDepositAddresses, type CryptoDepositAddresses } from '@/lib/hd-derivation-engine';
 
 export const dynamic = 'force-dynamic';
 
@@ -42,8 +42,8 @@ async function resolveAuthenticatedUserId(req: NextRequest): Promise<string | nu
   return null;
 }
 
-function resolveCanonicalAddress(addresses: Record<string, string>, symbol: string): string | null {
-  const map: Record<string, string> = {
+function resolveCanonicalAddress(addresses: CryptoDepositAddresses, symbol: string): string | null {
+  const map: Record<string, keyof CryptoDepositAddresses> = {
     ETH: 'ETH',
     BTC: 'BTC',
     LTC: 'LTC',
@@ -76,7 +76,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     }
 
     const derived = await getOrDeriveUserDepositAddresses(userId);
-    const depositAddress = resolveCanonicalAddress(derived.addresses as Record<string, string>, symbol);
+    const depositAddress = resolveCanonicalAddress(derived.addresses, symbol);
     if (!depositAddress) {
       return NextResponse.json({ success: false, error: 'No canonical deposit address is configured for this asset' }, { status: 503 });
     }
