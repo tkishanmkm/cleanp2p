@@ -298,18 +298,38 @@ async function scanEvmNativeDeposits(
             if (transfers?.transfers && Array.isArray(transfers.transfers) && transfers.transfers.length > 0) {
               for (const tx of transfers.transfers) {
                 const txHash = tx.hash;
-                let formattedNativeAmount: string;
+                const txBlock = parseInt(tx.blockNum, 16);
+
+                // Never credit from an indexer summary alone. Verify the transaction and
+                // successful receipt against the configured chain RPC, including the
+                // actual recipient, native value, and mined block.
+                let canonicalNativeValue: bigint;
                 try {
-                  const rawValue = tx.rawContract?.value
-                    ? BigInt(tx.rawContract.value)
-                    : ethers.parseUnits(String(tx.value ?? '0'), chainConfig.nativeDecimals);
-                  if (rawValue <= 0n) continue;
-                  formattedNativeAmount = ethers.formatUnits(rawValue, chainConfig.nativeDecimals);
+                  const [canonicalTx, receipt] = await Promise.all([
+                    provider.getTransaction(txHash),
+                    provider.getTransactionReceipt(txHash),
+                  ]);
+                  if (
+                    !canonicalTx ||
+                    !receipt ||
+                    receipt.status !== 1 ||
+                    !Number.isSafeInteger(txBlock) ||
+                    receipt.blockNumber !== txBlock ||
+                    canonicalTx.blockNumber !== txBlock ||
+                    !canonicalTx.to ||
+                    canonicalTx.to.toLowerCase() !== address.toLowerCase() ||
+                    canonicalTx.value <= 0n
+                  ) {
+                    continue;
+                  }
+                  canonicalNativeValue = canonicalTx.value;
                 } catch {
+                  // RPC uncertainty must never turn into a credit.
                   continue;
                 }
-                const assetSymbol = (tx.asset || chainConfig.nativeSymbol).toUpperCase();
-                const txBlock = parseInt(tx.blockNum, 16);
+
+                const formattedNativeAmount = ethers.formatUnits(canonicalNativeValue, chainConfig.nativeDecimals);
+                const assetSymbol = chainConfig.nativeSymbol.toUpperCase();
                 const confirmations = latestBlock >= txBlock ? latestBlock - txBlock + 1 : 1;
 
                 detected++;
@@ -355,6 +375,18 @@ async function scanEvmNativeDeposits(
         const toClean = tx.to.toLowerCase();
 
         if (monitoredEvmAddresses.has(toClean) && tx.value > BigInt(0)) {
+          // A transaction may be included in a block but still have reverted.
+          // Require a successful canonical receipt before any balance-changing RPC.
+          let receipt;
+          try {
+            receipt = await provider.getTransactionReceipt(tx.hash);
+          } catch {
+            continue;
+          }
+          if (!receipt || receipt.status !== 1 || receipt.blockNumber !== b) {
+            continue;
+          }
+
           detected++;
           const formattedAmount = ethers.formatUnits(tx.value, chainConfig.nativeDecimals);
           const confirmations = Math.max(1, latestBlock - b + 1);
