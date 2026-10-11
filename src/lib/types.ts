@@ -2,6 +2,20 @@
 
 export type CryptoCurrency = 'BTC' | 'ETH' | 'LTC' | 'USDT' | 'BNB' | 'TRX';
 
+export interface UserWallet {
+  id: string;
+  crypto: CryptoCurrency;
+  chain: string;
+  address?: string | null;
+  balance: number;
+  lockedBalance?: number;
+  available_balance?: number;
+  asset_symbol?: string;
+  deposit_address?: string | null;
+  created_at?: string;
+  updated_at?: string | null;
+}
+
 export interface CurrencyConfig {
   code: string;
   name: string;
