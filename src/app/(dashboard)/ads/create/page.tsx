@@ -327,6 +327,12 @@ export default function CreateP2PAdPage() {
   const router = useRouter();
   const { balances } = useWallet();
   const [user, setUser] = useState<any>(null);
+  const [profile, setProfile] = useState<{
+    is_verified?: boolean | null;
+    id_verified?: boolean | null;
+    kyc_status?: string | null;
+    verification_tier?: string | number | null;
+  } | null>(null);
   const [authLoading, setAuthLoading] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
@@ -334,33 +340,50 @@ export default function CreateP2PAdPage() {
   useEffect(() => {
     let isMounted = true;
 
+    const loadProfile = async (userId: string) => {
+      const { data, error } = await supabase
+        .from('profiles')
+        .select('is_verified, id_verified, kyc_status, verification_tier')
+        .eq('id', userId)
+        .maybeSingle();
+
+      if (!isMounted) return;
+      if (error) {
+        console.warn('Unable to load seller verification profile.');
+        setProfile(null);
+        return;
+      }
+      setProfile(data);
+    };
+
     const checkUser = async () => {
       try {
         const { data: { session } } = await supabase.auth.getSession();
-        if (isMounted && session?.user) {
-          setUser(session.user);
-        } else {
-          const { data: { user: currentUser } } = await supabase.auth.getUser();
-          if (isMounted && currentUser) {
-            setUser(currentUser);
-          }
+        let currentUser = session?.user ?? null;
+        if (!currentUser) {
+          const { data } = await supabase.auth.getUser();
+          currentUser = data.user;
         }
+        if (isMounted) setUser(currentUser);
+        if (currentUser) await loadProfile(currentUser.id);
+        else if (isMounted) setProfile(null);
       } catch (err) {
         console.error('Error fetching auth user:', err);
+        if (isMounted) setProfile(null);
       } finally {
-        if (isMounted) {
-          setAuthLoading(false);
-        }
+        if (isMounted) setAuthLoading(false);
       }
     };
 
     checkUser();
 
-    // Listen for session changes (e.g. token refresh, login, logout)
+    // Keep the KYC profile in sync with the authenticated user.
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      if (isMounted) {
-        setUser(session?.user ?? null);
-      }
+      if (!isMounted) return;
+      const currentUser = session?.user ?? null;
+      setUser(currentUser);
+      if (currentUser) void loadProfile(currentUser.id);
+      else setProfile(null);
     });
 
     return () => {
