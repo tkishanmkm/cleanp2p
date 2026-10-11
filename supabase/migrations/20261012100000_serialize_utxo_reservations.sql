@@ -47,8 +47,158 @@ BEGIN
         SELECT value FROM jsonb_array_elements(p_utxos) AS item(value)
         ORDER BY lower(COALESCE(value->>'txid', '')), COALESCE(value->>'vout', '')
     LOOP
-        v_txid := NULLIF(TRIM(v_utxo->>'txid'), '');
-        IF v_txid IS NULL OR (v_utxo->>'vout') IS NULL OR (v_utxo->>'vout') !~ '^[0-9]+$' THEN
+        v_txid := LOWER(NULLIF(TRIM(v_utxo->>'txid'), ''));
+        IF v_txid IS NULL OR v_txid !~ '^[0-9a-f]{64}
+            RETURN jsonb_build_object('success', false, 'code', 'INVALID_UTXO');
+        END IF;
+        v_vout := (v_utxo->>'vout')::INTEGER;
+        IF v_vout < 0 THEN
+            RETURN jsonb_build_object('success', false, 'code', 'INVALID_UTXO');
+        END IF;
+
+        PERFORM pg_advisory_xact_lock(hashtextextended(v_network || ':' || lower(v_txid) || ':' || v_vout::TEXT, 0));
+    END LOOP;
+
+    -- Expired RESERVED entries are reclaimable only after the lock is held.
+    DELETE FROM public.utxo_reservations
+    WHERE reserved_until < NOW()
+      AND status = 'RESERVED';
+
+    -- No outpoint may be transferred away from another active or reconciled sweep.
+    FOR v_utxo IN SELECT value FROM jsonb_array_elements(p_utxos) AS item(value)
+    LOOP
+        v_txid := LOWER(TRIM(v_utxo->>'txid'));
+        v_vout := (v_utxo->>'vout')::INTEGER;
+
+        IF EXISTS (
+            SELECT 1
+            FROM public.utxo_reservations r
+            WHERE r.txid = v_txid
+              AND r.vout = v_vout
+              AND r.network = v_network
+              AND r.sweep_id <> p_sweep_id
+              AND r.status <> 'RELEASED'
+        ) THEN
+            v_conflict_count := v_conflict_count + 1;
+        END IF;
+    END LOOP;
+
+    IF v_conflict_count > 0 THEN
+        RETURN jsonb_build_object(
+            'success', false,
+            'code', 'UTXO_CONFLICT',
+            'message', 'One or more UTXOs are reserved or reconciled by another sweep'
+        );
+    END IF;
+
+    FOR v_utxo IN SELECT value FROM jsonb_array_elements(p_utxos) AS item(value)
+    LOOP
+        v_txid := TRIM(v_utxo->>'txid');
+        v_vout := (v_utxo->>'vout')::INTEGER;
+
+        INSERT INTO public.utxo_reservations AS existing (txid, vout, network, sweep_id, status, reserved_until)
+        VALUES (v_txid, v_vout, v_network, p_sweep_id, 'RESERVED', v_until)
+        ON CONFLICT (txid, vout, network)
+        DO UPDATE SET
+            sweep_id = EXCLUDED.sweep_id,
+            status = CASE
+                WHEN existing.status = 'RELEASED' THEN 'RESERVED'
+                ELSE existing.status
+            END,
+            reserved_until = CASE
+                WHEN existing.status = 'RELEASED'
+                  OR existing.status = 'RESERVED'
+                THEN EXCLUDED.reserved_until
+                ELSE existing.reserved_until
+            END
+        WHERE existing.sweep_id = EXCLUDED.sweep_id
+           OR existing.status = 'RELEASED';
+    END LOOP;
+
+    RETURN jsonb_build_object('success', true, 'count', jsonb_array_length(p_utxos));
+END;
+$$;
+
+REVOKE EXECUTE ON FUNCTION public.reserve_utxos_for_sweep(UUID, TEXT, JSONB, INTEGER) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.reserve_utxos_for_sweep(UUID, TEXT, JSONB, INTEGER) TO service_role, postgres;
+
+COMMIT;
+ OR (v_utxo->>'vout') IS NULL OR (v_utxo->>'vout') !~ '^[0-9]+
+            RETURN jsonb_build_object('success', false, 'code', 'INVALID_UTXO');
+        END IF;
+        v_vout := (v_utxo->>'vout')::INTEGER;
+        IF v_vout < 0 THEN
+            RETURN jsonb_build_object('success', false, 'code', 'INVALID_UTXO');
+        END IF;
+
+        PERFORM pg_advisory_xact_lock(hashtextextended(v_network || ':' || lower(v_txid) || ':' || v_vout::TEXT, 0));
+    END LOOP;
+
+    -- Expired RESERVED entries are reclaimable only after the lock is held.
+    DELETE FROM public.utxo_reservations
+    WHERE reserved_until < NOW()
+      AND status = 'RESERVED';
+
+    -- No outpoint may be transferred away from another active or reconciled sweep.
+    FOR v_utxo IN SELECT value FROM jsonb_array_elements(p_utxos) AS item(value)
+    LOOP
+        v_txid := TRIM(v_utxo->>'txid');
+        v_vout := (v_utxo->>'vout')::INTEGER;
+
+        IF EXISTS (
+            SELECT 1
+            FROM public.utxo_reservations r
+            WHERE r.txid = v_txid
+              AND r.vout = v_vout
+              AND r.network = v_network
+              AND r.sweep_id <> p_sweep_id
+              AND r.status <> 'RELEASED'
+        ) THEN
+            v_conflict_count := v_conflict_count + 1;
+        END IF;
+    END LOOP;
+
+    IF v_conflict_count > 0 THEN
+        RETURN jsonb_build_object(
+            'success', false,
+            'code', 'UTXO_CONFLICT',
+            'message', 'One or more UTXOs are reserved or reconciled by another sweep'
+        );
+    END IF;
+
+    FOR v_utxo IN SELECT value FROM jsonb_array_elements(p_utxos) AS item(value)
+    LOOP
+        v_txid := TRIM(v_utxo->>'txid');
+        v_vout := (v_utxo->>'vout')::INTEGER;
+
+        INSERT INTO public.utxo_reservations AS existing (txid, vout, network, sweep_id, status, reserved_until)
+        VALUES (v_txid, v_vout, v_network, p_sweep_id, 'RESERVED', v_until)
+        ON CONFLICT (txid, vout, network)
+        DO UPDATE SET
+            sweep_id = EXCLUDED.sweep_id,
+            status = CASE
+                WHEN existing.status = 'RELEASED' THEN 'RESERVED'
+                ELSE existing.status
+            END,
+            reserved_until = CASE
+                WHEN existing.status = 'RELEASED'
+                  OR existing.status = 'RESERVED'
+                THEN EXCLUDED.reserved_until
+                ELSE existing.reserved_until
+            END
+        WHERE existing.sweep_id = EXCLUDED.sweep_id
+           OR existing.status = 'RELEASED';
+    END LOOP;
+
+    RETURN jsonb_build_object('success', true, 'count', jsonb_array_length(p_utxos));
+END;
+$$;
+
+REVOKE EXECUTE ON FUNCTION public.reserve_utxos_for_sweep(UUID, TEXT, JSONB, INTEGER) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.reserve_utxos_for_sweep(UUID, TEXT, JSONB, INTEGER) TO service_role, postgres;
+
+COMMIT;
+ THEN
             RETURN jsonb_build_object('success', false, 'code', 'INVALID_UTXO');
         END IF;
         v_vout := (v_utxo->>'vout')::INTEGER;
