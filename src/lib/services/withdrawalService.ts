@@ -11,7 +11,10 @@ import {
 import { isValidTronAddress } from '@/lib/blockchain/tron';
 import { isTier2User } from '@/lib/kyc';
 
-export const SUPPORTED_ASSETS = ['USDT', 'BTC', 'ETH', 'LTC'] as const;
+// The live canonical custodial withdrawal RPC currently supports USDT only.
+// Do not route other assets through the legacy request_withdrawal function,
+// whose target schema does not match the live withdrawals table.
+export const SUPPORTED_ASSETS = ['USDT'] as const;
 export const SUPPORTED_NETWORKS: Record<string, string[]> = {
   USDT: ['TRC20', 'ERC20', 'BEP20'],
   BTC: ['BTC'],
@@ -428,41 +431,29 @@ export async function executeCanonicalWithdrawal(input: WithdrawalRequestInput):
     };
   }
 
-  // 7. Idempotency Check
-  if (input.idempotencyKey) {
-    const { data: existing } = await supabaseAdmin
-      .from('withdrawals')
-      .select('*')
-      .eq('user_id', user.id)
-      .eq('destination_address', validDestination)
-      .eq('amount', parsedAmount)
-      .order('created_at', { ascending: false })
-      .limit(1)
-      .maybeSingle();
-
-    if (existing && (existing.status === 'completed' || existing.status === 'processing' || existing.status === 'QUEUED' || existing.status === 'PENDING_APPROVAL')) {
-      return {
-        success: true,
-        status: existing.status,
-        withdrawalId: existing.id,
-        amountRequested: parsedAmount,
-        networkFee: Number(existing.network_fee || networkFee),
-        totalDebited: parsedAmount + Number(existing.network_fee || networkFee),
-        message: 'Withdrawal already submitted (idempotent replay).',
-        statusCode: 200,
-      };
-    }
+  // 7. Require an idempotency key for every value-moving withdrawal request.
+  const idempotencyKey = String(input.idempotencyKey || '').trim();
+  if (!idempotencyKey || idempotencyKey.length > 255) {
+    return {
+      success: false,
+      status: 'IDEMPOTENCY_KEY_REQUIRED',
+      error: 'A valid X-Idempotency-Key is required for withdrawals.',
+      message: 'A valid idempotency key is required.',
+      statusCode: 400,
+    };
   }
 
-  // 8. Execute Atomic Balance Reservation via Authoritative RPC
-  const { data: rpcResult, error: rpcError } = await supabaseAdmin.rpc('request_withdrawal', {
+  // 8. Atomic, idempotent reservation through the RPC aligned with the live
+  // onchain_withdrawals and wallet_assets schema. The legacy request_withdrawal
+  // RPC writes columns that do not exist in the live withdrawals table.
+  const { data: rpcResult, error: rpcError } = await supabaseAdmin.rpc('request_custodial_withdrawal', {
     p_user_id: user.id,
     p_network: networkCode,
+    p_asset_symbol: assetSymbol,
     p_to_address: validDestination,
     p_amount: parsedAmount,
     p_fee: networkFee,
-    p_asset: assetSymbol,
-    p_usd_equivalent: usdEquivalent,
+    p_idempotency_key: idempotencyKey,
   });
 
   if (rpcError) {
@@ -476,7 +467,7 @@ export async function executeCanonicalWithdrawal(input: WithdrawalRequestInput):
   }
 
   const withdrawalId = rpcResult?.withdrawal_id || rpcResult;
-  const returnedStatus = rpcResult?.status || 'QUEUED';
+  const returnedStatus = rpcResult?.status || 'NEEDS_APPROVAL';
 
   // Activity Notification
   try {
