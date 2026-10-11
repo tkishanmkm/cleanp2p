@@ -36,11 +36,19 @@ export async function POST(request: Request) {
     const adminClient = getSupabaseAdminClient();
 
     // 2FA check for sensitive trade release operation
-    const { data: sellerProfile } = await adminClient
+    const { data: sellerProfile, error: sellerProfileError } = await adminClient
       .from('profiles')
       .select('is_2fa_enabled, is_mfa_enabled, two_factor_enabled, totp_secret, two_factor_secret')
       .eq('id', user.id)
       .maybeSingle();
+
+    if (sellerProfileError || !sellerProfile) {
+      console.error('[P2P trade release] Seller security profile unavailable:', sellerProfileError?.code || 'PROFILE_MISSING');
+      return NextResponse.json(
+        { success: false, error: 'Seller security settings could not be verified. Please try again.' },
+        { status: 503, headers: { 'Cache-Control': 'no-store' } }
+      );
+    }
 
     const is2faActive = Boolean(
       sellerProfile?.is_2fa_enabled || sellerProfile?.is_mfa_enabled || sellerProfile?.two_factor_enabled
