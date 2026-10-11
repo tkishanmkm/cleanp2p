@@ -138,7 +138,7 @@ export async function sendTrxTransfer(params: {
 export async function getTronTransactionConfirmations(txHash: string): Promise<{
   confirmations: number;
   isConfirmed: boolean;
-  success: boolean;
+  success: boolean | null;
   blockNumber?: number;
   actualCostTrx?: string;
 }> {
@@ -149,7 +149,7 @@ export async function getTronTransactionConfirmations(txHash: string): Promise<{
     const txInfo = await tronWeb.trx.getTransactionInfo(txHash);
     if (!txInfo || !txInfo.blockNumber) {
       // A missing transaction-info response is an unknown state, not proof of failure.
-      return { confirmations: 0, isConfirmed: false, success: true };
+      return { confirmations: 0, isConfirmed: false, success: null };
     }
 
     // Get current block
@@ -163,20 +163,20 @@ export async function getTronTransactionConfirmations(txHash: string): Promise<{
     const actualCostTrx = `${wholeTrx}.${fractionSun}`;
 
     if (!currentHeight) {
-      return { confirmations: 1, isConfirmed: false, success: !txInfo.receipt?.result, actualCostTrx };
+      return { confirmations: 0, isConfirmed: false, success: txInfo.receipt?.result === 'SUCCESS' ? true : txInfo.receipt?.result ? false : null, actualCostTrx };
     }
 
     const confirmations = Math.max(0, currentHeight - txInfo.blockNumber + 1);
-    const success = !txInfo.receipt?.result || txInfo.receipt.result === 'SUCCESS';
+    const success: boolean | null = txInfo.receipt?.result === 'SUCCESS' ? true : txInfo.receipt?.result ? false : null;
 
     return {
       confirmations,
-      isConfirmed: confirmations >= TRON_CONFIG.requiredConfirmations && success,
+      isConfirmed: confirmations >= TRON_CONFIG.requiredConfirmations && success === true,
       success,
       blockNumber: txInfo.blockNumber,
       actualCostTrx,
     };
   } catch (err) {
-    return { confirmations: 0, isConfirmed: false, success: false };
+    return { confirmations: 0, isConfirmed: false, success: null };
   }
 }
