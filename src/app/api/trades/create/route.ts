@@ -230,7 +230,7 @@ export async function POST(req: NextRequest) {
       ? JSON.parse(ad.payment_methods)
       : ['Bank Transfer'];
     const resolvedPaymentMethod = payment_method || paymentMethods[0] || 'Bank Transfer';
-    const resolvedFiatCurrency = fiat_currency || ad.fiat_currency || ad.fiat || 'USD';
+    const resolvedFiatCurrency = adFiatCurrency;
     const shortRef = trade_ref || generateTradeId();
     const adIdentifier = String(ad.id || ad.public_ad_id || ad_id);
 
