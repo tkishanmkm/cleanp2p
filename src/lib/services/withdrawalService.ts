@@ -282,8 +282,21 @@ export async function executeCanonicalWithdrawal(input: WithdrawalRequestInput):
     };
   }
 
-  const parsedAmount = typeof rawAmount === 'number' ? rawAmount : parseFloat(String(rawAmount));
-  if (isNaN(parsedAmount) || parsedAmount <= 0) {
+  // USDT uses 6 decimal places on the supported withdrawal networks.
+  // Reject partial parses (for example "10abc"), exponent notation, NaN, and Infinity.
+  const amountText = typeof rawAmount === 'number' ? String(rawAmount) : String(rawAmount).trim();
+  if (!/^(?:\\d+(?:\\.\\d{0,6})?|\\.\\d{1,6})$/.test(amountText)) {
+    return {
+      success: false,
+      status: 'INVALID_AMOUNT',
+      error: 'Amount must be a positive decimal with at most 6 decimal places',
+      message: 'Invalid withdrawal amount',
+      statusCode: 400,
+    };
+  }
+
+  const parsedAmount = Number(amountText);
+  if (!Number.isFinite(parsedAmount) || parsedAmount <= 0) {
     return {
       success: false,
       status: 'INVALID_AMOUNT',
@@ -493,11 +506,18 @@ export async function executeCanonicalWithdrawal(input: WithdrawalRequestInput):
   });
 
   if (rpcError) {
+    // Database errors may include internal schema details; keep them in server logs,
+    // not in the public API response.
+    console.error('[wallet-withdrawal] Atomic reservation failed', {
+      code: rpcError.code,
+      details: rpcError.details,
+      hint: rpcError.hint,
+    });
     return {
       success: false,
       status: 'RESERVATION_FAILED',
-      error: rpcError.message || 'Balance reservation failed',
-      message: rpcError.message || 'Balance reservation failed',
+      error: 'Withdrawal could not be reserved. Please verify the request and try again.',
+      message: 'Withdrawal reservation failed',
       statusCode: 400,
     };
   }
