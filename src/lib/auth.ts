@@ -26,7 +26,21 @@ export interface UserProfile {
   two_factor_secret?: string | null;
   is_banned?: boolean;
   is_restricted?: boolean;
+  is_emergency_frozen?: boolean;
   account_status?: string;
+  is_verified?: boolean | null;
+  id_verified?: boolean | null;
+  is_id_verified?: boolean | null;
+  kyc_status?: string | null;
+  verification_tier?: string | number | null;
+  tradeVolume?: number;
+  completedTrades?: number;
+  positiveFeedback?: number;
+  negativeFeedback?: number;
+  feedbackScore?: number;
+  avgReleaseTime?: number;
+  badges?: string[];
+  lastActive?: string | Date;
   btc_balance?: number;
   eth_balance?: number;
   usdt_balance?: number;
@@ -535,7 +549,21 @@ export async function getUserProfile(userId: string): Promise<UserProfile | null
       two_factor_secret: null,
       is_banned: Boolean(data.is_banned),
       is_restricted: Boolean(data.is_restricted),
+      is_emergency_frozen: Boolean(data.is_emergency_frozen),
       account_status: data.account_status || data.status || 'active',
+      is_verified: data.is_verified ?? null,
+      id_verified: data.id_verified ?? null,
+      is_id_verified: data.is_id_verified ?? null,
+      kyc_status: data.kyc_status ?? null,
+      verification_tier: data.verification_tier ?? null,
+      tradeVolume: Number(data.trade_volume ?? data.tradeVolume ?? data.total_trade_volume_usd ?? 0),
+      completedTrades: Number(data.completed_trades ?? data.completedTrades ?? data.total_completed_trades ?? 0),
+      positiveFeedback: Number(data.positive_feedback ?? data.positiveFeedback ?? 0),
+      negativeFeedback: Number(data.negative_feedback ?? data.negativeFeedback ?? 0),
+      feedbackScore: Number(data.feedback_score ?? data.feedbackScore ?? 0),
+      avgReleaseTime: Number(data.avg_release_time ?? data.avg_release_minutes ?? data.avgReleaseTime ?? 0),
+      badges: Array.isArray(data.badges) ? data.badges : [],
+      lastActive: data.last_active || data.updated_at || new Date().toISOString(),
       btc_balance: btcVal,
       eth_balance: ethVal,
       usdt_balance: usdtVal,
