@@ -108,7 +108,7 @@ export function CounterpartyInfoPanel({
 
         let targetProfileId = targetId;
 
-        const COUNTERPARTY_PROFILE_FIELDS = 'id, username, display_name, avatar_url, photo_url, is_online, last_seen_at, created_at, total_completed_trades, completed_trades, positive_feedback, negative_feedback, feedback_score';
+        const COUNTERPARTY_PROFILE_FIELDS = 'id, username, display_name, avatar_url, photo_url, is_online, last_seen_at, created_at, total_completed_trades, completed_trades, positive_feedback, negative_feedback, feedback_score, blocked_users';
         let query = supabase.from('profiles').select(COUNTERPARTY_PROFILE_FIELDS);
         if (targetId && targetId.includes('-')) {
           query = query.eq('id', targetId);
