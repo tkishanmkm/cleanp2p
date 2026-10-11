@@ -1,16 +1,17 @@
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/utils/supabase/server';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
 import { formatSystemMessageContent, type SystemMessagePayload } from '@/lib/trade-system-messages';
+import { verifyServerAdmin } from '@/lib/server-admin-auth';
 
 export const dynamic = 'force-dynamic';
 
 export async function POST(
-  req: Request,
+  req: NextRequest,
   { params }: { params: Promise<{ tradeId: string }> | { tradeId: string } }
 ) {
   try {
-    const resolvedParams = typeof (params as any)?.then === 'function' ? await params : params;
+    const resolvedParams = await Promise.resolve(params);
     const tradeId = resolvedParams?.tradeId;
 
     if (!tradeId) {
@@ -27,9 +28,23 @@ export async function POST(
 
     const body = await req.json().catch(() => ({}));
     const { type, metadata = {}, customText } = body;
+    const safeMetadata = metadata && typeof metadata === 'object' && !Array.isArray(metadata) ? metadata : {};
+    const allowedTypes = new Set([
+      'TRADE_INITIATED', 'TRADE_STARTED', 'ESCROW_LOCKED', 'MARKED_PAID',
+      'TRADE_RELEASED', 'TRADE_COMPLETED', 'TRADE_CANCELLED', 'TRADE_EXPIRED',
+      'TRADE_DISPUTED', 'TRADE_REPORTED', 'USER_BLOCKED', 'FEEDBACK_LEFT', 'MODERATOR_JOINED',
+    ]);
+    if ((!type && !customText) || (type && !allowedTypes.has(String(type)))) {
+      return NextResponse.json({ error: 'Unsupported system message type.' }, { status: 400 });
+    }
 
-    if (!type && !customText) {
-      return NextResponse.json({ error: 'Message type or customText is required' }, { status: 400 });
+    const adminAuth = await verifyServerAdmin(req);
+    const isAdmin = adminAuth.authorized;
+    if (customText && !isAdmin) {
+      return NextResponse.json({ error: 'Only an administrator can post custom system messages.' }, { status: 403 });
+    }
+    if (type === 'MODERATOR_JOINED' && !isAdmin) {
+      return NextResponse.json({ error: 'Only an administrator can post moderator messages.' }, { status: 403 });
     }
 
     const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(tradeId);
@@ -48,16 +63,32 @@ export async function POST(
     }
 
     // Verify caller is buyer, seller, or admin
-    const isAdmin =
-      user.user_metadata?.role === 'admin' ||
-      user.app_metadata?.role === 'admin' ||
-      user.email?.endsWith('@paxones.com');
+    // Admin status is verified server-side above; user metadata/email alone is not trusted.
 
     const isBuyer = String(trade.buyer_id) === String(user.id);
     const isSeller = String(trade.seller_id) === String(user.id);
 
     if (!isAdmin && !isBuyer && !isSeller) {
       return NextResponse.json({ error: 'Forbidden: You are not a participant in this trade' }, { status: 403 });
+    }
+
+    const tradeStatus = String(trade.status || '').trim().toLowerCase();
+    const escrowStatus = String(trade.escrow_status || '').trim().toUpperCase();
+    const lifecycleReady =
+      type === 'MARKED_PAID'
+        ? Boolean(trade.paid_at || trade.marked_paid_at || escrowStatus === 'PAID' || ['paid', 'buyer_marked_paid', 'payment_sent'].includes(tradeStatus))
+        : type === 'TRADE_RELEASED' || type === 'TRADE_COMPLETED'
+          ? Boolean(trade.released_at || trade.completed_at || ['released', 'completed'].includes(tradeStatus) || ['RELEASED', 'COMPLETED'].includes(escrowStatus))
+          : type === 'TRADE_CANCELLED'
+            ? Boolean(trade.cancelled_at || ['cancelled', 'canceled'].includes(tradeStatus) || ['CANCELLED', 'CANCELED'].includes(escrowStatus))
+            : type === 'TRADE_EXPIRED'
+              ? Boolean(trade.expired_at || tradeStatus === 'expired' || escrowStatus === 'EXPIRED')
+              : type === 'TRADE_DISPUTED'
+                ? Boolean(trade.is_disputed || tradeStatus === 'disputed' || escrowStatus === 'DISPUTED')
+                : true;
+
+    if (!isAdmin && ['MARKED_PAID', 'TRADE_RELEASED', 'TRADE_COMPLETED', 'TRADE_CANCELLED', 'TRADE_EXPIRED', 'TRADE_DISPUTED'].includes(String(type)) && !lifecycleReady) {
+      return NextResponse.json({ error: 'System message does not match the authoritative trade state.' }, { status: 409 });
     }
 
     const actualTradeId = trade.id || tradeId;
@@ -134,20 +165,20 @@ export async function POST(
     if (!sellerUsername) sellerUsername = trade.seller_username || metadata.sellerUsername || 'Trader';
 
     const payload: SystemMessagePayload = {
+      ...safeMetadata,
       tradeId: actualTradeId,
       type: type || 'CUSTOM',
       buyerUsername,
       sellerUsername,
       openerUsername: user.user_metadata?.username || user.email?.split('@')[0] || 'Trader',
-      coinAmount: trade.crypto_amount || trade.amount || metadata.coinAmount || '0.00',
-      coinSymbol: trade.crypto || trade.asset_symbol || metadata.coinSymbol || 'USDT',
-      paymentMethod: trade.payment_method || metadata.paymentMethod || '',
-      disputeReason: metadata.disputeReason || '',
-      issueDetails: metadata.issueDetails || '',
-      issueCategory: metadata.issueCategory || '',
-      feedbackComment: metadata.feedbackComment || '',
-      customText: customText || metadata.customText,
-      ...metadata
+      coinAmount: trade.crypto_amount || trade.amount || safeMetadata.coinAmount || '0.00',
+      coinSymbol: trade.crypto || trade.asset_symbol || safeMetadata.coinSymbol || 'USDT',
+      paymentMethod: trade.payment_method || safeMetadata.paymentMethod || '',
+      disputeReason: safeMetadata.disputeReason || '',
+      issueDetails: safeMetadata.issueDetails || '',
+      issueCategory: safeMetadata.issueCategory || '',
+      feedbackComment: safeMetadata.feedbackComment || '',
+      customText: isAdmin ? (customText || safeMetadata.customText) : undefined,
     };
 
     const text = formatSystemMessageContent(payload);
@@ -277,15 +308,33 @@ export async function POST(
 }
 
 export async function GET(
-  req: Request,
+  req: NextRequest,
   { params }: { params: Promise<{ tradeId: string }> | { tradeId: string } }
 ) {
   try {
-    const resolvedParams = typeof (params as any)?.then === 'function' ? await params : params;
+    const resolvedParams = await Promise.resolve(params);
     const tradeId = resolvedParams?.tradeId;
 
     if (!tradeId) {
       return NextResponse.json({ error: 'Trade ID is required' }, { status: 400 });
+    }
+
+    const supabase = await createClient();
+    const { data: { user }, error: authError } = await supabase.auth.getUser();
+    if (authError || !user) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401, headers: { 'Cache-Control': 'no-store' } });
+    }
+
+    const adminAuth = await verifyServerAdmin(req);
+    const isAdmin = adminAuth.authorized;
+    const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(tradeId);
+    let tradeQuery = supabaseAdmin.from('trades').select('id, buyer_id, seller_id');
+    if (isUuid) tradeQuery = tradeQuery.or(`id.eq.${tradeId},trade_id.eq.${tradeId}`);
+    else tradeQuery = tradeQuery.eq('trade_id', tradeId);
+    const { data: trade } = await tradeQuery.maybeSingle();
+    if (!trade) return NextResponse.json({ error: 'Trade not found' }, { status: 404 });
+    if (!isAdmin && trade.buyer_id !== user.id && trade.seller_id !== user.id) {
+      return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
     }
 
     const { data: messages, error } = await supabaseAdmin
