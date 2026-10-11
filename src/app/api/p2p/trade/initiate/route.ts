@@ -1,4 +1,5 @@
 import { createClient } from '@/utils/supabase/server';
+import { resolveAuthoritativeAdQuote } from '@/lib/p2p/authoritativeAdQuote';
 import { NextRequest, NextResponse } from 'next/server';
 import { generateTradeId } from '@/lib/id-generator';
 import { sendNewTradeNotificationEmail } from '@/lib/email/tradeEmailService';
@@ -57,9 +58,7 @@ export async function POST(request: NextRequest) {
     const adId = body.orderId || body.order_id || body.adId || body.ad_id;
     const rawCrypto = body.amount ?? body.cryptoAmount ?? body.crypto_amount;
     const rawFiat = body.fiatAmount ?? body.fiat_amount;
-    const customPrice = body.price ?? body.rate;
     const customPaymentMethod = body.paymentMethod || body.payment_method;
-    const customFiatCurrency = body.fiatCurrency || body.fiat_currency;
     const tradeRef = body.tradeRef || body.trade_ref || generateTradeId();
     const idempotencyKey =
       (body.idempotencyKey ||
@@ -121,8 +120,12 @@ export async function POST(request: NextRequest) {
     }
 
     // 4. Resolve exact numerical amounts
-    // Never accept a client-supplied trade price. The database escrow RPC independently uses the stored ad price.
-    const unitPrice = Number(ad.price ?? ad.unit_price ?? ad.fixed_rate ?? 0);
+    const adQuote = await resolveAuthoritativeAdQuote(ad);
+    if (!adQuote) {
+      return NextResponse.json({ success: false, error: 'Advertisement price is unavailable or invalid.' }, { status: 400 });
+    }
+    const unitPrice = adQuote.price;
+    const resolvedFiatCurrency = adQuote.fiatCurrency;
     let calculatedCrypto = parseFloat(rawCrypto);
     let numericFiat = parseFloat(rawFiat);
 
@@ -149,7 +152,6 @@ export async function POST(request: NextRequest) {
       ? JSON.parse(ad.payment_methods)
       : ['Bank Transfer'];
     const resolvedPaymentMethod = customPaymentMethod || paymentMethods[0] || 'Bank Transfer';
-    const resolvedFiatCurrency = customFiatCurrency || ad.fiat_currency || ad.fiat || 'USD';
     const adIdentifier = String(ad.id || ad.public_ad_id || adId);
 
     // 6. Execute Atomic Database RPC (Locks Escrow & Creates Trade)
@@ -193,10 +195,10 @@ export async function POST(request: NextRequest) {
           sellerId: String(sellerId),
           buyerId: String(buyerId),
           cryptoAmount: calculatedCrypto,
-          fiatAmount: numericFiat,
+          fiatAmount: Number(data?.fiat_amount ?? numericFiat),
           fiatCurrency: resolvedFiatCurrency,
           asset: String(data?.asset || ad.crypto || 'USDT'),
-          price: unitPrice,
+          price: Number(data?.price ?? unitPrice),
           paymentMethod: resolvedPaymentMethod,
           status: 'pending',
           createdAt: new Date().toISOString(),

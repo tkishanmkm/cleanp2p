@@ -1,4 +1,5 @@
 import { createClient } from '@/utils/supabase/server';
+import { resolveAuthoritativeAdQuote } from '@/lib/p2p/authoritativeAdQuote';
 import { NextRequest, NextResponse } from 'next/server';
 import { generateTradeId } from '@/lib/id-generator';
 import { sendNewTradeNotificationEmail } from '@/lib/email/tradeEmailService';
@@ -56,8 +57,6 @@ export async function POST(req: NextRequest) {
       fiat_amount,
       crypto_amount,
       payment_method,
-      price,
-      fiat_currency,
       trade_ref,
       idempotency_key,
     } = body;
@@ -117,15 +116,15 @@ export async function POST(req: NextRequest) {
     }
 
     // 3. Resolve numerical values and authoritative parameters
-    // Never let the request override the published advertisement price.
-    const rawPrice = ad.price ?? ad.unit_price ?? ad.fixed_rate;
-    const unitPrice = Number(rawPrice);
-    if (!rawPrice || isNaN(unitPrice) || unitPrice <= 0) {
+    const adQuote = await resolveAuthoritativeAdQuote(ad);
+    if (!adQuote) {
       return NextResponse.json(
         { error: 'Advertisement unit price is invalid or market price is unavailable.' },
         { status: 400 }
       );
     }
+    const unitPrice = adQuote.price;
+    const adFiatCurrency = adQuote.fiatCurrency;
     let calculatedCrypto = parseFloat(crypto_amount);
     let numericFiat = parseFloat(fiat_amount);
 
@@ -148,7 +147,7 @@ export async function POST(req: NextRequest) {
     const maxLimit = Number(ad.max_amount ?? ad.max_limit ?? Infinity);
     if (numericFiat < minLimit || numericFiat > maxLimit) {
       return NextResponse.json(
-        { error: `Amount must be between ${minLimit} and ${maxLimit} ${ad.fiat_currency || ad.fiat || 'USD'}` },
+        { error: `Amount must be between ${minLimit} and ${maxLimit} ${adFiatCurrency}` },
         { status: 400 }
       );
     }

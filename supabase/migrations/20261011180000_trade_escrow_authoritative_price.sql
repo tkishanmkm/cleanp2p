@@ -48,7 +48,10 @@ DECLARE
     v_ad_user_id UUID := NULL;
     v_ad_type TEXT := 'SELL';
     v_ad_asset TEXT := 'USDT';
-    v_ad_price NUMERIC(36, 18) := 1.0;
+    v_ad_price NUMERIC(36, 18) := 0.0;
+    v_ad_margin_percent NUMERIC(10, 6) := 0.0;
+    v_market_price NUMERIC(36, 18) := NULL;
+    v_ad_is_fixed BOOLEAN := FALSE;
     v_ad_fiat_currency TEXT := 'USD';
     v_ad_payment_window_mins INTEGER := 30;
     v_ad_is_active BOOLEAN := TRUE;
@@ -135,12 +138,13 @@ BEGIN
         ));
 
         -- The ad's stored price is authoritative; caller-supplied p_price is never trusted.
-        v_ad_price := COALESCE(NULLIF(v_p2p_ad.price, 0), 0);
+        v_ad_price := COALESCE(NULLIF(v_p2p_ad.price, 0), NULLIF(v_p2p_ad.unit_price, 0), 0);
+        v_ad_margin_percent := COALESCE(v_p2p_ad.rate_percent, v_p2p_ad.margin, 0);
+        v_ad_is_fixed := COALESCE(v_p2p_ad.is_fixed, FALSE) OR UPPER(COALESCE(v_p2p_ad.pricing_type, '')) = 'FIXED';
 
         v_ad_fiat_currency := UPPER(COALESCE(
-            NULLIF(p_fiat_currency, ''),
-            v_p2p_ad.fiat_currency,
-            v_p2p_ad.fiat_symbol,
+            NULLIF(v_p2p_ad.fiat_currency, ''),
+            NULLIF(v_p2p_ad.fiat_symbol, ''),
             'USD'
         ));
 
@@ -203,12 +207,13 @@ BEGIN
                 NULLIF(v_legacy_ad.fixed_rate, 0),
                 0
             );
+            v_ad_margin_percent := COALESCE(v_legacy_ad.rate_percent, v_legacy_ad.margin, 0);
+            v_ad_is_fixed := COALESCE(v_legacy_ad.is_fixed, FALSE) OR UPPER(COALESCE(v_legacy_ad.pricing_type, '')) = 'FIXED';
 
             v_ad_fiat_currency := UPPER(COALESCE(
-                NULLIF(p_fiat_currency, ''),
-                v_legacy_ad.fiat_currency,
-                v_legacy_ad.fiat_symbol,
-                v_legacy_ad.currency,
+                NULLIF(v_legacy_ad.fiat_currency, ''),
+                NULLIF(v_legacy_ad.fiat_symbol, ''),
+                NULLIF(v_legacy_ad.currency, ''),
                 'USD'
             ));
 
@@ -247,6 +252,29 @@ BEGIN
     END IF;
 
     -- Positive Price Check
+    -- Floating ads are priced from the current server market row and stored margin.
+    -- Fixed ads use the price stored on the advertisement.
+    IF NOT v_ad_is_fixed THEN
+        IF v_ad_margin_percent::TEXT IN ('NaN', 'Infinity', '-Infinity') OR v_ad_margin_percent < -50 OR v_ad_margin_percent > 50 THEN
+            RAISE EXCEPTION 'Advertisement margin is invalid; trade creation is blocked.';
+        END IF;
+
+        SELECT price_in_fiat INTO v_market_price
+        FROM public.crypto_market_prices
+        WHERE UPPER(asset_symbol) = v_ad_asset
+          AND UPPER(fiat_symbol) = v_ad_fiat_currency
+          AND price_in_fiat > 0
+          AND price_in_fiat::TEXT NOT IN ('NaN', 'Infinity', '-Infinity')
+        ORDER BY updated_at DESC
+        LIMIT 1;
+
+        IF v_market_price IS NULL THEN
+            RAISE EXCEPTION 'Current market price is unavailable for %/%; trade creation is blocked.', v_ad_asset, v_ad_fiat_currency;
+        END IF;
+
+        v_ad_price := ROUND(v_market_price * (1 + v_ad_margin_percent / 100), 8);
+    END IF;
+
     IF v_ad_price <= 0 OR v_ad_price::TEXT IN ('NaN', 'Infinity', '-Infinity') THEN
         RAISE EXCEPTION 'Advertisement has no valid server-side price; trade creation is blocked.';
     END IF;
@@ -338,6 +366,7 @@ BEGIN
             'crypto_amount', v_existing_trade.crypto_amount,
             'escrow_fee', v_existing_trade.escrow_fee,
             'fiat_amount', v_existing_trade.fiat_amount,
+            'price', v_existing_trade.price,
             'fiat_currency', v_existing_trade.fiat_currency,
             'asset', v_existing_trade.crypto,
             'status', v_existing_trade.status,
@@ -511,6 +540,7 @@ BEGIN
         'crypto_amount', v_crypto_amount,
         'escrow_fee', v_escrow_fee,
         'fiat_amount', v_fiat_amount,
+        'price', v_unit_price,
         'fiat_currency', v_fiat_currency,
         'asset', v_ad_asset,
         'status', 'pending',
