@@ -229,11 +229,12 @@ export function CreateAdForm({ ad }: CreateAdFormProps) {
   const adCreatorId = ad?.userId || user?.uid;
 
   useEffect(() => {
-    if (!adCreatorId) return;
+    const creatorId = adCreatorId;
+    if (!creatorId) return;
     let isMounted = true;
     async function loadBalances() {
       try {
-        const balances = await getUserWalletBalances(adCreatorId);
+        const balances = await getUserWalletBalances(creatorId);
         if (isMounted && balances) {
           setUserBalances(balances);
         }
@@ -444,7 +445,7 @@ export function CreateAdForm({ ad }: CreateAdFormProps) {
           positiveFeedback: profile.positiveFeedback ?? 0,
           negativeFeedback: profile.negativeFeedback ?? 0,
           completedTrades: profile.completedTrades ?? 0,
-          photoURL: profile.photoURL,
+          photoURL: profile.avatar_url || undefined,
           badges: profile.badges,
           lastActive: profile.lastActive instanceof Date ? profile.lastActive.toISOString() : profile.lastActive || undefined,
         });
