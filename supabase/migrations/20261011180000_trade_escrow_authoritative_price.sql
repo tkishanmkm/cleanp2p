@@ -3,6 +3,21 @@
 -- create a trade at a different price than the published advertisement.
 BEGIN;
 
+-- Durable idempotency records for atomic P2P trade creation.
+CREATE TABLE IF NOT EXISTS public.trade_request_idempotency (
+    user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+    idempotency_key TEXT NOT NULL CHECK (char_length(idempotency_key) BETWEEN 8 AND 128),
+    request_fingerprint TEXT NOT NULL,
+    trade_id UUID REFERENCES public.trades(id) ON DELETE SET NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (user_id, idempotency_key)
+);
+ALTER TABLE public.trade_request_idempotency ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON TABLE public.trade_request_idempotency FROM PUBLIC, anon, authenticated;
+GRANT SELECT, INSERT ON TABLE public.trade_request_idempotency TO service_role, postgres;
+
+
+
 CREATE OR REPLACE FUNCTION public.initiate_trade_with_escrow(
     p_ad_id TEXT,
     p_crypto_amount NUMERIC,
@@ -60,6 +75,8 @@ DECLARE
     v_seller_bal_after NUMERIC(36, 18);
     v_seller_escrow_after NUMERIC(36, 18);
     v_existing_trade RECORD;
+    v_existing_request RECORD;
+    v_request_fingerprint TEXT;
 BEGIN
     -- 1. Strict Authentication & Authorization Enforcement
     IF v_auth_uid IS NOT NULL THEN
@@ -270,30 +287,63 @@ BEGIN
 
     v_public_id := COALESCE(p_trade_ref, 'TX' || SUBSTRING(REPLACE(gen_random_uuid()::TEXT, '-', '') FROM 1 FOR 8));
 
-    -- 7. Idempotency Check on Trade Ref / Idempotency Key
-    IF p_idempotency_key IS NOT NULL THEN
+    -- 7. Durable idempotency: serialize same-user retries and bind each key to its request.
+    IF p_idempotency_key IS NULL
+       OR LENGTH(BTRIM(p_idempotency_key)) < 8
+       OR LENGTH(BTRIM(p_idempotency_key)) > 128 THEN
+        RAISE EXCEPTION 'A valid idempotency key between 8 and 128 characters is required.';
+    END IF;
+
+    v_request_fingerprint := MD5(CONCAT_WS('|',
+        COALESCE(v_ad_id::TEXT, v_ad_public_ad_id, v_trade_ad_id, p_ad_id),
+        v_ad_asset,
+        v_crypto_amount::TEXT,
+        v_fiat_currency,
+        v_unit_price::TEXT,
+        LOWER(BTRIM(COALESCE(p_payment_method, 'Bank Transfer')))
+    ));
+
+    PERFORM pg_advisory_xact_lock(
+        HASHtextextended(v_effective_caller::TEXT || ':' || BTRIM(p_idempotency_key), 0)
+    );
+
+    SELECT * INTO v_existing_request
+    FROM public.trade_request_idempotency
+    WHERE user_id = v_effective_caller
+      AND idempotency_key = BTRIM(p_idempotency_key)
+    FOR UPDATE;
+
+    IF FOUND THEN
+        IF v_existing_request.request_fingerprint IS DISTINCT FROM v_request_fingerprint THEN
+            RAISE EXCEPTION 'Idempotency key was already used for a different trade request.';
+        END IF;
+        IF v_existing_request.trade_id IS NULL THEN
+            RAISE EXCEPTION 'Prior trade request requires reconciliation; duplicate creation is blocked.';
+        END IF;
+
         SELECT * INTO v_existing_trade
         FROM public.trades
-        WHERE public_id = p_idempotency_key OR trade_id = p_idempotency_key OR public_id = v_public_id
-        LIMIT 1;
+        WHERE id = v_existing_request.trade_id;
 
-        IF v_existing_trade.id IS NOT NULL THEN
-            RETURN jsonb_build_object(
-                'success', true,
-                'trade_id', v_existing_trade.id,
-                'public_id', v_existing_trade.public_id,
-                'buyer_id', v_existing_trade.buyer_id,
-                'seller_id', v_existing_trade.seller_id,
-                'crypto_amount', v_existing_trade.crypto_amount,
-                'escrow_fee', v_existing_trade.escrow_fee,
-                'fiat_amount', v_existing_trade.fiat_amount,
-                'fiat_currency', v_existing_trade.fiat_currency,
-                'asset', v_existing_trade.crypto,
-                'status', v_existing_trade.status,
-                'escrow_status', v_existing_trade.escrow_status,
-                'message', 'Trade already initiated (idempotent replay)'
-            );
+        IF NOT FOUND THEN
+            RAISE EXCEPTION 'Prior trade record is missing; duplicate creation is blocked.';
         END IF;
+
+        RETURN jsonb_build_object(
+            'success', true,
+            'trade_id', v_existing_trade.id,
+            'public_id', v_existing_trade.public_id,
+            'buyer_id', v_existing_trade.buyer_id,
+            'seller_id', v_existing_trade.seller_id,
+            'crypto_amount', v_existing_trade.crypto_amount,
+            'escrow_fee', v_existing_trade.escrow_fee,
+            'fiat_amount', v_existing_trade.fiat_amount,
+            'fiat_currency', v_existing_trade.fiat_currency,
+            'asset', v_existing_trade.crypto,
+            'status', v_existing_trade.status,
+            'escrow_status', v_existing_trade.escrow_status,
+            'message', 'Trade already initiated (idempotent replay)'
+        );
     END IF;
 
     -- 8. Ensure Buyer wallet_assets Record Exists
@@ -444,6 +494,12 @@ BEGIN
         NOW() + (v_ad_payment_window_mins || ' minutes')::INTERVAL,
         NOW(),
         v_ad_public_ad_id
+    );
+
+    INSERT INTO public.trade_request_idempotency (
+        user_id, idempotency_key, request_fingerprint, trade_id
+    ) VALUES (
+        v_effective_caller, BTRIM(p_idempotency_key), v_request_fingerprint, v_trade_id
     );
 
     RETURN jsonb_build_object(
