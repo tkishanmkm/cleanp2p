@@ -208,7 +208,7 @@ export default function AdminAdsPage() {
                           className="hover:underline font-medium"
                           onClick={(e) => e.stopPropagation()}
                         >
-                          {ad.user.username}
+                          {ad.user?.username || 'Unknown seller'}
                         </Link>
                       </TableCell>
                       <TableCell>
