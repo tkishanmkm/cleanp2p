@@ -10,8 +10,8 @@ GRANT EXECUTE ON FUNCTION public.process_confirmed_deposit(uuid) TO service_role
 REVOKE ALL ON FUNCTION public.process_incoming_deposit(text, text, text, numeric, text, integer) FROM PUBLIC, anon, authenticated;
 GRANT EXECUTE ON FUNCTION public.process_incoming_deposit(text, text, text, numeric, text, integer) TO service_role;
 
-REVOKE ALL ON FUNCTION public.process_user_deposit(uuid, text, text, numeric, text, text, text) FROM PUBLIC, anon, authenticated;
-GRANT EXECUTE ON FUNCTION public.process_user_deposit(uuid, text, text, numeric, text, text, text) TO service_role;
+REVOKE ALL ON FUNCTION public.process_user_deposit(uuid, text, numeric, text, text, text, text) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.process_user_deposit(uuid, text, numeric, text, text, text, text) TO service_role;
 
 REVOKE ALL ON FUNCTION public.process_user_deposit(uuid, uuid, text, text, numeric, text, text, integer) FROM PUBLIC, anon, authenticated;
 GRANT EXECUTE ON FUNCTION public.process_user_deposit(uuid, uuid, text, text, numeric, text, text, integer) TO service_role;
