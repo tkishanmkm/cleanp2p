@@ -61,12 +61,13 @@ export async function POST(req: NextRequest) {
       idempotency_key,
     } = body;
 
-    const idempotencyKey =
-      (idempotency_key ||
-      body.idempotencyKey ||
-      req.headers.get('x-idempotency-key') ||
-      req.headers.get('idempotency-key') ||
-      '').trim();
+    const rawIdempotencyKey =
+      idempotency_key ??
+      body.idempotencyKey ??
+      req.headers.get('x-idempotency-key') ??
+      req.headers.get('idempotency-key') ??
+      '';
+    const idempotencyKey = typeof rawIdempotencyKey === 'string' ? rawIdempotencyKey.trim() : '';
 
     if (!idempotencyKey) {
       return NextResponse.json({
@@ -125,16 +126,17 @@ export async function POST(req: NextRequest) {
     }
     const unitPrice = adQuote.price;
     const adFiatCurrency = adQuote.fiatCurrency;
+    const resolvedFiatCurrency = String(adFiatCurrency || 'USD').toUpperCase();
     let calculatedCrypto = parseFloat(crypto_amount);
     let numericFiat = parseFloat(fiat_amount);
 
-    if (isNaN(calculatedCrypto) || calculatedCrypto <= 0) {
-      if (!isNaN(numericFiat) && numericFiat > 0 && unitPrice > 0) {
+    if (!Number.isFinite(calculatedCrypto) || calculatedCrypto <= 0) {
+      if (Number.isFinite(numericFiat) && numericFiat > 0 && unitPrice > 0) {
         calculatedCrypto = numericFiat / unitPrice;
       }
     }
 
-    if (isNaN(calculatedCrypto) || calculatedCrypto <= 0) {
+    if (!Number.isFinite(calculatedCrypto) || calculatedCrypto <= 0) {
       return NextResponse.json({ error: 'Invalid crypto amount.' }, { status: 400 });
     }
 
@@ -151,6 +153,36 @@ export async function POST(req: NextRequest) {
         { status: 400 }
       );
     }
+
+    let allowedPaymentMethods: string[] = [];
+    if (Array.isArray(ad.payment_methods)) {
+      allowedPaymentMethods = ad.payment_methods;
+    } else if (typeof ad.payment_methods === 'string' && ad.payment_methods.trim()) {
+      try {
+        const parsed = JSON.parse(ad.payment_methods);
+        allowedPaymentMethods = Array.isArray(parsed) ? parsed : [ad.payment_methods];
+      } catch {
+        allowedPaymentMethods = [ad.payment_methods];
+      }
+    } else if (typeof ad.payment_method === 'string' && ad.payment_method.trim()) {
+      allowedPaymentMethods = [ad.payment_method];
+    }
+    allowedPaymentMethods = allowedPaymentMethods
+      .filter((method: unknown): method is string => typeof method === 'string' && method.trim().length > 0)
+      .map((method) => method.trim());
+
+    if (allowedPaymentMethods.length === 0) allowedPaymentMethods = ['Bank Transfer'];
+    const requestedPaymentMethod = typeof payment_method === 'string' ? payment_method.trim() : '';
+    if (allowedPaymentMethods.length > 1 && !requestedPaymentMethod) {
+      return NextResponse.json({ error: 'Select a payment method for this advertisement.' }, { status: 400 });
+    }
+    const matchedPaymentMethod = requestedPaymentMethod
+      ? allowedPaymentMethods.find((method) => method.toLowerCase() === requestedPaymentMethod.toLowerCase())
+      : allowedPaymentMethods[0];
+    if (!matchedPaymentMethod) {
+      return NextResponse.json({ error: 'Selected payment method is not supported by this advertisement.' }, { status: 400 });
+    }
+    const resolvedPaymentMethod = matchedPaymentMethod;
 
     const eligibilityFailure = await getTradeEligibilityFailure(supabase, user, ad, numericFiat, adFiatCurrency);
     if (eligibilityFailure) {
