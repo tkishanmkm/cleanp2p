@@ -32,7 +32,8 @@ export async function POST(
     const allowedTypes = new Set([
       'TRADE_INITIATED', 'TRADE_STARTED', 'ESCROW_LOCKED', 'MARKED_PAID',
       'TRADE_RELEASED', 'TRADE_COMPLETED', 'TRADE_CANCELLED', 'TRADE_EXPIRED',
-      'TRADE_DISPUTED', 'TRADE_REPORTED', 'USER_BLOCKED', 'FEEDBACK_LEFT', 'MODERATOR_JOINED',
+      'TRADE_DISPUTED', 'USER_BLOCKED', 'POSITIVE_FEEDBACK', 'NEGATIVE_FEEDBACK',
+      'ISSUE_REPORTED', 'MESSAGE_BLOCKED', 'SECURITY_REMINDER', 'MODERATOR_JOINED', 'CUSTOM',
     ]);
     if ((!type && !customText) || (type && !allowedTypes.has(String(type)))) {
       return NextResponse.json({ error: 'Unsupported system message type.' }, { status: 400 });
@@ -40,7 +41,7 @@ export async function POST(
 
     const adminAuth = await verifyServerAdmin(req);
     const isAdmin = adminAuth.authorized;
-    if (customText && !isAdmin) {
+    if ((customText || type === 'CUSTOM') && !isAdmin) {
       return NextResponse.json({ error: 'Only an administrator can post custom system messages.' }, { status: 403 });
     }
     if (type === 'MODERATOR_JOINED' && !isAdmin) {
