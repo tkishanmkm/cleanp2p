@@ -1,5 +1,5 @@
 import { createServerClient } from '@supabase/ssr';
-import { createClient } from '@supabase/supabase-js';
+import { getSupabaseAdminClient } from '@/lib/supabase/server';
 import { cookies } from 'next/headers';
 import { NextResponse, type NextRequest } from 'next/server';
 import { findAdById, resolveBothTargetRows } from '@/lib/ad-lookup';
@@ -15,10 +15,7 @@ export async function GET(
     const resolvedParams = await Promise.resolve(params);
     const id = (resolvedParams.id || '').trim();
 
-    const supabaseAdmin = createClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL || 'https://placeholder.supabase.co',
-      process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'placeholder-anon-key'
-    );
+    const supabaseAdmin = getSupabaseAdminClient();
 
     // 1. Fetch ad by id, public_ad_id, public_id, or ad_id using universal resolver
     const resolved = await findAdById(id);
@@ -183,10 +180,7 @@ export async function PATCH(
     if (body.min_limit !== undefined && body.min_limit !== null && body.min_limit !== '') body.min_limit = Number(body.min_limit);
     if (body.max_limit !== undefined && body.max_limit !== null && body.max_limit !== '') body.max_limit = Number(body.max_limit);
 
-    const supabaseAdmin = createClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL || 'https://placeholder.supabase.co',
-      process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'placeholder-anon-key'
-    );
+    const supabaseAdmin = getSupabaseAdminClient();
 
     const { p2pAdsRow, adsRow } = await resolveBothTargetRows(existingAd, id, supabaseAdmin);
 
@@ -398,10 +392,7 @@ export async function DELETE(
       return NextResponse.json({ error: 'Forbidden. You do not own this advertisement.' }, { status: 403 });
     }
 
-    const supabaseAdmin = createClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL || 'https://placeholder.supabase.co',
-      process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'placeholder-anon-key'
-    );
+    const supabaseAdmin = getSupabaseAdminClient();
 
     const { p2pAdsRow, adsRow } = await resolveBothTargetRows(existingAd, id, supabaseAdmin);
 
