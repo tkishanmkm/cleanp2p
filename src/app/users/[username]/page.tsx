@@ -70,13 +70,10 @@ export default async function UserProfilePage({ params }: PageProps) {
       const isActive = ad.is_active !== false && ad.active !== false && String(ad.status || '').toUpperCase() !== 'INACTIVE';
       return (type === 'SELL' || type === 'ONLINE_SELL' || type === '') && isActive;
     })
-    .map((ad) => {
-      const sym = (ad.asset_symbol || ad.crypto || ad.asset || 'USDT').toUpperCase();
-      return {
-        ...ad,
-        available_crypto: Number(ad.available_amount ?? ad.total_amount ?? 0),
-      };
-    });
+    .map((ad) => ({
+      ...ad,
+      available_crypto: Number(ad.available_amount ?? ad.total_amount ?? 0),
+    }));
 
   // 2. If advertiser created a 'BUY' ad, the visitor SELLs crypto to advertiser -> "Sell Ads" tab
   const sellAds = userAds
