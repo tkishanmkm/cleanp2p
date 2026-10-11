@@ -35,7 +35,7 @@ import {
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
-import { Loader2, ShieldCheck, ArrowRight, CheckCircle2 } from 'lucide-react';
+import { Loader2, ShieldCheck, Shield, Link, ArrowRight, CheckCircle2 } from 'lucide-react';
 import { CryptoCurrency, CoinTransfer } from '@/lib/types';
 import { useRouter } from 'next/navigation';
 import { TransferHistoryTable } from '@/components/wallets/transfer-history-table';
