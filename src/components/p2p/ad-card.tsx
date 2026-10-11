@@ -168,20 +168,22 @@ export function AdCard({ ad, marketPriceUsd: propMarketPriceUsd, fiatExchangeRat
   // If available crypto inventory is passed (token amount), calculate available fiat using unit price:
   // Max Limit (Fiat) = Available Crypto * Unit Price
   let availableFiatFromInventory = Infinity;
-  const rawAvailableCrypto = (ad as any).available_crypto ?? (ad as any).availableCrypto ?? (ad as any).available_tokens ?? (ad as any).crypto_inventory;
-  if (rawAvailableCrypto !== undefined && rawAvailableCrypto !== null && Number(rawAvailableCrypto) >= 0) {
+  const rawAvailableCrypto =
+    (ad as any).available_crypto ??
+    (ad as any).availableCrypto ??
+    (ad as any).available_tokens ??
+    (ad as any).crypto_inventory ??
+    (ad as any).available_amount ??
+    (ad as any).total_amount;
+  if (rawAvailableCrypto !== undefined && rawAvailableCrypto !== null && Number.isFinite(Number(rawAvailableCrypto)) && Number(rawAvailableCrypto) >= 0) {
     const availCryptoNum = Number(rawAvailableCrypto);
-    availableFiatFromInventory = availCryptoNum * (adPrice > 0 ? adPrice : 1);
-  } else if (adCreator?.cryptoBalances && adCreator.cryptoBalances[adCrypto] !== undefined) {
-    const availCryptoNum = Number(adCreator.cryptoBalances[adCrypto]);
     availableFiatFromInventory = availCryptoNum * (adPrice > 0 ? adPrice : 1);
   }
 
-  // Check if advertiser balance was given in fiat or USD
-  const rawAdvertiserBalanceUSD = Number((ad as any).advertiserBalanceUSD ?? (ad as any).creator_crypto_balance_fiat ?? 0);
-  const advertiserBalanceInFiat = rawAdvertiserBalanceUSD > 0
-    ? rawAdvertiserBalanceUSD * (adFiat === 'USD' ? 1 : (fiatRates[adFiat] || 1))
-    : (availableFiatFromInventory < Infinity ? availableFiatFromInventory : maxLimit);
+  // Use only public ad inventory/limits. Never infer it from the seller's private wallet balance.
+  const advertiserBalanceInFiat = availableFiatFromInventory < Infinity
+    ? availableFiatFromInventory
+    : maxLimit;
 
   // Effective max limit is capped by available inventory/balance
   const effectiveMaxLimit = maxLimit > 0
