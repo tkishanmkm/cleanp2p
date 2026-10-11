@@ -34,13 +34,10 @@ export async function POST(req: Request) {
     }
 
     if (authError || !user) {
-      console.error('[Auth Error Details in /api/ads/create]:', authError?.message);
+      console.warn('[Ads Create] Authentication failed.');
       return NextResponse.json(
-        { 
-          error: 'No active session found! Please refresh or log in again.', 
-          details: authError?.message 
-        }, 
-        { status: 401 }
+        { error: 'No active session found. Please refresh or log in again.' },
+        { status: 401, headers: { 'Cache-Control': 'no-store' } }
       );
     }
 
