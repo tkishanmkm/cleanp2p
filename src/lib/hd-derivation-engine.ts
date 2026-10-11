@@ -181,10 +181,16 @@ export function getAdminClient(): SupabaseClient {
     process.env.SUPABASE_URL ||
     'https://eaiwgfxoiwxepinvcykg.supabase.co';
 
-  const serviceRoleKey =
-    process.env.SUPABASE_SERVICE_ROLE_KEY ||
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ||
-    'placeholder-key';
+  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY?.trim();
+  if (
+    !serviceRoleKey ||
+    serviceRoleKey === 'placeholder-key' ||
+    serviceRoleKey === process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
+  ) {
+    throw new Error(
+      'SUPABASE_SERVICE_ROLE_KEY is required for wallet provisioning and must not fall back to the public anon key.'
+    );
+  }
 
   return createClient(supabaseUrl, serviceRoleKey, {
     auth: {
