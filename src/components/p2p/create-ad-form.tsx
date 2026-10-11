@@ -234,7 +234,7 @@ export function CreateAdForm({ ad }: CreateAdFormProps) {
     let isMounted = true;
     async function loadBalances() {
       try {
-        const balances = await getUserWalletBalances(creatorId);
+        const balances = await getUserWalletBalances(creatorId as string);
         if (isMounted && balances) {
           setUserBalances(balances);
         }
