@@ -46,6 +46,8 @@ export async function GET(request: Request) {
       USDT: { available: 0, inEscrow: 0, inWithdrawal: 0, total: 0 },
       BNB: { available: 0, inEscrow: 0, inWithdrawal: 0, total: 0 },
       TRX: { available: 0, inEscrow: 0, inWithdrawal: 0, total: 0 },
+      BNB: { available: 0, inEscrow: 0, inWithdrawal: 0, total: 0 },
+      TRX: { available: 0, inEscrow: 0, inWithdrawal: 0, total: 0 },
     };
 
     const rawRecords: any[] = [];
