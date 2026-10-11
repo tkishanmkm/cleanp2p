@@ -96,23 +96,23 @@ BEGIN
         v_txid := TRIM(v_utxo->>'txid');
         v_vout := (v_utxo->>'vout')::INTEGER;
 
-        INSERT INTO public.utxo_reservations (txid, vout, network, sweep_id, status, reserved_until)
+        INSERT INTO public.utxo_reservations AS existing (txid, vout, network, sweep_id, status, reserved_until)
         VALUES (v_txid, v_vout, v_network, p_sweep_id, 'RESERVED', v_until)
         ON CONFLICT (txid, vout, network)
         DO UPDATE SET
             sweep_id = EXCLUDED.sweep_id,
             status = CASE
-                WHEN public.utxo_reservations.status = 'RELEASED' THEN 'RESERVED'
-                ELSE public.utxo_reservations.status
+                WHEN existing.status = 'RELEASED' THEN 'RESERVED'
+                ELSE existing.status
             END,
             reserved_until = CASE
-                WHEN public.utxo_reservations.status = 'RELEASED'
-                  OR public.utxo_reservations.status = 'RESERVED'
+                WHEN existing.status = 'RELEASED'
+                  OR existing.status = 'RESERVED'
                 THEN EXCLUDED.reserved_until
-                ELSE public.utxo_reservations.reserved_until
+                ELSE existing.reserved_until
             END
-        WHERE public.utxo_reservations.sweep_id = EXCLUDED.sweep_id
-           OR public.utxo_reservations.status = 'RELEASED';
+        WHERE existing.sweep_id = EXCLUDED.sweep_id
+           OR existing.status = 'RELEASED';
     END LOOP;
 
     RETURN jsonb_build_object('success', true, 'count', jsonb_array_length(p_utxos));
