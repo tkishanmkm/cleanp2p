@@ -662,9 +662,9 @@ export default function CreateP2PAdPage() {
       }
 
       let availableBalance = balances[crypto as CryptoCurrency]?.available || 0;
-      const minCoinRequired = (parseFloat(minAmount || '0') || 0) / (effectiveAdPrice || 1);
+      const maxCoinRequired = (parseFloat(maxAmount || '0') || 0) / (effectiveAdPrice || 1);
 
-      if (availableBalance < minCoinRequired) {
+      if (!Number.isFinite(maxCoinRequired) || availableBalance < maxCoinRequired) {
         // Attempt fresh fetch from /api/wallet/balance in case state was stale
         try {
           const freshRes = await fetch('/api/wallet/balance');
