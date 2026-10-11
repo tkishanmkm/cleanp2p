@@ -60,13 +60,15 @@ export async function POST(request: NextRequest) {
     const rawCrypto = body.amount ?? body.cryptoAmount ?? body.crypto_amount;
     const rawFiat = body.fiatAmount ?? body.fiat_amount;
     const customPaymentMethod = body.paymentMethod || body.payment_method;
-    const tradeRef = body.tradeRef || body.trade_ref || generateTradeId();
-    const idempotencyKey =
-      (body.idempotencyKey ||
-      body.idempotency_key ||
-      request.headers.get('x-idempotency-key') ||
-      request.headers.get('idempotency-key') ||
-      '').trim();
+    const rawTradeRef = body.tradeRef ?? body.trade_ref;
+    const tradeRef = typeof rawTradeRef === 'string' && rawTradeRef.trim() ? rawTradeRef.trim() : generateTradeId();
+    const rawIdempotencyKey =
+      body.idempotencyKey ??
+      body.idempotency_key ??
+      request.headers.get('x-idempotency-key') ??
+      request.headers.get('idempotency-key') ??
+      '';
+    const idempotencyKey = typeof rawIdempotencyKey === 'string' ? rawIdempotencyKey.trim() : '';
 
     if (!idempotencyKey) {
       return NextResponse.json({
@@ -113,6 +115,11 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    const adStatus = String(ad.status || '').trim().toUpperCase();
+    if (ad.is_active === false || ad.active === false || ['INACTIVE', 'DELETED', 'SUSPENDED', 'REJECTED', 'REMOVED', 'CANCELLED'].includes(adStatus)) {
+      return NextResponse.json({ success: false, error: 'This advertisement is not available for new trades.' }, { status: 409 });
+    }
+
     if (ad.user_id === user.id) {
       return NextResponse.json(
         { success: false, error: 'You cannot trade with your own advertisement.' },
@@ -122,16 +129,16 @@ export async function POST(request: NextRequest) {
 
     // 4. Resolve exact numerical amounts
     const adQuote = await resolveAuthoritativeAdQuote(ad);
-    if (!adQuote) {
+    if (!adQuote || !Number.isFinite(adQuote.price) || adQuote.price <= 0) {
       return NextResponse.json({ success: false, error: 'Advertisement price is unavailable or invalid.' }, { status: 400 });
     }
     const unitPrice = adQuote.price;
     const resolvedFiatCurrency = adQuote.fiatCurrency;
-    let calculatedCrypto = parseFloat(rawCrypto);
-    let numericFiat = parseFloat(rawFiat);
+    let calculatedCrypto = parseFloat(String(rawCrypto ?? ''));
+    let numericFiat = parseFloat(String(rawFiat ?? ''));
 
-    if (isNaN(calculatedCrypto) || calculatedCrypto <= 0) {
-      if (!isNaN(numericFiat) && numericFiat > 0 && unitPrice > 0) {
+    if (!Number.isFinite(calculatedCrypto) || calculatedCrypto <= 0) {
+      if (Number.isFinite(numericFiat) && numericFiat > 0 && unitPrice > 0) {
         calculatedCrypto = numericFiat / unitPrice;
       }
     }
@@ -151,13 +158,35 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ success: false, error: eligibilityFailure.error, code: eligibilityFailure.code }, { status: eligibilityFailure.status });
     }
 
-    // 5. Resolve Payment Method & Currency
-    const paymentMethods = Array.isArray(ad.payment_methods)
-      ? ad.payment_methods
-      : typeof ad.payment_methods === 'string'
-      ? JSON.parse(ad.payment_methods)
-      : ['Bank Transfer'];
-    const resolvedPaymentMethod = customPaymentMethod || paymentMethods[0] || 'Bank Transfer';
+    // 5. Resolve and validate the payment method against this advertisement.
+    let paymentMethods: string[] = [];
+    if (Array.isArray(ad.payment_methods)) {
+      paymentMethods = ad.payment_methods;
+    } else if (typeof ad.payment_methods === 'string' && ad.payment_methods.trim()) {
+      try {
+        const parsed = JSON.parse(ad.payment_methods);
+        paymentMethods = Array.isArray(parsed) ? parsed : [ad.payment_methods];
+      } catch {
+        paymentMethods = [ad.payment_methods];
+      }
+    } else if (typeof ad.payment_method === 'string' && ad.payment_method.trim()) {
+      paymentMethods = [ad.payment_method];
+    }
+    paymentMethods = paymentMethods
+      .filter((method: unknown): method is string => typeof method === 'string' && method.trim().length > 0)
+      .map((method) => method.trim());
+    if (paymentMethods.length === 0) paymentMethods = ['Bank Transfer'];
+
+    const requestedPaymentMethod = typeof customPaymentMethod === 'string' ? customPaymentMethod.trim() : '';
+    if (paymentMethods.length > 1 && !requestedPaymentMethod) {
+      return NextResponse.json({ success: false, error: 'Please select a payment method for this advertisement.' }, { status: 400 });
+    }
+    const resolvedPaymentMethod = requestedPaymentMethod
+      ? paymentMethods.find((method) => method.toLowerCase() === requestedPaymentMethod.toLowerCase())
+      : paymentMethods[0];
+    if (!resolvedPaymentMethod) {
+      return NextResponse.json({ success: false, error: 'Selected payment method is not supported by this advertisement.' }, { status: 400 });
+    }
     const adIdentifier = String(ad.id || ad.public_ad_id || adId);
 
     // 6. Execute Atomic Database RPC (Locks Escrow & Creates Trade)
