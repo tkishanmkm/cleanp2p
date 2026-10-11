@@ -80,27 +80,6 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Selling offers require Tier 2 identity verification. Fail closed if profile state cannot be read.
-    if (adSide === 'SELL') {
-      const admin = getSupabaseAdminClient();
-      const { data: creatorProfile, error: creatorProfileError } = await admin
-        .from('profiles')
-        .select('is_verified, id_verified, is_id_verified, kyc_status, verification_tier')
-        .eq('id', user.id)
-        .maybeSingle();
-
-      if (creatorProfileError || !creatorProfile) {
-        return NextResponse.json({ error: 'Unable to verify seller eligibility. Please try again.' }, { status: 503 });
-      }
-
-      if (!isTier2User(creatorProfile)) {
-        return NextResponse.json(
-          { error: 'KYC verification is required to sell.', code: 'KYC_REQUIRED', requires_kyc: true },
-          { status: 403 }
-        );
-      }
-    }
-
     // Ensure public.profiles record exists for user.id to guarantee foreign key integrity
     try {
       const admin = getSupabaseAdminClient();
@@ -141,6 +120,27 @@ export async function POST(request: NextRequest) {
         { error: 'Invalid or missing ad trade direction (BUY/SELL).' },
         { status: 400 }
       );
+    }
+
+    // Selling offers require Tier 2 identity verification. Fail closed if profile state cannot be read.
+    if (adSide === 'SELL') {
+      const admin = getSupabaseAdminClient();
+      const { data: creatorProfile, error: creatorProfileError } = await admin
+        .from('profiles')
+        .select('is_verified, id_verified, is_id_verified, kyc_status, verification_tier')
+        .eq('id', user.id)
+        .maybeSingle();
+
+      if (creatorProfileError || !creatorProfile) {
+        return NextResponse.json({ error: 'Unable to verify seller eligibility. Please try again.' }, { status: 503 });
+      }
+
+      if (!isTier2User(creatorProfile)) {
+        return NextResponse.json(
+          { error: 'KYC verification is required to sell.', code: 'KYC_REQUIRED', requires_kyc: true },
+          { status: 403 }
+        );
+      }
     }
 
     const requestedMax = Number(body.max_amount ?? body.max_limit ?? body.maxAmount ?? 5000);
