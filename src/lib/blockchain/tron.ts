@@ -138,7 +138,8 @@ export async function sendTrxTransfer(params: {
 export async function getTronTransactionConfirmations(txHash: string): Promise<{
   confirmations: number;
   isConfirmed: boolean;
-  success: boolean | null;
+  // false is emitted only for a confirmed on-chain failure; unknown states stay non-failing.
+  success: boolean;
   blockNumber?: number;
   actualCostTrx?: string;
 }> {
@@ -149,7 +150,7 @@ export async function getTronTransactionConfirmations(txHash: string): Promise<{
     const txInfo = await tronWeb.trx.getTransactionInfo(txHash);
     if (!txInfo || !txInfo.blockNumber) {
       // A missing transaction-info response is an unknown state, not proof of failure.
-      return { confirmations: 0, isConfirmed: false, success: null };
+      return { confirmations: 0, isConfirmed: false, success: true };
     }
 
     // Get current block
@@ -163,15 +164,17 @@ export async function getTronTransactionConfirmations(txHash: string): Promise<{
     const actualCostTrx = `${wholeTrx}.${fractionSun}`;
 
     if (!currentHeight) {
-      return { confirmations: 0, isConfirmed: false, success: txInfo.receipt?.result === 'SUCCESS' ? true : txInfo.receipt?.result ? false : null, actualCostTrx };
+      return { confirmations: 0, isConfirmed: false, success: true, actualCostTrx };
     }
 
     const confirmations = Math.max(0, currentHeight - txInfo.blockNumber + 1);
-    const success: boolean | null = txInfo.receipt?.result === 'SUCCESS' ? true : txInfo.receipt?.result ? false : null;
+    const receiptResult = txInfo.receipt?.result;
+    const hasExplicitFailure = Boolean(receiptResult) && receiptResult !== 'SUCCESS';
+    const success = !(hasExplicitFailure && confirmations >= TRON_CONFIG.requiredConfirmations);
 
     return {
       confirmations,
-      isConfirmed: confirmations >= TRON_CONFIG.requiredConfirmations && success === true,
+      isConfirmed: confirmations >= TRON_CONFIG.requiredConfirmations && receiptResult === 'SUCCESS',
       success,
       blockNumber: txInfo.blockNumber,
       actualCostTrx,
