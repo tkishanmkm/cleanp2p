@@ -117,7 +117,8 @@ export async function POST(req: NextRequest) {
     }
 
     // 3. Resolve numerical values and authoritative parameters
-    const rawPrice = price ?? ad.fixed_rate ?? ad.price;
+    // Never let the request override the published advertisement price.
+    const rawPrice = ad.price ?? ad.unit_price ?? ad.fixed_rate;
     const unitPrice = Number(rawPrice);
     if (!rawPrice || isNaN(unitPrice) || unitPrice <= 0) {
       return NextResponse.json(
