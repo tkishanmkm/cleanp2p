@@ -127,7 +127,8 @@ export function AdminSidebar() {
           {menuItems.map((item) => (
             <SidebarMenuItem key={item.label}>
               <Link href={item.href}>
-                <SidebarMenuButton isActive={pathname === item.href} icon={<item.icon />} tooltip={item.label}>
+                <SidebarMenuButton isActive={pathname === item.href} tooltip={item.label}>
+                  <item.icon className="mr-2 h-4 w-4" />
                   <span className="flex-grow">{item.label}</span>
                   {item.badge != null && item.badge > 0 && (
                     <Badge variant="destructive" className="ml-auto">
@@ -170,7 +171,8 @@ export function AdminSidebar() {
         </div>
         <SidebarMenu>
           <SidebarMenuItem>
-            <SidebarMenuButton icon={<LogOut />} tooltip="Logout" onClick={handleLogout}>
+            <SidebarMenuButton tooltip="Logout" onClick={handleLogout}>
+              <LogOut className="mr-2 h-4 w-4" />
               Logout
             </SidebarMenuButton>
           </SidebarMenuItem>
