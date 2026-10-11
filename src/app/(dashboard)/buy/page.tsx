@@ -348,7 +348,7 @@ function P2PMarketplaceContent() {
       if (creatorIds.length > 0) {
         const { data: profiles } = await supabase
           .from('profiles')
-          .select('id, username, country, feedback_score, positive_feedback, negative_feedback, completed_trades, avg_release_minutes, avg_release_time, avg_payment_minutes, avg_pay_time, avatar_url, photo_url, badges, last_seen, last_seen_at, last_active, updated_at, created_at, blocked_users, is_verified, kyc_status')
+          .select('id, username, country, feedback_score, positive_feedback, negative_feedback, completed_trades, avg_release_minutes, avg_release_time, avg_payment_minutes, avg_pay_time, avatar_url, photo_url, badges, last_seen, last_seen_at, last_active, updated_at, created_at, is_verified, kyc_status')
           .in('id', creatorIds);
 
         if (profiles) {
@@ -358,7 +358,7 @@ function P2PMarketplaceContent() {
               id: p.id,
               username: p.username || 'Trader',
               country: p.country,
-              feedbackScore: p.feedback_score ?? 100,
+              feedbackScore: p.feedback_score ?? 0,
               positiveFeedback: p.positive_feedback ?? 0,
               negativeFeedback: p.negative_feedback ?? 0,
               completedTrades: p.completed_trades ?? 0,
@@ -372,7 +372,6 @@ function P2PMarketplaceContent() {
               last_seen: p.last_seen || p.last_seen_at || p.last_active,
               last_seen_at: p.last_seen_at || p.last_seen || p.last_active,
               createdAt: p.created_at,
-              blockedUsers: p.blocked_users || [],
               isVerified: p.is_verified ?? (p.kyc_status === 'VERIFIED'),
             };
           });
