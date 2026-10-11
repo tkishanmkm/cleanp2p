@@ -377,7 +377,7 @@ async function scanEvmNativeDeposits(
         if (monitoredEvmAddresses.has(toClean) && tx.value > BigInt(0)) {
           // A transaction may be included in a block but still have reverted.
           // Require a successful canonical receipt before any balance-changing RPC.
-          let receipt;
+          let receipt: Awaited<ReturnType<typeof provider.getTransactionReceipt>>;
           try {
             receipt = await provider.getTransactionReceipt(tx.hash);
           } catch {
