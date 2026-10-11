@@ -6,6 +6,7 @@ import { generateAdId } from '@/lib/id-generator';
 import { calculateMinimumFiatAmount } from '@/lib/currency';
 import { resolveTradeType } from '@/utils/p2p-helpers';
 import { assertPlatformControlAllowed } from '@/lib/platform-guard';
+import { resolveAuthoritativeAdQuote } from '@/lib/p2p/authoritativeAdQuote';
 
 export const dynamic = 'force-dynamic';
 
@@ -114,7 +115,12 @@ export async function POST(request: NextRequest) {
     const requestedMax = Number(body.max_amount ?? body.max_limit ?? body.maxAmount ?? 5000);
     const requestedMin = Number(body.min_amount ?? body.min_limit ?? body.minAmount ?? 100);
 
-    // Enforce dynamic minimum limit equivalent to at least $10.00 USD
+    if (!Number.isFinite(requestedMin) || requestedMin <= 0 ||
+        !Number.isFinite(requestedMax) || requestedMax <= 0 || requestedMax < requestedMin) {
+      return NextResponse.json({ error: 'Minimum and maximum trade limits must be finite positive numbers, with maximum >= minimum.' }, { status: 400 });
+    }
+
+    // Enforce dynamic minimum limit equivalent to at least $10.00 USD.
     const dynamicMinThreshold = calculateMinimumFiatAmount(10.00, fiatType);
     if (requestedMin < dynamicMinThreshold) {
       return NextResponse.json({
@@ -125,17 +131,16 @@ export async function POST(request: NextRequest) {
 
     const priceVal = body.price !== undefined && body.price !== null && body.price !== '' ? Number(body.price) : null;
     const marginVal = Number(body.margin ?? body.rate_percent ?? body.margin_percentage ?? body.price_margin ?? 0);
-    const pricingType = body.pricing_type || (body.rate_type === 'fixed' || body.is_fixed ? 'FIXED' : 'FLOAT');
+    const pricingType = String(body.pricing_type || (body.rate_type === 'fixed' || body.is_fixed ? 'FIXED' : 'FLOAT')).toUpperCase();
     const paymentWindow = Math.max(30, parseInt(String(body.payment_window || body.payment_window_minutes || 30), 10) || 30);
     const paymentMethods = Array.isArray(body.payment_methods) && body.payment_methods.length > 0
       ? body.payment_methods
       : (Array.isArray(body.paymentMethods) ? body.paymentMethods : ['Bank Transfer']);
 
-    // Authoritative Server-Side ±50% Reference Market Price Validation (Applies to both BUY and SELL ads)
     const isFixedPricing = pricingType === 'FIXED' || body.rate_type === 'fixed' || Boolean(body.is_fixed);
 
     if (isFixedPricing) {
-      if (priceVal === null || isNaN(priceVal) || priceVal <= 0) {
+      if (priceVal === null || !Number.isFinite(priceVal) || priceVal <= 0) {
         return NextResponse.json({ error: 'Valid fixed price is required for fixed-rate ads.' }, { status: 400 });
       }
 
@@ -145,115 +150,67 @@ export async function POST(request: NextRequest) {
         .select('price_in_fiat, updated_at')
         .eq('asset_symbol', coinType)
         .eq('fiat_symbol', fiatType)
+        .order('updated_at', { ascending: false })
+        .limit(1)
         .maybeSingle();
 
-      if (marketError || !marketRow || !marketRow.price_in_fiat || Number(marketRow.price_in_fiat) <= 0) {
+      const refPrice = Number(marketRow?.price_in_fiat);
+      if (marketError || !marketRow || !Number.isFinite(refPrice) || refPrice <= 0) {
         return NextResponse.json(
           { error: `Market reference price is currently unavailable for ${coinType}/${fiatType}. Please try again later.` },
-          { status: 400 }
+          { status: 503 }
         );
       }
 
-      const refPrice = Number(marketRow.price_in_fiat);
       const minAllowedPrice = refPrice * 0.50;
       const maxAllowedPrice = refPrice * 1.50;
-
       if (priceVal < minAllowedPrice || priceVal > maxAllowedPrice) {
         return NextResponse.json(
-          {
-            error: `Fixed price must be within ±50% of the reference market price (${minAllowedPrice.toFixed(2)} - ${maxAllowedPrice.toFixed(2)} ${fiatType}).`,
-          },
+          { error: `Fixed price must be within ±50% of the reference market price (${minAllowedPrice.toFixed(2)} - ${maxAllowedPrice.toFixed(2)} ${fiatType}).` },
           { status: 400 }
         );
       }
-    } else {
-      // Floating/margin pricing validation (-50% to +50%)
-      if (marginVal < -50 || marginVal > 50) {
-        return NextResponse.json(
-          { error: 'Margin percentage for dynamic pricing must be between -50% and +50%.' },
-          { status: 400 }
-        );
-      }
+    } else if (!Number.isFinite(marginVal) || marginVal < -50 || marginVal > 50) {
+      return NextResponse.json(
+        { error: 'Margin percentage for dynamic pricing must be a finite number between -50% and +50%.' },
+        { status: 400 }
+      );
     }
 
-    // BALANCE VALIDATION: If user is creating a SELL ad (offering to sell coin), check that minimum limit in coin is present in their account
+    const adQuote = await resolveAuthoritativeAdQuote({
+      asset_symbol: coinType,
+      fiat_currency: fiatType,
+      pricing_type: pricingType,
+      is_fixed: isFixedPricing,
+      price: priceVal,
+      margin: marginVal,
+      rate_percent: marginVal,
+    });
+    if (!adQuote) {
+      return NextResponse.json({ error: 'Unable to resolve a valid current advertisement price.' }, { status: 503 });
+    }
+
+    // SELL ads must be backed by the canonical wallet_assets balance used by the escrow RPC.
+    // Do not use stale legacy tables or profile balance fields as a fallback.
     if (adSide === 'SELL') {
       const adminClient = getSupabaseAdminClient();
-      let availableBalance = 0;
+      const { data: walletAsset, error: walletError } = await adminClient
+        .from('wallet_assets')
+        .select('asset_symbol, balance')
+        .eq('user_id', user.id)
+        .ilike('asset_symbol', coinType)
+        .maybeSingle();
 
-      try {
-        // 1. Check wallet_assets directly by user_id
-        const { data: directAssets } = await adminClient
-          .from('wallet_assets')
-          .select('*')
-          .eq('user_id', user.id);
-
-        if (directAssets && directAssets.length > 0) {
-          const match = directAssets.find((a: any) => {
-            const sym = String(a.asset_symbol || a.asset_code || a.symbol || a.crypto || '').toUpperCase();
-            return sym === coinType.toUpperCase();
-          });
-          if (match) {
-            const avail = Number(match.available ?? match.balance ?? match.amount ?? 0);
-            const locked = Number(match.locked_escrow ?? match.locked ?? match.locked_balance ?? 0);
-            const net = Math.max(0, avail - locked);
-            if (net > availableBalance) availableBalance = net;
-          }
-        }
-
-        // 2. Check user_wallets table
-        const { data: walletData } = await adminClient
-          .from('user_wallets')
-          .select('available_balance, balance, locked_balance')
-          .eq('user_id', user.id)
-          .ilike('asset_symbol', coinType)
-          .maybeSingle();
-
-        if (walletData) {
-          const net = Number(walletData.available_balance ?? (Number(walletData.balance || 0) - Number(walletData.locked_balance || 0)));
-          if (net > availableBalance) availableBalance = net;
-        }
-
-        // 3. Check wallets table
-        const { data: chainWallets } = await adminClient
-          .from('wallets')
-          .select('balance, available_balance, currency, chain')
-          .eq('user_id', user.id);
-
-        if (chainWallets && chainWallets.length > 0) {
-          const matchingWallets = chainWallets.filter((w: any) => 
-            String(w.currency || w.chain || '').toUpperCase() === coinType.toUpperCase()
-          );
-          matchingWallets.forEach((w: any) => {
-            const val = Number(w.available_balance ?? w.balance ?? 0);
-            if (val > availableBalance) availableBalance = val;
-          });
-        }
-
-        // 4. Check profiles table fallback
-        const { data: prof } = await adminClient
-          .from('profiles')
-          .select('*')
-          .eq('id', user.id)
-          .maybeSingle();
-
-        if (prof) {
-          const col = `${coinType.toLowerCase()}_balance`;
-          if (prof[col] !== undefined) {
-            const val = Number(prof[col] || 0);
-            if (val > availableBalance) availableBalance = val;
-          }
-        }
-      } catch (balErr) {
-        console.warn('Balance check error during ad creation:', balErr);
+      if (walletError) {
+        console.error('[P2P Ad Creation] Canonical wallet balance lookup failed:', walletError.code || 'UNKNOWN');
+        return NextResponse.json({ error: 'Unable to verify available wallet balance. Please try again.' }, { status: 503 });
       }
 
-      const effectiveUnitPrice = priceVal && priceVal > 0 ? priceVal : 1;
-      const minCoinRequired = requestedMin / effectiveUnitPrice;
-
-      if (availableBalance < minCoinRequired) {
+      const availableBalance = Number(walletAsset?.balance ?? 0);
+      const minCoinRequired = requestedMin / adQuote.price;
+      if (!Number.isFinite(availableBalance) || availableBalance < minCoinRequired) {
         return NextResponse.json({
-          error: `Insufficient ${coinType} balance. You must have at least ${minCoinRequired.toFixed(6)} ${coinType} in your wallet to create a sell offer with a minimum limit of ${requestedMin} ${fiatType}. Current available: ${availableBalance.toFixed(6)} ${coinType}.`,
+          error: `Insufficient ${coinType} balance to back this sell offer.`,
           code: 'INSUFFICIENT_BALANCE',
         }, { status: 400 });
       }
@@ -280,8 +237,8 @@ export async function POST(request: NextRequest) {
       margin: marginVal,
       min_limit: requestedMin,
       max_limit: requestedMax,
-      total_amount: requestedMax,
-      available_amount: requestedMax,
+      total_amount: Number((requestedMax / adQuote.price).toFixed(8)),
+      available_amount: Number((requestedMax / adQuote.price).toFixed(8)),
       payment_methods: paymentMethods,
       payment_window: paymentWindow,
       
