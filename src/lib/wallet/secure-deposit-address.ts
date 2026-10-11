@@ -11,11 +11,11 @@ import {
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL || '';
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
 
-const authClient = createClient(
-  supabaseUrl || 'https://placeholder.supabase.co',
-  supabaseAnonKey || 'placeholder-anon-key',
-  { auth: { persistSession: false, autoRefreshToken: false } }
-);
+function getAuthClient() {
+  return createClient(supabaseUrl, supabaseAnonKey, {
+    auth: { persistSession: false, autoRefreshToken: false },
+  });
+}
 
 export async function resolveWalletRouteUserId(req: NextRequest): Promise<string | null> {
   if (!supabaseUrl || !supabaseAnonKey) return null;
@@ -23,7 +23,7 @@ export async function resolveWalletRouteUserId(req: NextRequest): Promise<string
   const authHeader = req.headers.get('authorization') || '';
   const bearer = authHeader.match(/^Bearer\s+(.+)$/i)?.[1]?.trim();
   if (bearer) {
-    const { data, error } = await authClient.auth.getUser(bearer);
+    const { data, error } = await getAuthClient().auth.getUser(bearer);
     if (!error && data.user?.id) return data.user.id;
   }
 
