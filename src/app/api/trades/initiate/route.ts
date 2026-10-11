@@ -63,13 +63,15 @@ export async function POST(req: Request) {
     const rawFiat = body.fiatAmount ?? body.fiat_amount;
     const rawCrypto = body.cryptoAmount ?? body.crypto_amount;
     const customPaymentMethod = body.paymentMethod || body.payment_method;
-    const tradeRef = body.tradeRef || body.trade_ref || generateTradeId();
-    const idempotencyKey =
-      (body.idempotencyKey ||
-      body.idempotency_key ||
-      req.headers.get('x-idempotency-key') ||
-      req.headers.get('idempotency-key') ||
-      '').trim();
+    const rawTradeRef = body.tradeRef ?? body.trade_ref;
+    const tradeRef = typeof rawTradeRef === 'string' && rawTradeRef.trim() ? rawTradeRef.trim() : generateTradeId();
+    const rawIdempotencyKey =
+      body.idempotencyKey ??
+      body.idempotency_key ??
+      req.headers.get('x-idempotency-key') ??
+      req.headers.get('idempotency-key') ??
+      '';
+    const idempotencyKey = typeof rawIdempotencyKey === 'string' ? rawIdempotencyKey.trim() : '';
 
     if (!idempotencyKey) {
       return NextResponse.json({
@@ -111,6 +113,11 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: 'Advertisement not found.' }, { status: 404 });
     }
 
+    const adStatus = String(ad.status || '').trim().toUpperCase();
+    if (ad.is_active === false || ad.active === false || ['INACTIVE', 'DELETED', 'SUSPENDED', 'REJECTED', 'REMOVED', 'CANCELLED'].includes(adStatus)) {
+      return NextResponse.json({ error: 'This advertisement is not available for new trades.' }, { status: 409 });
+    }
+
     // 2. Prevent trading with own ad
     if (ad.user_id === user.id) {
       return NextResponse.json(
@@ -121,7 +128,7 @@ export async function POST(req: Request) {
 
     // 3. Resolve numerical amounts with exact precision
     const adQuote = await resolveAuthoritativeAdQuote(ad);
-    if (!adQuote) {
+    if (!adQuote || !Number.isFinite(adQuote.price) || adQuote.price <= 0) {
       return NextResponse.json(
         { error: 'Advertisement unit price is invalid or market price is unavailable.' },
         { status: 400 }
@@ -129,11 +136,11 @@ export async function POST(req: Request) {
     }
     const unitPrice = adQuote.price;
     const resolvedFiatCurrency = adQuote.fiatCurrency;
-    let calculatedCrypto = parseFloat(rawCrypto);
-    let numericFiat = parseFloat(rawFiat);
+    let calculatedCrypto = parseFloat(String(rawCrypto ?? ''));
+    let numericFiat = parseFloat(String(rawFiat ?? ''));
 
-    if (isNaN(calculatedCrypto) || calculatedCrypto <= 0) {
-      if (!isNaN(numericFiat) && numericFiat > 0 && unitPrice > 0) {
+    if (!Number.isFinite(calculatedCrypto) || calculatedCrypto <= 0) {
+      if (Number.isFinite(numericFiat) && numericFiat > 0 && unitPrice > 0) {
         calculatedCrypto = numericFiat / unitPrice;
       }
     }
