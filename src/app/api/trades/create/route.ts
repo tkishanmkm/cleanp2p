@@ -192,6 +192,10 @@ export async function POST(req: NextRequest) {
     const publicId = rpcResult.public_id || shortRef;
     const sellerId = rpcResult.seller_id;
     const buyerId = rpcResult.buyer_id;
+    const finalCryptoAmount = Number(rpcResult?.crypto_amount ?? calculatedCrypto);
+    const finalFiatAmount = Number(rpcResult?.fiat_amount ?? numericFiat);
+    const finalUnitPrice = Number(rpcResult?.price ?? unitPrice);
+    const finalFiatCurrency = String(rpcResult?.fiat_currency ?? resolvedFiatCurrency);
     const nowIso = new Date().toISOString();
 
     // 9. Send Auto-Reply Message if configured
@@ -246,7 +250,7 @@ export async function POST(req: NextRequest) {
         await supabase.from('notifications').insert({
           user_id: sellerId,
           title: 'Trade Request Initiated',
-          message: `New trade request #${publicId} opened: ${calculatedCrypto.toFixed(4)} ${formattedCoin} for ${numericFiat.toFixed(2)} ${resolvedFiatCurrency}.`,
+          message: `New trade request #${publicId} opened: ${finalCryptoAmount.toFixed(4)} ${formattedCoin} for ${finalFiatAmount.toFixed(2)} ${resolvedFiatCurrency}.`,
           type: 'trade_initiated',
           is_read: false,
           read: false,
@@ -278,11 +282,11 @@ export async function POST(req: NextRequest) {
           publicId: String(publicId),
           sellerId: String(sellerId),
           buyerId: String(buyerId || user.id),
-          cryptoAmount: calculatedCrypto,
-          fiatAmount: numericFiat,
-          fiatCurrency: resolvedFiatCurrency,
+          cryptoAmount: finalCryptoAmount,
+          fiatAmount: finalFiatAmount,
+          fiatCurrency: finalFiatCurrency,
           asset: String(rpcResult.asset || ad.crypto || 'USDT'),
-          price: unitPrice,
+          price: finalUnitPrice,
           paymentMethod: resolvedPaymentMethod,
           status: 'pending',
           createdAt: nowIso,

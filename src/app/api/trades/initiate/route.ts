@@ -240,6 +240,10 @@ export async function POST(req: Request) {
     const publicId = rpcResult.public_id || tradeRef;
     const sellerId = rpcResult.seller_id || ad.user_id;
     const buyerId = rpcResult.buyer_id || user.id;
+    const finalCryptoAmount = Number(rpcResult?.crypto_amount ?? calculatedCrypto);
+    const finalFiatAmount = Number(rpcResult?.fiat_amount ?? numericFiat);
+    const finalUnitPrice = Number(rpcResult?.price ?? unitPrice);
+    const finalFiatCurrency = String(rpcResult?.fiat_currency ?? resolvedFiatCurrency);
 
     if (tradeId && resolvedPaymentMethod) {
       const adminClient = getSupabaseAdminClient();
@@ -257,11 +261,11 @@ export async function POST(req: Request) {
           publicId: String(publicId),
           sellerId: String(sellerId),
           buyerId: String(buyerId),
-          cryptoAmount: calculatedCrypto,
-          fiatAmount: Number(rpcResult?.fiat_amount ?? numericFiat),
-          fiatCurrency: resolvedFiatCurrency,
+          cryptoAmount: finalCryptoAmount,
+          fiatAmount: finalFiatAmount,
+          fiatCurrency: finalFiatCurrency,
           asset: String(rpcResult.asset || ad.crypto || 'USDT'),
-          price: Number(rpcResult?.price ?? unitPrice),
+          price: finalUnitPrice,
           paymentMethod: resolvedPaymentMethod,
           status: 'pending',
           createdAt: new Date().toISOString(),

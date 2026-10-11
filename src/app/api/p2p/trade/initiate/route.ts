@@ -192,6 +192,10 @@ export async function POST(request: NextRequest) {
     const publicId = data?.public_id || tradeRef;
     const sellerId = data?.seller_id || ad.user_id;
     const buyerId = data?.buyer_id || user.id;
+    const finalCryptoAmount = Number(data?.crypto_amount ?? calculatedCrypto);
+    const finalFiatAmount = Number(data?.fiat_amount ?? numericFiat);
+    const finalUnitPrice = Number(data?.price ?? unitPrice);
+    const finalFiatCurrency = String(data?.fiat_currency ?? resolvedFiatCurrency);
 
     if (!data?.message?.includes('idempotent replay') && sellerId && tradeId) {
       try {
@@ -200,11 +204,11 @@ export async function POST(request: NextRequest) {
           publicId: String(publicId),
           sellerId: String(sellerId),
           buyerId: String(buyerId),
-          cryptoAmount: calculatedCrypto,
-          fiatAmount: Number(data?.fiat_amount ?? numericFiat),
-          fiatCurrency: resolvedFiatCurrency,
+          cryptoAmount: finalCryptoAmount,
+          fiatAmount: finalFiatAmount,
+          fiatCurrency: finalFiatCurrency,
           asset: String(data?.asset || ad.crypto || 'USDT'),
-          price: Number(data?.price ?? unitPrice),
+          price: finalUnitPrice,
           paymentMethod: resolvedPaymentMethod,
           status: 'pending',
           createdAt: new Date().toISOString(),
@@ -222,7 +226,7 @@ export async function POST(request: NextRequest) {
       tradeId: tradeId,
       id: tradeId,
       publicId: publicId,
-      fiatAmount: data?.fiat_amount ?? numericFiat,
+      fiatAmount: finalFiatAmount,
       data,
     });
   } catch (err: any) {
