@@ -6,8 +6,19 @@ import { GET as legacyDepositGet } from '../src/app/api/wallets/deposit-address/
 import { GET as legacyProvisionGet } from '../src/app/api/wallets/provision-address/route';
 import { GET as legacyDispatchGet } from '../src/app/api/withdrawals/dispatch/route';
 import { NextRequest } from 'next/server';
+import { parseWithdrawalAmount } from '../src/lib/wallet/amount-validation';
 
 async function main() {
+  assert.equal(parseWithdrawalAmount('12.345678'), 12.345678, 'valid USDT decimal should parse');
+  assert.equal(parseWithdrawalAmount('.5'), 0.5, 'leading-dot decimal should parse');
+  assert.equal(parseWithdrawalAmount('12oops'), null, 'partial numeric strings must be rejected');
+  assert.equal(parseWithdrawalAmount('1e3'), null, 'exponent notation must be rejected');
+  assert.equal(parseWithdrawalAmount('1.1234567'), null, 'more than six decimal places must be rejected');
+  assert.equal(parseWithdrawalAmount('Infinity'), null, 'infinite values must be rejected');
+  assert.equal(parseWithdrawalAmount(0), null, 'zero must be rejected');
+  assert.equal(parseWithdrawalAmount(-1), null, 'negative values must be rejected');
+  assert.equal(parseWithdrawalAmount(null), null, 'non-string and non-number values must be rejected');
+
   const noSecretRequest = new Request('https://example.test/api/workers/withdrawal-worker');
   assert.equal(
     verifyWorkerAuth(noSecretRequest, { allowedSecrets: [] }).authorized,
