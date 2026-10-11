@@ -43,6 +43,16 @@ type BlockedUser = {
   createdAt?: string;
   feedbackScore?: number;
   completedTrades?: number;
+  fullName?: string;
+  dob?: string;
+  isBanned?: boolean;
+  isOnHold?: boolean;
+  tradeVolume?: number;
+  positiveFeedback?: number;
+  negativeFeedback?: number;
+  avgPaymentTime?: number;
+  avgReleaseTime?: number;
+  usernameChanged?: boolean;
 };
 
 export function BlockedUsersManagement({ user: currentUserData }: { user: User }) {
