@@ -186,58 +186,6 @@ export async function POST(req: NextRequest) {
     // Profile provisioning must happen through the dedicated, audited signup workflow.
 
     if (!recipientProfile) {
-      try {
-        const { data: authData } = await admin.auth.admin.listUsers();
-        if (authData?.users) {
-          const matchedAuthUser = authData.users.find((u) => {
-            const email = u.email?.toLowerCase() || '';
-            const emailPrefix = email.split('@')[0];
-            const metaUsername = (u.user_metadata?.username || '').toLowerCase();
-            const targetLower = cleanTarget.toLowerCase();
-            return (
-              email === targetLower ||
-              emailPrefix === targetLower ||
-              metaUsername === targetLower ||
-              u.id === cleanTarget
-            );
-          });
-
-          if (matchedAuthUser) {
-            // Find or insert profile for this user
-            const { data: existingProf } = await admin
-              .from('profiles')
-              .select('id, username, is_banned, is_restricted, account_status')
-              .eq('id', matchedAuthUser.id)
-              .maybeSingle();
-
-            if (existingProf) {
-              recipientProfile = existingProf;
-            } else {
-              // Auto-create/upsert basic profile so transfer succeeds seamlessly
-              const fallbackUsername = matchedAuthUser.user_metadata?.username || matchedAuthUser.email?.split('@')[0] || `user_${matchedAuthUser.id.slice(0, 6)}`;
-              const { data: newProf } = await admin
-                .from('profiles')
-                .upsert({
-                  id: matchedAuthUser.id,
-                  username: fallbackUsername,
-                  email: matchedAuthUser.email,
-                  account_status: 'ACTIVE',
-                })
-                .select('id, username, is_banned, is_restricted, account_status')
-                .single();
-
-              if (newProf) {
-                recipientProfile = newProf;
-              }
-            }
-          }
-        }
-      } catch (authLookupErr) {
-        console.warn('Auth user search fallback notice in transfer:', authLookupErr);
-      }
-    }
-
-    if (!recipientProfile) {
       return NextResponse.json({ error: `Recipient "${targetIdentifier}" not found on Paxones.` }, { status: 404 });
     }
 
