@@ -126,3 +126,12 @@ export async function updateWithdrawalGovernanceAction(formData: FormData) {
   revalidatePath("/adminnarayan/settings");
   return { success: true };
 }
+
+/** Form-action adapters intentionally return void to satisfy React's form action contract. */
+export async function updateAppSettingsFormAction(formData: FormData): Promise<void> {
+  await updateAppSettingsAction(formData);
+}
+
+export async function updateWithdrawalGovernanceFormAction(formData: FormData): Promise<void> {
+  await updateWithdrawalGovernanceAction(formData);
+}
