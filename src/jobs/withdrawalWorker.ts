@@ -437,47 +437,20 @@ export async function processAllPendingWithdrawals(maxBatch: number = 20): Promi
   results: WithdrawalProcessResult[];
   locked?: boolean;
 }> {
-  // Fail closed: this function promises singleton dispatch. If the database
-  // cannot confirm ownership of the lock, do not claim or broadcast payouts.
-  let hasLock = false;
-  try {
-    const { data: lockAcquired, error: lockErr } = await supabaseAdmin.rpc('acquire_withdrawal_worker_lock');
-    if (lockErr) {
-      console.error('[Withdrawal Worker Singleton] Lock acquisition failed; refusing to dispatch withdrawals.', {
-        code: lockErr.code,
-      });
-      return { totalProcessed: 0, results: [], locked: true };
-    }
-    if (lockAcquired !== true) {
-      console.warn('[Withdrawal Worker Singleton] Lock was not acquired; refusing to dispatch withdrawals.');
-      return { totalProcessed: 0, results: [], locked: true };
-    }
-    hasLock = true;
-  } catch (lockRpcErr) {
-    console.error('[Withdrawal Worker Singleton] Lock RPC unavailable; refusing to dispatch withdrawals.', lockRpcErr);
-    return { totalProcessed: 0, results: [], locked: true };
-  }
-
+  // Each call atomically claims rows through claim_pending_withdrawals
+  // (FOR UPDATE SKIP LOCKED + PROCESSING transition). Session-level advisory
+  // locks are unsafe across separate PostgREST requests because acquisition and
+  // release are not guaranteed to use the same PostgreSQL backend connection.
   const results: WithdrawalProcessResult[] = [];
   let count = 0;
 
-  try {
-    while (count < maxBatch) {
-      const res = await processWithdrawalQueue();
-      if (!res.processed) {
-        break;
-      }
-      results.push(res);
-      count++;
+  while (count < maxBatch) {
+    const res = await processWithdrawalQueue();
+    if (!res.processed) {
+      break;
     }
-  } finally {
-    if (hasLock) {
-      try {
-        await supabaseAdmin.rpc('release_withdrawal_worker_lock');
-      } catch (unlockErr) {
-        console.warn('[Withdrawal Worker Singleton] Notice on lock release:', unlockErr);
-      }
-    }
+    results.push(res);
+    count++;
   }
 
   return { totalProcessed: count, results };
