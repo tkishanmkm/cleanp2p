@@ -29,7 +29,7 @@ export async function hasPendingWithdrawalApproval(userId: string): Promise<bool
         .from('withdrawals')
         .select('id')
         .eq('user_id', userId)
-        .in('status', ['PENDING_APPROVAL', 'pending_approval', 'APPROVED', 'approved']),
+        .in('status', ['PENDING_APPROVAL', 'pending_approval']),
       supabaseAdmin
         .from('onchain_withdrawals')
         .select('id')
@@ -80,7 +80,10 @@ export async function checkPasswordChangeHold(userId: string): Promise<PasswordH
     }
 
     const passwordChangedAt = profileRes.data.password_changed_at;
-    const holdHours = Number(settingsRes.data?.password_change_withdrawal_hold_hours || defaultHoldHours);
+    const rawHoldHours = Number(settingsRes.data?.password_change_withdrawal_hold_hours || defaultHoldHours);
+    const holdHours = Number.isFinite(rawHoldHours) && rawHoldHours >= 0 && rawHoldHours <= 168
+      ? rawHoldHours
+      : defaultHoldHours;
 
     if (!passwordChangedAt) {
       return { isHeld: false, holdHours };
@@ -88,7 +91,7 @@ export async function checkPasswordChangeHold(userId: string): Promise<PasswordH
 
     const changedTime = new Date(passwordChangedAt).getTime();
     if (isNaN(changedTime)) {
-      return { isHeld: false, holdHours };
+      return { isHeld: true, remainingHours: holdHours, holdHours };
     }
 
     const holdDurationMs = holdHours * 60 * 60 * 1000;
@@ -107,8 +110,8 @@ export async function checkPasswordChangeHold(userId: string): Promise<PasswordH
 
     return { isHeld: false, holdHours };
   } catch (err) {
-    console.error('[WithdrawalSecurity] Error in checkPasswordChangeHold:', err);
-    return { isHeld: false, holdHours: defaultHoldHours };
+    console.error('[WithdrawalSecurity] Error in checkPasswordChangeHold; failing closed:', err);
+    return { isHeld: true, remainingHours: defaultHoldHours, holdHours: defaultHoldHours };
   }
 }
 
