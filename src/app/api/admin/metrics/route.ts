@@ -13,7 +13,7 @@ export async function GET(req: NextRequest) {
     }
 
     const supabaseAdmin = getSupabaseAdminClient();
-    const adminUserId = auth.user?.id || auth.userId || null;
+    const adminUserId = auth.adminId || null;
 
     // 1. Total Platform Volume (Completed P2P Trades)
     let totalVolumeUsdt = 0;
