@@ -340,7 +340,7 @@ export async function checkSubmittedWithdrawals(): Promise<{
             p_gas_asset: gasAsset,
           });
           if (!confErr) confirmed++;
-        } else if (status === 0) {
+        } else if (status === 0 && confirmations >= chain.requiredConfirmations) {
           await supabaseAdmin.rpc('process_failed_withdrawal', {
             p_withdrawal_id: w.id,
             p_error_reason: `EVM transaction reverted on-chain on network ${w.network}`,
