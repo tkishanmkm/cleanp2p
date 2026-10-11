@@ -80,6 +80,19 @@ DECLARE
     v_existing_trade RECORD;
     v_existing_request RECORD;
     v_request_fingerprint TEXT;
+
+    -- Global Emergency Control Variables
+    v_prevent_new_trades_val JSONB := NULL;
+    v_maintenance_mode_val JSONB := NULL;
+    v_prevent_new_trades BOOLEAN := NULL;
+    v_maintenance_mode BOOLEAN := NULL;
+    v_setting_rec RECORD;
+    v_read_count INTEGER := 0;
+    v_is_caller_admin BOOLEAN := FALSE;
+
+    -- Individual Emergency Freeze Variables
+    v_caller_frozen BOOLEAN := FALSE;
+    v_counterparty_frozen BOOLEAN := FALSE;
 BEGIN
     -- 1. Strict Authentication & Authorization Enforcement
     IF v_auth_uid IS NOT NULL THEN
@@ -92,6 +105,90 @@ BEGIN
             RAISE EXCEPTION 'Authentication required: neither session token nor trusted caller ID provided.';
         END IF;
         v_effective_caller := p_caller_id;
+    END IF;
+
+    -- =========================================================================
+    -- 2. AUTHORITATIVE DATABASE-LEVEL EMERGENCY FREEZE CHECK (system_settings)
+    -- Must execute BEFORE any ad lookup, balance checks, or escrow locking.
+    -- FAIL CLOSED: If controls cannot be read, verified, or parsed, REJECT trade.
+    -- =========================================================================
+    FOR v_setting_rec IN
+        SELECT key, value
+        FROM public.system_settings
+        WHERE key IN ('prevent_new_trades', 'maintenance_mode')
+    LOOP
+        v_read_count := v_read_count + 1;
+        IF v_setting_rec.key = 'prevent_new_trades' THEN
+            v_prevent_new_trades_val := v_setting_rec.value;
+        ELSIF v_setting_rec.key = 'maintenance_mode' THEN
+            v_maintenance_mode_val := v_setting_rec.value;
+        END IF;
+    END LOOP;
+
+    -- FAIL CLOSED: Both required keys ('prevent_new_trades' AND 'maintenance_mode') MUST exist
+    IF v_prevent_new_trades_val IS NULL OR v_maintenance_mode_val IS NULL OR v_read_count < 2 THEN
+        RAISE EXCEPTION 'Platform emergency control state is unavailable. Trade creation rejected for security reasons.'
+            USING ERRCODE = 'P0001', DETAIL = 'PLATFORM_CONTROL_STATE_UNAVAILABLE';
+    END IF;
+
+    -- Safely parse prevent_new_trades JSONB value
+    IF jsonb_typeof(v_prevent_new_trades_val) = 'boolean' THEN
+        v_prevent_new_trades := (v_prevent_new_trades_val)::boolean;
+    ELSIF jsonb_typeof(v_prevent_new_trades_val) = 'string' THEN
+        v_prevent_new_trades := (LOWER(v_prevent_new_trades_val #>> '{}') IN ('true', '1', 't'));
+    ELSE
+        RAISE EXCEPTION 'Invalid platform control value type for prevent_new_trades. Trade creation rejected.'
+            USING ERRCODE = 'P0001', DETAIL = 'PLATFORM_CONTROL_STATE_UNAVAILABLE';
+    END IF;
+
+    -- Safely parse maintenance_mode JSONB value
+    IF jsonb_typeof(v_maintenance_mode_val) = 'boolean' THEN
+        v_maintenance_mode := (v_maintenance_mode_val)::boolean;
+    ELSIF jsonb_typeof(v_maintenance_mode_val) = 'string' THEN
+        v_maintenance_mode := (LOWER(v_maintenance_mode_val #>> '{}') IN ('true', '1', 't'));
+    ELSE
+        RAISE EXCEPTION 'Invalid platform control value type for maintenance_mode. Trade creation rejected.'
+            USING ERRCODE = 'P0001', DETAIL = 'PLATFORM_CONTROL_STATE_UNAVAILABLE';
+    END IF;
+
+    -- Double check booleans are non-null after parsing
+    IF v_prevent_new_trades IS NULL OR v_maintenance_mode IS NULL THEN
+        RAISE EXCEPTION 'Unresolvable platform control booleans. Trade creation rejected.'
+            USING ERRCODE = 'P0001', DETAIL = 'PLATFORM_CONTROL_STATE_UNAVAILABLE';
+    END IF;
+
+    -- RULE A: prevent_new_trades = TRUE -> BLOCK ALL USERS (NO ADMIN EXEMPTION)
+    IF v_prevent_new_trades THEN
+        RAISE EXCEPTION 'Initiating new P2P trades is temporarily disabled by administrator.'
+            USING ERRCODE = 'P0001', DETAIL = 'P2P_TRADE_CREATION_DISABLED';
+    END IF;
+
+    -- RULE B: maintenance_mode = TRUE -> BLOCK NORMAL USERS; ALLOW ADMINS FOR TESTING
+    IF v_maintenance_mode THEN
+        SELECT EXISTS (
+            SELECT 1 FROM public.profiles
+            WHERE id = v_effective_caller
+              AND (role = 'admin' OR is_admin = TRUE OR is_admin_account = TRUE)
+        ) INTO v_is_caller_admin;
+
+        IF NOT v_is_caller_admin THEN
+            RAISE EXCEPTION 'Platform is currently undergoing scheduled maintenance. Initiating new trades is temporarily disabled.'
+                USING ERRCODE = 'P0001', DETAIL = 'PLATFORM_MAINTENANCE_MODE';
+        END IF;
+    END IF;
+
+    -- =========================================================================
+    -- 1.3 PENDING WITHDRAWAL APPROVAL LOCKOUT CHECK
+    -- =========================================================================
+    IF EXISTS (
+        SELECT 1 FROM pg_proc p 
+        JOIN pg_namespace n ON n.oid = p.pronamespace 
+        WHERE n.nspname = 'public' AND p.proname = 'has_pending_withdrawal_approval'
+    ) THEN
+        IF public.has_pending_withdrawal_approval(v_effective_caller) THEN
+            RAISE EXCEPTION 'WITHDRAWAL_APPROVAL_PENDING: You have a pending withdrawal awaiting administrator approval. You cannot initiate new trades until it is processed.'
+                USING ERRCODE = 'P0001', DETAIL = 'WITHDRAWAL_APPROVAL_PENDING';
+        END IF;
     END IF;
 
     -- 2. Lookup in Canonical public.p2p_ads Table
@@ -137,16 +234,11 @@ BEGIN
             'USDT'
         ));
 
-        -- The ad's stored price is authoritative; caller-supplied p_price is never trusted.
-        v_ad_price := COALESCE(NULLIF(v_p2p_ad.price, 0), NULLIF(v_p2p_ad.unit_price, 0), 0);
-        v_ad_margin_percent := COALESCE(v_p2p_ad.rate_percent, v_p2p_ad.margin, 0);
-        v_ad_is_fixed := COALESCE(v_p2p_ad.is_fixed, FALSE) OR UPPER(COALESCE(v_p2p_ad.pricing_type, '')) = 'FIXED';
+        v_ad_price := COALESCE(NULLIF(v_p2p_ad.price, 0), 0);
+        v_ad_margin_percent := COALESCE(NULLIF(to_jsonb(v_p2p_ad)->>'rate_percent', '')::NUMERIC, NULLIF(to_jsonb(v_p2p_ad)->>'margin', '')::NUMERIC, 0);
+        v_ad_is_fixed := COALESCE(NULLIF(to_jsonb(v_p2p_ad)->>'is_fixed', '')::BOOLEAN, FALSE) OR UPPER(COALESCE(to_jsonb(v_p2p_ad)->>'pricing_type', '')) = 'FIXED';
 
-        v_ad_fiat_currency := UPPER(COALESCE(
-            NULLIF(v_p2p_ad.fiat_currency, ''),
-            NULLIF(v_p2p_ad.fiat_symbol, ''),
-            'USD'
-        ));
+        v_ad_fiat_currency := UPPER(COALESCE(NULLIF(v_p2p_ad.fiat_currency, ''), NULLIF(v_p2p_ad.fiat_symbol, ''), 'USD'));
 
         v_ad_payment_window_mins := 30;
 
@@ -174,7 +266,6 @@ BEGIN
             v_trade_ad_id := v_legacy_ad.id;
             v_ad_public_ad_id := v_legacy_ad.public_ad_id;
 
-            -- Resolve ad UUID strictly without fabricating synthetic IDs
             IF v_legacy_ad.id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN
                 v_ad_id := v_legacy_ad.id::UUID;
             ELSIF v_legacy_ad.public_ad_id IS NOT NULL THEN
@@ -200,22 +291,11 @@ BEGIN
                 'USDT'
             ));
 
-            -- The legacy ad's stored price is authoritative; caller-supplied p_price is never trusted.
-            v_ad_price := COALESCE(
-                NULLIF(v_legacy_ad.price, 0),
-                NULLIF(v_legacy_ad.unit_price, 0),
-                NULLIF(v_legacy_ad.fixed_rate, 0),
-                0
-            );
-            v_ad_margin_percent := COALESCE(v_legacy_ad.rate_percent, v_legacy_ad.margin, 0);
-            v_ad_is_fixed := COALESCE(v_legacy_ad.is_fixed, FALSE) OR UPPER(COALESCE(v_legacy_ad.pricing_type, '')) = 'FIXED';
+            v_ad_price := COALESCE(NULLIF(v_legacy_ad.price, 0), NULLIF(v_legacy_ad.unit_price, 0), NULLIF(v_legacy_ad.fixed_rate, 0), 0);
+            v_ad_margin_percent := COALESCE(NULLIF(to_jsonb(v_legacy_ad)->>'rate_percent', '')::NUMERIC, NULLIF(to_jsonb(v_legacy_ad)->>'margin', '')::NUMERIC, 0);
+            v_ad_is_fixed := COALESCE(NULLIF(to_jsonb(v_legacy_ad)->>'is_fixed', '')::BOOLEAN, FALSE) OR UPPER(COALESCE(to_jsonb(v_legacy_ad)->>'pricing_type', '')) = 'FIXED';
 
-            v_ad_fiat_currency := UPPER(COALESCE(
-                NULLIF(v_legacy_ad.fiat_currency, ''),
-                NULLIF(v_legacy_ad.fiat_symbol, ''),
-                NULLIF(v_legacy_ad.currency, ''),
-                'USD'
-            ));
+            v_ad_fiat_currency := UPPER(COALESCE(NULLIF(v_legacy_ad.fiat_currency, ''), NULLIF(v_legacy_ad.fiat_symbol, ''), NULLIF(v_legacy_ad.currency, ''), 'USD'));
 
             v_ad_payment_window_mins := COALESCE(
                 v_legacy_ad.payment_window_minutes,
@@ -252,13 +332,11 @@ BEGIN
     END IF;
 
     -- Positive Price Check
-    -- Floating ads are priced from the current server market row and stored margin.
-    -- Fixed ads use the price stored on the advertisement.
+    -- Resolve FLOAT ads from canonical market data and the stored margin.
     IF NOT v_ad_is_fixed THEN
         IF v_ad_margin_percent::TEXT IN ('NaN', 'Infinity', '-Infinity') OR v_ad_margin_percent < -50 OR v_ad_margin_percent > 50 THEN
             RAISE EXCEPTION 'Advertisement margin is invalid; trade creation is blocked.';
         END IF;
-
         SELECT price_in_fiat INTO v_market_price
         FROM public.crypto_market_prices
         WHERE UPPER(asset_symbol) = v_ad_asset
@@ -267,14 +345,11 @@ BEGIN
           AND price_in_fiat::TEXT NOT IN ('NaN', 'Infinity', '-Infinity')
         ORDER BY updated_at DESC
         LIMIT 1;
-
         IF v_market_price IS NULL THEN
             RAISE EXCEPTION 'Current market price is unavailable for %/%; trade creation is blocked.', v_ad_asset, v_ad_fiat_currency;
         END IF;
-
         v_ad_price := ROUND(v_market_price * (1 + v_ad_margin_percent / 100), 8);
     END IF;
-
     IF v_ad_price <= 0 OR v_ad_price::TEXT IN ('NaN', 'Infinity', '-Infinity') THEN
         RAISE EXCEPTION 'Advertisement has no valid server-side price; trade creation is blocked.';
     END IF;
@@ -290,18 +365,53 @@ BEGIN
         v_buyer_id := v_effective_caller;
     END IF;
 
+    -- =========================================================================
+    -- 5.1 DETERMINISTIC ROW LOCKING & AUTHORITATIVE EMERGENCY FREEZE VERIFICATION
+    -- To eliminate deadlock (PostgreSQL 40P01) from reciprocal concurrent trades,
+    -- lock profiles in consistent lexicographical UUID order (smaller UUID first).
+    -- Both caller and counterparty profiles are locked FOR UPDATE and authoritatively checked.
+    -- =========================================================================
+    IF v_effective_caller < v_ad_user_id THEN
+        SELECT COALESCE(is_emergency_frozen, FALSE) INTO v_caller_frozen
+        FROM public.profiles
+        WHERE id = v_effective_caller
+        FOR UPDATE;
+
+        SELECT COALESCE(is_emergency_frozen, FALSE) INTO v_counterparty_frozen
+        FROM public.profiles
+        WHERE id = v_ad_user_id
+        FOR UPDATE;
+    ELSE
+        SELECT COALESCE(is_emergency_frozen, FALSE) INTO v_counterparty_frozen
+        FROM public.profiles
+        WHERE id = v_ad_user_id
+        FOR UPDATE;
+
+        SELECT COALESCE(is_emergency_frozen, FALSE) INTO v_caller_frozen
+        FROM public.profiles
+        WHERE id = v_effective_caller
+        FOR UPDATE;
+    END IF;
+
+    IF v_caller_frozen THEN
+        RAISE EXCEPTION 'USER_EMERGENCY_FROZEN: Your account is currently under an emergency security freeze.'
+            USING ERRCODE = 'P0001', DETAIL = 'USER_EMERGENCY_FROZEN';
+    END IF;
+
+    IF v_counterparty_frozen THEN
+        RAISE EXCEPTION 'USER_EMERGENCY_FROZEN: The counterparty account is currently under an emergency security freeze.'
+            USING ERRCODE = 'P0001', DETAIL = 'USER_EMERGENCY_FROZEN';
+    END IF;
+
     -- 6. Financial Calculations (Authoritative 1.5% Escrow Fee)
     v_unit_price := v_ad_price;
     v_fiat_currency := v_ad_fiat_currency;
 
-    IF p_crypto_amount IS NOT NULL
-       AND p_crypto_amount::TEXT IN ('NaN', 'Infinity', '-Infinity') THEN
+    IF p_crypto_amount IS NOT NULL AND p_crypto_amount::TEXT IN ('NaN', 'Infinity', '-Infinity') THEN
         RAISE EXCEPTION 'Invalid non-finite crypto amount.';
     END IF;
-
     v_crypto_amount := ROUND(COALESCE(p_crypto_amount, 0), 8);
-    IF v_crypto_amount <= 0 AND p_fiat_amount > 0
-       AND p_fiat_amount::TEXT NOT IN ('NaN', 'Infinity', '-Infinity') THEN
+    IF v_crypto_amount <= 0 AND p_fiat_amount > 0 AND p_fiat_amount::TEXT NOT IN ('NaN', 'Infinity', '-Infinity') THEN
         v_crypto_amount := ROUND((p_fiat_amount / v_unit_price), 8);
     END IF;
 
@@ -315,32 +425,20 @@ BEGIN
 
     v_public_id := COALESCE(p_trade_ref, 'TX' || SUBSTRING(REPLACE(gen_random_uuid()::TEXT, '-', '') FROM 1 FOR 8));
 
-    -- 7. Durable idempotency: serialize same-user retries and bind each key to its request.
-    IF p_idempotency_key IS NULL
-       OR LENGTH(BTRIM(p_idempotency_key)) < 8
-       OR LENGTH(BTRIM(p_idempotency_key)) > 128 THEN
+    -- 7. Durable idempotency: serialize same-user retries and bind each key to request data.
+    IF p_idempotency_key IS NULL OR LENGTH(BTRIM(p_idempotency_key)) < 8 OR LENGTH(BTRIM(p_idempotency_key)) > 128 THEN
         RAISE EXCEPTION 'A valid idempotency key between 8 and 128 characters is required.';
     END IF;
-
     v_request_fingerprint := MD5(CONCAT_WS('|',
         COALESCE(v_ad_id::TEXT, v_ad_public_ad_id, v_trade_ad_id, p_ad_id),
-        v_ad_asset,
-        v_crypto_amount::TEXT,
-        v_fiat_currency,
-        v_unit_price::TEXT,
+        v_ad_asset, v_crypto_amount::TEXT, v_fiat_currency, v_unit_price::TEXT,
         LOWER(BTRIM(COALESCE(p_payment_method, 'Bank Transfer')))
     ));
-
-    PERFORM pg_advisory_xact_lock(
-        HASHtextextended(v_effective_caller::TEXT || ':' || BTRIM(p_idempotency_key), 0)
-    );
-
+    PERFORM pg_advisory_xact_lock(HASHtextextended(v_effective_caller::TEXT || ':' || BTRIM(p_idempotency_key), 0));
     SELECT * INTO v_existing_request
     FROM public.trade_request_idempotency
-    WHERE user_id = v_effective_caller
-      AND idempotency_key = BTRIM(p_idempotency_key)
+    WHERE user_id = v_effective_caller AND idempotency_key = BTRIM(p_idempotency_key)
     FOR UPDATE;
-
     IF FOUND THEN
         IF v_existing_request.request_fingerprint IS DISTINCT FROM v_request_fingerprint THEN
             RAISE EXCEPTION 'Idempotency key was already used for a different trade request.';
@@ -348,29 +446,17 @@ BEGIN
         IF v_existing_request.trade_id IS NULL THEN
             RAISE EXCEPTION 'Prior trade request requires reconciliation; duplicate creation is blocked.';
         END IF;
-
-        SELECT * INTO v_existing_trade
-        FROM public.trades
-        WHERE id = v_existing_request.trade_id;
-
+        SELECT * INTO v_existing_trade FROM public.trades WHERE id = v_existing_request.trade_id;
         IF NOT FOUND THEN
             RAISE EXCEPTION 'Prior trade record is missing; duplicate creation is blocked.';
         END IF;
-
         RETURN jsonb_build_object(
-            'success', true,
-            'trade_id', v_existing_trade.id,
-            'public_id', v_existing_trade.public_id,
-            'buyer_id', v_existing_trade.buyer_id,
-            'seller_id', v_existing_trade.seller_id,
-            'crypto_amount', v_existing_trade.crypto_amount,
-            'escrow_fee', v_existing_trade.escrow_fee,
-            'fiat_amount', v_existing_trade.fiat_amount,
-            'price', v_existing_trade.price,
-            'fiat_currency', v_existing_trade.fiat_currency,
-            'asset', v_existing_trade.crypto,
-            'status', v_existing_trade.status,
-            'escrow_status', v_existing_trade.escrow_status,
+            'success', true, 'trade_id', v_existing_trade.id, 'public_id', v_existing_trade.public_id,
+            'buyer_id', v_existing_trade.buyer_id, 'seller_id', v_existing_trade.seller_id,
+            'crypto_amount', v_existing_trade.crypto_amount, 'escrow_fee', v_existing_trade.escrow_fee,
+            'fiat_amount', v_existing_trade.fiat_amount, 'price', v_existing_trade.price,
+            'fiat_currency', v_existing_trade.fiat_currency, 'asset', v_existing_trade.crypto,
+            'status', v_existing_trade.status, 'escrow_status', v_existing_trade.escrow_status,
             'message', 'Trade already initiated (idempotent replay)'
         );
     END IF;
@@ -525,11 +611,8 @@ BEGIN
         v_ad_public_ad_id
     );
 
-    INSERT INTO public.trade_request_idempotency (
-        user_id, idempotency_key, request_fingerprint, trade_id
-    ) VALUES (
-        v_effective_caller, BTRIM(p_idempotency_key), v_request_fingerprint, v_trade_id
-    );
+    INSERT INTO public.trade_request_idempotency (user_id, idempotency_key, request_fingerprint, trade_id)
+    VALUES (v_effective_caller, BTRIM(p_idempotency_key), v_request_fingerprint, v_trade_id);
 
     RETURN jsonb_build_object(
         'success', true,
