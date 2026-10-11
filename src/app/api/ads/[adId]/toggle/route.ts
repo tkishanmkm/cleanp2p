@@ -73,7 +73,12 @@ export async function PATCH(
     }
 
     const body = await request.json();
-    const newStatus = body.status ? String(body.status).toUpperCase().trim() : (body.active ? 'ACTIVE' : 'INACTIVE');
+    if (body.active !== undefined && typeof body.active !== 'boolean' && body.active !== 'true' && body.active !== 'false') {
+      return NextResponse.json({ error: 'The active field must be a boolean.' }, { status: 400 });
+    }
+    const newStatus = body.status
+      ? String(body.status).toUpperCase().trim()
+      : (body.active === true || body.active === 'true' ? 'ACTIVE' : 'INACTIVE');
     if (!isAdmin && !['ACTIVE', 'INACTIVE'].includes(newStatus)) {
       return NextResponse.json({ error: 'Forbidden: only administrators may set moderated advertisement statuses.' }, { status: 403 });
     }
