@@ -671,7 +671,7 @@ export default function CreateP2PAdPage() {
           if (freshRes.ok) {
             const freshJson = await freshRes.json();
             const fetchedAvail = Number(freshJson?.balances?.[crypto]?.available ?? 0);
-            if (fetchedAvail >= minCoinRequired) {
+            if (fetchedAvail >= maxCoinRequired) {
               availableBalance = fetchedAvail;
             }
           }
@@ -680,8 +680,8 @@ export default function CreateP2PAdPage() {
         }
       }
 
-      if (availableBalance < minCoinRequired) {
-        toast.error(`Insufficient ${crypto} balance. You need at least ${minCoinRequired.toFixed(6)} ${crypto} to set a minimum limit of ${minAmount} ${fiat.code}. Available: ${availableBalance.toFixed(6)} ${crypto}.`);
+      if (availableBalance < maxCoinRequired) {
+        toast.error(`Insufficient ${crypto} balance. You need at least ${maxCoinRequired.toFixed(6)} ${crypto} to back the maximum offer limit of ${maxAmount} ${fiat.code}. Available: ${availableBalance.toFixed(6)} ${crypto}.`);
         return;
       }
     }
