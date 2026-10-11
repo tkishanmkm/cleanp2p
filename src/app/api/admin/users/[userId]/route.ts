@@ -17,7 +17,7 @@ export async function GET(
       );
     }
 
-    const resolvedParams = typeof (params as any)?.then === "function" ? await params : params;
+    const resolvedParams = await Promise.resolve(params);
     const userId = resolvedParams.userId;
 
     if (!userId) {
