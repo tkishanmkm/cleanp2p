@@ -11,7 +11,7 @@ CREATE OR REPLACE FUNCTION public.reserve_utxos_for_sweep(
 RETURNS JSONB
 LANGUAGE plpgsql
 SECURITY DEFINER
-SET search_path = public, pg_temp
+SET search_path = ''
 AS $$
 DECLARE
     v_utxo JSONB;
@@ -43,7 +43,9 @@ BEGIN
 
     -- Serialize contenders for each chain/outpoint before checking or writing.
     -- Transaction-scoped locks are released automatically on commit/rollback.
-    FOR v_utxo IN SELECT value FROM jsonb_array_elements(p_utxos) AS item(value)
+    FOR v_utxo IN
+        SELECT value FROM jsonb_array_elements(p_utxos) AS item(value)
+        ORDER BY lower(COALESCE(value->>'txid', '')), COALESCE(value->>'vout', '')
     LOOP
         v_txid := NULLIF(TRIM(v_utxo->>'txid'), '');
         IF v_txid IS NULL OR (v_utxo->>'vout') IS NULL OR (v_utxo->>'vout') !~ '^[0-9]+$' THEN
