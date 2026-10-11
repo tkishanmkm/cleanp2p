@@ -143,7 +143,7 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    if (isNaN(calculatedCrypto) || calculatedCrypto <= 0) {
+    if (!Number.isFinite(calculatedCrypto) || calculatedCrypto <= 0) {
       return NextResponse.json(
         { success: false, error: 'Valid positive crypto amount is required' },
         { status: 400 }
