@@ -4,6 +4,8 @@ import { NextResponse, type NextRequest } from 'next/server';
 import { getSupabaseAdminClient } from '@/utils/supabase/server';
 import { generateAdId } from '@/lib/id-generator';
 import { calculateMinimumFiatAmount } from '@/lib/currency';
+import { FIAT_CURRENCIES } from '@/lib/currencies';
+import { isTier2User } from '@/lib/kyc';
 import { resolveTradeType } from '@/utils/p2p-helpers';
 import { assertPlatformControlAllowed } from '@/lib/platform-guard';
 import { resolveAuthoritativeAdQuote } from '@/lib/p2p/authoritativeAdQuote';
@@ -79,6 +81,27 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // Selling offers require Tier 2 identity verification. Fail closed if profile state cannot be read.
+    if (adSide === 'SELL') {
+      const admin = getSupabaseAdminClient();
+      const { data: creatorProfile, error: creatorProfileError } = await admin
+        .from('profiles')
+        .select('is_verified, id_verified, is_id_verified, kyc_status, verification_tier')
+        .eq('id', user.id)
+        .maybeSingle();
+
+      if (creatorProfileError || !creatorProfile) {
+        return NextResponse.json({ error: 'Unable to verify seller eligibility. Please try again.' }, { status: 503 });
+      }
+
+      if (!isTier2User(creatorProfile)) {
+        return NextResponse.json(
+          { error: 'KYC verification is required to sell.', code: 'KYC_REQUIRED', requires_kyc: true },
+          { status: 403 }
+        );
+      }
+    }
+
     // Ensure public.profiles record exists for user.id to guarantee foreign key integrity
     try {
       const admin = getSupabaseAdminClient();
@@ -104,6 +127,15 @@ export async function POST(request: NextRequest) {
     const coinType = (body.coin || body.crypto || body.crypto_currency || body.asset_symbol || body.asset || 'USDT').toUpperCase();
     const fiatType = (body.fiat || body.fiat_currency || body.fiat_symbol || 'USD').toUpperCase();
     const adSide = resolveTradeType(body);
+
+    const supportedAssets = new Set(['USDT', 'BTC', 'ETH', 'LTC']);
+    if (!supportedAssets.has(coinType)) {
+      return NextResponse.json({ error: 'Unsupported cryptocurrency. Supported assets are USDT, BTC, ETH, and LTC.' }, { status: 400 });
+    }
+
+    if (!FIAT_CURRENCIES.some((currency) => currency.code.toUpperCase() === fiatType)) {
+      return NextResponse.json({ error: 'Unsupported fiat currency.' }, { status: 400 });
+    }
 
     if (!adSide) {
       return NextResponse.json(
@@ -207,8 +239,8 @@ export async function POST(request: NextRequest) {
       }
 
       const availableBalance = Number(walletAsset?.balance ?? 0);
-      const minCoinRequired = requestedMin / adQuote.price;
-      if (!Number.isFinite(availableBalance) || availableBalance < minCoinRequired) {
+      const maxCoinRequired = requestedMax / adQuote.price;
+      if (!Number.isFinite(availableBalance) || !Number.isFinite(maxCoinRequired) || availableBalance < maxCoinRequired) {
         return NextResponse.json({
           error: `Insufficient ${coinType} balance to back this sell offer.`,
           code: 'INSUFFICIENT_BALANCE',
