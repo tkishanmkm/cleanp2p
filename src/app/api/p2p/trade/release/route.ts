@@ -67,18 +67,26 @@ export async function POST(request: Request) {
     });
 
     if (error) {
+      console.error('[P2P trade release] release_trade_escrow RPC failed:', error.code || 'UNKNOWN');
       return NextResponse.json(
-        { success: false, error: error.message },
-        { status: 400 }
+        { success: false, error: 'Escrow release could not be completed.' },
+        { status: 400, headers: { 'Cache-Control': 'no-store' } }
       );
     }
 
-    // 4. Return Success Response
+    // Fail closed: a returned JSON error must never be reported as a successful release.
+    if (!data || data.success !== true) {
+      return NextResponse.json(
+        { success: false, error: 'Escrow release was not confirmed by the database.' },
+        { status: 409, headers: { 'Cache-Control': 'no-store' } }
+      );
+    }
+
     return NextResponse.json({
       success: true,
-      tradeId: data?.trade_id || tradeId,
+      tradeId: data.trade_id || tradeId,
       message: 'Escrow released successfully and buyer wallet credited.',
-    });
+    }, { headers: { 'Cache-Control': 'no-store' } });
   } catch (err: any) {
     return NextResponse.json(
       { success: false, error: err.message || 'Internal server error' },
