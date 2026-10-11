@@ -1,25 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
 import { createServerClient } from '@supabase/ssr';
-import { createClient as createSupabaseClient } from '@supabase/supabase-js';
+import { getSupabaseAdminClient } from '@/lib/supabase/server';
 import { getOrDeriveUserDepositAddresses } from '@/lib/hd-derivation-engine';
 
 export const dynamic = 'force-dynamic';
 
 function getAdminClient() {
-  const supabaseUrl =
-    process.env.NEXT_PUBLIC_SUPABASE_URL ||
-    process.env.SUPABASE_URL ||
-    'https://eaiwgfxoiwxepinvcykg.supabase.co';
-
-  const serviceRoleKey =
-    process.env.SUPABASE_SERVICE_ROLE_KEY ||
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ||
-    'placeholder-key';
-
-  return createSupabaseClient(supabaseUrl, serviceRoleKey, {
-    auth: { persistSession: false, autoRefreshToken: false },
-  });
+  return getSupabaseAdminClient();
 }
 
 async function resolveAuthenticatedUserId(req: NextRequest): Promise<string | null> {
