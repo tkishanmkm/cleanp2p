@@ -38,13 +38,21 @@ export async function POST(request: Request) {
     });
 
     if (error) {
+      console.error('[P2P trade cancel] cancel_p2p_trade RPC failed:', error.code || 'UNKNOWN');
       return NextResponse.json(
-        { success: false, error: error.message },
-        { status: 400 }
+        { success: false, error: 'Trade cancellation could not be completed.' },
+        { status: 400, headers: { 'Cache-Control': 'no-store' } }
       );
     }
 
-    return NextResponse.json({ success: true, result: data });
+    if (!data || data.success !== true) {
+      return NextResponse.json(
+        { success: false, error: 'Trade cancellation was not confirmed by the database.' },
+        { status: 409, headers: { 'Cache-Control': 'no-store' } }
+      );
+    }
+
+    return NextResponse.json({ success: true, result: data }, { headers: { 'Cache-Control': 'no-store' } });
   } catch (err: any) {
     return NextResponse.json(
       { success: false, error: err.message || 'Internal server error' },
