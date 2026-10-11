@@ -1,0 +1,33 @@
+-- Restrict SECURITY DEFINER deposit and wallet-provisioning RPCs that accept
+-- caller-controlled user IDs, amounts, confirmations, or transaction identifiers.
+-- These must only be callable by trusted server-side code.
+REVOKE ALL ON FUNCTION public.credit_confirmed_deposit(character varying, integer, character varying, uuid, character varying, numeric) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.credit_confirmed_deposit(character varying, integer, character varying, uuid, character varying, numeric) TO service_role;
+
+REVOKE ALL ON FUNCTION public.process_confirmed_deposit(uuid) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.process_confirmed_deposit(uuid) TO service_role;
+
+REVOKE ALL ON FUNCTION public.process_incoming_deposit(text, text, text, numeric, text, integer) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.process_incoming_deposit(text, text, text, numeric, text, integer) TO service_role;
+
+REVOKE ALL ON FUNCTION public.process_user_deposit(uuid, text, text, numeric, text, text, text) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.process_user_deposit(uuid, text, text, numeric, text, text, text) TO service_role;
+
+REVOKE ALL ON FUNCTION public.process_user_deposit(uuid, uuid, text, text, numeric, text, text, integer) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.process_user_deposit(uuid, uuid, text, text, numeric, text, text, integer) TO service_role;
+
+REVOKE ALL ON FUNCTION public.process_user_deposit(uuid, text, text, text, numeric, text) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.process_user_deposit(uuid, text, text, text, numeric, text) TO service_role;
+
+REVOKE ALL ON FUNCTION public.ensure_user_balance_wallet(uuid, text) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.ensure_user_balance_wallet(uuid, text) TO service_role;
+
+REVOKE ALL ON FUNCTION public.claim_next_wallet_index() FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.claim_next_wallet_index() TO service_role;
+
+-- Trigger functions are not client-facing RPCs; remove inherited public execute
+-- grants as defense in depth.
+REVOKE ALL ON FUNCTION public.trigger_provision_user_wallets() FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON FUNCTION public.handle_new_user_wallet_init() FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON FUNCTION public.handle_new_user_wallets() FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON FUNCTION public.prevent_transfer_immutability_update() FROM PUBLIC, anon, authenticated;
