@@ -282,6 +282,29 @@ export async function processWithdrawalQueue(): Promise<WithdrawalProcessResult>
 /**
  * Checks previously BROADCASTED, PROCESSING, or AMBIGUOUS_BROADCAST withdrawals and confirms them once confirmations are met
  */
+async function getUtxoTransactionConfirmations(
+  apiBase: string,
+  status: { confirmed?: boolean; block_height?: number | string } | null | undefined
+): Promise<number> {
+  if (!status?.confirmed) return 0;
+
+  const blockHeight = Number(status.block_height);
+  if (!Number.isSafeInteger(blockHeight) || blockHeight <= 0) return 0;
+
+  try {
+    const tipResponse = await fetch(`${apiBase}/blocks/tip/height`);
+    if (!tipResponse.ok) return 0;
+
+    const tipHeight = Number((await tipResponse.text()).trim());
+    if (!Number.isSafeInteger(tipHeight) || tipHeight < blockHeight) return 0;
+
+    return tipHeight - blockHeight + 1;
+  } catch {
+    // An unavailable tip must leave the withdrawal pending, never settle it.
+    return 0;
+  }
+}
+
 export async function checkSubmittedWithdrawals(): Promise<{
   checked: number;
   confirmed: number;
@@ -353,7 +376,8 @@ export async function checkSubmittedWithdrawals(): Promise<{
           const res = await fetch(`${btcApiBase}/tx/${w.tx_hash}`);
           if (res.ok) {
             const txData = await res.json();
-            if (txData && txData.status && txData.status.confirmed) {
+            const btcConfirmations = await getUtxoTransactionConfirmations(btcApiBase, txData?.status);
+            if (btcConfirmations >= 3) {
               let actualFeeBtc = '0';
               if (typeof txData.fee === 'number' && txData.fee >= 0) {
                 const feeSat = BigInt(txData.fee);
@@ -389,7 +413,8 @@ export async function checkSubmittedWithdrawals(): Promise<{
           const res = await fetch(`${ltcApiBase}/tx/${w.tx_hash}`);
           if (res.ok) {
             const txData = await res.json();
-            if (txData && txData.status && txData.status.confirmed) {
+            const ltcConfirmations = await getUtxoTransactionConfirmations(ltcApiBase, txData?.status);
+            if (ltcConfirmations >= 12) {
               let actualFeeLtc = '0';
               if (typeof txData.fee === 'number' && txData.fee >= 0) {
                 const feeLit = BigInt(txData.fee);
