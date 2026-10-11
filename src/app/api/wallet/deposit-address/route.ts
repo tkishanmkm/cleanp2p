@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
 import { createServerClient } from '@supabase/ssr';
 import { createClient } from '@supabase/supabase-js';
-import { deriveUserKeys, deriveEvmAddress } from '@/lib/crypto/hd-engine';
+import { deriveEvmAddress } from '@/lib/crypto/hd-engine';
 
 export { deriveEvmAddress };
 export const dynamic = 'force-dynamic';
