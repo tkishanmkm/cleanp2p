@@ -291,8 +291,6 @@ export async function POST(req: NextRequest) {
       fee_amount?: number | string;
       fee?: number | string;
       total_deduction?: number | string;
-      fee?: number | string;
-      total_deduction?: number | string;
       sender_balance_after?: number | string;
       recipient_balance_after?: number | string;
       status?: string;
