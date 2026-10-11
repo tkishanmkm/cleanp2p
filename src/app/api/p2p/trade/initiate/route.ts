@@ -1,5 +1,6 @@
 import { createClient } from '@/utils/supabase/server';
 import { resolveAuthoritativeAdQuote } from '@/lib/p2p/authoritativeAdQuote';
+import { getTradeEligibilityFailure } from '@/lib/p2p/tradeEligibility';
 import { NextRequest, NextResponse } from 'next/server';
 import { generateTradeId } from '@/lib/id-generator';
 import { sendNewTradeNotificationEmail } from '@/lib/email/tradeEmailService';
@@ -144,6 +145,11 @@ export async function POST(request: NextRequest) {
 
     calculatedCrypto = Number(calculatedCrypto.toFixed(8));
     numericFiat = Number((calculatedCrypto * unitPrice).toFixed(2));
+
+    const eligibilityFailure = await getTradeEligibilityFailure(supabase, user, ad, numericFiat, resolvedFiatCurrency);
+    if (eligibilityFailure) {
+      return NextResponse.json({ success: false, error: eligibilityFailure.error, code: eligibilityFailure.code }, { status: eligibilityFailure.status });
+    }
 
     // 5. Resolve Payment Method & Currency
     const paymentMethods = Array.isArray(ad.payment_methods)

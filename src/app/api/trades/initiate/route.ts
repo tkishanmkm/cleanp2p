@@ -6,6 +6,7 @@ import { sendNewTradeNotificationEmail } from '@/lib/email/tradeEmailService';
 import { assertPlatformControlAllowed } from '@/lib/platform-guard';
 import { hasPendingWithdrawalApproval } from '@/lib/withdrawal-security';
 import { resolveAuthoritativeAdQuote } from '@/lib/p2p/authoritativeAdQuote';
+import { getTradeEligibilityFailure } from '@/lib/p2p/tradeEligibility';
 
 export const dynamic = 'force-dynamic';
 
@@ -145,6 +146,11 @@ export async function POST(req: Request) {
 
     calculatedCrypto = Number(calculatedCrypto.toFixed(8));
     numericFiat = Number((calculatedCrypto * unitPrice).toFixed(2));
+
+    const eligibilityFailure = await getTradeEligibilityFailure(supabase, user, ad, numericFiat, resolvedFiatCurrency);
+    if (eligibilityFailure) {
+      return NextResponse.json({ success: false, error: eligibilityFailure.error, code: eligibilityFailure.code }, { status: eligibilityFailure.status });
+    }
 
     // 4. Resolve Payment Method & Currency
     let rawPaymentMethods: any[] = [];
