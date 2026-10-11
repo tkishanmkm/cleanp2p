@@ -192,7 +192,7 @@ export async function POST(
         p_payment_method: confirmedPaymentMethod,
       });
 
-      if (rpcError || (rpcData && !rpcData.success)) {
+      if (rpcError || !rpcData || rpcData.success !== true) {
         const errorMsg = rpcError?.message || rpcData?.message || 'Failed to mark trade as paid.';
         console.error('mark_p2p_trade_paid RPC failed:', errorMsg);
         return NextResponse.json({ error: errorMsg }, { status: 400 });
@@ -285,7 +285,7 @@ export async function POST(
         p_caller_id: user.id,
       });
 
-      if (rpcError || (rpcData && !rpcData.success)) {
+      if (rpcError || !rpcData || rpcData.success !== true) {
         const errorMsg = rpcError?.message || rpcData?.message || 'Failed to release escrow.';
         console.error('release_trade_escrow RPC failed:', errorMsg);
         return NextResponse.json({ error: errorMsg }, { status: 400 });
@@ -336,7 +336,7 @@ export async function POST(
         p_caller_id: user.id,
       });
 
-      if (rpcError || (rpcData && !rpcData.success)) {
+      if (rpcError || !rpcData || rpcData.success !== true) {
         const errorMsg = rpcError?.message || rpcData?.message || 'Failed to cancel trade.';
         console.error('cancel_p2p_trade RPC failed:', errorMsg);
         return NextResponse.json({ error: errorMsg }, { status: 400 });
@@ -430,7 +430,7 @@ export async function POST(
         p_trade_id: actualTradeId,
       });
 
-      if (rpcError || (rpcData && !rpcData.success)) {
+      if (rpcError || !rpcData || rpcData.success !== true) {
         const errorMsg = rpcError?.message || rpcData?.message || 'Failed to expire trade.';
         console.error('expire_p2p_trade RPC failed:', errorMsg);
         return NextResponse.json({ error: errorMsg }, { status: 400 });

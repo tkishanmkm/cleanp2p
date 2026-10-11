@@ -63,10 +63,15 @@ export async function POST(
     });
 
     if (error) {
-      return NextResponse.json({ error: error.message }, { status: 400 });
+      console.error('[P2P trade release] RPC failed:', error.code || 'UNKNOWN');
+      return NextResponse.json({ error: 'Escrow release could not be completed.' }, { status: 400, headers: { 'Cache-Control': 'no-store' } });
     }
 
-    return NextResponse.json({ success: true, data });
+    if (!data || data.success !== true) {
+      return NextResponse.json({ error: 'Escrow release was not confirmed by the database.' }, { status: 409, headers: { 'Cache-Control': 'no-store' } });
+    }
+
+    return NextResponse.json({ success: true, data }, { headers: { 'Cache-Control': 'no-store' } });
   } catch (err: any) {
     return NextResponse.json({ error: err.message }, { status: 500 });
   }
