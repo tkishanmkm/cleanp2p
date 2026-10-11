@@ -65,7 +65,7 @@ export async function POST(
     }
 
     // Execute atomic escrow release procedure via service_role client
-    const { data, error } = await adminClient.rpc('release_trade_escrow', {
+    const { data, error } = await supabase.rpc('release_trade_escrow', {
       p_trade_id: tradeId,
       p_caller_id: user.id,
     });
