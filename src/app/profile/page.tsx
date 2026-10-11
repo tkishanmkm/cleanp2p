@@ -42,6 +42,9 @@ interface AccountData {
   is_2fa_enabled?: boolean;
   kyc_status?: string;
   verification_tier?: number | string;
+  is_verified?: boolean;
+  id_verified?: boolean;
+  is_id_verified?: boolean;
 }
 
 export default function ProfilePage() {
@@ -250,7 +253,7 @@ export default function ProfilePage() {
         id: userId,
         full_name: profile?.full_name || (user as any)?.user_metadata?.full_name || profile?.username || 'Trader',
         username: profile?.username || (user as any)?.user_metadata?.username || 'user',
-        email: user.email || profile?.email || '',
+        email: user?.email || profile?.email || '',
         preferred_fiat: preferredFiat,
         total_volume: displayVolume,
         completed_trades: completedTradesCount,
