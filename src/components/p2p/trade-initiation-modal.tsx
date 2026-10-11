@@ -126,8 +126,14 @@ export function TradeInitiationModal({ ad, isOpen, onClose }: TradeInitiationMod
 
   const handleStartTrade = async () => {
     const numericFiat = parseFloat(fiatAmount);
+    const numericCrypto = parseFloat(cryptoAmount);
 
-    if (isNaN(numericFiat) || numericFiat <= 0) {
+    if (!Number.isFinite(numericCrypto) || numericCrypto <= 0) {
+      setErrorMsg("Please enter a valid crypto amount.");
+      return;
+    }
+
+    if (!Number.isFinite(numericFiat) || numericFiat <= 0) {
       setErrorMsg("Please enter a valid amount.");
       return;
     }
@@ -178,8 +184,8 @@ export function TradeInitiationModal({ ad, isOpen, onClose }: TradeInitiationMod
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             adId: ad.id,
-            buyerId,
-            sellerId,
+            // Server derives buyer/seller from the authenticated session and ad ownership.
+            idempotencyKey: crypto.randomUUID(),
             cryptoAmount: numericCrypto,
             cryptoSymbol: ad.asset_symbol,
             rate: ad.price,
@@ -200,56 +206,13 @@ export function TradeInitiationModal({ ad, isOpen, onClose }: TradeInitiationMod
         console.warn('Trade API route creation warning, falling back to direct insert:', apiErr);
       }
 
-      // 2. Direct insert fallback if API route did not return ID
+      // Never create trades directly from the client: only the server RPC can
+      // atomically reserve the seller's coin and create the trade/escrow.
       if (!tradeId) {
-        const escrowFee = numericCrypto * 0.015;
-        let { data: trade, error: tradeError } = await supabase
-          .from("trades")
-          .insert({
-            ad_id: ad.id,
-            buyer_id: buyerId,
-            seller_id: sellerId,
-            crypto: ad.asset_symbol,
-            crypto_amount: numericCrypto,
-            amount: numericCrypto,
-            escrow_fee: escrowFee,
-            fiat_currency: ad.fiat_symbol || 'INR',
-            fiat_amount: numericFiat,
-            total_fiat: numericFiat,
-            rate: ad.price,
-            price: ad.price,
-            amount_usd: numericFiat,
-            payment_method: paymentMethod,
-            status: "pending",
-          })
-          .select("id")
-          .single();
-
-        if (tradeError) {
-          console.warn("Retrying trade insertion with minimal schema...", tradeError);
-          const { data: fallbackTrade, error: fallbackError } = await supabase
-            .from("trades")
-            .insert({
-              buyer_id: buyerId,
-              seller_id: sellerId,
-              amount_usd: numericFiat,
-              status: "pending",
-            })
-            .select("id")
-            .single();
-
-          if (fallbackError) {
-            throw fallbackError;
-          }
-          tradeId = fallbackTrade?.id;
-        } else {
-          tradeId = trade?.id;
-        }
+        throw new Error("Trade could not be created securely. Please retry.");
       }
 
-      if (!tradeId) {
-        throw new Error("Trade creation returned no ID.");
-      }
+
 
       // Sound feedback and redirect to trade execution page
       try {
