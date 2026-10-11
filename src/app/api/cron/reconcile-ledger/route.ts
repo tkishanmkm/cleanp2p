@@ -16,8 +16,8 @@ function verifyCronAuth(authHeader: string | null): boolean {
   ].filter((s): s is string => Boolean(s && s.trim().length > 0));
 
   if (validSecrets.length === 0) {
-    // If no secret configured in development, check for fallback Bearer token
-    return process.env.NODE_ENV === 'development';
+    // Financial reconciliation must fail closed in every environment.
+    return false;
   }
 
   const headerBuf = Buffer.from(authHeader);

@@ -10,7 +10,7 @@ export async function POST(
   { params }: { params: Promise<{ tradeId: string }> | { tradeId: string } }
 ) {
   try {
-    const resolvedParams = typeof (params as any)?.then === 'function' ? await params : params;
+    const resolvedParams = await Promise.resolve(params);
     const tradeId = resolvedParams.tradeId;
 
     if (!tradeId) {
