@@ -1227,7 +1227,7 @@ export async function sweepTronDepositAddress(
     }
 
     const hotWalletDestination = resolveTronHotWalletAddress();
-    if (!hotWalletDestination || hotWalletDestination === 'T00000000000000000000000000000000' || hotWalletDestination.length < 30) {
+    if (!/^T[1-9A-HJ-NP-Za-km-z]{33}$/.test(hotWalletDestination)) {
       throw new Error('TRON hot wallet destination address is not configured (checked HOT_WALLET_TRON_ADDRESS and TRON_HOT_WALLET_ADDRESS)');
     }
 
@@ -1380,6 +1380,14 @@ export async function sweepBtcDepositAddress(
   assertSweeperRuntimeConfiguration();
   const stopHeartbeat = sweepId && workerId ? startSweeperHeartbeat(sweepId, workerId) : () => {};
   try {
+    if (!HOT_WALLET_BTC_ADDRESS) {
+      throw new Error('Deposit sweeper is paused: HOT_WALLET_BTC_ADDRESS is not configured');
+    }
+    try {
+      bitcoin.address.toOutputScript(HOT_WALLET_BTC_ADDRESS, bitcoin.networks.bitcoin);
+    } catch {
+      throw new Error('Deposit sweeper is paused: HOT_WALLET_BTC_ADDRESS is invalid for Bitcoin mainnet');
+    }
     const mnemonic = process.env.DEPOSIT_HD_MNEMONIC;
     if (!mnemonic || !mnemonic.trim()) {
       throw new Error('DEPOSIT_HD_MNEMONIC is not configured in environment');
