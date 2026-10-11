@@ -130,18 +130,26 @@ export async function processWithdrawalQueue(): Promise<WithdrawalProcessResult>
       const txHash = res.txHash;
       broadcastTxHash = txHash;
 
-      const { error: completionError } = await supabaseAdmin.rpc('complete_onchain_withdrawal', {
-        p_withdrawal_id: withdrawal.id,
-        p_tx_hash: txHash,
-      });
-      if (completionError) throw new Error(`TRON transaction broadcast as ${txHash}, but database completion failed: ${completionError.message}`);
+      // Broadcasting is not settlement. Persist the hash and let the
+      // confirmation watcher complete the withdrawal only after chain finality.
+      const { error: broadcastRecordError } = await supabaseAdmin
+        .from('onchain_withdrawals')
+        .update({ status: 'BROADCASTED', tx_hash: txHash, updated_at: new Date().toISOString() })
+        .eq('id', withdrawal.id);
+      if (broadcastRecordError) throw new Error(`TRON transaction broadcast as ${txHash}, but recording broadcast state failed: ${broadcastRecordError.message}`);
 
-      console.log(`[Withdrawal Worker] Dispatched TRON payout ${withdrawal.id} (tx: ${txHash})`);
+      const { error: legacyRecordError } = await supabaseAdmin
+        .from('withdrawals')
+        .update({ status: 'BROADCASTED', tx_hash: txHash, updated_at: new Date().toISOString() })
+        .eq('id', withdrawal.id);
+      if (legacyRecordError) throw new Error(`TRON transaction broadcast as ${txHash}, but recording legacy broadcast state failed: ${legacyRecordError.message}`);
+
+      console.log(`[Withdrawal Worker] Broadcasted TRON payout ${withdrawal.id} (tx: ${txHash}); awaiting confirmations`);
       return {
         processed: true,
         withdrawalId: withdrawal.id,
         txHash,
-        status: 'COMPLETED',
+        status: 'BROADCASTED',
       };
     }
 
@@ -186,19 +194,27 @@ export async function processWithdrawalQueue(): Promise<WithdrawalProcessResult>
     }
 
     broadcastTxHash = tx.hash;
-    const { error: completionError } = await supabaseAdmin.rpc('complete_onchain_withdrawal', {
-      p_withdrawal_id: withdrawal.id,
-      p_tx_hash: tx.hash,
-    });
-    if (completionError) throw new Error(`EVM transaction broadcast as ${tx.hash}, but database completion failed: ${completionError.message}`);
+    // Persist broadcast state only. The confirmation watcher performs
+    // final settlement after the configured confirmation threshold is met.
+    const { error: broadcastRecordError } = await supabaseAdmin
+      .from('onchain_withdrawals')
+      .update({ status: 'BROADCASTED', tx_hash: tx.hash, updated_at: new Date().toISOString() })
+      .eq('id', withdrawal.id);
+    if (broadcastRecordError) throw new Error(`EVM transaction broadcast as ${tx.hash}, but recording broadcast state failed: ${broadcastRecordError.message}`);
 
-    console.log(`[Withdrawal Worker] Broadcasted EVM payout ${withdrawal.id} on ${network} (tx: ${tx.hash}, nonce: ${nonce})`);
+    const { error: legacyRecordError } = await supabaseAdmin
+      .from('withdrawals')
+      .update({ status: 'BROADCASTED', tx_hash: tx.hash, updated_at: new Date().toISOString() })
+      .eq('id', withdrawal.id);
+    if (legacyRecordError) throw new Error(`EVM transaction broadcast as ${tx.hash}, but recording legacy broadcast state failed: ${legacyRecordError.message}`);
+
+    console.log(`[Withdrawal Worker] Broadcasted EVM payout ${withdrawal.id} on ${network} (tx: ${tx.hash}, nonce: ${nonce}); awaiting confirmations`);
     return {
       processed: true,
       withdrawalId: withdrawal.id,
       txHash: tx.hash,
       nonce,
-      status: 'COMPLETED',
+      status: 'BROADCASTED',
     };
 
   } catch (err: any) {
