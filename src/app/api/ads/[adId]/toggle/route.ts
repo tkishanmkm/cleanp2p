@@ -74,6 +74,14 @@ export async function PATCH(
 
     const body = await request.json();
     const newStatus = body.status ? String(body.status).toUpperCase().trim() : (body.active ? 'ACTIVE' : 'INACTIVE');
+    if (!isAdmin && !['ACTIVE', 'INACTIVE'].includes(newStatus)) {
+      return NextResponse.json({ error: 'Forbidden: only administrators may set moderated advertisement statuses.' }, { status: 403 });
+    }
+    const existingStatus = String(existingAd.status || '').toUpperCase();
+    const moderationLockedStatuses = new Set(['SUSPENDED', 'REJECTED', 'BANNED', 'DELETED', 'REMOVED']);
+    if (!isAdmin && moderationLockedStatuses.has(existingStatus)) {
+      return NextResponse.json({ error: 'This advertisement is restricted by moderation and can only be changed by an administrator.' }, { status: 403 });
+    }
     const isActive = newStatus === 'ACTIVE';
 
     // 4. Independently resolve both target rows

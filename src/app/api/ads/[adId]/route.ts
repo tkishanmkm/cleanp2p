@@ -5,6 +5,7 @@ import { findAdById, resolveBothTargetRows } from '@/lib/ad-lookup';
 import { resolveTradeType } from '@/utils/p2p-helpers';
 import { verifyServerAdmin } from '@/lib/server-admin-auth';
 import { FIAT_CURRENCIES } from '@/lib/currencies';
+import { resolveAuthoritativeAdQuote } from '@/lib/p2p/authoritativeAdQuote';
 
 export const dynamic = 'force-dynamic';
 
@@ -642,7 +643,15 @@ export async function PUT(
       ? body.tags 
       : (Array.isArray(body.offer_tags) ? body.offer_tags : (Array.isArray(body.ad_tags) ? body.ad_tags : undefined));
 
-    const isFixed = body.rate_type === 'fixed' || body.pricing_type === 'FIXED' || Boolean(body.is_fixed);
+    const existingIsFixed = Boolean(existingAd.is_fixed) ||
+      String(existingAd.pricing_type || '').toUpperCase() === 'FIXED' ||
+      String(existingAd.rate_type || '').toLowerCase() === 'fixed';
+    const pricingWasSpecified = body.rate_type !== undefined || body.pricing_type !== undefined || body.is_fixed !== undefined;
+    const isFixed = pricingWasSpecified
+      ? (String(body.pricing_type || '').toUpperCase() === 'FIXED' ||
+         String(body.rate_type || '').toLowerCase() === 'fixed' ||
+         body.is_fixed === true)
+      : existingIsFixed;
     const pricingType = isFixed ? 'FIXED' : 'FLOAT';
     const rateType = isFixed ? 'fixed' : 'market';
 
@@ -679,10 +688,25 @@ export async function PUT(
     // Authoritative Server-Side ±50% Reference Market Price Validation for Edited Ads
     const effectiveAsset = String(updatedAsset || existingAd.asset_symbol || existingAd.asset || existingAd.crypto || 'USDT').toUpperCase().trim();
     const effectiveFiat = String(updatedFiat || existingAd.fiat_symbol || existingAd.fiat_currency || existingAd.fiat || 'USD').toUpperCase().trim();
+    const effectiveMargin = margin !== undefined
+      ? margin
+      : Number(existingAd.rate_percent ?? existingAd.margin ?? existingAd.price_margin ?? 0);
+    const updatedQuote = await resolveAuthoritativeAdQuote({
+      asset_symbol: effectiveAsset,
+      fiat_currency: effectiveFiat,
+      pricing_type: pricingType,
+      is_fixed: isFixed,
+      price: price !== undefined ? price : (existingAd.price ?? existingAd.unit_price),
+      margin: effectiveMargin,
+      rate_percent: effectiveMargin,
+    });
+    if (!updatedQuote) {
+      return NextResponse.json({ error: 'Unable to resolve a valid current advertisement price.' }, { status: 503 });
+    }
 
     if (isFixed) {
       const effectiveEditPrice = price !== undefined ? price : Number(existingAd.price ?? existingAd.unit_price ?? 0);
-      if (effectiveEditPrice <= 0) {
+      if (!Number.isFinite(effectiveEditPrice) || effectiveEditPrice <= 0) {
         return NextResponse.json({ error: 'Valid fixed price is required for fixed-rate ads.' }, { status: 400 });
       }
 
@@ -755,7 +779,6 @@ export async function PUT(
       if (maxAmount !== undefined) {
         p2pPayload.max_amount = maxAmount;
         p2pPayload.max_limit = maxAmount;
-        p2pPayload.available_amount = maxAmount;
       }
       if (margin !== undefined) {
         p2pPayload.rate_percent = margin;
