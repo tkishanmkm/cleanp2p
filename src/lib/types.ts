@@ -53,6 +53,7 @@ export interface P2PAd {
   userId: string;
   publicAdId?: string;
   user?: {
+    id?: string;
     username: string;
     country?: string;
     feedbackScore: number;
@@ -62,6 +63,9 @@ export interface P2PAd {
     photoURL?: string;
     badges?: string[];
     lastActive?: string;
+    last_seen?: string;
+    last_seen_at?: string;
+    last_active?: string;
     isVerified?: boolean;
     is_verified?: boolean;
   };
