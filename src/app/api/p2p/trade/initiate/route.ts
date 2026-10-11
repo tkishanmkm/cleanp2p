@@ -121,7 +121,8 @@ export async function POST(request: NextRequest) {
     }
 
     // 4. Resolve exact numerical amounts
-    const unitPrice = Number(customPrice ?? ad.fixed_rate ?? ad.price ?? 1);
+    // Never accept a client-supplied trade price. The database escrow RPC independently uses the stored ad price.
+    const unitPrice = Number(ad.price ?? ad.unit_price ?? ad.fixed_rate ?? 0);
     let calculatedCrypto = parseFloat(rawCrypto);
     let numericFiat = parseFloat(rawFiat);
 
