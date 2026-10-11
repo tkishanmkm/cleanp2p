@@ -1122,22 +1122,6 @@ export async function sweepTronDepositAddress(
   let delegatedEnergy = false;
 
   try {
-    if (!HOT_WALLET_BTC_ADDRESS) {
-      throw new Error('Deposit sweeper is paused: HOT_WALLET_BTC_ADDRESS is not configured');
-    }
-    try {
-      bitcoin.address.toOutputScript(HOT_WALLET_BTC_ADDRESS, bitcoin.networks.bitcoin);
-    } catch {
-      throw new Error('Deposit sweeper is paused: HOT_WALLET_BTC_ADDRESS is invalid for Bitcoin mainnet');
-    }
-    if (!HOT_WALLET_LTC_ADDRESS) {
-      throw new Error('Deposit sweeper is paused: HOT_WALLET_LTC_ADDRESS is not configured');
-    }
-    try {
-      bitcoin.address.toOutputScript(HOT_WALLET_LTC_ADDRESS, LTC_NETWORK);
-    } catch {
-      throw new Error('Deposit sweeper is paused: HOT_WALLET_LTC_ADDRESS is invalid for Litecoin');
-    }
     const mnemonic = process.env.DEPOSIT_HD_MNEMONIC;
     if (!mnemonic || !mnemonic.trim()) {
       throw new Error('DEPOSIT_HD_MNEMONIC is not configured in environment');
@@ -1616,6 +1600,14 @@ export async function sweepLtcDepositAddress(
   assertSweeperRuntimeConfiguration();
   const stopHeartbeat = sweepId && workerId ? startSweeperHeartbeat(sweepId, workerId) : () => {};
   try {
+    if (!HOT_WALLET_LTC_ADDRESS) {
+      throw new Error('Deposit sweeper is paused: HOT_WALLET_LTC_ADDRESS is not configured');
+    }
+    try {
+      bitcoin.address.toOutputScript(HOT_WALLET_LTC_ADDRESS, LTC_NETWORK);
+    } catch {
+      throw new Error('Deposit sweeper is paused: HOT_WALLET_LTC_ADDRESS is invalid for Litecoin');
+    }
     const mnemonic = process.env.DEPOSIT_HD_MNEMONIC;
     if (!mnemonic || !mnemonic.trim()) {
       throw new Error('DEPOSIT_HD_MNEMONIC is not configured in environment');
