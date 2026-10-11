@@ -69,7 +69,7 @@ export async function POST(request: Request) {
     }
 
     // 3. Execute Atomic RPC Procedure (Releases Escrow to Buyer & Completes Trade) via admin client
-    const { data, error } = await adminClient.rpc('release_trade_escrow', {
+    const { data, error } = await supabase.rpc('release_trade_escrow', {
       p_trade_id: tradeId,
       p_caller_id: user.id,
     });
