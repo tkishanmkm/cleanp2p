@@ -300,23 +300,31 @@ export async function checkSubmittedWithdrawals(): Promise<{
       const normNet = normalizeNetworkCode(w.network);
 
       if (normNet === 'TRC20') {
-        const { isConfirmed, success, actualCostTrx } = await getTronTransactionConfirmations(w.tx_hash);
-        
-        if (isConfirmed && success) {
+        const { isConfirmed, confirmations, success, actualCostTrx } = await getTronTransactionConfirmations(w.tx_hash);
+
+        if (isConfirmed && success === true) {
           const actualTrxStr = actualCostTrx && actualCostTrx.trim().length > 0 ? actualCostTrx.trim() : '0';
-          const { error: confErr } = await supabaseAdmin.rpc('complete_onchain_withdrawal', {
+          const { data: completion, error: confErr } = await supabaseAdmin.rpc('complete_onchain_withdrawal', {
             p_withdrawal_id: w.id,
             p_tx_hash: w.tx_hash,
             p_actual_gas_amount: actualTrxStr,
             p_gas_asset: 'TRX',
           });
-          if (!confErr) confirmed++;
-        } else if (!success) {
-          await supabaseAdmin.rpc('process_failed_withdrawal', {
+          if (confErr || completion?.success !== true) {
+            console.error('[Withdrawal Worker] TRON completion RPC did not confirm settlement', { withdrawalId: w.id, error: confErr?.message, result: completion });
+          } else {
+            confirmed++;
+          }
+        } else if (success === false && confirmations >= TRON_CONFIG.requiredConfirmations) {
+          // Refund only after a definitive on-chain failure is confirmed deeply.
+          const { data: refundResult, error: refundError } = await supabaseAdmin.rpc('process_failed_withdrawal', {
             p_withdrawal_id: w.id,
-            p_error_reason: `TRON transaction reverted on-chain`,
+            p_error_reason: 'TRON transaction definitively failed on-chain after required confirmations',
             p_is_verified_unbroadcast: true,
           });
+          if (refundError || refundResult?.success !== true) {
+            console.error('[Withdrawal Worker] TRON failed-transaction refund was not confirmed', { withdrawalId: w.id, error: refundError?.message, result: refundResult });
+          }
         }
       } else if (SUPPORTED_EVM_CHAINS[normNet]) {
         const chain = SUPPORTED_EVM_CHAINS[normNet];
@@ -324,21 +332,29 @@ export async function checkSubmittedWithdrawals(): Promise<{
         const { confirmations, status, actualGasCost } = await getTransactionConfirmations(provider, w.tx_hash);
         const gasAsset = normNet === 'BEP20' ? 'BNB' : 'ETH';
 
-        if (confirmations >= chain.requiredConfirmations && status !== 0) {
+        if (confirmations >= chain.requiredConfirmations && status === 1) {
           const actualGasStr = actualGasCost && actualGasCost.trim().length > 0 ? actualGasCost.trim() : '0';
-          const { error: confErr } = await supabaseAdmin.rpc('complete_onchain_withdrawal', {
+          const { data: completion, error: confErr } = await supabaseAdmin.rpc('complete_onchain_withdrawal', {
             p_withdrawal_id: w.id,
             p_tx_hash: w.tx_hash,
             p_actual_gas_amount: actualGasStr,
             p_gas_asset: gasAsset,
           });
-          if (!confErr) confirmed++;
-        } else if (status === 0) {
-          await supabaseAdmin.rpc('process_failed_withdrawal', {
+          if (confErr || completion?.success !== true) {
+            console.error('[Withdrawal Worker] EVM completion RPC did not confirm settlement', { withdrawalId: w.id, error: confErr?.message, result: completion });
+          } else {
+            confirmed++;
+          }
+        } else if (confirmations >= chain.requiredConfirmations && status === 0) {
+          // A receipt status of 0 is a definitive revert only after required depth.
+          const { data: refundResult, error: refundError } = await supabaseAdmin.rpc('process_failed_withdrawal', {
             p_withdrawal_id: w.id,
-            p_error_reason: `EVM transaction reverted on-chain on network ${w.network}`,
+            p_error_reason: `EVM transaction definitively reverted on-chain on network ${w.network}`,
             p_is_verified_unbroadcast: true,
           });
+          if (refundError || refundResult?.success !== true) {
+            console.error('[Withdrawal Worker] EVM failed-transaction refund was not confirmed', { withdrawalId: w.id, error: refundError?.message, result: refundResult });
+          }
         }
       } else if (normNet === 'BTC') {
         try {
