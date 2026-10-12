@@ -438,6 +438,142 @@ async function scanEvmNativeDeposits(
   return { detected, credited, errors };
 }
 
+type TronEventScan = {
+  events: any[];
+  newestEventKey: string | null;
+  complete: boolean;
+  nextBackfillFingerprint: string | null;
+  backfillComplete: boolean;
+};
+
+function tronEventKey(event: any): string | null {
+  const txId = String(event?.transaction_id || '');
+  const index = Number(event?.event_index);
+  return txId && Number.isSafeInteger(index) && index >= 0 ? `${txId}_${index}` : null;
+}
+
+async function fetchTronUsdtEventsSinceCursor(
+  tronGridHost: string,
+  headers: Record<string, string>,
+  contractAddress: string
+): Promise<TronEventScan> {
+  const { data: cursor, error: cursorError } = await supabaseAdmin
+    .from('tron_deposit_scan_cursors')
+    .select('last_seen_event_key, backfill_fingerprint, backfill_complete')
+    .eq('network_code', 'TRC20')
+    .maybeSingle();
+  if (cursorError) throw new Error(`Unable to load TRON deposit cursor: ${cursorError.message}`);
+
+  const fetchPage = async (fingerprint?: string | null): Promise<{ events: any[]; fingerprint: string | null }> => {
+    const query = new URLSearchParams({
+      event_name: 'Transfer',
+      limit: '50',
+      order_by: 'block_timestamp,desc',
+      only_confirmed: 'true',
+    });
+    if (fingerprint) query.set('fingerprint', fingerprint);
+    const response = await fetch(`${tronGridHost}/v1/contracts/${contractAddress}/events?${query.toString()}`, { headers });
+    if (!response.ok) throw new Error(`TRON event query failed with HTTP ${response.status}`);
+    const body = await response.json();
+    if (!Array.isArray(body?.data)) throw new Error('TRON event API returned an invalid response');
+    return {
+      events: body.data,
+      fingerprint: body?.meta?.fingerprint ? String(body.meta.fingerprint) : null,
+    };
+  };
+
+  const firstPage = await fetchPage();
+  const newestEventKey = tronEventKey(firstPage.events[0]) || cursor?.last_seen_event_key || null;
+  const lastSeenEventKey = cursor?.last_seen_event_key ? String(cursor.last_seen_event_key) : null;
+
+  if (!lastSeenEventKey) {
+    const needsBackfill = firstPage.events.length >= 50;
+    if (needsBackfill && !firstPage.fingerprint) {
+      return { events: firstPage.events, newestEventKey, complete: false, nextBackfillFingerprint: null, backfillComplete: false };
+    }
+    return {
+      events: firstPage.events,
+      newestEventKey,
+      complete: true,
+      nextBackfillFingerprint: needsBackfill ? firstPage.fingerprint : null,
+      backfillComplete: !needsBackfill,
+    };
+  }
+
+  const events: any[] = [];
+  let page = firstPage;
+  let pagesRead = 0;
+  let incrementalComplete = false;
+  while (true) {
+    let reachedCursor = false;
+    for (const event of page.events) {
+      if (tronEventKey(event) === lastSeenEventKey) {
+        reachedCursor = true;
+        break;
+      }
+      events.push(event);
+    }
+
+    if (reachedCursor || page.events.length < 50) {
+      incrementalComplete = true;
+      break;
+    }
+    if (!page.fingerprint || ++pagesRead >= 100) {
+      return {
+        events,
+        newestEventKey,
+        complete: false,
+        nextBackfillFingerprint: cursor?.backfill_fingerprint || null,
+        backfillComplete: cursor?.backfill_complete === true,
+      };
+    }
+    page = await fetchPage(page.fingerprint);
+  }
+
+  let nextBackfillFingerprint = cursor?.backfill_fingerprint ? String(cursor.backfill_fingerprint) : null;
+  let backfillComplete = cursor?.backfill_complete === true || !nextBackfillFingerprint;
+  if (!backfillComplete && nextBackfillFingerprint) {
+    const olderPage = await fetchPage(nextBackfillFingerprint);
+    events.push(...olderPage.events);
+    if (olderPage.events.length < 50) {
+      nextBackfillFingerprint = null;
+      backfillComplete = true;
+    } else if (olderPage.fingerprint) {
+      nextBackfillFingerprint = olderPage.fingerprint;
+    } else {
+      return {
+        events,
+        newestEventKey,
+        complete: false,
+        nextBackfillFingerprint,
+        backfillComplete: false,
+      };
+    }
+  }
+
+  return {
+    events,
+    newestEventKey,
+    complete: incrementalComplete,
+    nextBackfillFingerprint,
+    backfillComplete,
+  };
+}
+
+async function persistTronDepositCursor(scan: TronEventScan): Promise<void> {
+  if (!scan.newestEventKey) return;
+  const { error } = await supabaseAdmin
+    .from('tron_deposit_scan_cursors')
+    .upsert({
+      network_code: 'TRC20',
+      last_seen_event_key: scan.newestEventKey,
+      backfill_fingerprint: scan.nextBackfillFingerprint,
+      backfill_complete: scan.backfillComplete,
+      updated_at: new Date().toISOString(),
+    }, { onConflict: 'network_code' });
+  if (error) throw new Error(`Unable to persist TRON deposit cursor: ${error.message}`);
+}
+
 /**
  * Scans TRON TRC-20 token transfers targeting monitored TRON addresses
  * Supports Alchemy TRON JSON-RPC (eth_getLogs) with automatic chunking and recovery
@@ -682,14 +818,12 @@ async function scanTronDeposits(
       }
     }
 
-    // 3. Strategy B: TronGrid Contract Event Ingestion (Transfer events on known USDT contracts)
+    // 3. Strategy B: durable, paginated TronGrid contract-event ingestion.
     for (const cAddr of knownContracts) {
       try {
-        const eventUrl = `${tronGridHost}/v1/contracts/${cAddr}/events?event_name=Transfer&limit=50&order_by=block_timestamp,desc`;
-        const res = await fetch(eventUrl, { headers: tronGridHeaders });
-        if (res.ok) {
-          const data = await res.json();
-          for (const evt of data.data || []) {
+        const eventScan = await fetchTronUsdtEventsSinceCursor(tronGridHost, tronGridHeaders, cAddr);
+        const errorsBeforeEventScan = errors.length;
+        for (const evt of eventScan.events) {
             const txId = evt.transaction_id;
             const fromHex = evt.result?.from;
             const toHex = evt.result?.to;
@@ -754,7 +888,12 @@ async function scanTronDeposits(
                 credited++;
               }
             }
-          }
+        }
+
+        if (eventScan.complete && eventScan.newestEventKey && errors.length === errorsBeforeEventScan) {
+          await persistTronDepositCursor(eventScan);
+        } else if (!eventScan.complete) {
+          errors.push('TRON event history is incomplete; cursor was not advanced');
         }
       } catch (evtErr: any) {
         errors.push(`TronGrid contract events error for ${cAddr}: ${evtErr.message}`);
