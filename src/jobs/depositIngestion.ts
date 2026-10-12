@@ -243,6 +243,7 @@ async function scanEvmTokenDeposits(
           errors.push(`RPC error on tx ${log.transactionHash}: ${error.message}`);
         } else {
           const res = typeof data === 'string' ? JSON.parse(data) : data;
+          if (res?.success === false) errors.push(`Deposit RPC rejected tx ${log.transactionHash}: ${res.code || res.status || 'unknown'}`);
           if (res?.status === 'credited' || (res?.success && confirmations >= chainConfig.requiredConfirmations)) {
             credited++;
           }
@@ -353,6 +354,7 @@ async function scanEvmNativeDeposits(
 
                 if (!error) {
                   const res = typeof data === 'string' ? JSON.parse(data) : data;
+                  if (res?.success === false) errors.push(`Deposit RPC rejected indexed native tx ${txHash}: ${res.code || res.status || 'unknown'}`);
                   if (res?.status === 'credited' || (res?.success && confirmations >= chainConfig.requiredConfirmations)) {
                     credited++;
                   }
@@ -421,6 +423,7 @@ async function scanEvmNativeDeposits(
             errors.push(`RPC error for native transfer ${tx.hash}: ${error.message}`);
           } else {
             const res = typeof data === 'string' ? JSON.parse(data) : data;
+            if (res?.success === false) errors.push(`Deposit RPC rejected native tx ${tx.hash}: ${res.code || res.status || 'unknown'}`);
             if (res?.status === 'credited' || (res?.success && confirmations >= chainConfig.requiredConfirmations)) {
               credited++;
             }
@@ -667,6 +670,7 @@ async function scanTronDeposits(
               errors.push(`RPC error for TRON deposit ${txId}: ${error.message}`);
             } else {
               const r = typeof rpcData === 'string' ? JSON.parse(rpcData) : rpcData;
+              if (r?.success === false) errors.push(`Deposit RPC rejected TRON tx ${txId}: ${r.code || r.status || 'unknown'}`);
               if (r?.status === 'credited' || (r?.success && confirmations >= TRON_CONFIG.requiredConfirmations)) {
                 credited++;
               }
@@ -871,6 +875,7 @@ async function scanTronDeposits(
             errors.push(`RPC error for TRON deposit ${txHash}: ${error.message}`);
           } else {
             const res = typeof rpcData === 'string' ? JSON.parse(rpcData) : rpcData;
+            if (res?.success === false) errors.push(`Deposit RPC rejected TRON tx ${txHash}: ${res.code || res.status || 'unknown'}`);
             if (res?.status === 'credited' || (res?.success && confirmations >= TRON_CONFIG.requiredConfirmations)) {
               credited++;
             }
@@ -1095,6 +1100,7 @@ async function scanBtcDeposits(
             errors.push(`RPC error for BTC deposit ${tx.txid}:${i}: ${error.message}`);
           } else {
             const result = typeof data === 'string' ? JSON.parse(data) : data;
+            if (result?.success === false) errors.push(`Deposit RPC rejected BTC tx ${tx.txid}:${i}: ${result.code || result.status || 'unknown'}`);
             if (result?.status === 'credited') credited++;
           }
         }
@@ -1179,6 +1185,7 @@ async function scanLtcDeposits(
             errors.push(`RPC error for LTC deposit ${tx.txid}:${i}: ${error.message}`);
           } else {
             const result = typeof data === 'string' ? JSON.parse(data) : data;
+            if (result?.success === false) errors.push(`Deposit RPC rejected LTC tx ${tx.txid}:${i}: ${result.code || result.status || 'unknown'}`);
             if (result?.status === 'credited') credited++;
           }
         }
