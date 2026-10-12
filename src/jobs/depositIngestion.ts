@@ -1183,7 +1183,7 @@ export async function runDepositIngestion(): Promise<{
       const lastScanned = cursor?.last_scanned_block == null
         ? null
         : Number(cursor.last_scanned_block);
-      const configuredStart = Number(process.env[`DEPOSIT_SCAN_START_BLOCK_${netKey}]);
+      const configuredStart = Number(process.env[`DEPOSIT_SCAN_START_BLOCK_${netKey}`]);
       let fromBlock: number;
       if (lastScanned === null) {
         // Optional operator-controlled historical backfill start. Without it,
