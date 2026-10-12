@@ -6,7 +6,80 @@ import * as ecc from 'tiny-secp256k1';
 import { getSupabaseAdminClient } from '@/lib/supabase/server';
 import { LTC_NETWORK } from '@/lib/crypto/hd-engine';
 
+
 const ECPair = ECPairFactory(ecc);
+
+/**
+ * Persist a broadcast without settling the withdrawal. This function deliberately
+ * does not throw after a transaction hash exists: a database error must never
+ * route a possibly-broadcast transaction into an automatic refund path.
+ */
+async function recordWithdrawalBroadcast(
+  withdrawalId: string,
+  txHash: string,
+  gasAmount?: number,
+  gasAsset?: string,
+): Promise<void> {
+  const supabase = getSupabaseAdminClient();
+  const now = new Date().toISOString();
+
+  const { error: onchainError } = await supabase
+    .from('onchain_withdrawals')
+    .update({
+      status: 'BROADCASTED',
+      tx_hash: txHash,
+      updated_at: now,
+      ...(gasAmount === undefined ? {} : { actual_gas_amount: gasAmount }),
+      ...(gasAsset === undefined ? {} : { gas_asset: gasAsset }),
+    })
+    .eq('id', withdrawalId);
+
+  const { error: withdrawalError } = await supabase
+    .from('withdrawals')
+    .update({
+      status: 'BROADCASTED',
+      tx_hash: txHash,
+      txid: txHash,
+      broadcasted_at: now,
+      updated_at: now,
+    })
+    .eq('id', withdrawalId);
+
+  if (onchainError || withdrawalError) {
+    const reason = [
+      onchainError ? `onchain_withdrawals: ${onchainError.message}` : '',
+      withdrawalError ? `withdrawals: ${withdrawalError.message}` : '',
+    ].filter(Boolean).join('; ');
+
+    console.error('[Withdrawal Engine] Broadcast exists but status persistence failed; manual reconciliation required', {
+      withdrawalId, txHash, reason,
+    });
+
+    // Best-effort preserve the hash and quarantine the record from ordinary
+    // pending-queue selection. Never invoke the verified-unbroadcast refund RPC.
+    const [onchainAmbiguous, withdrawalAmbiguous] = await Promise.all([
+      supabase.from('onchain_withdrawals')
+        .update({ status: 'AMBIGUOUS_BROADCAST', tx_hash: txHash, updated_at: now })
+        .eq('id', withdrawalId),
+      supabase.from('withdrawals')
+        .update({
+          status: 'AMBIGUOUS_BROADCAST',
+          tx_hash: txHash,
+          txid: txHash,
+          broadcast_error: reason,
+          updated_at: now,
+        })
+        .eq('id', withdrawalId),
+    ]);
+    if (onchainAmbiguous.error || withdrawalAmbiguous.error) {
+      console.error('[Withdrawal Engine] Could not persist ambiguous broadcast quarantine', {
+        withdrawalId,
+        onchainError: onchainAmbiguous.error?.message,
+        withdrawalError: withdrawalAmbiguous.error?.message,
+      });
+    }
+  }
+}
 
 export interface WithdrawalTask {
   id: string;
@@ -118,16 +191,7 @@ export async function processTronWithdrawalOnChain(
 
   console.log(`[TRON Withdrawal Engine] Broadcast Successful. TxID: ${txid}`);
 
-  try {
-    await supabase.rpc('complete_onchain_withdrawal', {
-      p_withdrawal_id: withdrawal.id,
-      p_tx_hash: txid,
-      p_actual_gas_amount: 0,
-      p_gas_asset: 'TRX',
-    });
-  } catch (dbErr) {
-    console.warn('[TRON Withdrawal Engine] DB notice on update:', dbErr);
-  }
+  await recordWithdrawalBroadcast(withdrawal.id, txid, 0, 'TRX');
 
   return txid;
 }
@@ -239,17 +303,8 @@ export async function processBtcWithdrawalOnChain(
   console.log(`[BTC Withdrawal Engine] Broadcast Successful. TxID: ${txid}`);
 
   const supabase = getSupabaseAdminClient();
-  try {
-    const feeBtc = Number((networkFeeSat / 1e8).toFixed(8));
-    await supabase.rpc('complete_onchain_withdrawal', {
-      p_withdrawal_id: withdrawal.id,
-      p_tx_hash: txid,
-      p_actual_gas_amount: feeBtc,
-      p_gas_asset: 'BTC',
-    });
-  } catch (dbErr) {
-    console.warn('[BTC Withdrawal Engine] DB notice on update:', dbErr);
-  }
+  const feeBtc = Number((networkFeeSat / 1e8).toFixed(8));
+  await recordWithdrawalBroadcast(withdrawal.id, txid, feeBtc, 'BTC');
 
   return txid;
 }
@@ -361,17 +416,8 @@ export async function processLtcWithdrawalOnChain(
   console.log(`[LTC Withdrawal Engine] Broadcast Successful. TxID: ${txid}`);
 
   const supabase = getSupabaseAdminClient();
-  try {
-    const feeLtc = Number((networkFeeLit / 1e8).toFixed(8));
-    await supabase.rpc('complete_onchain_withdrawal', {
-      p_withdrawal_id: withdrawal.id,
-      p_tx_hash: txid,
-      p_actual_gas_amount: feeLtc,
-      p_gas_asset: 'LTC',
-    });
-  } catch (dbErr) {
-    console.warn('[LTC Withdrawal Engine] DB notice on update:', dbErr);
-  }
+  const feeLtc = Number((networkFeeLit / 1e8).toFixed(8));
+  await recordWithdrawalBroadcast(withdrawal.id, txid, feeLtc, 'LTC');
 
   return txid;
 }
@@ -448,18 +494,8 @@ export async function processEvmWithdrawalOnChain(
 
   console.log(`[Withdrawal Engine] Broadcast Successful. TxHash: ${txResponse.hash}`);
 
-  // Settle via authoritative complete_onchain_withdrawal RPC
-  try {
-    const gasAsset = (withdrawal.network_code || '').toUpperCase().includes('BEP') || (withdrawal.network_code || '').toUpperCase().includes('BSC') ? 'BNB' : 'ETH';
-    await supabase.rpc('complete_onchain_withdrawal', {
-      p_withdrawal_id: withdrawal.id,
-      p_tx_hash: txResponse.hash,
-      p_actual_gas_amount: 0,
-      p_gas_asset: gasAsset,
-    });
-  } catch (dbErr) {
-    console.warn('[Withdrawal Engine] DB notice on RPC execution:', dbErr);
-  }
+  const gasAsset = (withdrawal.network_code || '').toUpperCase().includes('BEP') || (withdrawal.network_code || '').toUpperCase().includes('BSC') ? 'BNB' : 'ETH';
+  await recordWithdrawalBroadcast(withdrawal.id, txResponse.hash, 0, gasAsset);
 
   return txResponse.hash;
 }
