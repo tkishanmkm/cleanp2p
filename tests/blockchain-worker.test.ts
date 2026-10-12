@@ -13,6 +13,14 @@ if (!supabaseUrl || !supabaseKey) {
   );
 }
 
+// processWithdrawalQueue() can submit real on-chain transfers using configured hot-wallet keys.
+// Make this high-risk suite opt-in rather than allowing an ordinary test command to broadcast.
+if (process.env.ENABLE_TEST_WITHDRAWAL_BROADCAST !== 'true') {
+  throw new Error(
+    'Blocked: blockchain worker tests can broadcast withdrawals. Use an isolated test project and test-only chain credentials, then explicitly set ENABLE_TEST_WITHDRAWAL_BROADCAST=true.'
+  );
+}
+
 const parsedSupabaseUrl = new URL(supabaseUrl);
 if (parsedSupabaseUrl.hostname.startsWith('eaiwgfxoiwxepinvcykg.')) {
   throw new Error('Blockchain worker tests are blocked from running against the production Supabase project.');
