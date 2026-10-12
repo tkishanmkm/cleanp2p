@@ -523,6 +523,47 @@ async function scanTronDeposits(
     const transferTopic = '0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef';
     const seenTxIndices = new Set<string>();
 
+    // Match each reported event to a successful canonical TRON receipt log.
+    // The receipt-log index becomes the stable idempotency key for that transfer.
+    const findCanonicalTransferIndex = (
+      info: any,
+      toAddress: string,
+      fromAddress: string | null,
+      rawAmount: bigint
+    ): number => {
+      const logs = Array.isArray(info?.log) ? info.log : [];
+      for (let index = 0; index < logs.length; index++) {
+        const log = logs[index];
+        const topics: string[] = Array.isArray(log?.topics) ? log.topics : [];
+        if ((topics[0] || '').replace(/^0x/i, '').toLowerCase() !== transferTopic.slice(2)) continue;
+
+        let logContract = '';
+        let logTo = '';
+        let logFrom = '';
+        let logAmount = -1n;
+        try {
+          const rawContract = String(log.address || '').replace(/^0x/i, '');
+          logContract = tronWeb.address.fromHex(rawContract.length === 42 ? rawContract : `41${rawContract.slice(-40)}`);
+          if (topics.length < 3) continue;
+          logFrom = tronWeb.address.fromHex(`41${topics[1].replace(/^0x/i, '').slice(-40)}`);
+          logTo = tronWeb.address.fromHex(`41${topics[2].replace(/^0x/i, '').slice(-40)}`);
+          const rawData = String(log.data || '').replace(/^0x/i, '');
+          if (!/^[0-9a-f]+$/i.test(rawData)) continue;
+          logAmount = BigInt(`0x${rawData}`);
+        } catch {
+          continue;
+        }
+
+        if (
+          logContract === CANONICAL_USDT_CONTRACTS.TRC20 &&
+          logTo === toAddress &&
+          (!fromAddress || logFrom === fromAddress) &&
+          logAmount === rawAmount
+        ) return index;
+      }
+      return -1;
+    };
+
     // 2. Strategy A: Direct Monitored Account TRC-20 Transaction Ingestion via TronGrid
     // Queries each monitored TRON address for incoming TRC-20 transfers (works reliably regardless of block depth)
     for (const monitoredAddr of monitoredTronAddresses) {
@@ -561,14 +602,6 @@ async function scanTronDeposits(
             }
             if (observedContract !== CANONICAL_USDT_CONTRACTS.TRC20) continue;
 
-            const outputIndex = Number(item.event_index);
-            // Without the event index, a transaction containing multiple Transfer
-            // logs cannot be safely deduplicated or credited exactly once.
-            if (!Number.isSafeInteger(outputIndex) || outputIndex < 0) continue;
-            const deduplicationKey = `${txId}_${outputIndex}`;
-            if (seenTxIndices.has(deduplicationKey)) continue;
-            seenTxIndices.add(deduplicationKey);
-
             // Confirm the canonical transaction actually succeeded and has a mined block.
             let canonicalInfo: any;
             try {
@@ -585,10 +618,15 @@ async function scanTronDeposits(
               }
             } catch (_) {}
 
-            const decimals = item.token_info?.decimals !== undefined ? Number(item.token_info.decimals) : 6;
+            // Canonical USDT on TRON has six decimals; do not trust token metadata.
             const rawVal = BigInt(item.value || '0');
             if (rawVal <= 0n) continue;
-            const formattedAmount = ethers.formatUnits(rawVal, decimals);
+            const outputIndex = findCanonicalTransferIndex(canonicalInfo, toAddr, fromAddr, rawVal);
+            if (outputIndex < 0) continue;
+            const deduplicationKey = `${txId}_${outputIndex}`;
+            if (seenTxIndices.has(deduplicationKey)) continue;
+            seenTxIndices.add(deduplicationKey);
+            const formattedAmount = ethers.formatUnits(rawVal, 6);
 
             const tokenContract = CANONICAL_USDT_CONTRACTS.TRC20;
 
@@ -638,10 +676,6 @@ async function scanTronDeposits(
           const data = await res.json();
           for (const evt of data.data || []) {
             const txId = evt.transaction_id;
-            const outputIndex = evt.event_index !== undefined && evt.event_index !== null ? Number(evt.event_index) : 0;
-            const deduplicationKey = `${txId}_${outputIndex}`;
-            if (seenTxIndices.has(deduplicationKey)) continue;
-
             const fromHex = evt.result?.from;
             const toHex = evt.result?.to;
             const rawValue = evt.result?.value;
@@ -661,10 +695,8 @@ async function scanTronDeposits(
             if (!monitoredTronAddresses.has(toBase58)) continue;
             seenTxIndices.add(deduplicationKey);
 
-            detected++;
             const rawValBig = BigInt(rawValue);
             if (rawValBig <= 0n) continue;
-            const formattedAmount = ethers.formatUnits(rawValBig, 6);
             let canonicalInfo: any;
             try {
               canonicalInfo = await tronWeb.trx.getTransactionInfo(txId);
@@ -673,6 +705,14 @@ async function scanTronDeposits(
             }
             if (!canonicalInfo?.blockNumber || canonicalInfo?.receipt?.result !== 'SUCCESS') continue;
 
+            const outputIndex = findCanonicalTransferIndex(canonicalInfo, toBase58, fromBase58, rawValBig);
+            if (outputIndex < 0) continue;
+            const deduplicationKey = `${txId}_${outputIndex}`;
+            if (seenTxIndices.has(deduplicationKey)) continue;
+            seenTxIndices.add(deduplicationKey);
+
+            detected++;
+            const formattedAmount = ethers.formatUnits(rawValBig, 6);
             const eventBlock = Number(canonicalInfo.blockNumber);
             const confirmations = latestBlock > 0 && latestBlock >= eventBlock
               ? latestBlock - eventBlock + 1
