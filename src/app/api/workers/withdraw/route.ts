@@ -21,7 +21,7 @@ export interface WithdrawalExecutionResult {
   toAddress: string;
   amount: string | number;
   txHash: string;
-  status: 'SUCCESS' | 'FAILED';
+  status: 'BROADCASTED' | 'FAILED';
   gasUsedEstimated?: string;
   providerUsed: string;
   error?: string;
@@ -323,7 +323,7 @@ export async function POST(req: NextRequest) {
         toAddress,
         amount,
         txHash: execution.txHash,
-        status: 'SUCCESS',
+        status: 'BROADCASTED',
         gasUsedEstimated: execution.gasEstimated,
         providerUsed: execution.providerUsed,
       };
@@ -389,7 +389,7 @@ export async function POST(req: NextRequest) {
           toAddress: itemTo,
           amount: itemAmt,
           txHash: exec.txHash,
-          status: 'SUCCESS',
+          status: 'BROADCASTED',
           gasUsedEstimated: exec.gasEstimated,
           providerUsed: exec.providerUsed,
         });
