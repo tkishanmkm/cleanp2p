@@ -96,10 +96,17 @@ BEGIN
         );
     END LOOP;
 
-    -- Expired, not-yet-broadcast reservations can be reclaimed after lock acquisition.
-    DELETE FROM public.utxo_reservations
-    WHERE reserved_until < NOW()
-      AND status = 'RESERVED';
+    -- Reclaim only an expired pre-signing reservation. A persisted signed
+    -- transaction must keep its inputs reserved even if its worker lease expired.
+    DELETE FROM public.utxo_reservations r
+    USING public.sweep_operations s
+    WHERE r.sweep_id = s.id
+      AND r.reserved_until < NOW()
+      AND r.status = 'RESERVED'
+      AND s.status IN ('PENDING', 'CLAIMED', 'GAS_FUNDING', 'GAS_FUNDED', 'FAILED')
+      AND (s.status = 'FAILED' OR s.lease_expires_at < NOW())
+      AND s.signed_tx_hex IS NULL
+      AND s.sweep_tx_hash IS NULL;
 
     -- An outpoint reserved by another non-released sweep is never transferable.
     FOR v_utxo IN SELECT value FROM jsonb_array_elements(p_utxos) AS item(value)
