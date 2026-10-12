@@ -176,7 +176,6 @@ export async function processTronWithdrawalOnChain(
     privateKey: privKey,
   });
 
-  const supabase = getSupabaseAdminClient();
   const usdtContractAddress = process.env.USDT_CONTRACT_TRC20 || 'TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t';
   const contract = await tronWeb.contract().at(usdtContractAddress);
 
@@ -415,7 +414,6 @@ export async function processLtcWithdrawalOnChain(
   const txid = (await broadcastRes.text()).trim();
   console.log(`[LTC Withdrawal Engine] Broadcast Successful. TxID: ${txid}`);
 
-  const supabase = getSupabaseAdminClient();
   const feeLtc = Number((networkFeeLit / 1e8).toFixed(8));
   await recordWithdrawalBroadcast(withdrawal.id, txid, feeLtc, 'LTC');
 
@@ -433,7 +431,6 @@ export async function processEvmWithdrawalOnChain(
   const formattedKey = privateKeyHex.startsWith('0x') ? privateKeyHex : `0x${privateKeyHex}`;
   const provider = new ethers.JsonRpcProvider(rpcUrl);
   const wallet = new ethers.Wallet(formattedKey, provider);
-  const supabase = getSupabaseAdminClient();
 
   console.log(`[Withdrawal Engine] Processing Withdrawal ID: ${withdrawal.id}`);
 
