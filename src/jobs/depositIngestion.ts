@@ -704,7 +704,6 @@ async function scanTronDeposits(
             } catch (_) {}
 
             if (!monitoredTronAddresses.has(toBase58)) continue;
-            seenTxIndices.add(deduplicationKey);
 
             const rawValBig = BigInt(rawValue);
             if (rawValBig <= 0n) continue;
@@ -844,9 +843,9 @@ async function scanTronDeposits(
           }
 
           const eventBlock = parseInt(log.blockNumber || '0x0', 16) || 0;
-          const confirmations = latestBlock > eventBlock ? latestBlock - eventBlock + 1 : 1;
+          const confirmations = latestBlock >= eventBlock && eventBlock > 0 ? latestBlock - eventBlock + 1 : 0;
 
-          let eventContractBase58 = contractAddress;
+          let eventContractBase58 = '';
           try {
             const logAddrHex = (log.address || '').toLowerCase().replace(/^0x/, '');
             eventContractBase58 = tronWeb.address.fromHex('41' + logAddrHex);
