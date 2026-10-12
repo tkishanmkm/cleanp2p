@@ -1,7 +1,39 @@
 import { NextResponse } from 'next/server';
+import crypto from 'node:crypto';
 import { getSupabaseAdminClient } from '@/lib/supabase/server';
 
+/**
+ * Reject unauthenticated provider callbacks before they can reach the privileged deposit RPC.
+ * Configure a provider-compatible signed gateway/header before enabling this endpoint.
+ */
+function verifyWebhookSecret(req: Request): 'ok' | 'missing-config' | 'unauthorized' {
+  const secret = process.env.BLOCKCYPHER_WEBHOOK_SECRET
+    || process.env.BLOCKCHAIN_WEBHOOK_SECRET;
+  if (!secret || !secret.trim()) return 'missing-config';
+
+  const authorization = req.headers.get('authorization') || '';
+  const bearer = authorization.toLowerCase().startsWith('bearer ')
+    ? authorization.slice(7).trim()
+    : '';
+  const supplied = req.headers.get('x-webhook-secret') || bearer;
+  if (!supplied) return 'unauthorized';
+
+  const expectedBytes = Buffer.from(secret.trim(), 'utf8');
+  const suppliedBytes = Buffer.from(supplied, 'utf8');
+  if (expectedBytes.length !== suppliedBytes.length) return 'unauthorized';
+  return crypto.timingSafeEqual(expectedBytes, suppliedBytes) ? 'ok' : 'unauthorized';
+}
+
 export async function POST(req: Request) {
+
+  const authResult = verifyWebhookSecret(req);
+  if (authResult === 'missing-config') {
+    return NextResponse.json({ error: 'Webhook authentication is not configured' }, { status: 503 });
+  }
+  if (authResult !== 'ok') {
+    return NextResponse.json({ error: 'Unauthorized webhook request' }, { status: 401 });
+  }
+
   const payload = await req.json().catch(() => ({}));
   const { hash: txHash, outputs, confirmations = 0, block_height } = payload;
 
