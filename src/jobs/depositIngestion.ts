@@ -19,10 +19,12 @@ export const supabaseAdmin = new Proxy({} as SupabaseClient, {
   },
 });
 
+// These are the canonical mainnet USDT contracts enforced by process_deposit_atomic.
+// Do not allow environment overrides to make ingestion and database validation disagree.
 export const CANONICAL_USDT_CONTRACTS: Record<string, string> = {
-  ERC20: process.env.USDT_CONTRACT_ERC20 || '0xdAC17F958D2ee523a2206206994597C13D831ec7',
-  BEP20: process.env.USDT_CONTRACT_BEP20 || '0x55d398326f99059fF775485246999027B3197955',
-  TRC20: process.env.USDT_CONTRACT_TRC20 || 'TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t',
+  ERC20: '0xdAC17F958D2ee523a2206206994597C13D831ec7',
+  BEP20: '0x55d398326f99059fF775485246999027B3197955',
+  TRC20: 'TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t',
 };
 
 export function getBtcMempoolApi(): string {
@@ -220,7 +222,7 @@ async function scanEvmTokenDeposits(
         const formattedAmount = ethers.formatUnits(rawValue, tokenDecimals);
 
         detected++;
-        const confirmations = Math.max(1, latestBlock - log.blockNumber + 1);
+        const confirmations = latestBlock >= log.blockNumber ? latestBlock - log.blockNumber + 1 : 0;
 
         // Call canonical atomic deposit RPC
         const { data, error } = await supabaseAdmin.rpc('process_deposit_atomic', {
@@ -330,13 +332,13 @@ async function scanEvmNativeDeposits(
 
                 const formattedNativeAmount = ethers.formatUnits(canonicalNativeValue, chainConfig.nativeDecimals);
                 const assetSymbol = chainConfig.nativeSymbol.toUpperCase();
-                const confirmations = latestBlock >= txBlock ? latestBlock - txBlock + 1 : 1;
+                const confirmations = latestBlock >= txBlock ? latestBlock - txBlock + 1 : 0;
 
                 detected++;
                 const { data, error } = await supabaseAdmin.rpc('process_deposit_atomic', {
                   p_destination_address: address.toLowerCase(),
                   p_asset_symbol: assetSymbol === 'ETH' ? 'ETH' : assetSymbol,
-                  p_network_code: normNet === 'ERC20' ? 'ETH' : normNet,
+                  p_network_code: 'ETH',
                   p_amount: formattedNativeAmount,
                   p_tx_hash: txHash,
                   p_output_index: 0,
@@ -389,7 +391,7 @@ async function scanEvmNativeDeposits(
 
           detected++;
           const formattedAmount = ethers.formatUnits(tx.value, chainConfig.nativeDecimals);
-          const confirmations = Math.max(1, latestBlock - b + 1);
+          const confirmations = latestBlock >= b ? latestBlock - b + 1 : 0;
 
           const { data, error } = await supabaseAdmin.rpc('process_deposit_atomic', {
             p_destination_address: toClean,
@@ -467,8 +469,7 @@ async function scanTronDeposits(
         knownContracts.push(addr);
       }
     };
-    addKnownContract(contractAddress);
-    addKnownContract('TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t'); // Mainnet TRC-20 USDT
+    addKnownContract(CANONICAL_USDT_CONTRACTS.TRC20); // Canonical mainnet TRC-20 USDT
 
     // Build contract addresses hex filter for eth_getLogs
     const contractAddressesHex: string[] = [];
@@ -550,9 +551,30 @@ async function scanTronDeposits(
             const txId = item.transaction_id;
             if (!txId) continue;
 
+            // Accept only the canonical mainnet USDT contract. Account history APIs
+            // can return transfers for arbitrary TRC-20 tokens.
+            let observedContract = String(item.token_info?.address || '');
+            try {
+              if (observedContract.startsWith('41') || observedContract.startsWith('0x')) {
+                observedContract = tronWeb.address.fromHex(observedContract);
+              }
+            } catch {
+              continue;
+            }
+            if (observedContract !== CANONICAL_USDT_CONTRACTS.TRC20) continue;
+
             const deduplicationKey = `${txId}_0`;
             if (seenTxIndices.has(deduplicationKey)) continue;
             seenTxIndices.add(deduplicationKey);
+
+            // Confirm the canonical transaction actually succeeded and has a mined block.
+            let canonicalInfo: any;
+            try {
+              canonicalInfo = await tronWeb.trx.getTransactionInfo(txId);
+            } catch {
+              continue;
+            }
+            if (!canonicalInfo?.blockNumber || canonicalInfo?.receipt?.result !== 'SUCCESS') continue;
 
             let fromAddr: string | null = item.from || null;
             try {
@@ -566,27 +588,13 @@ async function scanTronDeposits(
             if (rawVal <= 0n) continue;
             const formattedAmount = ethers.formatUnits(rawVal, decimals);
 
-            const tokenContract = item.token_info?.address || contractAddress;
+            const tokenContract = CANONICAL_USDT_CONTRACTS.TRC20;
 
             // Fetch block number from TRON RPC if missing from account event
-            let eventBlock = item.block_number || 0;
-            if (!eventBlock) {
-              try {
-                const txInfoRes = await fetch(`${tronHost}/wallet/gettransactioninfobyid`, {
-                  method: 'POST',
-                  headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({ value: txId }),
-                });
-                if (txInfoRes.ok) {
-                  const txInfo = await txInfoRes.json();
-                  eventBlock = txInfo.blockNumber || 0;
-                }
-              } catch (_) {}
-            }
-
-            const confirmations = (latestBlock && eventBlock && latestBlock >= eventBlock)
+            const eventBlock = Number(canonicalInfo.blockNumber);
+            const confirmations = latestBlock > 0 && latestBlock >= eventBlock
               ? latestBlock - eventBlock + 1
-              : 1;
+              : 0;
 
             detected++;
 
@@ -854,23 +862,18 @@ async function scanBtcDeposits(
       if (!Array.isArray(txs)) continue;
 
       for (const tx of txs) {
-        let outputAmountSat = 0n;
-        let voutIndex = 0;
-
         for (let i = 0; i < (tx.vout || []).length; i++) {
           const out = tx.vout[i];
-          if (out.scriptpubkey_address === btcAddr) {
-            outputAmountSat += BigInt(out.value || 0);
-            voutIndex = i;
-          }
-        }
+          if (out.scriptpubkey_address !== btcAddr) continue;
 
-        if (outputAmountSat > 0n) {
+          const outputAmountSat = BigInt(out.value || 0);
+          if (outputAmountSat <= 0n) continue;
+
           detected++;
           const btcAmount = ethers.formatUnits(outputAmountSat, 8);
-          const isConfirmed = tx.status?.confirmed === true;
           const blockHeight = tx.status?.block_height;
-          const confirmations = isConfirmed && blockHeight !== undefined && btcTipHeight !== null && btcTipHeight >= blockHeight
+          const confirmations = tx.status?.confirmed === true &&
+            blockHeight !== undefined && btcTipHeight !== null && btcTipHeight >= blockHeight
             ? btcTipHeight - blockHeight + 1
             : 0;
 
@@ -880,7 +883,7 @@ async function scanBtcDeposits(
             p_network_code: 'BTC',
             p_amount: btcAmount,
             p_tx_hash: tx.txid,
-            p_output_index: voutIndex,
+            p_output_index: i,
             p_block_number: blockHeight || null,
             p_from_address: null,
             p_token_contract: null,
@@ -889,12 +892,10 @@ async function scanBtcDeposits(
           });
 
           if (error) {
-            errors.push(`RPC error for BTC deposit ${tx.txid}: ${error.message}`);
+            errors.push(`RPC error for BTC deposit ${tx.txid}:${i}: ${error.message}`);
           } else {
-            const res = typeof data === 'string' ? JSON.parse(data) : data;
-            if (res?.status === 'credited') {
-              credited++;
-            }
+            const result = typeof data === 'string' ? JSON.parse(data) : data;
+            if (result?.status === 'credited') credited++;
           }
         }
       }
@@ -941,23 +942,18 @@ async function scanLtcDeposits(
       if (!Array.isArray(txs)) continue;
 
       for (const tx of txs) {
-        let outputAmountLit = 0n;
-        let voutIndex = 0;
-
         for (let i = 0; i < (tx.vout || []).length; i++) {
           const out = tx.vout[i];
-          if (out.scriptpubkey_address === ltcAddr) {
-            outputAmountLit += BigInt(out.value || 0);
-            voutIndex = i;
-          }
-        }
+          if (out.scriptpubkey_address !== ltcAddr) continue;
 
-        if (outputAmountLit > 0n) {
+          const outputAmountLit = BigInt(out.value || 0);
+          if (outputAmountLit <= 0n) continue;
+
           detected++;
           const ltcAmount = ethers.formatUnits(outputAmountLit, 8);
-          const isConfirmed = tx.status?.confirmed === true;
           const blockHeight = tx.status?.block_height;
-          const confirmations = isConfirmed && blockHeight !== undefined && ltcTipHeight !== null && ltcTipHeight >= blockHeight
+          const confirmations = tx.status?.confirmed === true &&
+            blockHeight !== undefined && ltcTipHeight !== null && ltcTipHeight >= blockHeight
             ? ltcTipHeight - blockHeight + 1
             : 0;
 
@@ -967,7 +963,7 @@ async function scanLtcDeposits(
             p_network_code: 'LTC',
             p_amount: ltcAmount,
             p_tx_hash: tx.txid,
-            p_output_index: voutIndex,
+            p_output_index: i,
             p_block_number: blockHeight || null,
             p_from_address: null,
             p_token_contract: null,
@@ -976,12 +972,10 @@ async function scanLtcDeposits(
           });
 
           if (error) {
-            errors.push(`RPC error for LTC deposit ${tx.txid}: ${error.message}`);
+            errors.push(`RPC error for LTC deposit ${tx.txid}:${i}: ${error.message}`);
           } else {
-            const res = typeof data === 'string' ? JSON.parse(data) : data;
-            if (res?.status === 'credited') {
-              credited++;
-            }
+            const result = typeof data === 'string' ? JSON.parse(data) : data;
+            if (result?.status === 'credited') credited++;
           }
         }
       }
@@ -1187,11 +1181,13 @@ export async function runDepositIngestion(): Promise<{
         netResult.depositsCredited += tokenRes.credited;
         netResult.errors.push(...tokenRes.errors);
 
-        // Scan Native transfers (ETH)
-        const nativeRes = await scanEvmNativeDeposits(netKey, evmAddresses, fromBlock, latestBlock);
-        netResult.depositsDetected += nativeRes.detected;
-        netResult.depositsCredited += nativeRes.credited;
-        netResult.errors.push(...nativeRes.errors);
+        // Native-asset deposit support is ETH-only; do not treat BNB as ETH.
+        if (normalizeDepositNetwork(netKey) === 'ETH' || netKey === 'ERC20') {
+          const nativeRes = await scanEvmNativeDeposits(netKey, evmAddresses, fromBlock, latestBlock);
+          netResult.depositsDetected += nativeRes.detected;
+          netResult.depositsCredited += nativeRes.credited;
+          netResult.errors.push(...nativeRes.errors);
+        }
       }
     } catch (chainErr: any) {
       netResult.errors.push(`Chain scan failed: ${chainErr.message}`);
