@@ -69,7 +69,8 @@ export async function getMonitoredAddresses(): Promise<{
       .from('deposit_addresses')
       .select('address, network_code, asset_code');
 
-    if (!pErr && primaryAddresses) {
+    if (pErr) throw new Error(`Failed to query deposit_addresses: ${pErr.message}`);
+    if (primaryAddresses) {
       for (const row of primaryAddresses) {
         if (!row.address) continue;
         const clean = row.address.trim();
@@ -99,7 +100,8 @@ export async function getMonitoredAddresses(): Promise<{
       .from('user_deposit_addresses')
       .select('address, network, coin');
 
-    if (!fErr && fallbackAddresses) {
+    if (fErr) throw new Error(`Failed to query user_deposit_addresses: ${fErr.message}`);
+    if (fallbackAddresses) {
       for (const row of fallbackAddresses) {
         if (!row.address) continue;
         const clean = row.address.trim();
@@ -129,7 +131,8 @@ export async function getMonitoredAddresses(): Promise<{
       .from('wallets')
       .select('address, chain, currency');
 
-    if (!wErr && userWallets) {
+    if (wErr) throw new Error(`Failed to query wallets: ${wErr.message}`);
+    if (userWallets) {
       for (const row of userWallets) {
         if (!row.address) continue;
         const clean = row.address.trim();
