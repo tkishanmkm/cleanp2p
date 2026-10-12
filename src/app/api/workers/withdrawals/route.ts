@@ -13,7 +13,6 @@ function isAuthorized(req: NextRequest): boolean {
       process.env.CRON_SECRET,
     ],
     customHeaderNames: ['x-service-key', 'x-worker-secret', 'x-withdrawal-worker-secret'],
-    checkQueryParam: true,
   });
 
   return result.authorized;
