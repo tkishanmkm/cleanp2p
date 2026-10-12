@@ -63,7 +63,13 @@ export async function POST(req: Request) {
     }
 
     const ingestHeader = req.headers.get('x-ingest-secret') || req.headers.get('x-api-key');
-    const isDirectHeaderValid = ingestHeader && secret && crypto.timingSafeEqual(Buffer.from(ingestHeader), Buffer.from(secret));
+    const ingestHeaderBuffer = ingestHeader ? Buffer.from(ingestHeader, 'utf8') : null;
+    const secretBuffer = Buffer.from(secret, 'utf8');
+    const isDirectHeaderValid = Boolean(
+      ingestHeaderBuffer &&
+      ingestHeaderBuffer.length === secretBuffer.length &&
+      crypto.timingSafeEqual(ingestHeaderBuffer, secretBuffer)
+    );
 
     if (!isDirectHeaderValid) {
       if (!signature || !verifySignature(rawBody, signature)) {
