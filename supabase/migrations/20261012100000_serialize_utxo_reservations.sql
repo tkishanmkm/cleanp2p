@@ -31,8 +31,13 @@ BEGIN
         RETURN jsonb_build_object('success', false, 'code', 'UNSUPPORTED_NETWORK');
     END IF;
 
-    IF p_utxos IS NULL OR jsonb_typeof(p_utxos) <> 'array'
-       OR jsonb_array_length(p_utxos) = 0 THEN
+    IF p_utxos IS NULL THEN
+        RETURN jsonb_build_object('success', false, 'code', 'INVALID_UTXOS');
+    END IF;
+    IF jsonb_typeof(p_utxos) <> 'array' THEN
+        RETURN jsonb_build_object('success', false, 'code', 'INVALID_UTXOS');
+    END IF;
+    IF jsonb_array_length(p_utxos) = 0 THEN
         RETURN jsonb_build_object('success', false, 'code', 'INVALID_UTXOS');
     END IF;
 
