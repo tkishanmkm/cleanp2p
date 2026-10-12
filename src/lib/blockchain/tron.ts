@@ -138,7 +138,7 @@ export async function sendTrxTransfer(params: {
 export async function getTronTransactionConfirmations(txHash: string): Promise<{
   confirmations: number;
   isConfirmed: boolean;
-  success: boolean;
+  success: boolean | null;
   blockNumber?: number;
   actualCostTrx?: string;
 }> {
@@ -148,7 +148,7 @@ export async function getTronTransactionConfirmations(txHash: string): Promise<{
     // Get transaction info
     const txInfo = await tronWeb.trx.getTransactionInfo(txHash);
     if (!txInfo || !txInfo.blockNumber) {
-      return { confirmations: 0, isConfirmed: false, success: false };
+      return { confirmations: 0, isConfirmed: false, success: null };
     }
 
     // Get current block
@@ -161,21 +161,29 @@ export async function getTronTransactionConfirmations(txHash: string): Promise<{
     const fractionSun = (feeSun % 1000000n).toString().padStart(6, '0');
     const actualCostTrx = `${wholeTrx}.${fractionSun}`;
 
+    // Missing provider fields are unknown, not evidence of an on-chain revert.
+    const receiptResult = txInfo.receipt?.result;
+    const success: boolean | null = receiptResult === 'SUCCESS'
+      ? true
+      : receiptResult
+        ? false
+        : null;
+
     if (!currentHeight) {
-      return { confirmations: 1, isConfirmed: false, success: !txInfo.receipt?.result, actualCostTrx };
+      return { confirmations: 1, isConfirmed: false, success, actualCostTrx };
     }
 
     const confirmations = Math.max(0, currentHeight - txInfo.blockNumber + 1);
-    const success = !txInfo.receipt?.result || txInfo.receipt.result === 'SUCCESS';
 
     return {
       confirmations,
-      isConfirmed: confirmations >= TRON_CONFIG.requiredConfirmations && success,
+      isConfirmed: confirmations >= TRON_CONFIG.requiredConfirmations && success === true,
       success,
       blockNumber: txInfo.blockNumber,
       actualCostTrx,
     };
   } catch (err) {
-    return { confirmations: 0, isConfirmed: false, success: false };
+    // RPC/API errors must never be interpreted as a failed transaction.
+    return { confirmations: 0, isConfirmed: false, success: null };
   }
 }
