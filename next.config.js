@@ -1,12 +1,6 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   transpilePackages: ['aria-hidden', 'get-nonce', '@floating-ui/react', '@floating-ui/dom', '@floating-ui/core', '@floating-ui/utils'],
-  typescript: {
-    ignoreBuildErrors: true,
-  },
-  eslint: {
-    ignoreDuringBuilds: true,
-  },
   webpack: (config, { dev }) => {
     if (dev) {
       // Use in-memory cache in development to avoid PackFileCacheStrategy disk cache corruption
