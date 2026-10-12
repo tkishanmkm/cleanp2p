@@ -367,8 +367,7 @@ async function scanEvmNativeDeposits(
     }
 
     // 2. Iterate through blocks in range (constrained to max 25 blocks for native scan)
-    const start = Math.max(fromBlock, toBlock - 25);
-    for (let b = start; b <= toBlock; b++) {
+    for (let b = fromBlock; b <= toBlock; b++) {
       const block = await provider.getBlock(b, true);
       if (!block || !block.prefetchedTransactions) continue;
 
@@ -1179,25 +1178,66 @@ export async function runDepositIngestion(): Promise<{
     try {
       const provider = getEvmProvider(netKey);
       const latestBlock = await provider.getBlockNumber();
-      // Scan a safe trailing block window of 100 blocks
-      const scanWindow = 100;
-      const fromBlock = Math.max(0, latestBlock - scanWindow);
+      const { data: cursor, error: cursorError } = await supabaseAdmin
+        .from('deposit_scan_cursors')
+        .select('last_scanned_block')
+        .eq('network_code', netKey)
+        .maybeSingle();
+      if (cursorError) {
+        throw new Error(`Unable to load ${netKey} deposit scan cursor: ${cursorError.message}`);
+      }
 
-      netResult.scannedBlocks = latestBlock - fromBlock;
+      const lastScanned = cursor?.last_scanned_block == null
+        ? null
+        : Number(cursor.last_scanned_block);
+      const configuredStart = Number(process.env[`DEPOSIT_SCAN_START_BLOCK_${netKey}]);
+      let fromBlock: number;
+      if (lastScanned === null) {
+        // Optional operator-controlled historical backfill start. Without it,
+        // bootstrap the cursor over the latest 100 blocks, then persist progress.
+        fromBlock = Number.isSafeInteger(configuredStart) && configuredStart >= 0
+          ? configuredStart
+          : Math.max(0, latestBlock - 99);
+      } else if (lastScanned > latestBlock) {
+        // A node endpoint may have changed or a reorg may have lowered the tip.
+        fromBlock = Math.max(0, latestBlock - 99);
+      } else if (lastScanned >= latestBlock - 20) {
+        // Re-scan a trailing overlap to catch short reorgs; RPC crediting is idempotent.
+        fromBlock = Math.max(0, lastScanned - 20);
+      } else {
+        fromBlock = lastScanned + 1;
+      }
+      const toBlock = Math.min(latestBlock, fromBlock + 99);
+      netResult.scannedBlocks = Math.max(0, toBlock - fromBlock + 1);
 
-      if (evmAddresses.size > 0) {
+      if (evmAddresses.size > 0 && fromBlock <= toBlock) {
         // Scan ERC20 / BEP20 USDT
-        const tokenRes = await scanEvmTokenDeposits(netKey, evmAddresses, fromBlock, latestBlock);
+        const tokenRes = await scanEvmTokenDeposits(netKey, evmAddresses, fromBlock, toBlock);
         netResult.depositsDetected += tokenRes.detected;
         netResult.depositsCredited += tokenRes.credited;
         netResult.errors.push(...tokenRes.errors);
 
         // Native-asset deposit support is ETH-only; do not treat BNB as ETH.
-        if (normalizeDepositNetwork(netKey) === 'ETH' || netKey === 'ERC20') {
-          const nativeRes = await scanEvmNativeDeposits(netKey, evmAddresses, fromBlock, latestBlock);
+        if (netKey === 'ERC20' || normalizeDepositNetwork(netKey) === 'ETH') {
+          const nativeRes = await scanEvmNativeDeposits(netKey, evmAddresses, fromBlock, toBlock);
           netResult.depositsDetected += nativeRes.detected;
           netResult.depositsCredited += nativeRes.credited;
           netResult.errors.push(...nativeRes.errors);
+        }
+
+        // Advance only after all applicable scans succeeded. If behind, the next
+        // cycle continues at the next chunk instead of silently jumping to latest.
+        if (netResult.errors.length === 0) {
+          const { error: cursorWriteError } = await supabaseAdmin
+            .from('deposit_scan_cursors')
+            .upsert({
+              network_code: netKey,
+              last_scanned_block: toBlock,
+              updated_at: new Date().toISOString(),
+            }, { onConflict: 'network_code' });
+          if (cursorWriteError) {
+            netResult.errors.push(`Unable to persist ${netKey} deposit scan cursor: ${cursorWriteError.message}`);
+          }
         }
       }
     } catch (chainErr: any) {
