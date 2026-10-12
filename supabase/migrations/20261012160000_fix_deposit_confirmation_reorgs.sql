@@ -22,14 +22,23 @@ BEGIN
 
     v_updated := regexp_replace(
         v_updated,
-        'confirmations :=[[:space:]]*GREATEST\([[:space:]]*COALESCE\(confirmations,[[:space:]]*0\),[[:space:]]*v_effective_confirmations[[:space:]]*\)',
-        'confirmations := v_effective_confirmations',
+        'confirmations[[:space:]]*=[[:space:]]*GREATEST\([[:space:]]*COALESCE\(confirmations,[[:space:]]*0\),[[:space:]]*v_effective_confirmations[[:space:]]*\)',
+        'confirmations = v_effective_confirmations',
+        'g'
+    );
+
+    -- Keep the Litecoin threshold consistent with the 12-confirmation policy.
+    v_updated := regexp_replace(
+        v_updated,
+        'WHEN ''LTC'' THEN[[:space:]]*v_expected_asset := ''LTC'';[[:space:]]*v_expected_contract := NULL;[[:space:]]*v_required_confirmations := 6;',
+        'WHEN ''LTC'' THEN v_expected_asset := ''LTC''; v_expected_contract := NULL; v_required_confirmations := 12;',
         'g'
     );
 
     IF v_updated = v_definition
        OR position('v_effective_confirmations := COALESCE(p_confirmations, 0);' IN v_updated) = 0
-       OR position('confirmations := v_effective_confirmations' IN v_updated) = 0 THEN
+       OR position('confirmations = v_effective_confirmations' IN v_updated) = 0
+       OR regexp_match(v_updated, 'WHEN ''LTC'' THEN[[:space:]]*v_expected_asset := ''LTC'';[[:space:]]*v_expected_contract := NULL;[[:space:]]*v_required_confirmations := 12;') IS NULL THEN
         RAISE EXCEPTION 'Could not safely patch process_deposit_atomic confirmation logic; no changes applied';
     END IF;
 
