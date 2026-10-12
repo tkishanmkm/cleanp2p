@@ -1,9 +1,26 @@
 import { createClient } from '@supabase/supabase-js';
 import crypto from 'crypto';
 
-// Setup Supabase admin client for test assertions
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL || 'https://placeholder.supabase.co';
-const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'placeholder-key';
+// This suite sends security probes to an app URL and reads database state.
+// Require an explicit test target and privileged credentials; never use placeholders.
+const supabaseUrl = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL;
+const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+const BASE_URL = process.env.TEST_APP_URL;
+
+if (!supabaseUrl || !supabaseKey || !BASE_URL) {
+  throw new Error(
+    'Security verification requires SUPABASE_URL (or NEXT_PUBLIC_SUPABASE_URL), SUPABASE_SERVICE_ROLE_KEY, and TEST_APP_URL for a dedicated test environment.'
+  );
+}
+
+const parsedSupabaseUrl = new URL(supabaseUrl);
+const parsedAppUrl = new URL(BASE_URL);
+if (
+  parsedSupabaseUrl.hostname.startsWith('eaiwgfxoiwxepinvcykg.') ||
+  parsedAppUrl.hostname === 'cleanp2p.vercel.app'
+) {
+  throw new Error('Security verification tests are blocked from targeting the known production environment.');
+}
 
 const supabase = createClient(supabaseUrl, supabaseKey, {
   auth: { persistSession: false, autoRefreshToken: false },
@@ -16,7 +33,6 @@ const cyan = (s: string) => `\x1b[36m${s}\x1b[0m`;
 const bold = (s: string) => `\x1b[1m${s}\x1b[0m`;
 const yellow = (s: string) => `\x1b[33m${s}\x1b[0m`;
 
-const BASE_URL = process.env.TEST_APP_URL || 'http://localhost:3000';
 
 async function runSecurityPenetrationTestSuite() {
   console.log(bold(cyan('\n========================================================================')));
@@ -107,7 +123,8 @@ async function runSecurityPenetrationTestSuite() {
     const victimDepositAddress = '0x1111111111111111111111111111111111111111';
     const fakeTokenContract = '0x6b175474e89094c44da98b954eedeac495271d0f'; // Spoofed fake contract (e.g. DAI address masquerading as USDT)
     const legitUsdtContract = '0xdac17f958d2ee523a2206206994597c13d831ec7';
-    const webhookSigningKey = process.env.ALCHEMY_WEBHOOK_SIGNING_KEY || 'test-webhook-signing-key-for-audit-verification';
+    const webhookSigningKey = process.env.ALCHEMY_WEBHOOK_SIGNING_KEY;
+    if (!webhookSigningKey) throw new Error('ALCHEMY_WEBHOOK_SIGNING_KEY must be configured for webhook signature tests.');
 
     // Sub-case A: Invalid / Missing HMAC-SHA256 Signature
     console.log(cyan('  -> Sending Webhook without valid HMAC-SHA256 signature...'));
