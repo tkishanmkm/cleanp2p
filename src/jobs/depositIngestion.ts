@@ -892,11 +892,14 @@ type UtxoAddressScan = {
   transactions: any[];
   newestTxid: string | null;
   complete: boolean;
+  nextBackfillCursor: string | null;
+  backfillComplete: boolean;
 };
 
 /**
- * Fetches address transactions newer than the durable cursor. The API's initial
- * address page is limited; walk older pages until the prior cursor is reached.
+ * Fetch new address transactions since the incremental cursor and one page of
+ * older history per cycle. This catches up after outages and incrementally
+ * backfills pre-existing address history without blocking the worker forever.
  */
 async function fetchUtxoAddressTransactionsSinceCursor(
   apiBase: string,
@@ -905,7 +908,7 @@ async function fetchUtxoAddressTransactionsSinceCursor(
 ): Promise<UtxoAddressScan> {
   const { data: cursor, error: cursorError } = await supabaseAdmin
     .from('utxo_deposit_scan_cursors')
-    .select('last_seen_txid')
+    .select('last_seen_txid, backfill_cursor_txid, backfill_complete')
     .eq('network_code', network)
     .eq('address', address)
     .maybeSingle();
@@ -918,15 +921,22 @@ async function fetchUtxoAddressTransactionsSinceCursor(
 
   const newestTxid = firstPage[0]?.txid ? String(firstPage[0].txid) : null;
   const cursorTxid = cursor?.last_seen_txid ? String(cursor.last_seen_txid) : null;
+
   if (!cursorTxid) {
-    // First deployment bootstrap: process the newest page; a separate controlled
-    // historical backfill can be used for older transactions.
-    return { transactions: firstPage, newestTxid, complete: true };
+    const oldestOnPage = firstPage.length > 0 ? String(firstPage[firstPage.length - 1]?.txid || '') : '';
+    return {
+      transactions: firstPage,
+      newestTxid,
+      complete: true,
+      nextBackfillCursor: firstPage.length >= 25 && oldestOnPage ? oldestOnPage : null,
+      backfillComplete: firstPage.length < 25,
+    };
   }
 
   const transactions: any[] = [];
   let page: any[] = firstPage;
   let pagesRead = 0;
+  let incrementalComplete = false;
   while (true) {
     let reachedCursor = false;
     for (const tx of page) {
@@ -937,15 +947,27 @@ async function fetchUtxoAddressTransactionsSinceCursor(
       if (tx?.txid) transactions.push(tx);
     }
 
-    if (reachedCursor) return { transactions, newestTxid, complete: true };
-    if (page.length < 25) return { transactions, newestTxid, complete: true };
+    if (reachedCursor || page.length < 25) {
+      incrementalComplete = true;
+      break;
+    }
     if (++pagesRead >= 200) {
-      // Do not advance the cursor; next cycle retries the remaining backlog.
-      return { transactions, newestTxid, complete: false };
+      return {
+        transactions,
+        newestTxid,
+        complete: false,
+        nextBackfillCursor: cursor?.backfill_cursor_txid || null,
+        backfillComplete: cursor?.backfill_complete === true,
+      };
     }
 
     const lastTxid = String(page[page.length - 1]?.txid || '');
-    if (!lastTxid) return { transactions, newestTxid, complete: false };
+    if (!lastTxid) return {
+      transactions, newestTxid, complete: false,
+      nextBackfillCursor: cursor?.backfill_cursor_txid || null,
+      backfillComplete: cursor?.backfill_complete === true,
+    };
+
     const nextResponse = await fetch(
       `${apiBase}/address/${encodeURIComponent(address)}/txs/chain/${encodeURIComponent(lastTxid)}`
     );
@@ -953,21 +975,56 @@ async function fetchUtxoAddressTransactionsSinceCursor(
     const nextPage = await nextResponse.json();
     if (!Array.isArray(nextPage)) throw new Error('Address history pagination returned an invalid response');
     page = nextPage;
-    if (page.length === 0) return { transactions, newestTxid, complete: true };
+    if (page.length === 0) {
+      incrementalComplete = true;
+      break;
+    }
   }
+
+  let nextBackfillCursor = cursor?.backfill_cursor_txid ? String(cursor.backfill_cursor_txid) : null;
+  let backfillComplete = cursor?.backfill_complete === true || !nextBackfillCursor;
+  if (!backfillComplete && nextBackfillCursor) {
+    const backfillResponse = await fetch(
+      `${apiBase}/address/${encodeURIComponent(address)}/txs/chain/${encodeURIComponent(nextBackfillCursor)}`
+    );
+    if (!backfillResponse.ok) throw new Error(`Historical address backfill failed with HTTP ${backfillResponse.status}`);
+    const backfillPage = await backfillResponse.json();
+    if (!Array.isArray(backfillPage)) throw new Error('Historical address backfill returned an invalid response');
+
+    transactions.push(...backfillPage.filter((tx: any) => tx?.txid));
+    if (backfillPage.length < 25) {
+      nextBackfillCursor = null;
+      backfillComplete = true;
+    } else {
+      const oldestTxid = String(backfillPage[backfillPage.length - 1]?.txid || '');
+      if (!oldestTxid) throw new Error('Historical address backfill page has no transaction ID');
+      nextBackfillCursor = oldestTxid;
+    }
+  }
+
+  return {
+    transactions,
+    newestTxid,
+    complete: incrementalComplete,
+    nextBackfillCursor,
+    backfillComplete,
+  };
 }
 
 async function persistUtxoAddressCursor(
   network: 'BTC' | 'LTC',
   address: string,
-  newestTxid: string
+  scan: UtxoAddressScan
 ): Promise<void> {
+  if (!scan.newestTxid) return;
   const { error } = await supabaseAdmin
     .from('utxo_deposit_scan_cursors')
     .upsert({
       network_code: network,
       address,
-      last_seen_txid: newestTxid,
+      last_seen_txid: scan.newestTxid,
+      backfill_cursor_txid: scan.nextBackfillCursor,
+      backfill_complete: scan.backfillComplete,
       updated_at: new Date().toISOString(),
     }, { onConflict: 'network_code,address' });
   if (error) throw new Error(`Unable to persist ${network} scan cursor: ${error.message}`);
@@ -1045,7 +1102,7 @@ async function scanBtcDeposits(
       }
 
       if (scan.complete && scan.newestTxid && errors.length === errorsBeforeAddress) {
-        await persistUtxoAddressCursor('BTC', btcAddr, scan.newestTxid);
+        await persistUtxoAddressCursor('BTC', btcAddr, scan);
       } else if (!scan.complete) {
         errors.push(`BTC history backlog for ${btcAddr} exceeds this cycle's page limit; cursor was not advanced`);
       }
@@ -1129,7 +1186,7 @@ async function scanLtcDeposits(
       }
 
       if (scan.complete && scan.newestTxid && errors.length === errorsBeforeAddress) {
-        await persistUtxoAddressCursor('LTC', ltcAddr, scan.newestTxid);
+        await persistUtxoAddressCursor('LTC', ltcAddr, scan);
       } else if (!scan.complete) {
         errors.push(`LTC history backlog for ${ltcAddr} exceeds this cycle's page limit; cursor was not advanced`);
       }
