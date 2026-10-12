@@ -15,11 +15,12 @@ if (!supabaseUrl || !supabaseKey || !BASE_URL) {
 
 const parsedSupabaseUrl = new URL(supabaseUrl);
 const parsedAppUrl = new URL(BASE_URL);
+const configuredProductionAppUrl = process.env.PRODUCTION_APP_URL;
 if (
   parsedSupabaseUrl.hostname.startsWith('eaiwgfxoiwxepinvcykg.') ||
-  parsedAppUrl.hostname === 'cleanp2p.vercel.app'
+  (configuredProductionAppUrl && parsedAppUrl.origin === new URL(configuredProductionAppUrl).origin)
 ) {
-  throw new Error('Security verification tests are blocked from targeting the known production environment.');
+  throw new Error('Security verification tests are blocked from targeting the configured production environment.');
 }
 
 const supabase = createClient(supabaseUrl, supabaseKey, {
