@@ -312,6 +312,20 @@ export async function runConfirmationsWorker(): Promise<ConfirmationWorkerResult
           });
         } else {
           const parsedRes = typeof rpcData === 'string' ? JSON.parse(rpcData) : rpcData;
+          if (parsedRes?.success === false) {
+            result.failedCount++;
+            result.details.push({
+              depositId: deposit.id,
+              txHash: deposit.tx_hash,
+              network: normNet,
+              previousConfirmations: prevConfs,
+              newConfirmations: currentConfirmations,
+              requiredConfirmations: requiredConfs,
+              status: 'ERROR',
+              error: String(parsedRes.code || parsedRes.message || 'Canonical deposit RPC rejected the record'),
+            });
+            continue;
+          }
           const isCredited = parsedRes?.status === 'credited' || parsedRes?.status === 'CONFIRMED' || parsedRes?.status === 'ALREADY_CREDITED';
 
           if (isCredited) {
