@@ -672,6 +672,7 @@ async function scanTronDeposits(
 
     const transferTopic = '0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef';
     const seenTxIndices = new Set<string>();
+    const errorsBeforeTronScan = errors.length;
 
     // Match each reported event to a successful canonical TRON receipt log.
     // The receipt-log index becomes the stable idempotency key for that transfer.
@@ -822,7 +823,6 @@ async function scanTronDeposits(
     for (const cAddr of knownContracts) {
       try {
         const eventScan = await fetchTronUsdtEventsSinceCursor(tronGridHost, tronGridHeaders, cAddr);
-        const errorsBeforeEventScan = errors.length;
         for (const evt of eventScan.events) {
             const txId = evt.transaction_id;
             const fromHex = evt.result?.from;
@@ -884,13 +884,15 @@ async function scanTronDeposits(
               errors.push(`RPC error for TRON deposit ${txId}: ${error.message}`);
             } else {
               const r = typeof rpcData === 'string' ? JSON.parse(rpcData) : rpcData;
-              if (r?.status === 'credited' || (r?.success && confirmations >= TRON_CONFIG.requiredConfirmations)) {
+              if (r?.success === false) {
+                errors.push(`Deposit RPC rejected TRON tx ${txId}: ${r.code || r.status || 'unknown'}`);
+              } else if (r?.status === 'credited' || (r?.success && confirmations >= TRON_CONFIG.requiredConfirmations)) {
                 credited++;
               }
             }
         }
 
-        if (eventScan.complete && eventScan.newestEventKey && errors.length === errorsBeforeEventScan) {
+        if (eventScan.complete && eventScan.newestEventKey && errors.length === errorsBeforeTronScan) {
           await persistTronDepositCursor(eventScan);
         } else if (!eventScan.complete) {
           errors.push('TRON event history is incomplete; cursor was not advanced');
