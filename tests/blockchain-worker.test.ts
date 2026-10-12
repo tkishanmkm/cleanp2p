@@ -2,8 +2,21 @@ import { createClient } from '@supabase/supabase-js';
 import { processWithdrawalQueue } from '../src/jobs/withdrawalWorker';
 import { CANONICAL_USDT_CONTRACTS } from '../src/jobs/depositIngestion';
 
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL || 'https://placeholder.supabase.co';
-const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'placeholder-key';
+// This suite mutates deposit/withdrawal records and calls the withdrawal worker.
+// Run only with explicit privileged credentials for a dedicated test project.
+const supabaseUrl = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL;
+const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+
+if (!supabaseUrl || !supabaseKey) {
+  throw new Error(
+    'Blockchain worker tests require SUPABASE_URL (or NEXT_PUBLIC_SUPABASE_URL) and SUPABASE_SERVICE_ROLE_KEY for a dedicated test project.'
+  );
+}
+
+const parsedSupabaseUrl = new URL(supabaseUrl);
+if (parsedSupabaseUrl.hostname.startsWith('eaiwgfxoiwxepinvcykg.')) {
+  throw new Error('Blockchain worker tests are blocked from running against the production Supabase project.');
+}
 
 const supabase = createClient(supabaseUrl, supabaseKey, {
   auth: { persistSession: false, autoRefreshToken: false },
