@@ -22,8 +22,16 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     const rawBody = await req.text();
     const signature = req.headers.get('x-alchemy-signature') ?? '';
 
-    if (SYSTEM_CONFIG.secrets.webhook && !verifySignature(rawBody, signature, SYSTEM_CONFIG.secrets.webhook)) {
-      return NextResponse.json({ error: 'Invalid HMAC signature' }, { status: 401 });
+    const webhookSecret = SYSTEM_CONFIG.secrets.webhook;
+
+    // Never process deposits when webhook authentication is not configured.
+    if (!webhookSecret || !webhookSecret.trim()) {
+      console.error('[Alchemy Webhook] BLOCKCHAIN_WEBHOOK_SECRET is not configured');
+      return NextResponse.json({ error: 'Webhook authentication is not configured' }, { status: 503 });
+    }
+
+    if (!signature || !verifySignature(rawBody, signature, webhookSecret)) {
+      return NextResponse.json({ error: 'Invalid or missing HMAC signature' }, { status: 401 });
     }
 
     const payload = JSON.parse(rawBody) as {
