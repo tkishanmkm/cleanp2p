@@ -154,7 +154,11 @@ export async function getMonitoredAddresses(): Promise<{
       }
     }
   } catch (err) {
-    console.error('[Deposit Ingestion] Error querying monitored deposit addresses:', err);
+    // Do not run a partial scan: silently omitting an address source can cause
+    // deposits to be missed while the worker appears healthy. Fail this cycle
+    // so the next run retries after the database/query issue is resolved.
+    console.error('[Deposit Ingestion] Failed to load the complete monitored-address set; aborting this cycle.');
+    throw err;
   }
 
   return { evmAddresses, tronAddresses, btcAddresses, ltcAddresses };
@@ -1401,11 +1405,12 @@ export async function runDepositIngestion(): Promise<{
       const configuredStart = Number(process.env[`DEPOSIT_SCAN_START_BLOCK_${netKey}`]);
       let fromBlock: number;
       if (lastScanned === null) {
-        // Optional operator-controlled historical backfill start. Without it,
-        // bootstrap the cursor over the latest 100 blocks, then persist progress.
+        // Never silently skip historical deposits on first boot. Operators can
+        // set an explicit start block to bound the initial backfill; otherwise
+        // begin at genesis and advance in bounded chunks until the chain tip.
         fromBlock = Number.isSafeInteger(configuredStart) && configuredStart >= 0
           ? configuredStart
-          : Math.max(0, latestBlock - 99);
+          : 0;
       } else if (lastScanned > latestBlock) {
         // A node endpoint may have changed or a reorg may have lowered the tip.
         fromBlock = Math.max(0, latestBlock - 99);
