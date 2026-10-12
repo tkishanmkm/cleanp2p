@@ -37,6 +37,36 @@ function getAdminClient() {
   return getSupabaseAdminClient();
 }
 
+async function recordBroadcast(supabase: ReturnType<typeof getAdminClient>, withdrawalId: string, txHash: string) {
+  const { error: onchainError } = await supabase
+    .from('onchain_withdrawals')
+    .update({ status: 'BROADCASTED', tx_hash: txHash, updated_at: new Date().toISOString() })
+    .eq('id', withdrawalId);
+  if (onchainError) throw new Error(`Could not persist on-chain broadcast: ${onchainError.message}`);
+
+  const { error: withdrawalError } = await supabase
+    .from('withdrawals')
+    .update({ status: 'BROADCASTED', tx_hash: txHash, txid: txHash, broadcasted_at: new Date().toISOString(), updated_at: new Date().toISOString() })
+    .eq('id', withdrawalId);
+  if (withdrawalError) throw new Error(`Could not persist withdrawal broadcast: ${withdrawalError.message}`);
+}
+
+async function markAmbiguousBroadcast(supabase: ReturnType<typeof getAdminClient>, withdrawalId: string, txHash: string, message: string) {
+  const [onchainResult, withdrawalResult] = await Promise.all([
+    supabase.from('onchain_withdrawals')
+      .update({ status: 'AMBIGUOUS_BROADCAST', tx_hash: txHash, error_message: message, updated_at: new Date().toISOString() })
+      .eq('id', withdrawalId),
+    supabase.from('withdrawals')
+      .update({ status: 'AMBIGUOUS_BROADCAST', tx_hash: txHash, txid: txHash, broadcast_error: message, updated_at: new Date().toISOString() })
+      .eq('id', withdrawalId),
+  ]);
+  if (onchainResult.error || withdrawalResult.error) {
+    console.error('[Withdrawal Worker] Could not persist ambiguous broadcast state', {
+      withdrawalId, onchainError: onchainResult.error?.message, withdrawalError: withdrawalResult.error?.message,
+    });
+  }
+}
+
 function getEvmRpcUrl(network: string): { url: string; providerName: string } {
   const normNet = network.toUpperCase();
 
@@ -271,10 +301,19 @@ export async function POST(req: NextRequest) {
 
       const supabase = getAdminClient();
       if (withdrawalId) {
-        await supabase.rpc('complete_onchain_withdrawal', {
-          p_withdrawal_id: withdrawalId,
-          p_tx_hash: execution.txHash,
-        });
+        try {
+          await recordBroadcast(supabase, withdrawalId, execution.txHash);
+        } catch (persistErr) {
+          const message = persistErr instanceof Error ? persistErr.message : String(persistErr);
+          await markAmbiguousBroadcast(supabase, withdrawalId, execution.txHash, message);
+          return NextResponse.json({
+            success: false,
+            withdrawalId,
+            txHash: execution.txHash,
+            status: 'AMBIGUOUS_BROADCAST',
+            error: 'Transaction was broadcast but its status could not be safely persisted. Do not retry; reconcile this transaction hash.',
+          }, { status: 202 });
+        }
       }
 
       const result: WithdrawalExecutionResult = {
@@ -327,6 +366,7 @@ export async function POST(req: NextRequest) {
 
       if (!itemTo || !itemAmt) continue;
 
+      let broadcastTxHash: string | null = null;
       try {
         let exec: { txHash: string; gasEstimated: string; providerUsed: string };
         if (itemNet === 'BTC' || itemAsset === 'BTC') {
@@ -339,10 +379,8 @@ export async function POST(req: NextRequest) {
           exec = await processEvmWithdrawal(itemTo, itemAmt, itemAsset, itemNet);
         }
 
-        await supabase.rpc('complete_onchain_withdrawal', {
-          p_withdrawal_id: item.id,
-          p_tx_hash: exec.txHash,
-        });
+        broadcastTxHash = exec.txHash;
+        await recordBroadcast(supabase, item.id, exec.txHash);
 
         processedResults.push({
           withdrawalId: item.id,
@@ -357,23 +395,41 @@ export async function POST(req: NextRequest) {
         });
       } catch (err: unknown) {
         const errorMsg = err instanceof Error ? err.message : String(err);
-        await supabase.rpc('process_failed_withdrawal', {
-          p_withdrawal_id: item.id,
-          p_error_reason: errorMsg,
-          p_is_verified_unbroadcast: true,
-        });
+        if (broadcastTxHash) {
+          // Once a tx hash exists, the transaction may already be on-chain.
+          // Never use the verified-unbroadcast refund path in this branch.
+          await markAmbiguousBroadcast(supabase, item.id, broadcastTxHash, errorMsg);
+          processedResults.push({
+            withdrawalId: item.id,
+            asset: itemAsset,
+            network: itemNet,
+            toAddress: itemTo,
+            amount: itemAmt,
+            txHash: broadcastTxHash,
+            status: 'FAILED',
+            providerUsed: 'Reconciliation required',
+            error: 'Broadcast may have succeeded; funds remain reserved and must not be refunded automatically.',
+          });
+        } else {
+          const { error: refundError } = await supabase.rpc('process_failed_withdrawal', {
+            p_withdrawal_id: item.id,
+            p_error_reason: errorMsg,
+            p_is_verified_unbroadcast: true,
+          });
+          if (refundError) console.error('[Withdrawal Worker] Pre-broadcast refund RPC failed', item.id, refundError.message);
 
-        processedResults.push({
-          withdrawalId: item.id,
-          asset: itemAsset,
-          network: itemNet,
-          toAddress: itemTo,
-          amount: itemAmt,
-          txHash: '',
-          status: 'FAILED',
-          providerUsed: 'Error',
-          error: errorMsg,
-        });
+          processedResults.push({
+            withdrawalId: item.id,
+            asset: itemAsset,
+            network: itemNet,
+            toAddress: itemTo,
+            amount: itemAmt,
+            txHash: '',
+            status: 'FAILED',
+            providerUsed: 'Error',
+            error: refundError ? `${errorMsg}; refund status update failed: ${refundError.message}` : errorMsg,
+          });
+        }
       }
     }
 
