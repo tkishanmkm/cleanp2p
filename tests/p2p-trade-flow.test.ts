@@ -1,8 +1,20 @@
 import { createClient } from '@supabase/supabase-js';
 
-// Initialize Supabase admin client
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL || 'https://placeholder.supabase.co';
-const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'placeholder-key';
+// This integration suite writes fixed test IDs and changes wallet balances.
+// Require explicit test-project configuration; never fall back to anon or placeholder credentials.
+const supabaseUrl = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL;
+const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+
+if (!supabaseUrl || !supabaseKey) {
+  throw new Error(
+    'P2P integration tests require SUPABASE_URL (or NEXT_PUBLIC_SUPABASE_URL) and SUPABASE_SERVICE_ROLE_KEY for a dedicated test project.'
+  );
+}
+
+const parsedSupabaseUrl = new URL(supabaseUrl);
+if (parsedSupabaseUrl.hostname.startsWith('eaiwgfxoiwxepinvcykg.')) {
+  throw new Error('P2P integration tests are blocked from running against the production Supabase project.');
+}
 
 const supabase = createClient(supabaseUrl, supabaseKey, {
   auth: { persistSession: false, autoRefreshToken: false },
