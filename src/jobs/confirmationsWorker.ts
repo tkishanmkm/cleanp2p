@@ -4,6 +4,7 @@ import { normalizeDepositNetwork } from '@/lib/hd-derivation-engine';
 import { getSupabaseAdminClient } from '@/lib/supabase/server';
 import { CANONICAL_USDT_CONTRACTS } from '@/jobs/depositIngestion';
 import { ERC20_ABI, SUPPORTED_EVM_CHAINS } from '@/lib/blockchain/providers';
+import { getTronWeb } from '@/lib/blockchain/tron';
 
 // Resolve privileged credentials only when the worker runs; never fall back to anon credentials.
 const supabaseAdmin = new Proxy({} as SupabaseClient, {
@@ -68,17 +69,21 @@ async function fetchOnChainConfirmations(
       const apiKey = process.env.TRON_GRID_API_KEY || process.env.TRONGRID_API_KEY || process.env.TRON_PRO_API_KEY;
       if (apiKey) headers['TRON-PRO-API-KEY'] = apiKey;
 
-      const [infoRes, nowRes] = await Promise.all([
+      const [infoRes, nowRes, txRes] = await Promise.all([
         fetch(`${tronHost}/wallet/gettransactioninfobyid`, {
           method: 'POST', headers, body: JSON.stringify({ value: txHash }),
         }),
         fetch(`${tronHost}/wallet/getnowblock`, {
           method: 'POST', headers, body: JSON.stringify({}),
         }),
+        fetch(`${tronHost}/wallet/gettransactionbyid`, {
+          method: 'POST', headers, body: JSON.stringify({ value: txHash }),
+        }),
       ]);
-      if (!infoRes.ok || !nowRes.ok) return null;
+      if (!infoRes.ok || !nowRes.ok || !txRes.ok) return null;
       const info = await infoRes.json();
       const now = await nowRes.json();
+      const tx = await txRes.json();
       const blockNumber = Number(info?.blockNumber);
       const currentBlock = Number(now?.block_header?.raw_data?.number);
       if (
@@ -86,6 +91,34 @@ async function fetchOnChainConfirmations(
         !Number.isSafeInteger(currentBlock) || currentBlock < blockNumber ||
         info?.receipt?.result !== 'SUCCESS'
       ) return null;
+
+      if (expected) {
+        // Custodial TRC-20 deposits are direct USDT transfer(address,uint256)
+        // calls. Verify the canonical contract, calldata recipient and exact amount.
+        if (expected.assetSymbol !== 'USDT') return null;
+        const contractValue = tx?.raw_data?.contract?.[0]?.parameter?.value;
+        const contractHex = String(contractValue?.contract_address || '').replace(/^0x/i, '');
+        const callData = String(contractValue?.data || '').replace(/^0x/i, '').toLowerCase();
+        if (!contractHex || !callData.startsWith('a9059cbb') || callData.length < 136) return null;
+
+        const tronWeb = getTronWeb(false);
+        let contractAddress = '';
+        try {
+          contractAddress = tronWeb.address.fromHex(
+            contractHex.length === 42 ? contractHex : `41${contractHex.slice(-40)}`
+          );
+        } catch {
+          return null;
+        }
+        const expectedHex = tronWeb.address.toHex(expected.destinationAddress).replace(/^0x/i, '').slice(-40).toLowerCase();
+        const calldataRecipient = callData.slice(8, 72).slice(-40);
+        const calldataAmount = BigInt(`0x${callData.slice(-64)}`);
+        if (
+          contractAddress !== CANONICAL_USDT_CONTRACTS.TRC20 ||
+          calldataRecipient !== expectedHex ||
+          calldataAmount !== ethers.parseUnits(expected.amount, 6)
+        ) return null;
+      }
 
       return { confirmations: currentBlock - blockNumber + 1, blockNumber };
     } catch (err) {
