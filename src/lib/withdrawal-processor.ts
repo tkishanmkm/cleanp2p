@@ -543,7 +543,7 @@ export async function processPendingWithdrawals(limit: number = 20): Promise<Pro
   const { data: withdrawals, error: fetchError } = await supabaseAdmin
     .from('withdrawals')
     .select('*')
-    .in('status', ['approved', 'processing', 'QUEUED'])
+    .in('status', ['approved', 'QUEUED'])
     .order('created_at', { ascending: true })
     .limit(limit);
 
@@ -571,16 +571,43 @@ export async function processPendingWithdrawals(limit: number = 20): Promise<Pro
     const destAddr = item.destination_address;
     const amountNum = Number(item.amount);
 
-    try {
-      await supabaseAdmin
-        .from('withdrawals')
-        .update({
-          status: 'processing',
-          broadcast_attempts: attempts,
-          updated_at: new Date().toISOString(),
-        })
-        .eq('id', item.id);
+    // Claim only if the row is still in the exact status observed by this
+    // worker. Concurrent workers cannot both move the same row out of that
+    // status. Existing "processing" rows are deliberately excluded above:
+    // they require reconciliation, not a blind rebroadcast.
+    const { data: claimed, error: claimError } = await supabaseAdmin
+      .from('withdrawals')
+      .update({
+        status: 'processing',
+        broadcast_attempts: attempts,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', item.id)
+      .eq('status', item.status)
+      .select('id')
+      .maybeSingle();
 
+    if (claimError) {
+      failed++;
+      results.push({
+        id: item.id,
+        assetCode,
+        networkCode,
+        destinationAddress: destAddr,
+        amount: amountNum,
+        success: false,
+        error: `Could not claim withdrawal; no broadcast attempted: ${claimError.message}`,
+        attempts: item.broadcast_attempts || 0,
+      });
+      continue;
+    }
+
+    if (!claimed) {
+      // Another worker claimed or changed this row after our read.
+      continue;
+    }
+
+    try {
       const task: WithdrawalTask = {
         id: item.id,
         user_id: item.user_id,
@@ -622,29 +649,37 @@ export async function processPendingWithdrawals(limit: number = 20): Promise<Pro
       successful++;
     } catch (broadcastErr: unknown) {
       const errorMsg = broadcastErr instanceof Error ? broadcastErr.message : String(broadcastErr);
-      const isPermanentlyFailed = attempts >= 3;
+      const now = new Date().toISOString();
 
-      if (isPermanentlyFailed) {
-        // Trigger automated refund via process_failed_withdrawal RPC
-        try {
-          await supabaseAdmin.rpc('process_failed_withdrawal', {
-            p_withdrawal_id: item.id,
-            p_error_reason: errorMsg,
-            p_is_verified_unbroadcast: true,
-          });
-        } catch (rpcErr) {
-          console.error('[processPendingWithdrawals] Refund RPC failed:', rpcErr);
-        }
-      } else {
-        await supabaseAdmin
+      // A provider timeout/error does not prove that the transaction was not
+      // broadcast. Never refund or automatically retry from this generic catch.
+      // Quarantine both records for transaction-hash / chain reconciliation.
+      const [withdrawalQuarantine, onchainQuarantine] = await Promise.all([
+        supabaseAdmin
           .from('withdrawals')
           .update({
-            status: 'processing',
+            status: 'AMBIGUOUS_BROADCAST',
             broadcast_attempts: attempts,
             broadcast_error: errorMsg,
-            updated_at: new Date().toISOString(),
+            updated_at: now,
           })
-          .eq('id', item.id);
+          .eq('id', item.id),
+        supabaseAdmin
+          .from('onchain_withdrawals')
+          .update({
+            status: 'AMBIGUOUS_BROADCAST',
+            error_message: errorMsg,
+            updated_at: now,
+          })
+          .eq('id', item.id),
+      ]);
+
+      if (withdrawalQuarantine.error || onchainQuarantine.error) {
+        console.error('[processPendingWithdrawals] Failed to quarantine ambiguous withdrawal', {
+          withdrawalId: item.id,
+          withdrawalError: withdrawalQuarantine.error?.message,
+          onchainError: onchainQuarantine.error?.message,
+        });
       }
 
       results.push({
