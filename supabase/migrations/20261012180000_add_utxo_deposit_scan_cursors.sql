@@ -6,6 +6,8 @@ CREATE TABLE IF NOT EXISTS public.utxo_deposit_scan_cursors (
     network_code TEXT NOT NULL CHECK (network_code IN ('BTC', 'LTC')),
     address TEXT NOT NULL,
     last_seen_txid TEXT NOT NULL,
+    backfill_cursor_txid TEXT,
+    backfill_complete BOOLEAN NOT NULL DEFAULT FALSE,
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     PRIMARY KEY (network_code, address)
 );
