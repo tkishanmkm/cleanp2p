@@ -443,7 +443,6 @@ async function scanTronDeposits(
   try {
     const tronWeb = getTronWeb(false);
     const tronHost = (process.env.TRON_RPC_URL || TRON_CONFIG.fullHost || 'https://api.trongrid.io').replace(/\/$/, '');
-    const contractAddress = process.env.USDT_CONTRACT_TRC20 || TRON_CONFIG.usdtContract || CANONICAL_USDT_CONTRACTS.TRC20;
 
     // Determine TronGrid REST host (Mainnet)
     const getTronGridHost = (rpcUrl: string): string => {
@@ -563,7 +562,11 @@ async function scanTronDeposits(
             }
             if (observedContract !== CANONICAL_USDT_CONTRACTS.TRC20) continue;
 
-            const deduplicationKey = `${txId}_0`;
+            const outputIndex = Number(item.event_index);
+            // Without the event index, a transaction containing multiple Transfer
+            // logs cannot be safely deduplicated or credited exactly once.
+            if (!Number.isSafeInteger(outputIndex) || outputIndex < 0) continue;
+            const deduplicationKey = `${txId}_${outputIndex}`;
             if (seenTxIndices.has(deduplicationKey)) continue;
             seenTxIndices.add(deduplicationKey);
 
@@ -604,7 +607,7 @@ async function scanTronDeposits(
               p_network_code: 'TRC20',
               p_amount: formattedAmount,
               p_tx_hash: txId,
-              p_output_index: 0,
+              p_output_index: outputIndex,
               p_block_number: eventBlock || null,
               p_from_address: fromAddr,
               p_token_contract: tokenContract,
@@ -663,10 +666,18 @@ async function scanTronDeposits(
             const rawValBig = BigInt(rawValue);
             if (rawValBig <= 0n) continue;
             const formattedAmount = ethers.formatUnits(rawValBig, 6);
-            const eventBlock = evt.block_number || 0;
-            const confirmations = (latestBlock && eventBlock && latestBlock >= eventBlock)
+            let canonicalInfo: any;
+            try {
+              canonicalInfo = await tronWeb.trx.getTransactionInfo(txId);
+            } catch {
+              continue;
+            }
+            if (!canonicalInfo?.blockNumber || canonicalInfo?.receipt?.result !== 'SUCCESS') continue;
+
+            const eventBlock = Number(canonicalInfo.blockNumber);
+            const confirmations = latestBlock > 0 && latestBlock >= eventBlock
               ? latestBlock - eventBlock + 1
-              : 1;
+              : 0;
 
             const { data: rpcData, error } = await supabaseAdmin.rpc('process_deposit_atomic', {
               p_destination_address: toBase58,
