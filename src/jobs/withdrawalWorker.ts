@@ -111,17 +111,21 @@ export async function processWithdrawalQueue(): Promise<WithdrawalProcessResult>
   // Persist a broadcast as BROADCASTED only. Settlement is deferred until the
   // confirmation worker verifies the transaction on-chain.
   const recordBroadcast = async (txHash: string) => {
-    const { error: onchainError } = await supabaseAdmin
+    const { data: onchainResult, error: onchainError } = await supabaseAdmin
       .from('onchain_withdrawals')
       .update({ status: 'BROADCASTED', tx_hash: txHash, updated_at: new Date().toISOString() })
-      .eq('id', withdrawal.id);
-    if (onchainError) throw new Error(`Failed to persist on-chain broadcast: ${onchainError.message}`);
+      .eq('id', withdrawal.id)
+      .select('id')
+      .maybeSingle();
+    if (onchainError || !onchainResult) throw new Error(`Failed to persist on-chain broadcast${onchainError ? `: ${onchainError.message}` : ': withdrawal row not found'}`);
 
-    const { error: withdrawalError } = await supabaseAdmin
+    const { data: withdrawalResult, error: withdrawalError } = await supabaseAdmin
       .from('withdrawals')
       .update({ status: 'BROADCASTED', tx_hash: txHash, txid: txHash, broadcasted_at: new Date().toISOString(), updated_at: new Date().toISOString() })
-      .eq('id', withdrawal.id);
-    if (withdrawalError) throw new Error(`Failed to persist withdrawal broadcast: ${withdrawalError.message}`);
+      .eq('id', withdrawal.id)
+      .select('id')
+      .maybeSingle();
+    if (withdrawalError || !withdrawalResult) throw new Error(`Failed to persist withdrawal broadcast${withdrawalError ? `: ${withdrawalError.message}` : ': withdrawal row not found'}`);
   };
 
   try {
@@ -239,6 +243,7 @@ export async function processWithdrawalQueue(): Promise<WithdrawalProcessResult>
           .from('onchain_withdrawals')
           .update({
             status: 'AMBIGUOUS_BROADCAST',
+            ...(broadcastTxHash ? { tx_hash: broadcastTxHash } : {}),
             error_message: `Ambiguous broadcast error: ${err.message}`,
             updated_at: new Date().toISOString(),
           })
@@ -248,6 +253,7 @@ export async function processWithdrawalQueue(): Promise<WithdrawalProcessResult>
           .from('withdrawals')
           .update({
             status: 'AMBIGUOUS_BROADCAST',
+            ...(broadcastTxHash ? { tx_hash: broadcastTxHash, txid: broadcastTxHash } : {}),
             broadcast_error: `Ambiguous broadcast error: ${err.message}`,
             updated_at: new Date().toISOString(),
           })
