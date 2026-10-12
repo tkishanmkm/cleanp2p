@@ -326,7 +326,9 @@ async function scanEvmNativeDeposits(
                   }
                   canonicalNativeValue = canonicalTx.value;
                 } catch {
-                  // RPC uncertainty must never turn into a credit.
+                  // Do not advance the durable scan cursor when canonical verification
+                  // is unavailable; retry this block range on the next worker cycle.
+                  errors.push(`Unable to verify indexed native transaction ${txHash} on ${normNet}`);
                   continue;
                 }
 
@@ -382,9 +384,18 @@ async function scanEvmNativeDeposits(
           try {
             receipt = await provider.getTransactionReceipt(tx.hash);
           } catch {
+            errors.push(`Unable to fetch receipt for native transaction ${tx.hash} on ${normNet}`);
             continue;
           }
-          if (!receipt || receipt.status !== 1 || receipt.blockNumber !== b) {
+          if (!receipt) {
+            errors.push(`Missing receipt for mined native transaction ${tx.hash} on ${normNet}`);
+            continue;
+          }
+          if (receipt.status !== 1) {
+            continue; // Canonical reverted transaction; it cannot be a deposit.
+          }
+          if (receipt.blockNumber !== b) {
+            errors.push(`Receipt block mismatch for native transaction ${tx.hash} on ${normNet}`);
             continue;
           }
 
