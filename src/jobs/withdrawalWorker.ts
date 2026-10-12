@@ -106,6 +106,23 @@ export async function processWithdrawalQueue(): Promise<WithdrawalProcessResult>
   const amountStr = withdrawal.amount.toString();
   const destination = withdrawal.to_address.trim();
   let isLocalCheckStage = true;
+  let broadcastTxHash: string | null = null;
+
+  // Persist a broadcast as BROADCASTED only. Settlement is deferred until the
+  // confirmation worker verifies the transaction on-chain.
+  const recordBroadcast = async (txHash: string) => {
+    const { error: onchainError } = await supabaseAdmin
+      .from('onchain_withdrawals')
+      .update({ status: 'BROADCASTED', tx_hash: txHash, updated_at: new Date().toISOString() })
+      .eq('id', withdrawal.id);
+    if (onchainError) throw new Error(`Failed to persist on-chain broadcast: ${onchainError.message}`);
+
+    const { error: withdrawalError } = await supabaseAdmin
+      .from('withdrawals')
+      .update({ status: 'BROADCASTED', tx_hash: txHash, txid: txHash, broadcasted_at: new Date().toISOString(), updated_at: new Date().toISOString() })
+      .eq('id', withdrawal.id);
+    if (withdrawalError) throw new Error(`Failed to persist withdrawal broadcast: ${withdrawalError.message}`);
+  };
 
   try {
     // BRANCH A: TRON Network (TRC-20 USDT)
@@ -125,18 +142,15 @@ export async function processWithdrawalQueue(): Promise<WithdrawalProcessResult>
         amount: amountStr,
       });
       const txHash = res.txHash;
+      broadcastTxHash = txHash;
+      await recordBroadcast(txHash);
 
-      await supabaseAdmin.rpc('complete_onchain_withdrawal', {
-        p_withdrawal_id: withdrawal.id,
-        p_tx_hash: txHash,
-      });
-
-      console.log(`[Withdrawal Worker] Dispatched TRON payout ${withdrawal.id} (tx: ${txHash})`);
+      console.log(`[Withdrawal Worker] Broadcast TRON payout ${withdrawal.id} (tx: ${txHash}); awaiting confirmations`);
       return {
         processed: true,
         withdrawalId: withdrawal.id,
         txHash,
-        status: 'COMPLETED',
+        status: 'BROADCASTED',
       };
     }
 
@@ -180,18 +194,16 @@ export async function processWithdrawalQueue(): Promise<WithdrawalProcessResult>
       });
     }
 
-    await supabaseAdmin.rpc('complete_onchain_withdrawal', {
-      p_withdrawal_id: withdrawal.id,
-      p_tx_hash: tx.hash,
-    });
+    broadcastTxHash = tx.hash;
+    await recordBroadcast(tx.hash);
 
-    console.log(`[Withdrawal Worker] Broadcasted EVM payout ${withdrawal.id} on ${network} (tx: ${tx.hash}, nonce: ${nonce})`);
+    console.log(`[Withdrawal Worker] Broadcast EVM payout ${withdrawal.id} on ${network} (tx: ${tx.hash}, nonce: ${nonce}); awaiting confirmations`);
     return {
       processed: true,
       withdrawalId: withdrawal.id,
       txHash: tx.hash,
       nonce,
-      status: 'COMPLETED',
+      status: 'BROADCASTED',
     };
 
   } catch (err: any) {
