@@ -35,19 +35,24 @@ export async function GET(request: NextRequest) {
     // Trigger your network event indexers (ETH, BSC, TRON, etc.)
     const indexerResult = await runDepositIngestion();
 
+    const success = indexerResult.ok && indexerResult.errorCount === 0;
     return NextResponse.json({
-      success: true,
-      message: 'Multi-chain indexer executed successfully',
+      success,
+      message: success
+        ? 'Deposit ingestion cycle completed without reported errors'
+        : 'Deposit ingestion cycle completed with errors; some deposits may remain pending',
       timestamp: new Date().toISOString(),
+      errorCount: indexerResult.errorCount,
       details: {
-        chainsIndexed: indexerResult?.results?.map((r: any) => ({
+        chainsIndexed: indexerResult.results.map((r) => ({
           network: r.network,
           detected: r.depositsDetected,
           credited: r.depositsCredited,
-        })) || [],
-        pendingRecheck: indexerResult?.pendingRecheck || 0,
+          errors: r.errors,
+        })),
+        pendingRecheck: indexerResult.pendingRecheck,
       },
-    }, { status: 200 });
+    }, { status: success ? 200 : 500 });
 
   } catch (error: any) {
     console.error('[CRON INDEXER ERROR]:', error);
