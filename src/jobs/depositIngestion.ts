@@ -1114,102 +1114,90 @@ export async function refreshPendingDepositConfirmations(): Promise<{
  * Main deposit ingestion cycle execution
  */
 export async function runDepositIngestion(): Promise<{
+  ok: boolean;
+  errorCount: number;
   results: IngestionResult[];
   pendingRecheck: { checked: number; newlyCredited: number };
 }> {
+  // Address loading is a prerequisite. getMonitoredAddresses throws on any query failure.
   const { evmAddresses, tronAddresses, btcAddresses, ltcAddresses } = await getMonitoredAddresses();
   const results: IngestionResult[] = [];
 
-  // 1. Scan EVM Chains (ERC20, BEP20)
-  for (const [netKey, chain] of Object.entries(SUPPORTED_EVM_CHAINS)) {
-    const netResult: IngestionResult = {
-      network: netKey,
-      depositsDetected: 0,
-      depositsCredited: 0,
-      errors: [],
-    };
-
+  // Scan each configured EVM chain independently and expose failures in the result.
+  for (const [netKey] of Object.entries(SUPPORTED_EVM_CHAINS)) {
+    const netResult: IngestionResult = { network: netKey, depositsDetected: 0, depositsCredited: 0, errors: [] };
     try {
       const provider = getEvmProvider(netKey);
       const latestBlock = await provider.getBlockNumber();
-      // Scan a safe trailing block window of 100 blocks
       const scanWindow = 100;
       const fromBlock = Math.max(0, latestBlock - scanWindow);
-
       netResult.scannedBlocks = latestBlock - fromBlock;
 
       if (evmAddresses.size > 0) {
-        // Scan ERC20 / BEP20 USDT
         const tokenRes = await scanEvmTokenDeposits(netKey, evmAddresses, fromBlock, latestBlock);
         netResult.depositsDetected += tokenRes.detected;
         netResult.depositsCredited += tokenRes.credited;
         netResult.errors.push(...tokenRes.errors);
 
-        // Scan Native transfers (ETH)
         const nativeRes = await scanEvmNativeDeposits(netKey, evmAddresses, fromBlock, latestBlock);
         netResult.depositsDetected += nativeRes.detected;
         netResult.depositsCredited += nativeRes.credited;
         netResult.errors.push(...nativeRes.errors);
       }
-    } catch (chainErr: any) {
-      netResult.errors.push(`Chain scan failed: ${chainErr.message}`);
+    } catch (chainErr: unknown) {
+      netResult.errors.push(`Chain scan failed: ${chainErr instanceof Error ? chainErr.message : String(chainErr)}`);
     }
-
     results.push(netResult);
   }
 
-  // 2. Scan TRON
-  const tronResult: IngestionResult = {
-    network: 'TRC20',
-    depositsDetected: 0,
-    depositsCredited: 0,
-    errors: [],
-  };
+  const otherScans: Array<{ network: string; addresses: Set<string>; scan: (addresses: Set<string>) => Promise<{ detected: number; credited: number; errors: string[] }> }> = [
+    { network: 'TRC20', addresses: tronAddresses, scan: scanTronDeposits },
+    { network: 'BTC', addresses: btcAddresses, scan: scanBtcDeposits },
+    { network: 'LTC', addresses: ltcAddresses, scan: scanLtcDeposits },
+  ];
 
-  if (tronAddresses.size > 0) {
-    const tRes = await scanTronDeposits(tronAddresses);
-    tronResult.depositsDetected += tRes.detected;
-    tronResult.depositsCredited += tRes.credited;
-    tronResult.errors.push(...tRes.errors);
+  for (const item of otherScans) {
+    const result: IngestionResult = { network: item.network, depositsDetected: 0, depositsCredited: 0, errors: [] };
+    if (item.addresses.size > 0) {
+      try {
+        const scanResult = await item.scan(item.addresses);
+        result.depositsDetected = scanResult.detected;
+        result.depositsCredited = scanResult.credited;
+        result.errors.push(...scanResult.errors);
+      } catch (scanErr: unknown) {
+        result.errors.push(`Chain scan failed: ${scanErr instanceof Error ? scanErr.message : String(scanErr)}`);
+      }
+    }
+    results.push(result);
   }
-  results.push(tronResult);
 
-  // 3. Scan Bitcoin (BTC)
-  const btcResult: IngestionResult = {
-    network: 'BTC',
-    depositsDetected: 0,
-    depositsCredited: 0,
-    errors: [],
-  };
-
-  if (btcAddresses.size > 0) {
-    const bRes = await scanBtcDeposits(btcAddresses);
-    btcResult.depositsDetected += bRes.detected;
-    btcResult.depositsCredited += bRes.credited;
-    btcResult.errors.push(...bRes.errors);
+  let pendingRecheck = { checked: 0, newlyCredited: 0 };
+  try {
+    pendingRecheck = await refreshPendingDepositConfirmations();
+  } catch (pendingErr: unknown) {
+    results.push({
+      network: 'PENDING_CONFIRMATIONS',
+      depositsDetected: 0,
+      depositsCredited: 0,
+      errors: [`Pending confirmation refresh failed: ${pendingErr instanceof Error ? pendingErr.message : String(pendingErr)}`],
+    });
   }
-  results.push(btcResult);
 
-  // 4. Scan Litecoin (LTC)
-  const ltcResult: IngestionResult = {
-    network: 'LTC',
-    depositsDetected: 0,
-    depositsCredited: 0,
-    errors: [],
-  };
-
-  if (ltcAddresses.size > 0) {
-    const lRes = await scanLtcDeposits(ltcAddresses);
-    ltcResult.depositsDetected += lRes.detected;
-    ltcResult.depositsCredited += lRes.credited;
-    ltcResult.errors.push(...lRes.errors);
+  const errorCount = results.reduce((count, result) => count + result.errors.length, 0);
+  const summary = { ok: errorCount === 0, errorCount, results, pendingRecheck };
+  if (!summary.ok) {
+    console.error('[Deposit Ingestion] Cycle completed with errors:', {
+      errorCount,
+      failedNetworks: results.filter((result) => result.errors.length > 0).map((result) => ({ network: result.network, errors: result.errors })),
+    });
+  } else {
+    console.info('[Deposit Ingestion] Cycle completed without reported errors.', {
+      networksScanned: results.length,
+      pendingChecked: pendingRecheck.checked,
+      newlyCredited: pendingRecheck.newlyCredited,
+    });
   }
-  results.push(ltcResult);
-
-  // 5. Recheck previously PENDING deposits
-  const pendingRecheck = await refreshPendingDepositConfirmations();
-
-  return { results, pendingRecheck };
+  return summary;
 }
 
 let ingestionInterval: NodeJS.Timeout | null = null;
@@ -1217,6 +1205,6 @@ let ingestionInterval: NodeJS.Timeout | null = null;
 export function startDepositIngestionWorker(intervalMs: number = 30000): void {
   if (ingestionInterval) return;
   console.log(`[Deposit Ingestion] Background worker started, polling every ${intervalMs}ms...`);
-  runDepositIngestion().catch((e) => console.error('[Deposit Ingestion] Cycle failed:', e));
+  runDepositIngestion().catch((e) => console.error('[Deposit Ingestion] Cycle failed before completion:', e));
   ingestionInterval = setInterval(() => {
     runDepositIngestion().catch((e) => console.error('[Deposit Ingestion] Cycle failed:', e));
