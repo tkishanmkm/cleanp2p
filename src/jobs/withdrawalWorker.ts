@@ -415,23 +415,9 @@ export async function processAllPendingWithdrawals(maxBatch: number = 20): Promi
   results: WithdrawalProcessResult[];
   locked?: boolean;
 }> {
-  // Acquire distributed singleton advisory lock
-  let hasLock = false;
-  try {
-    const { data: lockAcquired, error: lockErr } = await supabaseAdmin.rpc('acquire_withdrawal_worker_lock');
-    if (lockErr || lockAcquired !== true) {
-      console.warn(
-        '[Withdrawal Worker Singleton] Lock acquisition could not be verified; refusing to dispatch withdrawals.',
-        lockErr
-      );
-      return { totalProcessed: 0, results: [], locked: true };
-    }
-    hasLock = true;
-  } catch (lockRpcErr) {
-    // Never dispatch payouts when singleton-lock state cannot be verified.
-    console.error('[Withdrawal Worker Singleton] Lock RPC failed; refusing to dispatch withdrawals.', lockRpcErr);
-    return { totalProcessed: 0, results: [], locked: true };
-  }
+  // Concurrency is controlled by claim_pending_withdrawals using
+  // SELECT ... FOR UPDATE SKIP LOCKED and an atomic status transition to PROCESSING.
+  // Do not use session-level advisory locks across separate PostgREST RPC calls.
 
   const results: WithdrawalProcessResult[] = [];
   let count = 0;
@@ -444,14 +430,6 @@ export async function processAllPendingWithdrawals(maxBatch: number = 20): Promi
       }
       results.push(res);
       count++;
-    }
-  } finally {
-    if (hasLock) {
-      try {
-        await supabaseAdmin.rpc('release_withdrawal_worker_lock');
-      } catch (unlockErr) {
-        console.warn('[Withdrawal Worker Singleton] Notice on lock release:', unlockErr);
-      }
     }
   }
 
