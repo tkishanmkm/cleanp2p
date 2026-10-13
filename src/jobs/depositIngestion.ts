@@ -965,149 +965,55 @@ async function scanLtcDeposits(
 export async function refreshPendingDepositConfirmations(): Promise<{
   checked: number;
   newlyCredited: number;
+  errors: string[];
 }> {
   let checked = 0;
   let newlyCredited = 0;
+  const errors: string[] = [];
 
-  try {
-    const { data: pendingDeposits, error } = await getDepositSupabaseAdmin()
-      .from('onchain_deposits')
-      .select('*')
-      .eq('status', 'PENDING')
-      .limit(50);
+  const { data: pendingDeposits, error } = await getDepositSupabaseAdmin()
+    .from('onchain_deposits')
+    .select('*')
+    .eq('status', 'PENDING')
+    .limit(50);
 
-    if (error || !pendingDeposits || pendingDeposits.length === 0) {
-      return { checked: 0, newlyCredited: 0 };
-    }
-
-    checked = pendingDeposits.length;
-
-    for (const dep of pendingDeposits) {
-      const normNet = normalizeDepositNetwork(dep.network);
-      const destinationAddress = dep.to_address || dep.address;
-      const outputIndex = dep.output_index ?? dep.log_index ?? 0;
-      const assetSymbol = (dep.asset_symbol || 'USDT').toUpperCase().trim();
-      const tokenContract = CANONICAL_USDT_CONTRACTS[normNet] || null;
-
-      if (normNet === 'TRC20') {
-        const tronWeb = getTronWeb(false);
-        const txInfo = await tronWeb.trx.getTransactionInfo(dep.tx_hash);
-        if (txInfo && txInfo.blockNumber) {
-          const currentBlock = await tronWeb.trx.getCurrentBlock();
-          const currentHeight = currentBlock.block_header?.raw_data?.number || 0;
-          const confs = Math.max(1, currentHeight - txInfo.blockNumber + 1);
-
-          const { data, error: rpcErr } = await getDepositSupabaseAdmin().rpc('process_deposit_atomic', {
-            p_destination_address: destinationAddress,
-            p_asset_symbol: assetSymbol,
-            p_network_code: 'TRC20',
-            p_amount: Number(dep.amount),
-            p_tx_hash: dep.tx_hash,
-            p_output_index: outputIndex,
-            p_block_number: txInfo.blockNumber,
-            p_from_address: dep.from_address || null,
-            p_token_contract: tokenContract,
-            p_confirmations: confs,
-            p_provider: 'confirmations_worker',
-          });
-
-          if (!rpcErr) {
-            const res = typeof data === 'string' ? JSON.parse(data) : data;
-            if (res?.status === 'credited') {
-              newlyCredited++;
-            }
-          }
-        }
-      } else if (normNet === 'BTC') {
-        const btcApiBase = process.env.BTC_MEMPOOL_API || 'https://mempool.space/api';
-        try {
-          const res = await fetch(`${btcApiBase}/tx/${dep.tx_hash}/status`);
-          if (res.ok) {
-            const statusData = await res.json();
-            const confs = statusData.confirmed ? 2 : 0;
-            const { data, error: rpcErr } = await getDepositSupabaseAdmin().rpc('process_deposit_atomic', {
-              p_destination_address: destinationAddress,
-              p_asset_symbol: 'BTC',
-              p_network_code: 'BTC',
-              p_amount: Number(dep.amount),
-              p_tx_hash: dep.tx_hash,
-              p_output_index: outputIndex,
-              p_block_number: statusData.block_height || null,
-              p_from_address: null,
-              p_token_contract: null,
-              p_confirmations: confs,
-              p_provider: 'confirmations_worker',
-            });
-            if (!rpcErr) {
-              const r = typeof data === 'string' ? JSON.parse(data) : data;
-              if (r?.status === 'credited') newlyCredited++;
-            }
-          }
-        } catch (_) {}
-      } else if (normNet === 'LTC') {
-        const ltcApiBase = process.env.LTC_MEMPOOL_API || 'https://litecoinspace.org/api';
-        try {
-          const res = await fetch(`${ltcApiBase}/tx/${dep.tx_hash}/status`);
-          if (res.ok) {
-            const statusData = await res.json();
-            const confs = statusData.confirmed ? 6 : 0;
-            const { data, error: rpcErr } = await getDepositSupabaseAdmin().rpc('process_deposit_atomic', {
-              p_destination_address: destinationAddress,
-              p_asset_symbol: 'LTC',
-              p_network_code: 'LTC',
-              p_amount: Number(dep.amount),
-              p_tx_hash: dep.tx_hash,
-              p_output_index: outputIndex,
-              p_block_number: statusData.block_height || null,
-              p_from_address: null,
-              p_token_contract: null,
-              p_confirmations: confs,
-              p_provider: 'confirmations_worker',
-            });
-            if (!rpcErr) {
-              const r = typeof data === 'string' ? JSON.parse(data) : data;
-              if (r?.status === 'credited') newlyCredited++;
-            }
-          }
-        } catch (_) {}
-      } else {
-        const chain = SUPPORTED_EVM_CHAINS[normNet];
-        if (chain) {
-          const provider = getEvmProvider(normNet);
-          const receipt = await provider.getTransactionReceipt(dep.tx_hash);
-          if (receipt && receipt.blockNumber) {
-            const currentBlock = await provider.getBlockNumber();
-            const confs = Math.max(1, currentBlock - receipt.blockNumber + 1);
-
-            const { data, error: rpcErr } = await getDepositSupabaseAdmin().rpc('process_deposit_atomic', {
-              p_destination_address: destinationAddress,
-              p_asset_symbol: assetSymbol,
-              p_network_code: normNet,
-              p_amount: Number(dep.amount),
-              p_tx_hash: dep.tx_hash,
-              p_output_index: outputIndex,
-              p_block_number: receipt.blockNumber,
-              p_from_address: receipt.from?.toLowerCase() || dep.from_address || null,
-              p_token_contract: tokenContract,
-              p_confirmations: confs,
-              p_provider: 'confirmations_worker',
-            });
-
-            if (!rpcErr) {
-              const res = typeof data === 'string' ? JSON.parse(data) : data;
-              if (res?.status === 'credited') {
-                newlyCredited++;
-              }
-            }
-          }
-        }
-      }
-    }
-  } catch (err) {
-    console.error('[Deposit Ingestion] Error refreshing pending confirmations:', err);
+  if (error) {
+    throw new Error(`Failed to load pending on-chain deposits: ${error.message}`);
+  }
+  if (!pendingDeposits) {
+    throw new Error('Failed to load pending on-chain deposits: query returned no data');
   }
 
-  return { checked, newlyCredited };
+  checked = pendingDeposits.length;
+
+  for (const dep of pendingDeposits) {
+    try {
+      const normNet = normalizeDepositNetwork(dep.network);
+      // Do not use a stored DB amount as authoritative chain evidence. Each network
+      // path must prove transaction success, canonical inclusion, and exact output/log
+      // destination + amount before the credit RPC is called. That proof is not yet
+      // implemented for every pending-deposit path, so fail closed for this row.
+      if (!dep.tx_hash || typeof dep.tx_hash !== 'string') {
+        throw new Error('Missing transaction hash');
+      }
+      if (!['BTC', 'LTC', 'TRC20', ...Object.keys(SUPPORTED_EVM_CHAINS)].includes(normNet)) {
+        throw new Error(`Unsupported pending-deposit network: ${normNet || '(empty)'}`);
+      }
+      errors.push(`Pending deposit ${dep.tx_hash} on ${normNet}: re-verification is incomplete; no credit RPC was called`);
+    } catch (rowErr: unknown) {
+      errors.push(`Pending deposit row ${dep?.id ?? dep?.tx_hash ?? '(unknown)'} failed validation: ${rowErr instanceof Error ? rowErr.message : String(rowErr)}`);
+    }
+  }
+
+  if (errors.length > 0) {
+    console.error('[Deposit Ingestion] Pending confirmation refresh blocked unsafe/unverified credit attempts:', {
+      checked,
+      errorCount: errors.length,
+      errors: errors.slice(0, 20),
+    });
+  }
+
+  return { checked, newlyCredited, errors };
 }
 
 /**
