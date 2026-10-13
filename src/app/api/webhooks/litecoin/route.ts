@@ -4,10 +4,6 @@ import { getSupabaseAdminClient } from '@/lib/supabase/server';
 
 export const dynamic = 'force-dynamic';
 
-/**
- * Reject unauthenticated provider callbacks before they can reach the privileged deposit RPC.
- * Configure a provider-compatible signed gateway/header before enabling this endpoint.
- */
 function verifyWebhookSecret(req: Request): 'ok' | 'missing-config' | 'unauthorized' {
   const secret = process.env.LITECOIN_WEBHOOK_SECRET
     || process.env.BLOCKCHAIN_WEBHOOK_SECRET;
@@ -26,8 +22,21 @@ function verifyWebhookSecret(req: Request): 'ok' | 'missing-config' | 'unauthori
   return crypto.timingSafeEqual(expectedBytes, suppliedBytes) ? 'ok' : 'unauthorized';
 }
 
-export async function POST(req: NextRequest) {
+const LTC_TX_HASH_RE = /^[0-9a-fA-F]{64}$/;
+const LTC_ADDRESS_RE = /^(?:ltc1[ac-hj-np-z02-9]{11,87}|[LM3][1-9A-HJ-NP-Za-km-z]{25,36})$/;
+const DECIMAL_LTC_RE = /^(?:0|[1-9]\d*)(?:\.\d{1,8})?$/;
 
+function parseLtcAmount(input: unknown): number | null {
+  if (typeof input !== 'string' && typeof input !== 'number') return null;
+  if (typeof input === 'number' && !Number.isFinite(input)) return null;
+  const text = String(input);
+  if (!DECIMAL_LTC_RE.test(text)) return null;
+  const amount = Number(text);
+  if (!Number.isFinite(amount) || amount <= 0) return null;
+  return amount;
+}
+
+export async function POST(req: NextRequest) {
   const authResult = verifyWebhookSecret(req);
   if (authResult === 'missing-config') {
     return NextResponse.json({ error: 'Webhook authentication is not configured' }, { status: 503 });
@@ -37,74 +46,94 @@ export async function POST(req: NextRequest) {
   }
 
   try {
-    const rawBody = await req.text();
-    let payload: any = {};
+    let payload: unknown;
     try {
-      payload = JSON.parse(rawBody);
+      payload = await req.json();
     } catch {
       return NextResponse.json({ error: 'Invalid JSON payload' }, { status: 400 });
     }
 
-    const {
-      event,
-      txid,
-      tx_hash,
-      address,
-      amount,
-      value,
-      confirmations = 6,
-      output_index = 0,
-      block_height,
-    } = payload;
-
-    const txHash = txid || tx_hash;
-    const depositAmount = parseFloat(amount || value || '0');
-    const targetAddress = address?.trim();
-
-    if (!txHash || !targetAddress || isNaN(depositAmount) || depositAmount <= 0) {
+    if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
       return NextResponse.json({ error: 'Invalid deposit payload' }, { status: 400 });
     }
 
-    const supabaseAdmin = getSupabaseAdminClient();
+    const body = payload as Record<string, unknown>;
+    const txHashCandidate = typeof body.txid === 'string' && body.txid.trim()
+      ? body.txid.trim()
+      : typeof body.tx_hash === 'string' ? body.tx_hash.trim() : '';
+    if (!LTC_TX_HASH_RE.test(txHashCandidate)) {
+      return NextResponse.json({ error: 'Invalid transaction hash' }, { status: 400 });
+    }
 
-    // Call canonical atomic deposit RPC
+    if (typeof body.address !== 'string') {
+      return NextResponse.json({ error: 'Invalid destination address' }, { status: 400 });
+    }
+    const targetAddress = body.address.trim();
+    if (targetAddress !== body.address || !LTC_ADDRESS_RE.test(targetAddress)) {
+      return NextResponse.json({ error: 'Invalid destination address' }, { status: 400 });
+    }
+
+    const amountInput = body.amount !== undefined && body.amount !== null ? body.amount : body.value;
+    const depositAmount = parseLtcAmount(amountInput);
+    if (depositAmount === null) {
+      return NextResponse.json({ error: 'Invalid deposit amount' }, { status: 400 });
+    }
+
+    // Never invent output index or confirmation values when they are absent/malformed.
+    if (!Number.isSafeInteger(body.output_index) || (body.output_index as number) < 0) {
+      return NextResponse.json({ error: 'Invalid output index' }, { status: 400 });
+    }
+    if (!Number.isSafeInteger(body.confirmations) || (body.confirmations as number) < 0) {
+      return NextResponse.json({ error: 'Invalid confirmations value' }, { status: 400 });
+    }
+
+    let blockHeight: number | null = null;
+    if (body.block_height !== undefined && body.block_height !== null) {
+      if (!Number.isSafeInteger(body.block_height) || (body.block_height as number) < 0) {
+        return NextResponse.json({ error: 'Invalid block height' }, { status: 400 });
+      }
+      blockHeight = body.block_height as number;
+    }
+
+    const supabaseAdmin = getSupabaseAdminClient();
     const { data: rpcData, error: rpcErr } = await supabaseAdmin.rpc('process_deposit_atomic', {
       p_destination_address: targetAddress,
       p_asset_symbol: 'LTC',
       p_network_code: 'LTC',
       p_amount: depositAmount,
-      p_tx_hash: txHash,
-      p_output_index: Number(output_index) || 0,
-      p_block_number: block_height || null,
+      p_tx_hash: txHashCandidate,
+      p_output_index: body.output_index as number,
+      p_block_number: blockHeight,
       p_from_address: null,
       p_token_contract: null,
-      p_confirmations: Number(confirmations) || 6,
+      // This is provider-reported data, not independent chain verification.
+      p_confirmations: body.confirmations as number,
       p_provider: 'litecoin_webhook',
     });
 
     if (rpcErr) {
       console.error('[LTC Webhook] Canonical deposit processing error:', rpcErr.message);
       return NextResponse.json(
-        { success: false, error: rpcErr.message },
+        { success: false, error: 'Deposit processing failed' },
         { status: 500 }
       );
     }
 
     return NextResponse.json({
       success: true,
-      event: event || 'tx_confirmed',
+      event: typeof body.event === 'string' ? body.event : 'tx_confirmed',
       network: 'LTC',
-      txid: txHash,
+      txid: txHashCandidate,
       address: targetAddress,
       amount: depositAmount,
-      confirmations,
+      confirmations: body.confirmations,
       result: rpcData,
       processed_at: new Date().toISOString(),
     });
-  } catch (err: any) {
-    console.error('Error in POST /api/webhooks/litecoin:', err);
+  } catch (err) {
+    console.error('[LTC Webhook] Request processing failed:', err);
     return NextResponse.json(
-      { success: false, error: err?.message || 'Internal server error' },
+      { success: false, error: 'Internal server error' },
       { status: 500 }
     );
   }
