@@ -73,7 +73,7 @@ async function fetchOnChainConfirmations(
       if (!res.ok) return null;
       const data = await res.json();
 
-      if (!data || !data.blockNumber) {
+      if (!data || !Number.isInteger(data.blockNumber) || data.blockNumber < 0) {
         return null;
       }
 
@@ -81,15 +81,16 @@ async function fetchOnChainConfirmations(
         method: 'POST',
         headers,
       });
+      if (!nowRes.ok) return null;
+
       const nowData = await nowRes.json();
       const currentBlock = nowData?.block_header?.raw_data?.number;
-
-      if (currentBlock && data.blockNumber) {
-        const confs = Math.max(1, currentBlock - data.blockNumber + 1);
-        return { confirmations: confs, blockNumber: data.blockNumber };
+      if (!Number.isInteger(currentBlock) || currentBlock < data.blockNumber) {
+        return null;
       }
 
-      return { confirmations: 19, blockNumber: data.blockNumber };
+      const confs = currentBlock - data.blockNumber + 1;
+      return { confirmations: confs, blockNumber: data.blockNumber };
     } catch (tronErr) {
       console.warn(`Tron confirmation query error for ${txHash}:`, tronErr);
       return null;
@@ -159,11 +160,17 @@ async function fetchOnChainConfirmations(
 
     const [receipt, currentBlock] = await Promise.all([receiptPromise, blockPromise]);
 
-    if (!receipt || !receipt.blockNumber) {
-      return null; // Transaction still unmined
+    if (
+      !receipt ||
+      !Number.isInteger(receipt.blockNumber) ||
+      receipt.blockNumber < 0 ||
+      !Number.isInteger(currentBlock) ||
+      currentBlock < receipt.blockNumber
+    ) {
+      return null; // Missing, unmined, or inconsistent chain data
     }
 
-    const confs = Math.max(1, currentBlock - receipt.blockNumber + 1);
+    const confs = currentBlock - receipt.blockNumber + 1;
     return {
       confirmations: confs,
       blockNumber: receipt.blockNumber,
@@ -220,7 +227,25 @@ export async function runConfirmationsWorker(): Promise<ConfirmationWorkerResult
       try {
         const onChainData = await fetchOnChainConfirmations(deposit.tx_hash, normNet);
 
-        let currentConfirmations = prevConfs;
+        // Never submit stale database confirmations when the chain provider is unavailable.
+        // The canonical RPC takes the maximum of supplied and stored confirmations, so a
+        // stale high value could otherwise cross the credit threshold without fresh evidence.
+        if (!onChainData) {
+          result.failedCount++;
+          result.details.push({
+            depositId: deposit.id,
+            txHash: deposit.tx_hash,
+            network: normNet,
+            previousConfirmations: prevConfs,
+            newConfirmations: prevConfs,
+            requiredConfirmations: requiredConfs,
+            status: 'ERROR',
+            error: 'On-chain confirmation lookup unavailable or invalid; skipped deposit RPC',
+          });
+          continue;
+        }
+
+        let currentConfirmations = onChainData.confirmations;
         let blockNumber = deposit.block_number;
         let fromAddress = deposit.from_address;
 
