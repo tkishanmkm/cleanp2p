@@ -26,7 +26,7 @@ export async function POST(request: Request) {
   } catch (error: any) {
     console.error('Deposit worker error:', error);
     return NextResponse.json(
-      { error: error.message || 'Internal Server Error' },
+      { error: 'Internal Server Error', code: 'DEPOSIT_WORKER_FAILED' },
       { status: 500 }
     );
   }
