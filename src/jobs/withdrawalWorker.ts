@@ -129,12 +129,22 @@ export async function processWithdrawalQueue(): Promise<WithdrawalProcessResult>
       });
       const txHash = res.txHash;
 
-      await supabaseAdmin.rpc('complete_onchain_withdrawal', {
-        p_withdrawal_id: withdrawal.id,
-        p_tx_hash: txHash,
-      });
+      // Persist the broadcast hash without settling the withdrawal. Settlement must
+      // happen only after the confirmation worker verifies the chain transaction.
+      const { error: hashPersistErr } = await supabaseAdmin
+        .from('onchain_withdrawals')
+        .update({ tx_hash: txHash, status: 'BROADCASTED', updated_at: new Date().toISOString() })
+        .eq('id', withdrawal.id)
+        .eq('status', 'PROCESSING');
+      if (hashPersistErr) {
+        throw new Error(`Broadcast succeeded but tx hash persistence failed; manual reconciliation required: ${hashPersistErr.message}`);
+      }
+      await supabaseAdmin
+        .from('withdrawals')
+        .update({ tx_hash: txHash, txid: txHash, status: 'broadcasted', broadcasted_at: new Date().toISOString(), updated_at: new Date().toISOString() })
+        .eq('id', withdrawal.id);
 
-      console.log(`[Withdrawal Worker] Dispatched TRON payout ${withdrawal.id} (tx: ${txHash})`);
+      console.log(`[Withdrawal Worker] Broadcasted TRON payout ${withdrawal.id} (tx: ${txHash})`);
       return {
         processed: true,
         withdrawalId: withdrawal.id,
@@ -183,10 +193,20 @@ export async function processWithdrawalQueue(): Promise<WithdrawalProcessResult>
       });
     }
 
-    await supabaseAdmin.rpc('complete_onchain_withdrawal', {
-      p_withdrawal_id: withdrawal.id,
-      p_tx_hash: tx.hash,
-    });
+    // Persist the broadcast hash without settling the withdrawal. Settlement must
+    // happen only after the confirmation worker verifies the chain transaction.
+    const { error: hashPersistErr } = await supabaseAdmin
+      .from('onchain_withdrawals')
+      .update({ tx_hash: tx.hash, nonce, status: 'BROADCASTED', updated_at: new Date().toISOString() })
+      .eq('id', withdrawal.id)
+      .eq('status', 'PROCESSING');
+    if (hashPersistErr) {
+      throw new Error(`Broadcast succeeded but tx hash persistence failed; manual reconciliation required: ${hashPersistErr.message}`);
+    }
+    await supabaseAdmin
+      .from('withdrawals')
+      .update({ tx_hash: tx.hash, txid: tx.hash, status: 'broadcasted', broadcasted_at: new Date().toISOString(), updated_at: new Date().toISOString() })
+      .eq('id', withdrawal.id);
 
     console.log(`[Withdrawal Worker] Broadcasted EVM payout ${withdrawal.id} on ${network} (tx: ${tx.hash}, nonce: ${nonce})`);
     return {
