@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { SYSTEM_CONFIG } from '@/lib/config/env';
 import { getSupabaseAdminClient } from '@/lib/supabase/server';
-import { normalizeDepositNetwork } from '@/lib/hd-derivation-engine';
 import { CANONICAL_USDT_CONTRACTS } from '@/jobs/depositIngestion';
 import { verifyHmacSha256 } from '@/lib/webhooks/auth';
 
@@ -23,6 +22,11 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       payload = JSON.parse(rawBody);
     } catch {
       return NextResponse.json({ error: 'Invalid JSON payload' }, { status: 400 });
+    }
+
+    const network = payload.event?.network ?? payload.network;
+    if (network && network !== 'ETH_MAINNET') {
+      return NextResponse.json({ error: 'Unsupported network' }, { status: 400 });
     }
 
     const activity = payload.event?.activity;
@@ -51,6 +55,14 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     const normNet = rawAsset === 'ETH' ? 'ETH' : 'ERC20';
     const assetSymbol = rawAsset;
     const tokenContract = CANONICAL_USDT_CONTRACTS[normNet] || null;
+    if (rawAsset === 'USDT') {
+      const observedContract = typeof item.rawContract?.address === 'string'
+        ? item.rawContract.address.trim().toLowerCase()
+        : '';
+      if (!tokenContract || !observedContract || observedContract !== tokenContract.toLowerCase()) {
+        return NextResponse.json({ error: 'Unrecognized token contract' }, { status: 400 });
+      }
+    }
 
     const { data: rpcData, error: creditError } = await supabaseAdmin.rpc('process_deposit_atomic', {
       p_destination_address: toAddress,
