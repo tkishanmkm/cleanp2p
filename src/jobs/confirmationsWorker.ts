@@ -1,7 +1,6 @@
 import { createClient } from '@supabase/supabase-js';
 import { ethers } from 'ethers';
 import { normalizeDepositNetwork } from '@/lib/hd-derivation-engine';
-import { CANONICAL_USDT_CONTRACTS } from '@/jobs/depositIngestion';
 
 // Initialize Supabase admin client with service role key
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL || 'https://placeholder.supabase.co';
