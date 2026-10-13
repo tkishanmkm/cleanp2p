@@ -82,7 +82,9 @@ export async function getMonitoredAddresses(): Promise<{
       .from('deposit_addresses')
       .select('address, network_code, asset_code');
 
-    if (!pErr && primaryAddresses) {
+    if (pErr) throw new Error(`Failed to load deposit_addresses: ${pErr.message}`);
+    if (!primaryAddresses) throw new Error('Failed to load deposit_addresses: query returned no data');
+    {
       for (const row of primaryAddresses) {
         if (!row.address) continue;
         const clean = row.address.trim();
@@ -112,7 +114,9 @@ export async function getMonitoredAddresses(): Promise<{
       .from('user_deposit_addresses')
       .select('address, network, coin');
 
-    if (!fErr && fallbackAddresses) {
+    if (fErr) throw new Error(`Failed to load user_deposit_addresses: ${fErr.message}`);
+    if (!fallbackAddresses) throw new Error('Failed to load user_deposit_addresses: query returned no data');
+    {
       for (const row of fallbackAddresses) {
         if (!row.address) continue;
         const clean = row.address.trim();
@@ -142,7 +146,9 @@ export async function getMonitoredAddresses(): Promise<{
       .from('wallets')
       .select('address, chain, currency');
 
-    if (!wErr && userWallets) {
+    if (wErr) throw new Error(`Failed to load wallets: ${wErr.message}`);
+    if (!userWallets) throw new Error('Failed to load wallets: query returned no data');
+    {
       for (const row of userWallets) {
         if (!row.address) continue;
         const clean = row.address.trim();
@@ -167,7 +173,8 @@ export async function getMonitoredAddresses(): Promise<{
       }
     }
   } catch (err) {
-    console.error('[Deposit Ingestion] Error querying monitored deposit addresses:', err);
+    console.error('[Deposit Ingestion] Critical failure loading monitored deposit addresses:', err);
+    throw new Error('Deposit ingestion aborted: monitored address loading was incomplete.', { cause: err });
   }
 
   return { evmAddresses, tronAddresses, btcAddresses, ltcAddresses };
