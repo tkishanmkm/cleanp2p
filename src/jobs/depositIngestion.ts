@@ -1023,7 +1023,7 @@ export async function runDepositIngestion(): Promise<{
   ok: boolean;
   errorCount: number;
   results: IngestionResult[];
-  pendingRecheck: { checked: number; newlyCredited: number };
+  pendingRecheck: { checked: number; newlyCredited: number; errors: string[] };
 }> {
   // Address loading is a prerequisite. getMonitoredAddresses throws on any query failure.
   const { evmAddresses, tronAddresses, btcAddresses, ltcAddresses } = await getMonitoredAddresses();
@@ -1077,7 +1077,7 @@ export async function runDepositIngestion(): Promise<{
     results.push(result);
   }
 
-  let pendingRecheck = { checked: 0, newlyCredited: 0 };
+  let pendingRecheck = { checked: 0, newlyCredited: 0, errors: [] as string[] };
   try {
     pendingRecheck = await refreshPendingDepositConfirmations();
   } catch (pendingErr: unknown) {
@@ -1089,7 +1089,7 @@ export async function runDepositIngestion(): Promise<{
     });
   }
 
-  const errorCount = results.reduce((count, result) => count + result.errors.length, 0);
+  const errorCount = results.reduce((count, result) => count + result.errors.length, 0) + pendingRecheck.errors.length;
   const summary = { ok: errorCount === 0, errorCount, results, pendingRecheck };
   if (!summary.ok) {
     console.error('[Deposit Ingestion] Cycle completed with errors:', {
