@@ -961,28 +961,42 @@ export async function refreshPendingDepositConfirmations(): Promise<{
     checked = pendingDeposits.length;
 
     for (const dep of pendingDeposits) {
-      const normNet = normalizeDepositNetwork(dep.network);
-      const destinationAddress = dep.to_address || dep.address;
-      const outputIndex = dep.output_index ?? dep.log_index ?? 0;
-      const assetSymbol = (dep.asset_symbol || 'USDT').toUpperCase().trim();
-      const tokenContract = CANONICAL_USDT_CONTRACTS[normNet] || null;
+      try {
+        const normNet = normalizeDepositNetwork(dep.network);
+        const destinationAddress = dep.to_address || dep.address;
+        const outputIndex = dep.output_index ?? dep.log_index ?? 0;
+        const assetSymbol = (dep.asset_symbol || 'USDT').toUpperCase().trim();
+        const tokenContract = CANONICAL_USDT_CONTRACTS[normNet] || null;
 
-      if (normNet === 'TRC20') {
-        const tronWeb = getTronWeb(false);
-        const txInfo = await tronWeb.trx.getTransactionInfo(dep.tx_hash);
-        if (txInfo && txInfo.blockNumber) {
+        if (!destinationAddress || typeof dep.tx_hash !== 'string' || !dep.tx_hash.trim()) continue;
+        // Preserve the database's decimal representation as text at the RPC boundary.
+        // Do not perform Number(dep.amount), which can round financial values.
+        const amountText = String(dep.amount ?? '').trim();
+        if (!/^(?:0|[1-9]\d*)(?:\.\d+)?$/.test(amountText) || !/[1-9]/.test(amountText)) continue;
+        if (!Number.isSafeInteger(outputIndex) || outputIndex < 0) continue;
+
+        if (normNet === 'TRC20') {
+          const tronWeb = getTronWeb(false);
+          const txInfo = await tronWeb.trx.getTransactionInfo(dep.tx_hash);
+          const blockNumber = txInfo?.blockNumber;
+          // Do not promote a deposit unless the chain reports a successful transaction
+          // with a valid block and a current tip from which confirmations can be derived.
+          if (!txInfo || txInfo.receipt?.result !== 'SUCCESS' ||
+              !Number.isSafeInteger(blockNumber) || blockNumber <= 0) continue;
+
           const currentBlock = await tronWeb.trx.getCurrentBlock();
-          const currentHeight = currentBlock.block_header?.raw_data?.number || 0;
-          const confs = Math.max(1, currentHeight - txInfo.blockNumber + 1);
+          const currentHeight = currentBlock.block_header?.raw_data?.number;
+          if (!Number.isSafeInteger(currentHeight) || currentHeight < blockNumber) continue;
+          const confs = currentHeight - blockNumber + 1;
 
           const { data, error: rpcErr } = await supabaseAdmin.rpc('process_deposit_atomic', {
             p_destination_address: destinationAddress,
             p_asset_symbol: assetSymbol,
             p_network_code: 'TRC20',
-            p_amount: Number(dep.amount),
+            p_amount: amountText,
             p_tx_hash: dep.tx_hash,
             p_output_index: outputIndex,
-            p_block_number: txInfo.blockNumber,
+            p_block_number: blockNumber,
             p_from_address: dep.from_address || null,
             p_token_contract: tokenContract,
             p_confirmations: confs,
@@ -990,95 +1004,83 @@ export async function refreshPendingDepositConfirmations(): Promise<{
           });
 
           if (!rpcErr) {
-            const res = typeof data === 'string' ? JSON.parse(data) : data;
-            if (res?.status === 'credited') {
-              newlyCredited++;
-            }
+            const result = typeof data === 'string' ? JSON.parse(data) : data;
+            if (result?.credited === true || result?.status === 'CONFIRMED') newlyCredited++;
           }
-        }
-      } else if (normNet === 'BTC') {
-        const btcApiBase = process.env.BTC_MEMPOOL_API || 'https://mempool.space/api';
-        try {
-          const res = await fetch(`${btcApiBase}/tx/${dep.tx_hash}/status`);
-          if (res.ok) {
-            const statusData = await res.json();
-            const confs = statusData.confirmed ? 2 : 0;
-            const { data, error: rpcErr } = await supabaseAdmin.rpc('process_deposit_atomic', {
-              p_destination_address: destinationAddress,
-              p_asset_symbol: 'BTC',
-              p_network_code: 'BTC',
-              p_amount: Number(dep.amount),
-              p_tx_hash: dep.tx_hash,
-              p_output_index: outputIndex,
-              p_block_number: statusData.block_height || null,
-              p_from_address: null,
-              p_token_contract: null,
-              p_confirmations: confs,
-              p_provider: 'confirmations_worker',
-            });
-            if (!rpcErr) {
-              const r = typeof data === 'string' ? JSON.parse(data) : data;
-              if (r?.status === 'credited') newlyCredited++;
-            }
+        } else if (normNet === 'BTC' || normNet === 'LTC') {
+          const isBtc = normNet === 'BTC';
+          const apiBase = isBtc
+            ? getBtcMempoolApi()
+            : (process.env.LTC_MEMPOOL_API || 'https://litecoinspace.org/api');
+          if (!/^[0-9a-f]{64}$/i.test(dep.tx_hash)) continue;
+
+          const [statusResponse, tipResponse] = await Promise.all([
+            fetch(`${apiBase}/tx/${dep.tx_hash}/status`),
+            fetch(`${apiBase}/blocks/tip/height`),
+          ]);
+          if (!statusResponse.ok || !tipResponse.ok) continue;
+          const statusData = await statusResponse.json();
+          const tipHeightText = (await tipResponse.text()).trim();
+          const tipHeight = Number(tipHeightText);
+          if (!Number.isSafeInteger(tipHeight) || tipHeight < 0 ||
+              statusData?.confirmed !== true ||
+              !Number.isSafeInteger(statusData?.block_height) ||
+              statusData.block_height <= 0 || statusData.block_height > tipHeight) continue;
+
+          const confs = tipHeight - statusData.block_height + 1;
+          const { data, error: rpcErr } = await supabaseAdmin.rpc('process_deposit_atomic', {
+            p_destination_address: destinationAddress,
+            p_asset_symbol: isBtc ? 'BTC' : 'LTC',
+            p_network_code: normNet,
+            p_amount: amountText,
+            p_tx_hash: dep.tx_hash,
+            p_output_index: outputIndex,
+            p_block_number: statusData.block_height,
+            p_from_address: null,
+            p_token_contract: null,
+            p_confirmations: confs,
+            p_provider: 'confirmations_worker',
+          });
+          if (!rpcErr) {
+            const result = typeof data === 'string' ? JSON.parse(data) : data;
+            if (result?.credited === true || result?.status === 'CONFIRMED') newlyCredited++;
           }
-        } catch (_) {}
-      } else if (normNet === 'LTC') {
-        const ltcApiBase = process.env.LTC_MEMPOOL_API || 'https://litecoinspace.org/api';
-        try {
-          const res = await fetch(`${ltcApiBase}/tx/${dep.tx_hash}/status`);
-          if (res.ok) {
-            const statusData = await res.json();
-            const confs = statusData.confirmed ? 6 : 0;
-            const { data, error: rpcErr } = await supabaseAdmin.rpc('process_deposit_atomic', {
-              p_destination_address: destinationAddress,
-              p_asset_symbol: 'LTC',
-              p_network_code: 'LTC',
-              p_amount: Number(dep.amount),
-              p_tx_hash: dep.tx_hash,
-              p_output_index: outputIndex,
-              p_block_number: statusData.block_height || null,
-              p_from_address: null,
-              p_token_contract: null,
-              p_confirmations: confs,
-              p_provider: 'confirmations_worker',
-            });
-            if (!rpcErr) {
-              const r = typeof data === 'string' ? JSON.parse(data) : data;
-              if (r?.status === 'credited') newlyCredited++;
-            }
-          }
-        } catch (_) {}
-      } else {
-        const chain = SUPPORTED_EVM_CHAINS[normNet];
-        if (chain) {
+        } else {
+          const chain = SUPPORTED_EVM_CHAINS[normNet];
+          if (!chain || !/^0x[0-9a-f]{64}$/i.test(dep.tx_hash)) continue;
+
           const provider = getEvmProvider(normNet);
           const receipt = await provider.getTransactionReceipt(dep.tx_hash);
-          if (receipt && receipt.blockNumber) {
-            const currentBlock = await provider.getBlockNumber();
-            const confs = Math.max(1, currentBlock - receipt.blockNumber + 1);
+          if (!receipt || receipt.status !== 1 || !Number.isSafeInteger(receipt.blockNumber) ||
+              receipt.blockNumber <= 0 || !receipt.blockHash) continue;
+          const canonicalBlock = await provider.getBlock(receipt.blockNumber);
+          if (!canonicalBlock || canonicalBlock.hash?.toLowerCase() !== receipt.blockHash.toLowerCase()) continue;
+          const currentBlock = await provider.getBlockNumber();
+          if (currentBlock < receipt.blockNumber) continue;
+          const confs = currentBlock - receipt.blockNumber + 1;
 
-            const { data, error: rpcErr } = await supabaseAdmin.rpc('process_deposit_atomic', {
-              p_destination_address: destinationAddress,
-              p_asset_symbol: assetSymbol,
-              p_network_code: normNet,
-              p_amount: Number(dep.amount),
-              p_tx_hash: dep.tx_hash,
-              p_output_index: outputIndex,
-              p_block_number: receipt.blockNumber,
-              p_from_address: receipt.from?.toLowerCase() || dep.from_address || null,
-              p_token_contract: tokenContract,
-              p_confirmations: confs,
-              p_provider: 'confirmations_worker',
-            });
+          const { data, error: rpcErr } = await supabaseAdmin.rpc('process_deposit_atomic', {
+            p_destination_address: destinationAddress,
+            p_asset_symbol: assetSymbol,
+            p_network_code: normNet,
+            p_amount: amountText,
+            p_tx_hash: dep.tx_hash,
+            p_output_index: outputIndex,
+            p_block_number: receipt.blockNumber,
+            p_from_address: receipt.from?.toLowerCase() || dep.from_address || null,
+            p_token_contract: tokenContract,
+            p_confirmations: confs,
+            p_provider: 'confirmations_worker',
+          });
 
-            if (!rpcErr) {
-              const res = typeof data === 'string' ? JSON.parse(data) : data;
-              if (res?.status === 'credited') {
-                newlyCredited++;
-              }
-            }
+          if (!rpcErr) {
+            const result = typeof data === 'string' ? JSON.parse(data) : data;
+            if (result?.credited === true || result?.status === 'CONFIRMED') newlyCredited++;
           }
         }
+      } catch (depositError) {
+        // Isolate a single provider/data failure so one bad row does not abort the batch.
+        console.error('[Deposit Ingestion] Pending deposit recheck failed:', depositError);
       }
     }
   } catch (err) {
@@ -1087,7 +1089,6 @@ export async function refreshPendingDepositConfirmations(): Promise<{
 
   return { checked, newlyCredited };
 }
-
 /**
  * Main deposit ingestion cycle execution
  */
