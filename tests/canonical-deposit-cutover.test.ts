@@ -1,11 +1,26 @@
-import { config as loadDotenv } from 'dotenv';
-loadDotenv({ path: '.env.local' });
 import { createClient } from '@supabase/supabase-js';
 import { CANONICAL_USDT_CONTRACTS } from '../src/jobs/depositIngestion';
 import { normalizeDepositNetwork } from '../src/lib/hd-derivation-engine';
 
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL || 'https://placeholder.supabase.co';
-const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'placeholder-key';
+// This suite performs destructive writes through privileged RPCs. It must never
+// load application .env.local or fall back to production/anon credentials.
+if (process.env.ALLOW_DESTRUCTIVE_DEPOSIT_CUTOVER_TESTS !== 'true') {
+  throw new Error('Refusing to run destructive deposit cutover tests. Set ALLOW_DESTRUCTIVE_DEPOSIT_CUTOVER_TESTS=true only for an isolated local Supabase test project.');
+}
+const supabaseUrl = process.env.SUPABASE_TEST_URL;
+const supabaseKey = process.env.SUPABASE_TEST_SERVICE_ROLE_KEY;
+if (!supabaseUrl || !supabaseKey) {
+  throw new Error('Set SUPABASE_TEST_URL and SUPABASE_TEST_SERVICE_ROLE_KEY for an isolated local Supabase test project.');
+}
+let testHost: string;
+try {
+  testHost = new URL(supabaseUrl).hostname;
+} catch {
+  throw new Error('SUPABASE_TEST_URL must be a valid local Supabase URL.');
+}
+if (!['localhost', '127.0.0.1', '::1'].includes(testHost)) {
+  throw new Error('Refusing to run destructive deposit cutover tests against a non-local database host.');
+}
 
 const supabase = createClient(supabaseUrl, supabaseKey, {
   auth: { persistSession: false, autoRefreshToken: false },
