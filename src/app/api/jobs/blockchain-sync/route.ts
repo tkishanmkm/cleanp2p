@@ -1,28 +1,34 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { runDepositIngestion } from '@/jobs/depositIngestion';
 import { processAllPendingWithdrawals, checkSubmittedWithdrawals } from '@/jobs/withdrawalWorker';
+import { timingSafeEqualString } from '@/lib/security/worker-auth';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60; // 60 seconds maximum execution duration
 
 function verifyCronAuthorization(req: NextRequest): boolean {
-  const cronSecret = process.env.CRON_SECRET || process.env.WORKER_SECRET;
+  const configuredSecret = process.env.CRON_SECRET || process.env.WORKER_SECRET;
 
-  // In production environments with a configured secret, enforce strict validation
-  if (cronSecret && cronSecret.trim().length > 0) {
-    const authHeader = req.headers.get('authorization');
-    const xCronHeader = req.headers.get('x-cron-secret');
-
-    const bearerToken = authHeader?.startsWith('Bearer ')
-      ? authHeader.substring(7).trim()
-      : null;
-
-    if (bearerToken !== cronSecret && xCronHeader !== cronSecret) {
-      return false;
-    }
+  // Never allow this privileged combined worker to run without a configured secret.
+  if (!configuredSecret || !configuredSecret.trim()) {
+    console.error('[Blockchain Sync Cron] CRON_SECRET or WORKER_SECRET is not configured.');
+    return false;
   }
 
-  return true;
+  const expectedSecret = configuredSecret.trim();
+  const authHeader = req.headers.get('authorization');
+  const xCronHeader = req.headers.get('x-cron-secret');
+
+  const bearerToken = authHeader?.match(/^Bearer\s+(.+)$/i)?.[1]?.trim() ?? null;
+
+  if (
+    (bearerToken && timingSafeEqualString(bearerToken, expectedSecret)) ||
+    (xCronHeader && timingSafeEqualString(xCronHeader.trim(), expectedSecret))
+  ) {
+    return true;
+  }
+
+  return false;
 }
 
 async function handleSync(req: NextRequest) {
