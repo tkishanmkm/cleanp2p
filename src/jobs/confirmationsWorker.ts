@@ -287,7 +287,8 @@ export async function runConfirmationsWorker(): Promise<ConfirmationWorkerResult
           p_destination_address: destinationAddress,
           p_asset_symbol: assetSymbol,
           p_network_code: normNet,
-          p_amount: Number(deposit.amount),
+          // Pass decimal text to Postgres numeric without another JS Number coercion.
+          p_amount: String(deposit.amount),
           p_tx_hash: deposit.tx_hash,
           p_output_index: outputIndex,
           p_block_number: blockNumber,
@@ -312,7 +313,23 @@ export async function runConfirmationsWorker(): Promise<ConfirmationWorkerResult
           });
         } else {
           const parsedRes = typeof rpcData === 'string' ? JSON.parse(rpcData) : rpcData;
-          const isCredited = parsedRes?.status === 'credited' || parsedRes?.status === 'CONFIRMED' || parsedRes?.status === 'ALREADY_CREDITED';
+          if (!parsedRes || parsedRes.success === false) {
+            result.failedCount++;
+            result.details.push({
+              depositId: deposit.id,
+              txHash: deposit.tx_hash,
+              network: normNet,
+              previousConfirmations: prevConfs,
+              newConfirmations: currentConfirmations,
+              requiredConfirmations: requiredConfs,
+              status: 'ERROR',
+              error: parsedRes?.message || parsedRes?.code || 'Deposit RPC rejected the request',
+            });
+            continue;
+          }
+
+          const rpcStatus = typeof parsedRes.status === 'string' ? parsedRes.status.toUpperCase() : '';
+          const isCredited = ['CREDITED', 'CONFIRMED', 'ALREADY_CREDITED'].includes(rpcStatus);
 
           if (isCredited) {
             result.confirmedCount++;
@@ -325,7 +342,7 @@ export async function runConfirmationsWorker(): Promise<ConfirmationWorkerResult
               requiredConfirmations: requiredConfs,
               status: 'CREDITED',
             });
-          } else {
+          } else if (rpcStatus === 'PENDING') {
             result.pendingCount++;
             result.details.push({
               depositId: deposit.id,
@@ -335,6 +352,18 @@ export async function runConfirmationsWorker(): Promise<ConfirmationWorkerResult
               newConfirmations: currentConfirmations,
               requiredConfirmations: requiredConfs,
               status: 'PENDING',
+            });
+          } else {
+            result.failedCount++;
+            result.details.push({
+              depositId: deposit.id,
+              txHash: deposit.tx_hash,
+              network: normNet,
+              previousConfirmations: prevConfs,
+              newConfirmations: currentConfirmations,
+              requiredConfirmations: requiredConfs,
+              status: 'ERROR',
+              error: `Unexpected process_deposit_atomic status: ${rpcStatus || 'missing'}`,
             });
           }
         }
