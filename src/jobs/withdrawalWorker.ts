@@ -149,7 +149,7 @@ export async function processWithdrawalQueue(): Promise<WithdrawalProcessResult>
         processed: true,
         withdrawalId: withdrawal.id,
         txHash,
-        status: 'COMPLETED',
+        status: 'BROADCASTED',
       };
     }
 
@@ -214,7 +214,7 @@ export async function processWithdrawalQueue(): Promise<WithdrawalProcessResult>
       withdrawalId: withdrawal.id,
       txHash: tx.hash,
       nonce,
-      status: 'COMPLETED',
+      status: 'BROADCASTED',
     };
 
   } catch (err: any) {
