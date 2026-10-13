@@ -24,8 +24,16 @@ function verifyWebhookSecret(req: Request): 'ok' | 'missing-config' | 'unauthori
   return crypto.timingSafeEqual(expectedBytes, suppliedBytes) ? 'ok' : 'unauthorized';
 }
 
-export async function POST(req: Request) {
+const TX_HASH_RE = /^[0-9a-fA-F]{64}$/;
+const BTC_ADDRESS_MAX_LENGTH = 100;
 
+type BlockCypherOutput = {
+  addresses?: unknown;
+  value?: unknown;
+  n?: unknown;
+};
+
+export async function POST(req: Request) {
   const authResult = verifyWebhookSecret(req);
   if (authResult === 'missing-config') {
     return NextResponse.json({ error: 'Webhook authentication is not configured' }, { status: 503 });
@@ -34,45 +42,101 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: 'Unauthorized webhook request' }, { status: 401 });
   }
 
-  const payload = await req.json().catch(() => ({}));
-  const { hash: txHash, outputs, confirmations = 0, block_height } = payload;
-
-  if (!txHash || !Array.isArray(outputs)) {
-    return NextResponse.json({ message: 'Invalid payload' }, { status: 400 });
+  let payload: {
+    hash?: unknown;
+    outputs?: unknown;
+    confirmations?: unknown;
+    block_height?: unknown;
+  };
+  try {
+    payload = await req.json();
+  } catch {
+    return NextResponse.json({ error: 'Invalid JSON payload' }, { status: 400 });
   }
 
-  // Process only transactions with valid hash
-  const supabaseAdmin = getSupabaseAdminClient();
-  const results = [];
+  const txHash = typeof payload.hash === 'string' ? payload.hash.trim() : '';
+  if (!TX_HASH_RE.test(txHash)) {
+    return NextResponse.json({ error: 'Invalid transaction hash' }, { status: 400 });
+  }
+  if (!Array.isArray(payload.outputs) || payload.outputs.length === 0) {
+    return NextResponse.json({ error: 'Invalid transaction outputs' }, { status: 400 });
+  }
 
+  const confirmations = payload.confirmations;
+  if (!Number.isSafeInteger(confirmations) || (confirmations as number) < 0) {
+    return NextResponse.json({ error: 'Invalid confirmations value' }, { status: 400 });
+  }
+
+  let blockHeight: number | null = null;
+  if (payload.block_height !== undefined && payload.block_height !== null) {
+    if (!Number.isSafeInteger(payload.block_height) || (payload.block_height as number) < 0) {
+      return NextResponse.json({ error: 'Invalid block height' }, { status: 400 });
+    }
+    blockHeight = payload.block_height as number;
+  }
+
+  const outputs = payload.outputs as BlockCypherOutput[];
+  const validatedOutputs: Array<{ address: string; satoshis: number; outputIndex: number }> = [];
   for (const output of outputs) {
-    const toAddress = output.addresses?.[0];
-    const valueBtc = (output.value || 0) / 1e8; // Convert Satoshis to BTC
-    const outputIndex = typeof output.n === 'number' ? output.n : 0;
+    if (!output || typeof output !== 'object') {
+      return NextResponse.json({ error: 'Invalid transaction output' }, { status: 400 });
+    }
+    if (
+      !Array.isArray(output.addresses) ||
+      typeof output.addresses[0] !== 'string' ||
+      output.addresses[0].length === 0 ||
+      output.addresses[0].length > BTC_ADDRESS_MAX_LENGTH ||
+      output.addresses[0].trim() !== output.addresses[0]
+    ) {
+      return NextResponse.json({ error: 'Invalid output address' }, { status: 400 });
+    }
+    if (!Number.isSafeInteger(output.value) || (output.value as number) <= 0) {
+      return NextResponse.json({ error: 'Invalid output value' }, { status: 400 });
+    }
+    if (!Number.isSafeInteger(output.n) || (output.n as number) < 0) {
+      return NextResponse.json({ error: 'Invalid output index' }, { status: 400 });
+    }
+    validatedOutputs.push({
+      address: output.addresses[0],
+      satoshis: output.value as number,
+      outputIndex: output.n as number,
+    });
+  }
 
-    if (!toAddress || valueBtc <= 0) continue;
+  const supabaseAdmin = getSupabaseAdminClient();
+  const results: Array<{ txHash: string; outputIndex: number; status: 'processed' | 'failed'; error?: string; result?: unknown }> = [];
 
-    // Call canonical atomic deposit RPC
+  for (const output of validatedOutputs) {
     const { data: rpcData, error: rpcErr } = await supabaseAdmin.rpc('process_deposit_atomic', {
-      p_destination_address: toAddress,
+      p_destination_address: output.address,
       p_asset_symbol: 'BTC',
       p_network_code: 'BTC',
-      p_amount: valueBtc,
+      p_amount: output.satoshis / 1e8,
       p_tx_hash: txHash,
-      p_output_index: outputIndex,
-      p_block_number: block_height || null,
+      p_output_index: output.outputIndex,
+      p_block_number: blockHeight,
       p_from_address: null,
       p_token_contract: null,
-      p_confirmations: confirmations || 0,
+      // Provider-supplied confirmations are only a hint, not independent chain verification.
+      p_confirmations: confirmations as number,
       p_provider: 'blockcypher_webhook',
     });
 
     if (rpcErr) {
-      console.error(`[Blockcypher Webhook] RPC error for ${txHash}:${outputIndex}:`, rpcErr.message);
-      results.push({ txHash, outputIndex, error: rpcErr.message });
+      console.error(`[Blockcypher Webhook] RPC error for ${txHash}:${output.outputIndex}:`, rpcErr.message);
+      results.push({ txHash, outputIndex: output.outputIndex, status: 'failed', error: 'Deposit processing failed' });
     } else {
-      results.push({ txHash, outputIndex, result: rpcData });
+      results.push({ txHash, outputIndex: output.outputIndex, status: 'processed', result: rpcData });
     }
+  }
+
+  const failed = results.filter((result) => result.status === 'failed').length;
+  if (failed > 0) {
+    // Avoid acknowledging partial failures as a successful provider delivery.
+    return NextResponse.json(
+      { status: failed === results.length ? 'failed' : 'partial_failure', processed: results.length - failed, failed },
+      { status: 500 }
+    );
   }
 
   return NextResponse.json({ status: 'success', processed: results.length, results }, { status: 200 });
