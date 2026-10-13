@@ -247,7 +247,7 @@ async function scanEvmTokenDeposits(
         const confirmations = Math.max(1, latestBlock - log.blockNumber + 1);
 
         // Call canonical atomic deposit RPC
-        const { data, error } = await getDepositSupabaseAdmin().rpc('process_deposit_atomic', {
+        const { data, error } = await rejectUnverifiedScannerCredit({
           p_destination_address: toAddress,
           p_asset_symbol: 'USDT',
           p_network_code: normNet,
@@ -329,7 +329,7 @@ async function scanEvmNativeDeposits(
                 const confirmations = latestBlock >= txBlock ? latestBlock - txBlock + 1 : 1;
 
                 detected++;
-                const { data, error } = await getDepositSupabaseAdmin().rpc('process_deposit_atomic', {
+                const { data, error } = await rejectUnverifiedScannerCredit({
                   p_destination_address: address.toLowerCase(),
                   p_asset_symbol: assetSymbol === 'ETH' ? 'ETH' : assetSymbol,
                   p_network_code: normNet === 'ERC20' ? 'ETH' : normNet,
@@ -376,7 +376,7 @@ async function scanEvmNativeDeposits(
           const numericAmount = parseFloat(formattedAmount);
           const confirmations = Math.max(1, latestBlock - b + 1);
 
-          const { data, error } = await getDepositSupabaseAdmin().rpc('process_deposit_atomic', {
+          const { data, error } = await rejectUnverifiedScannerCredit({
             p_destination_address: toClean,
             p_asset_symbol: chainConfig.nativeSymbol === 'ETH' ? 'ETH' : chainConfig.nativeSymbol,
             p_network_code: normNet === 'ERC20' ? 'ETH' : normNet,
@@ -577,7 +577,7 @@ async function scanTronDeposits(
 
             detected++;
 
-            const { data: rpcData, error } = await getDepositSupabaseAdmin().rpc('process_deposit_atomic', {
+            const { data: rpcData, error } = await rejectUnverifiedScannerCredit({
               p_destination_address: toAddr,
               p_asset_symbol: 'USDT',
               p_network_code: 'TRC20',
@@ -647,7 +647,7 @@ async function scanTronDeposits(
               ? latestBlock - eventBlock + 1
               : 1;
 
-            const { data: rpcData, error } = await getDepositSupabaseAdmin().rpc('process_deposit_atomic', {
+            const { data: rpcData, error } = await rejectUnverifiedScannerCredit({
               p_destination_address: toBase58,
               p_asset_symbol: 'USDT',
               p_network_code: 'TRC20',
@@ -775,7 +775,7 @@ async function scanTronDeposits(
 
           detected++;
 
-          const { data: rpcData, error } = await getDepositSupabaseAdmin().rpc('process_deposit_atomic', {
+          const { data: rpcData, error } = await rejectUnverifiedScannerCredit({
             p_destination_address: toBase58,
             p_asset_symbol: 'USDT',
             p_network_code: 'TRC20',
@@ -852,7 +852,7 @@ async function scanBtcDeposits(
           const blockHeight = tx.status?.block_height;
           let confirmations = isConfirmed ? 2 : 0;
 
-          const { data, error } = await getDepositSupabaseAdmin().rpc('process_deposit_atomic', {
+          const { data, error } = await rejectUnverifiedScannerCredit({
             p_destination_address: btcAddr,
             p_asset_symbol: 'BTC',
             p_network_code: 'BTC',
@@ -927,7 +927,7 @@ async function scanLtcDeposits(
           const blockHeight = tx.status?.block_height;
           let confirmations = isConfirmed ? 6 : 0;
 
-          const { data, error } = await getDepositSupabaseAdmin().rpc('process_deposit_atomic', {
+          const { data, error } = await rejectUnverifiedScannerCredit({
             p_destination_address: ltcAddr,
             p_asset_symbol: 'LTC',
             p_network_code: 'LTC',
@@ -1112,6 +1112,18 @@ export async function refreshPendingDepositConfirmations(): Promise<{
 /**
  * Main deposit ingestion cycle execution
  */
+// Legacy scanner paths have not yet proved canonical transaction inclusion and exact
+// output/event identity. Keep them from reaching the credit RPC until each path is
+// independently hardened. The canonical pending verifier uses the real RPC below.
+async function rejectUnverifiedScannerCredit(
+  _params: Record<string, unknown>,
+): Promise<{ data: null; error: { message: string } }> {
+  return {
+    data: null,
+    error: { message: 'Direct scanner credit disabled: canonical transaction verification is required' },
+  };
+}
+
 export async function runDepositIngestion(): Promise<{
   ok: boolean;
   errorCount: number;
