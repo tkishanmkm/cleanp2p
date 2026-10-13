@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
 import { createServerClient } from '@supabase/ssr';
 import { createClient } from '@supabase/supabase-js';
-import { getOrDeriveUserDepositAddresses, deriveAllAddresses } from '@/lib/hd-derivation-engine';
+import { getOrDeriveUserDepositAddresses } from '@/lib/hd-derivation-engine';
 
 export const dynamic = 'force-dynamic';
 
@@ -69,71 +69,34 @@ export async function GET(req: NextRequest) {
       }
     }
 
-    // 3. Allow query parameter user_id override if present
-    const { searchParams } = new URL(req.url);
-    const queryUserId = searchParams.get('user_id');
-    if (queryUserId && !userId) {
-      userId = queryUserId;
+    // A user ID supplied by the caller is not proof of identity. Do not derive
+    // or disclose deposit addresses for an unauthenticated request.
+    if (!userId) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    // 4. Authenticated / identified user logic
-    if (userId) {
-      const result = await getOrDeriveUserDepositAddresses(userId);
-
-      return NextResponse.json({
-        success: true,
-        wallet_index: result.walletIndex,
-        addresses: {
-          evm: result.addresses.ETH,
-          tron: result.addresses.USDT_TRC20,
-          btc: result.addresses.BTC,
-          ltc: result.addresses.LTC,
-          // Cross-compatible keys for UI components
-          BTC: result.addresses.BTC,
-          ETH: result.addresses.ETH,
-          LTC: result.addresses.LTC,
-          USDT_ERC20: result.addresses.USDT_ERC20,
-          USDT_BEP20: result.addresses.USDT_BEP20,
-          USDT_TRC20: result.addresses.USDT_TRC20,
-        },
-        userId: result.userId,
-        walletIndex: result.walletIndex,
-        profile: result.profile || null,
-        records: result.records,
-        metadata: result.metadata,
-      });
-    }
-
-    // 5. Fallback for unauthenticated/preview state: deterministic index 1 addresses
-    const defaultAddresses = deriveAllAddresses(1);
+    const result = await getOrDeriveUserDepositAddresses(userId);
 
     return NextResponse.json({
       success: true,
-      authenticated: false,
-      wallet_index: 1,
+      wallet_index: result.walletIndex,
       addresses: {
-        evm: defaultAddresses.ETH,
-        tron: defaultAddresses.USDT_TRC20,
-        btc: defaultAddresses.BTC,
-        ltc: defaultAddresses.LTC,
-        BTC: defaultAddresses.BTC,
-        ETH: defaultAddresses.ETH,
-        LTC: defaultAddresses.LTC,
-        USDT_ERC20: defaultAddresses.USDT_ERC20,
-        USDT_BEP20: defaultAddresses.USDT_BEP20,
-        USDT_TRC20: defaultAddresses.USDT_TRC20,
+        evm: result.addresses.ETH,
+        tron: result.addresses.USDT_TRC20,
+        btc: result.addresses.BTC,
+        ltc: result.addresses.LTC,
+        BTC: result.addresses.BTC,
+        ETH: result.addresses.ETH,
+        LTC: result.addresses.LTC,
+        USDT_ERC20: result.addresses.USDT_ERC20,
+        USDT_BEP20: result.addresses.USDT_BEP20,
+        USDT_TRC20: result.addresses.USDT_TRC20,
       },
-      walletIndex: 1,
-      profile: null,
-      metadata: {
-        btcDerivationPath: "m/84'/0'/0'/0/1",
-        ethDerivationPath: "m/44'/60'/0'/0/1",
-        ltcDerivationPath: "m/84'/2'/0'/0/1",
-        tronDerivationPath: "m/44'/195'/0'/0/1",
-        evmAddressReusedFor: ['ETH', 'USDT_ERC20', 'USDT_BEP20'],
-        allowedChainNetworks: ['ERC20', 'BEP20', 'TRC20', 'BTC', 'LTC', 'ETH'],
-        derivedAt: new Date().toISOString(),
-      },
+      userId: result.userId,
+      walletIndex: result.walletIndex,
+      profile: result.profile || null,
+      records: result.records,
+      metadata: result.metadata,
     });
   } catch (err: unknown) {
     const errorMsg = err instanceof Error ? err.message : String(err);
