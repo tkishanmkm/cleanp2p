@@ -45,6 +45,10 @@ next-env.d.ts
 ,env-1.local
 !.env.example
 
+# Supabase CLI generated local state (do not commit linked project metadata)
+/supabase/.temp/
+/supabase/.branches/
+
 # firebase
 firebase-debug.log
 firestore-debug.log
