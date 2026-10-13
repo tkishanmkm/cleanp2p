@@ -148,8 +148,11 @@ async function fetchOnChainConfirmations(
       if (!res.ok) return null;
       const statusData = await res.json();
 
-      if (!statusData?.confirmed || !Number.isInteger(statusData.block_height) || statusData.block_height < 0) {
-        return { confirmations: 0 };
+      // A missing/unconfirmed transaction is not fresh confirmation evidence.
+      // Return null so the caller skips the SQL RPC; that RPC preserves the maximum
+      // stored confirmation count and must not be fed a synthetic zero on reorgs.
+      if (statusData?.confirmed !== true || !Number.isInteger(statusData.block_height) || statusData.block_height < 0) {
+        return null;
       }
 
       const tipRes = await fetch(`${ltcApiBase}/blocks/tip/height`);
