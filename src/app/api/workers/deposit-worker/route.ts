@@ -13,14 +13,18 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    const { results, pendingRecheck } = await runDepositIngestion();
+    const ingestion = await runDepositIngestion();
+    const success = ingestion.ok && ingestion.errorCount === 0;
 
     return NextResponse.json({
-      success: true,
-      results,
-      pendingRecheck,
-      message: 'Deposit scan completed; direct scanner credit is disabled, and pending credit is limited to the verified supported EVM path.',
-    });
+      success,
+      errorCount: ingestion.errorCount,
+      results: ingestion.results,
+      pendingRecheck: ingestion.pendingRecheck,
+      message: success
+        ? 'Deposit scan completed without reported errors; automatic credit remains disabled pending a validated credit trust boundary.'
+        : 'Deposit scan reported errors; deposits may remain pending because automatic credit is fail-closed.',
+    }, { status: success ? 200 : 500 });
   } catch (error: any) {
     console.error('Deposit worker error:', error);
     return NextResponse.json(
