@@ -11,7 +11,8 @@ interface ScannedDepositMatch {
   txHash: string;
   fromAddress?: string;
   toAddress: string;
-  amount: number;
+  // Decimal string preserves exact token/native units for PostgreSQL numeric.
+  amount: string;
   asset: string;
   network: string;
   tokenContract: string | null;
@@ -169,7 +170,6 @@ async function processDepositWorker(req: NextRequest) {
       if (!tx || !tx.hash) continue;
 
       const txTo = tx.to ? tx.to.toLowerCase() : null;
-      const txData = tx.data || '0x';
 
       // Native Transfer (ETH)
       const nativeRecipientConfigs = txTo ? evmAddressMap.get(txTo) || [] : [];
@@ -179,8 +179,8 @@ async function processDepositWorker(req: NextRequest) {
         nativeRecipientConfigs.some((config) => config.networkCode === 'ETH' && config.assetCode === 'ETH') &&
         tx.value > BigInt(0)
       ) {
-        const formattedAmount = parseFloat(ethers.formatEther(tx.value));
-        if (Number.isFinite(formattedAmount) && formattedAmount > 0) {
+        const formattedAmount = ethers.formatEther(tx.value);
+        if (formattedAmount !== '0.0' && tx.value > 0n) {
           matchedDeposits.push({
             txHash: tx.hash,
             fromAddress: tx.from?.toLowerCase(),
@@ -202,8 +202,6 @@ async function processDepositWorker(req: NextRequest) {
       const expectedContract = CANONICAL_USDT_CONTRACTS[expectedTokenNetwork]?.toLowerCase();
       if (!expectedContract) continue;
 
-      if (txTo !== expectedContract) continue;
-
       try {
         const receipt = await provider.getTransactionReceipt(tx.hash);
         if (!receipt || receipt.status !== 1 || receipt.blockNumber !== scannedBlockNumber || receipt.blockHash.toLowerCase() !== block.hash.toLowerCase()) continue;
@@ -224,8 +222,10 @@ async function processDepositWorker(req: NextRequest) {
           if (rawAmount <= 0n) continue;
 
           const decimals = expectedTokenNetwork === 'ERC20' ? 6 : 18;
-          const formattedAmount = Number(ethers.formatUnits(rawAmount, decimals));
-          if (!Number.isFinite(formattedAmount) || formattedAmount <= 0) continue;
+          // Keep the exact decimal representation; converting to Number can round
+          // large transfers and cause a mismatch with the on-chain amount.
+          const formattedAmount = ethers.formatUnits(rawAmount, decimals);
+          if (!formattedAmount || /^0+(\.0+)?$/.test(formattedAmount)) continue;
 
           matchedDeposits.push({
             txHash: tx.hash,
