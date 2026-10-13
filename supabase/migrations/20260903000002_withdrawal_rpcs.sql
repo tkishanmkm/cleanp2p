@@ -142,8 +142,7 @@ BEGIN
     END;
 
     -- Record immutable ledger entry
-    BEGIN
-        INSERT INTO public.ledger_entries (
+    INSERT INTO public.ledger_entries (
             wallet_id,
             user_id,
             asset_code,
@@ -168,10 +167,7 @@ BEGIN
             'onchain_withdrawals',
             v_withdrawal_id::TEXT,
             'wlock_' || v_withdrawal_id::TEXT
-        );
-    EXCEPTION WHEN OTHERS THEN
-        NULL;
-    END;
+    );
 
     RETURN v_withdrawal_id;
 END;
@@ -255,8 +251,7 @@ BEGIN
     END;
 
     -- Record refund ledger entry
-    BEGIN
-        INSERT INTO public.ledger_entries (
+    INSERT INTO public.ledger_entries (
             wallet_id,
             user_id,
             asset_code,
@@ -281,10 +276,7 @@ BEGIN
             'onchain_withdrawals',
             p_withdrawal_id::TEXT,
             'wrefund_' || p_withdrawal_id::TEXT
-        );
-    EXCEPTION WHEN OTHERS THEN
-        NULL;
-    END;
+    );
 
     RETURN jsonb_build_object(
         'success', true,
