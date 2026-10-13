@@ -419,12 +419,14 @@ export async function processAllPendingWithdrawals(maxBatch: number = 20): Promi
   let hasLock = false;
   try {
     const { data: lockAcquired, error: lockErr } = await supabaseAdmin.rpc('acquire_withdrawal_worker_lock');
-    if (!lockErr && lockAcquired === true) {
-      hasLock = true;
-    } else if (!lockErr && lockAcquired === false) {
-      console.warn('[Withdrawal Worker Singleton] Another worker instance is currently holding the dispatch lease. Exiting batch run.');
+    if (lockErr || lockAcquired !== true) {
+      console.warn(
+        '[Withdrawal Worker Singleton] Lock acquisition could not be verified; refusing to dispatch withdrawals.',
+        lockErr
+      );
       return { totalProcessed: 0, results: [], locked: true };
     }
+    hasLock = true;
   } catch (lockRpcErr) {
     // Never dispatch payouts when singleton-lock state cannot be verified.
     console.error('[Withdrawal Worker Singleton] Lock RPC failed; refusing to dispatch withdrawals.', lockRpcErr);
