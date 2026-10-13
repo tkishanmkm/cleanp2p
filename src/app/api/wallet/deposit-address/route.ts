@@ -15,9 +15,6 @@ const supabaseAdmin = createClient(
 );
 
 async function resolveUserId(req: NextRequest): Promise<string | null> {
-  let userId = req.headers.get('x-user-id');
-  if (userId) return userId;
-
   const authHeader = req.headers.get('authorization');
   if (authHeader && authHeader.startsWith('Bearer ')) {
     const token = authHeader.replace(/^Bearer\s+/i, '').trim();
@@ -40,8 +37,7 @@ async function resolveUserId(req: NextRequest): Promise<string | null> {
     } catch {}
   }
 
-  const { searchParams } = new URL(req.url);
-  return searchParams.get('user_id');
+  return null;
 }
 
 import { getOrDeriveUserDepositAddresses } from '@/lib/hd-derivation-engine';
