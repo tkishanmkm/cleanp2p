@@ -4,8 +4,21 @@ import { normalizeDepositNetwork } from '@/lib/hd-derivation-engine';
 import { CANONICAL_USDT_CONTRACTS } from '@/jobs/depositIngestion';
 
 // Initialize Supabase admin client with service role key
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL || 'https://placeholder.supabase.co';
-const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'placeholder-key';
+const supabaseUrl = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://placeholder.supabase.co';
+const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || 'placeholder-key';
+
+function hasValidSupabaseAdminConfig(): boolean {
+  const url = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!url || !key || !key.trim()) return false;
+  if (/placeholder|example|your[-_ ]/i.test(url) || /placeholder|example|your[-_ ]/i.test(key)) return false;
+  try {
+    const parsed = new URL(url);
+    return parsed.protocol === 'https:' && Boolean(parsed.hostname);
+  } catch {
+    return false;
+  }
+}
 
 const supabaseAdmin = createClient(supabaseUrl, supabaseKey, {
   auth: {
@@ -150,10 +163,14 @@ async function fetchOnChainConfirmations(
       return null;
     }
   }
-  // Handle EVM networks (ERC20, BEP20, ETH)
+  // Handle EVM networks (ERC20, BEP20, ETH) only; unknown networks fail closed.
+  if (!['ERC20', 'BEP20', 'ETH'].includes(norm)) return null;
   try {
     const rpcUrl = getRpcUrl(network);
     const provider = new ethers.JsonRpcProvider(rpcUrl);
+    const expectedChainId = norm === 'BEP20' ? 56n : 1n;
+    const connectedNetwork = await provider.getNetwork();
+    if (connectedNetwork.chainId !== expectedChainId) return null;
 
     const receiptPromise = provider.getTransactionReceipt(txHash);
     const blockPromise = provider.getBlockNumber();
@@ -195,6 +212,12 @@ export async function runConfirmationsWorker(): Promise<ConfirmationWorkerResult
   };
 
   try {
+    // Never query deposits with a placeholder URL, anon key, or missing admin credential.
+    if (!hasValidSupabaseAdminConfig()) {
+      result.failedCount++;
+      return result;
+    }
+
     // 1. Fetch pending on-chain deposits
     const { data: pendingDeposits, error } = await supabaseAdmin
       .from('onchain_deposits')
