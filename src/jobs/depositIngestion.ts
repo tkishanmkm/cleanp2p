@@ -1092,22 +1092,11 @@ export async function refreshPendingDepositConfirmations(): Promise<{
         throw new Error('Verified on-chain amount does not exactly match stored deposit amount');
       }
 
-      const { data, error: rpcError } = await getDepositSupabaseAdmin().rpc('process_deposit_atomic', {
-        p_destination_address: destination,
-        p_asset_symbol: assetSymbol,
-        p_network_code: normNet,
-        p_amount: verifiedAmount,
-        p_tx_hash: txHash,
-        p_output_index: storedOutputIndex ?? 0,
-        p_block_number: receipt.blockNumber,
-        p_from_address: fromAddress,
-        p_token_contract: tokenContract,
-        p_confirmations: confirmations,
-        p_provider: 'confirmations_worker',
-      });
-      if (rpcError) throw new Error(`Deposit credit RPC failed: ${rpcError.message}`);
-      const result = typeof data === 'string' ? JSON.parse(data) : data;
-      if (result?.status === 'credited') newlyCredited++;
+      // Fail closed: the database credit RPC still trusts caller-influenced confirmation
+      // values and has no independently verified attestation trust boundary. Chain checks
+      // above are useful evidence, but do not make this privileged RPC safe to call.
+      // Keep the deposit pending until a dedicated verifier/credit interface is validated.
+      throw new Error('Deposit credit disabled: database credit trust boundary is not independently verified');
     } catch (rowError: unknown) {
       errors.push(`Pending deposit row ${dep?.id ?? dep?.tx_hash ?? '(unknown)'}: ${rowError instanceof Error ? rowError.message : String(rowError)}`);
     }
