@@ -790,6 +790,20 @@ async function scanTronDeposits(
 /**
  * Scans Bitcoin (BTC Native SegWit / Bech32) UTXO deposits for monitored addresses
  */
+/**
+ * Convert integer UTXO base units to an exact decimal string without floating-point math.
+ * Input is the integer number of satoshis/litoshis returned by the chain API.
+ */
+function formatUtxoAmount(baseUnits: number): string {
+  if (!Number.isSafeInteger(baseUnits) || baseUnits <= 0) {
+    throw new Error('Invalid UTXO base-unit amount');
+  }
+  const units = BigInt(baseUnits);
+  const whole = units / 100_000_000n;
+  const fraction = (units % 100_000_000n).toString().padStart(8, '0').replace(/0+$/, '');
+  return fraction ? `${whole.toString()}.${fraction}` : whole.toString();
+}
+
 async function scanBtcDeposits(
   monitoredBtcAddresses: Set<string>
 ): Promise<{ detected: number; credited: number; errors: string[] }> {
@@ -805,39 +819,45 @@ async function scanBtcDeposits(
 
   for (const btcAddr of Array.from(monitoredBtcAddresses)) {
     try {
-      const res = await fetch(`${btcApiBase}/address/${btcAddr}/txs`);
-      if (!res.ok) continue;
+      const [tipRes, txRes] = await Promise.all([
+        fetch(`${btcApiBase}/blocks/tip/height`),
+        fetch(`${btcApiBase}/address/${encodeURIComponent(btcAddr)}/txs`),
+      ]);
+      if (!tipRes.ok || !txRes.ok) {
+        errors.push(`BTC provider unavailable for ${btcAddr}`);
+        continue;
+      }
 
-      const txs = await res.json();
-      if (!Array.isArray(txs)) continue;
+      const tipText = (await tipRes.text()).trim();
+      const tipHeight = Number(tipText);
+      const txs = await txRes.json();
+      if (!Number.isSafeInteger(tipHeight) || tipHeight < 0 || !Array.isArray(txs)) {
+        errors.push(`Invalid BTC provider response for ${btcAddr}`);
+        continue;
+      }
 
       for (const tx of txs) {
-        let outputAmountSat = 0;
-        let voutIndex = 0;
+        if (typeof tx?.txid !== 'string' || !/^[0-9a-f]{64}$/i.test(tx.txid) || !Array.isArray(tx.vout)) continue;
+        const blockHeight = tx.status?.confirmed === true ? tx.status?.block_height : null;
+        const validBlock = Number.isSafeInteger(blockHeight) && blockHeight > 0 && blockHeight <= tipHeight;
+        const confirmations = validBlock ? tipHeight - blockHeight + 1 : 0;
 
-        for (let i = 0; i < (tx.vout || []).length; i++) {
+        for (let i = 0; i < tx.vout.length; i++) {
           const out = tx.vout[i];
-          if (out.scriptpubkey_address === btcAddr) {
-            outputAmountSat += out.value || 0;
-            voutIndex = i;
-          }
-        }
+          if (out?.scriptpubkey_address !== btcAddr) continue;
+          const satoshis = out.value;
+          if (!Number.isSafeInteger(satoshis) || satoshis <= 0) continue;
 
-        if (outputAmountSat > 0) {
           detected++;
-          const btcAmount = outputAmountSat / 100_000_000;
-          const isConfirmed = tx.status?.confirmed === true;
-          const blockHeight = tx.status?.block_height;
-          let confirmations = isConfirmed ? 2 : 0;
-
+          const btcAmount = formatUtxoAmount(satoshis);
           const { data, error } = await supabaseAdmin.rpc('process_deposit_atomic', {
             p_destination_address: btcAddr,
             p_asset_symbol: 'BTC',
             p_network_code: 'BTC',
             p_amount: btcAmount,
             p_tx_hash: tx.txid,
-            p_output_index: voutIndex,
-            p_block_number: blockHeight || null,
+            p_output_index: i,
+            p_block_number: validBlock ? blockHeight : null,
             p_from_address: null,
             p_token_contract: null,
             p_confirmations: confirmations,
@@ -845,12 +865,10 @@ async function scanBtcDeposits(
           });
 
           if (error) {
-            errors.push(`RPC error for BTC deposit ${tx.txid}: ${error.message}`);
+            errors.push(`RPC error for BTC deposit ${tx.txid} output ${i}: ${error.message}`);
           } else {
-            const res = typeof data === 'string' ? JSON.parse(data) : data;
-            if (res?.status === 'credited' || (res?.success && confirmations >= 2)) {
-              credited++;
-            }
+            const rpcResult = typeof data === 'string' ? JSON.parse(data) : data;
+            if (rpcResult?.credited === true || rpcResult?.status === 'CONFIRMED' || rpcResult?.status === 'ALREADY_CREDITED') credited++;
           }
         }
       }
@@ -862,9 +880,6 @@ async function scanBtcDeposits(
   return { detected, credited, errors };
 }
 
-/**
- * Scans Litecoin (LTC Native SegWit / Bech32) UTXO deposits for monitored addresses
- */
 async function scanLtcDeposits(
   monitoredLtcAddresses: Set<string>
 ): Promise<{ detected: number; credited: number; errors: string[] }> {
@@ -880,39 +895,45 @@ async function scanLtcDeposits(
 
   for (const ltcAddr of Array.from(monitoredLtcAddresses)) {
     try {
-      const res = await fetch(`${ltcApiBase}/address/${ltcAddr}/txs`);
-      if (!res.ok) continue;
+      const [tipRes, txRes] = await Promise.all([
+        fetch(`${ltcApiBase}/blocks/tip/height`),
+        fetch(`${ltcApiBase}/address/${encodeURIComponent(ltcAddr)}/txs`),
+      ]);
+      if (!tipRes.ok || !txRes.ok) {
+        errors.push(`LTC provider unavailable for ${ltcAddr}`);
+        continue;
+      }
 
-      const txs = await res.json();
-      if (!Array.isArray(txs)) continue;
+      const tipText = (await tipRes.text()).trim();
+      const tipHeight = Number(tipText);
+      const txs = await txRes.json();
+      if (!Number.isSafeInteger(tipHeight) || tipHeight < 0 || !Array.isArray(txs)) {
+        errors.push(`Invalid LTC provider response for ${ltcAddr}`);
+        continue;
+      }
 
       for (const tx of txs) {
-        let outputAmountLit = 0;
-        let voutIndex = 0;
+        if (typeof tx?.txid !== 'string' || !/^[0-9a-f]{64}$/i.test(tx.txid) || !Array.isArray(tx.vout)) continue;
+        const blockHeight = tx.status?.confirmed === true ? tx.status?.block_height : null;
+        const validBlock = Number.isSafeInteger(blockHeight) && blockHeight > 0 && blockHeight <= tipHeight;
+        const confirmations = validBlock ? tipHeight - blockHeight + 1 : 0;
 
-        for (let i = 0; i < (tx.vout || []).length; i++) {
+        for (let i = 0; i < tx.vout.length; i++) {
           const out = tx.vout[i];
-          if (out.scriptpubkey_address === ltcAddr) {
-            outputAmountLit += out.value || 0;
-            voutIndex = i;
-          }
-        }
+          if (out?.scriptpubkey_address !== ltcAddr) continue;
+          const litoshis = out.value;
+          if (!Number.isSafeInteger(litoshis) || litoshis <= 0) continue;
 
-        if (outputAmountLit > 0) {
           detected++;
-          const ltcAmount = outputAmountLit / 100_000_000;
-          const isConfirmed = tx.status?.confirmed === true;
-          const blockHeight = tx.status?.block_height;
-          let confirmations = isConfirmed ? 6 : 0;
-
+          const ltcAmount = formatUtxoAmount(litoshis);
           const { data, error } = await supabaseAdmin.rpc('process_deposit_atomic', {
             p_destination_address: ltcAddr,
             p_asset_symbol: 'LTC',
             p_network_code: 'LTC',
             p_amount: ltcAmount,
             p_tx_hash: tx.txid,
-            p_output_index: voutIndex,
-            p_block_number: blockHeight || null,
+            p_output_index: i,
+            p_block_number: validBlock ? blockHeight : null,
             p_from_address: null,
             p_token_contract: null,
             p_confirmations: confirmations,
@@ -920,12 +941,10 @@ async function scanLtcDeposits(
           });
 
           if (error) {
-            errors.push(`RPC error for LTC deposit ${tx.txid}: ${error.message}`);
+            errors.push(`RPC error for LTC deposit ${tx.txid} output ${i}: ${error.message}`);
           } else {
-            const res = typeof data === 'string' ? JSON.parse(data) : data;
-            if (res?.status === 'credited' || (res?.success && confirmations >= 6)) {
-              credited++;
-            }
+            const rpcResult = typeof data === 'string' ? JSON.parse(data) : data;
+            if (rpcResult?.credited === true || rpcResult?.status === 'CONFIRMED' || rpcResult?.status === 'ALREADY_CREDITED') credited++;
           }
         }
       }
@@ -936,7 +955,6 @@ async function scanLtcDeposits(
 
   return { detected, credited, errors };
 }
-
 /**
  * Re-scans previously pending deposits in the database to credit them once required confirmations are reached
  */
