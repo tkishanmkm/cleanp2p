@@ -13,12 +13,13 @@ export function timingSafeEqualString(a: string, b: string): boolean {
 }
 
 /**
- * Extracts candidate credentials from request headers and optional URL search params.
+ * Extract candidate credentials from headers only. URL query parameters are
+ * deliberately never considered, because URLs may be persisted in access logs.
  */
 export function extractCandidateTokens(
   req: Request | NextRequest,
   customHeaderNames: string[] = [],
-  checkQueryParam: boolean = false
+  _checkQueryParam: boolean = false
 ): string[] {
   const candidates: string[] = [];
 
@@ -38,24 +39,14 @@ export function extractCandidateTokens(
     }
   }
 
-  if (checkQueryParam) {
-    try {
-      const url = new URL(req.url);
-      const key = url.searchParams.get('key');
-      if (key && key.trim().length > 0) {
-        candidates.push(key.trim());
-      }
-    } catch {
-      // Ignore URL parsing errors
-    }
-  }
-
+  // Intentionally ignore ?key=... even if a legacy caller passes true.
   return candidates;
 }
 
 export interface VerifyWorkerAuthOptions {
   allowedSecrets: (string | undefined | null)[];
   customHeaderNames?: string[];
+  /** @deprecated Query-string credentials are ignored; use headers only. */
   checkQueryParam?: boolean;
 }
 
@@ -65,13 +56,9 @@ export interface WorkerAuthResult {
 }
 
 /**
- * Authoritatively verifies worker credentials against configured secrets.
- * 
- * Rules:
- * 1. Fails closed if NO secrets are configured or all are empty. Never allows unauthenticated bypass.
- * 2. Extracts candidate credentials from Authorization Bearer, custom headers, or optional query params.
- * 3. Compares tokens using timing-safe comparison.
- * 4. Never logs secret values.
+ * Verifies worker credentials against configured secrets.
+ * Fails closed when no usable secret is configured. Credentials are accepted
+ * only from Authorization: Bearer or configured headers; never from URLs.
  */
 export function verifyWorkerAuth(
   req: Request | NextRequest,
@@ -87,7 +74,6 @@ export function verifyWorkerAuth(
         s !== 'placeholder-anon-key'
     );
 
-  // FAIL CLOSED: If no valid secret is configured on the server, reject immediately.
   if (validSecrets.length === 0) {
     return {
       authorized: false,
@@ -97,7 +83,7 @@ export function verifyWorkerAuth(
 
   const defaultHeaders = ['x-worker-secret', 'x-service-key'];
   const allHeaders = Array.from(new Set([...defaultHeaders, ...(options.customHeaderNames || [])]));
-  const candidateTokens = extractCandidateTokens(req, allHeaders, options.checkQueryParam);
+  const candidateTokens = extractCandidateTokens(req, allHeaders);
 
   if (candidateTokens.length === 0) {
     return {
