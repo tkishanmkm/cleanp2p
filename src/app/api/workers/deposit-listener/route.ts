@@ -153,12 +153,10 @@ async function processDepositWorker(req: NextRequest) {
     }
 
     if (!block) {
-      return NextResponse.json({
-        success: true,
-        credited_count: 0,
-        scanned_block: scannedBlockNumber,
-        message: `Block ${scannedBlockNumber} not found on chain.`,
-      });
+      return NextResponse.json(
+        { error: `Block ${scannedBlockNumber} was not returned by the RPC; retry the scan.` },
+        { status: 503 }
+      );
     }
 
     const matchedDeposits: ScannedDepositMatch[] = [];
@@ -227,10 +225,34 @@ async function processDepositWorker(req: NextRequest) {
       const expectedContract = CANONICAL_USDT_CONTRACTS[expectedTokenNetwork]?.toLowerCase();
       if (!expectedContract) continue;
 
+      let receipt: ethers.TransactionReceipt | null;
       try {
-        const receipt = await provider.getTransactionReceipt(tx.hash);
-        if (!receipt || receipt.status !== 1 || receipt.blockNumber !== scannedBlockNumber || receipt.blockHash.toLowerCase() !== block.hash.toLowerCase()) continue;
+        receipt = await provider.getTransactionReceipt(tx.hash);
+      } catch (receiptErr) {
+        console.error(`RPC error retrieving receipt for tx ${tx.hash}.`, receiptErr);
+        return NextResponse.json(
+          { error: `RPC failed while retrieving a transaction receipt in block ${scannedBlockNumber}; retry the scan.` },
+          { status: 503 }
+        );
+      }
 
+      // A missing receipt or a receipt for a different block may indicate RPC
+      // lag or a reorg. Do not report a successful scan with deposits omitted.
+      if (!receipt) {
+        return NextResponse.json(
+          { error: `RPC returned no receipt for transaction ${tx.hash}; retry the scan.` },
+          { status: 503 }
+        );
+      }
+      if (receipt.blockNumber !== scannedBlockNumber || receipt.blockHash.toLowerCase() !== block.hash.toLowerCase()) {
+        return NextResponse.json(
+          { error: `Transaction receipt block does not match scanned block ${scannedBlockNumber}; retry the scan.` },
+          { status: 503 }
+        );
+      }
+      if (receipt.status !== 1) continue;
+
+      try {
         for (const log of receipt.logs) {
           if (log.address.toLowerCase() !== expectedContract) continue;
           if (!log.topics[0] || log.topics[0].toLowerCase() !== ERC20_TRANSFER_TOPIC) continue;
@@ -265,11 +287,16 @@ async function processDepositWorker(req: NextRequest) {
           });
         }
       } catch (parseErr) {
-        console.warn(`Failed to inspect ERC-20 receipt logs for tx ${tx.hash}.`, parseErr);
+        console.error(`Failed to parse receipt logs for tx ${tx.hash}.`, parseErr);
+        return NextResponse.json(
+          { error: `Failed to inspect a transaction receipt in block ${scannedBlockNumber}; retry the scan.` },
+          { status: 503 }
+        );
       }
     }
 
     let creditedCount = 0;
+    const processingErrors: string[] = [];
 
     for (const match of matchedDeposits) {
       try {
@@ -287,13 +314,40 @@ async function processDepositWorker(req: NextRequest) {
           p_provider: 'deposit_listener_worker',
         });
 
-        if (!rpcErr) {
-          const parsed = typeof rpcData === 'string' ? JSON.parse(rpcData) : rpcData;
-          if (parsed?.status === 'credited') creditedCount++;
+        if (rpcErr) {
+          console.error(`process_deposit_atomic RPC failed for tx ${match.txHash}.`, rpcErr);
+          processingErrors.push(match.txHash);
+          continue;
+        }
+
+        const parsed = typeof rpcData === 'string' ? JSON.parse(rpcData) : rpcData;
+        if (!parsed || parsed.success === false) {
+          console.error(`process_deposit_atomic rejected tx ${match.txHash}.`, parsed);
+          processingErrors.push(match.txHash);
+          continue;
+        }
+
+        // The SQL function returns uppercase status values (CREDITED/PENDING).
+        // Normalize status to avoid silently reporting zero credits on successful deposits.
+        if (typeof parsed.status === 'string' && parsed.status.toUpperCase() === 'CREDITED') {
+          creditedCount++;
         }
       } catch (depositProcessingErr) {
         console.error(`Error processing deposit for tx ${match.txHash}:`, depositProcessingErr);
+        processingErrors.push(match.txHash);
       }
+    }
+
+    if (processingErrors.length > 0) {
+      return NextResponse.json({
+        success: false,
+        error: 'One or more matched deposits could not be processed; retry the block scan.',
+        failed_deposit_count: processingErrors.length,
+        scanned_block: scannedBlockNumber,
+        total_transactions: transactions.length,
+        matched_deposits: matchedDeposits.length,
+        credited_count: creditedCount,
+      }, { status: 503 });
     }
 
     return NextResponse.json({
