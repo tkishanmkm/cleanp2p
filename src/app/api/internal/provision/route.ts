@@ -49,8 +49,8 @@ export async function POST(req: NextRequest) {
       } catch {
         isAuthorized = false;
       }
-    } else if (process.env.NODE_ENV === 'development' || !configuredSecret) {
-      // In local dev without configured secrets, allow standard internal calls
+    } else if (process.env.NODE_ENV === 'development' && !configuredSecret) {
+      // Allow unauthenticated internal calls only in local development when no service secret is configured.
       isAuthorized = true;
     }
 
