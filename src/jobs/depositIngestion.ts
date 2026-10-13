@@ -1029,7 +1029,14 @@ export async function refreshPendingDepositConfirmations(): Promise<{
         throw new Error('Receipt block is not canonical');
       }
       const confirmations = Math.max(0, currentBlock - receipt.blockNumber + 1);
-      const assetSymbol = String(dep.asset_symbol || 'USDT').toUpperCase().trim();
+      const assetSymbol = String(dep.asset_symbol || '').toUpperCase().trim();
+      if (!assetSymbol) throw new Error('Stored asset symbol is missing; refusing to assume USDT');
+      if ((normNet === 'ERC20' || normNet === 'BEP20') && assetSymbol !== 'USDT') {
+        throw new Error(`Unsupported asset/network pairing: ${assetSymbol} on ${normNet}`);
+      }
+      if (normNet === 'ETH' && assetSymbol !== chain.nativeSymbol) {
+        throw new Error(`Unsupported asset/network pairing: ${assetSymbol} on ${normNet}`);
+      }
       let verifiedAmount: string;
       let fromAddress: string | null = null;
       let tokenContract: string | null = null;
@@ -1050,7 +1057,15 @@ export async function refreshPendingDepositConfirmations(): Promise<{
         }
         const logIndex = Number(storedOutputIndex);
         const log = receipt.logs.find((candidate) => candidate.index === logIndex);
-        if (!log || log.address.toLowerCase() !== expectedContract || log.topics[0]?.toLowerCase() !== transferTopic.toLowerCase()) {
+        if (
+          !log ||
+          log.address.toLowerCase() !== expectedContract ||
+          log.topics.length !== 3 ||
+          log.topics[0]?.toLowerCase() !== transferTopic.toLowerCase() ||
+          log.transactionHash.toLowerCase() !== receipt.hash.toLowerCase() ||
+          log.blockHash?.toLowerCase() !== receipt.blockHash.toLowerCase() ||
+          log.blockNumber !== receipt.blockNumber
+        ) {
           throw new Error('Receipt does not contain the expected token Transfer log at the stored log index');
         }
         const parsed = erc20Interface.parseLog({ topics: [...log.topics], data: log.data });
