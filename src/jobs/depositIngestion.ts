@@ -978,35 +978,124 @@ export async function refreshPendingDepositConfirmations(): Promise<{
     .limit(50);
 
   if (error) {
-    throw new Error(`Failed to load pending on-chain deposits: ${error.message}`);
+    throw new Error(\`Failed to load pending on-chain deposits: \${error.message}\`);
   }
   if (!pendingDeposits) {
     throw new Error('Failed to load pending on-chain deposits: query returned no data');
   }
 
   checked = pendingDeposits.length;
+  const erc20Interface = new ethers.Interface(ERC20_ABI);
+  const transferTopic = erc20Interface.getEvent('Transfer')?.topicHash;
+  if (!transferTopic) throw new Error('Unable to construct ERC-20 Transfer event topic');
+
+  const normalizeDecimal = (value: unknown): string => {
+    const raw = typeof value === 'string' ? value.trim() : String(value);
+    if (!/^(?:0|[1-9][0-9]*)(?:\.[0-9]+)?$/.test(raw)) {
+      throw new Error('Amount is not a plain non-negative decimal string');
+    }
+    const [whole, fraction = ''] = raw.split('.');
+    const trimmedFraction = fraction.replace(/0+$/, '');
+    return fraction ? \`\${whole}.\${trimmedFraction}\` : whole;
+  };
 
   for (const dep of pendingDeposits) {
     try {
       const normNet = normalizeDepositNetwork(dep.network);
-      // Do not use a stored DB amount as authoritative chain evidence. Each network
-      // path must prove transaction success, canonical inclusion, and exact output/log
-      // destination + amount before the credit RPC is called. That proof is not yet
-      // implemented for every pending-deposit path, so fail closed for this row.
-      if (!dep.tx_hash || typeof dep.tx_hash !== 'string') {
-        throw new Error('Missing transaction hash');
+      const chain = SUPPORTED_EVM_CHAINS[normNet];
+      if (!chain) {
+        errors.push(\`Pending deposit \${dep.tx_hash || dep.id || '(unknown)'} on \${normNet || '(empty)'}: chain-specific verification remains disabled\`);
+        continue;
       }
-      if (!['BTC', 'LTC', 'TRC20', ...Object.keys(SUPPORTED_EVM_CHAINS)].includes(normNet)) {
-        throw new Error(`Unsupported pending-deposit network: ${normNet || '(empty)'}`);
+
+      const txHash = String(dep.tx_hash || '').trim();
+      if (!/^0x[0-9a-fA-F]{64}$/.test(txHash)) throw new Error('Invalid EVM transaction hash');
+      const destination = String(dep.to_address || dep.address || '').trim().toLowerCase();
+      if (!ethers.isAddress(destination)) throw new Error('Invalid destination address');
+
+      const provider = getEvmProvider(normNet);
+      const [receipt, tx] = await Promise.all([
+        provider.getTransactionReceipt(txHash),
+        provider.getTransaction(txHash),
+      ]);
+      if (!receipt || !tx) throw new Error('Transaction or receipt not found');
+      if (receipt.status !== 1) throw new Error('Transaction receipt is not successful');
+      if (!receipt.blockHash || receipt.blockNumber < 1) throw new Error('Receipt is missing canonical block metadata');
+      const [canonicalBlock, currentBlock] = await Promise.all([
+        provider.getBlock(receipt.blockNumber),
+        provider.getBlockNumber(),
+      ]);
+      if (!canonicalBlock?.hash || canonicalBlock.hash.toLowerCase() !== receipt.blockHash.toLowerCase()) {
+        throw new Error('Receipt block is not canonical');
       }
-      errors.push(`Pending deposit ${dep.tx_hash} on ${normNet}: re-verification is incomplete; no credit RPC was called`);
-    } catch (rowErr: unknown) {
-      errors.push(`Pending deposit row ${dep?.id ?? dep?.tx_hash ?? '(unknown)'} failed validation: ${rowErr instanceof Error ? rowErr.message : String(rowErr)}`);
+      const confirmations = Math.max(0, currentBlock - receipt.blockNumber + 1);
+      const assetSymbol = String(dep.asset_symbol || 'USDT').toUpperCase().trim();
+      let verifiedAmount: string;
+      let fromAddress: string | null = null;
+      let tokenContract: string | null = null;
+      const storedOutputIndex = dep.output_index ?? dep.log_index;
+
+      if (assetSymbol === 'USDT' || dep.token_contract) {
+        const expectedContract = (CANONICAL_USDT_CONTRACTS[normNet] || chain.usdtContractAddress || '').toLowerCase();
+        if (!expectedContract || !ethers.isAddress(expectedContract)) throw new Error('Canonical token contract is not configured');
+        if (dep.token_contract && String(dep.token_contract).toLowerCase() !== expectedContract) {
+          throw new Error('Stored token contract does not match configured canonical token contract');
+        }
+        if (storedOutputIndex === null || storedOutputIndex === undefined || !Number.isSafeInteger(Number(storedOutputIndex))) {
+          throw new Error('Stored token log index is missing or invalid');
+        }
+        const logIndex = Number(storedOutputIndex);
+        const log = receipt.logs.find((candidate) => candidate.index === logIndex);
+        if (!log || log.address.toLowerCase() !== expectedContract || log.topics[0]?.toLowerCase() !== transferTopic.toLowerCase()) {
+          throw new Error('Receipt does not contain the expected token Transfer log at the stored log index');
+        }
+        const parsed = erc20Interface.parseLog({ topics: [...log.topics], data: log.data });
+        if (!parsed || parsed.name !== 'Transfer') throw new Error('Unable to decode token Transfer log');
+        const from = String(parsed.args[0]).toLowerCase();
+        const to = String(parsed.args[1]).toLowerCase();
+        const rawAmount = parsed.args[2] as bigint;
+        if (to !== destination) throw new Error('On-chain token destination does not match the stored deposit address');
+        if (rawAmount <= 0n) throw new Error('On-chain token amount is not positive');
+        verifiedAmount = ethers.formatUnits(rawAmount, chain.usdtDecimals ?? 6);
+        fromAddress = from;
+        tokenContract = expectedContract;
+      } else {
+        if (!tx.to || tx.to.toLowerCase() !== destination) throw new Error('Native transaction destination does not match stored deposit address');
+        if (tx.value <= 0n) throw new Error('Native transaction amount is not positive');
+        if (storedOutputIndex !== null && storedOutputIndex !== undefined && Number(storedOutputIndex) !== 0) {
+          throw new Error('Native transfer output index must be zero');
+        }
+        verifiedAmount = ethers.formatUnits(tx.value, chain.nativeDecimals);
+        fromAddress = tx.from.toLowerCase();
+      }
+
+      if (normalizeDecimal(verifiedAmount) !== normalizeDecimal(dep.amount)) {
+        throw new Error('Verified on-chain amount does not exactly match stored deposit amount');
+      }
+
+      const { data, error: rpcError } = await getDepositSupabaseAdmin().rpc('process_deposit_atomic', {
+        p_destination_address: destination,
+        p_asset_symbol: assetSymbol,
+        p_network_code: normNet,
+        p_amount: verifiedAmount,
+        p_tx_hash: txHash,
+        p_output_index: storedOutputIndex ?? 0,
+        p_block_number: receipt.blockNumber,
+        p_from_address: fromAddress,
+        p_token_contract: tokenContract,
+        p_confirmations: confirmations,
+        p_provider: 'confirmations_worker',
+      });
+      if (rpcError) throw new Error(\`Deposit credit RPC failed: \${rpcError.message}\`);
+      const result = typeof data === 'string' ? JSON.parse(data) : data;
+      if (result?.status === 'credited') newlyCredited++;
+    } catch (rowError: unknown) {
+      errors.push(\`Pending deposit row \${dep?.id ?? dep?.tx_hash ?? '(unknown)'}: \${rowError instanceof Error ? rowError.message : String(rowError)}\`);
     }
   }
 
   if (errors.length > 0) {
-    console.error('[Deposit Ingestion] Pending confirmation refresh blocked unsafe/unverified credit attempts:', {
+    console.error('[Deposit Ingestion] Pending confirmation refresh reported errors:', {
       checked,
       errorCount: errors.length,
       errors: errors.slice(0, 20),
