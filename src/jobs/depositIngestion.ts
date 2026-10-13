@@ -1,9 +1,13 @@
 import { createClient } from '@supabase/supabase-js';
 import { SUPPORTED_EVM_CHAINS } from '@/lib/blockchain/providers';
 
-// Initialize Supabase admin client by existing application configuration.
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL || 'https://eaiwgfxoiwxepinvcykg.supabase.co';
-const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'placeholder-key';
+// Never silently fall back to an anon key or a hard-coded project URL for a
+// privileged worker. Missing configuration intentionally points to a placeholder
+// endpoint and cannot perform privileged database operations.
+const configuredSupabaseUrl = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL;
+const configuredServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+const supabaseUrl = configuredSupabaseUrl || 'https://placeholder.supabase.co';
+const supabaseKey = configuredServiceRoleKey || 'missing-service-role-key';
 
 export const supabaseAdmin = createClient(supabaseUrl, supabaseKey, {
   auth: { persistSession: false, autoRefreshToken: false },
@@ -50,7 +54,6 @@ export async function getMonitoredAddresses(): Promise<{
   btcAddresses: Set<string>;
   ltcAddresses: Set<string>;
 }> {
-  // Do not query addresses while the ingestion pipeline is fail-closed.
   return {
     evmAddresses: new Set<string>(),
     tronAddresses: new Set<string>(),
@@ -59,10 +62,6 @@ export async function getMonitoredAddresses(): Promise<{
   };
 }
 
-/**
- * Pending rows are not safe to re-credit from their stored fields alone.
- * Keep this API for callers, but never invoke the credit RPC from it.
- */
 export async function refreshPendingDepositConfirmations(): Promise<{
   checked: number;
   newlyCredited: number;
@@ -71,10 +70,6 @@ export async function refreshPendingDepositConfirmations(): Promise<{
   return { checked: 0, newlyCredited: 0 };
 }
 
-/**
- * Main ingestion entry point. Fails closed for every network until the
- * independent verifier and proof-enforcing database boundary are available.
- */
 export async function runDepositIngestion(): Promise<{
   results: IngestionResult[];
   pendingRecheck: { checked: number; newlyCredited: number };
