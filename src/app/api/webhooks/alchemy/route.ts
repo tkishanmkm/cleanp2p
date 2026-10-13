@@ -3,84 +3,77 @@ import { SYSTEM_CONFIG } from '@/lib/config/env';
 import { getSupabaseAdminClient } from '@/lib/supabase/server';
 import { normalizeDepositNetwork } from '@/lib/hd-derivation-engine';
 import { CANONICAL_USDT_CONTRACTS } from '@/jobs/depositIngestion';
-import crypto from 'crypto';
+import { verifyHmacSha256 } from '@/lib/webhooks/auth';
 
-function verifySignature(body: string, signature: string, secret: string): boolean {
-  try {
-    const hmac = crypto.createHmac('sha256', secret).update(body).digest('hex');
-    const sigBuf = Buffer.from(signature);
-    const hmacBuf = Buffer.from(hmac);
-    if (sigBuf.length !== hmacBuf.length) return false;
-    return crypto.timingSafeEqual(sigBuf, hmacBuf);
-  } catch {
-    return false;
-  }
-}
+export const dynamic = 'force-dynamic';
 
 export async function POST(req: NextRequest): Promise<NextResponse> {
   try {
     const rawBody = await req.text();
-    const signature = req.headers.get('x-alchemy-signature') ?? '';
-
-    if (SYSTEM_CONFIG.secrets.webhook && !verifySignature(rawBody, signature, SYSTEM_CONFIG.secrets.webhook)) {
-      return NextResponse.json({ error: 'Invalid HMAC signature' }, { status: 401 });
+    const secret = SYSTEM_CONFIG.secrets.webhook || process.env.ALCHEMY_WEBHOOK_SIGNING_KEY;
+    if (!secret?.trim()) {
+      return NextResponse.json({ error: 'Webhook authentication is not configured' }, { status: 503 });
+    }
+    if (!verifyHmacSha256(rawBody, req.headers.get('x-alchemy-signature'), secret)) {
+      return NextResponse.json({ error: 'Unauthorized webhook' }, { status: 401 });
     }
 
-    const payload = JSON.parse(rawBody) as {
-      event?: { activity?: Array<{ toAddress: string; fromAddress?: string; value: number; asset: string; hash: string; blockNum?: string }> };
-    };
-    
-    const activity = payload.event?.activity?.[0];
-
-    if (!activity) {
-      return NextResponse.json({ error: 'No activity data found' }, { status: 400 });
+    let payload: any;
+    try {
+      payload = JSON.parse(rawBody);
+    } catch {
+      return NextResponse.json({ error: 'Invalid JSON payload' }, { status: 400 });
     }
 
-    const toAddress = activity.toAddress.toLowerCase().trim();
-    const fromAddress = activity.fromAddress?.toLowerCase().trim() || null;
-    const amount = Number(activity.value);
-    const rawAsset = (activity.asset || 'USDT').toUpperCase().trim();
-    const txHash = activity.hash;
-    const blockNumber = activity.blockNum ? parseInt(activity.blockNum, 16) : null;
+    const activity = payload.event?.activity;
+    if (!Array.isArray(activity) || activity.length !== 1) {
+      return NextResponse.json({ error: 'Expected exactly one activity item' }, { status: 400 });
+    }
 
-    if (!toAddress || !txHash || isNaN(amount) || amount <= 0) {
+    const item = activity[0];
+    const toAddress = typeof item.toAddress === 'string' ? item.toAddress.trim() : '';
+    const fromAddress = typeof item.fromAddress === 'string' ? item.fromAddress.trim() : null;
+    const amount = Number(item.value);
+    const rawAsset = typeof item.asset === 'string' ? item.asset.toUpperCase().trim() : '';
+    const txHash = typeof item.hash === 'string' ? item.hash.trim() : '';
+    const blockNumber = typeof item.blockNum === 'string' && /^0x[0-9a-f]+$/i.test(item.blockNum)
+      ? Number.parseInt(item.blockNum, 16) : null;
+    const logIndex = item.logIndex;
+
+    if (!toAddress || !/^0x[a-f0-9]{40}$/i.test(toAddress) ||
+        !/^0x[a-f0-9]{64}$/i.test(txHash) || !Number.isFinite(amount) || amount <= 0 ||
+        !Number.isInteger(logIndex) || logIndex < 0 ||
+        !['ETH', 'USDT'].includes(rawAsset)) {
       return NextResponse.json({ error: 'Invalid activity data' }, { status: 400 });
     }
 
     const supabaseAdmin = getSupabaseAdminClient();
     const normNet = rawAsset === 'ETH' ? 'ETH' : 'ERC20';
-    const assetSymbol = rawAsset === 'ETH' ? 'ETH' : 'USDT';
+    const assetSymbol = rawAsset;
     const tokenContract = CANONICAL_USDT_CONTRACTS[normNet] || null;
 
-    // Process deposit via canonical atomic RPC
     const { data: rpcData, error: creditError } = await supabaseAdmin.rpc('process_deposit_atomic', {
       p_destination_address: toAddress,
       p_asset_symbol: assetSymbol,
       p_network_code: normNet,
       p_amount: amount,
       p_tx_hash: txHash,
-      p_output_index: 0,
-      p_block_number: isNaN(blockNumber as number) ? null : blockNumber,
+      p_output_index: logIndex,
+      p_block_number: blockNumber,
       p_from_address: fromAddress,
       p_token_contract: tokenContract,
-      p_confirmations: 12,
+      // This value is not an independent chain confirmation; downstream verification remains required.
+      p_confirmations: 0,
       p_provider: 'alchemy_webhook',
     });
 
     if (creditError) {
-      console.error('[Alchemy Webhook] Canonical deposit processing error:', creditError.message);
-      return NextResponse.json(
-        { success: false, error: creditError.message },
-        { status: 500 }
-      );
+      console.error('[Alchemy Webhook] Canonical deposit processing failed');
+      return NextResponse.json({ success: false, error: 'Deposit processing failed' }, { status: 500 });
     }
 
-    return NextResponse.json({ success: true, message: 'Deposit processed', data: rpcData });
-  } catch (err: any) {
-    console.error('Webhook processing error:', err);
-    return NextResponse.json(
-      { success: false, error: 'Internal server error' },
-      { status: 500 }
-    );
+    return NextResponse.json({ success: true, message: 'Deposit event accepted for canonical processing', data: rpcData });
+  } catch {
+    return NextResponse.json({ success: false, error: 'Internal server error' }, { status: 500 });
   }
 }
