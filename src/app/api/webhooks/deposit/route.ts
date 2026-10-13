@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import crypto from 'crypto';
+import { verifyHmacSha256 } from '@/lib/webhooks/auth';
 import { ethers } from 'ethers';
 import { getSupabaseAdminClient } from '@/lib/supabase/server';
 import { normalizeDepositNetwork } from '@/lib/hd-derivation-engine';
@@ -12,33 +13,7 @@ function verifySignature(rawBody: string, signatureHeader: string | null): boole
     process.env.BLOCKCHAIN_WEBHOOK_SECRET ||
     process.env.ALCHEMY_WEBHOOK_SIGNING_KEY ||
     process.env.CHAIN_INGEST_SECRET;
-
-  if (!secret) {
-    console.error('⛔ [Deposit Webhook] REJECTED: No webhook secret configured in environment (failing closed).');
-    return false; // Fail-closed
-  }
-
-  if (!signatureHeader) {
-    return false;
-  }
-
-  try {
-    const cleanSignature = signatureHeader.replace(/^sha256=/i, '').trim();
-    const hmac = crypto.createHmac('sha256', secret);
-    hmac.update(rawBody, 'utf8');
-    const digest = hmac.digest('hex');
-
-    const signatureBuffer = Buffer.from(cleanSignature, 'hex');
-    const digestBuffer = Buffer.from(digest, 'hex');
-
-    if (signatureBuffer.length !== digestBuffer.length) {
-      return false;
-    }
-
-    return crypto.timingSafeEqual(signatureBuffer, digestBuffer);
-  } catch {
-    return false;
-  }
+  return verifyHmacSha256(rawBody, signatureHeader, secret);
 }
 
 export async function POST(req: Request) {
@@ -63,7 +38,9 @@ export async function POST(req: Request) {
     }
 
     const ingestHeader = req.headers.get('x-ingest-secret') || req.headers.get('x-api-key');
-    const isDirectHeaderValid = ingestHeader && secret && crypto.timingSafeEqual(Buffer.from(ingestHeader), Buffer.from(secret));
+    const ingestBuffer = Buffer.from(ingestHeader || '', 'utf8');
+    const secretBuffer = Buffer.from(secret, 'utf8');
+    const isDirectHeaderValid = Boolean(ingestHeader) && ingestBuffer.length > 0 && ingestBuffer.length === secretBuffer.length && crypto.timingSafeEqual(ingestBuffer, secretBuffer);
 
     if (!isDirectHeaderValid) {
       if (!signature || !verifySignature(rawBody, signature)) {
@@ -100,7 +77,7 @@ export async function POST(req: Request) {
       for (const ev of payload.events) {
         items.push({
           txHash: ev.txHash || ev.hash || ev.transactionHash,
-          logIndex: typeof ev.logIndex === 'number' ? ev.logIndex : parseInt(ev.logIndex || '0', 10) || 0,
+          logIndex: typeof ev.logIndex === 'number' && Number.isInteger(ev.logIndex) && ev.logIndex >= 0 ? ev.logIndex : -1,
           from: ev.from || ev.fromAddress,
           to: ev.to || ev.toAddress,
           value: ev.value || ev.amount,
@@ -114,7 +91,7 @@ export async function POST(req: Request) {
       for (const act of payload.event.activity) {
         items.push({
           txHash: act.hash,
-          logIndex: 0,
+          logIndex: Number.isInteger(act.logIndex) && act.logIndex >= 0 ? act.logIndex : -1,
           from: act.fromAddress,
           to: act.toAddress,
           value: act.value,
@@ -126,7 +103,7 @@ export async function POST(req: Request) {
     } else if (payload.txHash || payload.hash) {
       items.push({
         txHash: payload.txHash || payload.hash,
-        logIndex: typeof payload.logIndex === 'number' ? payload.logIndex : 0,
+        logIndex: typeof payload.logIndex === 'number' && Number.isInteger(payload.logIndex) && payload.logIndex >= 0 ? payload.logIndex : -1,
         from: payload.from || payload.fromAddress,
         to: payload.to || payload.toAddress,
         value: payload.value || payload.amount,
@@ -152,7 +129,7 @@ export async function POST(req: Request) {
       const assetSymbol = (item.assetSymbol || 'USDT').toUpperCase().trim();
       const tokenContract = CANONICAL_USDT_CONTRACTS[normNet] || null;
 
-      if (!destinationAddress || !txHash || isNaN(amount) || amount <= 0) {
+      if (!destinationAddress || !txHash || !/^(0x)?[a-f0-9]{64}$/i.test(txHash) || !Number.isInteger(logIndex) || logIndex < 0 || !Number.isFinite(amount) || amount <= 0) {
         continue;
       }
 
@@ -167,17 +144,18 @@ export async function POST(req: Request) {
         p_block_number: item.blockNumber ?? null,
         p_from_address: item.from || null,
         p_token_contract: tokenContract,
-        p_confirmations: item.confirmations ?? 12,
+        // Provider-reported confirmations are not independently verified here.
+        p_confirmations: 0,
         p_provider: 'deposit_webhook',
       });
 
       if (rpcErr) {
-        console.error(`[Deposit Webhook] RPC error for tx ${txHash}:`, rpcErr.message);
+        console.error('[Deposit Webhook] Canonical deposit RPC failed');
         processedResults.push({
           txHash,
           logIndex,
           status: 'error',
-          error: rpcErr.message,
+          error: 'Deposit processing failed',
         });
       } else {
         const parsed = typeof rpcData === 'string' ? JSON.parse(rpcData) : rpcData;
@@ -196,9 +174,9 @@ export async function POST(req: Request) {
       results: processedResults,
     });
   } catch (error: any) {
-    console.error('❌ [Deposit Webhook] Error processing event:', error);
+    console.error('[Deposit Webhook] Error processing event');
     return NextResponse.json(
-      { error: error?.message || 'Internal server error processing deposit webhook' },
+      { error: 'Internal server error processing deposit webhook' },
       { status: 500 }
     );
   }
