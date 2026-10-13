@@ -20,7 +20,8 @@
     "test:all": "tsx tests/p2p-trade-flow.test.ts && tsx tests/blockchain-worker.test.ts && tsx tests/reconciliation.test.ts && tsx tests/security-verification.test.ts",
     "test:webhook-auth": "tsx tests/webhook-auth.test.ts",
     "test:worker-auth": "tsx tests/worker-auth.test.ts",
-    "test:deposit-listener-retired": "tsx tests/deposit-listener-retired.test.ts"
+    "test:deposit-listener-retired": "tsx tests/deposit-listener-retired.test.ts",
+    "test:confirmation-worker-fail-closed": "tsx tests/confirmation-worker-fail-closed.test.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.700.0",
