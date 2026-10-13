@@ -25,3 +25,9 @@ The helper's HMAC secret must never be available to ordinary request handlers or
 ## Current status
 
 The source and test files were read back from the proposal branch. Unit tests were not run because this connector workflow did not provide a checked-out repository/test runtime. No claim of passing tests is made. The production deposit-credit RPC remains unchanged and remains a release blocker.
+
+## Step 34G — Adversarial review corrections
+
+A follow-up review found two input-validation gaps in the candidate helper: JavaScript date parsing can produce `NaN` for calendar-invalid strings that match the timestamp shape, and a destination containing leading/trailing or embedded whitespace could be signed. The helper now requires round-trippable UTC timestamps and rejects destination whitespace/overlong values; non-native token contract fields also reject whitespace and overlong values. Two regression cases were added.
+
+These are protocol-input hardening only. They do not normalize addresses per chain, prove that an address belongs to the user, enforce replay protection, or establish a secure signing-key boundary. Those remain mandatory before integration. Tests are still not executed in this connector-only workflow.
