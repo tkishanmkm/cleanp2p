@@ -15,12 +15,17 @@ export async function POST(request: Request) {
 
     const { results, pendingRecheck } = await runDepositIngestion();
 
+    const depositsPaused = results.every((item) => item.depositsCredited === 0) &&
+      results.every((item) => item.errors.some((message) => message.toLowerCase().includes('paused')) || item.errors.length > 0);
+
     return NextResponse.json({
-      success: true,
+      success: false,
+      code: 'DEPOSIT_CREDITING_PAUSED',
+      depositsPaused: true,
       results,
       pendingRecheck,
-      message: 'Deposit ingestion completed via canonical process_deposit_atomic',
-    });
+      message: 'Deposit ingestion is paused pending independent chain verification. No deposits were credited.',
+    }, { status: 503 });
   } catch (error: any) {
     console.error('Deposit worker error:', error);
     return NextResponse.json(
