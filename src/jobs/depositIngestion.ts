@@ -1,12 +1,5 @@
-import { ethers } from 'ethers';
 import { createClient } from '@supabase/supabase-js';
-import {
-  SUPPORTED_EVM_CHAINS,
-  getEvmProvider,
-  ERC20_ABI,
-} from '@/lib/blockchain/providers';
-import { TRON_CONFIG, getTronWeb, isValidTronAddress } from '@/lib/blockchain/tron';
-import { normalizeDepositNetwork } from '@/lib/hd-derivation-engine';
+import { SUPPORTED_EVM_CHAINS } from '@/lib/blockchain/providers';
 
 // Initialize Supabase admin client by existing application configuration.
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL || 'https://eaiwgfxoiwxepinvcykg.supabase.co';
