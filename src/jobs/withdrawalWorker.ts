@@ -278,6 +278,46 @@ export async function processWithdrawalQueue(): Promise<WithdrawalProcessResult>
 }
 
 /**
+ * Quarantines a transaction that appears reverted/unsuccessful without issuing a refund.
+ * The current refund RPC accepts a caller-controlled verification boolean and cannot
+ * independently bind chain evidence to the stored transaction. Preserve the reserve
+ * until a verified, transaction-bound refund settlement path exists.
+ */
+async function quarantineObservedWithdrawalFailure(
+  withdrawalId: string,
+  reason: string
+): Promise<void> {
+  const timestamp = new Date().toISOString();
+  const onchain = await supabaseAdmin
+    .from('onchain_withdrawals')
+    .update({
+      status: 'AMBIGUOUS_BROADCAST',
+      error_message: reason,
+      updated_at: timestamp,
+    })
+    .eq('id', withdrawalId);
+  if (onchain.error) {
+    throw new Error(`Failed to quarantine on-chain withdrawal row: ${onchain.error.message}`);
+  }
+
+  const legacy = await supabaseAdmin
+    .from('withdrawals')
+    .update({
+      status: 'AMBIGUOUS_BROADCAST',
+      broadcast_error: reason,
+      updated_at: timestamp,
+    })
+    .eq('id', withdrawalId);
+  if (legacy.error) {
+    throw new Error(`Failed to quarantine withdrawal row: ${legacy.error.message}`);
+  }
+
+  console.error(
+    `[Withdrawal Worker] ${withdrawalId}: ${reason}. No automatic refund issued; funds remain reserved for controlled reconciliation.`
+  );
+}
+
+/**
  * Checks previously BROADCASTED, PROCESSING, or AMBIGUOUS_BROADCAST withdrawals and confirms them once confirmations are met
  */
 export async function checkSubmittedWithdrawals(): Promise<{
@@ -317,11 +357,10 @@ export async function checkSubmittedWithdrawals(): Promise<{
           });
           if (!confErr) confirmed++;
         } else if (!success) {
-          await supabaseAdmin.rpc('process_failed_withdrawal', {
-            p_withdrawal_id: w.id,
-            p_error_reason: `TRON transaction reverted on-chain`,
-            p_is_verified_unbroadcast: true,
-          });
+          await quarantineObservedWithdrawalFailure(
+            w.id,
+            'TRON transaction reported unsuccessful or not yet verifiably successful; refund withheld pending transaction-bound reconciliation'
+          );
         }
       } else if (SUPPORTED_EVM_CHAINS[normNet]) {
         const chain = SUPPORTED_EVM_CHAINS[normNet];
@@ -339,11 +378,10 @@ export async function checkSubmittedWithdrawals(): Promise<{
           });
           if (!confErr) confirmed++;
         } else if (status === 0) {
-          await supabaseAdmin.rpc('process_failed_withdrawal', {
-            p_withdrawal_id: w.id,
-            p_error_reason: `EVM transaction reverted on-chain on network ${w.network}`,
-            p_is_verified_unbroadcast: true,
-          });
+          await quarantineObservedWithdrawalFailure(
+            w.id,
+            `EVM transaction reverted on-chain on network ${w.network}; refund withheld pending transaction-bound reconciliation`
+          );
         }
       } else if (normNet === 'BTC') {
         try {
