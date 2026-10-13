@@ -138,7 +138,7 @@ export async function sendTrxTransfer(params: {
 export async function getTronTransactionConfirmations(txHash: string): Promise<{
   confirmations: number;
   isConfirmed: boolean;
-  success: boolean;
+  success: boolean | null;
   blockNumber?: number;
   actualCostTrx?: string;
 }> {
@@ -148,7 +148,7 @@ export async function getTronTransactionConfirmations(txHash: string): Promise<{
     // Get transaction info
     const txInfo = await tronWeb.trx.getTransactionInfo(txHash);
     if (!txInfo || !txInfo.blockNumber) {
-      return { confirmations: 0, isConfirmed: false, success: false };
+      return { confirmations: 0, isConfirmed: false, success: null };
     }
 
     // Get current block
@@ -162,15 +162,19 @@ export async function getTronTransactionConfirmations(txHash: string): Promise<{
     const actualCostTrx = `${wholeTrx}.${fractionSun}`;
 
     if (!currentHeight) {
-      return { confirmations: 1, isConfirmed: false, success: !txInfo.receipt?.result, actualCostTrx };
+      return { confirmations: 1, isConfirmed: false, success: txInfo.receipt?.result === 'SUCCESS' ? true : (txInfo.receipt?.result ? false : null), actualCostTrx };
     }
 
     const confirmations = Math.max(0, currentHeight - txInfo.blockNumber + 1);
-    const success = !txInfo.receipt?.result || txInfo.receipt.result === 'SUCCESS';
+    // Unknown/missing receipt status is not proof of failure. Only explicit SUCCESS
+    // or an explicit non-success receipt result is actionable.
+    const success = txInfo.receipt?.result === 'SUCCESS' ? true : (txInfo.receipt?.result ? false : null);
 
     return {
       confirmations,
-      isConfirmed: confirmations >= TRON_CONFIG.requiredConfirmations && success,
+      // Confirmation depth is separate from execution success so a reverted transaction
+      // is quarantined only after it has reached the configured confirmation depth.
+      isConfirmed: confirmations >= TRON_CONFIG.requiredConfirmations,
       success,
       blockNumber: txInfo.blockNumber,
       actualCostTrx,
