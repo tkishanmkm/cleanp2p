@@ -4,8 +4,8 @@ import { ethers } from 'ethers';
 import { normalizeDepositNetwork } from '@/lib/hd-derivation-engine';
 import { CANONICAL_USDT_CONTRACTS } from '@/jobs/depositIngestion';
 
-// Standard ERC-20 transfer method signature: transfer(address,uint256)
-const ERC20_TRANSFER_METHOD_ID = '0xa9059cbb';
+// Canonical ERC-20 Transfer event signature.
+const ERC20_TRANSFER_TOPIC = ethers.id('Transfer(address,address,uint256)').toLowerCase();
 
 interface ScannedDepositMatch {
   txHash: string;
@@ -55,11 +55,11 @@ async function processDepositWorker(req: NextRequest) {
     if (req.method === 'GET') {
       const url = new URL(req.url);
       const b = url.searchParams.get('block') || url.searchParams.get('blockNumber');
-      if (b) targetBlockNumber = parseInt(b, 10);
+      if (b !== null) targetBlockNumber = Number(b);
     } else {
       const body = await req.json().catch(() => ({}));
-      if (body.block || body.blockNumber) {
-        targetBlockNumber = parseInt(body.block || body.blockNumber, 10);
+      if (body.block !== undefined || body.blockNumber !== undefined) {
+        targetBlockNumber = Number(body.block ?? body.blockNumber);
       }
     }
 
@@ -113,17 +113,32 @@ async function processDepositWorker(req: NextRequest) {
     }
 
     let scannedBlockNumber: number;
+    let latestBlockNumber: number;
     try {
-      if (targetBlockNumber && !isNaN(targetBlockNumber) && targetBlockNumber > 0) {
+      latestBlockNumber = await provider.getBlockNumber();
+      if (targetBlockNumber !== null) {
+        if (!Number.isSafeInteger(targetBlockNumber) || targetBlockNumber < 1) {
+          return NextResponse.json({ error: 'Block number must be a positive safe integer.' }, { status: 400 });
+        }
+        if (targetBlockNumber > latestBlockNumber) {
+          return NextResponse.json({ error: 'Requested block is ahead of the current chain head.' }, { status: 400 });
+        }
         scannedBlockNumber = targetBlockNumber;
       } else {
-        scannedBlockNumber = await provider.getBlockNumber();
+        scannedBlockNumber = latestBlockNumber;
       }
     } catch (rpcErr: any) {
       return NextResponse.json(
-        { error: `RPC connection error while getting block number: ${rpcErr.message}` },
-        { status: 500 }
+        { error: 'RPC connection error while getting block number.' },
+        { status: 503 }
       );
+    }
+
+    // Only report confirmations actually observed from this RPC. Never submit a
+    // fixed confirmation count for a freshly mined block.
+    const observedConfirmations = latestBlockNumber - scannedBlockNumber + 1;
+    if (!Number.isSafeInteger(observedConfirmations) || observedConfirmations < 1) {
+      return NextResponse.json({ error: 'Unable to establish a valid confirmation count.' }, { status: 503 });
     }
 
     let block: ethers.Block | null = null;
@@ -181,48 +196,56 @@ async function processDepositWorker(req: NextRequest) {
         }
       }
 
-      // ERC-20 Transfer
-      if (txData && txData.startsWith(ERC20_TRANSFER_METHOD_ID) && txData.length >= 138) {
-        try {
-          const recipientPadded = txData.slice(10, 74);
-          const rawRecipient = '0x' + recipientPadded.slice(24).toLowerCase();
-          const amountHex = '0x' + txData.slice(74, 138);
-          const rawAmount = BigInt(amountHex);
+      // ERC-20 deposits are identified from mined receipt logs, not calldata.
+      // This also covers transferFrom/router calls and gives each transfer a unique log index.
+      const expectedTokenNetwork = chainNetwork === 'ETH' ? 'ERC20' : 'BEP20';
+      const expectedContract = CANONICAL_USDT_CONTRACTS[expectedTokenNetwork]?.toLowerCase();
+      if (!expectedContract) continue;
 
-          const expectedTokenNetwork = chainNetwork === 'ETH' ? 'ERC20' : 'BEP20';
+      const relevantConfigs = new Set(
+        (evmAddressMap.get(txTo || '') || [])
+          .filter((config) => config.networkCode === expectedTokenNetwork && config.assetCode === 'USDT')
+          .map((config) => config.networkCode)
+      );
+      if (relevantConfigs.size === 0 || txTo !== expectedContract) continue;
+
+      try {
+        const receipt = await provider.getTransactionReceipt(tx.hash);
+        if (!receipt || receipt.status !== 1) continue;
+
+        for (const log of receipt.logs) {
+          if (log.address.toLowerCase() !== expectedContract) continue;
+          if (!log.topics[0] || log.topics[0].toLowerCase() !== ERC20_TRANSFER_TOPIC) continue;
+          if (log.topics.length < 3 || !/^0x[0-9a-fA-F]{64}$/.test(log.topics[1]) ||
+              !/^0x[0-9a-fA-F]{64}$/.test(log.topics[2])) continue;
+
+          const rawRecipient = ('0x' + log.topics[2].slice(-40)).toLowerCase();
           const addrConfig = (evmAddressMap.get(rawRecipient) || []).find(
             (config) => config.networkCode === expectedTokenNetwork && config.assetCode === 'USDT'
           );
-          const expectedContract = CANONICAL_USDT_CONTRACTS[expectedTokenNetwork]?.toLowerCase();
-          // A transfer-shaped calldata payload is not proof of USDT. The transaction
-          // destination must be the canonical token contract on this exact chain.
-          if (
-            addrConfig &&
-            txTo &&
-            expectedContract &&
-            txTo === expectedContract &&
-            rawAmount > BigInt(0)
-          ) {
-            const decimals = expectedTokenNetwork === 'ERC20' ? 6 : 18;
-            const formattedAmount = parseFloat(ethers.formatUnits(rawAmount, decimals));
+          if (!addrConfig || !/^0x[0-9a-fA-F]{64}$/.test(log.data)) continue;
 
-            if (Number.isFinite(formattedAmount) && formattedAmount > 0) {
-              matchedDeposits.push({
-                txHash: tx.hash,
-                fromAddress: tx.from?.toLowerCase(),
-                toAddress: rawRecipient,
-                amount: formattedAmount,
-                asset: 'USDT',
-                network: expectedTokenNetwork,
-                tokenContract: expectedContract,
-                outputIndex: 0,
-                blockNumber: scannedBlockNumber,
-              });
-            }
-          }
-        } catch (parseErr) {
-          console.warn(`Failed to parse ERC20 transfer data for tx ${tx.hash}:`, parseErr);
+          const rawAmount = BigInt(log.data);
+          if (rawAmount <= 0n) continue;
+
+          const decimals = expectedTokenNetwork === 'ERC20' ? 6 : 18;
+          const formattedAmount = Number(ethers.formatUnits(rawAmount, decimals));
+          if (!Number.isFinite(formattedAmount) || formattedAmount <= 0) continue;
+
+          matchedDeposits.push({
+            txHash: tx.hash,
+            fromAddress: ('0x' + log.topics[1].slice(-40)).toLowerCase(),
+            toAddress: rawRecipient,
+            amount: formattedAmount,
+            asset: 'USDT',
+            network: expectedTokenNetwork,
+            tokenContract: expectedContract,
+            outputIndex: log.index,
+            blockNumber: scannedBlockNumber,
+          });
         }
+      } catch (parseErr) {
+        console.warn(`Failed to inspect ERC-20 receipt logs for tx ${tx.hash}.`, parseErr);
       }
     }
 
@@ -240,7 +263,7 @@ async function processDepositWorker(req: NextRequest) {
           p_block_number: match.blockNumber,
           p_from_address: match.fromAddress || null,
           p_token_contract: match.tokenContract,
-          p_confirmations: 12,
+          p_confirmations: observedConfirmations,
           p_provider: 'deposit_listener_worker',
         });
 
