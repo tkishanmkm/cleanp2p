@@ -259,6 +259,38 @@ async function scanEvmTokenDeposits(
 }
 
 /**
+ * Native-value transactions must have a successful receipt on the canonical block.
+ * A transaction object alone is insufficient: reverted EVM transactions can still
+ * carry a non-zero tx.value field even though no value transfer was applied.
+ */
+async function isSuccessfulCanonicalNativeTransfer(
+  provider: ethers.Provider,
+  txHash: string,
+  expectedBlockNumber?: number
+): Promise<boolean> {
+  try {
+    const receipt = await provider.getTransactionReceipt(txHash);
+    if (!receipt || receipt.status !== 1) return false;
+    if (
+      expectedBlockNumber !== undefined &&
+      (!Number.isSafeInteger(expectedBlockNumber) || receipt.blockNumber !== expectedBlockNumber)
+    ) {
+      return false;
+    }
+
+    const canonicalBlock = await provider.getBlock(receipt.blockNumber);
+    if (!canonicalBlock || canonicalBlock.hash?.toLowerCase() !== receipt.blockHash.toLowerCase()) {
+      return false;
+    }
+
+    return true;
+  } catch {
+    // Missing or unverifiable receipt data must never result in a credit.
+    return false;
+  }
+}
+
+/**
  * Scans EVM blocks for native asset transfers (ETH) targeting monitored addresses
  */
 async function scanEvmNativeDeposits(
@@ -299,11 +331,19 @@ async function scanEvmNativeDeposits(
 
             if (transfers?.transfers && Array.isArray(transfers.transfers) && transfers.transfers.length > 0) {
               for (const tx of transfers.transfers) {
-                const txHash = tx.hash;
+                const txHash = typeof tx.hash === 'string' ? tx.hash : '';
                 const valueNum = Number(tx.value || 0);
-                if (valueNum <= 0) continue;
+                const txBlock = typeof tx.blockNum === 'string' ? parseInt(tx.blockNum, 16) : Number.NaN;
+                if (
+                  !txHash ||
+                  !Number.isFinite(valueNum) ||
+                  valueNum <= 0 ||
+                  !Number.isSafeInteger(txBlock) ||
+                  txBlock < 0 ||
+                  !(await isSuccessfulCanonicalNativeTransfer(provider, txHash, txBlock))
+                ) continue;
+
                 const assetSymbol = (tx.asset || chainConfig.nativeSymbol).toUpperCase();
-                const txBlock = parseInt(tx.blockNum, 16);
                 const confirmations = latestBlock >= txBlock ? latestBlock - txBlock + 1 : 1;
 
                 detected++;
@@ -348,7 +388,11 @@ async function scanEvmNativeDeposits(
         if (!tx.to) continue;
         const toClean = tx.to.toLowerCase();
 
-        if (monitoredEvmAddresses.has(toClean) && tx.value > BigInt(0)) {
+        if (
+          monitoredEvmAddresses.has(toClean) &&
+          tx.value > BigInt(0) &&
+          (await isSuccessfulCanonicalNativeTransfer(provider, tx.hash, b))
+        ) {
           detected++;
           const formattedAmount = ethers.formatUnits(tx.value, chainConfig.nativeDecimals);
           const numericAmount = parseFloat(formattedAmount);
@@ -1198,12 +1242,3 @@ export function startDepositIngestionWorker(intervalMs: number = 30000): void {
   runDepositIngestion().catch((e) => console.error('[Deposit Ingestion] Cycle failed:', e));
   ingestionInterval = setInterval(() => {
     runDepositIngestion().catch((e) => console.error('[Deposit Ingestion] Cycle failed:', e));
-  }, intervalMs);
-}
-
-export function stopDepositIngestionWorker(): void {
-  if (ingestionInterval) {
-    clearInterval(ingestionInterval);
-    ingestionInterval = null;
-  }
-}
