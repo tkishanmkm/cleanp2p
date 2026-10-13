@@ -55,12 +55,19 @@ export function canonicalizeDepositAttestationV1(payload: DepositAttestationV1):
   if (payload.blockHash !== "native" && !HEX_HASH.test(payload.blockHash)) throw new Error("Invalid block hash");
   if (!ADDRESS_ID.test(payload.userAddressId)) throw new Error("Invalid address identity");
   if (!/^[A-Z0-9]{2,16}$/.test(payload.asset)) throw new Error("Invalid asset");
-  if (payload.tokenContract !== "native" && payload.tokenContract.trim() === "") throw new Error("Invalid token contract");
+  if (payload.destination !== payload.destination.trim() || /\\s/.test(payload.destination)) throw new Error("Destination must be pre-normalized with no whitespace");
+  if (payload.destination.length > 256) throw new Error("Destination is too long");
+  if (payload.tokenContract !== "native" && (payload.tokenContract !== payload.tokenContract.trim() || /\\s/.test(payload.tokenContract) || payload.tokenContract.length > 256)) throw new Error("Invalid token contract");
   if (!NON_NEGATIVE_INTEGER.test(payload.rawAmount) || payload.rawAmount === "0") throw new Error("Invalid raw amount");
   if (!NON_NEGATIVE_INTEGER.test(payload.confirmations)) throw new Error("Invalid confirmations");
   if (!/^[A-Za-z0-9._-]{1,64}$/.test(payload.verifierVersion)) throw new Error("Invalid verifier version");
   if (!ISO_UTC.test(payload.issuedAt) || !ISO_UTC.test(payload.expiresAt)) throw new Error("Invalid timestamp");
-  if (Date.parse(payload.expiresAt) <= Date.parse(payload.issuedAt)) throw new Error("Invalid attestation lifetime");
+  const issuedAtMs = Date.parse(payload.issuedAt);
+  const expiresAtMs = Date.parse(payload.expiresAt);
+  if (!Number.isFinite(issuedAtMs) || !Number.isFinite(expiresAtMs) ||
+      new Date(issuedAtMs).toISOString() !== payload.issuedAt ||
+      new Date(expiresAtMs).toISOString() !== payload.expiresAt) throw new Error("Invalid calendar timestamp");
+  if (expiresAtMs <= issuedAtMs) throw new Error("Invalid attestation lifetime");
   return FIELD_ORDER.map((field) => payload[field]).join("\n");
 }
 
@@ -82,8 +89,11 @@ export function verifyDepositAttestationMac(
   if (!/^[0-9a-f]{64}$/.test(suppliedMac)) return false;
   let expected: Buffer;
   try {
-    if (Date.parse(payload.issuedAt) > nowMs + 30_000) return false;
-    if (Date.parse(payload.expiresAt) <= nowMs) return false;
+    const issuedAtMs = Date.parse(payload.issuedAt);
+    const expiresAtMs = Date.parse(payload.expiresAt);
+    if (!Number.isFinite(issuedAtMs) || !Number.isFinite(expiresAtMs)) return false;
+    if (issuedAtMs > nowMs + 30_000) return false;
+    if (expiresAtMs <= nowMs) return false;
     expected = Buffer.from(createDepositAttestationMac(payload, secret), "hex");
   } catch {
     return false;
