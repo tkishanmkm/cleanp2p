@@ -3,6 +3,7 @@ import { getSupabaseAdminClient } from '@/lib/supabase/server';
 import { ethers } from 'ethers';
 import { normalizeDepositNetwork } from '@/lib/hd-derivation-engine';
 import { CANONICAL_USDT_CONTRACTS } from '@/jobs/depositIngestion';
+import { verifyWorkerAuth } from '@/lib/security/worker-auth';
 
 // Canonical ERC-20 Transfer event signature.
 const ERC20_TRANSFER_TOPIC = ethers.id('Transfer(address,address,uint256)').toLowerCase();
@@ -21,26 +22,12 @@ interface ScannedDepositMatch {
 }
 
 function isAuthorized(req: NextRequest): boolean {
-  const serviceKey = process.env.PROVISION_SERVICE_KEY;
-  if (!serviceKey) {
-    console.error("PROVISION_SERVICE_KEY environment variable is not configured.");
-    return false;
-  }
+  const result = verifyWorkerAuth(req, {
+    allowedSecrets: [process.env.PROVISION_SERVICE_KEY],
+    customHeaderNames: ['x-provision-key'],
+  });
 
-  const headerKey = req.headers.get('x-service-key') || req.headers.get('x-provision-key');
-  if (headerKey && headerKey === serviceKey) {
-    return true;
-  }
-
-  const authHeader = req.headers.get('authorization');
-  if (authHeader) {
-    const token = authHeader.replace(/^Bearer\s+/i, '').trim();
-    if (token === serviceKey) {
-      return true;
-    }
-  }
-
-  return false;
+  return result.authorized;
 }
 
 async function processDepositWorker(req: NextRequest) {
