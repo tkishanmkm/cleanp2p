@@ -77,19 +77,40 @@ async function processDepositWorker(req: NextRequest) {
       );
     }
 
-    const evmAddressMap = new Map<string, { assetCode: string; networkCode: string }>();
-
-    for (const record of addressRecords || []) {
-      if (record.address && record.address.startsWith('0x')) {
-        evmAddressMap.set(record.address.toLowerCase().trim(), {
-          assetCode: record.asset_code || 'USDT',
-          networkCode: record.network_code || 'ERC20',
-        });
-      }
-    }
-
     const rpcUrl = process.env.EVM_RPC_URL || 'https://cloudflare-eth.com';
     const provider = new ethers.JsonRpcProvider(rpcUrl);
+    let chainId: bigint;
+    try {
+      chainId = (await provider.getNetwork()).chainId;
+    } catch (rpcErr: any) {
+      return NextResponse.json(
+        { error: 'RPC connection error while identifying the EVM chain.' },
+        { status: 503 }
+      );
+    }
+
+    // This worker scans one chain per invocation. Never interpret a block from one
+    // EVM chain as deposits on another chain.
+    const chainNetwork = chainId === 1n ? 'ETH' : chainId === 56n ? 'BEP20' : null;
+    if (!chainNetwork) {
+      return NextResponse.json(
+        { error: 'Unsupported EVM RPC chain; configure an Ethereum mainnet or BNB Smart Chain RPC.' },
+        { status: 503 }
+      );
+    }
+
+    const evmAddressMap = new Map<string, Array<{ assetCode: string; networkCode: string }>>();
+    for (const record of addressRecords || []) {
+      if (record.address && record.address.startsWith('0x')) {
+        const key = record.address.toLowerCase().trim();
+        const configs = evmAddressMap.get(key) || [];
+        configs.push({
+          assetCode: String(record.asset_code || '').toUpperCase(),
+          networkCode: normalizeDepositNetwork(String(record.network_code || '')),
+        });
+        evmAddressMap.set(key, configs);
+      }
+    }
 
     let scannedBlockNumber: number;
     try {
@@ -136,9 +157,15 @@ async function processDepositWorker(req: NextRequest) {
       const txData = tx.data || '0x';
 
       // Native Transfer (ETH)
-      if (txTo && evmAddressMap.has(txTo) && tx.value > BigInt(0)) {
+      const nativeRecipientConfigs = txTo ? evmAddressMap.get(txTo) || [] : [];
+      if (
+        txTo &&
+        chainNetwork === 'ETH' &&
+        nativeRecipientConfigs.some((config) => config.networkCode === 'ETH' && config.assetCode === 'ETH') &&
+        tx.value > BigInt(0)
+      ) {
         const formattedAmount = parseFloat(ethers.formatEther(tx.value));
-        if (formattedAmount > 0) {
+        if (Number.isFinite(formattedAmount) && formattedAmount > 0) {
           matchedDeposits.push({
             txHash: tx.hash,
             fromAddress: tx.from?.toLowerCase(),
@@ -162,22 +189,32 @@ async function processDepositWorker(req: NextRequest) {
           const amountHex = '0x' + txData.slice(74, 138);
           const rawAmount = BigInt(amountHex);
 
-          if (evmAddressMap.has(rawRecipient) && rawAmount > BigInt(0)) {
-            const addrConfig = evmAddressMap.get(rawRecipient)!;
-            const normNet = normalizeDepositNetwork(addrConfig.networkCode);
-            const decimals = normNet === 'ERC20' ? 6 : 18;
+          const expectedTokenNetwork = chainNetwork === 'ETH' ? 'ERC20' : 'BEP20';
+          const addrConfig = (evmAddressMap.get(rawRecipient) || []).find(
+            (config) => config.networkCode === expectedTokenNetwork && config.assetCode === 'USDT'
+          );
+          const expectedContract = CANONICAL_USDT_CONTRACTS[expectedTokenNetwork]?.toLowerCase();
+          // A transfer-shaped calldata payload is not proof of USDT. The transaction
+          // destination must be the canonical token contract on this exact chain.
+          if (
+            addrConfig &&
+            txTo &&
+            expectedContract &&
+            txTo === expectedContract &&
+            rawAmount > BigInt(0)
+          ) {
+            const decimals = expectedTokenNetwork === 'ERC20' ? 6 : 18;
             const formattedAmount = parseFloat(ethers.formatUnits(rawAmount, decimals));
-            const tokenContract = CANONICAL_USDT_CONTRACTS[normNet] || txTo;
 
-            if (formattedAmount > 0) {
+            if (Number.isFinite(formattedAmount) && formattedAmount > 0) {
               matchedDeposits.push({
                 txHash: tx.hash,
                 fromAddress: tx.from?.toLowerCase(),
                 toAddress: rawRecipient,
                 amount: formattedAmount,
                 asset: 'USDT',
-                network: normNet,
-                tokenContract,
+                network: expectedTokenNetwork,
+                tokenContract: expectedContract,
                 outputIndex: 0,
                 blockNumber: scannedBlockNumber,
               });
