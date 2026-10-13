@@ -362,7 +362,7 @@ export async function checkSubmittedWithdrawals(): Promise<{
             p_gas_asset: 'TRX',
           });
           if (!confErr) confirmed++;
-        } else if (!success) {
+        } else if (isConfirmed && success === false) {
           await quarantineObservedWithdrawalFailure(
             w.id,
             'TRON transaction reported unsuccessful or not yet verifiably successful; refund withheld pending transaction-bound reconciliation'
