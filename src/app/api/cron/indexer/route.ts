@@ -29,8 +29,10 @@ export async function GET(request: NextRequest) {
     const indexerResult = await runDepositIngestion();
 
     return NextResponse.json({
-      success: true,
-      message: 'Multi-chain indexer executed successfully',
+      success: false,
+      code: 'DEPOSIT_CREDITING_PAUSED',
+      depositsPaused: true,
+      message: 'Deposit indexing is paused pending independent chain verification. No deposits were credited.',
       timestamp: new Date().toISOString(),
       details: {
         chainsIndexed: indexerResult?.results?.map((r: any) => ({
@@ -40,7 +42,7 @@ export async function GET(request: NextRequest) {
         })) || [],
         pendingRecheck: indexerResult?.pendingRecheck || 0,
       },
-    }, { status: 200 });
+    }, { status: 503 });
   } catch (error: any) {
     console.error('[CRON INDEXER ERROR]:', error);
     return NextResponse.json(
