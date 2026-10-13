@@ -99,12 +99,24 @@ async function fetchOnChainConfirmations(
   // Handle Bitcoin (BTC)
   if (norm === 'BTC') {
     try {
-      const btcApiBase = process.env.BTC_MEMPOOL_API || 'https://mempool.space/api';
+      const btcApiBase = (process.env.BTC_MEMPOOL_API || 'https://mempool.space/api').replace(/\/$/, '');
       const res = await fetch(`${btcApiBase}/tx/${txHash}/status`);
       if (!res.ok) return null;
       const statusData = await res.json();
-      const confs = statusData.confirmed ? 2 : 0;
-      return { confirmations: confs, blockNumber: statusData.block_height };
+
+      if (!statusData?.confirmed || !Number.isInteger(statusData.block_height) || statusData.block_height < 0) {
+        return { confirmations: 0 };
+      }
+
+      const tipRes = await fetch(`${btcApiBase}/blocks/tip/height`);
+      if (!tipRes.ok) return null;
+      const tipHeight = Number((await tipRes.text()).trim());
+      if (!Number.isInteger(tipHeight) || tipHeight < statusData.block_height) return null;
+
+      return {
+        confirmations: tipHeight - statusData.block_height + 1,
+        blockNumber: statusData.block_height,
+      };
     } catch (btcErr) {
       console.warn(`BTC confirmation query error for ${txHash}:`, btcErr);
       return null;
@@ -114,18 +126,29 @@ async function fetchOnChainConfirmations(
   // Handle Litecoin (LTC)
   if (norm === 'LTC') {
     try {
-      const ltcApiBase = process.env.LTC_MEMPOOL_API || 'https://litecoinspace.org/api';
+      const ltcApiBase = (process.env.LTC_MEMPOOL_API || 'https://litecoinspace.org/api').replace(/\/$/, '');
       const res = await fetch(`${ltcApiBase}/tx/${txHash}/status`);
       if (!res.ok) return null;
       const statusData = await res.json();
-      const confs = statusData.confirmed ? 6 : 0;
-      return { confirmations: confs, blockNumber: statusData.block_height };
+
+      if (!statusData?.confirmed || !Number.isInteger(statusData.block_height) || statusData.block_height < 0) {
+        return { confirmations: 0 };
+      }
+
+      const tipRes = await fetch(`${ltcApiBase}/blocks/tip/height`);
+      if (!tipRes.ok) return null;
+      const tipHeight = Number((await tipRes.text()).trim());
+      if (!Number.isInteger(tipHeight) || tipHeight < statusData.block_height) return null;
+
+      return {
+        confirmations: tipHeight - statusData.block_height + 1,
+        blockNumber: statusData.block_height,
+      };
     } catch (ltcErr) {
       console.warn(`LTC confirmation query error for ${txHash}:`, ltcErr);
       return null;
     }
   }
-
   // Handle EVM networks (ERC20, BEP20, ETH)
   try {
     const rpcUrl = getRpcUrl(network);
