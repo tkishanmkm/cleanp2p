@@ -8,16 +8,31 @@ import {
 import { TRON_CONFIG, getTronWeb, isValidTronAddress } from '@/lib/blockchain/tron';
 import { normalizeDepositNetwork } from '@/lib/hd-derivation-engine';
 
-// Initialize Supabase admin client with service role
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL || 'https://eaiwgfxoiwxepinvcykg.supabase.co';
-const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'placeholder-key';
+// Create the privileged database client only when ingestion actually runs.
+// Never fall back to the public anon key: deposit crediting requires service_role.
+let depositSupabaseAdmin: ReturnType<typeof createClient> | null = null;
 
-export const supabaseAdmin = createClient(supabaseUrl, supabaseKey, {
-  auth: {
-    persistSession: false,
-    autoRefreshToken: false,
-  },
-});
+function getDepositSupabaseAdmin() {
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL;
+  const supabaseServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+
+  if (!supabaseUrl || !supabaseServiceRoleKey) {
+    throw new Error(
+      'Deposit ingestion is disabled: SUPABASE_URL (or NEXT_PUBLIC_SUPABASE_URL) and SUPABASE_SERVICE_ROLE_KEY are required.'
+    );
+  }
+
+  if (!depositSupabaseAdmin) {
+    depositSupabaseAdmin = createClient(supabaseUrl, supabaseServiceRoleKey, {
+      auth: {
+        persistSession: false,
+        autoRefreshToken: false,
+      },
+    });
+  }
+
+  return depositSupabaseAdmin;
+}
 
 export const CANONICAL_USDT_CONTRACTS: Record<string, string> = {
   ERC20: process.env.USDT_CONTRACT_ERC20 || '0xdAC17F958D2ee523a2206206994597C13D831ec7',
@@ -225,7 +240,7 @@ async function scanEvmTokenDeposits(
         const confirmations = Math.max(1, latestBlock - log.blockNumber + 1);
 
         // Call canonical atomic deposit RPC
-        const { data, error } = await supabaseAdmin.rpc('process_deposit_atomic', {
+        const { data, error } = await getDepositSupabaseAdmin().rpc('process_deposit_atomic', {
           p_destination_address: toAddress,
           p_asset_symbol: 'USDT',
           p_network_code: normNet,
@@ -307,7 +322,7 @@ async function scanEvmNativeDeposits(
                 const confirmations = latestBlock >= txBlock ? latestBlock - txBlock + 1 : 1;
 
                 detected++;
-                const { data, error } = await supabaseAdmin.rpc('process_deposit_atomic', {
+                const { data, error } = await getDepositSupabaseAdmin().rpc('process_deposit_atomic', {
                   p_destination_address: address.toLowerCase(),
                   p_asset_symbol: assetSymbol === 'ETH' ? 'ETH' : assetSymbol,
                   p_network_code: normNet === 'ERC20' ? 'ETH' : normNet,
@@ -354,7 +369,7 @@ async function scanEvmNativeDeposits(
           const numericAmount = parseFloat(formattedAmount);
           const confirmations = Math.max(1, latestBlock - b + 1);
 
-          const { data, error } = await supabaseAdmin.rpc('process_deposit_atomic', {
+          const { data, error } = await getDepositSupabaseAdmin().rpc('process_deposit_atomic', {
             p_destination_address: toClean,
             p_asset_symbol: chainConfig.nativeSymbol === 'ETH' ? 'ETH' : chainConfig.nativeSymbol,
             p_network_code: normNet === 'ERC20' ? 'ETH' : normNet,
@@ -555,7 +570,7 @@ async function scanTronDeposits(
 
             detected++;
 
-            const { data: rpcData, error } = await supabaseAdmin.rpc('process_deposit_atomic', {
+            const { data: rpcData, error } = await getDepositSupabaseAdmin().rpc('process_deposit_atomic', {
               p_destination_address: toAddr,
               p_asset_symbol: 'USDT',
               p_network_code: 'TRC20',
@@ -625,7 +640,7 @@ async function scanTronDeposits(
               ? latestBlock - eventBlock + 1
               : 1;
 
-            const { data: rpcData, error } = await supabaseAdmin.rpc('process_deposit_atomic', {
+            const { data: rpcData, error } = await getDepositSupabaseAdmin().rpc('process_deposit_atomic', {
               p_destination_address: toBase58,
               p_asset_symbol: 'USDT',
               p_network_code: 'TRC20',
@@ -753,7 +768,7 @@ async function scanTronDeposits(
 
           detected++;
 
-          const { data: rpcData, error } = await supabaseAdmin.rpc('process_deposit_atomic', {
+          const { data: rpcData, error } = await getDepositSupabaseAdmin().rpc('process_deposit_atomic', {
             p_destination_address: toBase58,
             p_asset_symbol: 'USDT',
             p_network_code: 'TRC20',
@@ -830,7 +845,7 @@ async function scanBtcDeposits(
           const blockHeight = tx.status?.block_height;
           let confirmations = isConfirmed ? 2 : 0;
 
-          const { data, error } = await supabaseAdmin.rpc('process_deposit_atomic', {
+          const { data, error } = await getDepositSupabaseAdmin().rpc('process_deposit_atomic', {
             p_destination_address: btcAddr,
             p_asset_symbol: 'BTC',
             p_network_code: 'BTC',
@@ -905,7 +920,7 @@ async function scanLtcDeposits(
           const blockHeight = tx.status?.block_height;
           let confirmations = isConfirmed ? 6 : 0;
 
-          const { data, error } = await supabaseAdmin.rpc('process_deposit_atomic', {
+          const { data, error } = await getDepositSupabaseAdmin().rpc('process_deposit_atomic', {
             p_destination_address: ltcAddr,
             p_asset_symbol: 'LTC',
             p_network_code: 'LTC',
@@ -975,7 +990,7 @@ export async function refreshPendingDepositConfirmations(): Promise<{
           const currentHeight = currentBlock.block_header?.raw_data?.number || 0;
           const confs = Math.max(1, currentHeight - txInfo.blockNumber + 1);
 
-          const { data, error: rpcErr } = await supabaseAdmin.rpc('process_deposit_atomic', {
+          const { data, error: rpcErr } = await getDepositSupabaseAdmin().rpc('process_deposit_atomic', {
             p_destination_address: destinationAddress,
             p_asset_symbol: assetSymbol,
             p_network_code: 'TRC20',
@@ -1003,7 +1018,7 @@ export async function refreshPendingDepositConfirmations(): Promise<{
           if (res.ok) {
             const statusData = await res.json();
             const confs = statusData.confirmed ? 2 : 0;
-            const { data, error: rpcErr } = await supabaseAdmin.rpc('process_deposit_atomic', {
+            const { data, error: rpcErr } = await getDepositSupabaseAdmin().rpc('process_deposit_atomic', {
               p_destination_address: destinationAddress,
               p_asset_symbol: 'BTC',
               p_network_code: 'BTC',
@@ -1029,7 +1044,7 @@ export async function refreshPendingDepositConfirmations(): Promise<{
           if (res.ok) {
             const statusData = await res.json();
             const confs = statusData.confirmed ? 6 : 0;
-            const { data, error: rpcErr } = await supabaseAdmin.rpc('process_deposit_atomic', {
+            const { data, error: rpcErr } = await getDepositSupabaseAdmin().rpc('process_deposit_atomic', {
               p_destination_address: destinationAddress,
               p_asset_symbol: 'LTC',
               p_network_code: 'LTC',
@@ -1057,7 +1072,7 @@ export async function refreshPendingDepositConfirmations(): Promise<{
             const currentBlock = await provider.getBlockNumber();
             const confs = Math.max(1, currentBlock - receipt.blockNumber + 1);
 
-            const { data, error: rpcErr } = await supabaseAdmin.rpc('process_deposit_atomic', {
+            const { data, error: rpcErr } = await getDepositSupabaseAdmin().rpc('process_deposit_atomic', {
               p_destination_address: destinationAddress,
               p_asset_symbol: assetSymbol,
               p_network_code: normNet,
@@ -1198,12 +1213,3 @@ export function startDepositIngestionWorker(intervalMs: number = 30000): void {
   runDepositIngestion().catch((e) => console.error('[Deposit Ingestion] Cycle failed:', e));
   ingestionInterval = setInterval(() => {
     runDepositIngestion().catch((e) => console.error('[Deposit Ingestion] Cycle failed:', e));
-  }, intervalMs);
-}
-
-export function stopDepositIngestionWorker(): void {
-  if (ingestionInterval) {
-    clearInterval(ingestionInterval);
-    ingestionInterval = null;
-  }
-}
