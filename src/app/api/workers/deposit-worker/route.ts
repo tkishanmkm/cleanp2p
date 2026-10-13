@@ -19,7 +19,7 @@ export async function POST(request: Request) {
       success: true,
       results,
       pendingRecheck,
-      message: 'Deposit ingestion completed via canonical process_deposit_atomic',
+      message: 'Deposit scan completed; direct scanner credit is disabled, and pending credit is limited to the verified supported EVM path.',
     });
   } catch (error: any) {
     console.error('Deposit worker error:', error);
