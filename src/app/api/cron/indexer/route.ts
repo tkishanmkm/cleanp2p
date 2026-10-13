@@ -25,7 +25,7 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: 'Unauthorized request' }, { status: 401 });
     }
 
-    console.log('[CRON INDEXER] Triggered successfully at:', new Date().toISOString());
+    console.warn('[CRON INDEXER] Authenticated request received; indexing remains paused at:', new Date().toISOString());
     const indexerResult = await runDepositIngestion();
 
     return NextResponse.json({
