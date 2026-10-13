@@ -78,7 +78,7 @@ export async function getMonitoredAddresses(): Promise<{
 
   try {
     // 1. Fetch from deposit_addresses
-    const { data: primaryAddresses, error: pErr } = await supabaseAdmin
+    const { data: primaryAddresses, error: pErr } = await getDepositSupabaseAdmin()
       .from('deposit_addresses')
       .select('address, network_code, asset_code');
 
@@ -108,7 +108,7 @@ export async function getMonitoredAddresses(): Promise<{
     }
 
     // 2. Fetch from user_deposit_addresses
-    const { data: fallbackAddresses, error: fErr } = await supabaseAdmin
+    const { data: fallbackAddresses, error: fErr } = await getDepositSupabaseAdmin()
       .from('user_deposit_addresses')
       .select('address, network, coin');
 
@@ -138,7 +138,7 @@ export async function getMonitoredAddresses(): Promise<{
     }
 
     // 3. Fetch from wallets (User dashboard wallets)
-    const { data: userWallets, error: wErr } = await supabaseAdmin
+    const { data: userWallets, error: wErr } = await getDepositSupabaseAdmin()
       .from('wallets')
       .select('address, chain, currency');
 
@@ -963,7 +963,7 @@ export async function refreshPendingDepositConfirmations(): Promise<{
   let newlyCredited = 0;
 
   try {
-    const { data: pendingDeposits, error } = await supabaseAdmin
+    const { data: pendingDeposits, error } = await getDepositSupabaseAdmin()
       .from('onchain_deposits')
       .select('*')
       .eq('status', 'PENDING')
