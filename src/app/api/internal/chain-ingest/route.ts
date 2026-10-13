@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseAdminClient } from '@/lib/supabase/server';
 import { normalizeDepositNetwork } from '@/lib/hd-derivation-engine';
 import { CANONICAL_USDT_CONTRACTS } from '@/jobs/depositIngestion';
+import { timingSafeEqualString } from '@/lib/security/worker-auth';
 
 interface IngestPayload {
   networkCode: string;
@@ -21,7 +22,7 @@ export async function POST(req: NextRequest) {
     const providedSecret = req.headers.get('x-ingest-secret');
     const configuredSecret = process.env.CHAIN_INGEST_SECRET;
 
-    if (!configuredSecret || providedSecret !== configuredSecret) {
+    if (!configuredSecret || !providedSecret || !timingSafeEqualString(providedSecret, configuredSecret)) {
       return NextResponse.json(
         { error: 'Unauthorized: Invalid or missing x-ingest-secret header.' },
         { status: 401 }
