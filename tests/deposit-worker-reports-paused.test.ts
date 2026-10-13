@@ -23,5 +23,7 @@ assert.match(indexer, /depositsPaused: true/);
 assert.match(indexer, /status: 503/);
 assert.match(indexer, /Deposit indexing is paused pending independent chain verification/);
 assert.doesNotMatch(indexer, /Multi-chain indexer executed successfully/);
+assert.doesNotMatch(indexer, /Triggered successfully at/);
+assert.match(indexer, /Authenticated request received; indexing remains paused at/);
 
 console.log('cron indexer paused-status assertions passed (5 additional assertions)');
