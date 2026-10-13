@@ -422,15 +422,13 @@ export async function processAllPendingWithdrawals(maxBatch: number = 20): Promi
   const results: WithdrawalProcessResult[] = [];
   let count = 0;
 
-  try {
-    while (count < maxBatch) {
-      const res = await processWithdrawalQueue();
-      if (!res.processed) {
-        break;
-      }
-      results.push(res);
-      count++;
+  while (count < maxBatch) {
+    const res = await processWithdrawalQueue();
+    if (!res.processed) {
+      break;
     }
+    results.push(res);
+    count++;
   }
 
   return { totalProcessed: count, results };
