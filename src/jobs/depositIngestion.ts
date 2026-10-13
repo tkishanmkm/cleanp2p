@@ -216,20 +216,21 @@ async function scanEvmTokenDeposits(
         }
 
         const rawValue = parsed.args[2] as bigint;
-        const formattedAmount = ethers.formatUnits(rawValue, tokenDecimals);
-        const numericAmount = parseFloat(formattedAmount);
+        if (rawValue <= 0n) continue;
 
-        if (numericAmount <= 0) continue;
+        // Keep the exact decimal string from the integer token units. Do not
+        // round-trip a financial amount through JavaScript Number/parseFloat.
+        const exactAmount = ethers.formatUnits(rawValue, tokenDecimals);
 
         detected++;
         const confirmations = Math.max(1, latestBlock - log.blockNumber + 1);
 
-        // Call canonical atomic deposit RPC
+        // PostgreSQL numeric accepts this decimal string without JS float rounding.
         const { data, error } = await supabaseAdmin.rpc('process_deposit_atomic', {
           p_destination_address: toAddress,
           p_asset_symbol: 'USDT',
           p_network_code: normNet,
-          p_amount: numericAmount,
+          p_amount: exactAmount,
           p_tx_hash: log.transactionHash,
           p_output_index: log.index,
           p_block_number: log.blockNumber,
@@ -1198,12 +1199,3 @@ export function startDepositIngestionWorker(intervalMs: number = 30000): void {
   runDepositIngestion().catch((e) => console.error('[Deposit Ingestion] Cycle failed:', e));
   ingestionInterval = setInterval(() => {
     runDepositIngestion().catch((e) => console.error('[Deposit Ingestion] Cycle failed:', e));
-  }, intervalMs);
-}
-
-export function stopDepositIngestionWorker(): void {
-  if (ingestionInterval) {
-    clearInterval(ingestionInterval);
-    ingestionInterval = null;
-  }
-}
