@@ -22,7 +22,8 @@
     "test:worker-auth": "tsx tests/worker-auth.test.ts",
     "test:deposit-listener-retired": "tsx tests/deposit-listener-retired.test.ts",
     "test:confirmation-worker-fail-closed": "tsx tests/confirmation-worker-fail-closed.test.ts",
-    "test:deposit-ingestion-fail-closed": "tsx tests/deposit-ingestion-fail-closed.test.ts"
+    "test:deposit-ingestion-fail-closed": "tsx tests/deposit-ingestion-fail-closed.test.ts",
+    "test:direct-webhook-credit-disabled": "tsx tests/direct-webhook-credit-disabled.test.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.700.0",
