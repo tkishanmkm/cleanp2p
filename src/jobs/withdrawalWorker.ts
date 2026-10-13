@@ -42,7 +42,8 @@ export async function checkCircuitBreakers(): Promise<{ allowed: boolean; reason
       .maybeSingle();
 
     if (error || !settings) {
-      return { allowed: true };
+      console.error('[Withdrawal Worker] Circuit-breaker settings unavailable; failing closed.', error);
+      return { allowed: false, reason: 'Withdrawal safety settings could not be verified' };
     }
     if (settings.global_kill_switch_active) {
       return { allowed: false, reason: 'Global emergency kill switch is currently active' };
@@ -52,7 +53,8 @@ export async function checkCircuitBreakers(): Promise<{ allowed: boolean; reason
     }
     return { allowed: true };
   } catch (err) {
-    return { allowed: true };
+    console.error('[Withdrawal Worker] Circuit-breaker check failed; failing closed.', err);
+    return { allowed: false, reason: 'Withdrawal safety settings could not be verified' };
   }
 }
 
@@ -76,9 +78,10 @@ export async function allocateEvmNonce(
       return Number(allocatedNonce);
     }
   } catch (rpcErr) {
-    console.warn('[Nonce Manager] RPC allocate_hot_wallet_nonce failed, falling back to on-chain count:', rpcErr);
+    console.error('[Nonce Manager] RPC allocate_hot_wallet_nonce failed; refusing unsafe nonce fallback.', rpcErr);
+    throw new Error('Safe hot-wallet nonce allocation unavailable; withdrawal dispatch halted');
   }
-  return await provider.getTransactionCount(walletAddress, 'pending');
+  throw new Error('Safe hot-wallet nonce allocation returned no nonce; withdrawal dispatch halted');
 }
 
 /**
@@ -423,8 +426,9 @@ export async function processAllPendingWithdrawals(maxBatch: number = 20): Promi
       return { totalProcessed: 0, results: [], locked: true };
     }
   } catch (lockRpcErr) {
-    // If RPC is unavailable, proceed defensively
-    hasLock = false;
+    // Never dispatch payouts when singleton-lock state cannot be verified.
+    console.error('[Withdrawal Worker Singleton] Lock RPC failed; refusing to dispatch withdrawals.', lockRpcErr);
+    return { totalProcessed: 0, results: [], locked: true };
   }
 
   const results: WithdrawalProcessResult[] = [];
