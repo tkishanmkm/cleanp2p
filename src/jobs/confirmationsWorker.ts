@@ -2,16 +2,29 @@ import { createClient } from '@supabase/supabase-js';
 import { ethers } from 'ethers';
 import { normalizeDepositNetwork } from '@/lib/hd-derivation-engine';
 
-// Initialize Supabase admin client with service role key
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL || 'https://placeholder.supabase.co';
-const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'placeholder-key';
+// Construct the privileged client only when the worker runs. Never fall back to
+// a public anon key or placeholder credentials for a worker that reads deposit records.
+function getSupabaseAdmin() {
+  const supabaseUrl = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
-const supabaseAdmin = createClient(supabaseUrl, supabaseKey, {
-  auth: {
-    persistSession: false,
-    autoRefreshToken: false,
-  },
-});
+  if (!supabaseUrl || !serviceRoleKey) {
+    throw new Error('Confirmation worker requires SUPABASE_URL (or NEXT_PUBLIC_SUPABASE_URL) and SUPABASE_SERVICE_ROLE_KEY');
+  }
+  if (
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY &&
+    serviceRoleKey === process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
+  ) {
+    throw new Error('Confirmation worker refuses to use the public anon key as its service-role credential');
+  }
+
+  return createClient(supabaseUrl, serviceRoleKey, {
+    auth: {
+      persistSession: false,
+      autoRefreshToken: false,
+    },
+  });
+}
 
 export interface ConfirmationWorkerResult {
   totalScanned: number;
@@ -152,7 +165,7 @@ async function fetchOnChainConfirmations(
 }
 
 /**
- * Main worker logic: Polling and ingestion processor for pending deposits via canonical process_deposit_atomic RPC
+ * Poll pending deposits and report chain confirmations only. This worker never credits deposits.
  */
 export async function runConfirmationsWorker(): Promise<ConfirmationWorkerResult> {
   const result: ConfirmationWorkerResult = {
@@ -165,6 +178,7 @@ export async function runConfirmationsWorker(): Promise<ConfirmationWorkerResult
 
   try {
     // 1. Fetch pending on-chain deposits
+    const supabaseAdmin = getSupabaseAdmin();
     const { data: pendingDeposits, error } = await supabaseAdmin
       .from('onchain_deposits')
       .select('*')
@@ -229,6 +243,17 @@ export async function runConfirmationsWorker(): Promise<ConfirmationWorkerResult
     return result;
   } catch (err: any) {
     console.error('Fatal error in runConfirmationsWorker:', err);
+    result.failedCount++;
+    result.details.push({
+      depositId: '(worker)',
+      txHash: '',
+      network: 'CONFIGURATION',
+      previousConfirmations: 0,
+      newConfirmations: 0,
+      requiredConfirmations: 0,
+      status: 'WORKER_ERROR',
+      error: err instanceof Error ? err.message : String(err),
+    });
     return result;
   }
 }
