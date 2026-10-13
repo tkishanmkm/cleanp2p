@@ -7,6 +7,8 @@ assert.match(route, /depositsPaused: true/);
 assert.match(route, /status: 503/);
 assert.match(route, /Deposit ingestion is paused pending independent chain verification/);
 assert.doesNotMatch(route, /Deposit ingestion completed via canonical process_deposit_atomic/);
+assert.match(route, /code: 'DEPOSIT_WORKER_FAILED'/);
+assert.doesNotMatch(route, /error\.message/);
 
 const job = readFileSync('src/jobs/depositIngestion.ts', 'utf8');
 assert.match(job, /depositsCredited: 0/);
