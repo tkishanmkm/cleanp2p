@@ -26,6 +26,7 @@
     "test:direct-webhook-credit-disabled": "tsx tests/direct-webhook-credit-disabled.test.ts",
     "test:deposit-recovery-diagnostic-retired": "tsx tests/deposit-recovery-diagnostic-retired.test.ts",
     "test:deposit-worker-reports-paused": "tsx tests/deposit-worker-reports-paused.test.ts",
+    "test:deposit-cutover-test-safety": "tsx tests/deposit-cutover-test-safety.test.ts",
     "test:deposit-address-auth-required": "tsx tests/deposit-address-auth-required.test.ts",
     "test:confirmation-route-reports-diagnostic-only": "tsx tests/confirmation-route-reports-diagnostic-only.test.ts",
     "test:privileged-worker-credentials": "tsx tests/privileged-worker-credentials.test.ts"
