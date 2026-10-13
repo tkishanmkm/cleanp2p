@@ -189,84 +189,28 @@ export async function runConfirmationsWorker(): Promise<ConfirmationWorkerResult
       const normNet = normalizeDepositNetwork(deposit.network);
       const requiredConfs = deposit.required_confirmations || 12;
       const prevConfs = deposit.confirmations || 0;
-      const destinationAddress = deposit.to_address || deposit.address;
-      const outputIndex = deposit.output_index ?? deposit.log_index ?? 0;
-      const assetSymbol = (deposit.asset_symbol || 'USDT').toUpperCase().trim();
-      const tokenContract = CANONICAL_USDT_CONTRACTS[normNet] || null;
-
       try {
         const onChainData = await fetchOnChainConfirmations(deposit.tx_hash, normNet);
+        const currentConfirmations = onChainData?.confirmations ?? prevConfs;
 
-        let currentConfirmations = prevConfs;
-        let blockNumber = deposit.block_number;
-        let fromAddress = deposit.from_address;
-
-        if (onChainData) {
-          currentConfirmations = onChainData.confirmations;
-          if (onChainData.blockNumber) {
-            blockNumber = onChainData.blockNumber;
-          }
-          if (onChainData.fromAddress) {
-            fromAddress = onChainData.fromAddress;
-          }
-        }
-
-        // Call authoritative canonical RPC process_deposit_atomic
-        const { data: rpcData, error: rpcErr } = await supabaseAdmin.rpc('process_deposit_atomic', {
-          p_destination_address: destinationAddress,
-          p_asset_symbol: assetSymbol,
-          p_network_code: normNet,
-          p_amount: Number(deposit.amount),
-          p_tx_hash: deposit.tx_hash,
-          p_output_index: outputIndex,
-          p_block_number: blockNumber,
-          p_from_address: fromAddress,
-          p_token_contract: tokenContract,
-          p_confirmations: currentConfirmations,
-          p_provider: 'confirmations_worker',
+        // Fail closed: this worker's chain lookups do not fully verify the
+        // canonical transaction/output or token-transfer evidence, and the DB
+        // RPC currently accepts caller-supplied confirmations. Never credit here.
+        result.pendingCount++;
+        result.details.push({
+          depositId: deposit.id,
+          txHash: deposit.tx_hash,
+          network: normNet,
+          previousConfirmations: prevConfs,
+          newConfirmations: currentConfirmations,
+          requiredConfirmations: requiredConfs,
+          status: onChainData
+            ? 'NOT_CREDITED_REQUIRES_CANONICAL_VERIFIER'
+            : 'NOT_CREDITED_CHAIN_LOOKUP_UNAVAILABLE',
+          error: onChainData
+            ? 'Confirmation-only worker cannot establish all required transaction evidence; use the canonical verified ingestion path.'
+            : 'Chain lookup failed; stored confirmations are informational only and cannot authorize credit.',
         });
-
-        if (rpcErr) {
-          console.error(`RPC process_deposit_atomic failed for ${deposit.tx_hash}:`, rpcErr);
-          result.failedCount++;
-          result.details.push({
-            depositId: deposit.id,
-            txHash: deposit.tx_hash,
-            network: normNet,
-            previousConfirmations: prevConfs,
-            newConfirmations: currentConfirmations,
-            requiredConfirmations: requiredConfs,
-            status: 'ERROR',
-            error: rpcErr.message,
-          });
-        } else {
-          const parsedRes = typeof rpcData === 'string' ? JSON.parse(rpcData) : rpcData;
-          const isCredited = parsedRes?.status === 'credited' || parsedRes?.status === 'CONFIRMED' || parsedRes?.status === 'ALREADY_CREDITED';
-
-          if (isCredited) {
-            result.confirmedCount++;
-            result.details.push({
-              depositId: deposit.id,
-              txHash: deposit.tx_hash,
-              network: normNet,
-              previousConfirmations: prevConfs,
-              newConfirmations: currentConfirmations,
-              requiredConfirmations: requiredConfs,
-              status: 'CREDITED',
-            });
-          } else {
-            result.pendingCount++;
-            result.details.push({
-              depositId: deposit.id,
-              txHash: deposit.tx_hash,
-              network: normNet,
-              previousConfirmations: prevConfs,
-              newConfirmations: currentConfirmations,
-              requiredConfirmations: requiredConfs,
-              status: 'PENDING',
-            });
-          }
-        }
       } catch (depositErr: any) {
         console.error(`Error processing pending deposit ${deposit.tx_hash}:`, depositErr);
         result.failedCount++;
