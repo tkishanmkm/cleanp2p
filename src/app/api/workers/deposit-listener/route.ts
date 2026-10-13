@@ -181,6 +181,35 @@ async function processDepositWorker(req: NextRequest) {
 
       const txTo = tx.to ? tx.to.toLowerCase() : null;
 
+      // Validate every transaction receipt before matching either native ETH or
+      // token transfers. Otherwise a reverted native-value transaction could be
+      // credited by the fast path before receipt.status is checked.
+      let receipt: ethers.TransactionReceipt | null;
+      try {
+        receipt = await provider.getTransactionReceipt(tx.hash);
+      } catch (receiptErr) {
+        console.error(`RPC error retrieving receipt for tx ${tx.hash}.`, receiptErr);
+        return NextResponse.json(
+          { error: `RPC failed while retrieving a transaction receipt in block ${scannedBlockNumber}; retry the scan.` },
+          { status: 503 }
+        );
+      }
+
+      if (!receipt) {
+        return NextResponse.json(
+          { error: `RPC returned no receipt for transaction ${tx.hash}; retry the scan.` },
+          { status: 503 }
+        );
+      }
+      if (receipt.blockNumber !== scannedBlockNumber || !receipt.blockHash ||
+          receipt.blockHash.toLowerCase() !== block.hash.toLowerCase()) {
+        return NextResponse.json(
+          { error: `Transaction receipt block does not match scanned block ${scannedBlockNumber}; retry the scan.` },
+          { status: 503 }
+        );
+      }
+      if (receipt.status !== 1) continue;
+
       // Native Transfer (ETH)
       const nativeRecipientConfigs = txTo ? evmAddressMap.get(txTo) || [] : [];
       if (
@@ -206,38 +235,11 @@ async function processDepositWorker(req: NextRequest) {
         }
       }
 
-      // ERC-20 deposits are identified from mined receipt logs, not calldata.
-      // This also covers transferFrom/router calls and gives each transfer a unique log index.
+      // ERC-20 deposits are identified from the already validated mined receipt logs,
+      // not calldata. This also covers transferFrom/router calls and gives each transfer a unique log index.
       const expectedTokenNetwork = chainNetwork === 'ETH' ? 'ERC20' : 'BEP20';
       const expectedContract = CANONICAL_USDT_CONTRACTS[expectedTokenNetwork]?.toLowerCase();
       if (!expectedContract) continue;
-
-      let receipt: ethers.TransactionReceipt | null;
-      try {
-        receipt = await provider.getTransactionReceipt(tx.hash);
-      } catch (receiptErr) {
-        console.error(`RPC error retrieving receipt for tx ${tx.hash}.`, receiptErr);
-        return NextResponse.json(
-          { error: `RPC failed while retrieving a transaction receipt in block ${scannedBlockNumber}; retry the scan.` },
-          { status: 503 }
-        );
-      }
-
-      // A missing receipt or a receipt for a different block may indicate RPC
-      // lag or a reorg. Do not report a successful scan with deposits omitted.
-      if (!receipt) {
-        return NextResponse.json(
-          { error: `RPC returned no receipt for transaction ${tx.hash}; retry the scan.` },
-          { status: 503 }
-        );
-      }
-      if (receipt.blockNumber !== scannedBlockNumber || receipt.blockHash.toLowerCase() !== block.hash.toLowerCase()) {
-        return NextResponse.json(
-          { error: `Transaction receipt block does not match scanned block ${scannedBlockNumber}; retry the scan.` },
-          { status: 503 }
-        );
-      }
-      if (receipt.status !== 1) continue;
 
       try {
         for (const log of receipt.logs) {
