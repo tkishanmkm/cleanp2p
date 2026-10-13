@@ -14,3 +14,12 @@ assert.match(job, /Deposit crediting is paused until exact-event independent cha
 assert.doesNotMatch(job, /\.rpc\(['"]process_deposit_atomic['"]/);
 
 console.log('deposit worker paused-status assertions passed (8 assertions)');
+
+const indexer = readFileSync('src/app/api/cron/indexer/route.ts', 'utf8');
+assert.match(indexer, /code: 'DEPOSIT_CREDITING_PAUSED'/);
+assert.match(indexer, /depositsPaused: true/);
+assert.match(indexer, /status: 503/);
+assert.match(indexer, /Deposit indexing is paused pending independent chain verification/);
+assert.doesNotMatch(indexer, /Multi-chain indexer executed successfully/);
+
+console.log('cron indexer paused-status assertions passed (5 additional assertions)');
