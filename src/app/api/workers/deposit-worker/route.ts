@@ -15,9 +15,6 @@ export async function POST(request: Request) {
 
     const { results, pendingRecheck } = await runDepositIngestion();
 
-    const depositsPaused = results.every((item) => item.depositsCredited === 0) &&
-      results.every((item) => item.errors.some((message) => message.toLowerCase().includes('paused')) || item.errors.length > 0);
-
     return NextResponse.json({
       success: false,
       code: 'DEPOSIT_CREDITING_PAUSED',
