@@ -56,3 +56,10 @@ test("short secrets and malformed MACs are rejected", () => {
   assert.throws(() => createDepositAttestationMac(payload, "too-short"));
   assert.equal(verifyDepositAttestationMac(payload, "not-a-mac", secret, now), false);
 });
+
+test("invalid calendar dates are rejected even when the timestamp shape looks valid", () => {
+  assert.throws(() => createDepositAttestationMac({ ...payload, expiresAt: "2026-99-99T00:05:00.000Z" }, secret));
+});
+test("destinations with whitespace are rejected before signing", () => {
+  assert.throws(() => createDepositAttestationMac({ ...payload, destination: " 0x1111111111111111111111111111111111111111" }, secret));
+});
