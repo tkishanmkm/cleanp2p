@@ -206,7 +206,7 @@ async function processDepositWorker(req: NextRequest) {
 
       try {
         const receipt = await provider.getTransactionReceipt(tx.hash);
-        if (!receipt || receipt.status !== 1 || receipt.blockNumber !== scannedBlockNumber) continue;
+        if (!receipt || receipt.status !== 1 || receipt.blockNumber !== scannedBlockNumber || receipt.blockHash.toLowerCase() !== block.hash.toLowerCase()) continue;
 
         for (const log of receipt.logs) {
           if (log.address.toLowerCase() !== expectedContract) continue;
