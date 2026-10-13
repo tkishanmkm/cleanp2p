@@ -202,12 +202,7 @@ async function processDepositWorker(req: NextRequest) {
       const expectedContract = CANONICAL_USDT_CONTRACTS[expectedTokenNetwork]?.toLowerCase();
       if (!expectedContract) continue;
 
-      const relevantConfigs = new Set(
-        (evmAddressMap.get(txTo || '') || [])
-          .filter((config) => config.networkCode === expectedTokenNetwork && config.assetCode === 'USDT')
-          .map((config) => config.networkCode)
-      );
-      if (relevantConfigs.size === 0 || txTo !== expectedContract) continue;
+      if (txTo !== expectedContract) continue;
 
       try {
         const receipt = await provider.getTransactionReceipt(tx.hash);
