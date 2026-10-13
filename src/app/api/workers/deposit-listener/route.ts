@@ -162,9 +162,34 @@ async function processDepositWorker(req: NextRequest) {
     }
 
     const matchedDeposits: ScannedDepositMatch[] = [];
-    const transactions = (block.prefetchedTransactions && block.prefetchedTransactions.length > 0)
-      ? block.prefetchedTransactions
-      : [];
+    let transactions = block.prefetchedTransactions || [];
+
+    // Some JSON-RPC providers return only transaction hashes even when a full
+    // block was requested. Resolve those hashes explicitly instead of silently
+    // treating the block as empty and missing deposits.
+    if (transactions.length === 0 && block.transactions.length > 0) {
+      const resolvedTransactions: ethers.TransactionResponse[] = [];
+      const batchSize = 25;
+      for (let offset = 0; offset < block.transactions.length; offset += batchSize) {
+        const hashes = block.transactions.slice(offset, offset + batchSize);
+        const batch = await Promise.all(hashes.map((hash) => provider.getTransaction(hash)));
+        if (batch.some((tx) => tx === null)) {
+          return NextResponse.json(
+            { error: `RPC returned incomplete transaction data for block ${scannedBlockNumber}; retry the block scan.` },
+            { status: 503 }
+          );
+        }
+        resolvedTransactions.push(...batch as ethers.TransactionResponse[]);
+      }
+      transactions = resolvedTransactions;
+    }
+
+    if (transactions.length !== block.transactions.length) {
+      return NextResponse.json(
+        { error: `RPC returned an incomplete transaction list for block ${scannedBlockNumber}; retry the block scan.` },
+        { status: 503 }
+      );
+    }
 
     for (const tx of transactions) {
       if (!tx || !tx.hash) continue;
