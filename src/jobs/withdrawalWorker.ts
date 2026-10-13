@@ -139,10 +139,13 @@ export async function processWithdrawalQueue(): Promise<WithdrawalProcessResult>
       if (hashPersistErr) {
         throw new Error(`Broadcast succeeded but tx hash persistence failed; manual reconciliation required: ${hashPersistErr.message}`);
       }
-      await supabaseAdmin
+      const { error: legacyPersistErr } = await supabaseAdmin
         .from('withdrawals')
         .update({ tx_hash: txHash, txid: txHash, status: 'broadcasted', broadcasted_at: new Date().toISOString(), updated_at: new Date().toISOString() })
         .eq('id', withdrawal.id);
+      if (legacyPersistErr) {
+        throw new Error(`Broadcast hash saved to onchain_withdrawals but legacy withdrawal persistence failed; reconciliation required: ${legacyPersistErr.message}`);
+      }
 
       console.log(`[Withdrawal Worker] Broadcasted TRON payout ${withdrawal.id} (tx: ${txHash})`);
       return {
@@ -203,10 +206,13 @@ export async function processWithdrawalQueue(): Promise<WithdrawalProcessResult>
     if (hashPersistErr) {
       throw new Error(`Broadcast succeeded but tx hash persistence failed; manual reconciliation required: ${hashPersistErr.message}`);
     }
-    await supabaseAdmin
+    const { error: legacyPersistErr } = await supabaseAdmin
       .from('withdrawals')
       .update({ tx_hash: tx.hash, txid: tx.hash, status: 'broadcasted', broadcasted_at: new Date().toISOString(), updated_at: new Date().toISOString() })
       .eq('id', withdrawal.id);
+    if (legacyPersistErr) {
+      throw new Error(`Broadcast hash saved to onchain_withdrawals but legacy withdrawal persistence failed; reconciliation required: ${legacyPersistErr.message}`);
+    }
 
     console.log(`[Withdrawal Worker] Broadcasted EVM payout ${withdrawal.id} on ${network} (tx: ${tx.hash}, nonce: ${nonce})`);
     return {
