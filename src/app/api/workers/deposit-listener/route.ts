@@ -7,8 +7,9 @@ import { NextResponse } from 'next/server';
  * hardcoded confirmation count to process_deposit_atomic. Neither is sufficient
  * evidence that a transfer was successful or sufficiently confirmed.
  *
- * Use the authenticated canonical deposit ingestion worker at
- * POST /api/workers/deposit-worker, which runs the shared ingestion pipeline.
+ * POST /api/workers/deposit-worker is also fail-closed and currently returns
+ * HTTP 503 while independent chain verification is not implemented. It is not
+ * an operational replacement for live deposit processing yet.
  *
  * This route intentionally does not inspect request data, access the database,
  * or credit deposits. Any external scheduler using this legacy path must be
