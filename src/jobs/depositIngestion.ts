@@ -299,9 +299,15 @@ async function scanEvmNativeDeposits(
 
             if (transfers?.transfers && Array.isArray(transfers.transfers) && transfers.transfers.length > 0) {
               for (const tx of transfers.transfers) {
-                const txHash = tx.hash;
-                const valueNum = Number(tx.value || 0);
-                if (valueNum <= 0) continue;
+                const txHash = typeof tx.hash === 'string' ? tx.hash : '';
+                // Alchemy's decimal value is only accepted as a string; accepting a
+                // JS number here could preserve an already-rounded financial value.
+                const exactAmount = typeof tx.value === 'string' ? tx.value.trim() : '';
+                if (
+                  !txHash ||
+                  !/^(?:0|[1-9]\d*)(?:\.\d+)?$/.test(exactAmount) ||
+                  !/[1-9]/.test(exactAmount)
+                ) continue;
                 const assetSymbol = (tx.asset || chainConfig.nativeSymbol).toUpperCase();
                 const txBlock = parseInt(tx.blockNum, 16);
                 const confirmations = latestBlock >= txBlock ? latestBlock - txBlock + 1 : 1;
@@ -311,7 +317,7 @@ async function scanEvmNativeDeposits(
                   p_destination_address: address.toLowerCase(),
                   p_asset_symbol: assetSymbol === 'ETH' ? 'ETH' : assetSymbol,
                   p_network_code: normNet === 'ERC20' ? 'ETH' : normNet,
-                  p_amount: valueNum,
+                  p_amount: exactAmount,
                   p_tx_hash: txHash,
                   p_output_index: 0,
                   p_block_number: isNaN(txBlock) ? null : txBlock,
@@ -350,15 +356,14 @@ async function scanEvmNativeDeposits(
 
         if (monitoredEvmAddresses.has(toClean) && tx.value > BigInt(0)) {
           detected++;
-          const formattedAmount = ethers.formatUnits(tx.value, chainConfig.nativeDecimals);
-          const numericAmount = parseFloat(formattedAmount);
+          const exactAmount = ethers.formatUnits(tx.value, chainConfig.nativeDecimals);
           const confirmations = Math.max(1, latestBlock - b + 1);
 
           const { data, error } = await supabaseAdmin.rpc('process_deposit_atomic', {
             p_destination_address: toClean,
             p_asset_symbol: chainConfig.nativeSymbol === 'ETH' ? 'ETH' : chainConfig.nativeSymbol,
             p_network_code: normNet === 'ERC20' ? 'ETH' : normNet,
-            p_amount: numericAmount,
+            p_amount: exactAmount,
             p_tx_hash: tx.hash,
             p_output_index: 0,
             p_block_number: b,
@@ -1198,12 +1203,3 @@ export function startDepositIngestionWorker(intervalMs: number = 30000): void {
   runDepositIngestion().catch((e) => console.error('[Deposit Ingestion] Cycle failed:', e));
   ingestionInterval = setInterval(() => {
     runDepositIngestion().catch((e) => console.error('[Deposit Ingestion] Cycle failed:', e));
-  }, intervalMs);
-}
-
-export function stopDepositIngestionWorker(): void {
-  if (ingestionInterval) {
-    clearInterval(ingestionInterval);
-    ingestionInterval = null;
-  }
-}
