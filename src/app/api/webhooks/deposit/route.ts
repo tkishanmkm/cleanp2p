@@ -1,7 +1,6 @@
 import { NextResponse } from 'next/server';
 import crypto from 'crypto';
 import { verifyHmacSha256 } from '@/lib/webhooks/auth';
-import { ethers } from 'ethers';
 import { getSupabaseAdminClient } from '@/lib/supabase/server';
 import { normalizeDepositNetwork } from '@/lib/hd-derivation-engine';
 import { CANONICAL_USDT_CONTRACTS } from '@/jobs/depositIngestion';
@@ -173,7 +172,7 @@ export async function POST(req: Request) {
       processed: processedResults.length,
       results: processedResults,
     });
-  } catch (error: any) {
+  } catch {
     console.error('[Deposit Webhook] Error processing event');
     return NextResponse.json(
       { error: 'Internal server error processing deposit webhook' },
