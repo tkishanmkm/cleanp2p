@@ -63,7 +63,12 @@ export async function POST(req: Request) {
     }
 
     const ingestHeader = req.headers.get('x-ingest-secret') || req.headers.get('x-api-key');
-    const isDirectHeaderValid = ingestHeader && secret && crypto.timingSafeEqual(Buffer.from(ingestHeader), Buffer.from(secret));
+    // Compare lengths before timingSafeEqual: Node throws if buffer lengths differ.
+    const ingestBuffer = ingestHeader ? Buffer.from(ingestHeader) : Buffer.alloc(0);
+    const secretBuffer = Buffer.from(secret);
+    const isDirectHeaderValid =
+      ingestBuffer.length === secretBuffer.length &&
+      crypto.timingSafeEqual(ingestBuffer, secretBuffer);
 
     if (!isDirectHeaderValid) {
       if (!signature || !verifySignature(rawBody, signature)) {
@@ -147,12 +152,34 @@ export async function POST(req: Request) {
       const destinationAddress = item.to?.trim();
       const txHash = item.txHash;
       const logIndex = item.logIndex;
-      const amount = typeof item.value === 'number' ? item.value : parseFloat(item.value);
+      const amount = typeof item.value === 'number' ? item.value : Number(item.value);
+      const confirmations = item.confirmations;
+      const blockNumber = item.blockNumber;
       const normNet = normalizeDepositNetwork(item.network);
       const assetSymbol = (item.assetSymbol || 'USDT').toUpperCase().trim();
       const tokenContract = CANONICAL_USDT_CONTRACTS[normNet] || null;
 
-      if (!destinationAddress || !txHash || isNaN(amount) || amount <= 0) {
+      // Never fabricate confirmations or credit from an event without a block anchor.
+      // The RPC must receive confirmation/block metadata from the authenticated provider.
+      if (
+        !destinationAddress ||
+        !txHash ||
+        !/^0x[0-9a-fA-F]{64}$/.test(txHash) ||
+        !Number.isFinite(amount) ||
+        amount <= 0 ||
+        !Number.isSafeInteger(logIndex) ||
+        logIndex < 0 ||
+        !Number.isSafeInteger(blockNumber) ||
+        (blockNumber as number) < 0 ||
+        !Number.isSafeInteger(confirmations) ||
+        (confirmations as number) < 1
+      ) {
+        processedResults.push({
+          txHash: txHash || null,
+          logIndex,
+          status: 'rejected',
+          error: 'Missing or invalid transaction hash, amount, output index, block number, or provider confirmation count.',
+        });
         continue;
       }
 
@@ -164,10 +191,10 @@ export async function POST(req: Request) {
         p_amount: amount,
         p_tx_hash: txHash,
         p_output_index: logIndex,
-        p_block_number: item.blockNumber ?? null,
+        p_block_number: blockNumber as number,
         p_from_address: item.from || null,
         p_token_contract: tokenContract,
-        p_confirmations: item.confirmations ?? 12,
+        p_confirmations: confirmations as number,
         p_provider: 'deposit_webhook',
       });
 
