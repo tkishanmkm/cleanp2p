@@ -978,7 +978,7 @@ export async function refreshPendingDepositConfirmations(): Promise<{
     .limit(50);
 
   if (error) {
-    throw new Error(\`Failed to load pending on-chain deposits: \${error.message}\`);
+    throw new Error(`Failed to load pending on-chain deposits: ${error.message}`);
   }
   if (!pendingDeposits) {
     throw new Error('Failed to load pending on-chain deposits: query returned no data');
@@ -996,7 +996,7 @@ export async function refreshPendingDepositConfirmations(): Promise<{
     }
     const [whole, fraction = ''] = raw.split('.');
     const trimmedFraction = fraction.replace(/0+$/, '');
-    return fraction ? \`\${whole}.\${trimmedFraction}\` : whole;
+    return trimmedFraction ? `${whole}.${trimmedFraction}` : whole;
   };
 
   for (const dep of pendingDeposits) {
@@ -1004,7 +1004,7 @@ export async function refreshPendingDepositConfirmations(): Promise<{
       const normNet = normalizeDepositNetwork(dep.network);
       const chain = SUPPORTED_EVM_CHAINS[normNet];
       if (!chain) {
-        errors.push(\`Pending deposit \${dep.tx_hash || dep.id || '(unknown)'} on \${normNet || '(empty)'}: chain-specific verification remains disabled\`);
+        errors.push(`Pending deposit ${dep.tx_hash || dep.id || '(unknown)'} on ${normNet || '(empty)'}: chain-specific verification remains disabled`);
         continue;
       }
 
@@ -1034,6 +1034,10 @@ export async function refreshPendingDepositConfirmations(): Promise<{
       let fromAddress: string | null = null;
       let tokenContract: string | null = null;
       const storedOutputIndex = dep.output_index ?? dep.log_index;
+
+      if (assetSymbol !== 'USDT' && assetSymbol !== chain.nativeSymbol) {
+        throw new Error(`Unsupported EVM asset for pending confirmation: ${assetSymbol}`);
+      }
 
       if (assetSymbol === 'USDT' || dep.token_contract) {
         const expectedContract = (CANONICAL_USDT_CONTRACTS[normNet] || chain.usdtContractAddress || '').toLowerCase();
@@ -1086,11 +1090,11 @@ export async function refreshPendingDepositConfirmations(): Promise<{
         p_confirmations: confirmations,
         p_provider: 'confirmations_worker',
       });
-      if (rpcError) throw new Error(\`Deposit credit RPC failed: \${rpcError.message}\`);
+      if (rpcError) throw new Error(`Deposit credit RPC failed: ${rpcError.message}`);
       const result = typeof data === 'string' ? JSON.parse(data) : data;
       if (result?.status === 'credited') newlyCredited++;
     } catch (rowError: unknown) {
-      errors.push(\`Pending deposit row \${dep?.id ?? dep?.tx_hash ?? '(unknown)'}: \${rowError instanceof Error ? rowError.message : String(rowError)}\`);
+      errors.push(`Pending deposit row ${dep?.id ?? dep?.tx_hash ?? '(unknown)'}: ${rowError instanceof Error ? rowError.message : String(rowError)}`);
     }
   }
 
