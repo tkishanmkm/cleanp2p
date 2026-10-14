@@ -1302,7 +1302,7 @@ export async function refreshPendingDepositConfirmations(): Promise<{
           dep.tx_hash,
           outputIndex,
           destinationAddress,
-          Number(dep.amount)
+          dep.amount
         );
         if (!verified) continue;
 
@@ -1310,7 +1310,7 @@ export async function refreshPendingDepositConfirmations(): Promise<{
           p_destination_address: destinationAddress,
           p_asset_symbol: 'USDT',
           p_network_code: 'TRC20',
-          p_amount: Number(dep.amount),
+          p_amount: dep.amount,
           p_tx_hash: dep.tx_hash,
           p_output_index: outputIndex,
           p_block_number: verified.blockNumber,
@@ -1326,7 +1326,7 @@ export async function refreshPendingDepositConfirmations(): Promise<{
       } else if (normNet === 'BTC') {
         const btcApiBase = getBtcMempoolApi();
         const verified = await verifyUtxoDepositOutput(
-          btcApiBase, dep.tx_hash, outputIndex, destinationAddress, Number(dep.amount)
+          btcApiBase, dep.tx_hash, outputIndex, destinationAddress, dep.amount
         );
         // Stored DB values are not proof of the destination or amount. Do not call
         // the crediting RPC unless the exact output is independently verified.
@@ -1335,7 +1335,7 @@ export async function refreshPendingDepositConfirmations(): Promise<{
           p_destination_address: destinationAddress,
           p_asset_symbol: 'BTC',
           p_network_code: 'BTC',
-          p_amount: Number(dep.amount),
+          p_amount: dep.amount,
           p_tx_hash: dep.tx_hash,
           p_output_index: outputIndex,
           p_block_number: verified.blockHeight,
@@ -1351,14 +1351,14 @@ export async function refreshPendingDepositConfirmations(): Promise<{
       } else if (normNet === 'LTC') {
         const ltcApiBase = process.env.LTC_MEMPOOL_API || 'https://litecoinspace.org/api';
         const verified = await verifyUtxoDepositOutput(
-          ltcApiBase, dep.tx_hash, outputIndex, destinationAddress, Number(dep.amount)
+          ltcApiBase, dep.tx_hash, outputIndex, destinationAddress, dep.amount
         );
         if (!verified) continue;
         const { data, error: rpcErr } = await supabaseAdmin.rpc('process_deposit_atomic', {
           p_destination_address: destinationAddress,
           p_asset_symbol: 'LTC',
           p_network_code: 'LTC',
-          p_amount: Number(dep.amount),
+          p_amount: dep.amount,
           p_tx_hash: dep.tx_hash,
           p_output_index: outputIndex,
           p_block_number: verified.blockHeight,
@@ -1386,7 +1386,7 @@ export async function refreshPendingDepositConfirmations(): Promise<{
               dep.tx_hash,
               outputIndex,
               destinationAddress,
-              Number(dep.amount),
+              dep.amount,
               tokenContract || chain.usdtContractAddress || '',
               chain.usdtDecimals ?? 6
             );
@@ -1414,7 +1414,7 @@ export async function refreshPendingDepositConfirmations(): Promise<{
             p_destination_address: destinationAddress,
             p_asset_symbol: assetSymbol,
             p_network_code: normNet,
-            p_amount: Number(dep.amount),
+            p_amount: dep.amount,
             p_tx_hash: dep.tx_hash,
             p_output_index: outputIndex,
             p_block_number: blockNumber,
