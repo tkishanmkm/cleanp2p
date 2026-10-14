@@ -77,7 +77,7 @@ async function verifyUtxoDepositOutput(
   const amountString = typeof storedAmount === 'string' ? storedAmount.trim() : String(storedAmount);
   if (!/^[a-fA-F0-9]{64}$/.test(txHash) ||
       !Number.isSafeInteger(outputIndex) || outputIndex < 0 ||
-      !/^\\d+(?:\\.\\d+)?$/.test(amountString) ||
+      !/^\d+(?:\.\d+)?$/.test(amountString) ||
       (typeof storedAmount === 'number' && !Number.isFinite(storedAmount)) ||
       !destinationAddress) return null;
 
