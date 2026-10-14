@@ -270,8 +270,10 @@ export async function runConfirmedDepositReorgAudit(
 
   let query = supabaseAdmin
     .from('onchain_deposits')
+    // The canonical credit RPC records credited on-chain rows as CREDITED.
+    // Include CONFIRMED for legacy rows so the audit does not silently skip them.
     .select('*')
-    .eq('status', 'CONFIRMED')
+    .in('status', ['CONFIRMED', 'CREDITED'])
     .order('id', { ascending: true })
     .limit(safeLimit);
   if (afterId !== null) query = query.gt('id', afterId);
