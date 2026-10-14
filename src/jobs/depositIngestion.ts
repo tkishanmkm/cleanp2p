@@ -362,6 +362,10 @@ async function scanEvmNativeDeposits(
         const toClean = tx.to.toLowerCase();
 
         if (monitoredEvmAddresses.has(toClean) && tx.value > BigInt(0)) {
+          // Require a successful canonical receipt before crediting a native transfer.
+          const receipt = await provider.getTransactionReceipt(tx.hash);
+          if (!receipt || receipt.status !== 1 || receipt.blockNumber !== b) continue;
+
           detected++;
           const formattedAmount = ethers.formatUnits(tx.value, chainConfig.nativeDecimals);
           const numericAmount = parseFloat(formattedAmount);
