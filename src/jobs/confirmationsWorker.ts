@@ -403,6 +403,7 @@ export async function runConfirmationsWorker(): Promise<ConfirmationWorkerResult
           p_token_contract: assetSymbol === 'USDT' ? tokenContract : null,
           p_confirmations: currentConfirmations,
           p_provider: 'confirmations_worker',
+          p_block_hash: verifiedBlockHash,
         });
 
         if (rpcErr) {
@@ -419,29 +420,6 @@ export async function runConfirmationsWorker(): Promise<ConfirmationWorkerResult
             error: rpcErr.message,
           });
         } else {
-          if (verifiedBlockHash && (SUPPORTED_EVM_CHAINS[normNet] || ['TRC20', 'BTC', 'LTC'].includes(normNet))) {
-            // Best-effort retryable metadata write; never changes balances or credit state.
-            const [depositHashWrite, onchainHashWrite] = await Promise.all([
-              supabaseAdmin.from('deposits')
-                .update({ block_hash: verifiedBlockHash })
-                .eq('tx_hash', deposit.tx_hash)
-                .eq('output_index', outputIndex)
-                .eq('chain', normNet),
-              supabaseAdmin.from('onchain_deposits')
-                .update({ block_hash: verifiedBlockHash })
-                .eq('tx_hash', deposit.tx_hash)
-                .eq('output_index', outputIndex)
-                .eq('network', normNet),
-            ]);
-            if (depositHashWrite.error || onchainHashWrite.error) {
-              console.error('Failed to persist verified canonical block hash', {
-                txHash: deposit.tx_hash,
-                network: normNet,
-                depositsError: depositHashWrite.error?.message,
-                onchainError: onchainHashWrite.error?.message,
-              });
-            }
-          }
           const parsedRes = typeof rpcData === 'string' ? JSON.parse(rpcData) : rpcData;
           const isCredited = parsedRes?.status === 'credited' || parsedRes?.status === 'CONFIRMED' || parsedRes?.status === 'ALREADY_CREDITED';
 
