@@ -258,6 +258,7 @@ export async function runConfirmationsWorker(): Promise<ConfirmationWorkerResult
         // A TRON transaction's confirmation count does not prove a matching TRC-20
         // Transfer event. Keep it pending until this worker validates contract, log
         // index, destination, and raw amount independently.
+        let verifiedTronBlockHash: string | null = null;
         if (normNet === 'TRC20' && assetSymbol === 'USDT') {
           if (deposit.output_index == null && deposit.log_index == null) {
             result.pendingCount++;
@@ -297,12 +298,13 @@ export async function runConfirmationsWorker(): Promise<ConfirmationWorkerResult
           onChainData.confirmations = verified.confirmations;
           onChainData.blockNumber = verified.blockNumber;
           onChainData.fromAddress = verified.fromAddress;
+          verifiedTronBlockHash = verified.blockHash;
         }
 
         let currentConfirmations = onChainData.confirmations;
         let blockNumber = onChainData.blockNumber ?? deposit.block_number;
         let fromAddress = onChainData.fromAddress ?? deposit.from_address;
-        let verifiedBlockHash: string | null = null;
+        let verifiedBlockHash: string | null = verifiedTronBlockHash;
 
         // For EVM USDT, transaction success alone is insufficient: prove that the
         // exact receipt log matches the configured contract, index, recipient, and amount.
@@ -395,7 +397,7 @@ export async function runConfirmationsWorker(): Promise<ConfirmationWorkerResult
             error: rpcErr.message,
           });
         } else {
-          if (verifiedBlockHash && SUPPORTED_EVM_CHAINS[normNet]) {
+          if (verifiedBlockHash && (SUPPORTED_EVM_CHAINS[normNet] || normNet === 'TRC20')) {
             // Best-effort retryable metadata write; never changes balances or credit state.
             const [depositHashWrite, onchainHashWrite] = await Promise.all([
               supabaseAdmin.from('deposits')
