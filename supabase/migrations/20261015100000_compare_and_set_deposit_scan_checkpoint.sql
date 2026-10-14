@@ -26,20 +26,27 @@ BEGIN
         RAISE EXCEPTION 'new block must be non-negative and greater than expected previous block';
     END IF;
 
-    IF p_expected_previous_block = -1 THEN
-        INSERT INTO public.deposit_scan_checkpoints (network, last_scanned_block, updated_at)
-        VALUES (v_network, p_new_block, now())
-        ON CONFLICT (network) DO NOTHING;
+    IF p_expected_previous_block >= 0 THEN
+        UPDATE public.deposit_scan_checkpoints
+           SET last_scanned_block = p_new_block,
+               updated_at = now()
+         WHERE network = v_network
+           AND last_scanned_block = p_expected_previous_block
+           AND last_scanned_block < p_new_block;
+
         GET DIAGNOSTICS v_rows = ROW_COUNT;
-        RETURN v_rows = 1;
+        IF v_rows = 1 THEN
+            RETURN true;
+        END IF;
     END IF;
 
-    UPDATE public.deposit_scan_checkpoints
-       SET last_scanned_block = p_new_block,
-           updated_at = now()
-     WHERE network = v_network
-       AND last_scanned_block = p_expected_previous_block
-       AND last_scanned_block < p_new_block;
+    -- No checkpoint means this is the first scan and the caller supplied an
+    -- explicit start-block baseline. Concurrent first writers race on the
+    -- primary key; exactly one can initialize it. Existing mismatched rows
+    -- are not overwritten because ON CONFLICT performs no update.
+    INSERT INTO public.deposit_scan_checkpoints (network, last_scanned_block, updated_at)
+    VALUES (v_network, p_new_block, now())
+    ON CONFLICT (network) DO NOTHING;
 
     GET DIAGNOSTICS v_rows = ROW_COUNT;
     RETURN v_rows = 1;
