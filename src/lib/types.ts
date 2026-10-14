@@ -26,6 +26,7 @@ export interface UserProfile {
   completedTrades: number;
   lastActive: string | Date;
   badges?: string[];
+  verification_tier?: number | string;
 }
 
 export interface P2PAd {
