@@ -419,7 +419,7 @@ export async function runConfirmationsWorker(): Promise<ConfirmationWorkerResult
             error: rpcErr.message,
           });
         } else {
-          if (verifiedBlockHash && (SUPPORTED_EVM_CHAINS[normNet] || normNet === 'TRC20')) {
+          if (verifiedBlockHash && (SUPPORTED_EVM_CHAINS[normNet] || ['TRC20', 'BTC', 'LTC'].includes(normNet))) {
             // Best-effort retryable metadata write; never changes balances or credit state.
             const [depositHashWrite, onchainHashWrite] = await Promise.all([
               supabaseAdmin.from('deposits')
