@@ -8,9 +8,22 @@ import {
 import { TRON_CONFIG, getTronWeb, isValidTronAddress } from '@/lib/blockchain/tron';
 import { normalizeDepositNetwork } from '@/lib/hd-derivation-engine';
 
-// Initialize Supabase admin client with service role
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL || 'https://eaiwgfxoiwxepinvcykg.supabase.co';
-const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'placeholder-key';
+// Privileged deposit ingestion must fail closed: never fall back to the public anon key.
+const supabaseUrl =
+  process.env.NEXT_PUBLIC_SUPABASE_URL?.trim() ||
+  process.env.SUPABASE_URL?.trim() ||
+  'https://eaiwgfxoiwxepinvcykg.supabase.co';
+const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY?.trim();
+
+if (
+  !supabaseKey ||
+  supabaseKey === 'placeholder-key' ||
+  supabaseKey === 'placeholder-anon-key'
+) {
+  throw new Error(
+    'SUPABASE_SERVICE_ROLE_KEY is required for privileged deposit ingestion but is missing or not configured.'
+  );
+}
 
 export const supabaseAdmin = createClient(supabaseUrl, supabaseKey, {
   auth: {
