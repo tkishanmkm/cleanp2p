@@ -143,7 +143,17 @@ export async function POST(request: NextRequest) {
 
     const priceVal = body.price !== undefined && body.price !== null && body.price !== '' ? Number(body.price) : null;
     const marginVal = Number(body.margin ?? body.rate_percent ?? body.margin_percentage ?? body.price_margin ?? 0);
-    const pricingType = body.pricing_type || (body.rate_type === 'fixed' || body.is_fixed ? 'FIXED' : 'FLOAT');
+    const rawPricingType = body.pricing_type;
+    const pricingType = rawPricingType == null || rawPricingType === ''
+      ? (body.rate_type === 'fixed' || body.is_fixed ? 'FIXED' : 'FLOAT')
+      : String(rawPricingType).trim().toUpperCase();
+
+    if (pricingType !== 'FIXED' && pricingType !== 'FLOAT') {
+      return NextResponse.json(
+        { error: 'Pricing type must be FIXED or FLOAT.', code: 'INVALID_PRICING_TYPE' },
+        { status: 400 }
+      );
+    }
     const paymentWindow = Math.max(30, parseInt(String(body.payment_window || body.payment_window_minutes || 30), 10) || 30);
     const paymentMethods = Array.isArray(body.payment_methods) && body.payment_methods.length > 0
       ? body.payment_methods
