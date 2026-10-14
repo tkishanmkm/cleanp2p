@@ -289,11 +289,10 @@ BEGIN
     FOR UPDATE;
 
 
-    v_effective_confirmations :=
-        GREATEST(
-            COALESCE(p_confirmations, 0),
-            COALESCE(v_existing_onchain.confirmations, 0)
-        );
+    -- Only the current independently verified caller-supplied confirmation
+    -- count may authorize credit. A persisted count can be stale after a reorg
+    -- or provider inconsistency and must never elevate the current observation.
+    v_effective_confirmations := COALESCE(p_confirmations, 0);
 
     v_is_confirmed :=
         v_effective_confirmations >= v_required_confirmations;
