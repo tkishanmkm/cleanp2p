@@ -124,8 +124,15 @@ async function fetchOnChainConfirmations(
       const res = await fetch(`${btcApiBase}/tx/${txHash}/status`);
       if (!res.ok) return null;
       const statusData = await res.json();
-      const confs = statusData.confirmed ? 2 : 0;
-      return { confirmations: confs, blockNumber: statusData.block_height };
+      const tipRes = await fetch(`${btcApiBase.replace(/\\/$/, '')}/blocks/tip/height`);
+      if (!tipRes.ok) return null;
+      const tipRaw = (await tipRes.text()).trim();
+      if (!/^\\d+$/.test(tipRaw)) return null;
+      const tipHeight = Number(tipRaw);
+      const blockHeight = statusData.block_height;
+      if (!statusData.confirmed || !Number.isSafeInteger(blockHeight) || blockHeight <= 0 ||
+          !Number.isSafeInteger(tipHeight) || tipHeight < blockHeight) return null;
+      return { confirmations: tipHeight - blockHeight + 1, blockNumber: blockHeight };
     } catch (btcErr) {
       console.warn(`BTC confirmation query error for ${txHash}:`, btcErr);
       return null;
@@ -139,8 +146,15 @@ async function fetchOnChainConfirmations(
       const res = await fetch(`${ltcApiBase}/tx/${txHash}/status`);
       if (!res.ok) return null;
       const statusData = await res.json();
-      const confs = statusData.confirmed ? 6 : 0;
-      return { confirmations: confs, blockNumber: statusData.block_height };
+      const tipRes = await fetch(`${ltcApiBase.replace(/\\/$/, '')}/blocks/tip/height`);
+      if (!tipRes.ok) return null;
+      const tipRaw = (await tipRes.text()).trim();
+      if (!/^\\d+$/.test(tipRaw)) return null;
+      const tipHeight = Number(tipRaw);
+      const blockHeight = statusData.block_height;
+      if (!statusData.confirmed || !Number.isSafeInteger(blockHeight) || blockHeight <= 0 ||
+          !Number.isSafeInteger(tipHeight) || tipHeight < blockHeight) return null;
+      return { confirmations: tipHeight - blockHeight + 1, blockNumber: blockHeight };
     } catch (ltcErr) {
       console.warn(`LTC confirmation query error for ${txHash}:`, ltcErr);
       return null;
