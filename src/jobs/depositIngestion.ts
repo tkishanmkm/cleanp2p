@@ -1341,6 +1341,7 @@ export async function refreshPendingDepositConfirmations(): Promise<{
           p_token_contract: tokenContract,
           p_confirmations: verified.confirmations,
           p_provider: 'confirmations_worker',
+          p_block_hash: verified.blockHash,
         });
         if (!rpcErr) {
           const r = typeof rpcData === 'string' ? JSON.parse(rpcData) : rpcData;
@@ -1366,6 +1367,8 @@ export async function refreshPendingDepositConfirmations(): Promise<{
           p_token_contract: null,
           p_confirmations: verified.confirmations,
           p_provider: 'confirmations_worker',
+          p_block_hash: verified.blockHash,
+          p_block_hash: verified.blockHash,
         });
         if (!rpcErr) {
           const r = typeof data === 'string' ? JSON.parse(data) : data;
@@ -1400,6 +1403,7 @@ export async function refreshPendingDepositConfirmations(): Promise<{
           const provider = getEvmProvider(normNet);
           const isTokenDeposit = assetSymbol === 'USDT';
           let blockNumber: number | null = null;
+          let verifiedBlockHash: string | null = null;
           let confs = 0;
           let fromAddress: string | null = dep.from_address || null;
 
@@ -1415,6 +1419,7 @@ export async function refreshPendingDepositConfirmations(): Promise<{
             );
             if (!verified) continue;
             blockNumber = verified.blockNumber;
+            verifiedBlockHash = verified.blockHash;
             confs = verified.confirmations;
             fromAddress = verified.fromAddress;
           } else {
@@ -1429,6 +1434,7 @@ export async function refreshPendingDepositConfirmations(): Promise<{
             );
             if (!verified) continue;
             blockNumber = verified.blockNumber;
+            verifiedBlockHash = verified.blockHash;
             confs = verified.confirmations;
             fromAddress = verified.fromAddress;
           }
@@ -1445,6 +1451,7 @@ export async function refreshPendingDepositConfirmations(): Promise<{
             p_token_contract: isTokenDeposit ? (tokenContract || chain.usdtContractAddress || null) : null,
             p_confirmations: confs,
             p_provider: 'confirmations_worker',
+            p_block_hash: verifiedBlockHash,
           });
 
           if (!rpcErr) {
