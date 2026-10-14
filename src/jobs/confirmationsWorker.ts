@@ -335,7 +335,6 @@ export async function runConfirmationsWorker(): Promise<ConfirmationWorkerResult
           blockNumber = verified.blockNumber;
           fromAddress = verified.fromAddress;
           verifiedBlockHash = verified.blockHash;
-          verifiedBlockHash = verified.blockHash;
         } else if (SUPPORTED_EVM_CHAINS[normNet]) {
           // For native coins, verify the exact tx.to and tx.value against the
           // stored deposit before invoking the privileged credit RPC.
