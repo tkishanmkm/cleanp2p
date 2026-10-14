@@ -114,12 +114,14 @@ export async function verifyEvmNativeDeposit(
   provider: ReturnType<typeof getEvmProvider>,
   txHash: string,
   destinationAddress: string,
-  storedAmount: number,
+  storedAmount: number | string,
   decimals: number
 ): Promise<{ blockNumber: number; confirmations: number; fromAddress: string } | null> {
+  const amountString = typeof storedAmount === 'string' ? storedAmount.trim() : String(storedAmount);
   if (!/^0x[0-9a-f]{64}$/i.test(txHash) ||
       !ethers.isAddress(destinationAddress) ||
-      !Number.isFinite(storedAmount) || storedAmount <= 0 ||
+      !/^\\d+(?:\\.\\d+)?$/.test(amountString) ||
+      (typeof storedAmount === 'number' && !Number.isFinite(storedAmount)) ||
       !Number.isSafeInteger(decimals) || decimals < 0 || decimals > 36) return null;
 
   try {
@@ -137,7 +139,7 @@ export async function verifyEvmNativeDeposit(
 
     let expectedValue: bigint;
     try {
-      expectedValue = ethers.parseUnits(String(storedAmount), decimals);
+      expectedValue = ethers.parseUnits(amountString, decimals);
     } catch {
       return null;
     }
@@ -1388,7 +1390,7 @@ export async function refreshPendingDepositConfirmations(): Promise<{
               provider,
               dep.tx_hash,
               destinationAddress,
-              Number(dep.amount),
+              dep.amount,
               chain.nativeDecimals
             );
             if (!verified) continue;
