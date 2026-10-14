@@ -646,7 +646,7 @@ BEGIN
                 NOW(),
                 v_asset,
                 p_output_index,
-                p_block_hash
+                v_block_hash
             )
             RETURNING id INTO v_deposit_id;
 
@@ -706,7 +706,7 @@ BEGIN
                 v_asset,
                 v_network,
                 p_output_index,
-                p_block_hash
+                v_block_hash
             )
             RETURNING id INTO v_onchain_id;
 
@@ -796,7 +796,7 @@ BEGIN
             NOW(),
             v_asset,
             p_output_index,
-            p_block_hash
+            v_block_hash
         )
         RETURNING id INTO v_deposit_id;
 
@@ -999,7 +999,7 @@ BEGIN
             v_asset,
             v_network,
             p_output_index,
-            p_block_hash
+            v_block_hash
         )
         RETURNING id INTO v_onchain_id;
 
