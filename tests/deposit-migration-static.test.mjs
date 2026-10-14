@@ -26,6 +26,23 @@ const mismatchGuard = sql.indexOf('DEPOSIT_BLOCK_HASH_MISMATCH');
 const pendingBranch = sql.indexOf('-- PENDING DEPOSIT');
 assert.ok(mismatchGuard > 0 && pendingBranch > mismatchGuard, 'hash mismatch guard must occur before pending-state writes');
 
+
+const txLock = sql.indexOf("'deposit:' ||");
+const existingDepositLock = sql.indexOf("FROM public.deposits", txLock);
+const existingOnchainLock = sql.indexOf("FROM public.onchain_deposits", existingDepositLock);
+assert.ok(txLock > 0 && existingDepositLock > txLock && existingOnchainLock > existingDepositLock,
+  'transaction identity advisory lock must be acquired before existing deposit rows are read');
+const walletAssetLock = sql.indexOf("'wallet_asset:' ||");
+const walletAssetRowLock = sql.indexOf('FROM public.wallet_assets', walletAssetLock);
+const balanceWrite = sql.indexOf('UPDATE public.wallet_assets', walletAssetRowLock);
+assert.ok(walletAssetLock > 0 && walletAssetRowLock > walletAssetLock && balanceWrite > walletAssetRowLock,
+  'wallet asset advisory lock and row lock must precede balance updates');
+const ledgerIdempotency = sql.indexOf('-- LEDGER IDEMPOTENCY');
+const duplicateCreditReturn = sql.indexOf("'status', 'ALREADY_CREDITED'", ledgerIdempotency);
+const firstBalanceWrite = sql.indexOf('UPDATE public.wallet_assets', ledgerIdempotency);
+assert.ok(ledgerIdempotency > 0 && duplicateCreditReturn > ledgerIdempotency && firstBalanceWrite > duplicateCreditReturn,
+  'duplicate ledger detection must return before any wallet balance credit');
+
 console.log('Deposit migration static safety checks passed. This is not a PostgreSQL parser or execution test.');
 const workerPath = 'src/jobs/confirmationsWorker.ts';
 const worker = readFileSync(workerPath, 'utf8');
