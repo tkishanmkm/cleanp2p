@@ -124,7 +124,7 @@ export type Withdrawal = {
   address: string;
   amount: number;
   fee?: number;
-  status: 'pending' | 'approved' | 'declined' | 'cancelled';
+  status: 'pending' | 'pending_approval' | 'PENDING_APPROVAL' | 'queued' | 'processing' | 'approved' | 'declined' | 'cancelled' | 'completed' | 'failed';
   txHash?: string;
   adminId?: string;
   createdAt: string;
