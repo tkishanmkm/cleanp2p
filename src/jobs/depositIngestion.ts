@@ -67,7 +67,7 @@ async function fetchUtxoTipHeight(apiBase: string): Promise<number | null> {
 }
 
 /** Independently verifies a stored BTC/LTC deposit against the exact transaction output. */
-async function verifyUtxoDepositOutput(
+export async function verifyUtxoDepositOutput(
   apiBase: string,
   txHash: string,
   outputIndex: number,
