@@ -512,6 +512,30 @@ export async function runConfirmationsWorker(): Promise<ConfirmationWorkerResult
       const tokenContract = CANONICAL_USDT_CONTRACTS[normNet] || null;
 
       try {
+        // Output/log index is part of the identity for UTXO outputs and token
+        // transfer events. Never default a missing index to zero for these assets.
+        const indexRequired =
+          normNet === 'BTC' ||
+          normNet === 'LTC' ||
+          (assetSymbol === 'USDT' && (
+            normNet === 'TRC20' ||
+            Boolean(SUPPORTED_EVM_CHAINS[normNet])
+          ));
+        if (indexRequired && deposit.output_index == null && deposit.log_index == null) {
+          result.pendingCount++;
+          result.details.push({
+            depositId: deposit.id,
+            txHash: deposit.tx_hash,
+            network: normNet,
+            previousConfirmations: prevConfs,
+            newConfirmations: 0,
+            requiredConfirmations: requiredConfs,
+            status: 'PENDING',
+            error: 'Required output/event index is missing; credit RPC not called.',
+          });
+          continue;
+        }
+
         const onChainData = await fetchOnChainConfirmations(deposit.tx_hash, normNet);
 
         // Fail closed when the chain provider cannot independently confirm this
