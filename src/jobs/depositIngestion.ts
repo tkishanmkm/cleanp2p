@@ -106,6 +106,66 @@ async function verifyUtxoDepositOutput(
   }
 }
 
+/**
+ * Independently verifies the exact ERC-20 Transfer log before a stored token
+ * deposit is allowed to reach the crediting RPC.
+ */
+export async function verifyEvmTokenDeposit(
+  provider: ethers.Provider,
+  txHash: string,
+  logIndex: number,
+  destinationAddress: string,
+  storedAmount: number,
+  tokenContract: string,
+  decimals: number
+): Promise<{ blockNumber: number; confirmations: number; fromAddress: string } | null> {
+  if (!/^0x[0-9a-f]{64}$/i.test(txHash) ||
+      !Number.isSafeInteger(logIndex) || logIndex < 0 ||
+      !ethers.isAddress(destinationAddress) || !ethers.isAddress(tokenContract) ||
+      !Number.isFinite(storedAmount) || storedAmount <= 0 ||
+      !Number.isSafeInteger(decimals) || decimals < 0 || decimals > 36) return null;
+
+  try {
+    const [receipt, currentBlock] = await Promise.all([
+      provider.getTransactionReceipt(txHash),
+      provider.getBlockNumber(),
+    ]);
+    if (!receipt || receipt.status !== 1 || receipt.blockNumber == null ||
+        currentBlock < receipt.blockNumber) return null;
+
+    const transferInterface = new ethers.Interface([
+      'event Transfer(address indexed from, address indexed to, uint256 value)',
+    ]);
+    const transferTopic = transferInterface.getEvent('Transfer')?.topicHash.toLowerCase();
+    const log = receipt.logs.find((candidate) => candidate.index === logIndex);
+    if (!log || log.address.toLowerCase() !== tokenContract.toLowerCase() ||
+        !log.topics[0] || log.topics[0].toLowerCase() !== transferTopic) return null;
+
+    const parsed = transferInterface.parseLog({ topics: log.topics, data: log.data });
+    if (!parsed || parsed.name !== 'Transfer') return null;
+    const fromAddress = String(parsed.args[0]).toLowerCase();
+    const toAddress = String(parsed.args[1]).toLowerCase();
+    const rawValue = parsed.args[2] as bigint;
+    if (toAddress !== destinationAddress.toLowerCase() || rawValue <= 0n) return null;
+
+    let expectedValue: bigint;
+    try {
+      expectedValue = ethers.parseUnits(String(storedAmount), decimals);
+    } catch {
+      return null;
+    }
+    if (expectedValue !== rawValue) return null;
+
+    return {
+      blockNumber: receipt.blockNumber,
+      confirmations: currentBlock - receipt.blockNumber + 1,
+      fromAddress,
+    };
+  } catch {
+    return null;
+  }
+}
+
 export interface IngestionResult {
   network: string;
   scannedBlocks?: number;
@@ -275,6 +335,8 @@ async function scanEvmTokenDeposits(
         });
 
         if (!parsed || parsed.name !== 'Transfer') continue;
+        // Do not trust provider filtering alone: bind the log to the configured contract.
+        if (log.address.toLowerCase() !== tokenContractAddress.toLowerCase()) continue;
 
         const fromAddress = (parsed.args[0] as string).toLowerCase();
         const toAddress = (parsed.args[1] as string).toLowerCase();
@@ -522,8 +584,9 @@ async function scanTronDeposits(
         knownContracts.push(addr);
       }
     };
+    // Only the configured contract is approved; do not silently permit a second
+    // hard-coded contract when a deployment is configured for another network.
     addKnownContract(contractAddress);
-    addKnownContract('TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t'); // Mainnet TRC-20 USDT
 
     // Build contract addresses hex filter for eth_getLogs
     const contractAddressesHex: string[] = [];
@@ -613,7 +676,9 @@ async function scanTronDeposits(
             const txId = item.transaction_id;
             if (!txId) continue;
 
-            const deduplicationKey = `${txId}_0`;
+            const eventIndex = Number(item.event_index);
+            if (!Number.isSafeInteger(eventIndex) || eventIndex < 0) continue;
+            const deduplicationKey = `${txId}_${eventIndex}`;
             if (seenTxIndices.has(deduplicationKey)) continue;
             seenTxIndices.add(deduplicationKey);
 
@@ -661,7 +726,7 @@ async function scanTronDeposits(
               p_network_code: 'TRC20',
               p_amount: amount,
               p_tx_hash: txId,
-              p_output_index: 0,
+              p_output_index: eventIndex,
               p_block_number: eventBlock || null,
               p_from_address: fromAddr,
               p_token_contract: tokenContract,
@@ -692,6 +757,12 @@ async function scanTronDeposits(
         if (res.ok) {
           const data = await res.json();
           for (const evt of data.data || []) {
+            // Enforce the exact configured token contract before accepting an event.
+            const eventContract = evt.contract_address || evt.contractAddress || cAddr;
+            if (!approvedContractHex ||
+                normalizeTronContractHex(String(eventContract)) !== approvedContractHex ||
+                normalizeTronContractHex(String(cAddr)) !== approvedContractHex) continue;
+
             const txId = evt.transaction_id;
             const outputIndex = evt.event_index !== undefined && evt.event_index !== null ? Number(evt.event_index) : 0;
             const deduplicationKey = `${txId}_${outputIndex}`;
@@ -807,6 +878,8 @@ async function scanTronDeposits(
         for (const log of allLogs) {
           if (!log.topics || log.topics.length < 3) continue;
           if ((log.topics[0] || '').toLowerCase() !== transferTopic) continue;
+          const logContractHex = String(log.address || '').toLowerCase().replace(/^0x/, '');
+          if (!approvedContractHex || logContractHex !== approvedContractHex) continue;
 
           const txHash = (log.transactionHash || '').replace(/^0x/, '');
           const outputIndex = parseInt(log.logIndex || '0x0', 16) || 0;
@@ -1063,8 +1136,10 @@ export async function refreshPendingDepositConfirmations(): Promise<{
       const tokenContract = CANONICAL_USDT_CONTRACTS[normNet] || null;
 
       if (normNet === 'TRC20') {
-        const tronWeb = getTronWeb(false);
-        const txInfo = await tronWeb.trx.getTransactionInfo(dep.tx_hash);
+        // Transaction confirmation alone does not prove the stored amount,
+        // destination, contract, and event index. Fail closed until the exact
+        // TRON Transfer event is independently re-fetched in this pending path.
+        continue;
         if (txInfo && txInfo.blockNumber) {
           const currentBlock = await tronWeb.trx.getCurrentBlock();
           const currentHeight = currentBlock.block_header?.raw_data?.number || 0;
@@ -1143,31 +1218,52 @@ export async function refreshPendingDepositConfirmations(): Promise<{
         const chain = SUPPORTED_EVM_CHAINS[normNet];
         if (chain) {
           const provider = getEvmProvider(normNet);
-          const receipt = await provider.getTransactionReceipt(dep.tx_hash);
-          if (receipt && receipt.blockNumber) {
+          const isTokenDeposit = assetSymbol === 'USDT';
+          let blockNumber: number | null = null;
+          let confs = 0;
+          let fromAddress: string | null = dep.from_address || null;
+
+          if (isTokenDeposit) {
+            const verified = await verifyEvmTokenDeposit(
+              provider,
+              dep.tx_hash,
+              outputIndex,
+              destinationAddress,
+              Number(dep.amount),
+              tokenContract || chain.usdtContractAddress || '',
+              chain.usdtDecimals ?? 6
+            );
+            if (!verified) continue;
+            blockNumber = verified.blockNumber;
+            confs = verified.confirmations;
+            fromAddress = verified.fromAddress;
+          } else {
+            const receipt = await provider.getTransactionReceipt(dep.tx_hash);
+            if (!receipt || receipt.status !== 1 || receipt.blockNumber == null) continue;
             const currentBlock = await provider.getBlockNumber();
-            const confs = Math.max(1, currentBlock - receipt.blockNumber + 1);
+            if (currentBlock < receipt.blockNumber) continue;
+            blockNumber = receipt.blockNumber;
+            confs = currentBlock - receipt.blockNumber + 1;
+            fromAddress = receipt.from?.toLowerCase() || fromAddress;
+          }
 
-            const { data, error: rpcErr } = await supabaseAdmin.rpc('process_deposit_atomic', {
-              p_destination_address: destinationAddress,
-              p_asset_symbol: assetSymbol,
-              p_network_code: normNet,
-              p_amount: Number(dep.amount),
-              p_tx_hash: dep.tx_hash,
-              p_output_index: outputIndex,
-              p_block_number: receipt.blockNumber,
-              p_from_address: receipt.from?.toLowerCase() || dep.from_address || null,
-              p_token_contract: tokenContract,
-              p_confirmations: confs,
-              p_provider: 'confirmations_worker',
-            });
+          const { data, error: rpcErr } = await supabaseAdmin.rpc('process_deposit_atomic', {
+            p_destination_address: destinationAddress,
+            p_asset_symbol: assetSymbol,
+            p_network_code: normNet,
+            p_amount: Number(dep.amount),
+            p_tx_hash: dep.tx_hash,
+            p_output_index: outputIndex,
+            p_block_number: blockNumber,
+            p_from_address: fromAddress,
+            p_token_contract: isTokenDeposit ? (tokenContract || chain.usdtContractAddress || null) : null,
+            p_confirmations: confs,
+            p_provider: 'confirmations_worker',
+          });
 
-            if (!rpcErr) {
-              const res = typeof data === 'string' ? JSON.parse(data) : data;
-              if (res?.status === 'credited') {
-                newlyCredited++;
-              }
-            }
+          if (!rpcErr) {
+            const res = typeof data === 'string' ? JSON.parse(data) : data;
+            if (res?.status === 'credited') newlyCredited++;
           }
         }
       }
