@@ -111,7 +111,7 @@ async function verifyUtxoDepositOutput(
  * deposit is allowed to reach the crediting RPC.
  */
 export async function verifyEvmTokenDeposit(
-  provider: ethers.Provider,
+  provider: ReturnType<typeof getEvmProvider>,
   txHash: string,
   logIndex: number,
   destinationAddress: string,
