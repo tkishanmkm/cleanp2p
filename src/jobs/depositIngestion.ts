@@ -313,11 +313,24 @@ async function scanEvmNativeDeposits(
             if (transfers?.transfers && Array.isArray(transfers.transfers) && transfers.transfers.length > 0) {
               for (const tx of transfers.transfers) {
                 const txHash = tx.hash;
-                const valueNum = Number(tx.value || 0);
-                if (valueNum <= 0) continue;
-                const assetSymbol = (tx.asset || chainConfig.nativeSymbol).toUpperCase();
-                const txBlock = parseInt(tx.blockNum, 16);
-                const confirmations = latestBlock >= txBlock ? latestBlock - txBlock + 1 : 1;
+                if (typeof txHash !== 'string' || !/^0x[0-9a-f]{64}$/i.test(txHash)) continue;
+
+                // Treat the asset-transfer API as discovery only. Verify transaction,
+                // successful receipt, destination, amount and block via the chain RPC.
+                const [chainTx, receipt] = await Promise.all([
+                  provider.getTransaction(txHash),
+                  provider.getTransactionReceipt(txHash),
+                ]);
+                if (!chainTx || !receipt || receipt.status !== 1 || receipt.blockNumber == null) continue;
+                if (!chainTx.to || chainTx.to.toLowerCase() !== address.toLowerCase()) continue;
+                if (chainTx.value <= BigInt(0)) continue;
+
+                const txBlock = receipt.blockNumber;
+                if (tx.blockNum && Number.parseInt(tx.blockNum, 16) !== txBlock) continue;
+                const valueNum = Number(ethers.formatUnits(chainTx.value, chainConfig.nativeDecimals));
+                if (!Number.isFinite(valueNum) || valueNum <= 0) continue;
+                const assetSymbol = chainConfig.nativeSymbol.toUpperCase();
+                const confirmations = Math.max(0, latestBlock - txBlock + 1);
 
                 detected++;
                 const { data, error } = await supabaseAdmin.rpc('process_deposit_atomic', {
@@ -328,7 +341,7 @@ async function scanEvmNativeDeposits(
                   p_tx_hash: txHash,
                   p_output_index: 0,
                   p_block_number: isNaN(txBlock) ? null : txBlock,
-                  p_from_address: tx.from?.toLowerCase() || null,
+                  p_from_address: chainTx.from?.toLowerCase() || null,
                   p_token_contract: null,
                   p_confirmations: confirmations,
                   p_provider: 'deposit_ingestion',
