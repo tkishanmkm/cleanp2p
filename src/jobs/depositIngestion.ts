@@ -748,20 +748,29 @@ async function scanEvmNativeDeposits(
                   p_block_hash: verified.blockHash,
                 });
 
-                if (!error) {
+                if (error) {
+                  errors.push(`RPC error in native discovery for tx ${txHash}: ${error.message}`);
+                } else {
                   const res = typeof data === 'string' ? JSON.parse(data) : data;
                   if (res?.status === 'credited' || (res?.success && confirmations >= chainConfig.requiredConfirmations)) {
                     credited++;
+                  } else if (res?.status === 'error' || res?.success === false) {
+                    errors.push(`Native discovery did not process tx ${txHash}: ${res?.message || res?.error || res?.status}`);
                   }
                 }
               }
             }
-          } catch (_) {
-            // If provider is standard RPC without alchemy_getAssetTransfers, fallback gracefully
+          } catch (discoveryErr: any) {
+            // Alchemy's optional discovery method may be unavailable on standard RPCs.
+            // Keep the canonical block scanner as fallback, but surface unexpected failures.
+            const message = String(discoveryErr?.message || discoveryErr);
+            if (!/method not found|unsupported method|not available|unknown method/i.test(message)) {
+              errors.push(`Native asset-transfer discovery failed for ${address}: ${message}`);
+            }
           }
         }
       } catch (addrErr: any) {
-        // Continue scanning other addresses
+        errors.push(`Native balance/discovery check failed for ${address}: ${addrErr?.message || addrErr}`);
       }
     }
 
