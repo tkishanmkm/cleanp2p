@@ -77,6 +77,21 @@ assert.match(sql, /WHERE chain = 'BTC'\s+AND BTRIM\(address\) = BTRIM\(v_address
 assert.match(sql, /v_network = 'BTC'[\s\S]*?BTRIM\(uda\.address\) = BTRIM\(v_address\)/,
   'cross-table Bitcoin ownership checks must use exact address equality');
 
+
+const creditStart = sql.indexOf('-- CREDIT wallet_assets.balance ONLY');
+const ledgerInsert = sql.indexOf('INSERT INTO public.ledger_entries', creditStart);
+const depositFinalize = sql.indexOf('UPDATE public.deposits', ledgerInsert);
+const onchainFinalize = sql.indexOf('-- FINALIZE ON-CHAIN DEPOSIT', depositFinalize);
+const finalSuccess = sql.indexOf("'status', 'CONFIRMED'", onchainFinalize);
+assert.ok(creditStart > 0 && ledgerInsert > creditStart && depositFinalize > ledgerInsert &&
+  onchainFinalize > depositFinalize && finalSuccess > onchainFinalize,
+  'wallet credit, ledger insert, and both deposit finalizations must remain in the same ordered function path');
+assert.doesNotMatch(sql.slice(sql.indexOf('CREATE OR REPLACE FUNCTION public.process_deposit_atomic'), sql.indexOf('$function$;', sql.indexOf('CREATE OR REPLACE FUNCTION public.process_deposit_atomic'))),
+  /EXCEPTION\s+WHEN[\s\S]*?THEN[\s\S]*?RETURN\s+jsonb_build_object/,
+  'the atomic credit function must not swallow a write failure and return success after partial writes');
+assert.match(sql, /INSERT INTO public\.ledger_entries[\s\S]*?RETURNING id INTO v_ledger_id/,
+  'deposit ledger insertion must return a ledger id before success is reported');
+
 console.log('Deposit migration static safety checks passed. This is not a PostgreSQL parser or execution test.');
 const workerPath = 'src/jobs/confirmationsWorker.ts';
 const worker = readFileSync(workerPath, 'utf8');
