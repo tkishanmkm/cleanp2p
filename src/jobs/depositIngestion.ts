@@ -377,6 +377,26 @@ export interface IngestionResult {
   errors: string[];
 }
 
+// Supabase projects commonly cap a single REST response at 1,000 rows.
+// Page through every address source so large customer bases do not silently lose
+// monitored addresses beyond the first response page.
+const MONITORED_ADDRESS_PAGE_SIZE = 1000;
+
+async function fetchAllAddressRows<T>(
+  fetchPage: (from: number, to: number) => PromiseLike<{ data: T[] | null; error: { message: string } | null }>
+): Promise<T[]> {
+  const rows: T[] = [];
+  for (let from = 0; ; from += MONITORED_ADDRESS_PAGE_SIZE) {
+    const { data, error } = await fetchPage(from, from + MONITORED_ADDRESS_PAGE_SIZE - 1);
+    if (error) {
+      throw new Error(`Failed to load monitored deposit addresses (offset ${from}): ${error.message}`);
+    }
+    const page = data ?? [];
+    rows.push(...page);
+    if (page.length < MONITORED_ADDRESS_PAGE_SIZE) return rows;
+  }
+}
+
 /**
  * Loads all active user deposit addresses across all chains
  */
@@ -393,11 +413,15 @@ export async function getMonitoredAddresses(): Promise<{
 
   try {
     // 1. Fetch from deposit_addresses
-    const { data: primaryAddresses, error: pErr } = await supabaseAdmin
-      .from('deposit_addresses')
-      .select('address, network_code, asset_code');
+    const primaryAddresses = await fetchAllAddressRows((from, to) =>
+      supabaseAdmin
+        .from('deposit_addresses')
+        .select('address, network_code, asset_code')
+        .order('address', { ascending: true })
+        .range(from, to)
+    );
 
-    if (!pErr && primaryAddresses) {
+    {
       for (const row of primaryAddresses) {
         if (!row.address) continue;
         const clean = row.address.trim();
@@ -423,11 +447,15 @@ export async function getMonitoredAddresses(): Promise<{
     }
 
     // 2. Fetch from user_deposit_addresses
-    const { data: fallbackAddresses, error: fErr } = await supabaseAdmin
-      .from('user_deposit_addresses')
-      .select('address, network, coin');
+    const fallbackAddresses = await fetchAllAddressRows((from, to) =>
+      supabaseAdmin
+        .from('user_deposit_addresses')
+        .select('address, network, coin')
+        .order('address', { ascending: true })
+        .range(from, to)
+    );
 
-    if (!fErr && fallbackAddresses) {
+    {
       for (const row of fallbackAddresses) {
         if (!row.address) continue;
         const clean = row.address.trim();
@@ -453,24 +481,15 @@ export async function getMonitoredAddresses(): Promise<{
     }
 
     // 3. Fetch from wallets (User dashboard wallets)
-    const { data: userWallets, error: wErr } = await supabaseAdmin
-      .from('wallets')
-      .select('address, chain, currency');
+    const userWallets = await fetchAllAddressRows((from, to) =>
+      supabaseAdmin
+        .from('wallets')
+        .select('address, chain, currency')
+        .order('address', { ascending: true })
+        .range(from, to)
+    );
 
-    // These three sources may each contain deposit addresses not present in the
-    // others. Do not start a partial scan if any source failed: that can silently
-    // omit customer addresses and make a cycle look healthy while missing deposits.
-    const addressQueryFailures = [
-      pErr ? `user_deposit_addresses primary query: ${pErr.message}` : null,
-      fErr ? `user_deposit_addresses fallback query: ${fErr.message}` : null,
-      wErr ? `wallets query: ${wErr.message}` : null,
-    ].filter((failure): failure is string => Boolean(failure));
-
-    if (addressQueryFailures.length > 0) {
-      throw new Error(`Unable to load all monitored deposit address sources: ${addressQueryFailures.join('; ')}`);
-    }
-
-    if (!wErr && userWallets) {
+    {
       for (const row of userWallets) {
         if (!row.address) continue;
         const clean = row.address.trim();
