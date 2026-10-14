@@ -1792,7 +1792,7 @@ export async function runDepositIngestion(): Promise<{
           fromBlock = lastScannedBlock + 1;
         } else {
           const startBlockEnv = process.env[`EVM_DEPOSIT_START_BLOCK_${netKey}`];
-          if (!startBlockEnv || !/^\\d+$/.test(startBlockEnv)) {
+          if (!startBlockEnv || !/^\d+$/.test(startBlockEnv)) {
             throw new Error(`Missing EVM_DEPOSIT_START_BLOCK_${netKey}; configure the verified historical start block before first scan`);
           }
           fromBlock = Number(startBlockEnv);
