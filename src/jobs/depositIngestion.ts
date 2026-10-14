@@ -294,15 +294,13 @@ export async function verifyTronTokenDeposit(
     const apiKey = process.env.TRON_GRID_API_KEY || process.env.TRONGRID_API_KEY || TRON_CONFIG.apiKey;
     if (apiKey) headers['TRON-PRO-API-KEY'] = apiKey;
 
-    const [txInfo, currentBlock, eventsResponse] = await Promise.all([
+    const [txInfo, currentBlock] = await Promise.all([
       tronWeb.trx.getTransactionInfo(txHash),
       tronWeb.trx.getCurrentBlock(),
-      fetch(`${eventHost}/v1/transactions/${txHash}/events?limit=200`, { headers }),
     ]);
     if (!txInfo || String(txInfo.id || '').toLowerCase() !== txHash.toLowerCase() ||
         String(txInfo.receipt?.result || '').toUpperCase() !== 'SUCCESS' ||
-        !Number.isSafeInteger(txInfo.blockNumber) || txInfo.blockNumber <= 0 ||
-        !eventsResponse.ok) return null;
+        !Number.isSafeInteger(txInfo.blockNumber) || txInfo.blockNumber <= 0) return null;
 
     const currentHeight = currentBlock?.block_header?.raw_data?.number;
     if (!Number.isSafeInteger(currentHeight) || currentHeight < txInfo.blockNumber) return null;
@@ -319,8 +317,29 @@ export async function verifyTronTokenDeposit(
     if (!Number.isSafeInteger(canonicalHeight) || canonicalHeight !== txInfo.blockNumber ||
         !/^[0-9a-f]{64}$/.test(canonicalBlockHash) || !transactionInCanonicalBlock) return null;
 
-    const eventsPayload = await eventsResponse.json();
-    const events = Array.isArray(eventsPayload?.data) ? eventsPayload.data : [];
+    // Follow TronGrid's fingerprint cursor when a transaction exposes more
+    // than one page of events. Never interpret malformed or truncated event data
+    // as proof that the requested transfer does not exist.
+    const events: any[] = [];
+    let fingerprint: string | null = null;
+    let pageCount = 0;
+    do {
+      const baseUrl = `${eventHost}/v1/transactions/${txHash}/events?limit=200`;
+      const pageUrl = fingerprint
+        ? `${baseUrl}&fingerprint=${encodeURIComponent(fingerprint)}`
+        : baseUrl;
+      const eventsResponse = await fetch(pageUrl, { headers });
+      if (!eventsResponse.ok) return null;
+      const eventsPayload = await eventsResponse.json();
+      if (!Array.isArray(eventsPayload?.data)) return null;
+      events.push(...eventsPayload.data);
+      fingerprint = typeof eventsPayload?.meta?.fingerprint === 'string' && eventsPayload.meta.fingerprint.length > 0
+        ? eventsPayload.meta.fingerprint
+        : null;
+      pageCount++;
+    } while (fingerprint && pageCount < 10);
+    if (fingerprint) return null;
+
     const event = events.find((item: any) =>
       Number(item.event_index) === eventIndex &&
       String(item.transaction_id || '').toLowerCase() === txHash.toLowerCase()
