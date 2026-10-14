@@ -120,7 +120,7 @@ export async function verifyEvmNativeDeposit(
   const amountString = typeof storedAmount === 'string' ? storedAmount.trim() : String(storedAmount);
   if (!/^0x[0-9a-f]{64}$/i.test(txHash) ||
       !ethers.isAddress(destinationAddress) ||
-      !/^\\d+(?:\\.\\d+)?$/.test(amountString) ||
+      !/^\d+(?:\.\d+)?$/.test(amountString) ||
       (typeof storedAmount === 'number' && !Number.isFinite(storedAmount)) ||
       !Number.isSafeInteger(decimals) || decimals < 0 || decimals > 36) return null;
 
