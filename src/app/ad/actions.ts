@@ -703,12 +703,19 @@ export async function createTradeOrderWithEscrow(input: {
       }
     }
 
-    // Check Seller available balance comprehensively
+    // Check the seller's wallet balance. Advertisement inventory is a listing limit,
+    // not proof that the seller currently owns or has unlocked the advertised crypto.
     const sellerBalanceInfo = await fetchUserCryptoBalance(sellerId, assetSymbol);
-    let currentSellerAvail = sellerBalanceInfo.available;
+    const currentSellerAvail = Number(sellerBalanceInfo.available);
 
-    if (isAdSell && Number(ad.total_amount || 0) > currentSellerAvail) {
-      currentSellerAvail = Number(ad.total_amount);
+    if (!Number.isFinite(currentSellerAvail) || currentSellerAvail < 0) {
+      return {
+        data: null,
+        error: {
+          message: 'Unable to verify the seller wallet balance. Please try again later.',
+          code: 'WALLET_BALANCE_UNAVAILABLE',
+        },
+      };
     }
 
     // Effective max limit check
