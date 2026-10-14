@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createClient, createAdminClient } from '@/lib/supabase/server';
+import { createClient, getSupabaseAdminClient } from '@/lib/supabase/server';
 import { getAdminSecurityState } from '@/lib/admin-security';
 
 export async function GET(req: NextRequest) {
@@ -11,7 +11,7 @@ export async function GET(req: NextRequest) {
     }
 
     const adminId = session.user.id;
-    const adminDb = createAdminClient();
+    const adminDb = getSupabaseAdminClient();
 
     const state = await getAdminSecurityState(adminId);
     if (!state) {
