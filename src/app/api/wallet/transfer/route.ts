@@ -289,6 +289,9 @@ export async function POST(req: NextRequest) {
       gross_amount?: number | string;
       net_amount?: number | string;
       fee_amount?: number | string;
+      /** Backward-compatible aliases returned by some deployed RPC versions. */
+      fee?: number | string | null;
+      total_deduction?: number | string | null;
       sender_balance_after?: number | string;
       recipient_balance_after?: number | string;
       status?: string;
