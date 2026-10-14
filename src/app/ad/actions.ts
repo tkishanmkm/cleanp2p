@@ -777,11 +777,16 @@ export async function createTradeOrderWithEscrow(input: {
 
     if (rpcError) {
       console.error('[createTradeOrderWithEscrow] RPC initiate_trade_with_escrow error:', rpcError);
+      const rpcErrorMessage = String(rpcError.message || 'Failed to initiate trade and lock escrow.');
+      const normalizedRpcErrorMessage = rpcErrorMessage.toLowerCase();
+      const isInsufficientFundsError =
+        rpcError.code === 'P0001' &&
+        /(insufficient funds|insufficient balance|not enough available balance|insufficient available balance)/i.test(normalizedRpcErrorMessage);
       return {
         data: null,
         error: {
-          message: rpcError.message || 'Failed to initiate trade and lock escrow.',
-          code: rpcError.code === 'P0001' ? 'INSUFFICIENT_FUNDS' : 'ESCROW_ERROR',
+          message: rpcErrorMessage,
+          code: isInsufficientFundsError ? 'INSUFFICIENT_FUNDS' : 'ESCROW_ERROR',
         },
       };
     }
