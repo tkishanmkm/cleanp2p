@@ -47,7 +47,6 @@ export function WalletDisplayCard({ coin, wallets }: WalletDisplayCardProps) {
             <DepositDialog
                 open={isDepositOpen}
                 onOpenChange={setIsDepositOpen}
-                asset={coin}
                 wallet={selectedWallet}
             />
             <WithdrawDialog
