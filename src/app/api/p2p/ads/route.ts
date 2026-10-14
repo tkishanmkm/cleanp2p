@@ -177,10 +177,29 @@ export async function POST(request: NextRequest) {
         { status: 400 }
       );
     }
-    const paymentWindow = Math.max(30, parseInt(String(body.payment_window || body.payment_window_minutes || 30), 10) || 30);
-    const paymentMethods = Array.isArray(body.payment_methods) && body.payment_methods.length > 0
-      ? body.payment_methods
-      : (Array.isArray(body.paymentMethods) ? body.paymentMethods : ['Bank Transfer']);
+    const rawPaymentWindow = body.payment_window ?? body.payment_window_minutes;
+    const paymentWindow = rawPaymentWindow === undefined || rawPaymentWindow === null || rawPaymentWindow === ''
+      ? 30
+      : Number(rawPaymentWindow);
+    if (!Number.isInteger(paymentWindow) || paymentWindow < 30 || paymentWindow > 1440) {
+      return NextResponse.json(
+        { error: 'Payment window must be a whole number between 30 and 1440 minutes.', code: 'INVALID_PAYMENT_WINDOW' },
+        { status: 400 }
+      );
+    }
+
+    const rawPaymentMethods = body.payment_methods ?? body.paymentMethods;
+    let paymentMethods: string[] = ['Bank Transfer'];
+    if (rawPaymentMethods !== undefined && rawPaymentMethods !== null) {
+      if (!Array.isArray(rawPaymentMethods) || rawPaymentMethods.length < 1 || rawPaymentMethods.length > 10 ||
+          rawPaymentMethods.some((method: unknown) => typeof method !== 'string' || method.trim().length === 0 || method.trim().length > 80)) {
+        return NextResponse.json(
+          { error: 'Provide between 1 and 10 valid payment methods, each 1–80 characters.', code: 'INVALID_PAYMENT_METHODS' },
+          { status: 400 }
+        );
+      }
+      paymentMethods = Array.from(new Set(rawPaymentMethods.map((method: string) => method.trim())));
+    }
 
     // Authoritative Server-Side ±50% Reference Market Price Validation (Applies to both BUY and SELL ads)
     const isFixedPricing = pricingType === 'FIXED' || body.rate_type === 'fixed' || Boolean(body.is_fixed);
