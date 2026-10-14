@@ -57,6 +57,10 @@ assert.ok(recorderStart >= 0 && recorderEnd > recorderStart, 'incident recorder 
 const recorder = worker.slice(recorderStart, recorderEnd);
 assert.match(recorder, /\.from\('deposit_reorg_incidents'\)/, 'recorder may write only to incident review table');
 assert.match(recorder, /\.from\('onchain_deposits'\)/, 'recorder must resolve source deposit output index');
+assert.match(recorder, /sourceNetwork !== network/, 'recorder must validate the source network');
+assert.match(recorder, /sourceTxHash !== txHash/, 'recorder must validate the source transaction hash');
+assert.match(recorder, /Number\.isSafeInteger\(sourceOutputIndex\)/, 'recorder must reject missing/invalid output indices');
+assert.doesNotMatch(recorder, /sourceDeposit\.output_index \?\? sourceDeposit\.log_index \?\? 0/, 'recorder must not silently collapse missing output indices to zero');
 assert.match(recorder, /review_status: 'OPEN'/, 'new incidents must start open');
 assert.match(recorder, /hashChanged[\s\S]*review_status: 'OPEN'/, 'changed canonical hashes must reopen incidents');
 assert.doesNotMatch(recorder, /\.from\('(deposits|user_balances|wallet_balances|ledger_entries|financial_ledger)'\)\s*\.(update|insert|upsert|delete)|\.rpc\s*\(/,
