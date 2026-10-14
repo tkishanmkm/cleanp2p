@@ -1769,24 +1769,70 @@ export async function runDepositIngestion(): Promise<{
     try {
       const provider = getEvmProvider(netKey);
       const latestBlock = await provider.getBlockNumber();
-      // Scan a safe trailing block window of 100 blocks
-      const scanWindow = 100;
-      const fromBlock = Math.max(0, latestBlock - scanWindow);
-
-      netResult.scannedBlocks = latestBlock - fromBlock;
 
       if (evmAddresses.size > 0) {
-        // Scan ERC20 / BEP20 USDT
-        const tokenRes = await scanEvmTokenDeposits(netKey, evmAddresses, fromBlock, latestBlock);
-        netResult.depositsDetected += tokenRes.detected;
-        netResult.depositsCredited += tokenRes.credited;
-        netResult.errors.push(...tokenRes.errors);
+        // Read the durable checkpoint. On first use, require an explicit start block
+        // so deployment cannot silently skip older deposits by guessing a baseline.
+        const { data: checkpoint, error: checkpointError } = await supabaseAdmin
+          .from('deposit_scan_checkpoints')
+          .select('last_scanned_block')
+          .eq('network', netKey)
+          .maybeSingle();
 
-        // Scan Native transfers (ETH)
-        const nativeRes = await scanEvmNativeDeposits(netKey, evmAddresses, fromBlock, latestBlock);
-        netResult.depositsDetected += nativeRes.detected;
-        netResult.depositsCredited += nativeRes.credited;
-        netResult.errors.push(...nativeRes.errors);
+        if (checkpointError) {
+          throw new Error(`Failed to read EVM deposit checkpoint for ${netKey}: ${checkpointError.message}`);
+        }
+
+        let fromBlock: number;
+        if (checkpoint) {
+          const lastScannedBlock = Number(checkpoint.last_scanned_block);
+          if (!Number.isSafeInteger(lastScannedBlock) || lastScannedBlock < 0) {
+            throw new Error(`Invalid stored EVM deposit checkpoint for ${netKey}`);
+          }
+          fromBlock = lastScannedBlock + 1;
+        } else {
+          const startBlockEnv = process.env[`EVM_DEPOSIT_START_BLOCK_${netKey}`];
+          if (!startBlockEnv || !/^\\d+$/.test(startBlockEnv)) {
+            throw new Error(`Missing EVM_DEPOSIT_START_BLOCK_${netKey}; configure the verified historical start block before first scan`);
+          }
+          fromBlock = Number(startBlockEnv);
+          if (!Number.isSafeInteger(fromBlock) || fromBlock < 0) {
+            throw new Error(`Invalid EVM_DEPOSIT_START_BLOCK_${netKey}`);
+          }
+        }
+
+        // Bound each cycle to 100 blocks; the durable checkpoint lets later cycles
+        // catch up incrementally after downtime without skipping the backlog.
+        const toBlock = Math.min(latestBlock, fromBlock + 99);
+        if (fromBlock <= toBlock) {
+          netResult.scannedBlocks = toBlock - fromBlock + 1;
+
+          const tokenRes = await scanEvmTokenDeposits(netKey, evmAddresses, fromBlock, toBlock);
+          netResult.depositsDetected += tokenRes.detected;
+          netResult.depositsCredited += tokenRes.credited;
+          netResult.errors.push(...tokenRes.errors);
+
+          const nativeRes = await scanEvmNativeDeposits(netKey, evmAddresses, fromBlock, toBlock);
+          netResult.depositsDetected += nativeRes.detected;
+          netResult.depositsCredited += nativeRes.credited;
+          netResult.errors.push(...nativeRes.errors);
+
+          // Never advance past a partial/failed scan. Replaying a range is safe only
+          // because process_deposit_atomic must enforce transaction/output idempotency.
+          if (netResult.errors.length === 0) {
+            const { error: checkpointWriteError } = await supabaseAdmin
+              .from('deposit_scan_checkpoints')
+              .upsert({
+                network: netKey,
+                last_scanned_block: toBlock,
+                updated_at: new Date().toISOString(),
+              }, { onConflict: 'network' });
+
+            if (checkpointWriteError) {
+              netResult.errors.push(`Failed to persist EVM deposit checkpoint for ${netKey}: ${checkpointWriteError.message}`);
+            }
+          }
+        }
       }
     } catch (chainErr: any) {
       netResult.errors.push(`Chain scan failed: ${chainErr.message}`);
