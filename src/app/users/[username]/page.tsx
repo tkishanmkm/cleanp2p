@@ -63,13 +63,7 @@ export default async function UserProfilePage({ params }: PageProps) {
   }
 
   // Fetch user's crypto balances for precise limit clamping
-  let userCryptoBalances: Record<string, number> = {
-    BTC: Number(profile.btc_balance || 0),
-    ETH: Number(profile.eth_balance || 0),
-    LTC: Number(profile.ltc_balance || 0),
-    USDT: Number(profile.usdt_balance || 0),
-    SOL: Number(profile.sol_balance || 0),
-  };
+  let userCryptoBalances: Record<string, number> = {};
 
   try {
     const { data: userWallets } = await supabase
@@ -133,10 +127,10 @@ export default async function UserProfilePage({ params }: PageProps) {
     }));
 
   // 3. Aggregate Real Trade Stats & Dynamic Averages from trades table
-  let completedTradeCount = Number(profile.completed_trades || 0);
-  let totalVolumeUSD = Number(profile.total_trade_volume_usd || profile.trade_volume || profile.total_volume || 0);
-  let avgPayTimeSeconds = profile.avg_pay_time_seconds ?? null;
-  let avgReleaseTimeSeconds = profile.avg_release_time_seconds ?? null;
+  let completedTradeCount = Number(profile.total_completed_trades || profile.completed_trades || 0);
+  let totalVolumeUSD = Number(profile.trade_volume || 0);
+  let avgPayTimeSeconds: number | null = null;
+  let avgReleaseTimeSeconds: number | null = null;
 
   try {
     const { data: userTrades } = await supabase
@@ -308,23 +302,19 @@ export default async function UserProfilePage({ params }: PageProps) {
   const positiveRatio = totalFeedbackCount > 0 ? ((positiveFeedbacksCount / totalFeedbackCount) * 100).toFixed(0) : '100';
 
   // 6. Verification Statuses
-  const isEmailVerified = Boolean(
-    profile.is_email_verified ||
-    profile.email_verified ||
-    profile.email_confirmed_at ||
-    (profile.email && !profile.email.includes('placeholder'))
-  );
+  // The public profile query intentionally does not select private email fields.
+  // Do not infer email verification from the mere presence of an email address.
+  const isEmailVerified = false;
 
   const verification = getIdentityVerificationState(profile);
-  const countryCode = (profile.country || profile.country_code || 'US').toUpperCase();
+  const countryCode = (profile.country || 'US').toUpperCase();
 
   return (
     <UserProfileClient
       profile={{
         ...profile,
-        last_seen: profile.last_seen || profile.last_seen_at || profile.last_active || profile.updated_at || null,
-        last_seen_at: profile.last_seen || profile.last_seen_at || profile.last_active || profile.updated_at || null,
-        last_active: profile.last_seen || profile.last_seen_at || profile.last_active || profile.updated_at || null,
+        last_seen: profile.last_seen_at || null,
+        last_seen_at: profile.last_seen_at || null,
         is_online: profile.is_online ?? false,
         username: profile.username || username,
         is_email_verified: isEmailVerified,
@@ -346,8 +336,8 @@ export default async function UserProfilePage({ params }: PageProps) {
         negativeFeedbacksCount,
         positiveRatio,
         totalFeedbackCount,
-        blockedBy: Number(profile.blocked_by_count || 0),
-        hasBlocked: Number(profile.blocking_count || 0),
+        blockedBy: 0,
+        hasBlocked: 0,
       }}
     />
   );
