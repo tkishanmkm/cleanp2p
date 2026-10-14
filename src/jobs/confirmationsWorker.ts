@@ -3,9 +3,22 @@ import { ethers } from 'ethers';
 import { normalizeDepositNetwork } from '@/lib/hd-derivation-engine';
 import { CANONICAL_USDT_CONTRACTS } from '@/jobs/depositIngestion';
 
-// Initialize Supabase admin client with service role key
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL || 'https://placeholder.supabase.co';
-const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'placeholder-key';
+// Privileged confirmation processing must fail closed: never fall back to the public anon key.
+const supabaseUrl =
+  process.env.NEXT_PUBLIC_SUPABASE_URL?.trim() ||
+  process.env.SUPABASE_URL?.trim() ||
+  'https://eaiwgfxoiwxepinvcykg.supabase.co';
+const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY?.trim();
+
+if (
+  !supabaseKey ||
+  supabaseKey === 'placeholder-key' ||
+  supabaseKey === 'placeholder-anon-key'
+) {
+  throw new Error(
+    'SUPABASE_SERVICE_ROLE_KEY is required for privileged deposit confirmation processing but is missing or not configured.'
+  );
+}
 
 const supabaseAdmin = createClient(supabaseUrl, supabaseKey, {
   auth: {
