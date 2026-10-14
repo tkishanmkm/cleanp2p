@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createClient, createAdminClient } from '@/lib/supabase/server';
+import { createClient, getSupabaseAdminClient } from '@/lib/supabase/server';
 import speakeasy from 'speakeasy';
 import { logAdminSecurityAudit, encryptAdminTOTPSecret } from '@/lib/admin-security';
 
@@ -15,7 +15,7 @@ export async function POST(req: NextRequest) {
     const adminEmail = session.user.email || 'admin';
 
     // Verify admin status
-    const adminDb = createAdminClient();
+    const adminDb = getSupabaseAdminClient();
     const { data: profile } = await adminDb
       .from('profiles')
       .select('id, is_admin, role')
