@@ -666,7 +666,6 @@ BEGIN
                 created_at,
                 asset,
                 output_index,
-                block_number,
                 block_hash
             )
             VALUES (
