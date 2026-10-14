@@ -865,21 +865,30 @@ async function scanTronDeposits(
       addContractHex(c);
     }
 
-    // 1. Determine latest block height
+    // 1. Determine latest block height. Never continue with an unknown tip:
+    // confirmation counts and the block-log scan would otherwise be misleading.
     let latestBlock = 0;
+    const blockTipErrors: string[] = [];
     try {
       const blockRes = await fetch(tronHost, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'eth_blockNumber', params: [] }),
       });
-      if (blockRes.ok) {
-        const bData = await blockRes.json();
-        if (bData.result) {
-          latestBlock = parseInt(bData.result, 16);
-        }
+      if (!blockRes.ok) {
+        throw new Error(`eth_blockNumber HTTP ${blockRes.status}`);
       }
-    } catch (_) {}
+      const bData = await blockRes.json();
+      if (typeof bData?.result !== 'string' || !/^0x[0-9a-f]+$/i.test(bData.result)) {
+        throw new Error('eth_blockNumber returned an invalid block height');
+      }
+      latestBlock = Number.parseInt(bData.result, 16);
+      if (!Number.isSafeInteger(latestBlock) || latestBlock <= 0) {
+        throw new Error('eth_blockNumber returned a non-positive or unsafe block height');
+      }
+    } catch (err: any) {
+      blockTipErrors.push(err?.message || String(err));
+    }
 
     if (!latestBlock) {
       try {
@@ -888,18 +897,35 @@ async function scanTronDeposits(
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({}),
         });
-        if (nowBlockRes.ok) {
-          const nbData = await nowBlockRes.json();
-          latestBlock = nbData?.block_header?.raw_data?.number || 0;
+        if (!nowBlockRes.ok) {
+          throw new Error(`getnowblock HTTP ${nowBlockRes.status}`);
         }
-      } catch (_) {}
+        const nbData = await nowBlockRes.json();
+        const height = nbData?.block_header?.raw_data?.number;
+        if (!Number.isSafeInteger(height) || height <= 0) {
+          throw new Error('getnowblock returned an invalid block height');
+        }
+        latestBlock = height;
+      } catch (err: any) {
+        blockTipErrors.push(err?.message || String(err));
+      }
     }
 
     if (!latestBlock) {
       try {
         const curBlock = await tronWeb.trx.getCurrentBlock();
-        latestBlock = curBlock?.block_header?.raw_data?.number || 0;
-      } catch (_) {}
+        const height = curBlock?.block_header?.raw_data?.number;
+        if (!Number.isSafeInteger(height) || height <= 0) {
+          throw new Error('TronWeb returned an invalid current block height');
+        }
+        latestBlock = height;
+      } catch (err: any) {
+        blockTipErrors.push(err?.message || String(err));
+      }
+    }
+
+    if (!latestBlock) {
+      throw new Error(`Unable to determine TRON chain tip from all configured providers: ${blockTipErrors.join('; ')}`);
     }
 
     const transferTopic = '0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef';
