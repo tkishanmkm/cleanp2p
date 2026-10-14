@@ -651,8 +651,12 @@ async function scanEvmTokenDeposits(
           errors.push(`RPC error on tx ${log.transactionHash}: ${error.message}`);
         } else {
           const res = typeof data === 'string' ? JSON.parse(data) : data;
-          if (res?.status === 'credited' || (res?.success && confirmations >= chainConfig.requiredConfirmations)) {
+          if (!res || typeof res !== 'object') {
+            errors.push(`Invalid atomic-credit response for token transfer ${log.transactionHash} index ${log.index}`);
+          } else if (res?.status === 'credited' || (res?.success && confirmations >= chainConfig.requiredConfirmations)) {
             credited++;
+          } else if (res?.status === 'error' || res?.success === false) {
+            errors.push(`Atomic credit rejected token transfer ${log.transactionHash} index ${log.index}: ${res?.message || res?.error || res?.status}`);
           }
         }
       } catch (logErr: any) {
