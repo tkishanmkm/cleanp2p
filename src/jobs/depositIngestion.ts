@@ -72,11 +72,13 @@ async function verifyUtxoDepositOutput(
   txHash: string,
   outputIndex: number,
   destinationAddress: string,
-  storedAmount: number
+  storedAmount: number | string
 ): Promise<{ blockHeight: number | null; confirmations: number } | null> {
+  const amountString = typeof storedAmount === 'string' ? storedAmount.trim() : String(storedAmount);
   if (!/^[a-fA-F0-9]{64}$/.test(txHash) ||
       !Number.isSafeInteger(outputIndex) || outputIndex < 0 ||
-      !Number.isFinite(storedAmount) || storedAmount <= 0 ||
+      !/^\\d+(?:\\.\\d+)?$/.test(amountString) ||
+      (typeof storedAmount === 'number' && !Number.isFinite(storedAmount)) ||
       !destinationAddress) return null;
 
   try {
@@ -92,8 +94,14 @@ async function verifyUtxoDepositOutput(
 
     const output = tx.vout[outputIndex];
     if (output?.scriptpubkey_address !== destinationAddress ||
-        !Number.isSafeInteger(output.value) || output.value <= 0 ||
-        Math.round(storedAmount * 100_000_000) !== output.value) return null;
+        !Number.isSafeInteger(output.value) || output.value <= 0) return null;
+    let expectedSatoshis: bigint;
+    try {
+      expectedSatoshis = ethers.parseUnits(amountString, 8);
+    } catch {
+      return null;
+    }
+    if (expectedSatoshis <= 0n || expectedSatoshis !== BigInt(output.value)) return null;
 
     if (status?.confirmed !== true) return { blockHeight: null, confirmations: 0 };
     const blockHeight = status.block_height;
@@ -847,8 +855,7 @@ async function scanTronDeposits(
             const rawVal = BigInt(item.value || '0');
             if (rawVal <= 0n) continue;
             const formattedAmount = ethers.formatUnits(rawVal, decimals);
-            const amount = parseFloat(formattedAmount);
-            if (amount <= 0) continue;
+            if (/^0(?:\\.0+)?$/.test(formattedAmount)) continue;
 
             const tokenContract = contractAddress;
 
@@ -878,7 +885,7 @@ async function scanTronDeposits(
               p_destination_address: toAddr,
               p_asset_symbol: 'USDT',
               p_network_code: 'TRC20',
-              p_amount: amount,
+              p_amount: formattedAmount,
               p_tx_hash: txId,
               p_output_index: eventIndex,
               p_block_number: eventBlock || null,
@@ -944,7 +951,7 @@ async function scanTronDeposits(
             detected++;
             const rawValBig = BigInt(rawValue);
             const formattedAmount = ethers.formatUnits(rawValBig, 6);
-            const amount = parseFloat(formattedAmount);
+
             const eventBlock = evt.block_number || 0;
             const confirmations = (latestBlock && eventBlock && latestBlock >= eventBlock)
               ? latestBlock - eventBlock + 1
@@ -1057,17 +1064,16 @@ async function scanTronDeposits(
             fromBase58 = tronWeb.address.fromHex(fromHex);
           } catch (_) {}
 
-          let numericAmount = 0;
+          let formattedAmount = '';
           try {
             const rawValue = BigInt(log.data || '0x0');
             if (rawValue <= 0n) continue;
-            const formattedAmount = ethers.formatUnits(rawValue, 6);
-            numericAmount = parseFloat(formattedAmount);
+            formattedAmount = ethers.formatUnits(rawValue, 6);
           } catch (_) {
             continue;
           }
 
-          if (numericAmount <= 0) continue;
+          if (/^0(?:\\.0+)?$/.test(formattedAmount)) continue;
 
           const eventBlock = parseInt(log.blockNumber || '0x0', 16) || 0;
           const confirmations = latestBlock > eventBlock ? latestBlock - eventBlock + 1 : 1;
@@ -1084,7 +1090,7 @@ async function scanTronDeposits(
             p_destination_address: toBase58,
             p_asset_symbol: 'USDT',
             p_network_code: 'TRC20',
-            p_amount: numericAmount,
+            p_amount: formattedAmount,
             p_tx_hash: txHash,
             p_output_index: outputIndex,
             p_block_number: eventBlock,
@@ -1156,7 +1162,7 @@ async function scanBtcDeposits(
               !Number.isSafeInteger(out.value) || out.value <= 0) continue;
 
           detected++;
-          const btcAmount = out.value / 100_000_000;
+          const btcAmount = ethers.formatUnits(BigInt(out.value), 8);
           const { data, error } = await supabaseAdmin.rpc('process_deposit_atomic', {
             p_destination_address: btcAddr,
             p_asset_symbol: 'BTC',
@@ -1228,7 +1234,7 @@ async function scanLtcDeposits(
               !Number.isSafeInteger(out.value) || out.value <= 0) continue;
 
           detected++;
-          const ltcAmount = out.value / 100_000_000;
+          const ltcAmount = ethers.formatUnits(BigInt(out.value), 8);
           const { data, error } = await supabaseAdmin.rpc('process_deposit_atomic', {
             p_destination_address: ltcAddr,
             p_asset_symbol: 'LTC',
