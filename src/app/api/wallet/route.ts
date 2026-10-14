@@ -71,7 +71,7 @@ export async function GET() {
       currency: assetSymbol,
       balance: Math.max(0, availableBalance),
       availableBalance: Math.max(0, availableBalance).toFixed(8),
-      lastUpdated: wallet?.updated_at || null,
+      lastUpdated,
     });
   } catch (error: any) {
     return NextResponse.json({ error: error.message || 'Internal Server Error' }, { status: 500 });
