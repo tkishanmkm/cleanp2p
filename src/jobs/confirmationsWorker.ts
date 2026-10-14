@@ -740,8 +740,24 @@ export async function runConfirmationsWorker(): Promise<ConfirmationWorkerResult
           verifiedBlockHash = verified.blockHash;
         }
 
-        // Never invoke the privileged credit RPC without a syntactically valid
-        // block hash returned by the network-specific independent verifier.
+        // Never invoke the privileged credit RPC without a valid canonical
+        // block height and hash returned by independent network verification.
+        // Do not fall back to a database-stored height to authorize credit.
+        if (!Number.isSafeInteger(blockNumber) || blockNumber <= 0) {
+          result.pendingCount++;
+          result.details.push({
+            depositId: deposit.id,
+            txHash: deposit.tx_hash,
+            network: normNet,
+            previousConfirmations: prevConfs,
+            newConfirmations: currentConfirmations,
+            requiredConfirmations: requiredConfs,
+            status: 'PENDING',
+            error: 'Verified canonical block height is missing or invalid; credit RPC not called.',
+          });
+          continue;
+        }
+
         const canonicalVerifiedBlockHash = normalizeBlockHash(verifiedBlockHash);
         if (!canonicalVerifiedBlockHash) {
           result.pendingCount++;
