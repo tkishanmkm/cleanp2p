@@ -7,20 +7,34 @@ export async function POST(req: Request) {
   try {
     const supabase = getSupabaseAdminClient();
     const authHeader = req.headers.get('authorization');
-    const webhookSecret = process.env.BLOCKCHAIN_WEBHOOK_SECRET;
+    const webhookSecret = process.env.BLOCKCHAIN_WEBHOOK_SECRET?.trim();
 
-    if (webhookSecret && authHeader !== `Bearer ${webhookSecret}`) {
+    // This endpoint can invoke a privileged financial RPC; it must never be unauthenticated.
+    if (!webhookSecret || webhookSecret.length < 32) {
+      console.error('BLOCKCHAIN_WEBHOOK_SECRET is missing or too short; refusing webhook requests.');
+      return NextResponse.json({ error: 'Webhook authentication is not configured' }, { status: 503 });
+    }
+    if (authHeader !== `Bearer ${webhookSecret}`) {
       return NextResponse.json({ error: 'Unauthorized webhook' }, { status: 401 });
     }
 
-    const body = await req.json().catch(() => ({}));
+    const body = await req.json().catch(() => null);
+    if (!body || typeof body !== 'object' || Array.isArray(body)) {
+      return NextResponse.json({ error: 'Invalid deposit payload' }, { status: 400 });
+    }
     const { userId, assetCode, networkCode, amount, txHash, destinationAddress, outputIndex = 0 } = body;
 
-    if (!assetCode || !amount || !txHash) {
-      return NextResponse.json({ error: 'Missing deposit payload fields' }, { status: 400 });
+    if (
+      typeof assetCode !== 'string' || !assetCode.trim() ||
+      typeof networkCode !== 'string' || !networkCode.trim() ||
+      typeof txHash !== 'string' || !txHash.trim() ||
+      typeof amount !== 'number' || !Number.isFinite(amount) || amount <= 0 ||
+      !Number.isSafeInteger(outputIndex) || outputIndex < 0
+    ) {
+      return NextResponse.json({ error: 'Invalid or missing deposit payload fields' }, { status: 400 });
     }
 
-    const normNet = normalizeDepositNetwork(networkCode || 'ERC20');
+    const normNet = normalizeDepositNetwork(networkCode);
     const normAsset = assetCode.toUpperCase().trim();
     const tokenContract = CANONICAL_USDT_CONTRACTS[normNet] || null;
 
