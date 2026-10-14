@@ -1236,6 +1236,8 @@ export async function refreshPendingDepositConfirmations(): Promise<{
       const tokenContract = CANONICAL_USDT_CONTRACTS[normNet] || null;
 
       if (normNet === 'TRC20') {
+        // Do not silently guess event index zero for old/incomplete database rows.
+        if (dep.output_index == null && dep.log_index == null) continue;
         const verified = await verifyTronTokenDeposit(
           dep.tx_hash,
           outputIndex,
