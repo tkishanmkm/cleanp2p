@@ -808,6 +808,26 @@ export async function runConfirmationsWorker(): Promise<ConfirmationWorkerResult
 }
 
 let workerIntervalHandle: NodeJS.Timeout | null = null;
+let confirmationCycleInProgress = false;
+
+async function runScheduledConfirmationCycle(): Promise<void> {
+  if (confirmationCycleInProgress) {
+    console.warn('Previous confirmation cycle is still running; skipping overlapping scheduled cycle.');
+    return;
+  }
+
+  confirmationCycleInProgress = true;
+  try {
+    const result = await runConfirmationsWorker();
+    if (result.failedCount > 0) {
+      console.error(`Confirmation worker cycle completed with ${result.failedCount} failure(s).`);
+    }
+  } catch (err) {
+    console.error('Scheduled confirmation worker cycle failed:', err);
+  } finally {
+    confirmationCycleInProgress = false;
+  }
+}
 
 export function startConfirmationsWorker(intervalMs: number = 30000): void {
   if (workerIntervalHandle) {
@@ -816,10 +836,10 @@ export function startConfirmationsWorker(intervalMs: number = 30000): void {
   }
 
   console.log(`Starting confirmations worker polling every ${intervalMs}ms...`);
-  runConfirmationsWorker().catch((err) => console.error('Initial confirmations worker run failed:', err));
+  void runScheduledConfirmationCycle();
 
   workerIntervalHandle = setInterval(() => {
-    runConfirmationsWorker().catch((err) => console.error('Periodic confirmations worker run failed:', err));
+    void runScheduledConfirmationCycle();
   }, intervalMs);
 }
 
