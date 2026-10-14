@@ -42,10 +42,13 @@ interface AccountData {
   is_2fa_enabled?: boolean;
   kyc_status?: string;
   verification_tier?: number | string;
+  is_verified?: boolean;
+  id_verified?: boolean;
+  is_id_verified?: boolean;
 }
 
 export default function ProfilePage() {
-  const { user, loading: authLoading } = useAuth();
+  const { user, isLoading: authLoading } = useAuth();
   const [account, setAccount] = useState<AccountData | null>(null);
   const [loading, setLoading] = useState(true);
   const [blockedUsers, setBlockedUsers] = useState<any[]>([]);
@@ -250,7 +253,7 @@ export default function ProfilePage() {
         id: userId,
         full_name: profile?.full_name || (user as any)?.user_metadata?.full_name || profile?.username || 'Trader',
         username: profile?.username || (user as any)?.user_metadata?.username || 'user',
-        email: user.email || profile?.email || '',
+        email: user?.email || profile?.email || '',
         preferred_fiat: preferredFiat,
         total_volume: displayVolume,
         completed_trades: completedTradesCount,
@@ -258,7 +261,7 @@ export default function ProfilePage() {
         avg_release_time: realAvgReleaseTime,
         positive_rating_pct: calculatedPositiveRatingPct,
         dob: profile?.dob || profile?.date_of_birth || 'Not provided',
-        created_at: profile?.created_at || user?.created_at,
+        created_at: profile?.created_at || user?.rawUser?.created_at,
         is_2fa_enabled: Boolean(profile?.is_2fa_enabled || profile?.is_mfa_enabled),
         kyc_status: profile?.kyc_status || 'NOT_SUBMITTED',
         verification_tier: profile?.verification_tier || 1,
