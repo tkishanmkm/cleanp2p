@@ -537,29 +537,57 @@ export async function createTradeOrderWithEscrow(input: {
       };
     }
 
-    // 3. Get Dynamic Escrow Fee from settings (Fallback to 1.5%)
-    let escrowFeePercent = 1.5;
-    try {
-      const { data: feeSetting } = await adminClient
-        .from('system_settings')
-        .select('value')
-        .eq('key', 'escrow_fee_percent')
-        .maybeSingle();
+    // 3. Read the configured escrow fee. Do not silently invent financial settings
+    // when the settings store is unavailable or contains an invalid value.
+    const { data: feeSetting, error: feeSettingError } = await adminClient
+      .from('system_settings')
+      .select('value')
+      .eq('key', 'escrow_fee_percent')
+      .maybeSingle();
 
-      if (feeSetting?.value) {
-        escrowFeePercent = Number(feeSetting.value) || 1.5;
-      }
-    } catch {
-      escrowFeePercent = 1.5;
+    if (feeSettingError || feeSetting?.value == null || String(feeSetting.value).trim() === '') {
+      return {
+        data: null,
+        error: {
+          message: 'Escrow fee settings could not be verified. Please try again later.',
+          code: 'ESCROW_FEE_CONFIG_UNAVAILABLE',
+        },
+      };
     }
 
-    // 4. Calculate Base Amounts & Limits
-    const price = Number(ad.price || ad.fixed_rate || ad.fixedRate || ad.unit_price) || 80116.02;
+    const escrowFeePercent = Number(feeSetting.value);
+    if (!Number.isFinite(escrowFeePercent) || escrowFeePercent < 0 || escrowFeePercent > 100) {
+      return {
+        data: null,
+        error: {
+          message: 'Escrow fee settings are invalid. Please contact support.',
+          code: 'ESCROW_FEE_CONFIG_INVALID',
+        },
+      };
+    }
+
+    // 4. Validate the ad's actual price and fiat limits. Never substitute a
+    // hard-coded market price or default limits for missing advertisement data.
+    const price = Number(ad.price ?? ad.fixed_rate ?? ad.fixedRate ?? ad.unit_price);
     const fiatAmount = Number(input.fiatAmount);
-    const minLimit = Number(ad.min_limit ?? ad.min_amount ?? 100) || 100;
-    const maxLimit = Number(ad.max_limit ?? ad.max_amount ?? 5000) || 5000;
-    const assetSymbol = (ad.asset_symbol || ad.crypto || ad.asset_code || 'BTC').toUpperCase();
-    const fiatSymbol = (ad.fiat_symbol || ad.fiat || ad.fiat_currency || 'USD').toUpperCase();
+    const minLimit = Number(ad.min_limit ?? ad.min_amount);
+    const maxLimit = Number(ad.max_limit ?? ad.max_amount);
+    const assetSymbol = String(ad.asset_symbol || ad.crypto || ad.asset_code || '').trim().toUpperCase();
+    const fiatSymbol = String(ad.fiat_symbol || ad.fiat || ad.fiat_currency || '').trim().toUpperCase();
+
+    if (!Number.isFinite(price) || price <= 0 ||
+        !Number.isFinite(fiatAmount) || fiatAmount <= 0 ||
+        !Number.isFinite(minLimit) || minLimit <= 0 ||
+        !Number.isFinite(maxLimit) || maxLimit < minLimit ||
+        !assetSymbol || !fiatSymbol) {
+      return {
+        data: null,
+        error: {
+          message: 'Advertisement price, asset, currency, or trade limits are invalid.',
+          code: 'INVALID_AD_FINANCIAL_TERMS',
+        },
+      };
+    }
 
     // 5. Determine who is providing crypto for escrow:
     const typeCandidates = [
