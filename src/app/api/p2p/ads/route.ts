@@ -106,8 +106,25 @@ export async function POST(request: NextRequest) {
       console.warn('Profile auto-ensure warning:', profileUpsertErr);
     }
 
-    const coinType = (body.coin || body.crypto || body.crypto_currency || body.asset_symbol || body.asset || 'USDT').toUpperCase();
-    const fiatType = (body.fiat || body.fiat_currency || body.fiat_symbol || 'USD').toUpperCase();
+    const rawCoinType = body.coin ?? body.crypto ?? body.crypto_currency ?? body.asset_symbol ?? body.asset ?? 'USDT';
+    const rawFiatType = body.fiat ?? body.fiat_currency ?? body.fiat_symbol ?? 'USD';
+    const coinType = typeof rawCoinType === 'string' ? rawCoinType.trim().toUpperCase() : '';
+    const fiatType = typeof rawFiatType === 'string' ? rawFiatType.trim().toUpperCase() : '';
+
+    // Validate identifiers before using them in wallet and market-price queries.
+    if (!/^[A-Z0-9]{2,12}$/.test(coinType)) {
+      return NextResponse.json(
+        { error: 'Invalid crypto asset symbol.', code: 'INVALID_ASSET_SYMBOL' },
+        { status: 400 }
+      );
+    }
+    if (!/^[A-Z]{3,5}$/.test(fiatType)) {
+      return NextResponse.json(
+        { error: 'Invalid fiat currency symbol.', code: 'INVALID_FIAT_SYMBOL' },
+        { status: 400 }
+      );
+    }
+
     const adSide = resolveTradeType(body);
 
     if (!adSide) {
