@@ -382,16 +382,15 @@ export async function POST(request: NextRequest) {
     }
 
     if (dbError) {
+      // Keep schema, constraint, and database diagnostics in server logs only.
+      // Returning raw PostgREST details to callers can disclose internal schema information.
       console.error('[P2P Ad Creation Error]:', dbError);
       return NextResponse.json(
-        { 
-          error: dbError.message || 'Database error creating ad', 
-          realError: `${dbError.message} (Code: ${dbError.code || 'UNKNOWN'}${dbError.details ? ` - ${dbError.details}` : ''})`,
-          code: dbError.code,
-          details: dbError.details,
-          hint: dbError.hint
-        }, 
-        { status: 400 }
+        {
+          error: 'Unable to create advertisement. Please review the submitted details or try again later.',
+          code: 'AD_CREATE_FAILED',
+        },
+        { status: 500 }
       );
     }
 
