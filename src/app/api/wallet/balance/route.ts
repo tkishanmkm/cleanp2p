@@ -26,14 +26,19 @@ export async function GET(request: Request) {
       // Session fetch failed or not present
     }
 
-    if (!effectiveUserId && paramUserId) {
-      effectiveUserId = paramUserId;
-    }
-
+    // Never trust a caller-supplied user ID as authentication. This endpoint
+    // uses service-role reads, so every request must be tied to a verified session.
     if (!effectiveUserId) {
       return NextResponse.json(
-        { success: false, error: 'Unauthorized: User not found' },
+        { success: false, error: 'Unauthorized: valid user session required' },
         { status: 401 }
+      );
+    }
+
+    if (paramUserId && paramUserId !== effectiveUserId) {
+      return NextResponse.json(
+        { success: false, error: 'Forbidden: requested user does not match session' },
+        { status: 403 }
       );
     }
 
@@ -44,6 +49,8 @@ export async function GET(request: Request) {
       ETH: { available: 0, inEscrow: 0, inWithdrawal: 0, total: 0 },
       LTC: { available: 0, inEscrow: 0, inWithdrawal: 0, total: 0 },
       USDT: { available: 0, inEscrow: 0, inWithdrawal: 0, total: 0 },
+      BNB: { available: 0, inEscrow: 0, inWithdrawal: 0, total: 0 },
+      TRX: { available: 0, inEscrow: 0, inWithdrawal: 0, total: 0 },
     };
 
     const rawRecords: any[] = [];
@@ -55,6 +62,8 @@ export async function GET(request: Request) {
       ETH: 0,
       LTC: 0,
       USDT: 0,
+      BNB: 0,
+      TRX: 0,
     };
 
     try {
@@ -120,6 +129,8 @@ export async function GET(request: Request) {
       ETH: false,
       LTC: false,
       USDT: false,
+      BNB: false,
+      TRX: false,
     };
 
     try {
