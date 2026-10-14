@@ -128,7 +128,7 @@ async function fetchOnChainConfirmations(
       const tipRes = await fetch(`${btcApiBase}/blocks/tip/height`);
       if (!tipRes.ok) return null;
       const tipRaw = (await tipRes.text()).trim();
-      if (!/^\\d+$/.test(tipRaw)) return null;
+      if (!/^\d+$/.test(tipRaw)) return null;
       const tipHeight = Number(tipRaw);
       const blockHeight = statusData.block_height;
       const reportedHash = String(statusData.block_hash || '').toLowerCase();
@@ -161,7 +161,7 @@ async function fetchOnChainConfirmations(
       const tipRes = await fetch(`${ltcApiBase}/blocks/tip/height`);
       if (!tipRes.ok) return null;
       const tipRaw = (await tipRes.text()).trim();
-      if (!/^\\d+$/.test(tipRaw)) return null;
+      if (!/^\d+$/.test(tipRaw)) return null;
       const tipHeight = Number(tipRaw);
       const blockHeight = statusData.block_height;
       const reportedHash = String(statusData.block_hash || '').toLowerCase();
