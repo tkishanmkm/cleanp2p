@@ -771,7 +771,12 @@ async function scanEvmNativeDeposits(
     const start = fromBlock;
     for (let b = start; b <= toBlock; b++) {
       const block = await provider.getBlock(b, true);
-      if (!block || !block.prefetchedTransactions) continue;
+      if (!block) {
+        throw new Error(`RPC returned no block data for EVM block ${b}; native deposit scan is incomplete`);
+      }
+      if (!Array.isArray(block.prefetchedTransactions)) {
+        throw new Error(`RPC returned incomplete transaction data for EVM block ${b}; native deposit scan is incomplete`);
+      }
 
       for (const tx of block.prefetchedTransactions) {
         if (!tx.to) continue;
