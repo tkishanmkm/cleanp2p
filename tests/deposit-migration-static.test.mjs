@@ -43,6 +43,17 @@ const firstBalanceWrite = sql.indexOf('UPDATE public.wallet_assets', ledgerIdemp
 assert.ok(ledgerIdempotency > 0 && duplicateCreditReturn > ledgerIdempotency && firstBalanceWrite > duplicateCreditReturn,
   'duplicate ledger detection must return before any wallet balance credit');
 
+
+assert.match(sql, /v_block_hash := LOWER\([\s\S]*?SUBSTRING\(BTRIM\(p_block_hash\) FROM 3\)/,
+  'optional 0x prefix must be removed when canonicalizing a valid block hash');
+assert.match(sql, /LOWER\(v_existing_deposit\.block_hash\) IS DISTINCT FROM v_block_hash/,
+  'existing deposit block hash must be compared with the canonical hash');
+assert.match(sql, /block_hash = COALESCE\(v_block_hash, block_hash\)/,
+  'block hash columns must store the canonical hash');
+const postValidation = sql.slice(sql.indexOf('v_block_hash :='));
+assert.doesNotMatch(postValidation, /(^|\n)\s+p_block_hash\s*[,)]/,
+  'raw caller block hash must not be persisted after canonicalization');
+
 console.log('Deposit migration static safety checks passed. This is not a PostgreSQL parser or execution test.');
 const workerPath = 'src/jobs/confirmationsWorker.ts';
 const worker = readFileSync(workerPath, 'utf8');
