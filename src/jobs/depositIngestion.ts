@@ -492,10 +492,10 @@ async function scanEvmTokenDeposits(
         }
 
         const rawValue = parsed.args[2] as bigint;
+        // Keep the exact decimal string: converting token units to Number can
+        // round large balances and make the credited amount differ from the chain.
         const formattedAmount = ethers.formatUnits(rawValue, tokenDecimals);
-        const numericAmount = parseFloat(formattedAmount);
-
-        if (numericAmount <= 0) continue;
+        if (rawValue <= 0n) continue;
 
         detected++;
         const confirmations = Math.max(1, latestBlock - log.blockNumber + 1);
@@ -505,7 +505,7 @@ async function scanEvmTokenDeposits(
           p_destination_address: toAddress,
           p_asset_symbol: 'USDT',
           p_network_code: normNet,
-          p_amount: numericAmount,
+          p_amount: formattedAmount,
           p_tx_hash: log.transactionHash,
           p_output_index: log.index,
           p_block_number: log.blockNumber,
@@ -590,8 +590,9 @@ async function scanEvmNativeDeposits(
 
                 const txBlock = receipt.blockNumber;
                 if (tx.blockNum && Number.parseInt(tx.blockNum, 16) !== txBlock) continue;
-                const valueNum = Number(ethers.formatUnits(chainTx.value, chainConfig.nativeDecimals));
-                if (!Number.isFinite(valueNum) || valueNum <= 0) continue;
+                // Keep native coin amounts as exact decimal strings to avoid IEEE-754 rounding.
+                const formattedValue = ethers.formatUnits(chainTx.value, chainConfig.nativeDecimals);
+                if (chainTx.value <= 0n) continue;
                 const assetSymbol = chainConfig.nativeSymbol.toUpperCase();
                 const confirmations = Math.max(0, latestBlock - txBlock + 1);
 
@@ -600,7 +601,7 @@ async function scanEvmNativeDeposits(
                   p_destination_address: address.toLowerCase(),
                   p_asset_symbol: assetSymbol === 'ETH' ? 'ETH' : assetSymbol,
                   p_network_code: normNet === 'ERC20' ? 'ETH' : normNet,
-                  p_amount: valueNum,
+                  p_amount: formattedValue,
                   p_tx_hash: txHash,
                   p_output_index: 0,
                   p_block_number: isNaN(txBlock) ? null : txBlock,
@@ -643,15 +644,15 @@ async function scanEvmNativeDeposits(
           if (!receipt || receipt.status !== 1 || receipt.blockNumber !== b) continue;
 
           detected++;
+          // Keep native coin amounts as exact decimal strings to avoid IEEE-754 rounding.
           const formattedAmount = ethers.formatUnits(tx.value, chainConfig.nativeDecimals);
-          const numericAmount = parseFloat(formattedAmount);
           const confirmations = Math.max(1, latestBlock - b + 1);
 
           const { data, error } = await supabaseAdmin.rpc('process_deposit_atomic', {
             p_destination_address: toClean,
             p_asset_symbol: chainConfig.nativeSymbol === 'ETH' ? 'ETH' : chainConfig.nativeSymbol,
             p_network_code: normNet === 'ERC20' ? 'ETH' : normNet,
-            p_amount: numericAmount,
+            p_amount: formattedAmount,
             p_tx_hash: tx.hash,
             p_output_index: 0,
             p_block_number: b,
