@@ -1411,7 +1411,10 @@ export async function refreshPendingDepositConfirmations(): Promise<{
       .eq('status', 'PENDING')
       .limit(50);
 
-    if (error || !pendingDeposits || pendingDeposits.length === 0) {
+    if (error) {
+      throw new Error(`Failed to query pending deposits for confirmation refresh: ${error.message}`);
+    }
+    if (!pendingDeposits || pendingDeposits.length === 0) {
       return { checked: 0, newlyCredited: 0 };
     }
 
@@ -1569,6 +1572,9 @@ export async function refreshPendingDepositConfirmations(): Promise<{
     }
   } catch (err) {
     console.error('[Deposit Ingestion] Error refreshing pending confirmations:', err);
+    // Do not report a healthy zero-work result when refresh failed. The caller
+    // must surface this cycle as failed so monitoring can alert operators.
+    throw err;
   }
 
   return { checked, newlyCredited };
