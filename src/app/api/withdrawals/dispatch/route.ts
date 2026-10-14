@@ -146,6 +146,11 @@ export async function POST(req: NextRequest) {
   }
 }
 
-export async function GET(req: NextRequest) {
-  return POST(req);
+export async function GET() {
+  // Dispatching a withdrawal broadcasts an on-chain transaction and must never
+  // be triggered by a read-only HTTP method such as GET.
+  return NextResponse.json(
+    { error: 'Method not allowed. Use the authenticated POST endpoint.' },
+    { status: 405, headers: { Allow: 'POST' } }
+  );
 }
