@@ -418,6 +418,14 @@ async function scanTronDeposits(
     const tronWeb = getTronWeb(false);
     const tronHost = (process.env.TRON_RPC_URL || TRON_CONFIG.fullHost || 'https://api.trongrid.io').replace(/\/$/, '');
     const contractAddress = process.env.USDT_CONTRACT_TRC20 || TRON_CONFIG.usdtContract || CANONICAL_USDT_CONTRACTS.TRC20;
+    const normalizeTronContractHex = (value: string): string | null => {
+      try {
+        return tronWeb.address.toHex(value).toLowerCase().replace(/^0x/, '');
+      } catch {
+        return null;
+      }
+    };
+    const approvedContractHex = normalizeTronContractHex(contractAddress);
 
     // Determine TronGrid REST host (Mainnet)
     const getTronGridHost = (rpcUrl: string): string => {
@@ -511,6 +519,14 @@ async function scanTronDeposits(
           const items = Array.isArray(json?.data) ? json.data : [];
           for (const item of items) {
             if (item.type !== 'Transfer') continue;
+
+            // Never credit an arbitrary TRC-20 token as USDT. The provider's token
+            // metadata must identify the configured approved USDT contract.
+            const reportedContract = item.token_info?.address;
+            if (!approvedContractHex || !reportedContract ||
+                normalizeTronContractHex(reportedContract) !== approvedContractHex) {
+              continue;
+            }
 
             let toAddr = item.to || '';
             try {
