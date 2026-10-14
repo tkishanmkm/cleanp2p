@@ -383,11 +383,7 @@ export async function recordConfirmedDepositReorgIncidents(
 
     const network = String(detail.network || '').trim().toUpperCase();
     const txHash = String(detail.txHash || '').trim().toLowerCase();
-    const outputIndexMatch = detail.depositId
-      ? audit.details.find((candidate) => candidate.depositId === detail.depositId)
-      : undefined;
-
-    if (!network || !txHash || !outputIndexMatch) {
+    if (!network || !txHash || !detail.depositId) {
       counts.skipped++;
       continue;
     }
