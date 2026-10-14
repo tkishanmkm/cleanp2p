@@ -302,6 +302,7 @@ export async function runConfirmationsWorker(): Promise<ConfirmationWorkerResult
         let currentConfirmations = onChainData.confirmations;
         let blockNumber = onChainData.blockNumber ?? deposit.block_number;
         let fromAddress = onChainData.fromAddress ?? deposit.from_address;
+        let verifiedBlockHash: string | null = null;
 
         // For EVM USDT, transaction success alone is insufficient: prove that the
         // exact receipt log matches the configured contract, index, recipient, and amount.
@@ -333,6 +334,8 @@ export async function runConfirmationsWorker(): Promise<ConfirmationWorkerResult
           currentConfirmations = verified.confirmations;
           blockNumber = verified.blockNumber;
           fromAddress = verified.fromAddress;
+          verifiedBlockHash = verified.blockHash;
+          verifiedBlockHash = verified.blockHash;
         } else if (SUPPORTED_EVM_CHAINS[normNet]) {
           // For native coins, verify the exact tx.to and tx.value against the
           // stored deposit before invoking the privileged credit RPC.
@@ -361,6 +364,7 @@ export async function runConfirmationsWorker(): Promise<ConfirmationWorkerResult
           currentConfirmations = verified.confirmations;
           blockNumber = verified.blockNumber;
           fromAddress = verified.fromAddress;
+          verifiedBlockHash = verified.blockHash;
         }
 
         // Call authoritative canonical RPC process_deposit_atomic
@@ -392,6 +396,29 @@ export async function runConfirmationsWorker(): Promise<ConfirmationWorkerResult
             error: rpcErr.message,
           });
         } else {
+          if (verifiedBlockHash && SUPPORTED_EVM_CHAINS[normNet]) {
+            // Best-effort retryable metadata write; never changes balances or credit state.
+            const [depositHashWrite, onchainHashWrite] = await Promise.all([
+              supabaseAdmin.from('deposits')
+                .update({ block_hash: verifiedBlockHash })
+                .eq('tx_hash', deposit.tx_hash)
+                .eq('output_index', outputIndex)
+                .eq('chain', normNet),
+              supabaseAdmin.from('onchain_deposits')
+                .update({ block_hash: verifiedBlockHash })
+                .eq('tx_hash', deposit.tx_hash)
+                .eq('output_index', outputIndex)
+                .eq('network', normNet),
+            ]);
+            if (depositHashWrite.error || onchainHashWrite.error) {
+              console.error('Failed to persist verified canonical block hash', {
+                txHash: deposit.tx_hash,
+                network: normNet,
+                depositsError: depositHashWrite.error?.message,
+                onchainError: onchainHashWrite.error?.message,
+              });
+            }
+          }
           const parsedRes = typeof rpcData === 'string' ? JSON.parse(rpcData) : rpcData;
           const isCredited = parsedRes?.status === 'credited' || parsedRes?.status === 'CONFIRMED' || parsedRes?.status === 'ALREADY_CREDITED';
 
