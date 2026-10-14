@@ -37,6 +37,12 @@ export async function POST(request: NextRequest) {
     );
 
     const body = await request.json();
+    if (!body || typeof body !== 'object' || Array.isArray(body)) {
+      return NextResponse.json(
+        { error: 'Request body must be a JSON object.', code: 'INVALID_REQUEST_BODY' },
+        { status: 400 }
+      );
+    }
 
     // Support Bearer token header if provided by frontend
     const authHeader = request.headers.get('Authorization') || request.headers.get('authorization');
