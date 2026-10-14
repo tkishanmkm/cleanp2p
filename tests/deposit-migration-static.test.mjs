@@ -104,7 +104,7 @@ assert.match(audit, /\.eq\('status', 'CONFIRMED'\)/, 'reorg audit must include c
 assert.match(audit, /Math\.min\(500, Math\.max\(1, limit\)\)/, 'reorg audit batch size must be bounded');
 assert.match(audit, /storedHash !== normalizedObserved/, 'reorg audit must compare stored and observed canonical hashes');
 assert.match(audit, /REORG_SUSPECTED/, 'reorg audit must flag hash mismatches');
-assert.doesNotMatch(audit, /\.update\s*\(|\.insert\s*\(|\.upsert\s*\(|\.delete\s*\(|\.rpc\s*\(/, 'reorg audit must remain read-only and must not call financial RPCs');
+assert.doesNotMatch(audit, /\.from\('(deposits|user_balances|wallet_balances|ledger_entries|financial_ledger)'\)\s*\.(update|insert|upsert|delete)|\.rpc\s*\(/, 'reorg audit may record review incidents but must not mutate financial records or call financial RPCs');
 
 console.log('Confirmed-deposit reorg audit static safety checks passed. This is not a runtime chain or database test.');
 const incidentMigration = readFileSync(
