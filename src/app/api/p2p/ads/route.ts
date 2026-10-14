@@ -204,79 +204,53 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // BALANCE VALIDATION: If user is creating a SELL ad (offering to sell coin), check that minimum limit in coin is present in their account
+    // PRE-FLIGHT BALANCE CHECK ONLY. The escrow RPC/database must enforce the
+    // actual spendable balance atomically; legacy wallet/profile caches are not authoritative.
     if (adSide === 'SELL') {
       const adminClient = getSupabaseAdminClient();
-      let availableBalance = 0;
+      const { data: assetRows, error: assetError } = await adminClient
+        .from('wallet_assets')
+        .select('id, asset_symbol, balance, reserved_balance, in_escrow, in_withdrawal')
+        .eq('user_id', user.id)
+        .ilike('asset_symbol', coinType);
 
-      try {
-        // 1. Check wallet_assets directly by user_id
-        const { data: directAssets } = await adminClient
-          .from('wallet_assets')
-          .select('*')
-          .eq('user_id', user.id);
-
-        if (directAssets && directAssets.length > 0) {
-          const match = directAssets.find((a: any) => {
-            const sym = String(a.asset_symbol || a.asset_code || a.symbol || a.crypto || '').toUpperCase();
-            return sym === coinType.toUpperCase();
-          });
-          if (match) {
-            const avail = Number(match.available ?? match.balance ?? match.amount ?? 0);
-            const locked = Number(match.locked_escrow ?? match.locked ?? match.locked_balance ?? 0);
-            const net = Math.max(0, avail - locked);
-            if (net > availableBalance) availableBalance = net;
-          }
-        }
-
-        // 2. Check user_wallets table
-        const { data: walletData } = await adminClient
-          .from('user_wallets')
-          .select('available_balance, balance, locked_balance')
-          .eq('user_id', user.id)
-          .ilike('asset_symbol', coinType)
-          .maybeSingle();
-
-        if (walletData) {
-          const net = Number(walletData.available_balance ?? (Number(walletData.balance || 0) - Number(walletData.locked_balance || 0)));
-          if (net > availableBalance) availableBalance = net;
-        }
-
-        // 3. Check wallets table
-        const { data: chainWallets } = await adminClient
-          .from('wallets')
-          .select('balance, available_balance, currency, chain')
-          .eq('user_id', user.id);
-
-        if (chainWallets && chainWallets.length > 0) {
-          const matchingWallets = chainWallets.filter((w: any) => 
-            String(w.currency || w.chain || '').toUpperCase() === coinType.toUpperCase()
-          );
-          matchingWallets.forEach((w: any) => {
-            const val = Number(w.available_balance ?? w.balance ?? 0);
-            if (val > availableBalance) availableBalance = val;
-          });
-        }
-
-        // 4. Check profiles table fallback
-        const { data: prof } = await adminClient
-          .from('profiles')
-          .select('*')
-          .eq('id', user.id)
-          .maybeSingle();
-
-        if (prof) {
-          const col = `${coinType.toLowerCase()}_balance`;
-          if (prof[col] !== undefined) {
-            const val = Number(prof[col] || 0);
-            if (val > availableBalance) availableBalance = val;
-          }
-        }
-      } catch (balErr) {
-        console.warn('Balance check error during ad creation:', balErr);
+      if (assetError || !assetRows) {
+        console.error('[P2P Ad Balance Check] canonical wallet_assets query failed:', assetError);
+        return NextResponse.json(
+          { error: 'Unable to verify your available balance. Please try again later.', code: 'BALANCE_CHECK_UNAVAILABLE' },
+          { status: 503 }
+        );
       }
 
-      const effectiveUnitPrice = priceVal && priceVal > 0 ? priceVal : 1;
+      const matchingAssets = assetRows.filter((row: any) =>
+        String(row.asset_symbol || '').trim().toUpperCase() === coinType
+      );
+
+      if (matchingAssets.length > 1) {
+        console.error('[P2P Ad Balance Check] duplicate wallet_assets rows for user/asset:', user.id, coinType);
+        return NextResponse.json(
+          { error: 'Your wallet balance needs reconciliation before creating this sell advertisement.', code: 'WALLET_ASSET_DUPLICATE' },
+          { status: 409 }
+        );
+      }
+
+      const asset = matchingAssets[0];
+      const balance = Number(asset?.balance ?? 0);
+      const reserved = Number(asset?.reserved_balance ?? 0);
+      const inEscrow = Number(asset?.in_escrow ?? 0);
+      const inWithdrawal = Number(asset?.in_withdrawal ?? 0);
+
+      if (![balance, reserved, inEscrow, inWithdrawal].every(Number.isFinite) ||
+          [balance, reserved, inEscrow, inWithdrawal].some((value) => value < 0)) {
+        console.error('[P2P Ad Balance Check] invalid canonical wallet values:', user.id, coinType);
+        return NextResponse.json(
+          { error: 'Unable to verify your available balance. Please contact support if this persists.', code: 'INVALID_WALLET_BALANCE' },
+          { status: 503 }
+        );
+      }
+
+      const availableBalance = Math.max(0, balance - reserved - inEscrow - inWithdrawal);
+      const effectiveUnitPrice = priceVal !== null && Number.isFinite(priceVal) && priceVal > 0 ? priceVal : 1;
       const minCoinRequired = requestedMin / effectiveUnitPrice;
 
       if (availableBalance < minCoinRequired) {
