@@ -27,5 +27,7 @@ jobs:
           cache: npm
       - name: Install locked dependencies
         run: npm ci
+      - name: Check deposit migration safety invariants (offline)
+        run: node tests/deposit-migration-static.test.mjs
       - name: Typecheck
         run: npm run typecheck
