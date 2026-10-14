@@ -574,13 +574,21 @@ async function scanEvmTokenDeposits(
       return { detected: 0, credited: 0, errors: ['Failed to compute Transfer topic'] };
     }
 
-    // Query event logs in configured block window
-    const logs = await provider.getLogs({
-      fromBlock,
-      toBlock,
-      address: tokenContractAddress,
-      topics: [transferTopic],
-    });
+    // Query bounded log ranges. Some EVM RPC providers reject broad getLogs
+    // requests; each chunk is fetched independently, and any failed chunk aborts
+    // this scan rather than silently treating missing logs as an empty result.
+    const logChunkSize = 25;
+    const logs: Awaited<ReturnType<typeof provider.getLogs>> = [];
+    for (let chunkFrom = fromBlock; chunkFrom <= toBlock; chunkFrom += logChunkSize) {
+      const chunkTo = Math.min(toBlock, chunkFrom + logChunkSize - 1);
+      const chunkLogs = await provider.getLogs({
+        fromBlock: chunkFrom,
+        toBlock: chunkTo,
+        address: tokenContractAddress,
+        topics: [transferTopic],
+      });
+      logs.push(...chunkLogs);
+    }
 
     const latestBlock = await provider.getBlockNumber();
 
