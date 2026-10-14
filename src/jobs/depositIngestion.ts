@@ -1335,13 +1335,19 @@ export async function refreshPendingDepositConfirmations(): Promise<{
             confs = verified.confirmations;
             fromAddress = verified.fromAddress;
           } else {
-            const receipt = await provider.getTransactionReceipt(dep.tx_hash);
-            if (!receipt || receipt.status !== 1 || receipt.blockNumber == null) continue;
-            const currentBlock = await provider.getBlockNumber();
-            if (currentBlock < receipt.blockNumber) continue;
-            blockNumber = receipt.blockNumber;
-            confs = currentBlock - receipt.blockNumber + 1;
-            fromAddress = receipt.from?.toLowerCase() || fromAddress;
+            // Native EVM deposits must match the exact transaction recipient and
+            // raw value before the stored row is allowed to reach the credit RPC.
+            const verified = await verifyEvmNativeDeposit(
+              provider,
+              dep.tx_hash,
+              destinationAddress,
+              Number(dep.amount),
+              chain.nativeDecimals
+            );
+            if (!verified) continue;
+            blockNumber = verified.blockNumber;
+            confs = verified.confirmations;
+            fromAddress = verified.fromAddress;
           }
 
           const { data, error: rpcErr } = await supabaseAdmin.rpc('process_deposit_atomic', {
