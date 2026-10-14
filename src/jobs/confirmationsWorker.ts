@@ -216,6 +216,140 @@ async function fetchOnChainConfirmations(
 }
 
 /**
+ * Read-only audit of already-confirmed deposits against the current canonical chain.
+ * This intentionally never changes balances, statuses, confirmations, or ledger rows.
+ * A mismatch is a review signal, not permission to reverse a credit automatically.
+ */
+export interface ConfirmedDepositReorgAuditResult {
+  scanned: number;
+  matched: number;
+  suspectedReorg: number;
+  unverifiable: number;
+  details: Array<{
+    depositId: string;
+    txHash: string;
+    network: string;
+    status: 'MATCH' | 'REORG_SUSPECTED' | 'UNVERIFIABLE';
+    storedBlockHash: string | null;
+    observedBlockHash: string | null;
+    note: string;
+  }>;
+}
+
+function normalizeBlockHash(hash: unknown): string | null {
+  if (typeof hash !== 'string') return null;
+  const normalized = hash.trim().toLowerCase().replace(/^0x/, '');
+  return /^[0-9a-f]{64}$/.test(normalized) ? normalized : null;
+}
+
+export async function runConfirmedDepositReorgAudit(
+  limit: number = 100
+): Promise<ConfirmedDepositReorgAuditResult> {
+  const result: ConfirmedDepositReorgAuditResult = {
+    scanned: 0,
+    matched: 0,
+    suspectedReorg: 0,
+    unverifiable: 0,
+    details: [],
+  };
+  const safeLimit = Number.isSafeInteger(limit) ? Math.min(500, Math.max(1, limit)) : 100;
+
+  const { data: deposits, error } = await supabaseAdmin
+    .from('onchain_deposits')
+    .select('*')
+    .eq('status', 'CONFIRMED')
+    .order('updated_at', { ascending: true })
+    .limit(safeLimit);
+
+  if (error) {
+    throw new Error(`Confirmed-deposit reorg audit query failed: ${error.message}`);
+  }
+
+  for (const deposit of deposits || []) {
+    result.scanned++;
+    const network = normalizeDepositNetwork(deposit.network || deposit.network_code || '');
+    const storedHash = normalizeBlockHash(deposit.block_hash);
+    const destination = deposit.to_address || deposit.address;
+    const index = deposit.output_index ?? deposit.log_index;
+    const symbol = String(deposit.asset_symbol || deposit.asset || 'USDT').toUpperCase().trim();
+    let observedHash: string | null = null;
+    let verificationError = 'No supported independent verifier for this deposit network/asset.';
+
+    try {
+      if (!storedHash) {
+        verificationError = 'No stored canonical block hash; backfill/verification is required before this row can be assessed.';
+      } else if ((network === 'BTC' || network === 'LTC') && index != null) {
+        const base = network === 'BTC'
+          ? getBtcMempoolApi()
+          : (process.env.LTC_MEMPOOL_API?.trim() || 'https://litecoinspace.org/api');
+        const verified = await verifyUtxoDepositOutput(base, deposit.tx_hash, index, destination, deposit.amount);
+        observedHash = verified?.blockHash || null;
+        if (!verified) verificationError = 'BTC/LTC transaction output or canonical block could not be independently verified.';
+      } else if (network === 'TRC20' && symbol === 'USDT' && index != null) {
+        const verified = await verifyTronTokenDeposit(deposit.tx_hash, index, destination, deposit.amount);
+        observedHash = verified?.blockHash || null;
+        if (!verified) verificationError = 'TRON Transfer event or canonical block could not be independently verified.';
+      } else if (SUPPORTED_EVM_CHAINS[network]) {
+        const chain = SUPPORTED_EVM_CHAINS[network];
+        if (symbol === 'USDT' && index != null) {
+          const verified = await verifyEvmTokenDeposit(
+            getEvmProvider(network), deposit.tx_hash, index, destination, deposit.amount,
+            CANONICAL_USDT_CONTRACTS[network] || chain.usdtContractAddress || '',
+            chain.usdtDecimals ?? 6
+          );
+          observedHash = verified?.blockHash || null;
+          if (!verified) verificationError = 'EVM Transfer event or canonical block could not be independently verified.';
+        } else {
+          const verified = await verifyEvmNativeDeposit(
+            getEvmProvider(network), deposit.tx_hash, destination, deposit.amount, chain.nativeDecimals
+          );
+          observedHash = verified?.blockHash || null;
+          if (!verified) verificationError = 'EVM native transfer or canonical block could not be independently verified.';
+        }
+      }
+
+      const normalizedObserved = normalizeBlockHash(observedHash);
+      let status: 'MATCH' | 'REORG_SUSPECTED' | 'UNVERIFIABLE';
+      let note: string;
+      if (!storedHash || !normalizedObserved) {
+        status = 'UNVERIFIABLE';
+        note = verificationError;
+        result.unverifiable++;
+      } else if (storedHash !== normalizedObserved) {
+        status = 'REORG_SUSPECTED';
+        note = 'Stored and currently observed canonical block hashes differ. Manual reconciliation is required; no funds or records were changed.';
+        result.suspectedReorg++;
+      } else {
+        status = 'MATCH';
+        note = 'Stored block hash matches the independently observed canonical block.';
+        result.matched++;
+      }
+      result.details.push({
+        depositId: String(deposit.id),
+        txHash: String(deposit.tx_hash),
+        network,
+        status,
+        storedBlockHash: storedHash,
+        observedBlockHash: normalizedObserved,
+        note,
+      });
+    } catch (err: any) {
+      result.unverifiable++;
+      result.details.push({
+        depositId: String(deposit.id),
+        txHash: String(deposit.tx_hash),
+        network,
+        status: 'UNVERIFIABLE',
+        storedBlockHash: storedHash,
+        observedBlockHash: normalizeBlockHash(observedHash),
+        note: err?.message || verificationError,
+      });
+    }
+  }
+  return result;
+}
+
+/**
  * Main worker logic: Polling and ingestion processor for pending deposits via canonical process_deposit_atomic RPC
  */
 export async function runConfirmationsWorker(): Promise<ConfirmationWorkerResult> {
