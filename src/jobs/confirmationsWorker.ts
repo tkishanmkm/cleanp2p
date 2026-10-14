@@ -341,7 +341,7 @@ export async function runConfirmationsWorker(): Promise<ConfirmationWorkerResult
             getEvmProvider(normNet),
             deposit.tx_hash,
             destinationAddress,
-            Number(deposit.amount),
+            deposit.amount,
             chain.nativeDecimals
           );
           if (!verified) {
@@ -368,7 +368,7 @@ export async function runConfirmationsWorker(): Promise<ConfirmationWorkerResult
           p_destination_address: destinationAddress,
           p_asset_symbol: assetSymbol,
           p_network_code: normNet,
-          p_amount: Number(deposit.amount),
+          p_amount: assetSymbol === 'USDT' ? Number(deposit.amount) : deposit.amount,
           p_tx_hash: deposit.tx_hash,
           p_output_index: outputIndex,
           p_block_number: blockNumber,
