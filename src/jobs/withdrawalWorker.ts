@@ -219,16 +219,32 @@ export async function processWithdrawalQueue(): Promise<WithdrawalProcessResult>
     if (isLocalCheckStage) {
       console.warn(`[Withdrawal Worker] Pre-broadcast validation failure: refunding withdrawal ${withdrawal.id}`);
       try {
-        await supabaseAdmin.rpc('process_failed_withdrawal', {
+        const { error: refundError, data: refundData } = await supabaseAdmin.rpc('process_failed_withdrawal', {
           p_withdrawal_id: withdrawal.id,
           p_error_reason: err.message || 'Transaction pre-broadcast validation failure',
           p_is_verified_unbroadcast: true,
         });
+
+        if (refundError || (
+          refundData &&
+          typeof refundData === 'object' &&
+          'success' in refundData &&
+          refundData.success === false
+        )) {
+          console.error(`[Withdrawal Worker] Refund RPC did not confirm success for ${withdrawal.id}:`, refundError || refundData);
+          return {
+            processed: true,
+            withdrawalId: withdrawal.id,
+            status: 'FAILED',
+            error: `Pre-broadcast failure; refund was not confirmed. Manual reconciliation required: ${err.message}`,
+          };
+        }
+
         return {
           processed: true,
           withdrawalId: withdrawal.id,
           status: 'FAILED',
-          error: `Pre-broadcast failure. Refund successful: ${err.message}`,
+          error: `Pre-broadcast failure. Refund confirmed: ${err.message}`,
         };
       } catch (refundErr: any) {
         console.error(`[Withdrawal Worker] Refund RPC failed for ${withdrawal.id}:`, refundErr);
