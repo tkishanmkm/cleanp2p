@@ -96,11 +96,44 @@ export async function POST(req: NextRequest) {
       txHash = tx.hash;
     }
 
-    // Settle via authoritative complete_onchain_withdrawal RPC
-    await supabaseAdmin.rpc('complete_onchain_withdrawal', {
+    // Persist settlement via the authoritative RPC. A broadcast transaction cannot
+    // be safely treated as settled if this database operation fails; return the
+    // hash for reconciliation instead of reporting success.
+    const { error: settlementError, data: settlementData } = await supabaseAdmin.rpc('complete_onchain_withdrawal', {
       p_withdrawal_id: targetWithdrawalId,
       p_tx_hash: txHash,
     });
+
+    if (settlementError) {
+      console.error('[Withdrawal Dispatch] Broadcast submitted but settlement RPC failed:', {
+        withdrawalId: targetWithdrawalId,
+        txHash,
+        error: settlementError,
+      });
+      return NextResponse.json({
+        success: false,
+        broadcastSubmitted: true,
+        reconciliationRequired: true,
+        withdrawalId: targetWithdrawalId,
+        txHash,
+        error: 'Transaction was submitted, but withdrawal settlement could not be confirmed. Reconcile this transaction before retrying.',
+      }, { status: 502 });
+    }
+
+    if (settlementData && typeof settlementData === 'object' && 'success' in settlementData && settlementData.success === false) {
+      console.error('[Withdrawal Dispatch] Settlement RPC returned an unsuccessful result:', {
+        withdrawalId: targetWithdrawalId,
+        txHash,
+      });
+      return NextResponse.json({
+        success: false,
+        broadcastSubmitted: true,
+        reconciliationRequired: true,
+        withdrawalId: targetWithdrawalId,
+        txHash,
+        error: 'Transaction was submitted, but withdrawal settlement was not confirmed. Reconcile this transaction before retrying.',
+      }, { status: 502 });
+    }
 
     return NextResponse.json({
       success: true,
