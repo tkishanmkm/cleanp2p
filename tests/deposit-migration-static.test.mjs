@@ -92,6 +92,18 @@ assert.doesNotMatch(sql.slice(sql.indexOf('CREATE OR REPLACE FUNCTION public.pro
 assert.match(sql, /INSERT INTO public\.ledger_entries[\s\S]*?RETURNING id INTO v_ledger_id/,
   'deposit ledger insertion must return a ledger id before success is reported');
 
+const workerPathForHash = 'src/jobs/confirmationsWorker.ts';
+const workerForHash = readFileSync(workerPathForHash, 'utf8');
+const hashGuard = workerForHash.indexOf('const canonicalVerifiedBlockHash = normalizeBlockHash(verifiedBlockHash);');
+const rpcCall = workerForHash.indexOf("supabaseAdmin.rpc('process_deposit_atomic'", hashGuard);
+assert.ok(hashGuard >= 0 && rpcCall > hashGuard,
+  'confirmation worker must validate a canonical block hash before invoking the deposit credit RPC');
+assert.match(workerForHash.slice(hashGuard, rpcCall), /if \(!canonicalVerifiedBlockHash\)[\s\S]*?credit RPC not called[\s\S]*?continue;/,
+  'missing or malformed canonical block hash must leave deposit pending and skip the credit RPC');
+assert.match(workerForHash.slice(rpcCall, rpcCall + 1000), /p_block_hash: canonicalVerifiedBlockHash/,
+  'credit RPC must receive the validated canonical block hash, not an unchecked value');
+
+
 console.log('Deposit migration static safety checks passed. This is not a PostgreSQL parser or execution test.');
 const workerPath = 'src/jobs/confirmationsWorker.ts';
 const worker = readFileSync(workerPath, 'utf8');
