@@ -402,7 +402,20 @@ export async function recordConfirmedDepositReorgIncidents(
       continue;
     }
 
-    const outputIndex = sourceDeposit.output_index ?? sourceDeposit.log_index ?? 0;
+    const sourceNetwork = String(sourceDeposit.network || '').trim().toUpperCase();
+    const sourceTxHash = String(sourceDeposit.tx_hash || '').trim().toLowerCase();
+    const sourceOutputIndex = sourceDeposit.output_index ?? sourceDeposit.log_index;
+    if (
+      sourceNetwork !== network ||
+      sourceTxHash !== txHash ||
+      !Number.isSafeInteger(sourceOutputIndex) ||
+      sourceOutputIndex < 0
+    ) {
+      console.error('Skipping reorg incident because source deposit identity/output index is invalid or mismatched:', detail.depositId);
+      counts.skipped++;
+      continue;
+    }
+    const outputIndex = sourceOutputIndex;
     const { data: existing, error: existingError } = await supabaseAdmin
       .from('deposit_reorg_incidents')
       .select('id, stored_block_hash, observed_block_hash, review_status, observation_count')
