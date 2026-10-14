@@ -94,15 +94,23 @@ async function fetchOnChainConfirmations(
         method: 'POST',
         headers,
       });
+      if (!nowRes.ok) return null;
+
       const nowData = await nowRes.json();
       const currentBlock = nowData?.block_header?.raw_data?.number;
 
-      if (currentBlock && data.blockNumber) {
-        const confs = Math.max(1, currentBlock - data.blockNumber + 1);
-        return { confirmations: confs, blockNumber: data.blockNumber };
+      // Never assume confirmations when the node cannot provide the current block height.
+      if (
+        !Number.isSafeInteger(currentBlock) ||
+        currentBlock < data.blockNumber ||
+        !Number.isSafeInteger(data.blockNumber) ||
+        data.blockNumber <= 0
+      ) {
+        return null;
       }
 
-      return { confirmations: 19, blockNumber: data.blockNumber };
+      const confs = currentBlock - data.blockNumber + 1;
+      return { confirmations: confs, blockNumber: data.blockNumber };
     } catch (tronErr) {
       console.warn(`Tron confirmation query error for ${txHash}:`, tronErr);
       return null;
