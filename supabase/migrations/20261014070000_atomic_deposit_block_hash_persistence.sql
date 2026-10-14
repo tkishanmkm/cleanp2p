@@ -2,6 +2,9 @@
 -- Review on the fix branch before applying to any live project.
 ALTER TABLE public.deposits ADD COLUMN IF NOT EXISTS block_hash text;
 ALTER TABLE public.onchain_deposits ADD COLUMN IF NOT EXISTS block_hash text;
+-- The existing onchain_deposits schema stores confirmations but has no block_number column.
+-- Add it before the RPC references it in UPDATE and INSERT statements.
+ALTER TABLE public.onchain_deposits ADD COLUMN IF NOT EXISTS block_number bigint;
 
 DROP FUNCTION public.process_deposit_atomic(text,text,text,numeric,text,integer,bigint,text,text,integer,text);
 
