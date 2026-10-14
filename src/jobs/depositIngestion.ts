@@ -1046,7 +1046,7 @@ async function scanTronDeposits(
               errors.push(`RPC error for TRON deposit ${txId}: ${error.message}`);
             } else {
               const r = typeof rpcData === 'string' ? JSON.parse(rpcData) : rpcData;
-              if (r?.status === 'credited' || (r?.success && confirmations >= TRON_CONFIG.requiredConfirmations)) {
+              if (r?.status === 'credited' || (r?.success && verified.confirmations >= TRON_CONFIG.requiredConfirmations)) {
                 credited++;
               }
             }
