@@ -935,17 +935,32 @@ async function scanTronDeposits(
     // Queries each monitored TRON address for incoming TRC-20 transfers (works reliably regardless of block depth)
     for (const monitoredAddr of monitoredTronAddresses) {
       try {
-        const accountUrl = `${tronGridHost}/v1/accounts/${monitoredAddr}/transactions/trc20?limit=20`;
-        const res = await fetch(accountUrl, { headers: tronGridHeaders });
-        if (!res.ok) {
-          throw new Error(`TronGrid account endpoint returned HTTP ${res.status}`);
-        }
-        {
+        const accountUrl = `${tronGridHost}/v1/accounts/${monitoredAddr}/transactions/trc20?limit=200`;
+        const items: any[] = [];
+        let accountFingerprint: string | null = null;
+        let accountPages = 0;
+        do {
+          const pageUrl = accountFingerprint
+            ? `${accountUrl}&fingerprint=${encodeURIComponent(accountFingerprint)}`
+            : accountUrl;
+          const res = await fetch(pageUrl, { headers: tronGridHeaders });
+          if (!res.ok) {
+            throw new Error(`TronGrid account endpoint returned HTTP ${res.status}`);
+          }
           const json = await res.json();
           if (!Array.isArray(json?.data)) {
             throw new Error('TronGrid account endpoint returned an invalid data payload');
           }
-          const items = json.data;
+          items.push(...json.data);
+          accountFingerprint = typeof json?.meta?.fingerprint === 'string' && json.meta.fingerprint.length > 0
+            ? json.meta.fingerprint
+            : null;
+          accountPages++;
+        } while (accountFingerprint && accountPages < 10);
+        if (accountFingerprint) {
+          throw new Error('TronGrid account scan reached the 10-page safety limit; scan is incomplete');
+        }
+        {
           for (const item of items) {
             if (item.type !== 'Transfer') continue;
 
@@ -1054,17 +1069,33 @@ async function scanTronDeposits(
     // 3. Strategy B: TronGrid Contract Event Ingestion (Transfer events on known USDT contracts)
     for (const cAddr of knownContracts) {
       try {
-        const eventUrl = `${tronGridHost}/v1/contracts/${cAddr}/events?event_name=Transfer&limit=50&order_by=block_timestamp,desc`;
-        const res = await fetch(eventUrl, { headers: tronGridHeaders });
-        if (!res.ok) {
-          throw new Error(`TronGrid contract events endpoint returned HTTP ${res.status}`);
-        }
-        {
+        const eventUrl = `${tronGridHost}/v1/contracts/${cAddr}/events?event_name=Transfer&limit=200&order_by=block_timestamp,desc`;
+        const events: any[] = [];
+        let eventFingerprint: string | null = null;
+        let eventPages = 0;
+        do {
+          const pageUrl = eventFingerprint
+            ? `${eventUrl}&fingerprint=${encodeURIComponent(eventFingerprint)}`
+            : eventUrl;
+          const res = await fetch(pageUrl, { headers: tronGridHeaders });
+          if (!res.ok) {
+            throw new Error(`TronGrid contract events endpoint returned HTTP ${res.status}`);
+          }
           const data = await res.json();
           if (!Array.isArray(data?.data)) {
             throw new Error('TronGrid contract events endpoint returned an invalid data payload');
           }
-          for (const evt of data.data) {
+          events.push(...data.data);
+          eventFingerprint = typeof data?.meta?.fingerprint === 'string' && data.meta.fingerprint.length > 0
+            ? data.meta.fingerprint
+            : null;
+          eventPages++;
+        } while (eventFingerprint && eventPages < 10);
+        if (eventFingerprint) {
+          throw new Error('TronGrid contract event scan reached the 10-page safety limit; scan is incomplete');
+        }
+        {
+          for (const evt of events) {
             // Enforce the exact configured token contract before accepting an event.
             const eventContract = evt.contract_address || evt.contractAddress || cAddr;
             if (!approvedContractHex ||
