@@ -65,6 +65,12 @@ assert.match(sql, /DEPOSIT_ADDRESS_OWNERSHIP_AMBIGUOUS/,
   'conflicting ownership across canonical deposit-address and legacy wallet records must fail closed');
 assert.match(sql, /uda\.user_id <> w\.user_id/,
   'cross-table address ownership guard must compare distinct user identities');
+assert.match(sql, /WHERE network::TEXT = 'bitcoin'\s+AND BTRIM\(address\) = BTRIM\(v_address\)/,
+  'Bitcoin deposit-address ownership must preserve case-sensitive Base58 address matching');
+assert.match(sql, /WHERE chain = 'BTC'\s+AND BTRIM\(address\) = BTRIM\(v_address\)/,
+  'Bitcoin legacy-wallet ownership must preserve case-sensitive address matching');
+assert.match(sql, /v_network = 'BTC'[\s\S]*?BTRIM\(uda\.address\) = BTRIM\(v_address\)/,
+  'cross-table Bitcoin ownership checks must use exact address equality');
 
 console.log('Deposit migration static safety checks passed. This is not a PostgreSQL parser or execution test.');
 const workerPath = 'src/jobs/confirmationsWorker.ts';
