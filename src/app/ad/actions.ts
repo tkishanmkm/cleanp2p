@@ -68,6 +68,21 @@ async function fetchUserCryptoBalance(userId: string, assetSymbol: string) {
   const rows = assets.filter((row: any) =>
     String(row.asset_symbol || '').trim().toUpperCase() === normalizedSym
   );
+
+  // The escrow RPC must lock one unambiguous canonical asset row. Aggregating
+  // duplicate user/asset rows here could overstate funds relative to the row
+  // that the database RPC actually locks, so fail closed until duplicates are reconciled.
+  if (rows.length > 1) {
+    console.error('[WalletBalance] multiple canonical wallet_assets rows found for user/asset; refusing preflight balance');
+    return {
+      available: 0,
+      lockedEscrow: 0,
+      walletId: null as string | null,
+      matchedAssetRow: null as any,
+      normalizedSym,
+    };
+  }
+
   const available = rows.reduce((sum: number, row: any) => {
     const balance = Number(row.balance ?? 0);
     const reserved = Number(row.reserved_balance ?? 0);
