@@ -1,7 +1,7 @@
 import { createClient } from '@supabase/supabase-js';
 import { ethers } from 'ethers';
 import { normalizeDepositNetwork } from '@/lib/hd-derivation-engine';
-import { CANONICAL_USDT_CONTRACTS, verifyEvmNativeDeposit, verifyEvmTokenDeposit, verifyTronTokenDeposit } from '@/jobs/depositIngestion';
+import { CANONICAL_USDT_CONTRACTS, getBtcMempoolApi, verifyUtxoDepositOutput, verifyEvmNativeDeposit, verifyEvmTokenDeposit, verifyTronTokenDeposit } from '@/jobs/depositIngestion';
 import { SUPPORTED_EVM_CHAINS, getEvmProvider } from '@/lib/blockchain/providers';
 
 // Privileged confirmation processing must fail closed: never fall back to the public anon key.
@@ -327,6 +327,38 @@ export async function runConfirmationsWorker(): Promise<ConfirmationWorkerResult
         let blockNumber = onChainData.blockNumber ?? deposit.block_number;
         let fromAddress = onChainData.fromAddress ?? deposit.from_address;
         let verifiedBlockHash: string | null = verifiedTronBlockHash || onChainData.blockHash || null;
+
+        // BTC/LTC transaction inclusion alone is not enough: independently verify
+        // the exact output index, destination, and satoshi amount before crediting.
+        if (normNet === 'BTC' || normNet === 'LTC') {
+          const utxoApiBase = normNet === 'BTC'
+            ? getBtcMempoolApi()
+            : (process.env.LTC_MEMPOOL_API?.trim() || 'https://litecoinspace.org/api');
+          const verified = await verifyUtxoDepositOutput(
+            utxoApiBase,
+            deposit.tx_hash,
+            outputIndex,
+            destinationAddress,
+            deposit.amount
+          );
+          if (!verified || !verified.blockHash || verified.blockHeight === null) {
+            result.pendingCount++;
+            result.details.push({
+              depositId: deposit.id,
+              txHash: deposit.tx_hash,
+              network: normNet,
+              previousConfirmations: prevConfs,
+              newConfirmations: verified?.confirmations ?? 0,
+              requiredConfirmations: requiredConfs,
+              status: 'PENDING',
+              error: 'Exact BTC/LTC output or canonical block verification failed; credit RPC not called.',
+            });
+            continue;
+          }
+          currentConfirmations = verified.confirmations;
+          blockNumber = verified.blockHeight;
+          verifiedBlockHash = verified.blockHash;
+        }
 
         // For EVM USDT, transaction success alone is insufficient: prove that the
         // exact receipt log matches the configured contract, index, recipient, and amount.
