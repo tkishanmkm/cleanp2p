@@ -961,7 +961,7 @@ async function scanTronDeposits(
               p_destination_address: toBase58,
               p_asset_symbol: 'USDT',
               p_network_code: 'TRC20',
-              p_amount: amount,
+              p_amount: formattedAmount,
               p_tx_hash: txId,
               p_output_index: outputIndex,
               p_block_number: eventBlock || null,
