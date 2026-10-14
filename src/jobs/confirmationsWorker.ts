@@ -66,7 +66,7 @@ function getRpcUrl(network: string): string {
 async function fetchOnChainConfirmations(
   txHash: string,
   network: string
-): Promise<{ confirmations: number; blockNumber?: number; fromAddress?: string } | null> {
+): Promise<{ confirmations: number; blockNumber?: number; blockHash?: string; fromAddress?: string } | null> {
   const norm = normalizeDepositNetwork(network);
 
   // Handle Tron TRC-20
@@ -121,19 +121,30 @@ async function fetchOnChainConfirmations(
   // Handle Bitcoin (BTC)
   if (norm === 'BTC') {
     try {
-      const btcApiBase = process.env.BTC_MEMPOOL_API || 'https://mempool.space/api';
+      const btcApiBase = (process.env.BTC_MEMPOOL_API || 'https://mempool.space/api').replace(/\/$/, '');
       const res = await fetch(`${btcApiBase}/tx/${txHash}/status`);
       if (!res.ok) return null;
       const statusData = await res.json();
-      const tipRes = await fetch(`${btcApiBase.endsWith('/') ? btcApiBase.slice(0, -1) : btcApiBase}/blocks/tip/height`);
+      const tipRes = await fetch(`${btcApiBase}/blocks/tip/height`);
       if (!tipRes.ok) return null;
       const tipRaw = (await tipRes.text()).trim();
-      if (tipRaw.length === 0 || !Array.from(tipRaw).every((ch) => ch >= '0' && ch <= '9')) return null;
+      if (!/^\\d+$/.test(tipRaw)) return null;
       const tipHeight = Number(tipRaw);
       const blockHeight = statusData.block_height;
+      const reportedHash = String(statusData.block_hash || '').toLowerCase();
       if (!statusData.confirmed || !Number.isSafeInteger(blockHeight) || blockHeight <= 0 ||
-          !Number.isSafeInteger(tipHeight) || tipHeight < blockHeight) return null;
-      return { confirmations: tipHeight - blockHeight + 1, blockNumber: blockHeight };
+          !Number.isSafeInteger(tipHeight) || tipHeight < blockHeight ||
+          !/^[0-9a-f]{64}$/.test(reportedHash)) return null;
+      const [canonicalRes, txidsRes] = await Promise.all([
+        fetch(`${btcApiBase}/block-height/${blockHeight}`),
+        fetch(`${btcApiBase}/block/${reportedHash}/txids`),
+      ]);
+      if (!canonicalRes.ok || !txidsRes.ok) return null;
+      const canonicalHash = (await canonicalRes.text()).trim().toLowerCase();
+      const blockTxids = await txidsRes.json();
+      if (canonicalHash !== reportedHash || !Array.isArray(blockTxids) ||
+          !blockTxids.some((id: unknown) => typeof id === 'string' && id.toLowerCase() === txHash.toLowerCase())) return null;
+      return { confirmations: tipHeight - blockHeight + 1, blockNumber: blockHeight, blockHash: canonicalHash };
     } catch (btcErr) {
       console.warn(`BTC confirmation query error for ${txHash}:`, btcErr);
       return null;
@@ -143,19 +154,30 @@ async function fetchOnChainConfirmations(
   // Handle Litecoin (LTC)
   if (norm === 'LTC') {
     try {
-      const ltcApiBase = process.env.LTC_MEMPOOL_API || 'https://litecoinspace.org/api';
+      const ltcApiBase = (process.env.LTC_MEMPOOL_API || 'https://litecoinspace.org/api').replace(/\/$/, '');
       const res = await fetch(`${ltcApiBase}/tx/${txHash}/status`);
       if (!res.ok) return null;
       const statusData = await res.json();
-      const tipRes = await fetch(`${ltcApiBase.endsWith('/') ? ltcApiBase.slice(0, -1) : ltcApiBase}/blocks/tip/height`);
+      const tipRes = await fetch(`${ltcApiBase}/blocks/tip/height`);
       if (!tipRes.ok) return null;
       const tipRaw = (await tipRes.text()).trim();
-      if (tipRaw.length === 0 || !Array.from(tipRaw).every((ch) => ch >= '0' && ch <= '9')) return null;
+      if (!/^\\d+$/.test(tipRaw)) return null;
       const tipHeight = Number(tipRaw);
       const blockHeight = statusData.block_height;
+      const reportedHash = String(statusData.block_hash || '').toLowerCase();
       if (!statusData.confirmed || !Number.isSafeInteger(blockHeight) || blockHeight <= 0 ||
-          !Number.isSafeInteger(tipHeight) || tipHeight < blockHeight) return null;
-      return { confirmations: tipHeight - blockHeight + 1, blockNumber: blockHeight };
+          !Number.isSafeInteger(tipHeight) || tipHeight < blockHeight ||
+          !/^[0-9a-f]{64}$/.test(reportedHash)) return null;
+      const [canonicalRes, txidsRes] = await Promise.all([
+        fetch(`${ltcApiBase}/block-height/${blockHeight}`),
+        fetch(`${ltcApiBase}/block/${reportedHash}/txids`),
+      ]);
+      if (!canonicalRes.ok || !txidsRes.ok) return null;
+      const canonicalHash = (await canonicalRes.text()).trim().toLowerCase();
+      const blockTxids = await txidsRes.json();
+      if (canonicalHash !== reportedHash || !Array.isArray(blockTxids) ||
+          !blockTxids.some((id: unknown) => typeof id === 'string' && id.toLowerCase() === txHash.toLowerCase())) return null;
+      return { confirmations: tipHeight - blockHeight + 1, blockNumber: blockHeight, blockHash: canonicalHash };
     } catch (ltcErr) {
       console.warn(`LTC confirmation query error for ${txHash}:`, ltcErr);
       return null;
@@ -304,7 +326,7 @@ export async function runConfirmationsWorker(): Promise<ConfirmationWorkerResult
         let currentConfirmations = onChainData.confirmations;
         let blockNumber = onChainData.blockNumber ?? deposit.block_number;
         let fromAddress = onChainData.fromAddress ?? deposit.from_address;
-        let verifiedBlockHash: string | null = verifiedTronBlockHash;
+        let verifiedBlockHash: string | null = verifiedTronBlockHash || onChainData.blockHash || null;
 
         // For EVM USDT, transaction success alone is insufficient: prove that the
         // exact receipt log matches the configured contract, index, recipient, and amount.
