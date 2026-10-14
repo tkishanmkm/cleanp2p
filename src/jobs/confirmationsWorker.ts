@@ -687,7 +687,8 @@ export async function runConfirmationsWorker(): Promise<ConfirmationWorkerResult
             destinationAddress,
             deposit.amount,
             tokenContract || chain.usdtContractAddress || '',
-            chain.usdtDecimals ?? 6
+            chain.usdtDecimals ?? 6,
+            chain.chainId
           );
           if (!verified) {
             result.pendingCount++;
@@ -716,7 +717,8 @@ export async function runConfirmationsWorker(): Promise<ConfirmationWorkerResult
             deposit.tx_hash,
             destinationAddress,
             deposit.amount,
-            chain.nativeDecimals
+            chain.nativeDecimals,
+            chain.chainId
           );
           if (!verified) {
             result.pendingCount++;
