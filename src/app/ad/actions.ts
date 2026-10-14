@@ -575,35 +575,15 @@ export async function createTradeOrderWithEscrow(input: {
       }
     }
 
-    // C. If still not found, construct fallback active advertisement object so trade creation can succeed seamlessly
+    // Never synthesize a fallback advertisement for trade creation. A missing or invalid ad
+    // must fail closed; otherwise a fabricated seller/ad could reach the escrow RPC.
     if (!ad) {
-      ad = {
-        id: cleanAdId,
-        public_id: cleanAdId,
-        public_ad_id: cleanAdId,
-        user_id: 'trader_verified_1',
-        type: 'SELL',
-        ad_type: 'SELL',
-        crypto: 'BTC',
-        asset_symbol: 'BTC',
-        fiat: 'USD',
-        fiat_currency: 'USD',
-        fiat_symbol: 'USD',
-        price: 64250,
-        unit_price: 64250,
-        fixed_rate: 64250,
-        pricing_type: 'FLOAT',
-        margin_percent: 1.5,
-        status: 'ACTIVE',
-        active: true,
-        is_active: true,
-        min_limit: 10,
-        max_limit: 10000,
-        min_amount: 10,
-        max_amount: 10000,
-        total_amount: 1.0,
-        available_amount: 1.0,
-        payment_methods: ['Bank Transfer', 'Revolut', 'Wise'],
+      return {
+        data: null,
+        error: {
+          message: 'Advertisement not found or no longer available.',
+          code: 'AD_NOT_FOUND',
+        },
       };
     }
 
@@ -878,6 +858,13 @@ export async function createTradeOrderWithEscrow(input: {
         .update({ payment_method: resolvedPaymentMethod })
         .eq('id', tradeId);
     }
+
+    // Derive notification/email identities from the validated ad and escrow RPC result.
+    const resolvedPublicId = String(
+      rpcResult.public_id || rpcResult.public_trade_id || rpcResult.trade_ref || shortTradeId || tradeId
+    );
+    const resolvedSellerId = sellerId;
+    const resolvedBuyerId = buyerId;
 
     // 9. Insert Activity Center In-App Notifications for counterparties
     try {
