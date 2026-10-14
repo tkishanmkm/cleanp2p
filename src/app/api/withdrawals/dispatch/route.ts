@@ -37,10 +37,18 @@ export async function POST(req: NextRequest) {
     // Atomically claim the next pending withdrawal via PostgreSQL SKIP LOCKED
     const { data: rawWithdrawal, error: claimErr } = await supabaseAdmin
       .rpc('claim_next_pending_withdrawal')
-      .single();
+      .maybeSingle();
     const withdrawal = rawWithdrawal as unknown as ClaimedWithdrawal | null;
 
-    if (claimErr || !withdrawal) {
+    if (claimErr) {
+      console.error('[Withdrawal Dispatch] Failed to claim pending withdrawal:', claimErr);
+      return NextResponse.json(
+        { error: 'Unable to claim a pending withdrawal safely' },
+        { status: 500 }
+      );
+    }
+
+    if (!withdrawal) {
       return NextResponse.json({ message: 'No pending withdrawals to process' }, { status: 200 });
     }
 
