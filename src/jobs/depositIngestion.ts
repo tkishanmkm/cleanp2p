@@ -911,7 +911,10 @@ async function scanTronDeposits(
       try {
         const accountUrl = `${tronGridHost}/v1/accounts/${monitoredAddr}/transactions/trc20?limit=20`;
         const res = await fetch(accountUrl, { headers: tronGridHeaders });
-        if (res.ok) {
+        if (!res.ok) {
+          throw new Error(`TronGrid account endpoint returned HTTP ${res.status}`);
+        }
+        {
           const json = await res.json();
           const items = Array.isArray(json?.data) ? json.data : [];
           for (const item of items) {
@@ -1024,7 +1027,10 @@ async function scanTronDeposits(
       try {
         const eventUrl = `${tronGridHost}/v1/contracts/${cAddr}/events?event_name=Transfer&limit=50&order_by=block_timestamp,desc`;
         const res = await fetch(eventUrl, { headers: tronGridHeaders });
-        if (res.ok) {
+        if (!res.ok) {
+          throw new Error(`TronGrid contract events endpoint returned HTTP ${res.status}`);
+        }
+        {
           const data = await res.json();
           for (const evt of data.data || []) {
             // Enforce the exact configured token contract before accepting an event.
