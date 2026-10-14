@@ -36,7 +36,14 @@ export async function GET(request: Request) {
         .order('created_at', { ascending: false });
 
       if (orderErr) {
-        return NextResponse.json({ success: true, trades: [] });
+        console.error('[GET /api/p2p/trades] Failed to fetch both p2p_trades and p2p_orders:', {
+          p2pTradesError: error.message,
+          p2pOrdersError: orderErr.message,
+        });
+        return NextResponse.json(
+          { success: false, error: 'Unable to load trades right now.' },
+          { status: 500 }
+        );
       }
 
       const formatted = (orders || []).map((o: any) => ({
