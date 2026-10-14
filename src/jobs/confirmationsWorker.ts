@@ -1,7 +1,7 @@
 import { createClient } from '@supabase/supabase-js';
 import { ethers } from 'ethers';
 import { normalizeDepositNetwork } from '@/lib/hd-derivation-engine';
-import { CANONICAL_USDT_CONTRACTS, verifyEvmTokenDeposit } from '@/jobs/depositIngestion';
+import { CANONICAL_USDT_CONTRACTS, verifyEvmTokenDeposit, verifyTronTokenDeposit } from '@/jobs/depositIngestion';
 import { SUPPORTED_EVM_CHAINS, getEvmProvider } from '@/lib/blockchain/providers';
 
 // Privileged confirmation processing must fail closed: never fall back to the public anon key.
@@ -259,18 +259,44 @@ export async function runConfirmationsWorker(): Promise<ConfirmationWorkerResult
         // Transfer event. Keep it pending until this worker validates contract, log
         // index, destination, and raw amount independently.
         if (normNet === 'TRC20' && assetSymbol === 'USDT') {
-          result.pendingCount++;
-          result.details.push({
-            depositId: deposit.id,
-            txHash: deposit.tx_hash,
-            network: normNet,
-            previousConfirmations: prevConfs,
-            newConfirmations: onChainData.confirmations,
-            requiredConfirmations: requiredConfs,
-            status: 'PENDING',
-            error: 'Exact TRC-20 Transfer event validation is required; credit RPC not called.',
-          });
-          continue;
+          if (deposit.output_index == null && deposit.log_index == null) {
+            result.pendingCount++;
+            result.details.push({
+              depositId: deposit.id,
+              txHash: deposit.tx_hash,
+              network: normNet,
+              previousConfirmations: prevConfs,
+              newConfirmations: onChainData.confirmations,
+              requiredConfirmations: requiredConfs,
+              status: 'PENDING',
+              error: 'Stored TRC-20 event index is missing; credit RPC not called.',
+            });
+            continue;
+          }
+
+          const verified = await verifyTronTokenDeposit(
+            deposit.tx_hash,
+            outputIndex,
+            destinationAddress,
+            Number(deposit.amount)
+          );
+          if (!verified) {
+            result.pendingCount++;
+            result.details.push({
+              depositId: deposit.id,
+              txHash: deposit.tx_hash,
+              network: normNet,
+              previousConfirmations: prevConfs,
+              newConfirmations: onChainData.confirmations,
+              requiredConfirmations: requiredConfs,
+              status: 'PENDING',
+              error: 'Exact TRC-20 event verification failed; credit RPC not called.',
+            });
+            continue;
+          }
+          onChainData.confirmations = verified.confirmations;
+          onChainData.blockNumber = verified.blockNumber;
+          onChainData.fromAddress = verified.fromAddress;
         }
 
         let currentConfirmations = onChainData.confirmations;
