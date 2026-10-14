@@ -129,10 +129,18 @@ export async function processWithdrawalQueue(): Promise<WithdrawalProcessResult>
       });
       const txHash = res.txHash;
 
-      await supabaseAdmin.rpc('complete_onchain_withdrawal', {
+      const { data: settlementData, error: settlementError } = await supabaseAdmin.rpc('complete_onchain_withdrawal', {
         p_withdrawal_id: withdrawal.id,
         p_tx_hash: txHash,
       });
+      if (
+        settlementError ||
+        (settlementData && typeof settlementData === 'object' && 'success' in settlementData && settlementData.success === false)
+      ) {
+        // A chain transaction was submitted, so preserve the reservation and route
+        // through the existing ambiguous-broadcast reconciliation path.
+        throw new Error('TRON transaction broadcast succeeded but withdrawal settlement was not confirmed');
+      }
 
       console.log(`[Withdrawal Worker] Dispatched TRON payout ${withdrawal.id} (tx: ${txHash})`);
       return {
@@ -183,10 +191,18 @@ export async function processWithdrawalQueue(): Promise<WithdrawalProcessResult>
       });
     }
 
-    await supabaseAdmin.rpc('complete_onchain_withdrawal', {
+    const { data: settlementData, error: settlementError } = await supabaseAdmin.rpc('complete_onchain_withdrawal', {
       p_withdrawal_id: withdrawal.id,
       p_tx_hash: tx.hash,
     });
+    if (
+      settlementError ||
+      (settlementData && typeof settlementData === 'object' && 'success' in settlementData && settlementData.success === false)
+    ) {
+      // Do not report success when the payout has been broadcast but the
+      // authoritative database settlement is unresolved.
+      throw new Error('EVM transaction broadcast succeeded but withdrawal settlement was not confirmed');
+    }
 
     console.log(`[Withdrawal Worker] Broadcasted EVM payout ${withdrawal.id} on ${network} (tx: ${tx.hash}, nonce: ${nonce})`);
     return {
