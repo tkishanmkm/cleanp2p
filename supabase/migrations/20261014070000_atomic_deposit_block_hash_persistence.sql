@@ -124,7 +124,11 @@ BEGIN
         RETURN jsonb_build_object('success', false, 'code', 'BLOCK_HASH_REQUIRED');
     END IF;
 
-    IF p_block_hash !~* '^0x[0-9a-f]{64}
+    IF p_block_hash !~* '^0x[0-9a-f]{64}$' AND p_block_hash !~* '^[0-9a-f]{64}$' THEN
+        RETURN jsonb_build_object('success', false, 'code', 'INVALID_BLOCK_HASH');
+    END IF;
+
+    IF v_network IN ('ETH', 'ERC20', 'BEP20') THEN
         v_address := LOWER(BTRIM(p_destination_address));
     ELSE
         v_address := BTRIM(p_destination_address);
