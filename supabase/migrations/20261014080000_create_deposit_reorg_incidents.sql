@@ -2,8 +2,8 @@
 -- This migration does not change balances, deposit statuses, or ledger entries.
 CREATE TABLE IF NOT EXISTS public.deposit_reorg_incidents (
     id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-    network text NOT NULL CHECK (length(btrim(network)) > 0),
-    tx_hash text NOT NULL CHECK (length(btrim(tx_hash)) > 0),
+    network text NOT NULL CHECK (length(btrim(network)) > 0 AND network = upper(btrim(network))),
+    tx_hash text NOT NULL CHECK (length(btrim(tx_hash)) > 0 AND tx_hash = lower(btrim(tx_hash))),
     output_index integer NOT NULL CHECK (output_index >= 0),
     deposit_id uuid,
     incident_type text NOT NULL CHECK (
@@ -22,7 +22,7 @@ CREATE TABLE IF NOT EXISTS public.deposit_reorg_incidents (
 );
 
 CREATE UNIQUE INDEX IF NOT EXISTS deposit_reorg_incidents_identity_key
-    ON public.deposit_reorg_incidents (lower(btrim(network)), lower(btrim(tx_hash)), output_index);
+    ON public.deposit_reorg_incidents (network, tx_hash, output_index);
 
 COMMENT ON TABLE public.deposit_reorg_incidents IS
     'Read/reconciliation queue for suspicious or unverifiable confirmed deposits; never itself authorizes a financial adjustment.';
