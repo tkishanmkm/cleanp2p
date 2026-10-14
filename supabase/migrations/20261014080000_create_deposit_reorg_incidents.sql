@@ -18,11 +18,11 @@ CREATE TABLE IF NOT EXISTS public.deposit_reorg_incidents (
     last_seen_at timestamptz NOT NULL DEFAULT now(),
     observation_count integer NOT NULL DEFAULT 1 CHECK (observation_count > 0),
     reviewer_note text,
-    metadata jsonb NOT NULL DEFAULT '{}'::jsonb,
-    CONSTRAINT deposit_reorg_incidents_identity_key UNIQUE (
-        lower(btrim(network)), lower(btrim(tx_hash)), output_index
-    )
+    metadata jsonb NOT NULL DEFAULT '{}'::jsonb
 );
+
+CREATE UNIQUE INDEX IF NOT EXISTS deposit_reorg_incidents_identity_key
+    ON public.deposit_reorg_incidents (lower(btrim(network)), lower(btrim(tx_hash)), output_index);
 
 COMMENT ON TABLE public.deposit_reorg_incidents IS
     'Read/reconciliation queue for suspicious or unverifiable confirmed deposits; never itself authorizes a financial adjustment.';
@@ -32,4 +32,3 @@ COMMENT ON COLUMN public.deposit_reorg_incidents.review_status IS
 ALTER TABLE public.deposit_reorg_incidents ENABLE ROW LEVEL SECURITY;
 REVOKE ALL ON TABLE public.deposit_reorg_incidents FROM PUBLIC, anon, authenticated;
 GRANT SELECT, INSERT, UPDATE ON TABLE public.deposit_reorg_incidents TO service_role;
-GRANT USAGE, SELECT ON SEQUENCE public.deposit_reorg_incidents_id_seq TO service_role;
