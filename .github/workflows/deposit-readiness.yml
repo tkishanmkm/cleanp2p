@@ -29,5 +29,7 @@ jobs:
         run: npm ci
       - name: Check deposit migration safety invariants (offline)
         run: node tests/deposit-migration-static.test.mjs
+      - name: Check confirmed-deposit reorg audit safety (offline)
+        run: node tests/deposit-migration-static.test.mjs
       - name: Typecheck
         run: npm run typecheck
