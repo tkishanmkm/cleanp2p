@@ -527,12 +527,35 @@ export async function createTradeOrderWithEscrow(input: {
       };
     }
 
-    if (ad.is_active === false || ad.active === false || ad.status === 'INACTIVE') {
+    // Match the canonical RPC's activation rule and fail closed for missing/unknown
+    // statuses. The database requires status ACTIVE; a truthy active flag alone is not enough.
+    if (
+      String(ad.status || '').trim().toUpperCase() !== 'ACTIVE' ||
+      ad.is_active === false ||
+      ad.active === false
+    ) {
       return {
         data: null,
         error: {
-          message: 'This advertisement is currently inactive.',
-          code: '400',
+          message: 'This advertisement is currently inactive or not available for trading.',
+          code: 'AD_INACTIVE',
+        },
+      };
+    }
+
+    // Never interpret an unknown/missing advertisement side as SELL. The canonical
+    // RPC currently defaults unknown types to SELL, so reject them before calling it.
+    const declaredAdSide = [ad.trade_type, ad.ad_type, ad.side, ad.adType, ad.type]
+      .filter((value: unknown) => typeof value === 'string' && value.trim().length > 0)
+      .map((value: string) => value.trim().toUpperCase())
+      .find((value: string) => value === 'BUY' || value === 'SELL');
+
+    if (!declaredAdSide) {
+      return {
+        data: null,
+        error: {
+          message: 'This advertisement has an invalid trade type and cannot be traded.',
+          code: 'AD_INVALID_TYPE',
         },
       };
     }
@@ -574,7 +597,7 @@ export async function createTradeOrderWithEscrow(input: {
       ad.type,
     ].filter(Boolean).map((s: any) => String(s).toUpperCase());
 
-    const isBuyAd = typeCandidates.some((t: string) => t === 'BUY' || t === 'ONLINE_BUY' || t.includes('BUY'));
+    const isBuyAd = declaredAdSide === 'BUY';
     const isInitiatorSelling = isBuyAd;
     const isAdSell = !isBuyAd;
 
