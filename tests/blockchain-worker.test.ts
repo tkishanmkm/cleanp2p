@@ -2,8 +2,18 @@ import { createClient } from '@supabase/supabase-js';
 import { processWithdrawalQueue } from '../src/jobs/withdrawalWorker';
 import { CANONICAL_USDT_CONTRACTS } from '../src/jobs/depositIngestion';
 
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL || 'https://placeholder.supabase.co';
-const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'placeholder-key';
+// Safety gate: these integration tests may inspect or mutate financial records.
+// They must use a dedicated test project and an explicitly provided test-only key.
+if (process.env.TEST_ALLOW_DESTRUCTIVE_DB_TESTS !== 'true' ||
+    !process.env.TEST_SUPABASE_URL ||
+    !process.env.TEST_SUPABASE_SERVICE_ROLE_KEY) {
+  throw new Error(
+    'Refusing to run integration tests without TEST_ALLOW_DESTRUCTIVE_DB_TESTS=true, TEST_SUPABASE_URL, and TEST_SUPABASE_SERVICE_ROLE_KEY for an isolated test project.'
+  );
+}
+
+const supabaseUrl = process.env.TEST_SUPABASE_URL;
+const supabaseKey = process.env.TEST_SUPABASE_SERVICE_ROLE_KEY;
 
 const supabase = createClient(supabaseUrl, supabaseKey, {
   auth: { persistSession: false, autoRefreshToken: false },
