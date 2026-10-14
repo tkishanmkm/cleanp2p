@@ -66,3 +66,14 @@ GitHub search for the two exact function names and `platform_ledger_entries` ret
 ## Production status
 
 Wallet/deposit credit remains **not production-ready**. The client-role ACL is restrictive, but the privileged balance-credit function lacks its own evidence, amount, and idempotency guards. Automatic credit should remain disabled until a verified replacement is tested end-to-end.
+
+
+## Step 36Z verification addendum (2026-10-14)
+
+A fresh live catalog query re-read both complete function definitions. It confirmed the observations above, including the `credit_user_balance` balance upsert and deposit ledger insert, and the platform-ledger idempotency conflict loop.
+
+A live ACL check independently confirmed:
+- `credit_user_balance(uuid,text,text,numeric)`: `anon=false`, `authenticated=false`, `service_role=true`.
+- `record_platform_ledger_entry(text,text,numeric,text,uuid,text,text,text,text,text,jsonb)`: `anon=false`, `authenticated=false`, `service_role=true`.
+
+A live scan of other `public` function definitions found no textual callers of either function. Repository code-search returned no results for the exact function names. These negative results are limited evidence, not a complete call-graph proof; dynamic calls, other schemas, external jobs and code-search indexing gaps remain possible. No permissions or database objects were changed.
