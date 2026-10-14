@@ -19,3 +19,17 @@ const pendingBranch = sql.indexOf('-- PENDING DEPOSIT');
 assert.ok(mismatchGuard > 0 && pendingBranch > mismatchGuard, 'hash mismatch guard must occur before pending-state writes');
 
 console.log('Deposit migration static safety checks passed. This is not a PostgreSQL parser or execution test.');
+const workerPath = 'src/jobs/confirmationsWorker.ts';
+const worker = readFileSync(workerPath, 'utf8');
+const auditStart = worker.indexOf('export async function runConfirmedDepositReorgAudit');
+const auditEnd = worker.indexOf('/**\\n * Main worker logic', auditStart);
+assert.ok(auditStart >= 0 && auditEnd > auditStart, 'confirmed-deposit reorg audit helper must exist');
+const audit = worker.slice(auditStart, auditEnd);
+assert.match(audit, /\.from\('onchain_deposits'\)/, 'reorg audit must inspect on-chain deposit records');
+assert.match(audit, /\.eq\('status', 'CONFIRMED'\)/, 'reorg audit must include confirmed deposits');
+assert.match(audit, /Math\.min\(500, Math\.max\(1, limit\)\)/, 'reorg audit batch size must be bounded');
+assert.match(audit, /storedHash !== normalizedObserved/, 'reorg audit must compare stored and observed canonical hashes');
+assert.match(audit, /REORG_SUSPECTED/, 'reorg audit must flag hash mismatches');
+assert.doesNotMatch(audit, /\.update\s*\(|\.insert\s*\(|\.upsert\s*\(|\.delete\s*\(|\.rpc\s*\(/, 'reorg audit must remain read-only and must not call financial RPCs');
+
+console.log('Confirmed-deposit reorg audit static safety checks passed. This is not a runtime chain or database test.');
