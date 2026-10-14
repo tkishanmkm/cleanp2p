@@ -276,9 +276,7 @@ export async function runConfirmedDepositReorgAudit(
     let verificationError = 'No supported independent verifier for this deposit network/asset.';
 
     try {
-      if (!storedHash) {
-        verificationError = 'No stored canonical block hash; backfill/verification is required before this row can be assessed.';
-      } else if ((network === 'BTC' || network === 'LTC') && index != null) {
+      if ((network === 'BTC' || network === 'LTC') && index != null) {
         const base = network === 'BTC'
           ? getBtcMempoolApi()
           : (process.env.LTC_MEMPOOL_API?.trim() || 'https://litecoinspace.org/api');
@@ -313,7 +311,9 @@ export async function runConfirmedDepositReorgAudit(
       let note: string;
       if (!storedHash || !normalizedObserved) {
         status = 'UNVERIFIABLE';
-        note = verificationError;
+        note = !storedHash && normalizedObserved
+          ? 'Current canonical block was verified, but no stored block hash exists for comparison. Treat as a backfill candidate; no records or funds were changed.'
+          : verificationError;
         result.unverifiable++;
       } else if (storedHash !== normalizedObserved) {
         status = 'REORG_SUSPECTED';
