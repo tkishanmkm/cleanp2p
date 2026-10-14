@@ -815,28 +815,37 @@ async function scanEvmNativeDeposits(
           const confirmations = verified.confirmations;
 
           detected++;
-          const { data, error } = await supabaseAdmin.rpc('process_deposit_atomic', {
-            p_destination_address: toClean,
-            p_asset_symbol: chainConfig.nativeSymbol === 'ETH' ? 'ETH' : chainConfig.nativeSymbol,
-            p_network_code: normNet === 'ERC20' ? 'ETH' : normNet,
-            p_amount: formattedAmount,
-            p_tx_hash: tx.hash,
-            p_output_index: 0,
-            p_block_number: verified.blockNumber,
-            p_from_address: verified.fromAddress,
-            p_token_contract: null,
-            p_confirmations: confirmations,
-            p_provider: 'deposit_ingestion',
-            p_block_hash: verified.blockHash,
-          });
+          try {
+            const { data, error } = await supabaseAdmin.rpc('process_deposit_atomic', {
+              p_destination_address: toClean,
+              p_asset_symbol: chainConfig.nativeSymbol === 'ETH' ? 'ETH' : chainConfig.nativeSymbol,
+              p_network_code: normNet === 'ERC20' ? 'ETH' : normNet,
+              p_amount: formattedAmount,
+              p_tx_hash: tx.hash,
+              p_output_index: 0,
+              p_block_number: verified.blockNumber,
+              p_from_address: verified.fromAddress,
+              p_token_contract: null,
+              p_confirmations: confirmations,
+              p_provider: 'deposit_ingestion',
+              p_block_hash: verified.blockHash,
+            });
 
-          if (error) {
-            errors.push(`RPC error for native transfer ${tx.hash}: ${error.message}`);
-          } else {
-            const res = typeof data === 'string' ? JSON.parse(data) : data;
-            if (res?.status === 'credited' || (res?.success && confirmations >= chainConfig.requiredConfirmations)) {
-              credited++;
+            if (error) {
+              errors.push(`RPC error for native transfer ${tx.hash}: ${error.message}`);
+            } else {
+              const res = typeof data === 'string' ? JSON.parse(data) : data;
+              if (!res || typeof res !== 'object') {
+                errors.push(`Invalid atomic-credit response for native transfer ${tx.hash}`);
+              } else if (res?.status === 'credited' || (res?.success && confirmations >= chainConfig.requiredConfirmations)) {
+                credited++;
+              } else if (res?.status === 'error' || res?.success === false) {
+                errors.push(`Atomic credit rejected native transfer ${tx.hash}: ${res?.message || res?.error || res?.status}`);
+              }
             }
+          } catch (creditErr: any) {
+            // Record the individual transfer failure and continue scanning later transactions.
+            errors.push(`Atomic credit failed for native transfer ${tx.hash}: ${creditErr?.message || creditErr}`);
           }
         }
       }
