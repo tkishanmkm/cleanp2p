@@ -112,7 +112,7 @@ const auditEnd = worker.indexOf('Main worker logic', auditStart);
 assert.ok(auditStart >= 0 && auditEnd > auditStart, 'confirmed-deposit reorg audit helper must exist');
 const audit = worker.slice(auditStart, auditEnd);
 assert.match(audit, /\.from\('onchain_deposits'\)/, 'reorg audit must inspect on-chain deposit records');
-assert.match(audit, /\.eq\('status', 'CONFIRMED'\)/, 'reorg audit must include confirmed deposits');
+assert.match(audit, /\.in\('status', \['CONFIRMED', 'CREDITED'\]\)/, 'reorg audit must include both canonical credited rows and legacy confirmed rows');
 assert.match(audit, /Math\.min\(500, Math\.max\(1, limit\)\)/, 'reorg audit batch size must be bounded');
 assert.match(audit, /storedHash !== normalizedObserved/, 'reorg audit must compare stored and observed canonical hashes');
 assert.match(audit, /REORG_SUSPECTED/, 'reorg audit must flag hash mismatches');
