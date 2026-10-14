@@ -1,7 +1,8 @@
 import { createClient } from '@supabase/supabase-js';
 import { ethers } from 'ethers';
 import { normalizeDepositNetwork } from '@/lib/hd-derivation-engine';
-import { CANONICAL_USDT_CONTRACTS } from '@/jobs/depositIngestion';
+import { CANONICAL_USDT_CONTRACTS, verifyEvmTokenDeposit } from '@/jobs/depositIngestion';
+import { SUPPORTED_EVM_CHAINS, getEvmProvider } from '@/lib/blockchain/providers';
 
 // Privileged confirmation processing must fail closed: never fall back to the public anon key.
 const supabaseUrl =
@@ -254,9 +255,59 @@ export async function runConfirmationsWorker(): Promise<ConfirmationWorkerResult
           continue;
         }
 
-        const currentConfirmations = onChainData.confirmations;
-        const blockNumber = onChainData.blockNumber ?? deposit.block_number;
-        const fromAddress = onChainData.fromAddress ?? deposit.from_address;
+        // A TRON transaction's confirmation count does not prove a matching TRC-20
+        // Transfer event. Keep it pending until this worker validates contract, log
+        // index, destination, and raw amount independently.
+        if (normNet === 'TRC20' && assetSymbol === 'USDT') {
+          result.pendingCount++;
+          result.details.push({
+            depositId: deposit.id,
+            txHash: deposit.tx_hash,
+            network: normNet,
+            previousConfirmations: prevConfs,
+            newConfirmations: onChainData.confirmations,
+            requiredConfirmations: requiredConfs,
+            status: 'PENDING',
+            error: 'Exact TRC-20 Transfer event validation is required; credit RPC not called.',
+          });
+          continue;
+        }
+
+        let currentConfirmations = onChainData.confirmations;
+        let blockNumber = onChainData.blockNumber ?? deposit.block_number;
+        let fromAddress = onChainData.fromAddress ?? deposit.from_address;
+
+        // For EVM USDT, transaction success alone is insufficient: prove that the
+        // exact receipt log matches the configured contract, index, recipient, and amount.
+        if (assetSymbol === 'USDT' && SUPPORTED_EVM_CHAINS[normNet]) {
+          const chain = SUPPORTED_EVM_CHAINS[normNet];
+          const verified = await verifyEvmTokenDeposit(
+            getEvmProvider(normNet),
+            deposit.tx_hash,
+            outputIndex,
+            destinationAddress,
+            Number(deposit.amount),
+            tokenContract || chain.usdtContractAddress || '',
+            chain.usdtDecimals ?? 6
+          );
+          if (!verified) {
+            result.pendingCount++;
+            result.details.push({
+              depositId: deposit.id,
+              txHash: deposit.tx_hash,
+              network: normNet,
+              previousConfirmations: prevConfs,
+              newConfirmations: onChainData.confirmations,
+              requiredConfirmations: requiredConfs,
+              status: 'PENDING',
+              error: 'Exact ERC-20 Transfer log validation failed; credit RPC not called.',
+            });
+            continue;
+          }
+          currentConfirmations = verified.confirmations;
+          blockNumber = verified.blockNumber;
+          fromAddress = verified.fromAddress;
+        }
 
         // Call authoritative canonical RPC process_deposit_atomic
         const { data: rpcData, error: rpcErr } = await supabaseAdmin.rpc('process_deposit_atomic', {
