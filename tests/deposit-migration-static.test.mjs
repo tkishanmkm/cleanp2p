@@ -14,6 +14,10 @@ assert.match(sql, /v_effective_confirmations := COALESCE\(p_confirmations, 0\)/,
   'credit eligibility must use the current independently verified confirmation count');
 assert.doesNotMatch(sql, /GREATEST\([\s\S]{0,160}v_existing_onchain\.confirmations/,
   'persisted confirmations must never elevate a stale or lower current confirmation observation');
+assert.match(sql, /CONFIRMED_DEPOSIT_CONFIRMATIONS_REGRESSED/,
+  'a credited deposit must not be downgraded when the current confirmation count falls below threshold');
+assert.match(sql, /Previously credited deposit needs reorg review; no status or balance changes were made/,
+  'confirmation regression must return for review without changing credited state');
 assert.match(sql, /REVOKE ALL ON FUNCTION public\.process_deposit_atomic\([^;]+ FROM PUBLIC;/, 'function execute must be revoked from PUBLIC');
 assert.match(sql, /REVOKE ALL ON FUNCTION public\.process_deposit_atomic\([^;]+ FROM anon, authenticated;/, 'function execute must be revoked from client roles');
 assert.match(sql, /GRANT EXECUTE ON FUNCTION public\.process_deposit_atomic\([^;]+ TO service_role;/, 'function execute must be granted to service_role');
