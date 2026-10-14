@@ -741,7 +741,8 @@ BEGIN
     SELECT COUNT(*)
     INTO v_ledger_count
     FROM public.ledger_entries
-    WHERE reference_id = v_deposit_id::TEXT;
+    WHERE reference_id = v_deposit_id::TEXT
+      AND type = 'deposit';
 
     IF v_ledger_count > 1 THEN
         RAISE EXCEPTION
@@ -755,7 +756,8 @@ BEGIN
         SELECT *
         INTO v_existing_ledger
         FROM public.ledger_entries
-        WHERE reference_id = v_deposit_id::TEXT;
+        WHERE reference_id = v_deposit_id::TEXT
+          AND type = 'deposit';
 
         IF v_existing_ledger.user_id IS DISTINCT FROM v_user_id
            OR v_existing_ledger.type IS DISTINCT FROM 'deposit'
