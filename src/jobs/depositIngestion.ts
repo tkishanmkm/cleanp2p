@@ -66,6 +66,46 @@ async function fetchUtxoTipHeight(apiBase: string): Promise<number | null> {
   }
 }
 
+/** Independently verifies a stored BTC/LTC deposit against the exact transaction output. */
+async function verifyUtxoDepositOutput(
+  apiBase: string,
+  txHash: string,
+  outputIndex: number,
+  destinationAddress: string,
+  storedAmount: number
+): Promise<{ blockHeight: number | null; confirmations: number } | null> {
+  if (!/^[a-fA-F0-9]{64}$/.test(txHash) ||
+      !Number.isSafeInteger(outputIndex) || outputIndex < 0 ||
+      !Number.isFinite(storedAmount) || storedAmount <= 0 ||
+      !destinationAddress) return null;
+
+  try {
+    const base = apiBase.endsWith('/') ? apiBase.slice(0, -1) : apiBase;
+    const [txRes, statusRes] = await Promise.all([
+      fetch(`${base}/tx/${txHash}`),
+      fetch(`${base}/tx/${txHash}/status`),
+    ]);
+    if (!txRes.ok || !statusRes.ok) return null;
+    const [tx, status] = await Promise.all([txRes.json(), statusRes.json()]);
+    if (typeof tx?.txid !== 'string' || tx.txid.toLowerCase() !== txHash.toLowerCase() ||
+        !Array.isArray(tx.vout) || outputIndex >= tx.vout.length) return null;
+
+    const output = tx.vout[outputIndex];
+    if (output?.scriptpubkey_address !== destinationAddress ||
+        !Number.isSafeInteger(output.value) || output.value <= 0 ||
+        Math.round(storedAmount * 100_000_000) !== output.value) return null;
+
+    if (status?.confirmed !== true) return { blockHeight: null, confirmations: 0 };
+    const blockHeight = status.block_height;
+    if (!Number.isSafeInteger(blockHeight) || blockHeight <= 0) return null;
+    const tipHeight = await fetchUtxoTipHeight(base);
+    if (tipHeight === null || tipHeight < blockHeight) return null;
+    return { blockHeight, confirmations: tipHeight - blockHeight + 1 };
+  } catch {
+    return null;
+  }
+}
+
 export interface IngestionResult {
   network: string;
   scannedBlocks?: number;
@@ -1052,61 +1092,53 @@ export async function refreshPendingDepositConfirmations(): Promise<{
           }
         }
       } else if (normNet === 'BTC') {
-        const btcApiBase = process.env.BTC_MEMPOOL_API || 'https://mempool.space/api';
-        try {
-          const res = await fetch(`${btcApiBase}/tx/${dep.tx_hash}/status`);
-          if (res.ok) {
-            const statusData = await res.json();
-            const tipHeight = await fetchUtxoTipHeight(btcApiBase);
-            const blockHeight = statusData.block_height;
-            const confs = statusData.confirmed === true && Number.isSafeInteger(blockHeight) && blockHeight > 0 && tipHeight !== null && tipHeight >= blockHeight ? tipHeight - blockHeight + 1 : 0;
-            const { data, error: rpcErr } = await supabaseAdmin.rpc('process_deposit_atomic', {
-              p_destination_address: destinationAddress,
-              p_asset_symbol: 'BTC',
-              p_network_code: 'BTC',
-              p_amount: Number(dep.amount),
-              p_tx_hash: dep.tx_hash,
-              p_output_index: outputIndex,
-              p_block_number: statusData.block_height || null,
-              p_from_address: null,
-              p_token_contract: null,
-              p_confirmations: confs,
-              p_provider: 'confirmations_worker',
-            });
-            if (!rpcErr) {
-              const r = typeof data === 'string' ? JSON.parse(data) : data;
-              if (r?.status === 'credited') newlyCredited++;
-            }
-          }
-        } catch (_) {}
+        const btcApiBase = getBtcMempoolApi();
+        const verified = await verifyUtxoDepositOutput(
+          btcApiBase, dep.tx_hash, outputIndex, destinationAddress, Number(dep.amount)
+        );
+        // Stored DB values are not proof of the destination or amount. Do not call
+        // the crediting RPC unless the exact output is independently verified.
+        if (!verified) continue;
+        const { data, error: rpcErr } = await supabaseAdmin.rpc('process_deposit_atomic', {
+          p_destination_address: destinationAddress,
+          p_asset_symbol: 'BTC',
+          p_network_code: 'BTC',
+          p_amount: Number(dep.amount),
+          p_tx_hash: dep.tx_hash,
+          p_output_index: outputIndex,
+          p_block_number: verified.blockHeight,
+          p_from_address: null,
+          p_token_contract: null,
+          p_confirmations: verified.confirmations,
+          p_provider: 'confirmations_worker',
+        });
+        if (!rpcErr) {
+          const r = typeof data === 'string' ? JSON.parse(data) : data;
+          if (r?.status === 'credited') newlyCredited++;
+        }
       } else if (normNet === 'LTC') {
         const ltcApiBase = process.env.LTC_MEMPOOL_API || 'https://litecoinspace.org/api';
-        try {
-          const res = await fetch(`${ltcApiBase}/tx/${dep.tx_hash}/status`);
-          if (res.ok) {
-            const statusData = await res.json();
-            const tipHeight = await fetchUtxoTipHeight(ltcApiBase);
-            const blockHeight = statusData.block_height;
-            const confs = statusData.confirmed === true && Number.isSafeInteger(blockHeight) && blockHeight > 0 && tipHeight !== null && tipHeight >= blockHeight ? tipHeight - blockHeight + 1 : 0;
-            const { data, error: rpcErr } = await supabaseAdmin.rpc('process_deposit_atomic', {
-              p_destination_address: destinationAddress,
-              p_asset_symbol: 'LTC',
-              p_network_code: 'LTC',
-              p_amount: Number(dep.amount),
-              p_tx_hash: dep.tx_hash,
-              p_output_index: outputIndex,
-              p_block_number: statusData.block_height || null,
-              p_from_address: null,
-              p_token_contract: null,
-              p_confirmations: confs,
-              p_provider: 'confirmations_worker',
-            });
-            if (!rpcErr) {
-              const r = typeof data === 'string' ? JSON.parse(data) : data;
-              if (r?.status === 'credited') newlyCredited++;
-            }
-          }
-        } catch (_) {}
+        const verified = await verifyUtxoDepositOutput(
+          ltcApiBase, dep.tx_hash, outputIndex, destinationAddress, Number(dep.amount)
+        );
+        if (!verified) continue;
+        const { data, error: rpcErr } = await supabaseAdmin.rpc('process_deposit_atomic', {
+          p_destination_address: destinationAddress,
+          p_asset_symbol: 'LTC',
+          p_network_code: 'LTC',
+          p_amount: Number(dep.amount),
+          p_tx_hash: dep.tx_hash,
+          p_output_index: outputIndex,
+          p_block_number: verified.blockHeight,
+          p_from_address: null,
+          p_token_contract: null,
+          p_confirmations: verified.confirmations,
+          p_provider: 'confirmations_worker',
+        });
+        if (!rpcErr) {
+          const r = typeof data === 'string' ? JSON.parse(data) : data;
+          if (r?.status === 'credited') newlyCredited++;
+        }
       } else {
         const chain = SUPPORTED_EVM_CHAINS[normNet];
         if (chain) {
