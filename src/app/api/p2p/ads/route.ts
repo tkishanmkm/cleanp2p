@@ -394,7 +394,9 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    let marketplaceSync: 'synced' | 'pending' | 'not_required' = 'not_required';
     if (data) {
+      marketplaceSync = 'pending';
       try {
         const admin = getSupabaseAdminClient();
         const p2pRow = {
@@ -408,13 +410,22 @@ export async function POST(request: NextRequest) {
           unit_price: priceVal,
           status: 'ACTIVE',
         };
-        await admin.from('p2p_ads').upsert(p2pRow, { onConflict: 'id', ignoreDuplicates: true });
+        const { error: p2pSyncError } = await admin
+          .from('p2p_ads')
+          .upsert(p2pRow, { onConflict: 'id', ignoreDuplicates: true });
+        if (p2pSyncError) {
+          console.error('[P2P Ad Marketplace Sync Error]:', p2pSyncError);
+        } else {
+          marketplaceSync = 'synced';
+        }
       } catch (p2pSyncErr) {
-        // Silently continue if p2p_ads is a view or non-updatable
+        console.error('[P2P Ad Marketplace Sync Exception]:', p2pSyncErr);
       }
     }
 
-    return NextResponse.json({ success: true, data });
+    // The primary ad is already committed; surface projection sync state rather than
+    // pretending the secondary marketplace record is guaranteed to exist.
+    return NextResponse.json({ success: true, data, marketplaceSync });
   } catch (err: any) {
     console.error('Unhandled ad creation error:', err);
     return NextResponse.json(
