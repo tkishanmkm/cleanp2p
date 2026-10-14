@@ -66,3 +66,8 @@ assert.match(recorder, /hashChanged[\s\S]*review_status: 'OPEN'/, 'changed canon
 assert.doesNotMatch(recorder, /\.from\('(deposits|user_balances|wallet_balances|ledger_entries|financial_ledger)'\)\s*\.(update|insert|upsert|delete)|\.rpc\s*\(/,
   'incident recorder must never change balances, deposits, ledgers, or call financial RPCs');
 console.log('Deposit reorg incident recorder static safety checks passed.');
+
+assert.match(worker, /const indexRequired =\s*[\s\S]*normNet === 'BTC'[\s\S]*normNet === 'LTC'[\s\S]*SUPPORTED_EVM_CHAINS\[normNet\]/,
+  'confirmation worker must require output/event indexes for UTXO outputs and supported token events');
+assert.match(worker, /Required output\/event index is missing; credit RPC not called\./,
+  'confirmation worker must keep deposits pending when required index is missing');
