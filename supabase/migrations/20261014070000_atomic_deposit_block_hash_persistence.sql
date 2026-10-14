@@ -888,6 +888,19 @@ BEGIN
 
         END IF;
 
+        -- A prior ledger credit without its matching on-chain record is a
+        -- reconciliation incident. Fail closed rather than reporting success
+        -- or silently fabricating a record during retry.
+        IF v_existing_onchain.id IS NULL THEN
+            RETURN jsonb_build_object(
+                'success', false,
+                'code', 'ALREADY_CREDITED_ONCHAIN_RECORD_MISSING',
+                'deposit_id', v_deposit_id,
+                'ledger_id', v_existing_ledger.id,
+                'message', 'Previously credited deposit is missing its on-chain record; manual reconciliation required'
+            );
+        END IF;
+
         UPDATE public.deposits
         SET block_number = COALESCE(p_block_number, block_number),
             block_hash = COALESCE(v_block_hash, block_hash)
