@@ -666,6 +666,7 @@ BEGIN
                 created_at,
                 asset,
                 output_index,
+                block_number,
                 block_hash
             )
             VALUES (
@@ -697,6 +698,7 @@ BEGIN
                         v_effective_confirmations
                     ),
                 required_confirmations = v_required_confirmations,
+                block_number = COALESCE(p_block_number, block_number),
                 block_hash = COALESCE(v_block_hash, block_hash),
                 updated_at = NOW()
             WHERE id = v_existing_onchain.id;
@@ -722,6 +724,7 @@ BEGIN
                 asset_code,
                 network_code,
                 output_index,
+                block_number,
                 block_hash
             )
             VALUES (
@@ -741,6 +744,7 @@ BEGIN
                 v_asset,
                 v_network,
                 p_output_index,
+                p_block_number,
                 v_block_hash
             )
             RETURNING id INTO v_onchain_id;
@@ -1002,6 +1006,7 @@ BEGIN
                 ),
             required_confirmations = v_required_confirmations,
             status = 'CONFIRMED',
+            block_number = COALESCE(p_block_number, block_number),
             block_hash = COALESCE(v_block_hash, block_hash),
             updated_at = NOW()
         WHERE id = v_existing_onchain.id;
