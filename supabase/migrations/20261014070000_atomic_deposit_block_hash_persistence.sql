@@ -565,6 +565,25 @@ BEGIN
           'message', 'Verified block hash differs from the stored deposit block hash');
     END IF;
 
+    -- A deposit that already has a ledger credit must never be downgraded
+    -- to PENDING by a later lower confirmation observation. This function does
+    -- not reverse funds on a suspected reorg; return for operator reconciliation.
+    IF NOT v_is_confirmed AND v_existing_deposit.id IS NOT NULL THEN
+        SELECT COUNT(*)
+        INTO v_ledger_count
+        FROM public.ledger_entries
+        WHERE reference_id = v_existing_deposit.id::TEXT
+          AND type = 'deposit';
+
+        IF v_ledger_count > 0 THEN
+            RETURN jsonb_build_object(
+                'success', false,
+                'code', 'CONFIRMED_DEPOSIT_CONFIRMATIONS_REGRESSED',
+                'message', 'Previously credited deposit needs reorg review; no status or balance changes were made'
+            );
+        END IF;
+    END IF;
+
     -- PENDING DEPOSIT
     -- ================================================================
 
