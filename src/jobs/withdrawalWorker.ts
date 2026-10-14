@@ -374,7 +374,9 @@ export async function checkSubmittedWithdrawals(): Promise<{
         const { confirmations, status, actualGasCost } = await getTransactionConfirmations(provider, w.tx_hash);
         const gasAsset = normNet === 'BEP20' ? 'BNB' : 'ETH';
 
-        if (confirmations >= chain.requiredConfirmations && status !== 0) {
+        // Settlement requires an explicit successful EVM receipt. Missing status (for
+        // example, an RPC/provider inconsistency) must never be treated as success.
+        if (confirmations >= chain.requiredConfirmations && status === 1) {
           const actualGasStr = actualGasCost && actualGasCost.trim().length > 0 ? actualGasCost.trim() : '0';
           const { error: confErr } = await supabaseAdmin.rpc('complete_onchain_withdrawal', {
             p_withdrawal_id: w.id,
