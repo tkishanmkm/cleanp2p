@@ -73,7 +73,7 @@ async function verifyUtxoDepositOutput(
   outputIndex: number,
   destinationAddress: string,
   storedAmount: number | string
-): Promise<{ blockHeight: number | null; confirmations: number } | null> {
+): Promise<{ blockHeight: number | null; blockHash: string | null; confirmations: number } | null> {
   const amountString = typeof storedAmount === 'string' ? storedAmount.trim() : String(storedAmount);
   if (!/^[a-fA-F0-9]{64}$/.test(txHash) ||
       !Number.isSafeInteger(outputIndex) || outputIndex < 0 ||
@@ -103,12 +103,28 @@ async function verifyUtxoDepositOutput(
     }
     if (expectedSatoshis <= 0n || expectedSatoshis !== BigInt(output.value)) return null;
 
-    if (status?.confirmed !== true) return { blockHeight: null, confirmations: 0 };
+    if (status?.confirmed !== true) return { blockHeight: null, blockHash: null, confirmations: 0 };
     const blockHeight = status.block_height;
-    if (!Number.isSafeInteger(blockHeight) || blockHeight <= 0) return null;
-    const tipHeight = await fetchUtxoTipHeight(base);
-    if (tipHeight === null || tipHeight < blockHeight) return null;
-    return { blockHeight, confirmations: tipHeight - blockHeight + 1 };
+    const reportedHash = status.block_hash;
+    if (!Number.isSafeInteger(blockHeight) || blockHeight <= 0 ||
+        typeof reportedHash !== 'string' || !/^[a-fA-F0-9]{64}$/.test(reportedHash)) return null;
+
+    const [tipHeight, canonicalHashRes] = await Promise.all([
+      fetchUtxoTipHeight(base),
+      fetch(`${base}/block-height/${blockHeight}`),
+    ]);
+    if (tipHeight === null || tipHeight < blockHeight || !canonicalHashRes.ok) return null;
+    const canonicalHash = (await canonicalHashRes.text()).trim();
+    if (!/^[a-fA-F0-9]{64}$/.test(canonicalHash) ||
+        canonicalHash.toLowerCase() !== reportedHash.toLowerCase()) return null;
+
+    const txidsRes = await fetch(`${base}/block/${canonicalHash}/txids`);
+    if (!txidsRes.ok) return null;
+    const canonicalTxids = await txidsRes.json();
+    if (!Array.isArray(canonicalTxids) ||
+        !canonicalTxids.some((id) => typeof id === 'string' && id.toLowerCase() === txHash.toLowerCase())) return null;
+
+    return { blockHeight, blockHash: canonicalHash.toLowerCase(), confirmations: tipHeight - blockHeight + 1 };
   } catch {
     return null;
   }
