@@ -113,12 +113,21 @@ export async function POST(request: NextRequest) {
 
     const requestedMax = Number(body.max_amount ?? body.max_limit ?? body.maxAmount ?? 5000);
     const requestedMin = Number(body.min_amount ?? body.min_limit ?? body.minAmount ?? 100);
+    const rawCryptoAmount = body.crypto_amount ?? body.cryptoAmount ?? body.total_amount ?? body.totalAmount;
+    const requestedCryptoAmount = Number(rawCryptoAmount);
 
-    // Reject malformed or inverted fiat limits before any balance lookup or database write.
+    // Fiat order limits and crypto inventory are different quantities and must be supplied separately.
     if (!Number.isFinite(requestedMin) || !Number.isFinite(requestedMax) ||
         requestedMin <= 0 || requestedMax <= 0 || requestedMin > requestedMax) {
       return NextResponse.json(
         { error: 'Trade limits must be finite positive numbers, and the maximum must be at least the minimum.', code: 'INVALID_TRADE_LIMITS' },
+        { status: 400 }
+      );
+    }
+    if (rawCryptoAmount === undefined || rawCryptoAmount === null || rawCryptoAmount === '' ||
+        !Number.isFinite(requestedCryptoAmount) || requestedCryptoAmount <= 0) {
+      return NextResponse.json(
+        { error: 'Enter a valid crypto quantity to offer. Crypto quantity is separate from fiat trade limits.', code: 'INVALID_CRYPTO_AMOUNT' },
         { status: 400 }
       );
     }
@@ -289,8 +298,8 @@ export async function POST(request: NextRequest) {
       margin: marginVal,
       min_limit: requestedMin,
       max_limit: requestedMax,
-      total_amount: requestedMax,
-      available_amount: requestedMax,
+      total_amount: requestedCryptoAmount,
+      available_amount: requestedCryptoAmount,
       payment_methods: paymentMethods,
       payment_window: paymentWindow,
       
@@ -343,6 +352,8 @@ export async function POST(request: NextRequest) {
           price: priceVal,
           min_limit: requestedMin,
           max_limit: requestedMax,
+          total_amount: requestedCryptoAmount,
+          available_amount: requestedCryptoAmount,
           payment_methods: paymentMethods,
           is_active: true,
           terms: resolvedTerms,
