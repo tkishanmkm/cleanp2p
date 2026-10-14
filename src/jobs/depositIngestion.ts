@@ -244,7 +244,7 @@ export async function verifyTronTokenDeposit(
   eventIndex: number,
   destinationAddress: string,
   storedAmount: number | string
-): Promise<{ blockNumber: number; confirmations: number; fromAddress: string } | null> {
+): Promise<{ blockNumber: number; blockHash: string; confirmations: number; fromAddress: string } | null> {
   const amountString = typeof storedAmount === 'string' ? storedAmount.trim() : String(storedAmount);
   if (!/^[0-9a-f]{64}$/i.test(txHash) ||
       !Number.isSafeInteger(eventIndex) || eventIndex < 0 ||
@@ -285,6 +285,18 @@ export async function verifyTronTokenDeposit(
 
     const currentHeight = currentBlock?.block_header?.raw_data?.number;
     if (!Number.isSafeInteger(currentHeight) || currentHeight < txInfo.blockNumber) return null;
+
+    // Re-fetch the transaction's height from the node and verify the canonical
+    // block actually contains this transaction before trusting its block ID.
+    const canonicalBlock = await tronWeb.trx.getBlock(txInfo.blockNumber);
+    const canonicalHeight = canonicalBlock?.block_header?.raw_data?.number;
+    const canonicalBlockHash = String(canonicalBlock?.blockID || '').toLowerCase();
+    const blockTransactions = Array.isArray(canonicalBlock?.transactions) ? canonicalBlock.transactions : [];
+    const transactionInCanonicalBlock = blockTransactions.some((item: any) =>
+      String(item.txID || '').toLowerCase() === txHash.toLowerCase()
+    );
+    if (!Number.isSafeInteger(canonicalHeight) || canonicalHeight !== txInfo.blockNumber ||
+        !/^[0-9a-f]{64}$/.test(canonicalBlockHash) || !transactionInCanonicalBlock) return null;
 
     const eventsPayload = await eventsResponse.json();
     const events = Array.isArray(eventsPayload?.data) ? eventsPayload.data : [];
@@ -327,6 +339,7 @@ export async function verifyTronTokenDeposit(
 
     return {
       blockNumber: txInfo.blockNumber,
+      blockHash: canonicalBlockHash,
       confirmations: currentHeight - txInfo.blockNumber + 1,
       fromAddress: fromBase58,
     };
