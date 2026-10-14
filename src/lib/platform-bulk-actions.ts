@@ -50,15 +50,19 @@ export async function pauseAllAds(adminId: string, adminEmail: string): Promise<
         .in("id", p2pAdIds);
     }
 
-    // Also update advertisements table if any active
-    await supabase
+    // Also update advertisements table if any active. Supabase query builders
+    // return errors in the result object; they are not Promise.catch() chains.
+    const { error: advertisementsPauseError } = await supabase
       .from("advertisements")
       .update({
         status: "GLOBAL_PAUSED",
         is_active: false,
       })
-      .eq("is_active", true)
-      .catch(() => {});
+      .eq("is_active", true);
+
+    if (advertisementsPauseError) {
+      console.error("[pauseAllAds] Failed to pause advertisements table rows:", advertisementsPauseError);
+    }
 
     // Save timestamp in system_settings
     await supabase
