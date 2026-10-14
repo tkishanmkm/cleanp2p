@@ -433,6 +433,7 @@ export async function getAdDetails(adId: string): Promise<ActionResponse<any>> {
 export async function createAd(formData: any): Promise<ActionResponse<any>> {
   try {
     const supabase = await createClient();
+    const adminClient = getSupabaseAdminClient();
 
     const { data: { user }, error: authError } = await supabase.auth.getUser();
 
