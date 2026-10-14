@@ -55,3 +55,11 @@ Earlier steps revoked service-role execution from legacy unverified deposit-cred
 - No SQL mutations, wallet credits, ledger inserts, privilege grants, or revocations were performed in this step.
 - No tests/build/deployment were run.
 - **Status: audit report only; production readiness not established.**
+
+
+## Additional live finding from caller-boundary scan
+
+- `public.credit_onchain_deposit(text,text,numeric,text,text)` is also `SECURITY DEFINER` with an empty pinned search path. Its observed ACL grants execute to `postgres` and `supabase_auth_admin`, but not `anon`, `authenticated`, or `service_role`.
+- Its body appears to use a separate legacy accounting path: it inserts an `onchain_deposits` row as `COMPLETED`, increments `balances.available_balance`, and writes `financial_ledger`. This differs from `wallet_assets` + compact `ledger_entries`, so it must not be assumed to reconcile with the current wallet model.
+- Its body performs a duplicate check by transaction hash, but the inspected logic does not demonstrate a canonical uniqueness key across network and output/log index, nor prove chain confirmations/finality before the credit. It must remain non-callable by app roles unless and until its full callers and verified-evidence requirements are proven.
+- This additional catalog result does not change the conclusion: caller coverage is incomplete and deposit credit should remain fail-closed.
