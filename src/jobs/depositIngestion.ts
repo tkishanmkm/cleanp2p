@@ -689,14 +689,16 @@ async function scanTronDeposits(
               }
             } catch (_) {}
 
-            const decimals = item.token_info?.decimals !== undefined ? Number(item.token_info.decimals) : 6;
+            // The approved TRC-20 USDT contract uses six decimals; do not trust
+            // third-party token metadata to choose the credited unit scale.
+            const decimals = 6;
             const rawVal = BigInt(item.value || '0');
             if (rawVal <= 0n) continue;
             const formattedAmount = ethers.formatUnits(rawVal, decimals);
             const amount = parseFloat(formattedAmount);
             if (amount <= 0) continue;
 
-            const tokenContract = item.token_info?.address || contractAddress;
+            const tokenContract = contractAddress;
 
             // Fetch block number from TRON RPC if missing from account event
             let eventBlock = item.block_number || 0;
@@ -879,7 +881,7 @@ async function scanTronDeposits(
           if (!log.topics || log.topics.length < 3) continue;
           if ((log.topics[0] || '').toLowerCase() !== transferTopic) continue;
           const logContractHex = String(log.address || '').toLowerCase().replace(/^0x/, '');
-          if (!approvedContractHex || logContractHex !== approvedContractHex) continue;
+          if (!approvedContractHex || logContractHex !== approvedContractHex.replace(/^41/, '')) continue;
 
           const txHash = (log.transactionHash || '').replace(/^0x/, '');
           const outputIndex = parseInt(log.logIndex || '0x0', 16) || 0;
