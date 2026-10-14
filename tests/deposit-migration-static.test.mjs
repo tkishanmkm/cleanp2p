@@ -54,6 +54,12 @@ const postValidation = sql.slice(sql.indexOf('v_block_hash :='));
 assert.doesNotMatch(postValidation, /(^|\n)\s+p_block_hash\s*[,)]/,
   'raw caller block hash must not be persisted after canonicalization');
 
+
+assert.match(sql, /COALESCE\(NULLIF\(v_from_address, ''\), ''\)/,
+  'deposit insert must respect the live NOT NULL from_address column when sender is unavailable');
+assert.match(sql, /'code', 'WALLET_BALANCE_INVALID'/,
+  'NULL or negative wallet balances must fail closed before credit');
+
 console.log('Deposit migration static safety checks passed. This is not a PostgreSQL parser or execution test.');
 const workerPath = 'src/jobs/confirmationsWorker.ts';
 const worker = readFileSync(workerPath, 'utf8');
