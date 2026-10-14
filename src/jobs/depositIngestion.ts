@@ -164,14 +164,16 @@ export async function verifyEvmTokenDeposit(
   txHash: string,
   logIndex: number,
   destinationAddress: string,
-  storedAmount: number,
+  storedAmount: number | string,
   tokenContract: string,
   decimals: number
 ): Promise<{ blockNumber: number; confirmations: number; fromAddress: string } | null> {
+  const amountString = typeof storedAmount === 'string' ? storedAmount.trim() : String(storedAmount);
   if (!/^0x[0-9a-f]{64}$/i.test(txHash) ||
       !Number.isSafeInteger(logIndex) || logIndex < 0 ||
       !ethers.isAddress(destinationAddress) || !ethers.isAddress(tokenContract) ||
-      !Number.isFinite(storedAmount) || storedAmount <= 0 ||
+      !/^\\d+(?:\\.\\d+)?$/.test(amountString) ||
+      (typeof storedAmount === 'number' && !Number.isFinite(storedAmount)) ||
       !Number.isSafeInteger(decimals) || decimals < 0 || decimals > 36) return null;
 
   try {
@@ -199,7 +201,7 @@ export async function verifyEvmTokenDeposit(
 
     let expectedValue: bigint;
     try {
-      expectedValue = ethers.parseUnits(String(storedAmount), decimals);
+      expectedValue = ethers.parseUnits(amountString, decimals);
     } catch {
       return null;
     }
@@ -223,12 +225,14 @@ export async function verifyTronTokenDeposit(
   txHash: string,
   eventIndex: number,
   destinationAddress: string,
-  storedAmount: number
+  storedAmount: number | string
 ): Promise<{ blockNumber: number; confirmations: number; fromAddress: string } | null> {
+  const amountString = typeof storedAmount === 'string' ? storedAmount.trim() : String(storedAmount);
   if (!/^[0-9a-f]{64}$/i.test(txHash) ||
       !Number.isSafeInteger(eventIndex) || eventIndex < 0 ||
       !isValidTronAddress(destinationAddress) ||
-      !Number.isFinite(storedAmount) || storedAmount <= 0) return null;
+      !/^\\d+(?:\\.\\d+)?$/.test(amountString) ||
+      (typeof storedAmount === 'number' && !Number.isFinite(storedAmount))) return null;
 
   try {
     const tronWeb = getTronWeb(false);
@@ -288,7 +292,7 @@ export async function verifyTronTokenDeposit(
 
     let expectedValue: bigint;
     try {
-      expectedValue = ethers.parseUnits(String(storedAmount), 6);
+      expectedValue = ethers.parseUnits(amountString, 6);
     } catch {
       return null;
     }
