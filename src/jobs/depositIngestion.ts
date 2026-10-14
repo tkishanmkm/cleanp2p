@@ -107,6 +107,53 @@ async function verifyUtxoDepositOutput(
 }
 
 /**
+ * Independently verifies a pending native EVM deposit against the transaction
+ * and successful receipt. Database-stored destination/amount are never proof.
+ */
+export async function verifyEvmNativeDeposit(
+  provider: ReturnType<typeof getEvmProvider>,
+  txHash: string,
+  destinationAddress: string,
+  storedAmount: number,
+  decimals: number
+): Promise<{ blockNumber: number; confirmations: number; fromAddress: string } | null> {
+  if (!/^0x[0-9a-f]{64}$/i.test(txHash) ||
+      !ethers.isAddress(destinationAddress) ||
+      !Number.isFinite(storedAmount) || storedAmount <= 0 ||
+      !Number.isSafeInteger(decimals) || decimals < 0 || decimals > 36) return null;
+
+  try {
+    const [tx, receipt, currentBlock] = await Promise.all([
+      provider.getTransaction(txHash),
+      provider.getTransactionReceipt(txHash),
+      provider.getBlockNumber(),
+    ]);
+    if (!tx || tx.hash.toLowerCase() !== txHash.toLowerCase() ||
+        !tx.to || tx.to.toLowerCase() !== destinationAddress.toLowerCase() ||
+        tx.value <= 0n || !receipt ||
+        receipt.hash.toLowerCase() !== txHash.toLowerCase() ||
+        receipt.status !== 1 || receipt.blockNumber == null ||
+        currentBlock < receipt.blockNumber) return null;
+
+    let expectedValue: bigint;
+    try {
+      expectedValue = ethers.parseUnits(String(storedAmount), decimals);
+    } catch {
+      return null;
+    }
+    if (expectedValue <= 0n || tx.value !== expectedValue) return null;
+
+    return {
+      blockNumber: receipt.blockNumber,
+      confirmations: currentBlock - receipt.blockNumber + 1,
+      fromAddress: tx.from.toLowerCase(),
+    };
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Independently verifies the exact ERC-20 Transfer log before a stored token
  * deposit is allowed to reach the crediting RPC.
  */
