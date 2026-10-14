@@ -225,6 +225,8 @@ export interface ConfirmedDepositReorgAuditResult {
   matched: number;
   suspectedReorg: number;
   unverifiable: number;
+  hasMore: boolean;
+  nextCursor: string | null;
   details: Array<{
     depositId: string;
     txHash: string;
@@ -243,29 +245,43 @@ function normalizeBlockHash(hash: unknown): string | null {
 }
 
 export async function runConfirmedDepositReorgAudit(
-  limit: number = 100
+  limit: number = 100,
+  afterId: string | null = null
 ): Promise<ConfirmedDepositReorgAuditResult> {
   const result: ConfirmedDepositReorgAuditResult = {
     scanned: 0,
     matched: 0,
     suspectedReorg: 0,
     unverifiable: 0,
+    hasMore: false,
+    nextCursor: null,
     details: [],
   };
   const safeLimit = Number.isSafeInteger(limit) ? Math.min(500, Math.max(1, limit)) : 100;
 
-  const { data: deposits, error } = await supabaseAdmin
+  if (afterId !== null && !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(afterId)) {
+    throw new Error('Invalid confirmed-deposit reorg audit cursor; expected a UUID.');
+  }
+
+  let query = supabaseAdmin
     .from('onchain_deposits')
     .select('*')
     .eq('status', 'CONFIRMED')
-    .order('updated_at', { ascending: true })
+    .order('id', { ascending: true })
     .limit(safeLimit);
+  if (afterId !== null) query = query.gt('id', afterId);
+
+  const { data: deposits, error } = await query;
 
   if (error) {
     throw new Error(`Confirmed-deposit reorg audit query failed: ${error.message}`);
   }
 
-  for (const deposit of deposits || []) {
+  const batch = deposits || [];
+  result.hasMore = batch.length === safeLimit;
+  result.nextCursor = result.hasMore ? String(batch[batch.length - 1]?.id || '') || null : null;
+
+  for (const deposit of batch) {
     result.scanned++;
     const network = normalizeDepositNetwork(deposit.network || deposit.network_code || '');
     const storedHash = normalizeBlockHash(deposit.block_hash);
