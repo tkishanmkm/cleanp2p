@@ -278,7 +278,7 @@ export async function runConfirmationsWorker(): Promise<ConfirmationWorkerResult
             deposit.tx_hash,
             outputIndex,
             destinationAddress,
-            Number(deposit.amount)
+            deposit.amount
           );
           if (!verified) {
             result.pendingCount++;
@@ -312,7 +312,7 @@ export async function runConfirmationsWorker(): Promise<ConfirmationWorkerResult
             deposit.tx_hash,
             outputIndex,
             destinationAddress,
-            Number(deposit.amount),
+            deposit.amount,
             tokenContract || chain.usdtContractAddress || '',
             chain.usdtDecimals ?? 6
           );
@@ -368,7 +368,7 @@ export async function runConfirmationsWorker(): Promise<ConfirmationWorkerResult
           p_destination_address: destinationAddress,
           p_asset_symbol: assetSymbol,
           p_network_code: normNet,
-          p_amount: assetSymbol === 'USDT' ? Number(deposit.amount) : deposit.amount,
+          p_amount: deposit.amount,
           p_tx_hash: deposit.tx_hash,
           p_output_index: outputIndex,
           p_block_number: blockNumber,
