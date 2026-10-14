@@ -725,8 +725,8 @@ async function scanEvmNativeDeposits(
           try {
             const transfers: any = await provider.send('alchemy_getAssetTransfers', [
               {
-                fromBlock: '0x0',
-                toBlock: 'latest',
+                fromBlock: '0x' + fromBlock.toString(16),
+                toBlock: '0x' + toBlock.toString(16),
                 toAddress: address,
                 category: ['external'],
                 order: 'desc',
@@ -750,6 +750,9 @@ async function scanEvmNativeDeposits(
                 if (chainTx.value <= BigInt(0)) continue;
 
                 const txBlock = receipt.blockNumber;
+                // Discovery must stay inside the checkpointed scan range; it is not
+                // a substitute for a historical backfill or an all-chain transaction index.
+                if (txBlock < fromBlock || txBlock > toBlock) continue;
                 if (tx.blockNum && Number.parseInt(tx.blockNum, 16) !== txBlock) continue;
                 // Keep native coin amounts as exact decimal strings to avoid IEEE-754 rounding.
                 const formattedValue = ethers.formatUnits(chainTx.value, chainConfig.nativeDecimals);
