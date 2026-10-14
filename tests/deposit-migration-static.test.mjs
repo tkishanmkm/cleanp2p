@@ -33,3 +33,19 @@ assert.match(audit, /REORG_SUSPECTED/, 'reorg audit must flag hash mismatches');
 assert.doesNotMatch(audit, /\.update\s*\(|\.insert\s*\(|\.upsert\s*\(|\.delete\s*\(|\.rpc\s*\(/, 'reorg audit must remain read-only and must not call financial RPCs');
 
 console.log('Confirmed-deposit reorg audit static safety checks passed. This is not a runtime chain or database test.');
+const incidentMigration = readFileSync(
+  'supabase/migrations/20261014080000_create_deposit_reorg_incidents.sql',
+  'utf8'
+);
+assert.match(incidentMigration, /CREATE TABLE IF NOT EXISTS public\.deposit_reorg_incidents/);
+assert.match(incidentMigration, /UNIQUE INDEX IF NOT EXISTS deposit_reorg_incidents_identity_key/);
+assert.match(incidentMigration, /REORG_SUSPECTED/);
+assert.match(incidentMigration, /MISSING_STORED_HASH/);
+assert.match(incidentMigration, /review_status text NOT NULL DEFAULT 'OPEN'/);
+assert.match(incidentMigration, /ENABLE ROW LEVEL SECURITY/);
+assert.match(incidentMigration, /REVOKE ALL ON TABLE public\.deposit_reorg_incidents FROM PUBLIC, anon, authenticated/);
+assert.match(incidentMigration, /GRANT SELECT, INSERT, UPDATE ON TABLE public\.deposit_reorg_incidents TO service_role/);
+assert.doesNotMatch(incidentMigration, /UPDATE public\.(deposits|onchain_deposits|user_balances|wallet_balances|ledger_entries)|INSERT INTO public\.(ledger_entries|financial_ledger)|process_deposit_atomic/i,
+  'incident-table migration must not alter financial balances, deposit records, or call credit RPCs');
+
+console.log('Deposit reorg incident migration static safety checks passed. This is not a PostgreSQL parser or execution test.');
