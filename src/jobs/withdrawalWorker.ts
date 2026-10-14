@@ -41,8 +41,10 @@ export async function checkCircuitBreakers(): Promise<{ allowed: boolean; reason
       .eq('id', 1)
       .maybeSingle();
 
+    // Fail closed: if the settings row cannot be read, do not broadcast funds.
     if (error || !settings) {
-      return { allowed: true };
+      console.error('[Withdrawal Worker] Could not verify withdrawal settings; dispatch is blocked.', error);
+      return { allowed: false, reason: 'Withdrawal settings could not be verified' };
     }
     if (settings.global_kill_switch_active) {
       return { allowed: false, reason: 'Global emergency kill switch is currently active' };
@@ -52,7 +54,8 @@ export async function checkCircuitBreakers(): Promise<{ allowed: boolean; reason
     }
     return { allowed: true };
   } catch (err) {
-    return { allowed: true };
+    console.error('[Withdrawal Worker] Failed to verify withdrawal circuit breakers; dispatch is blocked.', err);
+    return { allowed: false, reason: 'Withdrawal safety settings could not be verified' };
   }
 }
 
