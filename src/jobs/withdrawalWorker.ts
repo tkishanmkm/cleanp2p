@@ -229,16 +229,34 @@ export async function processWithdrawalQueue(): Promise<WithdrawalProcessResult>
     if (isLocalCheckStage) {
       console.warn(`[Withdrawal Worker] Pre-broadcast validation failure: refunding withdrawal ${withdrawal.id}`);
       try {
-        await supabaseAdmin.rpc('process_failed_withdrawal', {
+        const { data: refundResult, error: refundError } = await supabaseAdmin.rpc('process_failed_withdrawal', {
           p_withdrawal_id: withdrawal.id,
           p_error_reason: err.message || 'Transaction pre-broadcast validation failure',
           p_is_verified_unbroadcast: true,
         });
+        if (refundError) {
+          console.error(`[Withdrawal Worker] Refund RPC returned an error for ${withdrawal.id}:`, refundError.message);
+          return {
+            processed: true,
+            withdrawalId: withdrawal.id,
+            status: 'REFUND_RECONCILIATION_REQUIRED',
+            error: `Pre-broadcast failure; refund RPC failed and requires reconciliation: ${refundError.message}`,
+          };
+        }
+        if (!refundResult || typeof refundResult !== 'object' || refundResult.success !== true) {
+          console.error(`[Withdrawal Worker] Refund RPC returned no explicit success for ${withdrawal.id}; manual reconciliation required.`, refundResult);
+          return {
+            processed: true,
+            withdrawalId: withdrawal.id,
+            status: 'REFUND_RECONCILIATION_REQUIRED',
+            error: 'Pre-broadcast failure; refund outcome was not explicitly confirmed by the database.',
+          };
+        }
         return {
           processed: true,
           withdrawalId: withdrawal.id,
           status: 'FAILED',
-          error: `Pre-broadcast failure. Refund successful: ${err.message}`,
+          error: `Pre-broadcast failure. Refund confirmed by database: ${err.message}`,
         };
       } catch (refundErr: any) {
         console.error(`[Withdrawal Worker] Refund RPC failed for ${withdrawal.id}:`, refundErr);
@@ -252,7 +270,7 @@ export async function processWithdrawalQueue(): Promise<WithdrawalProcessResult>
     } else {
       console.warn(`[Withdrawal Worker] Ambiguous broadcast result for withdrawal ${withdrawal.id}. Transitioning to AMBIGUOUS_BROADCAST and preserving funds reservation.`);
       try {
-        await supabaseAdmin
+        const onchainStatus = await supabaseAdmin
           .from('onchain_withdrawals')
           .update({
             status: 'AMBIGUOUS_BROADCAST',
@@ -260,8 +278,11 @@ export async function processWithdrawalQueue(): Promise<WithdrawalProcessResult>
             updated_at: new Date().toISOString(),
           })
           .eq('id', withdrawal.id);
+        if (onchainStatus.error) {
+          throw new Error(`Failed to update on-chain status: ${onchainStatus.error.message}`);
+        }
 
-        await supabaseAdmin
+        const legacyStatus = await supabaseAdmin
           .from('withdrawals')
           .update({
             status: 'AMBIGUOUS_BROADCAST',
@@ -269,6 +290,9 @@ export async function processWithdrawalQueue(): Promise<WithdrawalProcessResult>
             updated_at: new Date().toISOString(),
           })
           .eq('id', withdrawal.id);
+        if (legacyStatus.error) {
+          throw new Error(`Failed to update legacy withdrawal status: ${legacyStatus.error.message}`);
+        }
       } catch (statusErr) {
         console.error(`[Withdrawal Worker] Failed setting AMBIGUOUS_BROADCAST status for ${withdrawal.id}:`, statusErr);
       }
