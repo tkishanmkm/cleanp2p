@@ -203,7 +203,8 @@ export async function verifyEvmTokenDeposit(
   destinationAddress: string,
   storedAmount: number | string,
   tokenContract: string,
-  decimals: number
+  decimals: number,
+  expectedChainId: number
 ): Promise<{ blockNumber: number; blockHash: string; confirmations: number; fromAddress: string } | null> {
   const amountString = typeof storedAmount === 'string' ? storedAmount.trim() : String(storedAmount);
   if (!/^0x[0-9a-f]{64}$/i.test(txHash) ||
