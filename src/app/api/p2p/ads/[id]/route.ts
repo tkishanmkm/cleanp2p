@@ -242,9 +242,7 @@ export async function PATCH(
     if (p2pAdsRow) {
       // Only write columns that exist in the live canonical public.p2p_ads schema.
       // Fiat limits must never be copied into crypto inventory fields.
-      const p2pPayload: Record<string, any> = {
-        updated_at: new Date().toISOString(),
-      };
+      const p2pPayload: Record<string, any> = {};
 
       if (newStatus !== undefined && isActive !== undefined) {
         p2pPayload.status = newStatus;
