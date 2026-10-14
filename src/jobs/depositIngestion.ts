@@ -563,6 +563,10 @@ async function scanEvmTokenDeposits(
     return { detected: 0, credited: 0, errors: [] };
   }
 
+  if (!Number.isSafeInteger(fromBlock) || !Number.isSafeInteger(toBlock) || fromBlock < 0 || toBlock < fromBlock) {
+    return { detected: 0, credited: 0, errors: [`Invalid EVM token scan range: fromBlock=${fromBlock}, toBlock=${toBlock}`] };
+  }
+
   const provider = getEvmProvider(normNet);
   const tokenDecimals = chainConfig.usdtDecimals ?? 6;
 
@@ -587,6 +591,27 @@ async function scanEvmTokenDeposits(
         address: tokenContractAddress,
         topics: [transferTopic],
       });
+      if (!Array.isArray(chunkLogs)) {
+        throw new Error(`RPC returned malformed EVM token logs for blocks ${chunkFrom}-${chunkTo}`);
+      }
+      for (const log of chunkLogs) {
+        if (
+          !log ||
+          !Number.isSafeInteger(log.blockNumber) ||
+          log.blockNumber < chunkFrom ||
+          log.blockNumber > chunkTo ||
+          typeof log.transactionHash !== 'string' ||
+          !/^0x[0-9a-f]{64}$/i.test(log.transactionHash) ||
+          !Number.isSafeInteger(log.index) ||
+          log.index < 0 ||
+          typeof log.address !== 'string' ||
+          log.address.toLowerCase() !== tokenContractAddress.toLowerCase() ||
+          !Array.isArray(log.topics) ||
+          typeof log.data !== 'string'
+        ) {
+          throw new Error(`RPC returned invalid or out-of-range EVM token log in blocks ${chunkFrom}-${chunkTo}`);
+        }
+      }
       logs.push(...chunkLogs);
     }
 
