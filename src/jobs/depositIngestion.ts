@@ -144,7 +144,8 @@ export async function verifyEvmNativeDeposit(
   txHash: string,
   destinationAddress: string,
   storedAmount: number | string,
-  decimals: number
+  decimals: number,
+  expectedChainId: number
 ): Promise<{ blockNumber: number; blockHash: string; confirmations: number; fromAddress: string } | null> {
   const amountString = typeof storedAmount === 'string' ? storedAmount.trim() : String(storedAmount);
   if (!/^0x[0-9a-f]{64}$/i.test(txHash) ||
@@ -154,12 +155,14 @@ export async function verifyEvmNativeDeposit(
       !Number.isSafeInteger(decimals) || decimals < 0 || decimals > 36) return null;
 
   try {
-    const [tx, receipt, currentBlock] = await Promise.all([
+    const [network, tx, receipt, currentBlock] = await Promise.all([
+      provider.getNetwork(),
       provider.getTransaction(txHash),
       provider.getTransactionReceipt(txHash),
       provider.getBlockNumber(),
     ]);
-    if (!tx || tx.hash.toLowerCase() !== txHash.toLowerCase() ||
+    if (network.chainId !== BigInt(expectedChainId) ||
+        !tx || tx.hash.toLowerCase() !== txHash.toLowerCase() ||
         !tx.to || tx.to.toLowerCase() !== destinationAddress.toLowerCase() ||
         tx.value <= 0n || !receipt ||
         receipt.hash.toLowerCase() !== txHash.toLowerCase() ||
@@ -211,11 +214,13 @@ export async function verifyEvmTokenDeposit(
       !Number.isSafeInteger(decimals) || decimals < 0 || decimals > 36) return null;
 
   try {
-    const [receipt, currentBlock] = await Promise.all([
+    const [network, receipt, currentBlock] = await Promise.all([
+      provider.getNetwork(),
       provider.getTransactionReceipt(txHash),
       provider.getBlockNumber(),
     ]);
-    if (!receipt || receipt.status !== 1 || receipt.blockNumber == null ||
+    if (network.chainId !== BigInt(expectedChainId) ||
+        !receipt || receipt.status !== 1 || receipt.blockNumber == null ||
         currentBlock < receipt.blockNumber) return null;
 
     const transferInterface = new ethers.Interface([
@@ -647,7 +652,8 @@ async function scanEvmTokenDeposits(
           toAddress,
           formattedAmount,
           tokenContractAddress,
-          tokenDecimals
+          tokenDecimals,
+          SUPPORTED_EVM_CHAINS[normNet].chainId
         );
         if (!verified) {
           errors.push(`Skipped EVM log ${log.transactionHash} index ${log.index}: canonical receipt verification failed`);
@@ -759,7 +765,7 @@ async function scanEvmNativeDeposits(
                 if (chainTx.value <= 0n) continue;
                 const assetSymbol = chainConfig.nativeSymbol.toUpperCase();
                 const verified = await verifyEvmNativeDeposit(
-                  provider, txHash, address, formattedValue, chainConfig.nativeDecimals
+                  provider, txHash, address, formattedValue, chainConfig.nativeDecimals, chainConfig.chainId
                 );
                 if (!verified) continue;
                 const confirmations = verified.confirmations;
@@ -839,7 +845,7 @@ async function scanEvmNativeDeposits(
           // Keep native coin amounts as exact decimal strings to avoid IEEE-754 rounding.
           const formattedAmount = ethers.formatUnits(tx.value, chainConfig.nativeDecimals);
           const verified = await verifyEvmNativeDeposit(
-            provider, tx.hash, toClean, formattedAmount, chainConfig.nativeDecimals
+            provider, tx.hash, toClean, formattedAmount, chainConfig.nativeDecimals, chainConfig.chainId
           );
           if (!verified || verified.blockNumber !== b) {
             throw new Error(`Canonical verification failed for native transfer ${tx.hash}; scan is incomplete`);
@@ -1694,7 +1700,8 @@ export async function refreshPendingDepositConfirmations(): Promise<{
               destinationAddress,
               dep.amount,
               tokenContract || chain.usdtContractAddress || '',
-              chain.usdtDecimals ?? 6
+              chain.usdtDecimals ?? 6,
+              chain.chainId
             );
             if (!verified) continue;
             blockNumber = verified.blockNumber;
@@ -1709,7 +1716,8 @@ export async function refreshPendingDepositConfirmations(): Promise<{
               dep.tx_hash,
               destinationAddress,
               dep.amount,
-              chain.nativeDecimals
+              chain.nativeDecimals,
+              chain.chainId
             );
             if (!verified) continue;
             blockNumber = verified.blockNumber;
