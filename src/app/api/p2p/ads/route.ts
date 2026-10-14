@@ -114,6 +114,15 @@ export async function POST(request: NextRequest) {
     const requestedMax = Number(body.max_amount ?? body.max_limit ?? body.maxAmount ?? 5000);
     const requestedMin = Number(body.min_amount ?? body.min_limit ?? body.minAmount ?? 100);
 
+    // Reject malformed or inverted fiat limits before any balance lookup or database write.
+    if (!Number.isFinite(requestedMin) || !Number.isFinite(requestedMax) ||
+        requestedMin <= 0 || requestedMax <= 0 || requestedMin > requestedMax) {
+      return NextResponse.json(
+        { error: 'Trade limits must be finite positive numbers, and the maximum must be at least the minimum.', code: 'INVALID_TRADE_LIMITS' },
+        { status: 400 }
+      );
+    }
+
     // Enforce dynamic minimum limit equivalent to at least $10.00 USD
     const dynamicMinThreshold = calculateMinimumFiatAmount(10.00, fiatType);
     if (requestedMin < dynamicMinThreshold) {
@@ -357,54 +366,8 @@ export async function POST(request: NextRequest) {
         }
       }
 
-      // If RLS blocked the user or table not accessible via client, try service role admin client
-      if (dbError && (dbError.code === '42501' || dbError.message?.toLowerCase().includes('row-level security') || dbError.code === '42P01')) {
-        try {
-          const admin = getSupabaseAdminClient();
-          const { data: adminResult, error: adminError } = await admin
-            .from('ads')
-            .insert([basePayload])
-            .select()
-            .single();
-
-          if (!adminError) {
-            data = adminResult;
-            dbError = null;
-          } else {
-            // Try minimal payload with admin
-            const minAdminPayload: Record<string, any> = {
-              user_id: user.id,
-              type: adSide,
-              asset_symbol: coinType,
-              fiat_symbol: fiatType,
-              price: priceVal,
-              min_limit: requestedMin,
-              max_limit: requestedMax,
-              payment_methods: paymentMethods,
-              is_active: true,
-              terms: resolvedTerms,
-              offer_label: resolvedLabel,
-              label: resolvedLabel,
-              ad_tags: resolvedTags,
-              tags: resolvedTags,
-            };
-            const { data: minAdminRes, error: minAdminErr } = await admin
-              .from('ads')
-              .insert([minAdminPayload])
-              .select()
-              .single();
-
-            if (!minAdminErr) {
-              data = minAdminRes;
-              dbError = null;
-            } else {
-              dbError = minAdminErr;
-            }
-          }
-        } catch (adminEx: any) {
-          console.error('Admin insertion exception:', adminEx);
-        }
-      }
+      // Do not retry user ad creation with the service-role client.
+      // RLS/schema errors must fail closed rather than bypass user-scoped policies.
     }
 
     if (dbError) {
