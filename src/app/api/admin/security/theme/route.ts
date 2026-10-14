@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createClient, createAdminClient } from '@/lib/supabase/server';
+import { createClient, getSupabaseAdminClient } from '@/lib/supabase/server';
 import { logAdminSecurityAudit } from '@/lib/admin-security';
 
 export async function POST(req: NextRequest) {
@@ -17,7 +17,7 @@ export async function POST(req: NextRequest) {
 
     const adminId = session.user.id;
     const adminEmail = session.user.email || 'admin';
-    const adminDb = createAdminClient();
+    const adminDb = getSupabaseAdminClient();
 
     await adminDb
       .from('profiles')
