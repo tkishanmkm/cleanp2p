@@ -1,4 +1,4 @@
-import { createClient } from '@/utils/supabase/server';
+import { createClient, getSupabaseAdminClient } from '@/utils/supabase/server';
 import { NextResponse } from 'next/server';
 
 export const dynamic = 'force-dynamic';
@@ -36,9 +36,11 @@ export async function POST(request: Request) {
       );
     }
 
-    // Keep the reason server-controlled. The RPC signature requires p_reason;
-    // never let client text alter the financial audit reason.
-    const { data, error } = await supabase.rpc('cancel_p2p_trade', {
+    // This privileged RPC is intended for service_role only. Authenticate the
+    // user above, then pass only the server-verified user ID to the RPC.
+    // Keep the reason server-controlled for audit consistency.
+    const adminClient = getSupabaseAdminClient();
+    const { data, error } = await adminClient.rpc('cancel_p2p_trade', {
       p_trade_id: rawTradeId,
       p_caller_id: user.id,
       p_reason: 'user_cancelled',
