@@ -124,10 +124,10 @@ async function fetchOnChainConfirmations(
       const res = await fetch(`${btcApiBase}/tx/${txHash}/status`);
       if (!res.ok) return null;
       const statusData = await res.json();
-      const tipRes = await fetch(`${btcApiBase.replace(/\\/$/, '')}/blocks/tip/height`);
+      const tipRes = await fetch(`${btcApiBase.endsWith('/') ? btcApiBase.slice(0, -1) : btcApiBase}/blocks/tip/height`);
       if (!tipRes.ok) return null;
       const tipRaw = (await tipRes.text()).trim();
-      if (!/^\\d+$/.test(tipRaw)) return null;
+      if (tipRaw.length === 0 || !Array.from(tipRaw).every((ch) => ch >= '0' && ch <= '9')) return null;
       const tipHeight = Number(tipRaw);
       const blockHeight = statusData.block_height;
       if (!statusData.confirmed || !Number.isSafeInteger(blockHeight) || blockHeight <= 0 ||
@@ -146,10 +146,10 @@ async function fetchOnChainConfirmations(
       const res = await fetch(`${ltcApiBase}/tx/${txHash}/status`);
       if (!res.ok) return null;
       const statusData = await res.json();
-      const tipRes = await fetch(`${ltcApiBase.replace(/\\/$/, '')}/blocks/tip/height`);
+      const tipRes = await fetch(`${ltcApiBase.endsWith('/') ? ltcApiBase.slice(0, -1) : ltcApiBase}/blocks/tip/height`);
       if (!tipRes.ok) return null;
       const tipRaw = (await tipRes.text()).trim();
-      if (!/^\\d+$/.test(tipRaw)) return null;
+      if (tipRaw.length === 0 || !Array.from(tipRaw).every((ch) => ch >= '0' && ch <= '9')) return null;
       const tipHeight = Number(tipRaw);
       const blockHeight = statusData.block_height;
       if (!statusData.confirmed || !Number.isSafeInteger(blockHeight) || blockHeight <= 0 ||
