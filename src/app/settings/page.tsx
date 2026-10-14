@@ -448,7 +448,7 @@ export default function SettingsPage() {
         } else if (isReviewStatus) {
           if (hoursElapsed >= 24) {
             // 24 hours have passed without response: reset review and show form again
-            setKycStatus('NOT_STARTED');
+            setKycStatus('NOT_SUBMITTED');
             setIsKycSubmitted(false);
             setKycIsPermanentlyRejected(false);
             setKycCooldownHours(0);
@@ -466,7 +466,7 @@ export default function SettingsPage() {
             setKycCooldownHours(Math.max(1, Math.ceil(24 - hoursElapsed)));
           } else {
             // 24 hours cooldown expired, allow retry
-            setKycStatus('NOT_STARTED');
+            setKycStatus('NOT_SUBMITTED');
             setIsKycSubmitted(false);
             setKycIsPermanentlyRejected(false);
             setKycCooldownHours(0);
