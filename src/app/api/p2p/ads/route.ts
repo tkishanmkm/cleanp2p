@@ -163,7 +163,7 @@ export async function POST(request: NextRequest) {
     const isFixedPricing = pricingType === 'FIXED' || body.rate_type === 'fixed' || Boolean(body.is_fixed);
 
     if (isFixedPricing) {
-      if (priceVal === null || isNaN(priceVal) || priceVal <= 0) {
+      if (priceVal === null || !Number.isFinite(priceVal) || priceVal <= 0) {
         return NextResponse.json({ error: 'Valid fixed price is required for fixed-rate ads.' }, { status: 400 });
       }
 
@@ -196,7 +196,7 @@ export async function POST(request: NextRequest) {
       }
     } else {
       // Floating/margin pricing validation (-50% to +50%)
-      if (marginVal < -50 || marginVal > 50) {
+      if (!Number.isFinite(marginVal) || marginVal < -50 || marginVal > 50) {
         return NextResponse.json(
           { error: 'Margin percentage for dynamic pricing must be between -50% and +50%.' },
           { status: 400 }
