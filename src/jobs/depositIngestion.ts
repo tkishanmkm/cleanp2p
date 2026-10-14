@@ -548,10 +548,23 @@ async function scanEvmTokenDeposits(
         const formattedAmount = ethers.formatUnits(rawValue, tokenDecimals);
         if (rawValue <= 0n) continue;
 
+        const verified = await verifyEvmTokenDeposit(
+          provider,
+          log.transactionHash,
+          log.index,
+          toAddress,
+          formattedAmount,
+          tokenContractAddress,
+          tokenDecimals
+        );
+        if (!verified) {
+          errors.push(`Skipped EVM log ${log.transactionHash} index ${log.index}: canonical receipt verification failed`);
+          continue;
+        }
         detected++;
-        const confirmations = Math.max(1, latestBlock - log.blockNumber + 1);
+        const confirmations = verified.confirmations;
 
-        // Call canonical atomic deposit RPC
+        // Pass only independently verified canonical block metadata to the atomic RPC.
         const { data, error } = await supabaseAdmin.rpc('process_deposit_atomic', {
           p_destination_address: toAddress,
           p_asset_symbol: 'USDT',
@@ -559,11 +572,12 @@ async function scanEvmTokenDeposits(
           p_amount: formattedAmount,
           p_tx_hash: log.transactionHash,
           p_output_index: log.index,
-          p_block_number: log.blockNumber,
-          p_from_address: fromAddress,
+          p_block_number: verified.blockNumber,
+          p_from_address: verified.fromAddress,
           p_token_contract: tokenContractAddress,
           p_confirmations: confirmations,
           p_provider: 'deposit_ingestion',
+          p_block_hash: verified.blockHash,
         });
 
         if (error) {
@@ -1200,8 +1214,13 @@ async function scanBtcDeposits(
           if (out?.scriptpubkey_address !== btcAddr ||
               !Number.isSafeInteger(out.value) || out.value <= 0) continue;
 
-          detected++;
           const btcAmount = ethers.formatUnits(BigInt(out.value), 8);
+          const verified = await verifyUtxoDepositOutput(btcApiBase, tx.txid, i, btcAddr, btcAmount);
+          if (!verified) {
+            errors.push(`Skipped BTC output ${tx.txid}:${i}: canonical output verification failed`);
+            continue;
+          }
+          detected++;
           const { data, error } = await supabaseAdmin.rpc('process_deposit_atomic', {
             p_destination_address: btcAddr,
             p_asset_symbol: 'BTC',
@@ -1209,11 +1228,12 @@ async function scanBtcDeposits(
             p_amount: btcAmount,
             p_tx_hash: tx.txid,
             p_output_index: i,
-            p_block_number: Number.isSafeInteger(blockHeight) && blockHeight > 0 ? blockHeight : null,
+            p_block_number: verified.blockHeight,
             p_from_address: null,
             p_token_contract: null,
-            p_confirmations: confirmations,
+            p_confirmations: verified.confirmations,
             p_provider: 'deposit_ingestion',
+            p_block_hash: verified.blockHash,
           });
 
           if (error) {
@@ -1272,8 +1292,13 @@ async function scanLtcDeposits(
           if (out?.scriptpubkey_address !== ltcAddr ||
               !Number.isSafeInteger(out.value) || out.value <= 0) continue;
 
-          detected++;
           const ltcAmount = ethers.formatUnits(BigInt(out.value), 8);
+          const verified = await verifyUtxoDepositOutput(ltcApiBase, tx.txid, i, ltcAddr, ltcAmount);
+          if (!verified) {
+            errors.push(`Skipped LTC output ${tx.txid}:${i}: canonical output verification failed`);
+            continue;
+          }
+          detected++;
           const { data, error } = await supabaseAdmin.rpc('process_deposit_atomic', {
             p_destination_address: ltcAddr,
             p_asset_symbol: 'LTC',
@@ -1281,11 +1306,12 @@ async function scanLtcDeposits(
             p_amount: ltcAmount,
             p_tx_hash: tx.txid,
             p_output_index: i,
-            p_block_number: Number.isSafeInteger(blockHeight) && blockHeight > 0 ? blockHeight : null,
+            p_block_number: verified.blockHeight,
             p_from_address: null,
             p_token_contract: null,
-            p_confirmations: confirmations,
+            p_confirmations: verified.confirmations,
             p_provider: 'deposit_ingestion',
+            p_block_hash: verified.blockHash,
           });
 
           if (error) {
