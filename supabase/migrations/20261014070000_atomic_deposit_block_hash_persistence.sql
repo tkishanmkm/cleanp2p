@@ -326,15 +326,20 @@ BEGIN
           AND (
               (v_network = 'BTC'
                AND uda.network::TEXT = 'bitcoin'
-               AND w.chain = 'BTC')
+               AND w.chain = 'BTC'
+               AND BTRIM(uda.address) = BTRIM(v_address)
+               AND BTRIM(w.address) = BTRIM(v_address))
               OR (v_network IN ('ETH', 'ERC20', 'BEP20')
                   AND uda.network::TEXT = 'ethereum'
-                  AND w.chain = 'EVM')
+                  AND w.chain = 'EVM'
+                  AND LOWER(BTRIM(uda.address)) = LOWER(BTRIM(v_address))
+                  AND LOWER(BTRIM(w.address)) = LOWER(BTRIM(v_address)))
               OR (v_network = 'TRC20'
                   AND uda.network::TEXT = 'TRC20'
-                  AND w.chain = 'TRON')
+                  AND w.chain = 'TRON'
+                  AND BTRIM(uda.address) = BTRIM(v_address)
+                  AND BTRIM(w.address) = BTRIM(v_address))
           )
-          AND LOWER(BTRIM(uda.address)) = LOWER(BTRIM(v_address))
     ) THEN
         RETURN jsonb_build_object(
             'success', false,
@@ -349,7 +354,7 @@ BEGIN
         INTO v_uda_count
         FROM public.user_deposit_addresses
         WHERE network::TEXT = 'bitcoin'
-          AND LOWER(BTRIM(address)) = LOWER(v_address);
+          AND BTRIM(address) = BTRIM(v_address);
 
         IF v_uda_count > 1 THEN
             RAISE EXCEPTION
@@ -363,7 +368,7 @@ BEGIN
             INTO v_user_id
             FROM public.user_deposit_addresses
             WHERE network::TEXT = 'bitcoin'
-              AND LOWER(BTRIM(address)) = LOWER(v_address);
+              AND BTRIM(address) = BTRIM(v_address);
 
         ELSE
 
@@ -371,7 +376,7 @@ BEGIN
             INTO v_wallet_count
             FROM public.wallets
             WHERE chain = 'BTC'
-              AND LOWER(BTRIM(address)) = LOWER(v_address)
+              AND BTRIM(address) = BTRIM(v_address)
               AND UPPER(COALESCE(funding_status, '')) = 'ACTIVE';
 
             IF v_wallet_count > 1 THEN
@@ -385,7 +390,7 @@ BEGIN
                 INTO v_user_id
                 FROM public.wallets
                 WHERE chain = 'BTC'
-                  AND LOWER(BTRIM(address)) = LOWER(v_address)
+                  AND BTRIM(address) = BTRIM(v_address)
                   AND UPPER(COALESCE(funding_status, '')) = 'ACTIVE';
             END IF;
 
