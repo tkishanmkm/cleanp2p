@@ -166,6 +166,104 @@ export async function verifyEvmTokenDeposit(
   }
 }
 
+/**
+ * Independently verifies the exact TRC-20 USDT event before a pending deposit
+ * can reach the atomic credit RPC. Provider or database metadata alone is not proof.
+ */
+export async function verifyTronTokenDeposit(
+  txHash: string,
+  eventIndex: number,
+  destinationAddress: string,
+  storedAmount: number
+): Promise<{ blockNumber: number; confirmations: number; fromAddress: string } | null> {
+  if (!/^[0-9a-f]{64}$/i.test(txHash) ||
+      !Number.isSafeInteger(eventIndex) || eventIndex < 0 ||
+      !isValidTronAddress(destinationAddress) ||
+      !Number.isFinite(storedAmount) || storedAmount <= 0) return null;
+
+  try {
+    const tronWeb = getTronWeb(false);
+    const rpcUrl = (process.env.TRON_RPC_URL || TRON_CONFIG.fullHost || 'https://api.trongrid.io').replace(/\/$/, '');
+    const contractAddress = process.env.USDT_CONTRACT_TRC20 || TRON_CONFIG.usdtContract || CANONICAL_USDT_CONTRACTS.TRC20;
+    const normalizeAddress = (address: string): string | null => {
+      try {
+        return tronWeb.address.toHex(address).toLowerCase().replace(/^0x/, '');
+      } catch {
+        return null;
+      }
+    };
+    const expectedContract = normalizeAddress(contractAddress);
+    const expectedDestination = normalizeAddress(destinationAddress);
+    if (!expectedContract || !expectedDestination) return null;
+
+    const eventHost = (process.env.TRONGRID_API_URL || process.env.TRON_EVENT_SERVER ||
+      (rpcUrl.toLowerCase().includes('api.trongrid.io') ? rpcUrl : 'https://api.trongrid.io')).replace(/\/$/, '');
+    const headers: Record<string, string> = { Accept: 'application/json' };
+    const apiKey = process.env.TRON_GRID_API_KEY || process.env.TRONGRID_API_KEY || TRON_CONFIG.apiKey;
+    if (apiKey) headers['TRON-PRO-API-KEY'] = apiKey;
+
+    const [txInfo, currentBlock, eventsResponse] = await Promise.all([
+      tronWeb.trx.getTransactionInfo(txHash),
+      tronWeb.trx.getCurrentBlock(),
+      fetch(`${eventHost}/v1/transactions/${txHash}/events?limit=200`, { headers }),
+    ]);
+    if (!txInfo || String(txInfo.id || '').toLowerCase() !== txHash.toLowerCase() ||
+        String(txInfo.receipt?.result || '').toUpperCase() !== 'SUCCESS' ||
+        !Number.isSafeInteger(txInfo.blockNumber) || txInfo.blockNumber <= 0 ||
+        !eventsResponse.ok) return null;
+
+    const currentHeight = currentBlock?.block_header?.raw_data?.number;
+    if (!Number.isSafeInteger(currentHeight) || currentHeight < txInfo.blockNumber) return null;
+
+    const eventsPayload = await eventsResponse.json();
+    const events = Array.isArray(eventsPayload?.data) ? eventsPayload.data : [];
+    const event = events.find((item: any) =>
+      Number(item.event_index) === eventIndex &&
+      String(item.transaction_id || '').toLowerCase() === txHash.toLowerCase()
+    );
+    if (!event || String(event.event_name || '') !== 'Transfer') return null;
+    const eventContract = normalizeAddress(String(event.contract_address || ''));
+    if (!eventContract || eventContract !== expectedContract) return null;
+
+    const result = event.result || {};
+    const eventDestination = normalizeAddress(String(result.to || ''));
+    if (!eventDestination || eventDestination !== expectedDestination) return null;
+
+    let rawValue: bigint;
+    try {
+      rawValue = BigInt(String(result.value));
+    } catch {
+      return null;
+    }
+    if (rawValue <= 0n) return null;
+
+    let expectedValue: bigint;
+    try {
+      expectedValue = ethers.parseUnits(String(storedAmount), 6);
+    } catch {
+      return null;
+    }
+    if (rawValue !== expectedValue) return null;
+
+    const fromAddress = normalizeAddress(String(result.from || ''));
+    if (!fromAddress) return null;
+    let fromBase58: string;
+    try {
+      fromBase58 = tronWeb.address.fromHex(fromAddress);
+    } catch {
+      return null;
+    }
+
+    return {
+      blockNumber: txInfo.blockNumber,
+      confirmations: currentHeight - txInfo.blockNumber + 1,
+      fromAddress: fromBase58,
+    };
+  } catch {
+    return null;
+  }
+}
+
 export interface IngestionResult {
   network: string;
   scannedBlocks?: number;
@@ -1138,10 +1236,31 @@ export async function refreshPendingDepositConfirmations(): Promise<{
       const tokenContract = CANONICAL_USDT_CONTRACTS[normNet] || null;
 
       if (normNet === 'TRC20') {
-        // Transaction confirmation alone does not prove the stored amount,
-        // destination, contract, and event index. Fail closed until the exact
-        // TRON Transfer event is independently re-fetched in this pending path.
-        continue;
+        const verified = await verifyTronTokenDeposit(
+          dep.tx_hash,
+          outputIndex,
+          destinationAddress,
+          Number(dep.amount)
+        );
+        if (!verified) continue;
+
+        const { data: rpcData, error: rpcErr } = await supabaseAdmin.rpc('process_deposit_atomic', {
+          p_destination_address: destinationAddress,
+          p_asset_symbol: 'USDT',
+          p_network_code: 'TRC20',
+          p_amount: Number(dep.amount),
+          p_tx_hash: dep.tx_hash,
+          p_output_index: outputIndex,
+          p_block_number: verified.blockNumber,
+          p_from_address: verified.fromAddress,
+          p_token_contract: tokenContract,
+          p_confirmations: verified.confirmations,
+          p_provider: 'confirmations_worker',
+        });
+        if (!rpcErr) {
+          const r = typeof rpcData === 'string' ? JSON.parse(rpcData) : rpcData;
+          if (r?.status === 'credited') newlyCredited++;
+        }
       } else if (normNet === 'BTC') {
         const btcApiBase = getBtcMempoolApi();
         const verified = await verifyUtxoDepositOutput(
