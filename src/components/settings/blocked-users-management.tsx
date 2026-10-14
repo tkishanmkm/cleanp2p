@@ -91,6 +91,7 @@ export function BlockedUsersManagement({ user: currentUserData }: { user: User }
   }, [fetchBlockedUsers]);
 
   const authUserId = authUser?.uid;
+  const blockedUserIds = currentUserData?.blockedUsers || [];
 
   useEffect(() => {
     if (!usernameToBlock || usernameToBlock.length < 2) {
