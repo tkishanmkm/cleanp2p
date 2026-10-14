@@ -47,11 +47,9 @@ export async function GET(
 
     // 1. Unauthenticated Trade Access Check (Step 20.10)
     const {
-      data: { session },
+      data: { user },
       error: authError,
-    } = await authSupabase.auth.getSession();
-
-    const user = session?.user;
+    } = await authSupabase.auth.getUser();
     if (authError || !user) {
       return NextResponse.json(
         { error: 'Please log in to continue.', code: 'UNAUTHENTICATED' },
