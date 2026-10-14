@@ -812,13 +812,6 @@ export async function createTradeOrderWithEscrow(input: {
       };
     }
 
-    if (resolvedPaymentMethod) {
-      await adminClient
-        .from('trades')
-        .update({ payment_method: resolvedPaymentMethod })
-        .eq('id', tradeId);
-    }
-
     // Derive notification/email identities from the validated ad and escrow RPC result.
     const resolvedPublicId = String(
       rpcResult.public_id || rpcResult.public_trade_id || rpcResult.trade_ref || shortTradeId || tradeId
