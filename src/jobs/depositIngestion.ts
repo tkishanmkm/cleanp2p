@@ -942,6 +942,11 @@ async function scanTronDeposits(
               ? latestBlock - eventBlock + 1
               : 1;
 
+            const verified = await verifyTronTokenDeposit(txId, eventIndex, toAddr, formattedAmount);
+            if (!verified) {
+              errors.push(`Skipped TRON deposit ${txId} event ${eventIndex}: canonical event verification failed`);
+              continue;
+            }
             detected++;
 
             const { data: rpcData, error } = await supabaseAdmin.rpc('process_deposit_atomic', {
@@ -951,11 +956,12 @@ async function scanTronDeposits(
               p_amount: formattedAmount,
               p_tx_hash: txId,
               p_output_index: eventIndex,
-              p_block_number: eventBlock || null,
-              p_from_address: fromAddr,
+              p_block_number: verified.blockNumber,
+              p_from_address: verified.fromAddress,
               p_token_contract: tokenContract,
-              p_confirmations: confirmations,
+              p_confirmations: verified.confirmations,
               p_provider: 'deposit_ingestion',
+              p_block_hash: verified.blockHash,
             });
 
             if (error) {
@@ -1011,14 +1017,12 @@ async function scanTronDeposits(
             if (!monitoredTronAddresses.has(toBase58)) continue;
             seenTxIndices.add(deduplicationKey);
 
+            const verified = await verifyTronTokenDeposit(txId, outputIndex, toBase58, formattedAmount);
+            if (!verified) {
+              errors.push(`Skipped TRON deposit ${txId} event ${outputIndex}: canonical event verification failed`);
+              continue;
+            }
             detected++;
-            const rawValBig = BigInt(rawValue);
-            const formattedAmount = ethers.formatUnits(rawValBig, 6);
-
-            const eventBlock = evt.block_number || 0;
-            const confirmations = (latestBlock && eventBlock && latestBlock >= eventBlock)
-              ? latestBlock - eventBlock + 1
-              : 1;
 
             const { data: rpcData, error } = await supabaseAdmin.rpc('process_deposit_atomic', {
               p_destination_address: toBase58,
@@ -1027,11 +1031,12 @@ async function scanTronDeposits(
               p_amount: formattedAmount,
               p_tx_hash: txId,
               p_output_index: outputIndex,
-              p_block_number: eventBlock || null,
-              p_from_address: fromBase58,
+              p_block_number: verified.blockNumber,
+              p_from_address: verified.fromAddress,
               p_token_contract: cAddr,
-              p_confirmations: confirmations,
+              p_confirmations: verified.confirmations,
               p_provider: 'deposit_ingestion',
+              p_block_hash: verified.blockHash,
             });
 
             if (error) {
@@ -1147,6 +1152,11 @@ async function scanTronDeposits(
             eventContractBase58 = tronWeb.address.fromHex('41' + logAddrHex);
           } catch (_) {}
 
+          const verified = await verifyTronTokenDeposit(txHash, outputIndex, toBase58, formattedAmount);
+          if (!verified) {
+            errors.push(`Skipped TRON deposit ${txHash} event ${outputIndex}: canonical event verification failed`);
+            continue;
+          }
           detected++;
 
           const { data: rpcData, error } = await supabaseAdmin.rpc('process_deposit_atomic', {
@@ -1156,11 +1166,12 @@ async function scanTronDeposits(
             p_amount: formattedAmount,
             p_tx_hash: txHash,
             p_output_index: outputIndex,
-            p_block_number: eventBlock,
-            p_from_address: fromBase58,
+            p_block_number: verified.blockNumber,
+            p_from_address: verified.fromAddress,
             p_token_contract: eventContractBase58,
-            p_confirmations: confirmations,
+            p_confirmations: verified.confirmations,
             p_provider: 'deposit_ingestion',
+            p_block_hash: verified.blockHash,
           });
 
           if (error) {
