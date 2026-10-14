@@ -659,7 +659,11 @@ async function scanEvmNativeDeposits(
                 const formattedValue = ethers.formatUnits(chainTx.value, chainConfig.nativeDecimals);
                 if (chainTx.value <= 0n) continue;
                 const assetSymbol = chainConfig.nativeSymbol.toUpperCase();
-                const confirmations = Math.max(0, latestBlock - txBlock + 1);
+                const verified = await verifyEvmNativeDeposit(
+                  provider, txHash, address, formattedValue, chainConfig.nativeDecimals
+                );
+                if (!verified) continue;
+                const confirmations = verified.confirmations;
 
                 detected++;
                 const { data, error } = await supabaseAdmin.rpc('process_deposit_atomic', {
@@ -669,11 +673,12 @@ async function scanEvmNativeDeposits(
                   p_amount: formattedValue,
                   p_tx_hash: txHash,
                   p_output_index: 0,
-                  p_block_number: isNaN(txBlock) ? null : txBlock,
-                  p_from_address: chainTx.from?.toLowerCase() || null,
+                  p_block_number: verified.blockNumber,
+                  p_from_address: verified.fromAddress,
                   p_token_contract: null,
                   p_confirmations: confirmations,
                   p_provider: 'deposit_ingestion',
+                  p_block_hash: verified.blockHash,
                 });
 
                 if (!error) {
@@ -708,11 +713,15 @@ async function scanEvmNativeDeposits(
           const receipt = await provider.getTransactionReceipt(tx.hash);
           if (!receipt || receipt.status !== 1 || receipt.blockNumber !== b) continue;
 
-          detected++;
           // Keep native coin amounts as exact decimal strings to avoid IEEE-754 rounding.
           const formattedAmount = ethers.formatUnits(tx.value, chainConfig.nativeDecimals);
-          const confirmations = Math.max(1, latestBlock - b + 1);
+          const verified = await verifyEvmNativeDeposit(
+            provider, tx.hash, toClean, formattedAmount, chainConfig.nativeDecimals
+          );
+          if (!verified || verified.blockNumber !== b) continue;
+          const confirmations = verified.confirmations;
 
+          detected++;
           const { data, error } = await supabaseAdmin.rpc('process_deposit_atomic', {
             p_destination_address: toClean,
             p_asset_symbol: chainConfig.nativeSymbol === 'ETH' ? 'ETH' : chainConfig.nativeSymbol,
@@ -720,11 +729,12 @@ async function scanEvmNativeDeposits(
             p_amount: formattedAmount,
             p_tx_hash: tx.hash,
             p_output_index: 0,
-            p_block_number: b,
-            p_from_address: tx.from?.toLowerCase() || null,
+            p_block_number: verified.blockNumber,
+            p_from_address: verified.fromAddress,
             p_token_contract: null,
             p_confirmations: confirmations,
             p_provider: 'deposit_ingestion',
+            p_block_hash: verified.blockHash,
           });
 
           if (error) {
