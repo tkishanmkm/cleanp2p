@@ -1261,7 +1261,7 @@ async function scanBtcDeposits(
             errors.push(`RPC error for BTC deposit ${tx.txid} output ${i}: ${error.message}`);
           } else {
             const parsed = typeof data === 'string' ? JSON.parse(data) : data;
-            if (parsed?.status === 'credited' || (parsed?.success && confirmations >= 3)) credited++;
+            if (parsed?.status === 'credited' || (parsed?.success && verified.confirmations >= 3)) credited++;
           }
         }
       }
@@ -1339,7 +1339,7 @@ async function scanLtcDeposits(
             errors.push(`RPC error for LTC deposit ${tx.txid} output ${i}: ${error.message}`);
           } else {
             const parsed = typeof data === 'string' ? JSON.parse(data) : data;
-            if (parsed?.status === 'credited' || (parsed?.success && confirmations >= 6)) credited++;
+            if (parsed?.status === 'credited' || (parsed?.success && verified.confirmations >= 6)) credited++;
           }
         }
       }
