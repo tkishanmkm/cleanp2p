@@ -313,6 +313,36 @@ BEGIN
     -- ADDRESS OWNERSHIP
     -- ================================================================
 
+    -- Fail closed if legacy wallet records and canonical deposit-address
+    -- records assign the same normalized address to different users.
+    -- This check covers networks where the function supports both sources.
+    IF EXISTS (
+        SELECT 1
+        FROM public.user_deposit_addresses uda
+        JOIN public.wallets w
+          ON LOWER(BTRIM(uda.address)) = LOWER(BTRIM(w.address))
+         AND uda.user_id <> w.user_id
+        WHERE UPPER(BTRIM(w.funding_status)) = 'ACTIVE'
+          AND (
+              (v_network = 'BTC'
+               AND uda.network::TEXT = 'bitcoin'
+               AND w.chain = 'BTC')
+              OR (v_network IN ('ETH', 'ERC20', 'BEP20')
+                  AND uda.network::TEXT = 'ethereum'
+                  AND w.chain = 'EVM')
+              OR (v_network = 'TRC20'
+                  AND uda.network::TEXT = 'TRC20'
+                  AND w.chain = 'TRON')
+          )
+          AND LOWER(BTRIM(uda.address)) = LOWER(BTRIM(v_address))
+    ) THEN
+        RETURN jsonb_build_object(
+            'success', false,
+            'code', 'DEPOSIT_ADDRESS_OWNERSHIP_AMBIGUOUS',
+            'message', 'Deposit address maps to conflicting user records; manual reconciliation required'
+        );
+    END IF;
+
     IF v_network = 'BTC' THEN
 
         SELECT COUNT(*)
