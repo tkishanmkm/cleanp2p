@@ -7,8 +7,13 @@ import { SUPPORTED_EVM_CHAINS, getEvmProvider } from '@/lib/blockchain/providers
 // Privileged confirmation processing must fail closed: never fall back to the public anon key.
 const supabaseUrl =
   process.env.NEXT_PUBLIC_SUPABASE_URL?.trim() ||
-  process.env.SUPABASE_URL?.trim() ||
-  'https://eaiwgfxoiwxepinvcykg.supabase.co';
+  process.env.SUPABASE_URL?.trim();
+
+if (!supabaseUrl) {
+  throw new Error(
+    'SUPABASE_URL or NEXT_PUBLIC_SUPABASE_URL is required for privileged deposit processing; refusing to connect to a hard-coded project.'
+  );
+}
 const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY?.trim();
 
 if (
