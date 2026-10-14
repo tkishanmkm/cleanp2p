@@ -700,6 +700,24 @@ export async function runConfirmationsWorker(): Promise<ConfirmationWorkerResult
           verifiedBlockHash = verified.blockHash;
         }
 
+        // Never invoke the privileged credit RPC without a syntactically valid
+        // block hash returned by the network-specific independent verifier.
+        const canonicalVerifiedBlockHash = normalizeBlockHash(verifiedBlockHash);
+        if (!canonicalVerifiedBlockHash) {
+          result.pendingCount++;
+          result.details.push({
+            depositId: deposit.id,
+            txHash: deposit.tx_hash,
+            network: normNet,
+            previousConfirmations: prevConfs,
+            newConfirmations: currentConfirmations,
+            requiredConfirmations: requiredConfs,
+            status: 'PENDING',
+            error: 'Verified canonical block hash is missing or invalid; credit RPC not called.',
+          });
+          continue;
+        }
+
         // Call authoritative canonical RPC process_deposit_atomic
         const { data: rpcData, error: rpcErr } = await supabaseAdmin.rpc('process_deposit_atomic', {
           p_destination_address: destinationAddress,
@@ -713,7 +731,7 @@ export async function runConfirmationsWorker(): Promise<ConfirmationWorkerResult
           p_token_contract: assetSymbol === 'USDT' ? tokenContract : null,
           p_confirmations: currentConfirmations,
           p_provider: 'confirmations_worker',
-          p_block_hash: verifiedBlockHash,
+          p_block_hash: canonicalVerifiedBlockHash,
         });
 
         if (rpcErr) {
