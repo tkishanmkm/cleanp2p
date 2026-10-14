@@ -1642,13 +1642,30 @@ export async function runDepositIngestion(): Promise<{
 }
 
 let ingestionInterval: NodeJS.Timeout | null = null;
+let ingestionCycleInProgress = false;
+
+async function runScheduledDepositIngestion(): Promise<void> {
+  if (ingestionCycleInProgress) {
+    console.warn('[Deposit Ingestion] Previous cycle is still running; skipping overlapping scheduled cycle.');
+    return;
+  }
+
+  ingestionCycleInProgress = true;
+  try {
+    await runDepositIngestion();
+  } catch (e) {
+    console.error('[Deposit Ingestion] Cycle failed:', e);
+  } finally {
+    ingestionCycleInProgress = false;
+  }
+}
 
 export function startDepositIngestionWorker(intervalMs: number = 30000): void {
   if (ingestionInterval) return;
   console.log(`[Deposit Ingestion] Background worker started, polling every ${intervalMs}ms...`);
-  runDepositIngestion().catch((e) => console.error('[Deposit Ingestion] Cycle failed:', e));
+  void runScheduledDepositIngestion();
   ingestionInterval = setInterval(() => {
-    runDepositIngestion().catch((e) => console.error('[Deposit Ingestion] Cycle failed:', e));
+    void runScheduledDepositIngestion();
   }, intervalMs);
 }
 
