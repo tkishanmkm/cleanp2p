@@ -2,6 +2,14 @@
 
 export type CryptoCurrency = 'BTC' | 'ETH' | 'LTC' | 'USDT' | 'BNB' | 'TRX';
 
+/** UI-facing wallet/network row used by the wallet cards and dialogs. */
+export interface WalletDisplayItem {
+  crypto: CryptoCurrency;
+  chain: string;
+  balance: number;
+  lockedBalance: number;
+}
+
 export interface CurrencyConfig {
   code: string;
   name: string;
