@@ -1,7 +1,7 @@
 import { createClient } from '@supabase/supabase-js';
 import { ethers } from 'ethers';
 import { normalizeDepositNetwork } from '@/lib/hd-derivation-engine';
-import { CANONICAL_USDT_CONTRACTS, verifyEvmTokenDeposit, verifyTronTokenDeposit } from '@/jobs/depositIngestion';
+import { CANONICAL_USDT_CONTRACTS, verifyEvmNativeDeposit, verifyEvmTokenDeposit, verifyTronTokenDeposit } from '@/jobs/depositIngestion';
 import { SUPPORTED_EVM_CHAINS, getEvmProvider } from '@/lib/blockchain/providers';
 
 // Privileged confirmation processing must fail closed: never fall back to the public anon key.
@@ -333,6 +333,34 @@ export async function runConfirmationsWorker(): Promise<ConfirmationWorkerResult
           currentConfirmations = verified.confirmations;
           blockNumber = verified.blockNumber;
           fromAddress = verified.fromAddress;
+        } else if (SUPPORTED_EVM_CHAINS[normNet]) {
+          // For native coins, verify the exact tx.to and tx.value against the
+          // stored deposit before invoking the privileged credit RPC.
+          const chain = SUPPORTED_EVM_CHAINS[normNet];
+          const verified = await verifyEvmNativeDeposit(
+            getEvmProvider(normNet),
+            deposit.tx_hash,
+            destinationAddress,
+            Number(deposit.amount),
+            chain.nativeDecimals
+          );
+          if (!verified) {
+            result.pendingCount++;
+            result.details.push({
+              depositId: deposit.id,
+              txHash: deposit.tx_hash,
+              network: normNet,
+              previousConfirmations: prevConfs,
+              newConfirmations: onChainData.confirmations,
+              requiredConfirmations: requiredConfs,
+              status: 'PENDING',
+              error: 'Exact native transaction destination/value verification failed; credit RPC not called.',
+            });
+            continue;
+          }
+          currentConfirmations = verified.confirmations;
+          blockNumber = verified.blockNumber;
+          fromAddress = verified.fromAddress;
         }
 
         // Call authoritative canonical RPC process_deposit_atomic
@@ -345,7 +373,7 @@ export async function runConfirmationsWorker(): Promise<ConfirmationWorkerResult
           p_output_index: outputIndex,
           p_block_number: blockNumber,
           p_from_address: fromAddress,
-          p_token_contract: tokenContract,
+          p_token_contract: assetSymbol === 'USDT' ? tokenContract : null,
           p_confirmations: currentConfirmations,
           p_provider: 'confirmations_worker',
         });
