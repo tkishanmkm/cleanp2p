@@ -1032,6 +1032,7 @@ BEGIN
             asset_code,
             network_code,
             output_index,
+            block_number,
             block_hash
         )
         VALUES (
@@ -1051,6 +1052,7 @@ BEGIN
             v_asset,
             v_network,
             p_output_index,
+            p_block_number,
             v_block_hash
         )
         RETURNING id INTO v_onchain_id;
