@@ -1142,32 +1142,6 @@ export async function refreshPendingDepositConfirmations(): Promise<{
         // destination, contract, and event index. Fail closed until the exact
         // TRON Transfer event is independently re-fetched in this pending path.
         continue;
-        if (txInfo && txInfo.blockNumber) {
-          const currentBlock = await tronWeb.trx.getCurrentBlock();
-          const currentHeight = currentBlock.block_header?.raw_data?.number || 0;
-          const confs = Math.max(1, currentHeight - txInfo.blockNumber + 1);
-
-          const { data, error: rpcErr } = await supabaseAdmin.rpc('process_deposit_atomic', {
-            p_destination_address: destinationAddress,
-            p_asset_symbol: assetSymbol,
-            p_network_code: 'TRC20',
-            p_amount: Number(dep.amount),
-            p_tx_hash: dep.tx_hash,
-            p_output_index: outputIndex,
-            p_block_number: txInfo.blockNumber,
-            p_from_address: dep.from_address || null,
-            p_token_contract: tokenContract,
-            p_confirmations: confs,
-            p_provider: 'confirmations_worker',
-          });
-
-          if (!rpcErr) {
-            const res = typeof data === 'string' ? JSON.parse(data) : data;
-            if (res?.status === 'credited') {
-              newlyCredited++;
-            }
-          }
-        }
       } else if (normNet === 'BTC') {
         const btcApiBase = getBtcMempoolApi();
         const verified = await verifyUtxoDepositOutput(
