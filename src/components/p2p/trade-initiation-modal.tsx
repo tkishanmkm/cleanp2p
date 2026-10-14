@@ -126,6 +126,12 @@ export function TradeInitiationModal({ ad, isOpen, onClose }: TradeInitiationMod
 
   const handleStartTrade = async () => {
     const numericFiat = parseFloat(fiatAmount);
+    const numericCrypto = parseFloat(cryptoAmount);
+
+    if (!Number.isFinite(numericCrypto) || numericCrypto <= 0) {
+      setErrorMsg('Please enter a valid crypto amount.');
+      return;
+    }
 
     if (isNaN(numericFiat) || numericFiat <= 0) {
       setErrorMsg("Please enter a valid amount.");
