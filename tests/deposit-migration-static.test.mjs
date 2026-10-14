@@ -65,6 +65,11 @@ assert.match(sql, /DEPOSIT_ADDRESS_OWNERSHIP_AMBIGUOUS/,
   'conflicting ownership across canonical deposit-address and legacy wallet records must fail closed');
 assert.match(sql, /uda\.user_id <> w\.user_id/,
   'cross-table address ownership guard must compare distinct user identities');
+const ledgerBlock = sql.slice(sql.indexOf('-- LEDGER IDEMPOTENCY'), sql.indexOf('-- CREDIT wallet_assets.balance ONLY'));
+assert.match(ledgerBlock, /FROM public\.ledger_entries\s+WHERE reference_id = v_deposit_id::TEXT\s+AND type = 'deposit'/,
+  'deposit idempotency count must ignore unrelated ledger entry types sharing a reference string');
+assert.match(ledgerBlock, /SELECT \*\s+INTO v_existing_ledger\s+FROM public\.ledger_entries\s+WHERE reference_id = v_deposit_id::TEXT\s+AND type = 'deposit'/,
+  'existing ledger validation must select only the deposit entry for this deposit reference');
 assert.match(sql, /WHERE network::TEXT = 'bitcoin'\s+AND BTRIM\(address\) = BTRIM\(v_address\)/,
   'Bitcoin deposit-address ownership must preserve case-sensitive Base58 address matching');
 assert.match(sql, /WHERE chain = 'BTC'\s+AND BTRIM\(address\) = BTRIM\(v_address\)/,
