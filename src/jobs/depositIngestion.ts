@@ -124,7 +124,7 @@ export async function verifyEvmNativeDeposit(
   destinationAddress: string,
   storedAmount: number | string,
   decimals: number
-): Promise<{ blockNumber: number; confirmations: number; fromAddress: string } | null> {
+): Promise<{ blockNumber: number; blockHash: string; confirmations: number; fromAddress: string } | null> {
   const amountString = typeof storedAmount === 'string' ? storedAmount.trim() : String(storedAmount);
   if (!/^0x[0-9a-f]{64}$/i.test(txHash) ||
       !ethers.isAddress(destinationAddress) ||
@@ -153,8 +153,13 @@ export async function verifyEvmNativeDeposit(
     }
     if (expectedValue <= 0n || tx.value !== expectedValue) return null;
 
+    const canonicalBlock = await provider.getBlock(receipt.blockNumber);
+    if (!canonicalBlock?.hash || !receipt.blockHash ||
+        canonicalBlock.hash.toLowerCase() !== receipt.blockHash.toLowerCase()) return null;
+
     return {
       blockNumber: receipt.blockNumber,
+      blockHash: canonicalBlock.hash.toLowerCase(),
       confirmations: currentBlock - receipt.blockNumber + 1,
       fromAddress: tx.from.toLowerCase(),
     };
@@ -175,7 +180,7 @@ export async function verifyEvmTokenDeposit(
   storedAmount: number | string,
   tokenContract: string,
   decimals: number
-): Promise<{ blockNumber: number; confirmations: number; fromAddress: string } | null> {
+): Promise<{ blockNumber: number; blockHash: string; confirmations: number; fromAddress: string } | null> {
   const amountString = typeof storedAmount === 'string' ? storedAmount.trim() : String(storedAmount);
   if (!/^0x[0-9a-f]{64}$/i.test(txHash) ||
       !Number.isSafeInteger(logIndex) || logIndex < 0 ||
@@ -215,8 +220,13 @@ export async function verifyEvmTokenDeposit(
     }
     if (expectedValue !== rawValue) return null;
 
+    const canonicalBlock = await provider.getBlock(receipt.blockNumber);
+    if (!canonicalBlock?.hash || !receipt.blockHash ||
+        canonicalBlock.hash.toLowerCase() !== receipt.blockHash.toLowerCase()) return null;
+
     return {
       blockNumber: receipt.blockNumber,
+      blockHash: canonicalBlock.hash.toLowerCase(),
       confirmations: currentBlock - receipt.blockNumber + 1,
       fromAddress,
     };
