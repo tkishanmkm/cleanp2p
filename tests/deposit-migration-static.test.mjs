@@ -22,7 +22,7 @@ console.log('Deposit migration static safety checks passed. This is not a Postgr
 const workerPath = 'src/jobs/confirmationsWorker.ts';
 const worker = readFileSync(workerPath, 'utf8');
 const auditStart = worker.indexOf('export async function runConfirmedDepositReorgAudit');
-const auditEnd = worker.indexOf('/**\\n * Main worker logic', auditStart);
+const auditEnd = worker.indexOf('Main worker logic', auditStart);
 assert.ok(auditStart >= 0 && auditEnd > auditStart, 'confirmed-deposit reorg audit helper must exist');
 const audit = worker.slice(auditStart, auditEnd);
 assert.match(audit, /\.from\('onchain_deposits'\)/, 'reorg audit must inspect on-chain deposit records');
