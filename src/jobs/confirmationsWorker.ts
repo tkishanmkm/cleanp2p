@@ -161,6 +161,11 @@ async function fetchOnChainConfirmations(
       return null; // Transaction still unmined
     }
 
+    // A mined but failed EVM transaction did not transfer funds.
+    if (receipt.status !== 1) {
+      return null;
+    }
+
     const confs = Math.max(1, currentBlock - receipt.blockNumber + 1);
     return {
       confirmations: confs,
@@ -218,19 +223,26 @@ export async function runConfirmationsWorker(): Promise<ConfirmationWorkerResult
       try {
         const onChainData = await fetchOnChainConfirmations(deposit.tx_hash, normNet);
 
-        let currentConfirmations = prevConfs;
-        let blockNumber = deposit.block_number;
-        let fromAddress = deposit.from_address;
-
-        if (onChainData) {
-          currentConfirmations = onChainData.confirmations;
-          if (onChainData.blockNumber) {
-            blockNumber = onChainData.blockNumber;
-          }
-          if (onChainData.fromAddress) {
-            fromAddress = onChainData.fromAddress;
-          }
+        // Fail closed when the chain provider cannot independently confirm this
+        // transaction. Never reuse database-stored confirmations to authorize credit.
+        if (!onChainData) {
+          result.pendingCount++;
+          result.details.push({
+            depositId: deposit.id,
+            txHash: deposit.tx_hash,
+            network: normNet,
+            previousConfirmations: prevConfs,
+            newConfirmations: 0,
+            requiredConfirmations: requiredConfs,
+            status: 'PENDING',
+            error: 'On-chain transaction/confirmation check unavailable; credit RPC not called.',
+          });
+          continue;
         }
+
+        const currentConfirmations = onChainData.confirmations;
+        const blockNumber = onChainData.blockNumber ?? deposit.block_number;
+        const fromAddress = onChainData.fromAddress ?? deposit.from_address;
 
         // Call authoritative canonical RPC process_deposit_atomic
         const { data: rpcData, error: rpcErr } = await supabaseAdmin.rpc('process_deposit_atomic', {
