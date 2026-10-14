@@ -16,6 +16,7 @@ DECLARE
     v_network TEXT;
     v_asset TEXT;
     v_tx_hash TEXT;
+    v_block_hash TEXT;
     v_address TEXT;
     v_from_address TEXT;
     v_contract TEXT;
@@ -130,6 +131,16 @@ BEGIN
        OR (length(p_block_hash) = 66 AND substring(p_block_hash from 3) !~* '^[0-9a-f]{64}') THEN
         RETURN jsonb_build_object('success', false, 'code', 'INVALID_BLOCK_HASH');
     END IF;
+
+    -- Persist block hashes in one canonical form. EVM providers may include
+    -- a 0x prefix while other providers omit it; those represent the same hash.
+    v_block_hash := LOWER(
+        CASE
+            WHEN LOWER(LEFT(BTRIM(p_block_hash), 2)) = '0x'
+            THEN SUBSTRING(BTRIM(p_block_hash) FROM 3)
+            ELSE BTRIM(p_block_hash)
+        END
+    );
 
     IF v_network IN ('ETH', 'ERC20', 'BEP20') THEN
         v_address := LOWER(BTRIM(p_destination_address));
@@ -556,10 +567,10 @@ BEGIN
 
     IF p_block_hash IS NOT NULL AND (
         (v_existing_deposit.id IS NOT NULL AND v_existing_deposit.block_hash IS NOT NULL
-          AND LOWER(v_existing_deposit.block_hash) IS DISTINCT FROM LOWER(p_block_hash))
+          AND LOWER(v_existing_deposit.block_hash) IS DISTINCT FROM v_block_hash)
         OR
         (v_existing_onchain.id IS NOT NULL AND v_existing_onchain.block_hash IS NOT NULL
-          AND LOWER(v_existing_onchain.block_hash) IS DISTINCT FROM LOWER(p_block_hash))
+          AND LOWER(v_existing_onchain.block_hash) IS DISTINCT FROM v_block_hash)
     ) THEN
         RETURN jsonb_build_object('success', false, 'code', 'DEPOSIT_BLOCK_HASH_MISMATCH',
           'message', 'Verified block hash differs from the stored deposit block hash');
@@ -600,7 +611,7 @@ BEGIN
                         ELSE COALESCE(block_number, p_block_number)
                     END,
                 status = 'PENDING',
-                block_hash = COALESCE(p_block_hash, block_hash)
+                block_hash = COALESCE(v_block_hash, block_hash)
             WHERE id = v_existing_deposit.id;
 
             v_deposit_id := v_existing_deposit.id;
@@ -651,7 +662,7 @@ BEGIN
                         v_effective_confirmations
                     ),
                 required_confirmations = v_required_confirmations,
-                block_hash = COALESCE(p_block_hash, block_hash),
+                block_hash = COALESCE(v_block_hash, block_hash),
                 updated_at = NOW()
             WHERE id = v_existing_onchain.id;
 
@@ -926,7 +937,7 @@ BEGIN
                 THEN GREATEST(block_number, p_block_number)
                 ELSE COALESCE(block_number, p_block_number)
             END,
-        block_hash = COALESCE(p_block_hash, block_hash)
+        block_hash = COALESCE(v_block_hash, block_hash)
     WHERE id = v_deposit_id;
 
 
@@ -944,7 +955,7 @@ BEGIN
                 ),
             required_confirmations = v_required_confirmations,
             status = 'CONFIRMED',
-            block_hash = COALESCE(p_block_hash, block_hash),
+            block_hash = COALESCE(v_block_hash, block_hash),
             updated_at = NOW()
         WHERE id = v_existing_onchain.id;
 
