@@ -757,6 +757,16 @@ BEGIN
         );
     END IF;
 
+    -- The live schema permits NULL balances; never let NULL arithmetic silently
+    -- produce a successful deposit response without a real balance update.
+    IF v_previous_balance IS NULL OR v_previous_balance < 0 THEN
+        RETURN jsonb_build_object(
+            'success', false,
+            'code', 'WALLET_BALANCE_INVALID',
+            'message', 'Wallet balance is null or negative; manual reconciliation required'
+        );
+    END IF;
+
 
     -- ================================================================
     -- ENSURE DEPOSIT RECORD
@@ -789,7 +799,7 @@ BEGIN
             v_asset,
             v_tx_hash,
             p_amount,
-            NULLIF(v_from_address, ''),
+            COALESCE(NULLIF(v_from_address, ''), ''),
             v_address,
             'CONFIRMED',
             p_block_number,
