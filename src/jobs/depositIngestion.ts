@@ -172,7 +172,7 @@ export async function verifyEvmTokenDeposit(
   if (!/^0x[0-9a-f]{64}$/i.test(txHash) ||
       !Number.isSafeInteger(logIndex) || logIndex < 0 ||
       !ethers.isAddress(destinationAddress) || !ethers.isAddress(tokenContract) ||
-      !/^\\d+(?:\\.\\d+)?$/.test(amountString) ||
+      !/^\d+(?:\.\d+)?$/.test(amountString) ||
       (typeof storedAmount === 'number' && !Number.isFinite(storedAmount)) ||
       !Number.isSafeInteger(decimals) || decimals < 0 || decimals > 36) return null;
 
@@ -231,7 +231,7 @@ export async function verifyTronTokenDeposit(
   if (!/^[0-9a-f]{64}$/i.test(txHash) ||
       !Number.isSafeInteger(eventIndex) || eventIndex < 0 ||
       !isValidTronAddress(destinationAddress) ||
-      !/^\\d+(?:\\.\\d+)?$/.test(amountString) ||
+      !/^\d+(?:\.\d+)?$/.test(amountString) ||
       (typeof storedAmount === 'number' && !Number.isFinite(storedAmount))) return null;
 
   try {
