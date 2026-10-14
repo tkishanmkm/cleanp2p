@@ -436,13 +436,14 @@ export async function POST(request: NextRequest) {
     // The primary ad is already committed; surface projection sync state rather than
     // pretending the secondary marketplace record is guaranteed to exist.
     return NextResponse.json({ success: true, data, marketplaceSync });
-  } catch (err: any) {
+  } catch (err: unknown) {
+    // Log diagnostics server-side; do not leak exception messages or internals to clients.
     console.error('Unhandled ad creation error:', err);
     return NextResponse.json(
-      { 
-        error: err.message || 'Internal Server Error',
-        realError: String(err)
-      }, 
+      {
+        error: 'An unexpected error occurred while creating the advertisement.',
+        code: 'AD_CREATE_INTERNAL_ERROR',
+      },
       { status: 500 }
     );
   }
