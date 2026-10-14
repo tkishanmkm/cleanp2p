@@ -783,16 +783,26 @@ async function scanEvmNativeDeposits(
         const toClean = tx.to.toLowerCase();
 
         if (monitoredEvmAddresses.has(toClean) && tx.value > BigInt(0)) {
-          // Require a successful canonical receipt before crediting a native transfer.
+          // A transaction included in a fetched block should have a receipt.
+          // Missing/mismatched receipt data means this scan cannot be considered complete.
           const receipt = await provider.getTransactionReceipt(tx.hash);
-          if (!receipt || receipt.status !== 1 || receipt.blockNumber !== b) continue;
+          if (!receipt) {
+            throw new Error(`RPC returned no receipt for native transfer ${tx.hash} in block ${b}; scan is incomplete`);
+          }
+          if (receipt.blockNumber !== b) {
+            throw new Error(`Receipt block mismatch for native transfer ${tx.hash}: expected ${b}, received ${receipt.blockNumber}`);
+          }
+          // Reverted transactions cannot produce a deposit; status 0 is an expected non-credit.
+          if (receipt.status !== 1) continue;
 
           // Keep native coin amounts as exact decimal strings to avoid IEEE-754 rounding.
           const formattedAmount = ethers.formatUnits(tx.value, chainConfig.nativeDecimals);
           const verified = await verifyEvmNativeDeposit(
             provider, tx.hash, toClean, formattedAmount, chainConfig.nativeDecimals
           );
-          if (!verified || verified.blockNumber !== b) continue;
+          if (!verified || verified.blockNumber !== b) {
+            throw new Error(`Canonical verification failed for native transfer ${tx.hash}; scan is incomplete`);
+          }
           const confirmations = verified.confirmations;
 
           detected++;
