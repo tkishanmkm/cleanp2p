@@ -10,6 +10,10 @@ assert.equal((sql.match(/\$function\$/g) ?? []).length, 2, 'function body delimi
 assert.match(sql, /BLOCK_HASH_REQUIRED/, 'missing block hashes must fail closed');
 assert.match(sql, /INVALID_BLOCK_HASH/, 'malformed block hashes must fail closed');
 assert.match(sql, /DEPOSIT_BLOCK_HASH_MISMATCH/, 'changed stored hashes must be rejected for manual reconciliation');
+assert.match(sql, /v_effective_confirmations := COALESCE\(p_confirmations, 0\)/,
+  'credit eligibility must use the current independently verified confirmation count');
+assert.doesNotMatch(sql, /GREATEST\([\s\S]{0,160}v_existing_onchain\.confirmations/,
+  'persisted confirmations must never elevate a stale or lower current confirmation observation');
 assert.match(sql, /REVOKE ALL ON FUNCTION public\.process_deposit_atomic\([^;]+ FROM PUBLIC;/, 'function execute must be revoked from PUBLIC');
 assert.match(sql, /REVOKE ALL ON FUNCTION public\.process_deposit_atomic\([^;]+ FROM anon, authenticated;/, 'function execute must be revoked from client roles');
 assert.match(sql, /GRANT EXECUTE ON FUNCTION public\.process_deposit_atomic\([^;]+ TO service_role;/, 'function execute must be granted to service_role');
