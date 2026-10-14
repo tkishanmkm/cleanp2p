@@ -1787,12 +1787,14 @@ export async function runDepositIngestion(): Promise<{
         }
 
         let fromBlock: number;
+        let expectedCheckpointBlock: number;
         if (checkpoint) {
           const lastScannedBlock = Number(checkpoint.last_scanned_block);
-          if (!Number.isSafeInteger(lastScannedBlock) || lastScannedBlock < 0) {
+          if (!Number.isSafeInteger(lastScannedBlock) || lastScannedBlock < 0 || lastScannedBlock >= Number.MAX_SAFE_INTEGER) {
             throw new Error(`Invalid stored EVM deposit checkpoint for ${netKey}`);
           }
           fromBlock = lastScannedBlock + 1;
+          expectedCheckpointBlock = lastScannedBlock;
         } else {
           const startBlockEnv = process.env[`EVM_DEPOSIT_START_BLOCK_${netKey}`];
           if (!startBlockEnv || !/^\d+$/.test(startBlockEnv)) {
@@ -1802,6 +1804,7 @@ export async function runDepositIngestion(): Promise<{
           if (!Number.isSafeInteger(fromBlock) || fromBlock < 0) {
             throw new Error(`Invalid EVM_DEPOSIT_START_BLOCK_${netKey}`);
           }
+          expectedCheckpointBlock = fromBlock - 1;
         }
 
         // Bound each cycle to 100 blocks; the durable checkpoint lets later cycles
@@ -1823,16 +1826,21 @@ export async function runDepositIngestion(): Promise<{
           // Never advance past a partial/failed scan. Replaying a range is safe only
           // because process_deposit_atomic must enforce transaction/output idempotency.
           if (netResult.errors.length === 0) {
-            const { error: checkpointWriteError } = await supabaseAdmin
-              .from('deposit_scan_checkpoints')
-              .upsert({
-                network: netKey,
-                last_scanned_block: toBlock,
-                updated_at: new Date().toISOString(),
-              }, { onConflict: 'network' });
+            const { data: checkpointAdvanced, error: checkpointWriteError } = await supabaseAdmin.rpc(
+              'advance_deposit_scan_checkpoint',
+              {
+                p_network: netKey,
+                p_expected_previous_block: expectedCheckpointBlock,
+                p_new_block: toBlock,
+              }
+            );
 
             if (checkpointWriteError) {
               netResult.errors.push(`Failed to persist EVM deposit checkpoint for ${netKey}: ${checkpointWriteError.message}`);
+            } else if (checkpointAdvanced !== true) {
+              // Another worker may have advanced this network while we were scanning.
+              // Do not overwrite its progress; retry from the stored checkpoint next cycle.
+              netResult.errors.push(`EVM deposit checkpoint compare-and-set failed for ${netKey}; another worker may have advanced it`);
             }
           }
         }
