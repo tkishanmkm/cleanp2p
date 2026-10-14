@@ -497,6 +497,8 @@ export async function runConfirmationsWorker(): Promise<ConfirmationWorkerResult
 
     if (error) {
       console.error('Failed to query pending deposits:', error.message);
+      // Do not report a successful-looking empty result when the queue query failed.
+      result.failedCount++;
       return result;
     }
 
@@ -799,6 +801,8 @@ export async function runConfirmationsWorker(): Promise<ConfirmationWorkerResult
     return result;
   } catch (err: any) {
     console.error('Fatal error in runConfirmationsWorker:', err);
+    // Surface top-level worker failures in the result consumed by monitoring.
+    result.failedCount++;
     return result;
   }
 }
