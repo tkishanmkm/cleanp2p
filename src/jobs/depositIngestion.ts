@@ -331,12 +331,12 @@ export async function verifyTronTokenDeposit(
     let pageCount = 0;
     do {
       const baseUrl = `${eventHost}/v1/transactions/${txHash}/events?limit=200`;
-      const pageUrl = fingerprint
+      const pageUrl: string = fingerprint
         ? `${baseUrl}&fingerprint=${encodeURIComponent(fingerprint)}`
         : baseUrl;
-      const eventsResponse = await fetch(pageUrl, { headers });
+      const eventsResponse: Response = await fetch(pageUrl, { headers });
       if (!eventsResponse.ok) return null;
-      const eventsPayload = await eventsResponse.json();
+      const eventsPayload: any = await eventsResponse.json();
       if (!Array.isArray(eventsPayload?.data)) return null;
       events.push(...eventsPayload.data);
       fingerprint = typeof eventsPayload?.meta?.fingerprint === 'string' && eventsPayload.meta.fingerprint.length > 0
@@ -1041,14 +1041,14 @@ async function scanTronDeposits(
         let accountFingerprint: string | null = null;
         let accountPages = 0;
         do {
-          const pageUrl = accountFingerprint
+          const pageUrl: string = accountFingerprint
             ? `${accountUrl}&fingerprint=${encodeURIComponent(accountFingerprint)}`
             : accountUrl;
-          const res = await fetch(pageUrl, { headers: tronGridHeaders });
+          const res: Response = await fetch(pageUrl, { headers: tronGridHeaders });
           if (!res.ok) {
             throw new Error(`TronGrid account endpoint returned HTTP ${res.status}`);
           }
-          const json = await res.json();
+          const json: any = await res.json();
           if (!Array.isArray(json?.data)) {
             throw new Error('TronGrid account endpoint returned an invalid data payload');
           }
@@ -1175,14 +1175,14 @@ async function scanTronDeposits(
         let eventFingerprint: string | null = null;
         let eventPages = 0;
         do {
-          const pageUrl = eventFingerprint
+          const pageUrl: string = eventFingerprint
             ? `${eventUrl}&fingerprint=${encodeURIComponent(eventFingerprint)}`
             : eventUrl;
-          const res = await fetch(pageUrl, { headers: tronGridHeaders });
+          const res: Response = await fetch(pageUrl, { headers: tronGridHeaders });
           if (!res.ok) {
             throw new Error(`TronGrid contract events endpoint returned HTTP ${res.status}`);
           }
-          const data = await res.json();
+          const data: any = await res.json();
           if (!Array.isArray(data?.data)) {
             throw new Error('TronGrid contract events endpoint returned an invalid data payload');
           }
