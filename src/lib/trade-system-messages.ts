@@ -1647,6 +1647,7 @@ export interface SystemMessagePayload {
     | 'USER_BLOCKED'
     | 'ISSUE_REPORTED'
     | 'MARKED_PAID'
+    | 'MODERATOR_JOINED'
     | 'MESSAGE_BLOCKED'
     | 'SECURITY_REMINDER'
     | 'CUSTOM';
