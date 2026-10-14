@@ -589,14 +589,6 @@ export async function createTradeOrderWithEscrow(input: {
     }
 
     // 5. Determine who is providing crypto for escrow:
-    const typeCandidates = [
-      ad.trade_type,
-      ad.ad_type,
-      ad.side,
-      ad.adType,
-      ad.type,
-    ].filter(Boolean).map((s: any) => String(s).toUpperCase());
-
     const isBuyAd = declaredAdSide === 'BUY';
     const isInitiatorSelling = isBuyAd;
     const isAdSell = !isBuyAd;
