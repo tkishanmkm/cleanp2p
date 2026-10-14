@@ -537,34 +537,10 @@ export async function createTradeOrderWithEscrow(input: {
       };
     }
 
-    // 3. Read the configured escrow fee. Do not silently invent financial settings
-    // when the settings store is unavailable or contains an invalid value.
-    const { data: feeSetting, error: feeSettingError } = await adminClient
-      .from('system_settings')
-      .select('value')
-      .eq('key', 'escrow_fee_percent')
-      .maybeSingle();
-
-    if (feeSettingError || feeSetting?.value == null || String(feeSetting.value).trim() === '') {
-      return {
-        data: null,
-        error: {
-          message: 'Escrow fee settings could not be verified. Please try again later.',
-          code: 'ESCROW_FEE_CONFIG_UNAVAILABLE',
-        },
-      };
-    }
-
-    const escrowFeePercent = Number(feeSetting.value);
-    if (!Number.isFinite(escrowFeePercent) || escrowFeePercent < 0 || escrowFeePercent > 100) {
-      return {
-        data: null,
-        error: {
-          message: 'Escrow fee settings are invalid. Please contact support.',
-          code: 'ESCROW_FEE_CONFIG_INVALID',
-        },
-      };
-    }
+    // 3. The canonical database RPC currently calculates escrow fees at 1.5%
+    // (v_crypto_amount * 0.015). Keep the preflight estimate aligned with that
+    // authoritative behavior. Do not read a separate setting that the RPC ignores.
+    const escrowFeePercent = 1.5;
 
     // 4. Validate the ad's actual price and fiat limits. Never substitute a
     // hard-coded market price or default limits for missing advertisement data.
