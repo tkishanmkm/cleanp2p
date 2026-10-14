@@ -49,3 +49,16 @@ assert.doesNotMatch(incidentMigration, /UPDATE public\.(deposits|onchain_deposit
   'incident-table migration must not alter financial balances, deposit records, or call credit RPCs');
 
 console.log('Deposit reorg incident migration static safety checks passed. This is not a PostgreSQL parser or execution test.');
+
+
+const recorderStart = worker.indexOf('export async function recordConfirmedDepositReorgIncidents');
+const recorderEnd = worker.indexOf('Main worker logic', recorderStart);
+assert.ok(recorderStart >= 0 && recorderEnd > recorderStart, 'incident recorder must exist');
+const recorder = worker.slice(recorderStart, recorderEnd);
+assert.match(recorder, /\.from\('deposit_reorg_incidents'\)/, 'recorder may write only to incident review table');
+assert.match(recorder, /\.from\('onchain_deposits'\)/, 'recorder must resolve source deposit output index');
+assert.match(recorder, /review_status: 'OPEN'/, 'new incidents must start open');
+assert.match(recorder, /hashChanged[\s\S]*review_status: 'OPEN'/, 'changed canonical hashes must reopen incidents');
+assert.doesNotMatch(recorder, /\.from\('(deposits|user_balances|wallet_balances|ledger_entries|financial_ledger)'\)\s*\.(update|insert|upsert|delete)|\.rpc\s*\(/,
+  'incident recorder must never change balances, deposits, ledgers, or call financial RPCs');
+console.log('Deposit reorg incident recorder static safety checks passed.');
