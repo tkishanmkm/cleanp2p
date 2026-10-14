@@ -457,6 +457,19 @@ export async function getMonitoredAddresses(): Promise<{
       .from('wallets')
       .select('address, chain, currency');
 
+    // These three sources may each contain deposit addresses not present in the
+    // others. Do not start a partial scan if any source failed: that can silently
+    // omit customer addresses and make a cycle look healthy while missing deposits.
+    const addressQueryFailures = [
+      pErr ? `user_deposit_addresses primary query: ${pErr.message}` : null,
+      fErr ? `user_deposit_addresses fallback query: ${fErr.message}` : null,
+      wErr ? `wallets query: ${wErr.message}` : null,
+    ].filter((failure): failure is string => Boolean(failure));
+
+    if (addressQueryFailures.length > 0) {
+      throw new Error(`Unable to load all monitored deposit address sources: ${addressQueryFailures.join('; ')}`);
+    }
+
     if (!wErr && userWallets) {
       for (const row of userWallets) {
         if (!row.address) continue;
@@ -483,6 +496,9 @@ export async function getMonitoredAddresses(): Promise<{
     }
   } catch (err) {
     console.error('[Deposit Ingestion] Error querying monitored deposit addresses:', err);
+    // Propagate the failure so the scheduled cycle is reported as failed rather
+    // than scanning with an incomplete or empty address set.
+    throw err;
   }
 
   return { evmAddresses, tronAddresses, btcAddresses, ltcAddresses };
