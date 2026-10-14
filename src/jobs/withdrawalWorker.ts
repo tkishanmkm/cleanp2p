@@ -355,13 +355,19 @@ export async function checkSubmittedWithdrawals(): Promise<{
         
         if (isConfirmed && success) {
           const actualTrxStr = actualCostTrx && actualCostTrx.trim().length > 0 ? actualCostTrx.trim() : '0';
-          const { error: confErr } = await supabaseAdmin.rpc('complete_onchain_withdrawal', {
+          const { data: settlementResult, error: confErr } = await supabaseAdmin.rpc('complete_onchain_withdrawal', {
             p_withdrawal_id: w.id,
             p_tx_hash: w.tx_hash,
             p_actual_gas_amount: actualTrxStr,
             p_gas_asset: 'TRX',
           });
-          if (!confErr) confirmed++;
+          if (confErr) {
+            console.error(`[Withdrawal Worker] Settlement RPC failed for ${w.id} (${w.tx_hash}):`, confErr.message);
+          } else if (settlementResult && typeof settlementResult === 'object' && settlementResult.success === true) {
+            confirmed++;
+          } else {
+            console.error(`[Withdrawal Worker] Settlement RPC returned no explicit success for ${w.id} (${w.tx_hash}); leaving it for reconciliation.`, settlementResult);
+          }
         } else if (isConfirmed && success === false) {
           await quarantineObservedWithdrawalFailure(
             w.id,
@@ -378,13 +384,19 @@ export async function checkSubmittedWithdrawals(): Promise<{
         // example, an RPC/provider inconsistency) must never be treated as success.
         if (confirmations >= chain.requiredConfirmations && status === 1) {
           const actualGasStr = actualGasCost && actualGasCost.trim().length > 0 ? actualGasCost.trim() : '0';
-          const { error: confErr } = await supabaseAdmin.rpc('complete_onchain_withdrawal', {
+          const { data: settlementResult, error: confErr } = await supabaseAdmin.rpc('complete_onchain_withdrawal', {
             p_withdrawal_id: w.id,
             p_tx_hash: w.tx_hash,
             p_actual_gas_amount: actualGasStr,
             p_gas_asset: gasAsset,
           });
-          if (!confErr) confirmed++;
+          if (confErr) {
+            console.error(`[Withdrawal Worker] Settlement RPC failed for ${w.id} (${w.tx_hash}):`, confErr.message);
+          } else if (settlementResult && typeof settlementResult === 'object' && settlementResult.success === true) {
+            confirmed++;
+          } else {
+            console.error(`[Withdrawal Worker] Settlement RPC returned no explicit success for ${w.id} (${w.tx_hash}); leaving it for reconciliation.`, settlementResult);
+          }
         } else if (status === 0) {
           await quarantineObservedWithdrawalFailure(
             w.id,
@@ -415,13 +427,19 @@ export async function checkSubmittedWithdrawals(): Promise<{
                 }
               }
 
-              const { error: confErr } = await supabaseAdmin.rpc('complete_onchain_withdrawal', {
+              const { data: settlementResult, error: confErr } = await supabaseAdmin.rpc('complete_onchain_withdrawal', {
                 p_withdrawal_id: w.id,
                 p_tx_hash: w.tx_hash,
                 p_actual_gas_amount: actualFeeBtc,
                 p_gas_asset: 'BTC',
               });
-              if (!confErr) confirmed++;
+              if (confErr) {
+            console.error(`[Withdrawal Worker] Settlement RPC failed for ${w.id} (${w.tx_hash}):`, confErr.message);
+          } else if (settlementResult && typeof settlementResult === 'object' && settlementResult.success === true) {
+            confirmed++;
+          } else {
+            console.error(`[Withdrawal Worker] Settlement RPC returned no explicit success for ${w.id} (${w.tx_hash}); leaving it for reconciliation.`, settlementResult);
+          }
             }
           }
         } catch (btcErr) {
@@ -451,13 +469,19 @@ export async function checkSubmittedWithdrawals(): Promise<{
                 }
               }
 
-              const { error: confErr } = await supabaseAdmin.rpc('complete_onchain_withdrawal', {
+              const { data: settlementResult, error: confErr } = await supabaseAdmin.rpc('complete_onchain_withdrawal', {
                 p_withdrawal_id: w.id,
                 p_tx_hash: w.tx_hash,
                 p_actual_gas_amount: actualFeeLtc,
                 p_gas_asset: 'LTC',
               });
-              if (!confErr) confirmed++;
+              if (confErr) {
+            console.error(`[Withdrawal Worker] Settlement RPC failed for ${w.id} (${w.tx_hash}):`, confErr.message);
+          } else if (settlementResult && typeof settlementResult === 'object' && settlementResult.success === true) {
+            confirmed++;
+          } else {
+            console.error(`[Withdrawal Worker] Settlement RPC returned no explicit success for ${w.id} (${w.tx_hash}); leaving it for reconciliation.`, settlementResult);
+          }
             }
           }
         } catch (ltcErr) {
