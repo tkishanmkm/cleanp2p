@@ -23,13 +23,11 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
           cache: npm
       - name: Install locked dependencies
         run: npm ci
-      - name: Check deposit migration safety invariants (offline)
-        run: node tests/deposit-migration-static.test.mjs
-      - name: Check confirmed-deposit reorg audit safety (offline)
+      - name: Check deposit and reorg audit safety invariants (offline)
         run: node tests/deposit-migration-static.test.mjs
       - name: Typecheck
         run: npm run typecheck
