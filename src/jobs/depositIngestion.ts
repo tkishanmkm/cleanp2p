@@ -968,7 +968,7 @@ async function scanTronDeposits(
               errors.push(`RPC error for TRON deposit ${txId}: ${error.message}`);
             } else {
               const r = typeof rpcData === 'string' ? JSON.parse(rpcData) : rpcData;
-              if (r?.status === 'credited' || (r?.success && confirmations >= TRON_CONFIG.requiredConfirmations)) {
+              if (r?.status === 'credited' || (r?.success && verified.confirmations >= TRON_CONFIG.requiredConfirmations)) {
                 credited++;
               }
             }
@@ -1001,7 +1001,10 @@ async function scanTronDeposits(
             const fromHex = evt.result?.from;
             const toHex = evt.result?.to;
             const rawValue = evt.result?.value;
-            if (!toHex || !rawValue) continue;
+            if (!toHex || rawValue === undefined || rawValue === null || !/^\\d+$/.test(String(rawValue))) continue;
+            // TRON USDT uses six decimals; format only the independently verified raw event value.
+            const formattedAmount = ethers.formatUnits(String(rawValue), 6);
+            if (!/^\\d+(?:\\.\\d+)?$/.test(formattedAmount) || /^0(?:\\.0+)?$/.test(formattedAmount)) continue;
 
             let toBase58 = toHex;
             let fromBase58: string | null = fromHex || null;
@@ -1430,7 +1433,6 @@ export async function refreshPendingDepositConfirmations(): Promise<{
           p_token_contract: null,
           p_confirmations: verified.confirmations,
           p_provider: 'confirmations_worker',
-          p_block_hash: verified.blockHash,
           p_block_hash: verified.blockHash,
         });
         if (!rpcErr) {
