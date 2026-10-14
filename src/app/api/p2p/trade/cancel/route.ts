@@ -7,7 +7,7 @@ export async function POST(request: Request) {
   try {
     const supabase = await createClient();
 
-    // 1. Authenticate Requesting User
+    // Authenticate the caller before accepting any trade identifier.
     const {
       data: { user },
       error: authError,
@@ -20,34 +20,42 @@ export async function POST(request: Request) {
       );
     }
 
-    // 2. Parse Payload
-    const body = await request.json();
-    const tradeId = body.tradeId || body.trade_id;
+    const body = await request.json().catch(() => null);
+    if (!body || typeof body !== 'object' || Array.isArray(body)) {
+      return NextResponse.json(
+        { success: false, error: 'A valid JSON request body is required' },
+        { status: 400 }
+      );
+    }
 
-    if (!tradeId) {
+    const rawTradeId = body.tradeId ?? body.trade_id;
+    if (typeof rawTradeId !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(rawTradeId)) {
       return NextResponse.json(
         { success: false, error: 'Valid tradeId is required' },
         { status: 400 }
       );
     }
 
-    // 3. Execute Cancel RPC
+    // Keep the reason server-controlled. The RPC signature requires p_reason;
+    // never let client text alter the financial audit reason.
     const { data, error } = await supabase.rpc('cancel_p2p_trade', {
-      p_trade_id: tradeId,
+      p_trade_id: rawTradeId,
       p_caller_id: user.id,
+      p_reason: 'user_cancelled',
     });
 
     if (error) {
+      // Avoid returning database internals to the client.
       return NextResponse.json(
-        { success: false, error: error.message },
+        { success: false, error: 'Trade cancellation failed' },
         { status: 400 }
       );
     }
 
     return NextResponse.json({ success: true, result: data });
-  } catch (err: any) {
+  } catch {
     return NextResponse.json(
-      { success: false, error: err.message || 'Internal server error' },
+      { success: false, error: 'Internal server error' },
       { status: 500 }
     );
   }
