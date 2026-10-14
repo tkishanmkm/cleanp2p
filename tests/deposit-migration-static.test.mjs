@@ -9,6 +9,8 @@ assert.equal(functionDefinition.length, 1, 'migration must define exactly one at
 assert.equal((sql.match(/\$function\$/g) ?? []).length, 2, 'function body delimiters must be balanced');
 assert.match(sql, /BLOCK_HASH_REQUIRED/, 'missing block hashes must fail closed');
 assert.match(sql, /INVALID_BLOCK_HASH/, 'malformed block hashes must fail closed');
+assert.match(sql, /ALTER TABLE public\.onchain_deposits ADD COLUMN IF NOT EXISTS block_number bigint/i,
+  'migration must add the block_number column before the RPC reads or writes it');
 assert.match(sql, /DEPOSIT_BLOCK_HASH_MISMATCH/, 'changed stored hashes must be rejected for manual reconciliation');
 assert.match(sql, /v_effective_confirmations := COALESCE\(p_confirmations, 0\)/,
   'credit eligibility must use the current independently verified confirmation count');
