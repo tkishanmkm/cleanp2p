@@ -302,12 +302,12 @@ export async function POST(request: NextRequest) {
       }
 
       const availableBalance = Math.max(0, balance - reserved - inEscrow - inWithdrawal);
-      const effectiveUnitPrice = priceVal !== null && Number.isFinite(priceVal) && priceVal > 0 ? priceVal : 1;
-      const minCoinRequired = requestedMin / effectiveUnitPrice;
 
-      if (availableBalance < minCoinRequired) {
+      // The ad advertises the full crypto inventory, not just the minimum-sized order.
+      // This remains a preflight check; escrow must reserve inventory atomically at trade time.
+      if (availableBalance < requestedCryptoAmount) {
         return NextResponse.json({
-          error: `Insufficient ${coinType} balance. You must have at least ${minCoinRequired.toFixed(6)} ${coinType} in your wallet to create a sell offer with a minimum limit of ${requestedMin} ${fiatType}. Current available: ${availableBalance.toFixed(6)} ${coinType}.`,
+          error: `Insufficient ${coinType} balance. You must have at least ${requestedCryptoAmount.toFixed(6)} ${coinType} available to advertise this inventory. Current available: ${availableBalance.toFixed(6)} ${coinType}.`,
           code: 'INSUFFICIENT_BALANCE',
         }, { status: 400 });
       }
