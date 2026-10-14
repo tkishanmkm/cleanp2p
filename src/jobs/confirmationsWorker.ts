@@ -316,13 +316,15 @@ export async function runConfirmedDepositReorgAudit(
           const verified = await verifyEvmTokenDeposit(
             getEvmProvider(network), deposit.tx_hash, index, destination, deposit.amount,
             CANONICAL_USDT_CONTRACTS[network] || chain.usdtContractAddress || '',
-            chain.usdtDecimals ?? 6
+            chain.usdtDecimals ?? 6,
+            chain.chainId
           );
           observedHash = verified?.blockHash || null;
           if (!verified) verificationError = 'EVM Transfer event or canonical block could not be independently verified.';
         } else {
           const verified = await verifyEvmNativeDeposit(
-            getEvmProvider(network), deposit.tx_hash, destination, deposit.amount, chain.nativeDecimals
+            getEvmProvider(network), deposit.tx_hash, destination, deposit.amount, chain.nativeDecimals,
+            chain.chainId
           );
           observedHash = verified?.blockHash || null;
           if (!verified) verificationError = 'EVM native transfer or canonical block could not be independently verified.';
