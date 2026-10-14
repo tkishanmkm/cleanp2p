@@ -1455,6 +1455,7 @@ export async function refreshPendingDepositConfirmations(): Promise<{
           p_token_contract: null,
           p_confirmations: verified.confirmations,
           p_provider: 'confirmations_worker',
+          p_block_hash: verified.blockHash,
         });
         if (!rpcErr) {
           const r = typeof data === 'string' ? JSON.parse(data) : data;
