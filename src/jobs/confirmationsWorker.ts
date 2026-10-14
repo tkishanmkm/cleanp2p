@@ -474,6 +474,11 @@ export async function recordConfirmedDepositReorgIncidents(
   return counts;
 }
 
+// In-memory keyset cursor prevents the same first 50 long-pending deposits from
+// monopolizing every poll. The cursor is intentionally a fairness optimization,
+// not a durable recovery checkpoint; the worker wraps around after reaching the end.
+let pendingDepositCursor: string | null = null;
+
 /**
  * Main worker logic: Polling and ingestion processor for pending deposits via canonical process_deposit_atomic RPC
  */
@@ -487,13 +492,19 @@ export async function runConfirmationsWorker(): Promise<ConfirmationWorkerResult
   };
 
   try {
-    // 1. Fetch pending on-chain deposits
-    const { data: pendingDeposits, error } = await supabaseAdmin
+    // 1. Fetch a bounded page of pending on-chain deposits using a rotating keyset cursor.
+    let query = supabaseAdmin
       .from('onchain_deposits')
       .select('*')
       .eq('status', 'PENDING')
-      .order('created_at', { ascending: true })
+      .order('id', { ascending: true })
       .limit(50);
+
+    if (pendingDepositCursor) {
+      query = query.gt('id', pendingDepositCursor);
+    }
+
+    let { data: pendingDeposits, error } = await query;
 
     if (error) {
       console.error('Failed to query pending deposits:', error.message);
@@ -502,7 +513,25 @@ export async function runConfirmationsWorker(): Promise<ConfirmationWorkerResult
       return result;
     }
 
+    // Wrap around so rows before the cursor are revisited on later cycles.
+    if ((!pendingDeposits || pendingDeposits.length === 0) && pendingDepositCursor) {
+      const wrapped = await supabaseAdmin
+        .from('onchain_deposits')
+        .select('*')
+        .eq('status', 'PENDING')
+        .order('id', { ascending: true })
+        .limit(50);
+      pendingDeposits = wrapped.data;
+      error = wrapped.error;
+      if (error) {
+        console.error('Failed to wrap pending-deposit queue:', error.message);
+        result.failedCount++;
+        return result;
+      }
+    }
+
     if (!pendingDeposits || pendingDeposits.length === 0) {
+      pendingDepositCursor = null;
       return result;
     }
 
@@ -797,6 +826,10 @@ export async function runConfirmationsWorker(): Promise<ConfirmationWorkerResult
         });
       }
     }
+
+    // Advance only after this page has been processed. Rows that remain PENDING
+    // will be revisited after the cursor wraps around.
+    pendingDepositCursor = String(pendingDeposits[pendingDeposits.length - 1].id);
 
     return result;
   } catch (err: any) {
