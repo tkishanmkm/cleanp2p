@@ -889,12 +889,22 @@ BEGIN
 
         END IF;
 
-        SELECT id
-        INTO v_onchain_id
-        FROM public.onchain_deposits
+        UPDATE public.deposits
+        SET block_number = COALESCE(p_block_number, block_number),
+            block_hash = COALESCE(v_block_hash, block_hash)
+        WHERE id = v_deposit_id;
+
+        UPDATE public.onchain_deposits
+        SET confirmations = GREATEST(COALESCE(confirmations, 0), v_effective_confirmations),
+            required_confirmations = v_required_confirmations,
+            status = 'CONFIRMED',
+            block_number = COALESCE(p_block_number, block_number),
+            block_hash = COALESCE(v_block_hash, block_hash),
+            updated_at = NOW()
         WHERE LOWER(BTRIM(tx_hash)) = v_tx_hash
           AND UPPER(BTRIM(network)) = v_network
-          AND output_index = p_output_index;
+          AND output_index = p_output_index
+        RETURNING id INTO v_onchain_id;
 
         RETURN jsonb_build_object(
             'success', true,
