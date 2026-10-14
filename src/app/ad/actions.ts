@@ -70,7 +70,12 @@ async function fetchUserCryptoBalance(userId: string, assetSymbol: string) {
   );
   const available = rows.reduce((sum: number, row: any) => {
     const balance = Number(row.balance ?? 0);
-    return Number.isFinite(balance) && balance > 0 ? sum + balance : sum;
+    const reserved = Number(row.reserved_balance ?? 0);
+    const inEscrow = Number(row.in_escrow ?? 0);
+    const inWithdrawal = Number(row.in_withdrawal ?? 0);
+    if (![balance, reserved, inEscrow, inWithdrawal].every(Number.isFinite)) return sum;
+    // Conservatively exclude all explicit reservations from the spendable amount.
+    return sum + Math.max(0, balance - Math.max(0, reserved) - Math.max(0, inEscrow) - Math.max(0, inWithdrawal));
   }, 0);
   const lockedEscrow = rows.reduce((sum: number, row: any) => {
     const locked = Number(row.in_escrow ?? row.locked_balance ?? 0);
