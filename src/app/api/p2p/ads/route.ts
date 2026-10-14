@@ -125,6 +125,16 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // Keep ad creation aligned with the escrow RPC's currently supported assets.
+    // The market-price table contains additional symbols that the escrow lifecycle does not yet support.
+    const escrowSupportedAssets = new Set(['USDT', 'BTC', 'ETH', 'LTC']);
+    if (!escrowSupportedAssets.has(coinType)) {
+      return NextResponse.json(
+        { error: 'This crypto asset is not currently supported for P2P escrow trades.', code: 'UNSUPPORTED_ESCROW_ASSET' },
+        { status: 400 }
+      );
+    }
+
     const adSide = resolveTradeType(body);
 
     if (!adSide) {
