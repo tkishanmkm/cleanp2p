@@ -1,8 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient, getSupabaseAdminClient } from '@/lib/supabase/server';
 import { logAdminSecurityAudit } from '@/lib/admin-security';
+import { verifyServerAdmin } from '@/lib/server-admin-auth';
 
 export async function POST(req: NextRequest) {
+  const auth = await verifyServerAdmin(req);
+  if (!auth.authorized) return auth.response!;
+
   try {
     const supabase = await createClient();
     const { data: { session } } = await supabase.auth.getSession();
