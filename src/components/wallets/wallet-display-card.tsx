@@ -5,10 +5,8 @@ import { useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle, CardFooter } from '@/components/ui/card';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Button } from '@/components/ui/button';
-import { Tooltip, TooltipProvider, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip';
 import { ArrowDown, ArrowUp } from 'lucide-react';
-import { useToast } from '@/hooks/use-toast';
-import type { UserWallet, CryptoCurrency } from '@/lib/types';
+import type { WalletDisplayItem, CryptoCurrency } from '@/lib/types';
 import { BtcLogo, EthLogo, LtcLogo, UsdtLogo } from '@/components/icons';
 import { DepositDialog } from './deposit-dialog';
 import { WithdrawDialog } from './withdraw-dialog';
@@ -25,14 +23,13 @@ const CryptoLogo = ({ crypto, className }: { crypto: CryptoCurrency, className?:
 
 interface WalletDisplayCardProps {
     coin: CryptoCurrency;
-    wallets: UserWallet[];
+    wallets: WalletDisplayItem[];
 }
 
 export function WalletDisplayCard({ coin, wallets }: WalletDisplayCardProps) {
     const [selectedChain, setSelectedChain] = useState(wallets[0]?.chain || '');
     const [isDepositOpen, setIsDepositOpen] = useState(false);
     const [isWithdrawOpen, setIsWithdrawOpen] = useState(false);
-    const { toast } = useToast();
 
     const selectedWallet = wallets.find(w => w.chain === selectedChain) || wallets[0];
     const hasMultipleChains = wallets.length > 1;
@@ -50,12 +47,14 @@ export function WalletDisplayCard({ coin, wallets }: WalletDisplayCardProps) {
             <DepositDialog
                 open={isDepositOpen}
                 onOpenChange={setIsDepositOpen}
+                asset={coin}
                 wallet={selectedWallet}
             />
             <WithdrawDialog
                 open={isWithdrawOpen}
                 onOpenChange={setIsWithdrawOpen}
-                wallet={selectedWallet}
+                asset={coin}
+                initialChain={selectedWallet?.chain}
             />
             <Card>
                 <CardHeader className="flex flex-row items-start justify-between pb-2">
