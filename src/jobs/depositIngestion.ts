@@ -757,8 +757,10 @@ async function scanEvmNativeDeposits(
       }
     }
 
-    // 2. Iterate through blocks in range (constrained to max 25 blocks for native scan)
-    const start = Math.max(fromBlock, toBlock - 25);
+    // 2. Iterate through the full block range requested by the caller.
+    // Clamping this to the last 25 blocks silently skipped native deposits in
+    // the rest of the caller's scan window.
+    const start = fromBlock;
     for (let b = start; b <= toBlock; b++) {
       const block = await provider.getBlock(b, true);
       if (!block || !block.prefetchedTransactions) continue;
