@@ -60,6 +60,12 @@ assert.match(sql, /COALESCE\(NULLIF\(v_from_address, ''\), ''\)/,
 assert.match(sql, /'code', 'WALLET_BALANCE_INVALID'/,
   'NULL or negative wallet balances must fail closed before credit');
 
+
+assert.match(sql, /DEPOSIT_ADDRESS_OWNERSHIP_AMBIGUOUS/,
+  'conflicting ownership across canonical deposit-address and legacy wallet records must fail closed');
+assert.match(sql, /uda\.user_id <> w\.user_id/,
+  'cross-table address ownership guard must compare distinct user identities');
+
 console.log('Deposit migration static safety checks passed. This is not a PostgreSQL parser or execution test.');
 const workerPath = 'src/jobs/confirmationsWorker.ts';
 const worker = readFileSync(workerPath, 'utf8');
