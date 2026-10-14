@@ -1,12 +1,36 @@
 import { createClient } from '@supabase/supabase-js';
 
-// Initialize Supabase admin client
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL || 'https://placeholder.supabase.co';
-const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'placeholder-key';
+// This integration test mutates wallet, trade, and ad rows. It must only run
+// against the dedicated cleanp2p-staging project and must never fall back to anon
+// credentials or placeholder values.
+const supabaseUrl = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL || '';
+const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
 
-const supabase = createClient(supabaseUrl, supabaseKey, {
-  auth: { persistSession: false, autoRefreshToken: false },
-});
+function assertSafeTestEnvironment() {
+  const expectedProjectRef = 'tazvjyrdondcrdrkggqe';
+  let hostname = '';
+  try {
+    hostname = new URL(supabaseUrl).hostname;
+  } catch {
+    throw new Error('Refusing to run P2P escrow integration tests: SUPABASE_URL is missing or invalid.');
+  }
+
+  if (hostname !== `${expectedProjectRef}.supabase.co`) {
+    throw new Error(`Refusing to run destructive P2P escrow integration tests against non-staging project host: ${hostname}`);
+  }
+  if (!supabaseKey || !process.env.SUPABASE_SERVICE_ROLE_KEY) {
+    throw new Error('Refusing to run P2P escrow integration tests without SUPABASE_SERVICE_ROLE_KEY.');
+  }
+  if (process.env.P2P_ESCROW_TEST_ALLOW_MUTATIONS !== 'true') {
+    throw new Error('Refusing to mutate staging data unless P2P_ESCROW_TEST_ALLOW_MUTATIONS=true is explicitly set.');
+  }
+}
+
+const supabase = createClient(
+  supabaseUrl || 'https://invalid.invalid',
+  supabaseKey || 'invalid-test-key',
+  { auth: { persistSession: false, autoRefreshToken: false } },
+);
 
 // Color helpers for clean terminal reporting
 const green = (s: string) => `\x1b[32m${s}\x1b[0m`;
@@ -15,6 +39,7 @@ const cyan = (s: string) => `\x1b[36m${s}\x1b[0m`;
 const bold = (s: string) => `\x1b[1m${s}\x1b[0m`;
 
 async function runP2PTradeFlowTests() {
+  assertSafeTestEnvironment();
   console.log(bold(cyan('\n======================================================')));
   console.log(bold(cyan('  P2P ESCROW & STATE MACHINE INTEGRATION TEST SUITE   ')));
   console.log(bold(cyan('======================================================\n')));
