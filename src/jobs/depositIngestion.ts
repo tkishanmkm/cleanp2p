@@ -942,7 +942,10 @@ async function scanTronDeposits(
         }
         {
           const json = await res.json();
-          const items = Array.isArray(json?.data) ? json.data : [];
+          if (!Array.isArray(json?.data)) {
+            throw new Error('TronGrid account endpoint returned an invalid data payload');
+          }
+          const items = json.data;
           for (const item of items) {
             if (item.type !== 'Transfer') continue;
 
@@ -1058,7 +1061,10 @@ async function scanTronDeposits(
         }
         {
           const data = await res.json();
-          for (const evt of data.data || []) {
+          if (!Array.isArray(data?.data)) {
+            throw new Error('TronGrid contract events endpoint returned an invalid data payload');
+          }
+          for (const evt of data.data) {
             // Enforce the exact configured token contract before accepting an event.
             const eventContract = evt.contract_address || evt.contractAddress || cAddr;
             if (!approvedContractHex ||
