@@ -366,6 +366,101 @@ export async function runConfirmedDepositReorgAudit(
 }
 
 /**
+ * Persist audit findings to the review queue only. This function never modifies
+ * deposit, wallet, balance, or ledger rows and must only be called after the
+ * incident-table migration has been applied and verified.
+ */
+export async function recordConfirmedDepositReorgIncidents(
+  audit: ConfirmedDepositReorgAuditResult
+): Promise<{ inserted: number; updated: number; skipped: number }> {
+  const counts = { inserted: 0, updated: 0, skipped: 0 };
+
+  for (const detail of audit.details) {
+    if (detail.status === 'MATCH') {
+      counts.skipped++;
+      continue;
+    }
+
+    const network = String(detail.network || '').trim().toUpperCase();
+    const txHash = String(detail.txHash || '').trim().toLowerCase();
+    const outputIndexMatch = detail.depositId
+      ? audit.details.find((candidate) => candidate.depositId === detail.depositId)
+      : undefined;
+
+    if (!network || !txHash || !outputIndexMatch) {
+      counts.skipped++;
+      continue;
+    }
+
+    // The audit detail currently does not expose output index. Resolve it from
+    // the confirmed on-chain row so the incident identity is transaction-output scoped.
+    const { data: sourceDeposit, error: sourceError } = await supabaseAdmin
+      .from('onchain_deposits')
+      .select('id, network, tx_hash, output_index, log_index')
+      .eq('id', detail.depositId)
+      .maybeSingle();
+
+    if (sourceError || !sourceDeposit) {
+      console.error('Could not resolve source deposit for reorg incident:', sourceError?.message || detail.depositId);
+      counts.skipped++;
+      continue;
+    }
+
+    const outputIndex = sourceDeposit.output_index ?? sourceDeposit.log_index ?? 0;
+    const { data: existing, error: existingError } = await supabaseAdmin
+      .from('deposit_reorg_incidents')
+      .select('id, stored_block_hash, observed_block_hash, review_status, observation_count')
+      .eq('network', network)
+      .eq('tx_hash', txHash)
+      .eq('output_index', outputIndex)
+      .maybeSingle();
+
+    if (existingError) {
+      throw new Error(`Could not inspect existing deposit reorg incident: ${existingError.message}`);
+    }
+
+    const incidentType = detail.status === 'REORG_SUSPECTED'
+      ? 'REORG_SUSPECTED'
+      : (!detail.storedBlockHash && detail.observedBlockHash
+        ? 'MISSING_STORED_HASH'
+        : 'UNVERIFIABLE');
+    const now = new Date().toISOString();
+    const hashChanged = Boolean(existing && (
+      (existing.stored_block_hash || null) !== (detail.storedBlockHash || null)
+      || (existing.observed_block_hash || null) !== (detail.observedBlockHash || null)
+    ));
+
+    const row = {
+      network,
+      tx_hash: txHash,
+      output_index: outputIndex,
+      deposit_id: detail.depositId,
+      incident_type: incidentType,
+      stored_block_hash: detail.storedBlockHash,
+      observed_block_hash: detail.observedBlockHash,
+      last_seen_at: now,
+      observation_count: (existing?.observation_count || 0) + 1,
+      metadata: { note: detail.note, auditStatus: detail.status },
+      ...(existing ? {} : { first_seen_at: now, review_status: 'OPEN' }),
+      ...(existing && hashChanged ? { review_status: 'OPEN' } : {}),
+    };
+
+    const { error: writeError } = existing
+      ? await supabaseAdmin.from('deposit_reorg_incidents').update(row).eq('id', existing.id)
+      : await supabaseAdmin.from('deposit_reorg_incidents').insert(row);
+
+    if (writeError) {
+      throw new Error(`Could not record deposit reorg incident: ${writeError.message}`);
+    }
+
+    if (existing) counts.updated++;
+    else counts.inserted++;
+  }
+
+  return counts;
+}
+
+/**
  * Main worker logic: Polling and ingestion processor for pending deposits via canonical process_deposit_atomic RPC
  */
 export async function runConfirmationsWorker(): Promise<ConfirmationWorkerResult> {
