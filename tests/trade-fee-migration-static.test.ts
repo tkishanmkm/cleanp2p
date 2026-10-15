@@ -436,5 +436,14 @@ assert.equal((adCreationRoute.match(/marketAgeMs > MAX_MARKET_PRICE_AGE_MS/g) ??
 assert.equal((adCreationRoute.match(/\.select\('price_in_fiat, updated_at'\)/g) ?? []).length, 2,
   'both pricing modes must load the market timestamp before accepting a reference price');
 
+const marketPriceWorkerPath = join(process.cwd(), 'src/jobs/priceUpdaterWorker.ts');
+const marketPriceWorker = readFileSync(marketPriceWorkerPath, 'utf8');
+assert.match(marketPriceWorker, /process\.env\.SUPABASE_SERVICE_ROLE_KEY\s*\|\|\s*''/,
+  'market-price worker must require the service-role credential');
+assert.match(marketPriceWorker, /if \(!supabaseUrl \|\| !supabaseKey\)[\s\S]*?SUPABASE_SERVICE_CONFIGURATION_MISSING/,
+  'market-price worker must fail closed when Supabase server configuration is missing');
+assert.doesNotMatch(marketPriceWorker, /NEXT_PUBLIC_SUPABASE_ANON_KEY|placeholder\.supabase\.co|placeholder-key/,
+  'market-price worker must not fall back to public anon credentials or placeholder configuration');
+
 console.log('PASS: escrow fee migration static safety checks');
 console.log('NOTE: run integration tests against a fully initialized disposable Supabase project before deployment.');
