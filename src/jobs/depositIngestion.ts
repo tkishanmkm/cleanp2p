@@ -1269,6 +1269,9 @@ async function scanTronDeposits(
 
     // 4. Strategy C: JSON-RPC eth_getLogs on configured RPC endpoint (Alchemy TRON compatible).
     // A persisted cursor is required so an outage cannot permanently hide older TRON events.
+    // Errors from other providers must not prevent this independently complete scan from advancing;
+    // errors produced by this RPC scan still block checkpoint advancement.
+    const rpcScanErrorStart = errors.length;
     if (latestBlock && (tronHost.includes('alchemy.com') || tronHost.includes('rpc'))) {
       try {
         const checkpointNetwork = 'TRC20';
@@ -1438,7 +1441,7 @@ async function scanTronDeposits(
 
         // Persist progress only after the entire bounded range succeeded, including
         // verification and database handling for every matching monitored event.
-        if (fromBlock <= toBlock && errors.length === 0) {
+        if (fromBlock <= toBlock && errors.length === rpcScanErrorStart) {
           const { data: checkpointAdvanced, error: checkpointWriteError } = await supabaseAdmin.rpc(
             'advance_deposit_scan_checkpoint',
             {
