@@ -55,13 +55,26 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          if ! timeout 12m supabase start; then
-            echo 'Supabase stack startup failed or exceeded 12 minutes.'
+          for attempt in 1 2; do
+            echo "Starting disposable Supabase stack (attempt ${attempt}/2)..."
+            if timeout 12m supabase start; then
+              exit 0
+            fi
+
+            echo "Supabase startup attempt ${attempt} failed; collecting diagnostics."
             docker ps -a || true
-            docker info || true
             supabase status || true
-            exit 1
-          fi
+            supabase stop --no-backup || true
+
+            if [[ "${attempt}" -eq 1 ]]; then
+              echo "Retrying once after cleanup to recover from transient container startup failures."
+              sleep 10
+            fi
+          done
+
+          echo "Supabase stack failed to start after two attempts."
+          docker info || true
+          exit 1
 
       - name: Apply the complete migration history
         run: supabase db reset --local
