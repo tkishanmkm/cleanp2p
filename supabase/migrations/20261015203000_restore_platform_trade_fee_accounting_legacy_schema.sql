@@ -50,8 +50,8 @@ BEGIN
         RAISE EXCEPTION 'Trade % not found', p_trade_id;
     END IF;
 
-    -- The legacy schema stores participant IDs as text, but wallet and ledger
-    -- writes require UUIDs. Reject malformed IDs before any casts or mutations.
+    -- Legacy participant IDs are text, while wallet and ledger writes require UUIDs.
+    -- Reject malformed IDs before casts or financial mutations.
     IF v_trade.seller_id IS NULL
        OR v_trade.seller_id !~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}
 
@@ -284,7 +284,7 @@ END;
 $function$
 ;
 
--- Keep direct execution limited to the trusted server/service-role path.
+-- Restrict direct execution to the trusted server/service-role path.
 REVOKE ALL ON FUNCTION public.release_trade_escrow(uuid, uuid) FROM PUBLIC;
 REVOKE ALL ON FUNCTION public.release_trade_escrow(uuid, uuid) FROM anon, authenticated;
 GRANT EXECUTE ON FUNCTION public.release_trade_escrow(uuid, uuid) TO service_role;
