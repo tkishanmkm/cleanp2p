@@ -1,16 +1,14 @@
--- Restore P2P escrow fee accounting in the canonical release RPC.
--- Review and test on a fully initialized disposable Supabase project before applying.
+-- Restore P2P escrow fee accounting without reverting live authorization hardening.
+-- Baseline is the current production release_trade_escrow definition, inspected read-only.
+-- Execute only after SQL integration tests on a fully initialized disposable database.
 BEGIN;
 
-CREATE OR REPLACE FUNCTION public.release_trade_escrow(
-    p_trade_id UUID,
-    p_caller_id UUID DEFAULT NULL
-)
-RETURNS JSONB
-LANGUAGE plpgsql
-SECURITY DEFINER
-SET search_path = public, pg_temp
-AS $$
+CREATE OR REPLACE FUNCTION public.release_trade_escrow(p_trade_id uuid, p_caller_id uuid DEFAULT NULL::uuid)
+ RETURNS jsonb
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
 DECLARE
     v_auth_uid UUID := auth.uid();
     v_effective_caller UUID;
@@ -29,7 +27,7 @@ DECLARE
     v_is_disputed BOOLEAN := FALSE;
     v_is_admin BOOLEAN := FALSE;
 BEGIN
-    -- 1. Authentication Check & Impersonation Prevention
+    -- 1. Authentication Check
     IF v_auth_uid IS NOT NULL THEN
         IF p_caller_id IS NOT NULL AND p_caller_id <> v_auth_uid THEN
             RAISE EXCEPTION 'Caller ID mismatch: unauthorized impersonation.';
@@ -52,24 +50,18 @@ BEGIN
         RAISE EXCEPTION 'Trade % not found', p_trade_id;
     END IF;
 
-    -- Canonical Asset Code Resolution
-    v_crypto_symbol := UPPER(COALESCE(
-        NULLIF(TRIM(v_trade.crypto), ''),
-        NULLIF(TRIM(v_trade.asset_code), ''),
-        NULLIF(TRIM(v_trade.crypto_currency), ''),
-        'USDT'
-    ));
+    v_crypto_symbol := UPPER(NULLIF(TRIM(v_trade.crypto::TEXT), ''));
 
     v_total_escrow := v_trade.crypto_amount + COALESCE(v_trade.escrow_fee, 0.0);
 
-    -- 3. Lock Wallet Assets FOR UPDATE (with defensive ::TEXT casting)
+    -- 3. Lock Wallet Assets FOR UPDATE (Defensive ::TEXT casting)
     SELECT balance, in_escrow INTO v_seller_bal, v_seller_escrow
     FROM public.wallet_assets
-    WHERE user_id::TEXT = v_trade.seller_id::TEXT AND asset_symbol = v_crypto_symbol
+    WHERE user_id::TEXT = v_trade.seller_id::TEXT AND asset_symbol = v_trade.crypto
     FOR UPDATE;
 
     IF NOT FOUND THEN
-        RAISE EXCEPTION 'Seller wallet_assets record not found for user % and asset %', v_trade.seller_id, v_crypto_symbol;
+        RAISE EXCEPTION 'Seller wallet_assets record not found for user % and asset %', v_trade.seller_id, v_trade.crypto;
     END IF;
 
     -- Ensure Buyer wallet_assets exists
@@ -82,8 +74,8 @@ BEGIN
         updated_at
     )
     VALUES (
-        v_trade.buyer_id,
-        v_crypto_symbol,
+        v_trade.buyer_id::UUID,
+        v_trade.crypto,
         0.0,
         0.0,
         NOW(),
@@ -93,10 +85,10 @@ BEGIN
 
     SELECT balance, in_escrow INTO v_buyer_bal, v_buyer_escrow
     FROM public.wallet_assets
-    WHERE user_id::TEXT = v_trade.buyer_id::TEXT AND asset_symbol = v_crypto_symbol
+    WHERE user_id::TEXT = v_trade.buyer_id::TEXT AND asset_symbol = v_trade.crypto
     FOR UPDATE;
 
-    -- 4. Release Payment Guard
+    -- 4. Release Payment Guard (ENUM safe: explicit status::TEXT before COALESCE)
     v_is_paid := (v_trade.paid_at IS NOT NULL)
               OR (v_trade.marked_paid_at IS NOT NULL)
               OR (LOWER(COALESCE(v_trade.escrow_status::TEXT, '')) IN ('paid', 'completed', 'released'))
@@ -106,23 +98,16 @@ BEGIN
         RAISE EXCEPTION 'Trade % cannot be released before payment is marked.', p_trade_id;
     END IF;
 
-    -- 5. Authoritative Admin & Participant Authorization Guard (self-contained, type-safe)
+    -- 5. Dispute & Participant Authorization Guard (Cast enum status to text for LOWER())
     v_is_disputed := (LOWER(COALESCE(v_trade.escrow_status::TEXT, '')) = 'disputed')
                   OR (LOWER(COALESCE(v_trade.status::TEXT, '')) IN ('disputed', 'dispute'))
-                  OR EXISTS (SELECT 1 FROM public.disputes WHERE trade_id = p_trade_id AND LOWER(status) = 'open');
+                  OR EXISTS (SELECT 1 FROM public.disputes WHERE trade_id = p_trade_id AND LOWER(status::text) = 'open');
 
-    v_is_admin := (auth.role() = 'service_role')
-               OR EXISTS (
-                   SELECT 1 FROM public.app_admins
-                   WHERE user_id::TEXT = v_effective_caller::TEXT
-               )
+    v_is_admin := public.is_admin()
                OR EXISTS (
                    SELECT 1 FROM auth.users
-                   WHERE id::TEXT = v_effective_caller::TEXT
-                     AND (
-                         (raw_app_meta_data->>'role') = 'admin'
-                         OR COALESCE((raw_app_meta_data->>'is_admin')::BOOLEAN, false) = true
-                     )
+                   WHERE id = v_effective_caller
+                     AND ((raw_app_meta_data->>'role') = 'admin')
                );
 
     IF v_is_disputed THEN
@@ -135,21 +120,19 @@ BEGIN
         END IF;
     END IF;
 
-    -- 6. Terminal State & Replay Safety (Idempotency)
+    -- 6. Terminal State & Replay Safety (ENUM safe)
     IF LOWER(COALESCE(v_trade.status::TEXT, '')) IN ('cancelled', 'expired') OR LOWER(COALESCE(v_trade.escrow_status::TEXT, '')) IN ('cancelled', 'expired') THEN
         RAISE EXCEPTION 'Cannot release trade % in terminal state %.', p_trade_id, v_trade.status;
     END IF;
 
     IF LOWER(COALESCE(v_trade.status::TEXT, '')) IN ('completed', 'released') OR LOWER(COALESCE(v_trade.escrow_status::TEXT, '')) IN ('completed', 'released') THEN
-        -- Idempotent replay: ensure the fee entry exists; the helper rejects
-        -- any conflicting entry with the same deterministic key.
         IF COALESCE(v_trade.escrow_fee, 0) > 0 THEN
             PERFORM public.record_platform_ledger_entry(
                 p_entry_type := 'trade_fee_collected',
                 p_asset_code := v_crypto_symbol,
                 p_amount := v_trade.escrow_fee,
                 p_direction := 'CREDIT',
-                p_related_user_id := v_trade.seller_id,
+                p_related_user_id := v_trade.seller_id::UUID,
                 p_ref_table := 'trades',
                 p_ref_id := p_trade_id::TEXT,
                 p_network_code := NULL,
@@ -164,6 +147,7 @@ BEGIN
                 )
             );
         END IF;
+
         RETURN jsonb_build_object(
             'success', true,
             'trade_id', p_trade_id,
@@ -184,7 +168,7 @@ BEGIN
     SET in_escrow = in_escrow - v_total_escrow,
         updated_at = NOW()
     WHERE user_id::TEXT = v_trade.seller_id::TEXT
-      AND asset_symbol = v_crypto_symbol
+      AND asset_symbol = v_trade.crypto
       AND in_escrow >= v_total_escrow
     RETURNING balance, in_escrow INTO v_seller_bal_after, v_seller_escrow_after;
 
@@ -204,9 +188,9 @@ BEGIN
         metadata,
         status
     ) VALUES (
-        v_trade.seller_id,
-        v_crypto_symbol,
-        v_crypto_symbol,
+        v_trade.seller_id::UUID,
+        v_trade.crypto,
+        v_trade.crypto,
         0.0,
         'transfer',
         'trade_rel_seller:' || p_trade_id::TEXT,
@@ -224,7 +208,7 @@ BEGIN
     SET balance = balance + v_trade.crypto_amount,
         updated_at = NOW()
     WHERE user_id::TEXT = v_trade.buyer_id::TEXT
-      AND asset_symbol = v_crypto_symbol
+      AND asset_symbol = v_trade.crypto
     RETURNING balance, in_escrow INTO v_buyer_bal_after, v_buyer_escrow_after;
 
     IF NOT FOUND THEN
@@ -243,9 +227,9 @@ BEGIN
         metadata,
         status
     ) VALUES (
-        v_trade.buyer_id,
-        v_crypto_symbol,
-        v_crypto_symbol,
+        v_trade.buyer_id::UUID,
+        v_trade.crypto,
+        v_trade.crypto,
         +v_trade.crypto_amount,
         'transfer',
         'trade_rel_buyer:' || p_trade_id::TEXT,
@@ -258,15 +242,14 @@ BEGIN
         'completed'
     );
 
-    -- 7e. Record the platform fee in the same transaction as settlement.
-    -- Failure here rolls back the wallet changes and user ledger entries.
+    -- Record the platform fee in the same transaction as wallet settlement.
     IF COALESCE(v_trade.escrow_fee, 0) > 0 THEN
         PERFORM public.record_platform_ledger_entry(
             p_entry_type := 'trade_fee_collected',
             p_asset_code := v_crypto_symbol,
             p_amount := v_trade.escrow_fee,
             p_direction := 'CREDIT',
-            p_related_user_id := v_trade.seller_id,
+            p_related_user_id := v_trade.seller_id::UUID,
             p_ref_table := 'trades',
             p_ref_id := p_trade_id::TEXT,
             p_network_code := NULL,
@@ -282,7 +265,7 @@ BEGIN
         );
     END IF;
 
-    -- 7f. Update Trade State to Completed
+    -- 7e. Update Trade State to Completed
     UPDATE public.trades
     SET status = 'completed',
         escrow_status = 'RELEASED',
@@ -291,10 +274,10 @@ BEGIN
         updated_at = NOW()
     WHERE id = p_trade_id;
 
-    -- 7g. Resolve Active Dispute if present
+    -- 7f. Resolve Active Dispute if present (Cast enum status to text for LOWER())
     UPDATE public.disputes
     SET status = 'resolved'
-    WHERE trade_id = p_trade_id AND LOWER(status) = 'open';
+    WHERE trade_id = p_trade_id AND LOWER(status::text) = 'open';
 
     RETURN jsonb_build_object(
         'success', true,
@@ -303,9 +286,7 @@ BEGIN
         'escrow_status', 'RELEASED'
     );
 END;
-$$;
-
-REVOKE ALL ON FUNCTION public.release_trade_escrow(UUID, UUID) FROM PUBLIC, anon;
-GRANT EXECUTE ON FUNCTION public.release_trade_escrow(UUID, UUID) TO authenticated, service_role, postgres;
+$function$
+;
 
 COMMIT;
