@@ -32,6 +32,17 @@ const adminOverviewMigrationPath = join(
 const adminOverviewMigrationSql = readFileSync(adminOverviewMigrationPath, 'utf8');
 assert.match(
   adminOverviewMigrationSql,
+  /to_regprocedure\('public\.process_user_deposit\(uuid, text, numeric, text, text, text, text\)'\) IS NOT NULL/,
+  'financial RPC hardening must guard the exact process_user_deposit signature'
+);
+assert.doesNotMatch(
+  adminOverviewMigrationSql,
+  /IF EXISTS \(SELECT 1 FROM pg_proc WHERE proname = '(?:credit_confirmed_deposit|ingest_and_credit_deposit|process_user_deposit|mark_gas_funded|mark_swept|sync_didit_kyc_status|cancel_expired_p2p_trades)'\)/,
+  'financial RPC hardening must not guard a different signature by function name alone'
+);
+
+assert.match(
+  adminOverviewMigrationSql,
   /CREATE VIEW public\.admin_financial_overview[\s\S]*?COALESCE\(main_balance, 0\)/,
   'admin overview must use the actual main_balance column exposed by user_wallets'
 );
