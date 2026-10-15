@@ -551,7 +551,7 @@ async function scanTronDeposits(
 
             const confirmations = (latestBlock && eventBlock && latestBlock >= eventBlock)
               ? latestBlock - eventBlock + 1
-              : 1;
+              : 0;
 
             detected++;
 
@@ -573,7 +573,7 @@ async function scanTronDeposits(
               errors.push(`RPC error for TRON deposit ${txId}: ${error.message}`);
             } else {
               const r = typeof rpcData === 'string' ? JSON.parse(rpcData) : rpcData;
-              if (r?.status === 'credited' || (r?.success && confirmations >= TRON_CONFIG.requiredConfirmations)) {
+              if (r?.status === 'credited') {
                 credited++;
               }
             }
@@ -623,7 +623,7 @@ async function scanTronDeposits(
             const eventBlock = evt.block_number || 0;
             const confirmations = (latestBlock && eventBlock && latestBlock >= eventBlock)
               ? latestBlock - eventBlock + 1
-              : 1;
+              : 0;
 
             const { data: rpcData, error } = await supabaseAdmin.rpc('process_deposit_atomic', {
               p_destination_address: toBase58,
@@ -743,7 +743,7 @@ async function scanTronDeposits(
           if (numericAmount <= 0) continue;
 
           const eventBlock = parseInt(log.blockNumber || '0x0', 16) || 0;
-          const confirmations = latestBlock > eventBlock ? latestBlock - eventBlock + 1 : 1;
+          const confirmations = latestBlock > eventBlock ? latestBlock - eventBlock + 1 : 0;
 
           let eventContractBase58 = contractAddress;
           try {
@@ -771,7 +771,7 @@ async function scanTronDeposits(
             errors.push(`RPC error for TRON deposit ${txHash}: ${error.message}`);
           } else {
             const res = typeof rpcData === 'string' ? JSON.parse(rpcData) : rpcData;
-            if (res?.status === 'credited' || (res?.success && confirmations >= TRON_CONFIG.requiredConfirmations)) {
+            if (res?.status === 'credited') {
               credited++;
             }
           }
