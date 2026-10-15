@@ -62,7 +62,9 @@ const profileUpdatePolicyStart = securityHotfixSql.indexOf('CREATE POLICY "Users
 const profileUpdatePolicyEnd = securityHotfixSql.indexOf(';', profileUpdatePolicyStart);
 assert.ok(profileUpdatePolicyStart >= 0 && profileUpdatePolicyEnd > profileUpdatePolicyStart,
   'security hotfix must define the profile update policy');
-const profileUpdatePolicy = securityHotfixSql.slice(profileUpdatePolicyStart, profileUpdatePolicyEnd);
+const profileUpdatePolicy = securityHotfixSql
+  .slice(profileUpdatePolicyStart, profileUpdatePolicyEnd)
+  .replace(/--[^\n]*/g, ''); // Ignore explanatory comments; inspect executable policy SQL only.
 assert.doesNotMatch(profileUpdatePolicy, /\b(?:role|is_admin)\b/,
   'profile update policy must not reference role/is_admin columns absent from canonical profiles schema');
 const checkAdminStart = securityHotfixSql.indexOf('CREATE OR REPLACE FUNCTION public.check_is_admin');
