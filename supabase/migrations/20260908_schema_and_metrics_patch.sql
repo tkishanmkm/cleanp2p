@@ -54,7 +54,7 @@ ALTER TABLE IF EXISTS public.p2p_ads
   ADD COLUMN IF NOT EXISTS active BOOLEAN DEFAULT true;
 
 -- Populate legacy p2p_ads identifiers only when that optional legacy table exists.
-DO $
+DO $$
 BEGIN
   IF to_regclass('public.p2p_ads') IS NOT NULL THEN
     EXECUTE $sql$
@@ -63,7 +63,7 @@ BEGIN
       WHERE public_ad_id IS NULL
     $sql$;
   END IF;
-END $;
+END $$;
 
 -- 3. TRADES TABLE AUDIT & ALIGNMENT
 ALTER TABLE IF EXISTS public.trades
@@ -111,13 +111,13 @@ CREATE TABLE IF NOT EXISTS public.disputes (
 
 -- 5. PERFORMANCE INDEXES
 -- Legacy p2p_ads indexes are optional; do not fail clean replay when only public.ads exists.
-DO $
+DO $$
 BEGIN
   IF to_regclass('public.p2p_ads') IS NOT NULL THEN
     EXECUTE 'CREATE INDEX IF NOT EXISTS idx_p2p_ads_public_ad_id ON public.p2p_ads(public_ad_id)';
     EXECUTE 'CREATE INDEX IF NOT EXISTS idx_p2p_ads_user_id ON public.p2p_ads(user_id)';
   END IF;
-END $;
+END $$;
 CREATE INDEX IF NOT EXISTS idx_trades_public_id ON public.trades(public_id);
 CREATE INDEX IF NOT EXISTS idx_trades_buyer_id ON public.trades(buyer_id);
 CREATE INDEX IF NOT EXISTS idx_trades_seller_id ON public.trades(seller_id);
