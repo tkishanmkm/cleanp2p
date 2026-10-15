@@ -32,7 +32,7 @@ const adminOverviewMigrationPath = join(
 const adminOverviewMigrationSql = readFileSync(adminOverviewMigrationPath, 'utf8');
 assert.match(
   adminOverviewMigrationSql,
-  /CREATE VIEW public\\.admin_financial_overview[\\s\\S]*?COALESCE\\(main_balance, 0\\)/,
+  /CREATE VIEW public\.admin_financial_overview[\s\S]*?COALESCE\(main_balance, 0\)/,
   'admin overview must use the actual main_balance column exposed by user_wallets'
 );
 assert.match(
