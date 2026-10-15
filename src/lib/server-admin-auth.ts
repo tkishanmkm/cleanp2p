@@ -16,7 +16,10 @@ export interface AdminAuthResult {
  * If Admin 2FA is enabled, strictly verifies the cryptographic pax_admin_2fa_session cookie.
  * Never trusts request body parameters or client headers for identity or 2FA verification.
  */
-export async function verifyServerAdmin(req?: NextRequest): Promise<AdminAuthResult> {
+export async function verifyServerAdmin(
+  req?: NextRequest,
+  options: { require2FA?: boolean } = {}
+): Promise<AdminAuthResult> {
   try {
     const supabase = await createClient();
     const adminClient = getSupabaseAdminClient();
@@ -110,7 +113,7 @@ export async function verifyServerAdmin(req?: NextRequest): Promise<AdminAuthRes
     // 3. Admin 2FA Enforcement Gate
     const is2FAEnabled = Boolean(adminProfile?.admin_2fa_enabled || adminProfile?.is_2fa_enabled);
 
-    if (is2FAEnabled) {
+    if (is2FAEnabled && options.require2FA !== false) {
       // Extract cookie from NextRequest or Supabase cookies
       let sessionCookie: string | undefined;
       if (req) {
