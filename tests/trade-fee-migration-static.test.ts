@@ -177,6 +177,17 @@ assert.doesNotMatch(
   'trade baseline snapshot must not directly reference optional legacy columns'
 );
 
+assert.doesNotMatch(
+  depositSnapshotMigrationSql,
+  /8925fed8-c8bf-44a3-97fa-bd806aade05a/,
+  'schema migration must not hardcode a production user UUID'
+);
+assert.doesNotMatch(
+  depositSnapshotMigrationSql,
+  /STEP 4: PRECHECK & VERIFICATION OF USER ROUTE INTEGRITY|STEP 5: FINAL TRANSACTION VERIFICATION ASSERTIONS/,
+  'user-specific operational data checks must not block clean migration replay'
+);
+
 const tradeFlowHardeningPath = join(
   process.cwd(),
   'supabase/migrations/20260928080000_p2p_trade_flow_and_rls_hardening.sql'
