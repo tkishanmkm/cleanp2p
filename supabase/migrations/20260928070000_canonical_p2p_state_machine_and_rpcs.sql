@@ -37,7 +37,7 @@ DECLARE
 
     -- Strongly-typed record variables for each relation
     v_p2p_ad RECORD;
-    v_legacy_ad public.ads%ROWTYPE;
+    v_legacy_ad RECORD;
 
     -- Normalized scalar variables
     v_found_ad BOOLEAN := FALSE;
@@ -108,12 +108,14 @@ BEGIN
             v_ad_user_id := v_p2p_ad.user_id;
             v_ad_public_ad_id := v_p2p_ad.public_ad_id;
 
-            -- Resolve corresponding legacy public.ads.id strictly for foreign key trades_ad_id_fkey
-            SELECT id INTO v_trade_ad_id
-            FROM public.ads
-            WHERE public_ad_id = v_p2p_ad.public_ad_id
-               OR id = v_p2p_ad.id::TEXT
-            LIMIT 1;
+            -- Resolve legacy ads FK only when the optional legacy table exists.
+            IF to_regclass('public.ads') IS NOT NULL THEN
+                SELECT id INTO v_trade_ad_id
+                FROM public.ads
+                WHERE public_ad_id = v_p2p_ad.public_ad_id
+                   OR id = v_p2p_ad.id::TEXT
+                LIMIT 1;
+            END IF;
 
             v_ad_type := UPPER(COALESCE(
                 v_p2p_ad.ad_type,
@@ -154,8 +156,8 @@ BEGIN
 
     END IF;
 
-    -- 3. Fallback Lookup in Legacy public.ads Table (if not found in p2p_ads)
-    IF NOT v_found_ad THEN
+    -- 3. Fallback Lookup in optional Legacy public.ads Table
+    IF NOT v_found_ad AND to_regclass('public.ads') IS NOT NULL THEN
         SELECT * INTO v_legacy_ad
         FROM public.ads
         WHERE public_id = p_ad_id
