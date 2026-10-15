@@ -13,6 +13,7 @@ assert.match(sql, /SECURITY DEFINER/i, 'settlement RPC must retain SECURITY DEFI
 assert.match(sql, /SET search_path TO 'public', 'pg_temp'/i, 'settlement RPC must pin search_path');
 assert.match(sql, /v_trade\.seller_id !~\* '\^\[0-9a-f\]\{8\}-\[0-9a-f\]\{4\}-\[0-9a-f\]\{4\}-\[0-9a-f\]\{4\}-\[0-9a-f\]\{12\}\$'/i, 'seller UUID guard must be present');
 assert.match(sql, /v_trade\.buyer_id !~\* '\^\[0-9a-f\]\{8\}-\[0-9a-f\]\{4\}-\[0-9a-f\]\{4\}-\[0-9a-f\]\{4\}-\[0-9a-f\]\{12\}\$'/i, 'buyer UUID guard must be present');
+assert.match(sql, /IF v_trade\.seller_id::UUID = v_trade\.buyer_id::UUID THEN[\s\S]*?Buyer and seller must be different users/i, 'self-trades must fail closed');
 assert.match(sql, /IF COALESCE\(v_trade\.escrow_fee, 0\) < 0 THEN[\s\S]*?RAISE EXCEPTION 'Invalid negative escrow fee/i, 'negative fees must fail closed');
 assert.match(sql, /'pf_p2pfee_' \|\| p_trade_id::TEXT/i, 'fee ledger idempotency key must be deterministic');
 assert.match(sql, /Financial state corruption: completed trade/i, 'completed positive-fee trades must verify fee ledger');
@@ -30,6 +31,7 @@ const totalAssignment = sql.indexOf('v_total_escrow := v_trade.crypto_amount + C
 const firstWalletMutation = sql.indexOf('UPDATE public.wallet_assets');
 
 assert.ok(uuidGuard >= 0 && firstWalletOperation > uuidGuard, 'participant UUID guards must precede wallet operations');
+assert.ok(sql.indexOf('Buyer and seller must be different users') < firstWalletOperation, 'self-trade guard must precede wallet operations');
 assert.ok(amountGuard >= 0 && totalAssignment > amountGuard, 'crypto amount must be validated before calculating escrow liability');
 assert.ok(negativeFeeGuard >= 0 && totalAssignment > negativeFeeGuard, 'fee must be validated before calculating escrow liability');
 assert.ok(negativeFeeGuard < firstWalletOperation, 'negative fee guard must precede wallet operations');
