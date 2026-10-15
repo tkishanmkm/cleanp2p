@@ -56,6 +56,22 @@ assert.doesNotMatch(
   'admin overview must not reference a nonexistent balance column on user_wallets'
 );
 
+assert.match(
+  adminOverviewMigrationSql,
+  /IF to_regclass\('public\.sweep_logs'\) IS NOT NULL THEN[\s\S]*?CREATE POLICY "sweep_logs_service_role_all"/,
+  'sweep_logs RLS changes must be guarded when the optional legacy table is absent'
+);
+assert.match(
+  adminOverviewMigrationSql,
+  /IF to_regclass\('public\.sweep_queue'\) IS NOT NULL THEN[\s\S]*?CREATE POLICY "sweep_queue_service_role_all"/,
+  'sweep_queue RLS changes must be guarded when the optional legacy table is absent'
+);
+assert.match(
+  adminOverviewMigrationSql,
+  /IF to_regclass\('public\.trade_attachments'\) IS NOT NULL THEN[\s\S]*?CREATE POLICY "trade_attachments_participant_select"/,
+  'trade attachment policies must be guarded when the optional legacy table is absent'
+);
+
 const reservedBalanceMigrationPath = join(
   process.cwd(),
   'supabase/migrations/20260917000000_add_reserved_balance_and_sync.sql'
