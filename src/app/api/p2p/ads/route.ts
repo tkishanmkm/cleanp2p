@@ -212,7 +212,7 @@ export async function POST(request: NextRequest) {
       if (marketError || !marketRow || !marketRow.price_in_fiat || Number(marketRow.price_in_fiat) <= 0) {
         return NextResponse.json(
           { error: `Market reference price is currently unavailable for ${coinType}/${fiatType}. Please try again later.` },
-          { status: 400 }
+          { status: 503 }
         );
       }
 
@@ -248,7 +248,7 @@ export async function POST(request: NextRequest) {
         if (marketError || !Number.isFinite(referencePrice) || referencePrice <= 0) {
           return NextResponse.json(
             { error: `Market reference price is unavailable for ${coinType}/${fiatType}; a floating price cannot be calculated.`, code: 'MARKET_PRICE_UNAVAILABLE' },
-            { status: 400 }
+            { status: 503 }
           );
         }
         priceVal = Number((referencePrice * (1 + marginVal / 100)).toFixed(8));
