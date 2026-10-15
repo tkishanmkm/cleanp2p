@@ -41,6 +41,22 @@ assert.doesNotMatch(
   'financial RPC hardening must not guard a different signature by function name alone'
 );
 
+const canonicalP2pStateMachinePath = join(
+  process.cwd(),
+  'supabase/migrations/20260928070000_canonical_p2p_state_machine_and_rpcs.sql'
+);
+const canonicalP2pStateMachineSql = readFileSync(canonicalP2pStateMachinePath, 'utf8');
+assert.match(
+  canonicalP2pStateMachineSql,
+  /v_p2p_ad RECORD;[\s\S]*?IF to_regclass\('public\.p2p_ads'\) IS NOT NULL THEN[\s\S]*?FROM public\.p2p_ads/,
+  'canonical trade RPC must guard the optional p2p_ads relation and avoid a compile-time ROWTYPE dependency'
+);
+assert.doesNotMatch(
+  canonicalP2pStateMachineSql,
+  /v_p2p_ad public\.p2p_ads%ROWTYPE/,
+  'canonical trade RPC must not require p2p_ads to exist at function-creation time'
+);
+
 const profileWalletIndexMigrationPath = join(
   process.cwd(),
   'supabase/migrations/20260925000014_fix_profile_and_wallet_index_provisioning.sql'
