@@ -40,18 +40,20 @@ export async function createP2PAd(
 }
 
 export async function updateAd(_db: any, adId: string, adData: Partial<Omit<P2PAd, 'id' | 'createdAt' | 'user' | 'userId' | 'publicAdId'>>) {
-  const { data, error } = await supabase
-    .from('p2p_ads')
-    .update(adData)
-    .eq('id', adId)
-    .select();
+  const { data: { session } } = await supabase.auth.getSession();
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  if (session?.access_token) headers['Authorization'] = `Bearer ${session.access_token}`;
 
-  if (error) {
-    throw new Error(error.message);
-  }
-  return data;
+  const response = await fetch(`/api/ads/${encodeURIComponent(adId)}`, {
+    method: 'PUT',
+    headers,
+    credentials: 'include',
+    body: JSON.stringify(adData),
+  });
+  const result = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(result.error || result.message || `Failed to update advertisement (HTTP ${response.status})`);
+  return result.ad || result.data || result;
 }
-
 export async function updateAdStatus(_db: any, adId: string, active: boolean) {
   const { data: { session } } = await supabase.auth.getSession();
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
