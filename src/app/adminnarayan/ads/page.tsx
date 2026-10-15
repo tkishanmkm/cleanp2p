@@ -92,10 +92,10 @@ export default function AdminAdsPage() {
           crypto: ad.crypto || 'USDT',
           fiatCurrency: ad.fiat_currency || ad.fiatCurrency || 'USD',
           rateType: ad.rate_type || ad.rateType || 'fixed',
-          fixedRate: ad.fixed_rate || ad.fixedRate || 0,
-          ratePercent: ad.rate_percent || ad.ratePercent || 0,
-          minAmount: ad.min_amount || ad.minAmount || 0,
-          maxAmount: ad.max_amount || ad.maxAmount || 0,
+          fixedRate: ad.fixed_rate ?? ad.fixedRate ?? 0,
+          ratePercent: ad.rate_percent ?? ad.ratePercent ?? 0,
+          minAmount: ad.min_amount ?? ad.minAmount ?? 0,
+          maxAmount: ad.max_amount ?? ad.maxAmount ?? 0,
           paymentMethods: (() => {
             const value = ad.payment_methods ?? ad.paymentMethods;
             if (Array.isArray(value)) return value.map(String);
