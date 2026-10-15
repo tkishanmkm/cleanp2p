@@ -1482,15 +1482,15 @@ async function fetchAllUtxoAddressTransactions(apiBase: string, address: string)
   const seenCursors = new Set<string>();
 
   for (let pageNumber = 0; pageNumber < maxPages; pageNumber++) {
-    const url = lastSeenTxid
+    const url: string = lastSeenTxid
       ? `${apiBase}/address/${encodeURIComponent(address)}/txs/chain/${encodeURIComponent(lastSeenTxid)}`
       : `${apiBase}/address/${encodeURIComponent(address)}/txs`;
-    const res = await fetch(url);
+    const res: Response = await fetch(url);
     if (!res.ok) {
       throw new Error(`UTXO provider returned HTTP ${res.status} for address transaction page ${pageNumber + 1}`);
     }
 
-    const page = await res.json();
+    const page: unknown = await res.json();
     if (!Array.isArray(page)) {
       throw new Error(`UTXO provider returned invalid transaction page ${pageNumber + 1}`);
     }
@@ -1499,7 +1499,7 @@ async function fetchAllUtxoAddressTransactions(apiBase: string, address: string)
     transactions.push(...page);
     if (page.length < pageSize) return transactions;
 
-    const nextCursor = page[page.length - 1]?.txid;
+    const nextCursor: unknown = page[page.length - 1]?.txid;
     if (typeof nextCursor !== 'string' || !/^[a-fA-F0-9]{64}$/.test(nextCursor)) {
       throw new Error(`UTXO provider returned an invalid pagination cursor on page ${pageNumber + 1}`);
     }
