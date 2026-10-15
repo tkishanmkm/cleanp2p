@@ -41,6 +41,17 @@ assert.doesNotMatch(
   'financial RPC hardening must not guard a different signature by function name alone'
 );
 
+const profileWalletIndexMigrationPath = join(
+  process.cwd(),
+  'supabase/migrations/20260925000014_fix_profile_and_wallet_index_provisioning.sql'
+);
+const profileWalletIndexMigrationSql = readFileSync(profileWalletIndexMigrationPath, 'utf8');
+assert.match(
+  profileWalletIndexMigrationSql,
+  /ALTER TABLE public\.profiles ADD COLUMN IF NOT EXISTS wallet_index INTEGER;[\s\S]*?SELECT COALESCE\(MAX\(wallet_index\), 0\)/,
+  'wallet_index must exist before the migration synchronizes the sequence or creates its unique index'
+);
+
 const sweeperHardeningPath = join(
   process.cwd(),
   'supabase/migrations/20260925000000_sweeper_hardening.sql'
