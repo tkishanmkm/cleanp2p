@@ -164,6 +164,26 @@ export async function POST(req: Request) {
       );
     }
 
+    // Reject coercible non-numeric JSON values (for example true or []) before Number() can normalize them.
+    const numericInputKeys = [
+      'price', 'unit_price', 'fixed_rate', 'margin', 'price_margin', 'margin_percentage',
+      'min_amount', 'max_amount', 'min_order', 'max_order', 'min_limit', 'max_limit',
+      'total_amount', 'available_amount', 'rate_percent', 'rate_adjustment',
+      'payment_window', 'min_completed_trades',
+    ];
+    for (const key of numericInputKeys) {
+      const value = strippedFormData[key];
+      if (value === undefined || value === null || value === '') continue;
+      if ((typeof value !== 'number' && typeof value !== 'string') ||
+          (typeof value === 'string' && value.trim() === '') ||
+          !Number.isFinite(Number(value))) {
+        return NextResponse.json(
+          { error: `Field '${key}' must be a finite number.`, code: 'INVALID_NUMERIC_FIELD' },
+          { status: 400 }
+        );
+      }
+    }
+
     // 5. Sanitize and cast boolean/numeric payload fields before database operations
     const cleanPayload: Record<string, any> = {
       ...strippedFormData,
