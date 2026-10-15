@@ -420,12 +420,15 @@ export async function POST(req: Request) {
       // that could disagree with the validated margin and current market reference.
       const { data: marketRow, error: marketError } = await supabase
         .from('crypto_market_prices')
-        .select('price_in_fiat')
+        .select('price_in_fiat, updated_at')
         .eq('asset_symbol', rawAsset)
         .eq('fiat_symbol', rawFiat)
         .maybeSingle();
       const referencePrice = Number(marketRow?.price_in_fiat);
-      if (marketError || !Number.isFinite(referencePrice) || referencePrice <= 0) {
+      const marketUpdatedAt = marketRow?.updated_at ? Date.parse(marketRow.updated_at) : Number.NaN;
+      const marketAgeMs = Date.now() - marketUpdatedAt;
+      const marketDataStale = !Number.isFinite(marketUpdatedAt) || marketAgeMs < 0 || marketAgeMs > 15 * 60 * 1000;
+      if (marketError || !Number.isFinite(referencePrice) || referencePrice <= 0 || marketDataStale) {
         console.error('[Floating market price lookup failed in /api/ads/create]:', marketError || 'Missing or invalid reference price');
         return NextResponse.json(
           { error: 'Market reference price is currently unavailable. Please try again later.', code: 'MARKET_PRICE_UNAVAILABLE' },
