@@ -252,6 +252,18 @@ export async function DELETE(
       );
     }
 
+    if (!isAdmin) {
+      try {
+        const { assertUserNotEmergencyFrozen } = await import('@/lib/user-freeze');
+        await assertUserNotEmergencyFrozen(user.id);
+      } catch (freezeErr: any) {
+        return NextResponse.json(
+          { error: freezeErr.message || 'Your account is under an emergency security freeze.', code: 'USER_EMERGENCY_FROZEN' },
+          { status: 403 }
+        );
+      }
+    }
+
     // 4. Perform Soft-Delete & Deletion on independently resolved target IDs
     const { p2pAdsRow, adsRow } = await resolveBothTargetRows(existingAd, adId, admin);
 
@@ -322,7 +334,10 @@ export async function DELETE(
       return NextResponse.json({ error: 'Advertisement record not found.' }, { status: 404 });
     }
 
-    const overallDeleteSuccess = p2pAdsRow ? p2pMutated : adsMutated;
+    const overallDeleteSuccess =
+      targetTable === 'p2p_ads' ? p2pMutated :
+      targetTable === 'ads' ? adsMutated :
+      (p2pMutated || adsMutated);
 
     if (!overallDeleteSuccess) {
       console.error('[DELETE /api/ads/[adId]] Failed row mutation:', { p2pRowId: p2pAdsRow?.id, p2pMutated, adsRowId: adsRow?.id, adsMutated });
