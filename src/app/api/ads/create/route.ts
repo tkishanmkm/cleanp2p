@@ -320,8 +320,22 @@ export async function POST(req: Request) {
       const escrowBalance = Number(assetWallet?.in_escrow ?? 0);
       const spendableBalance = walletBalance - escrowBalance;
 
-      if (walletError || !Number.isFinite(walletBalance) || !Number.isFinite(escrowBalance) ||
-          spendableBalance <= 0 || spendableBalance < requiredCrypto) {
+      if (walletError) {
+        console.error('[Wallet balance lookup failed in /api/ads/create]:', walletError);
+        return NextResponse.json(
+          { error: 'Wallet balance is temporarily unavailable. Please try again.', code: 'WALLET_BALANCE_UNAVAILABLE' },
+          { status: 503 }
+        );
+      }
+
+      if (!Number.isFinite(walletBalance) || !Number.isFinite(escrowBalance)) {
+        return NextResponse.json(
+          { error: 'Wallet balance data is invalid; advertisement cannot be created.', code: 'INVALID_WALLET_BALANCE' },
+          { status: 503 }
+        );
+      }
+
+      if (spendableBalance <= 0 || spendableBalance < requiredCrypto) {
         return NextResponse.json(
           {
             error: `Insufficient spendable balance in your ${rawAsset} wallet. You have ${spendableBalance.toFixed(8)} ${rawAsset} available, but require at least ${requiredCrypto.toFixed(8)} ${rawAsset} to post this SELL advertisement.`,
