@@ -36,7 +36,23 @@ export async function POST(request: NextRequest) {
       }
     );
 
-    const body = await request.json();
+    const rawBody = await request.text();
+    if (new TextEncoder().encode(rawBody).byteLength > 32 * 1024) {
+      return NextResponse.json(
+        { error: 'Request body exceeds the 32 KB limit.', code: 'REQUEST_BODY_TOO_LARGE' },
+        { status: 413 }
+      );
+    }
+
+    let body: any;
+    try {
+      body = JSON.parse(rawBody);
+    } catch {
+      return NextResponse.json(
+        { error: 'Request body must contain valid JSON.', code: 'INVALID_JSON_BODY' },
+        { status: 400 }
+      );
+    }
     if (!body || typeof body !== 'object' || Array.isArray(body)) {
       return NextResponse.json(
         { error: 'Request body must be a JSON object.', code: 'INVALID_REQUEST_BODY' },
