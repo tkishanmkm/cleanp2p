@@ -155,6 +155,17 @@ assert.doesNotMatch(
   'deposit-address snapshot must not assume optional chain or asset-code columns exist'
 );
 
+assert.match(
+  depositSnapshotMigrationSql,
+  /to_jsonb\(w\)->>'chain'[\s\S]*?to_jsonb\(w\)->>'address'[\s\S]*?FROM public\.wallets AS w/,
+  'wallet snapshot must read optional legacy fields through JSON rather than direct column references'
+);
+assert.doesNotMatch(
+  depositSnapshotMigrationSql,
+  /SELECT id, user_id, chain, address, funding_status, created_at, updated_at\s+FROM public\.wallets/,
+  'wallet snapshot must not assume the legacy chain column exists'
+);
+
 const tradeFlowHardeningPath = join(
   process.cwd(),
   'supabase/migrations/20260928080000_p2p_trade_flow_and_rls_hardening.sql'
