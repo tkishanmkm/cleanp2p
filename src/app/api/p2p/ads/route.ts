@@ -159,7 +159,14 @@ export async function POST(request: NextRequest) {
     const priceVal = body.price !== undefined && body.price !== null && body.price !== '' ? Number(body.price) : null;
     const marginVal = Number(body.margin ?? body.rate_percent ?? body.margin_percentage ?? body.price_margin ?? 0);
     const pricingType = body.pricing_type || (body.rate_type === 'fixed' || body.is_fixed ? 'FIXED' : 'FLOAT');
-    const paymentWindow = Math.max(30, parseInt(String(body.payment_window || body.payment_window_minutes || 30), 10) || 30);
+    const rawPaymentWindow = Number(body.payment_window ?? body.payment_window_minutes ?? 30);
+    if (!Number.isInteger(rawPaymentWindow) || rawPaymentWindow < 30 || rawPaymentWindow > 1440) {
+      return NextResponse.json(
+        { error: 'Payment window must be a whole number between 30 and 1440 minutes.', code: 'INVALID_PAYMENT_WINDOW' },
+        { status: 400 }
+      );
+    }
+    const paymentWindow = rawPaymentWindow;
     const rawPaymentMethods = Array.isArray(body.payment_methods) && body.payment_methods.length > 0
       ? body.payment_methods
       : (Array.isArray(body.paymentMethods) ? body.paymentMethods : ['Bank Transfer']);
@@ -311,9 +318,20 @@ export async function POST(request: NextRequest) {
 
     const uniqueAdId = generateAdId();
 
-    const resolvedTerms = body.terms || body.terms_conditions || body.termsAndConditions || '';
-    const resolvedLabel = body.offer_label || body.label || body.offerLabel || '';
-    const resolvedTags = Array.isArray(body.ad_tags) ? body.ad_tags : (Array.isArray(body.tags) ? body.tags : []);
+    const rawTerms = body.terms ?? body.terms_conditions ?? body.termsAndConditions ?? '';
+    const rawLabel = body.offer_label ?? body.label ?? body.offerLabel ?? '';
+    const rawTags = Array.isArray(body.ad_tags) ? body.ad_tags : (Array.isArray(body.tags) ? body.tags : []);
+    if (typeof rawTerms !== 'string' || rawTerms.length > 5000 ||
+        typeof rawLabel !== 'string' || rawLabel.length > 120 ||
+        rawTags.length > 20 || rawTags.some((tag: unknown) => typeof tag !== 'string' || tag.length > 40)) {
+      return NextResponse.json(
+        { error: 'Terms, offer label, or tags exceed allowed input limits.', code: 'INVALID_AD_METADATA' },
+        { status: 400 }
+      );
+    }
+    const resolvedTerms = rawTerms.trim();
+    const resolvedLabel = rawLabel.trim();
+    const resolvedTags = rawTags.map((tag: string) => tag.trim()).filter((tag: string) => tag.length > 0);
 
     // Standard base table payload for `public.ads` and `public.p2p_ads`
     const basePayload: Record<string, any> = {
