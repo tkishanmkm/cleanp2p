@@ -167,11 +167,11 @@ export async function POST(req: NextRequest) {
       },
       userId: targetUserId,
     });
-  } catch (err: unknown) {
-    const errorMsg = err instanceof Error ? err.message : String(err);
-    console.error('[POST /api/auth/provision-wallets] Error:', errorMsg);
+  } catch {
+    // Keep database/configuration details in server logs, never in API responses.
+    console.error('[POST /api/auth/provision-wallets] Wallet provisioning failed.');
     return NextResponse.json(
-      { error: errorMsg || 'Failed to provision wallets' },
+      { error: 'Unable to provision wallets.' },
       { status: 500 }
     );
   }
