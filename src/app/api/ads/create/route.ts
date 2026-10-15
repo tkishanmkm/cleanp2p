@@ -184,6 +184,15 @@ export async function POST(req: Request) {
       }
     }
 
+    if (strippedFormData.is_fixed !== undefined &&
+        typeof strippedFormData.is_fixed !== 'boolean' &&
+        !(typeof strippedFormData.is_fixed === 'string' && ['true', 'false'].includes(strippedFormData.is_fixed.trim().toLowerCase()))) {
+      return NextResponse.json(
+        { error: 'is_fixed must be a boolean.', code: 'INVALID_PRICING_FLAG' },
+        { status: 400 }
+      );
+    }
+
     // 5. Sanitize and cast boolean/numeric payload fields before database operations
     const cleanPayload: Record<string, any> = {
       ...strippedFormData,
