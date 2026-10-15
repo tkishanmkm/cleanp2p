@@ -13,7 +13,7 @@ export async function checkTradeEligibility(userId: string): Promise<TradeEligib
     const admin = getSupabaseAdminClient();
     const { data: profile, error } = await admin
       .from('profiles')
-      .select('status, is_banned, is_restricted')
+      .select('status, account_status, is_banned, is_suspended, is_on_hold')
       .eq('id', userId)
       .maybeSingle();
 
@@ -28,7 +28,8 @@ export async function checkTradeEligibility(userId: string): Promise<TradeEligib
     }
 
     const status = String(profile.status ?? '').trim().toLowerCase();
-    if (profile.is_banned === true || status === 'banned') {
+    const accountStatus = String(profile.account_status ?? '').trim().toLowerCase();
+    if (profile.is_banned === true || status === 'banned' || accountStatus === 'blocked') {
       return {
         allowed: false,
         statusCode: 403,
@@ -38,8 +39,10 @@ export async function checkTradeEligibility(userId: string): Promise<TradeEligib
     }
 
     if (
-      profile.is_restricted === true ||
-      ['restricted', 'suspended', 'disabled', 'deactivated'].includes(status)
+      profile.is_suspended === true ||
+      profile.is_on_hold === true ||
+      ['restricted', 'suspended', 'disabled', 'deactivated'].includes(status) ||
+      ['on_hold', 'suspended', 'blocked'].includes(accountStatus)
     ) {
       return {
         allowed: false,
