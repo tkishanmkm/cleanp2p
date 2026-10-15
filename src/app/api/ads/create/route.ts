@@ -254,20 +254,29 @@ export async function POST(req: Request) {
       }
     }
 
-    // 6. Server-Side SELL Ad Spendable Balance Validation against public.wallet_assets
+    // 6. Server-Side SELL Ad Spendable Balance Validation against public.wallet_assets.
+    // min_amount/max_amount are fiat limits; total_amount/available_amount are crypto quantities.
     if (resolvedDirection === 'SELL') {
-      let requiredCrypto = 0;
-      if (cleanPayload.available_amount && cleanPayload.available_amount > 0) {
-        requiredCrypto = cleanPayload.available_amount;
-      } else if (cleanPayload.total_amount && cleanPayload.total_amount > 0) {
-        requiredCrypto = cleanPayload.total_amount;
-      } else if (cleanPayload.max_amount && effectivePrice && effectivePrice > 0) {
-        requiredCrypto = cleanPayload.max_amount / effectivePrice;
-      } else if (cleanPayload.min_amount && effectivePrice && effectivePrice > 0) {
-        requiredCrypto = cleanPayload.min_amount / effectivePrice;
+      const maxFiatAmount = Number(cleanPayload.max_amount);
+      if (!Number.isFinite(maxFiatAmount) || maxFiatAmount <= 0 ||
+          !Number.isFinite(effectivePrice) || effectivePrice <= 0) {
+        return NextResponse.json(
+          { error: 'A valid maximum fiat limit and unit price are required for SELL advertisements.', code: 'INVALID_SELL_AMOUNT' },
+          { status: 400 }
+        );
       }
 
-      // Query authoritative spendable balance from public.wallet_assets
+      const requiredCrypto = maxFiatAmount / effectivePrice;
+      if (!Number.isFinite(requiredCrypto) || requiredCrypto <= 0) {
+        return NextResponse.json(
+          { error: 'Unable to calculate the crypto quantity for this advertisement.', code: 'INVALID_SELL_AMOUNT' },
+          { status: 400 }
+        );
+      }
+      cleanPayload.total_amount = requiredCrypto;
+      cleanPayload.available_amount = requiredCrypto;
+
+      // Query authoritative balance and subtract funds already committed to escrow.
       const { data: assetWallet, error: walletError } = await supabase
         .from('wallet_assets')
         .select('balance, in_escrow')
@@ -275,9 +284,12 @@ export async function POST(req: Request) {
         .eq('asset_symbol', rawAsset)
         .maybeSingle();
 
-      const spendableBalance = Number(assetWallet?.balance || 0);
+      const walletBalance = Number(assetWallet?.balance);
+      const escrowBalance = Number(assetWallet?.in_escrow ?? 0);
+      const spendableBalance = walletBalance - escrowBalance;
 
-      if (walletError || spendableBalance <= 0 || (requiredCrypto > 0 && spendableBalance < requiredCrypto)) {
+      if (walletError || !Number.isFinite(walletBalance) || !Number.isFinite(escrowBalance) ||
+          spendableBalance <= 0 || spendableBalance < requiredCrypto) {
         return NextResponse.json(
           {
             error: `Insufficient spendable balance in your ${rawAsset} wallet. You have ${spendableBalance.toFixed(8)} ${rawAsset} available, but require at least ${requiredCrypto.toFixed(8)} ${rawAsset} to post this SELL advertisement.`,
