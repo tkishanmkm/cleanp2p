@@ -475,11 +475,29 @@ export async function POST(request: NextRequest) {
         };
         const { error: p2pSyncError } = await admin
           .from('p2p_ads')
-          .upsert(p2pRow, { onConflict: 'id', ignoreDuplicates: false });
+          .upsert(p2pRow, { onConflict: 'id', ignoreDuplicates: true });
         if (p2pSyncError) {
           console.error('[P2P Ad Marketplace Sync Error]:', p2pSyncError);
         } else {
-          marketplaceSync = 'synced';
+          // An upsert can report no error when ignoreDuplicates skips a conflicting
+          // row. Verify that the existing projection belongs to this ad before
+          // reporting synchronization success; never overwrite an unrelated ad.
+          const { data: syncedRow, error: verifySyncError } = await admin
+            .from('p2p_ads')
+            .select('id, user_id, public_ad_id')
+            .eq('id', p2pRow.id)
+            .maybeSingle();
+          if (verifySyncError) {
+            console.error('[P2P Ad Marketplace Sync Verification Error]:', verifySyncError);
+          } else if (
+            syncedRow &&
+            syncedRow.user_id === user.id &&
+            syncedRow.public_ad_id === uniqueAdId
+          ) {
+            marketplaceSync = 'synced';
+          } else {
+            console.error('[P2P Ad Marketplace Sync Conflict]: existing projection does not match the newly created ad');
+          }
         }
       } catch (p2pSyncErr) {
         console.error('[P2P Ad Marketplace Sync Exception]:', p2pSyncErr);
