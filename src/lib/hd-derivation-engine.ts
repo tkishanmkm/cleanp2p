@@ -176,15 +176,16 @@ export const BIP_PATHS = {
 // ============================================================================
 
 export function getAdminClient(): SupabaseClient {
-  const supabaseUrl =
-    process.env.NEXT_PUBLIC_SUPABASE_URL ||
-    process.env.SUPABASE_URL ||
-    'https://eaiwgfxoiwxepinvcykg.supabase.co';
+  // This client is used for privileged wallet provisioning and must never
+  // silently downgrade to an anon key or target a hard-coded project.
+  const supabaseUrl = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
-  const serviceRoleKey =
-    process.env.SUPABASE_SERVICE_ROLE_KEY ||
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ||
-    'placeholder-key';
+  if (!supabaseUrl || !serviceRoleKey) {
+    throw new Error(
+      'Wallet admin client is not configured: SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are required.'
+    );
+  }
 
   return createClient(supabaseUrl, serviceRoleKey, {
     auth: {
