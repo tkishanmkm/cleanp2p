@@ -25,6 +25,22 @@ assert.doesNotMatch(
   'trade-chat policies must not directly reference a possibly missing legacy column'
 );
 
+const reservedBalanceMigrationPath = join(
+  process.cwd(),
+  'supabase/migrations/20260917000000_add_reserved_balance_and_sync.sql'
+);
+const reservedBalanceMigrationSql = readFileSync(reservedBalanceMigrationPath, 'utf8');
+assert.doesNotMatch(
+  reservedBalanceMigrationSql,
+  /\\bDO\\s+\\$(?:\\s|;)|\\bEND\\s+\\$(?:\\s|;)/,
+  'guarded wallet migration blocks must use valid dollar-quote delimiters'
+);
+assert.equal(
+  (reservedBalanceMigrationSql.match(/DO \\$guard\\$/g) ?? []).length,
+  (reservedBalanceMigrationSql.match(/END \\$guard\\$;/g) ?? []).length,
+  'each guarded wallet migration block must have a matching closing delimiter'
+);
+
 const legacyAdsMigrationPath = join(
   process.cwd(),
   'supabase/migrations/20260906000000_name_privacy_and_trader_requirements.sql'
