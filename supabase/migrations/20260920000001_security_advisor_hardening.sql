@@ -122,43 +122,43 @@ $sweep_rls$;
 -- 4. Revoke anon/public access from sensitive internal financial RPCs (Fixes Warn 0028 & 0029)
 DO $$
 BEGIN
-  IF EXISTS (SELECT 1 FROM pg_proc WHERE proname = 'credit_confirmed_deposit') THEN
+  IF to_regprocedure('public.credit_confirmed_deposit(character varying, integer, character varying, uuid, character varying, numeric)') IS NOT NULL THEN
     ALTER FUNCTION public.credit_confirmed_deposit(character varying, integer, character varying, uuid, character varying, numeric) SET search_path = public, pg_temp;
     REVOKE EXECUTE ON FUNCTION public.credit_confirmed_deposit(character varying, integer, character varying, uuid, character varying, numeric) FROM PUBLIC, anon, authenticated;
     GRANT EXECUTE ON FUNCTION public.credit_confirmed_deposit(character varying, integer, character varying, uuid, character varying, numeric) TO service_role, postgres;
   END IF;
 
-  IF EXISTS (SELECT 1 FROM pg_proc WHERE proname = 'ingest_and_credit_deposit') THEN
+  IF to_regprocedure('public.ingest_and_credit_deposit(text, integer, text, text, numeric, text, integer)') IS NOT NULL THEN
     ALTER FUNCTION public.ingest_and_credit_deposit(text, integer, text, text, numeric, text, integer) SET search_path = public, pg_temp;
     REVOKE EXECUTE ON FUNCTION public.ingest_and_credit_deposit(text, integer, text, text, numeric, text, integer) FROM PUBLIC, anon, authenticated;
     GRANT EXECUTE ON FUNCTION public.ingest_and_credit_deposit(text, integer, text, text, numeric, text, integer) TO service_role, postgres;
   END IF;
 
-  IF EXISTS (SELECT 1 FROM pg_proc WHERE proname = 'process_user_deposit') THEN
+  IF to_regprocedure('public.process_user_deposit(uuid, text, numeric, text, text, text, text)') IS NOT NULL THEN
     ALTER FUNCTION public.process_user_deposit(uuid, text, numeric, text, text, text, text) SET search_path = public, pg_temp;
     REVOKE EXECUTE ON FUNCTION public.process_user_deposit(uuid, text, numeric, text, text, text, text) FROM PUBLIC, anon, authenticated;
     GRANT EXECUTE ON FUNCTION public.process_user_deposit(uuid, text, numeric, text, text, text, text) TO service_role, postgres;
   END IF;
 
-  IF EXISTS (SELECT 1 FROM pg_proc WHERE proname = 'mark_gas_funded') THEN
+  IF to_regprocedure('public.mark_gas_funded(uuid, text)') IS NOT NULL THEN
     ALTER FUNCTION public.mark_gas_funded(uuid, text) SET search_path = public, pg_temp;
     REVOKE EXECUTE ON FUNCTION public.mark_gas_funded(uuid, text) FROM PUBLIC, anon, authenticated;
     GRANT EXECUTE ON FUNCTION public.mark_gas_funded(uuid, text) TO service_role, postgres;
   END IF;
 
-  IF EXISTS (SELECT 1 FROM pg_proc WHERE proname = 'mark_swept') THEN
+  IF to_regprocedure('public.mark_swept(uuid, text)') IS NOT NULL THEN
     ALTER FUNCTION public.mark_swept(uuid, text) SET search_path = public, pg_temp;
     REVOKE EXECUTE ON FUNCTION public.mark_swept(uuid, text) FROM PUBLIC, anon, authenticated;
     GRANT EXECUTE ON FUNCTION public.mark_swept(uuid, text) TO service_role, postgres;
   END IF;
 
-  IF EXISTS (SELECT 1 FROM pg_proc WHERE proname = 'sync_didit_kyc_status') THEN
+  IF to_regprocedure('public.sync_didit_kyc_status(uuid, text, text, jsonb)') IS NOT NULL THEN
     ALTER FUNCTION public.sync_didit_kyc_status(uuid, text, text, jsonb) SET search_path = public, pg_temp;
     REVOKE EXECUTE ON FUNCTION public.sync_didit_kyc_status(uuid, text, text, jsonb) FROM PUBLIC, anon, authenticated;
     GRANT EXECUTE ON FUNCTION public.sync_didit_kyc_status(uuid, text, text, jsonb) TO service_role, postgres;
   END IF;
 
-  IF EXISTS (SELECT 1 FROM pg_proc WHERE proname = 'cancel_expired_p2p_trades') THEN
+  IF to_regprocedure('public.cancel_expired_p2p_trades()') IS NOT NULL THEN
     ALTER FUNCTION public.cancel_expired_p2p_trades() SET search_path = public, pg_temp;
     REVOKE EXECUTE ON FUNCTION public.cancel_expired_p2p_trades() FROM PUBLIC, anon, authenticated;
     GRANT EXECUTE ON FUNCTION public.cancel_expired_p2p_trades() TO service_role, postgres;
