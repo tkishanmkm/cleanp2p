@@ -111,8 +111,22 @@ export async function POST(request: NextRequest) {
       console.warn('Profile auto-ensure warning:', profileUpsertErr);
     }
 
-    const coinType = (body.coin || body.crypto || body.crypto_currency || body.asset_symbol || body.asset || 'USDT').toUpperCase();
-    const fiatType = (body.fiat || body.fiat_currency || body.fiat_symbol || 'USD').toUpperCase();
+    const rawCoinType = body.coin ?? body.crypto ?? body.crypto_currency ?? body.asset_symbol ?? body.asset ?? 'USDT';
+    const rawFiatType = body.fiat ?? body.fiat_currency ?? body.fiat_symbol ?? 'USD';
+    if (typeof rawCoinType !== 'string' || typeof rawFiatType !== 'string') {
+      return NextResponse.json(
+        { error: 'Asset and fiat symbols must be strings.', code: 'INVALID_CURRENCY_SYMBOL' },
+        { status: 400 }
+      );
+    }
+    const coinType = rawCoinType.trim().toUpperCase();
+    const fiatType = rawFiatType.trim().toUpperCase();
+    if (!/^[A-Z0-9]{2,12}$/.test(coinType) || !/^[A-Z0-9]{2,12}$/.test(fiatType)) {
+      return NextResponse.json(
+        { error: 'Asset and fiat symbols must contain 2–12 letters or digits.', code: 'INVALID_CURRENCY_SYMBOL' },
+        { status: 400 }
+      );
+    }
     const adSide = resolveTradeType(body);
 
     if (!adSide) {
