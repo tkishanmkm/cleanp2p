@@ -79,7 +79,21 @@ export async function POST(req: Request) {
       console.warn('Profile auto-ensure warning in /api/ads/create:', profileUpsertErr);
     }
 
+    const contentLength = Number(req.headers.get('content-length') || 0);
+    if (Number.isFinite(contentLength) && contentLength > 32 * 1024) {
+      return NextResponse.json(
+        { error: 'Advertisement request is too large.', code: 'REQUEST_BODY_TOO_LARGE' },
+        { status: 413 }
+      );
+    }
+
     const formData = await req.json();
+    if (!formData || typeof formData !== 'object' || Array.isArray(formData)) {
+      return NextResponse.json(
+        { error: 'Request body must be a JSON object.', code: 'INVALID_REQUEST_BODY' },
+        { status: 400 }
+      );
+    }
 
     // 2. Strip all client-controlled identity and administrative fields to prevent spoofing
     const strippedFormData = { ...formData };
