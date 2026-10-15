@@ -8,7 +8,7 @@ ALTER TABLE IF EXISTS public.wallets
 
 -- In some schema versions public.user_wallets is a VIEW, not a base table.
 -- ALTER TABLE cannot add columns to a view, so mutate it only when it is a table/partition.
-DO $
+DO $guard$
 BEGIN
     IF EXISTS (
         SELECT 1 FROM pg_class c
@@ -20,7 +20,7 @@ BEGIN
             ADD COLUMN IF NOT EXISTS reserved_balance NUMERIC(28, 8) DEFAULT 0,
             ADD COLUMN IF NOT EXISTS locked_balance NUMERIC(28, 8) DEFAULT 0;
     END IF;
-END $;
+END $guard$;
 
 ALTER TABLE IF EXISTS public.balances 
     ADD COLUMN IF NOT EXISTS reserved_balance NUMERIC(28, 8) DEFAULT 0,
@@ -39,7 +39,7 @@ UPDATE public.wallets
 SET reserved_balance = COALESCE(locked_balance, 0) 
 WHERE reserved_balance IS NULL OR reserved_balance = 0;
 
-DO $
+DO $guard$
 BEGIN
     IF EXISTS (
         SELECT 1 FROM pg_class c
@@ -51,7 +51,7 @@ BEGIN
         SET reserved_balance = COALESCE(locked_balance, 0)
         WHERE reserved_balance IS NULL OR reserved_balance = 0;
     END IF;
-END $;
+END $guard$;
 
 UPDATE public.balances 
 SET reserved_balance = COALESCE(locked_balance, 0) 
@@ -78,7 +78,7 @@ CREATE TRIGGER trg_sync_wallets_balance
 BEFORE INSERT OR UPDATE ON public.wallets
 FOR EACH ROW EXECUTE FUNCTION public.sync_wallet_locked_reserved_balances();
 
-DO $
+DO $guard$
 BEGIN
     IF EXISTS (
         SELECT 1 FROM pg_class c
@@ -91,7 +91,7 @@ BEGIN
                  BEFORE INSERT OR UPDATE ON public.user_wallets
                  FOR EACH ROW EXECUTE FUNCTION public.sync_wallet_locked_reserved_balances()';
     END IF;
-END $;
+END $guard$;
 
 DROP TRIGGER IF EXISTS trg_sync_balances ON public.balances;
 CREATE TRIGGER trg_sync_balances
