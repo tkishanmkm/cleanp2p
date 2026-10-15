@@ -6,9 +6,9 @@ BEGIN;
 DO $migration$
 DECLARE
   v_definition TEXT;
-  v_payment_anchor TEXT := '    v_unit_price := v_ad_price;
-    v_fiat_currency := v_ad_fiat_currency;';
-  v_payment_replacement TEXT := '    v_unit_price := v_ad_price;
+  v_payment_anchor TEXT := $payanchor$    v_unit_price := v_ad_price;
+    v_fiat_currency := v_ad_fiat_currency;$payanchor$;
+  v_payment_replacement TEXT := $payreplacement$    v_unit_price := v_ad_price;
     v_fiat_currency := v_ad_fiat_currency;
 
     -- Fail closed when the ad has no usable payment-method allowlist.
@@ -22,35 +22,35 @@ DECLARE
        ) THEN
       RAISE EXCEPTION 'Payment method is not permitted by this advertisement.'
         USING ERRCODE = 'P0001', DETAIL = 'PAYMENT_METHOD_NOT_ALLOWED';
-    END IF;';
-  v_limits_anchor TEXT := '    v_fiat_amount := ROUND((v_crypto_amount * v_unit_price), 2);
-    v_escrow_fee := ROUND(v_crypto_amount * 0.015, 8);';
-  v_limits_replacement TEXT := '    v_fiat_amount := ROUND((v_crypto_amount * v_unit_price), 2);
+    END IF;$payreplacement$;
+  v_limits_anchor TEXT := $limitsanchor$    v_fiat_amount := ROUND((v_crypto_amount * v_unit_price), 2);
+    v_escrow_fee := ROUND(v_crypto_amount * 0.015, 8);$limitsanchor$;
+  v_limits_replacement TEXT := $limitsreplacement$    v_fiat_amount := ROUND((v_crypto_amount * v_unit_price), 2);
 
     -- Validate advertisement fiat-denominated order limits at the authoritative RPC.
     IF v_ad.min_amount IS NOT NULL AND v_ad.min_amount <= 0 THEN
       RAISE EXCEPTION 'Advertisement minimum trade limit is invalid.'
-        USING ERRCODE = ''P0001'', DETAIL = ''INVALID_AD_LIMITS'';
+        USING ERRCODE = 'P0001', DETAIL = 'INVALID_AD_LIMITS';
     END IF;
     IF v_ad.max_amount IS NOT NULL AND v_ad.max_amount <= 0 THEN
       RAISE EXCEPTION 'Advertisement maximum trade limit is invalid.'
-        USING ERRCODE = ''P0001'', DETAIL = ''INVALID_AD_LIMITS'';
+        USING ERRCODE = 'P0001', DETAIL = 'INVALID_AD_LIMITS';
     END IF;
     IF v_ad.min_amount IS NOT NULL AND v_ad.max_amount IS NOT NULL
        AND v_ad.max_amount < v_ad.min_amount THEN
       RAISE EXCEPTION 'Advertisement trade limits are inconsistent.'
-        USING ERRCODE = ''P0001'', DETAIL = ''INVALID_AD_LIMITS'';
+        USING ERRCODE = 'P0001', DETAIL = 'INVALID_AD_LIMITS';
     END IF;
     IF v_ad.min_amount IS NOT NULL AND v_fiat_amount < v_ad.min_amount THEN
       RAISE EXCEPTION 'Trade fiat value is below the advertisement minimum.'
-        USING ERRCODE = ''P0001'', DETAIL = ''TRADE_BELOW_AD_MINIMUM'';
+        USING ERRCODE = 'P0001', DETAIL = 'TRADE_BELOW_AD_MINIMUM';
     END IF;
     IF v_ad.max_amount IS NOT NULL AND v_fiat_amount > v_ad.max_amount THEN
       RAISE EXCEPTION 'Trade fiat value exceeds the advertisement maximum.'
-        USING ERRCODE = ''P0001'', DETAIL = ''TRADE_ABOVE_AD_MAXIMUM'';
+        USING ERRCODE = 'P0001', DETAIL = 'TRADE_ABOVE_AD_MAXIMUM';
     END IF;
 
-    v_escrow_fee := ROUND(v_crypto_amount * 0.015, 8);';
+    v_escrow_fee := ROUND(v_crypto_amount * 0.015, 8);$limitsreplacement$;
 BEGIN
   v_definition := pg_get_functiondef(
     'public.initiate_trade_with_escrow(text,numeric,numeric,text,numeric,text,text,text,uuid)'::regprocedure
