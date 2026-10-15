@@ -14,8 +14,16 @@ export async function POST(request: NextRequest) {
     const cookieHeader = cookies();
     const cookieStore = typeof (cookieHeader as any)?.then === 'function' ? await cookieHeader : cookieHeader;
 
-    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL || 'https://placeholder.supabase.co';
-    const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'placeholder-anon-key';
+    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL;
+    const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+
+    if (!supabaseUrl || !supabaseAnonKey) {
+      console.error('Ad creation unavailable: Supabase URL or anon key is not configured.');
+      return NextResponse.json(
+        { error: 'Ad creation is temporarily unavailable.', code: 'SERVICE_CONFIGURATION_ERROR' },
+        { status: 503 }
+      );
+    }
 
     const supabase = createServerClient(
       supabaseUrl,
