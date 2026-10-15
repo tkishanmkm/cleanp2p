@@ -421,6 +421,18 @@ export async function PATCH(
       );
     }
 
+    if (!isAdmin) {
+      try {
+        const { assertUserNotEmergencyFrozen } = await import('@/lib/user-freeze');
+        await assertUserNotEmergencyFrozen(user.id);
+      } catch (freezeErr: any) {
+        return NextResponse.json(
+          { error: freezeErr.message || 'Your account is under an emergency security freeze.', code: 'USER_EMERGENCY_FROZEN' },
+          { status: 403 }
+        );
+      }
+    }
+
     // 4. Parse & Strictly Validate Allowlisted Fields
     const body = await request.json();
 
@@ -512,7 +524,10 @@ export async function PATCH(
 
     // Canonical p2p_ads is authoritative. If p2pAdsRow exists, canonical p2p update must succeed.
     // If only legacy adsRow exists, ads update must succeed.
-    const overallSuccess = p2pAdsRow ? p2pMutated : adsMutated;
+    const overallSuccess =
+      targetTable === 'p2p_ads' ? p2pMutated :
+      targetTable === 'ads' ? adsMutated :
+      (p2pMutated || adsMutated);
 
     if (!overallSuccess) {
       console.error('[PATCH /api/ads/[adId]] Failed canonical row status update:', { p2pRowId: p2pAdsRow?.id, p2pMutated, adsRowId: adsRow?.id, adsMutated });
