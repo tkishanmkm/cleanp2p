@@ -19,7 +19,7 @@ permissions:
 jobs:
   migration-replay:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 25
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -33,7 +33,16 @@ jobs:
         run: supabase init --force
 
       - name: Start disposable local Supabase stack
-        run: supabase start
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! timeout 12m supabase start; then
+            echo 'Supabase stack startup failed or exceeded 12 minutes.'
+            docker ps -a || true
+            docker info || true
+            supabase status || true
+            exit 1
+          fi
 
       - name: Apply the complete migration history
         run: supabase db reset --local
