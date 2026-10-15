@@ -78,6 +78,17 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // Emergency-frozen users must not create offers.
+    try {
+      const { assertUserNotEmergencyFrozen } = await import('@/lib/user-freeze');
+      await assertUserNotEmergencyFrozen(user.id);
+    } catch (freezeErr: any) {
+      return NextResponse.json(
+        { error: freezeErr.message || 'Your account is under an emergency security freeze.', code: 'USER_EMERGENCY_FROZEN' },
+        { status: 403 }
+      );
+    }
+
     // Ensure public.profiles record exists for user.id to guarantee foreign key integrity
     try {
       const admin = getSupabaseAdminClient();
