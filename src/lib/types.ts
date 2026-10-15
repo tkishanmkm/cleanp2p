@@ -141,6 +141,8 @@ export type User = {
   userId: string;
   oldUserId?: string;
   fullName: string;
+  displayName?: string;
+  username?: string;
   dob: string;
   country?: string;
   ipBasedCountry?: string;
