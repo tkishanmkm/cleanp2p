@@ -21,4 +21,21 @@ const walletMutationIndex = sql.indexOf('INSERT INTO public.wallet_assets');
 assert.ok(guardIndex >= 0, 'account restriction guard must exist');
 assert.ok(walletMutationIndex > guardIndex, 'restriction guard must precede wallet mutations');
 
+const guardedRoutes = [
+  'src/app/api/trades/route.ts',
+  'src/app/api/trades/initiate/route.ts',
+  'src/app/api/p2p/orders/create/route.ts',
+  'src/app/api/p2p/trade/initiate/route.ts',
+];
+
+for (const routePath of guardedRoutes) {
+  const route = readFileSync(join(process.cwd(), routePath), 'utf8');
+  const rpcIndex = route.indexOf("initiate_trade_with_escrow");
+  const eligibilityIndex = route.indexOf('checkTradeEligibility');
+  assert.ok(rpcIndex >= 0, `${routePath} must call the escrow RPC`);
+  assert.ok(eligibilityIndex >= 0, `${routePath} must import/use the eligibility guard`);
+  assert.ok(eligibilityIndex < rpcIndex, `${routePath} must check eligibility before the escrow RPC`);
+  assert.match(route, /checkTradeEligibility\(user\.id\)/, `${routePath} must check the authenticated caller`);
+}
+
 console.log('Trade account restriction migration static invariants: PASS');
