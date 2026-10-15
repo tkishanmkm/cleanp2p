@@ -9,6 +9,22 @@ const migrationPath = join(
   'supabase/migrations/20261015130000_restore_p2p_trade_fee_ledger_on_release.sql'
 );
 const sql = readFileSync(migrationPath, 'utf8');
+const chatMigrationPath = join(
+  process.cwd(),
+  'supabase/migrations/20260831000001_realtime_chat.sql'
+);
+const chatMigrationSql = readFileSync(chatMigrationPath, 'utf8');
+assert.equal(
+  (chatMigrationSql.match(/to_jsonb\(t\)->>'firestore_trade_id'/g) ?? []).length,
+  2,
+  'both trade-chat policies must safely support the optional legacy Firestore trade ID'
+);
+assert.doesNotMatch(
+  chatMigrationSql,
+  /t\.firestore_trade_id/,
+  'trade-chat policies must not directly reference a possibly missing legacy column'
+);
+
 const ledgerHelperPath = join(
   process.cwd(),
   'supabase/migrations/20260928000000_platform_ledger_entries.sql'
