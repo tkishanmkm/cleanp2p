@@ -1,60 +1,44 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
 import { createServerClient } from '@supabase/ssr';
-import { createClient } from '@supabase/supabase-js';
-import { SYSTEM_CONFIG } from '@/lib/config/env';
-import { deriveUserKeys, deriveEvmAddress } from '@/lib/crypto/hd-engine';
+import { deriveEvmAddress } from '@/lib/crypto/hd-engine';
+import { getOrDeriveUserDepositAddresses } from '@/lib/hd-derivation-engine';
 
 export { deriveEvmAddress };
 export const dynamic = 'force-dynamic';
 
-const supabaseAdmin = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://placeholder.supabase.co',
-  process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'placeholder-key',
-  { auth: { persistSession: false, autoRefreshToken: false } }
-);
+/**
+ * Resolve identity only from a verified Supabase session.
+ * Never trust x-user-id or a user_id query parameter for financial data.
+ */
+async function getAuthenticatedUserId(): Promise<string | null> {
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL;
+  const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+  if (!supabaseUrl || !anonKey) return null;
 
-async function resolveUserId(req: NextRequest): Promise<string | null> {
-  let userId = req.headers.get('x-user-id');
-  if (userId) return userId;
-
-  const authHeader = req.headers.get('authorization');
-  if (authHeader && authHeader.startsWith('Bearer ')) {
-    const token = authHeader.replace(/^Bearer\s+/i, '').trim();
-    try {
-      const { data } = await supabaseAdmin.auth.getUser(token);
-      if (data?.user?.id) return data.user.id;
-    } catch {}
+  try {
+    const cookieStore = await cookies();
+    const supabase = createServerClient(supabaseUrl, anonKey, {
+      cookies: {
+        getAll: () => cookieStore.getAll(),
+      },
+    });
+    const { data, error } = await supabase.auth.getUser();
+    if (error || !data.user?.id) return null;
+    return data.user.id;
+  } catch {
+    return null;
   }
-
-  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
-  const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
-  if (supabaseUrl && supabaseAnonKey) {
-    try {
-      const cookieStore = cookies();
-      const ssrSupabase = createServerClient(supabaseUrl, supabaseAnonKey, {
-        cookies: { getAll: () => cookieStore.getAll() },
-      });
-      const { data: { user } } = await ssrSupabase.auth.getUser();
-      if (user?.id) return user.id;
-    } catch {}
-  }
-
-  const { searchParams } = new URL(req.url);
-  return searchParams.get('user_id');
 }
 
-import { getOrDeriveUserDepositAddresses } from '@/lib/hd-derivation-engine';
-
-export async function GET(req: NextRequest): Promise<NextResponse> {
+export async function GET(_req: NextRequest): Promise<NextResponse> {
   try {
-    const userId = await resolveUserId(req);
+    const userId = await getAuthenticatedUserId();
     if (!userId) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+      return NextResponse.json({ success: false, error: 'Authentication required.' }, { status: 401 });
     }
 
     const result = await getOrDeriveUserDepositAddresses(userId);
-
     return NextResponse.json({
       success: true,
       wallet_index: result.walletIndex,
@@ -63,7 +47,6 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
         tron: result.addresses.USDT_TRC20,
         btc: result.addresses.BTC,
         ltc: result.addresses.LTC,
-        // Standard uppercase mappings for all frontend components
         BTC: result.addresses.BTC,
         ETH: result.addresses.ETH,
         LTC: result.addresses.LTC,
@@ -72,8 +55,12 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
         USDT_TRC20: result.addresses.USDT_TRC20,
       },
     });
-  } catch (err: any) {
-    return NextResponse.json({ error: err?.message || 'Failed to retrieve deposit address' }, { status: 500 });
+  } catch {
+    console.error('[GET /api/wallet/deposit-address] Provisioning failed.');
+    return NextResponse.json(
+      { success: false, error: 'Unable to retrieve deposit addresses.' },
+      { status: 500 }
+    );
   }
 }
 
