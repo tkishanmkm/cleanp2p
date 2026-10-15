@@ -41,6 +41,17 @@ assert.doesNotMatch(
   'financial RPC hardening must not guard a different signature by function name alone'
 );
 
+const sweeperHardeningPath = join(
+  process.cwd(),
+  'supabase/migrations/20260925000000_sweeper_hardening.sql'
+);
+const sweeperHardeningSql = readFileSync(sweeperHardeningPath, 'utf8');
+assert.equal(
+  (sweeperHardeningSql.match(/to_regprocedure\('public\.allocate_hot_wallet_nonce\(integer\)'\) IS NOT NULL/g) ?? []).length,
+  2,
+  'optional hot-wallet nonce RPC revoke and grant must both guard the exact signature'
+);
+
 assert.match(
   adminOverviewMigrationSql,
   /CREATE VIEW public\.admin_financial_overview[\s\S]*?COALESCE\(main_balance, 0\)/,
