@@ -166,7 +166,7 @@ export async function POST(req: Request) {
 
     // Reject coercible non-numeric JSON values (for example true or []) before Number() can normalize them.
     const numericInputKeys = [
-      'price', 'unit_price', 'fixed_rate', 'margin', 'price_margin', 'margin_percentage',
+      'price', 'unit_price', 'margin', 'price_margin', 'margin_percentage',
       'min_amount', 'max_amount', 'min_order', 'max_order', 'min_limit', 'max_limit',
       'total_amount', 'available_amount', 'rate_percent', 'rate_adjustment',
       'payment_window', 'min_completed_trades',
