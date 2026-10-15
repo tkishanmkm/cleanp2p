@@ -50,12 +50,16 @@ BEGIN
         RAISE EXCEPTION 'Trade % not found', p_trade_id;
     END IF;
 
-    -- Reject malformed text participant IDs before any UUID casts or financial mutations.
-    IF v_trade.seller_id IS NULL OR v_trade.seller_id !~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}
     -- Legacy participant IDs are text, while wallet and ledger writes require UUIDs.
-    -- Reject malformed IDs before casts or financial mutations.
+    -- Reject malformed IDs before any casts or financial mutations.
     IF v_trade.seller_id IS NULL
-       OR v_trade.seller_id !~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}
+       OR v_trade.seller_id !~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+       OR v_trade.buyer_id IS NULL
+       OR v_trade.buyer_id !~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN
+        RAISE EXCEPTION 'Invalid buyer or seller UUID in trade %', p_trade_id;
+    END IF;
+
+    v_total_escrow := v_trade.crypto_amount + COALESCE(v_trade.escrow_fee, 0.0);
 
     -- 3. Lock Wallet Assets FOR UPDATE (Defensive ::TEXT casting)
     SELECT balance, in_escrow INTO v_seller_bal, v_seller_escrow
