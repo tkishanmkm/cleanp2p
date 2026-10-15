@@ -62,3 +62,22 @@ Read-only catalog queries against the configured Supabase project confirmed:
 
 These observations reduce uncertainty around fee-entry idempotency, but they do **not** validate the proposed migration itself. The helper does not compare `metadata` during idempotency replay, so metadata equality should not be treated as an invariant. No rows were inserted or updated, no function was changed in Supabase, and the migration has not been executed. The staging preflight and the full settlement/rollback matrix remain outstanding.
 
+## Latest static and live-schema review (2026-10-15)
+
+- Added `tests/trade-fee-migration-static.test.ts` and CI workflow `.github/workflows/trade-fee-static.yml`.
+- GitHub Actions run `38730186220` completed successfully for the trade-fee static guardrail job. This confirms the static regression command passed; it is not a PostgreSQL execution test.
+- A read-only catalog query against the current Supabase project found:
+  - `release_trade_escrow(uuid, uuid)` is SECURITY DEFINER with `search_path=public, pg_temp`; its current ACL lists only `postgres` and `service_role`.
+  - `record_platform_ledger_entry(...)` is SECURITY DEFINER with the same pinned search path; its current ACL lists `postgres`, `service_role`, and `supabase_auth_admin`.
+  - The fee helper validates positive amounts, uses `ON CONFLICT (idempotency_key) DO NOTHING`, then compares existing financial fields and raises on mismatches.
+- The candidate migration now validates participant UUID text, rejects self-trades, validates positive crypto amount and non-negative fee before wallet operations, and explicitly revokes `PUBLIC`, `anon`, and `authenticated` execution before granting `service_role`.
+
+## Still unverified
+
+- The candidate migration has not been applied to a staging clone or compiled/executed by PostgreSQL.
+- No settlement mutation tests have run (positive fee, zero fee, duplicate retry, insufficient escrow, rollback, concurrent release, or authorization).
+- The staging preflight has not been executed because no dedicated staging endpoint/credentials were supplied to this run.
+- The current live project was inspected read-only only; no live schema, ledger, wallet, or trade rows were modified.
+
+**Decision:** do not mark the trade-fee migration production-ready until the staging schema preflight and PostgreSQL settlement tests pass, then obtain a separate deployment approval.
+
