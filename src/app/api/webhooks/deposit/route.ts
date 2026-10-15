@@ -62,8 +62,13 @@ export async function POST(req: Request) {
       );
     }
 
-    const ingestHeader = req.headers.get('x-ingest-secret') || req.headers.get('x-api-key');
-    const isDirectHeaderValid = ingestHeader && secret && crypto.timingSafeEqual(Buffer.from(ingestHeader), Buffer.from(secret));
+    const ingestHeader = req.headers.get('x-ingest-secret') || req.headers.get('x-api-key') || '';
+    const suppliedSecret = Buffer.from(ingestHeader, 'utf8');
+    const expectedSecret = Buffer.from(secret, 'utf8');
+    const isDirectHeaderValid =
+      suppliedSecret.length > 0 &&
+      suppliedSecret.length === expectedSecret.length &&
+      crypto.timingSafeEqual(suppliedSecret, expectedSecret);
 
     if (!isDirectHeaderValid) {
       if (!signature || !verifySignature(rawBody, signature)) {
@@ -172,12 +177,12 @@ export async function POST(req: Request) {
       });
 
       if (rpcErr) {
-        console.error(`[Deposit Webhook] RPC error for tx ${txHash}:`, rpcErr.message);
+        console.error('[Deposit Webhook] Atomic deposit RPC failed.');
         processedResults.push({
           txHash,
           logIndex,
           status: 'error',
-          error: rpcErr.message,
+          error: 'Unable to process deposit event.',
         });
       } else {
         const parsed = typeof rpcData === 'string' ? JSON.parse(rpcData) : rpcData;
@@ -195,10 +200,10 @@ export async function POST(req: Request) {
       processed: processedResults.length,
       results: processedResults,
     });
-  } catch (error: any) {
-    console.error('❌ [Deposit Webhook] Error processing event:', error);
+  } catch {
+    console.error('[Deposit Webhook] Request processing failed.');
     return NextResponse.json(
-      { error: error?.message || 'Internal server error processing deposit webhook' },
+      { error: 'Unable to process deposit webhook.' },
       { status: 500 }
     );
   }
