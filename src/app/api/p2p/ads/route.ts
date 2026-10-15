@@ -167,14 +167,14 @@ export async function POST(request: NextRequest) {
       );
     }
     const paymentWindow = rawPaymentWindow;
-    const rawPaymentMethods = Array.isArray(body.payment_methods) && body.payment_methods.length > 0
+    const rawPaymentMethods = Array.isArray(body.payment_methods)
       ? body.payment_methods
       : (Array.isArray(body.paymentMethods) ? body.paymentMethods : ['Bank Transfer']);
-    if (rawPaymentMethods.some((method: unknown) =>
+    if (rawPaymentMethods.length === 0 || rawPaymentMethods.length > 20 || rawPaymentMethods.some((method: unknown) =>
       typeof method !== 'string' || method.trim().length === 0 || method.trim().length > 80
     )) {
       return NextResponse.json(
-        { error: 'Each payment method must be a non-empty string of at most 80 characters.', code: 'INVALID_PAYMENT_METHODS' },
+        { error: 'Provide between 1 and 20 payment methods; each must be a non-empty string of at most 80 characters.', code: 'INVALID_PAYMENT_METHODS' },
         { status: 400 }
       );
     }
