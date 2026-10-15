@@ -29,10 +29,12 @@ export async function checkTradeEligibility(userId: string): Promise<TradeEligib
 
     const status = String(profile.status ?? '').trim().toLowerCase();
     if (status === 'banned') {
+      const banExpiry = profile.banned_at ? new Date(profile.banned_at) : null;
+      if (banExpiry) banExpiry.setMonth(banExpiry.getMonth() + 3);
       const temporaryBanExpired =
         String(profile.ban_policy ?? '').trim().toLowerCase() === 'three_months' &&
-        Boolean(profile.banned_at) &&
-        Date.now() >= new Date(profile.banned_at).getTime() + 3 * 30 * 24 * 60 * 60 * 1000;
+        Boolean(banExpiry && !Number.isNaN(banExpiry.getTime())) &&
+        Date.now() >= (banExpiry?.getTime() ?? Number.POSITIVE_INFINITY);
 
       if (!temporaryBanExpired) {
         return {
