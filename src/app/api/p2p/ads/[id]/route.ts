@@ -54,32 +54,8 @@ export async function GET(
     // Do not fall back to a username-based profile lookup. Public profile details are
     // optional; an unreadable owner profile must not trigger a privileged-client lookup.
 
-    // Fetch creator's wallet balance for the ad coin
-    let creatorBalance: number | null = null;
-    const coin = (ad.crypto || ad.coin || ad.asset || 'USDT').toUpperCase();
-
-    if (creatorId) {
-      try {
-        const { data: wallet } = await supabaseAdmin
-          .from('user_wallets')
-          .select('available_balance, balance, locked_balance')
-          .eq('user_id', creatorId)
-          .ilike('asset_symbol', coin)
-          .maybeSingle();
-
-        if (wallet) {
-          const avail = Number(wallet.available_balance ?? (Number(wallet.balance || 0) - Number(wallet.locked_balance || 0)));
-          creatorBalance = Math.max(0, avail);
-        } else if (creatorProfile) {
-          const colKey = `${coin.toLowerCase()}_balance`;
-          if (creatorProfile[colKey] !== undefined) {
-            creatorBalance = Number(creatorProfile[colKey] || 0);
-          }
-        }
-      } catch (wErr) {
-        console.warn('Wallet balance fetch error in /api/p2p/ads/[id]:', wErr);
-      }
-    }
+    // Do not expose a seller's wallet balance from this public endpoint.
+    const creatorBalance: number | null = null;
 
     // STRICT USERNAME ENFORCEMENT: lowercase letters, numbers, dot, underscore only
     const username = creatorProfile?.username || ad.user_display_name || 'trader';
