@@ -373,30 +373,31 @@ export async function POST(req: Request) {
           { status: 400 }
         );
       }
-      if (effectivePrice === null) {
-        const { data: marketRow, error: marketError } = await supabase
-          .from('crypto_market_prices')
-          .select('price_in_fiat')
-          .eq('asset_symbol', rawAsset)
-          .eq('fiat_symbol', rawFiat)
-          .maybeSingle();
-        const referencePrice = Number(marketRow?.price_in_fiat);
-        if (marketError || !Number.isFinite(referencePrice) || referencePrice <= 0) {
-          console.error('[Floating market price lookup failed in /api/ads/create]:', marketError || 'Missing or invalid reference price');
-          return NextResponse.json(
-            { error: 'Market reference price is currently unavailable. Please try again later.', code: 'MARKET_PRICE_UNAVAILABLE' },
-            { status: 503 }
-          );
-        }
-        effectivePrice = Number((referencePrice * (1 + marginPct / 100)).toFixed(8));
-        if (!Number.isFinite(effectivePrice) || effectivePrice <= 0) {
-          return NextResponse.json(
-            { error: 'Unable to calculate a valid floating price.', code: 'INVALID_FLOATING_PRICE' },
-            { status: 400 }
-          );
-        }
-        cleanPayload.price = effectivePrice;
+      // Derive floating prices on the server; never trust a client-supplied price
+      // that could disagree with the validated margin and current market reference.
+      const { data: marketRow, error: marketError } = await supabase
+        .from('crypto_market_prices')
+        .select('price_in_fiat')
+        .eq('asset_symbol', rawAsset)
+        .eq('fiat_symbol', rawFiat)
+        .maybeSingle();
+      const referencePrice = Number(marketRow?.price_in_fiat);
+      if (marketError || !Number.isFinite(referencePrice) || referencePrice <= 0) {
+        console.error('[Floating market price lookup failed in /api/ads/create]:', marketError || 'Missing or invalid reference price');
+        return NextResponse.json(
+          { error: 'Market reference price is currently unavailable. Please try again later.', code: 'MARKET_PRICE_UNAVAILABLE' },
+          { status: 503 }
+        );
       }
+      effectivePrice = Number((referencePrice * (1 + marginPct / 100)).toFixed(8));
+      if (!Number.isFinite(effectivePrice) || effectivePrice <= 0) {
+        return NextResponse.json(
+          { error: 'Unable to calculate a valid floating price.', code: 'INVALID_FLOATING_PRICE' },
+          { status: 400 }
+        );
+      }
+      cleanPayload.price = effectivePrice;
+      cleanPayload.unit_price = effectivePrice;
     }
 
     // 6. Server-Side SELL Ad Spendable Balance Validation against public.wallet_assets.
