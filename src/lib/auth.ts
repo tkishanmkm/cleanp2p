@@ -14,6 +14,15 @@ export interface UserProfile {
   username_changed_count?: number;
   username_changes_remaining?: number;
   country?: string | null;
+  /** Verification and P2P fields returned by the profiles row when present. */
+  is_verified?: boolean | null;
+  id_verified?: boolean | null;
+  kyc_status?: string | null;
+  verification_tier?: number | string | null;
+  completed_trades?: number | null;
+  completedTrades?: number | null;
+  blocked_users?: string[] | null;
+  blockedUsers?: string[] | null;
   preferredCurrency?: string;
   preferred_currency?: string;
   role: 'user' | 'admin' | 'moderator';
