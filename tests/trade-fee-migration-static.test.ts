@@ -378,5 +378,17 @@ assert.match(
   'nonce allocation must preserve legacy required columns and lock the canonical chain row'
 );
 
+
+const disputeAlignmentMigrationPath = join(
+  process.cwd(),
+  'supabase/migrations/20261003000000_p2p_dispute_schema_and_resolution_alignment.sql'
+);
+const disputeAlignmentSql = readFileSync(disputeAlignmentMigrationPath, 'utf8');
+assert.match(
+  disputeAlignmentSql,
+  /CREATE OR REPLACE FUNCTION public\.resolve_trade_dispute\(\s*p_dispute_id UUID,\s*p_resolution TEXT DEFAULT NULL,\s*p_winner_id UUID DEFAULT NULL,\s*p_caller_id UUID DEFAULT NULL\s*\)/,
+  'resolve_trade_dispute replacement must preserve existing trailing argument defaults'
+);
+
 console.log('PASS: escrow fee migration static safety checks');
 console.log('NOTE: run integration tests against a fully initialized disposable Supabase project before deployment.');
