@@ -194,11 +194,19 @@ export async function POST(req: Request) {
     // Enforce Tier 2 KYC for SELL ads (Tier 1 is blocked from selling)
     if (cleanPayload.type === 'SELL' || resolvedDirection === 'SELL') {
       const admin = getSupabaseAdminClient();
-      const { data: creatorProf } = await admin
+      const { data: creatorProf, error: creatorProfileError } = await admin
         .from('profiles')
         .select('is_verified, id_verified, is_id_verified, kyc_status, verification_tier')
         .eq('id', user.id)
         .maybeSingle();
+
+      if (creatorProfileError || !creatorProf) {
+        console.error('[KYC profile lookup failed in /api/ads/create]:', creatorProfileError || 'Profile not found');
+        return NextResponse.json(
+          { error: 'KYC status is temporarily unavailable. Please try again.', code: 'KYC_STATUS_UNAVAILABLE' },
+          { status: 503 }
+        );
+      }
 
       const isCreatorTier2 = isTier2User(creatorProf);
 
