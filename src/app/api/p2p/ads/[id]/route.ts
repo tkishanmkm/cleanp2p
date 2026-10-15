@@ -3,6 +3,7 @@ import { createClient } from '@supabase/supabase-js';
 import { cookies } from 'next/headers';
 import { NextResponse, type NextRequest } from 'next/server';
 import { findAdById, resolveBothTargetRows } from '@/lib/ad-lookup';
+import { isAdOwner } from '@/lib/ad-authorization';
 
 export const dynamic = 'force-dynamic';
 
@@ -193,7 +194,7 @@ export async function PATCH(
 
     const adOwnerId = existingAd.user_id ?? existingAd.userId;
     // Fail closed: privileged database writes must never proceed without a verifiable owner.
-    if (typeof adOwnerId !== 'string' || !adOwnerId.trim() || String(adOwnerId) !== String(user.id)) {
+    if (!isAdOwner(adOwnerId, user.id)) {
       return NextResponse.json({ error: 'Forbidden. You do not own this advertisement.' }, { status: 403 });
     }
 
@@ -428,7 +429,7 @@ export async function DELETE(
 
     const adOwnerId = existingAd.user_id ?? existingAd.userId;
     // Fail closed: privileged database writes must never proceed without a verifiable owner.
-    if (typeof adOwnerId !== 'string' || !adOwnerId.trim() || String(adOwnerId) !== String(user.id)) {
+    if (!isAdOwner(adOwnerId, user.id)) {
       return NextResponse.json({ error: 'Forbidden. You do not own this advertisement.' }, { status: 403 });
     }
 
