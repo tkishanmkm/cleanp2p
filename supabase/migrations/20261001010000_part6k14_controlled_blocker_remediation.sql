@@ -70,8 +70,18 @@ BEGIN
         INSERT INTO public._snapshot_6k14o_user_deposit_addresses (
             id, user_id, network, address, asset_symbol, created_at, updated_at, chain, asset_code, network_code
         )
-        SELECT id, user_id, network::text, address, asset_symbol, created_at, updated_at, chain, asset_code, network_code
-        FROM public.user_deposit_addresses;
+        SELECT
+            (to_jsonb(uda)->>'id')::uuid,
+            (to_jsonb(uda)->>'user_id')::uuid,
+            to_jsonb(uda)->>'network',
+            to_jsonb(uda)->>'address',
+            to_jsonb(uda)->>'asset_symbol',
+            (to_jsonb(uda)->>'created_at')::timestamptz,
+            (to_jsonb(uda)->>'updated_at')::timestamptz,
+            to_jsonb(uda)->>'chain',
+            to_jsonb(uda)->>'asset_code',
+            to_jsonb(uda)->>'network_code'
+        FROM public.user_deposit_addresses AS uda;
     END IF;
 
     IF NOT EXISTS (SELECT 1 FROM public._snapshot_6k14o_functions WHERE function_signature = 'process_deposit_atomic') THEN
