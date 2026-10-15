@@ -5,6 +5,8 @@ import { createClient } from '@supabase/supabase-js';
 const url = process.env.P2P_FEE_STAGING_SUPABASE_URL;
 const key = process.env.P2P_FEE_STAGING_SERVICE_ROLE_KEY;
 const explicitlyAllow = process.env.P2P_FEE_STAGING_PREFLIGHT === 'true';
+const expectedProjectRef = process.env.P2P_FEE_STAGING_EXPECTED_PROJECT_REF;
+const confirmDisposable = process.env.P2P_FEE_STAGING_CONFIRM_DISPOSABLE === 'true';
 const blockedProjectRef = 'eaiwgfxoiwxepinvcykg';
 
 function fail(message: string): never {
@@ -13,6 +15,8 @@ function fail(message: string): never {
 }
 
 if (!explicitlyAllow) fail('Set P2P_FEE_STAGING_PREFLIGHT=true to explicitly opt in.');
+if (!confirmDisposable) fail('Set P2P_FEE_STAGING_CONFIRM_DISPOSABLE=true only after confirming this is a disposable staging project.');
+if (!expectedProjectRef || !/^[a-z0-9]{20}$/.test(expectedProjectRef)) fail('Set P2P_FEE_STAGING_EXPECTED_PROJECT_REF to the exact 20-character staging project ref.');
 if (!url || !key) fail('P2P_FEE_STAGING_SUPABASE_URL and P2P_FEE_STAGING_SERVICE_ROLE_KEY are required.');
 let parsed: URL;
 try {
@@ -26,8 +30,11 @@ if (parsed.protocol !== 'https:' && parsed.hostname !== 'localhost' && parsed.ho
 if (parsed.hostname === `${blockedProjectRef}.supabase.co`) {
   fail('The known production Supabase project is blocked.');
 }
-if (!parsed.hostname.endsWith('.supabase.co') && parsed.hostname !== 'localhost' && parsed.hostname !== '127.0.0.1') {
-  fail('URL host is not a recognized Supabase endpoint or localhost.');
+if (parsed.hostname !== `${expectedProjectRef}.supabase.co` && parsed.hostname !== 'localhost' && parsed.hostname !== '127.0.0.1') {
+  fail('URL hostname does not exactly match P2P_FEE_STAGING_EXPECTED_PROJECT_REF.');
+}
+if (expectedProjectRef === blockedProjectRef) {
+  fail('The known production project cannot be designated as staging.');
 }
 
 const supabase = createClient(url, key, {
