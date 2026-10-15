@@ -17,10 +17,15 @@ export function generate12CharId(options?: { uppercaseOnly?: boolean; prefix?: s
     throw new Error('Cryptographically secure randomness is unavailable; refusing to generate an ID');
   }
 
-  const bytes = new Uint8Array(randomLength);
-  crypto.getRandomValues(bytes);
-  for (let i = 0; i < randomLength; i++) {
-    randomPart += chars[bytes[i] % chars.length];
+  // Rejection sampling avoids modulo bias in the generated character distribution.
+  const acceptanceLimit = Math.floor(256 / chars.length) * chars.length;
+  while (randomPart.length < randomLength) {
+    const bytes = new Uint8Array(Math.max(16, (randomLength - randomPart.length) * 2));
+    crypto.getRandomValues(bytes);
+    for (let i = 0; i < bytes.length && randomPart.length < randomLength; i++) {
+      if (bytes[i] >= acceptanceLimit) continue;
+      randomPart += chars[bytes[i] % chars.length];
+    }
   }
 
   const result = `${prefix}${randomPart}`;
