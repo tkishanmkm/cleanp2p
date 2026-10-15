@@ -298,11 +298,12 @@ export async function POST(request: NextRequest) {
       }, 0);
 
       const effectiveUnitPrice = priceVal && priceVal > 0 ? priceVal : 1;
-      const minCoinRequired = requestedMin / effectiveUnitPrice;
+      // Validate against the largest advertised trade, not just the minimum order.
+      const maxCoinRequired = requestedMax / effectiveUnitPrice;
 
-      if (!Number.isFinite(availableBalance) || availableBalance < minCoinRequired) {
+      if (!Number.isFinite(availableBalance) || availableBalance < maxCoinRequired) {
         return NextResponse.json({
-          error: `Insufficient ${coinType} balance or wallet balance unavailable. At least ${minCoinRequired.toFixed(6)} ${coinType} is required; verified available balance: ${Number.isFinite(availableBalance) ? availableBalance.toFixed(6) : '0.000000'} ${coinType}.`,
+          error: `Insufficient ${coinType} balance for the advertised maximum. At least ${maxCoinRequired.toFixed(6)} ${coinType} is required; verified available balance: ${Number.isFinite(availableBalance) ? availableBalance.toFixed(6) : '0.000000'} ${coinType}.`,
           code: 'INSUFFICIENT_BALANCE',
         }, { status: 400 });
       }
