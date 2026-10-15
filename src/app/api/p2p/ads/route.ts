@@ -216,7 +216,13 @@ export async function POST(request: NextRequest) {
           if (match) {
             const avail = Number(match.available ?? match.balance ?? match.amount ?? 0);
             const locked = Number(match.locked_escrow ?? match.locked ?? match.locked_balance ?? 0);
-            const net = Math.max(0, avail - locked);
+            const reserved = Number(match.reserved_balance ?? 0);
+            const escrow = Number(match.in_escrow ?? 0);
+            const withdrawal = Number(match.in_withdrawal ?? 0);
+            if (![avail, locked, reserved, escrow, withdrawal].every(Number.isFinite)) {
+              return NextResponse.json({ error: 'Wallet balance data is invalid; sell ad creation is blocked.' }, { status: 503 });
+            }
+            const net = Math.max(0, avail - locked - reserved - escrow - withdrawal);
             if (net > availableBalance) availableBalance = net;
           }
         }
@@ -224,7 +230,7 @@ export async function POST(request: NextRequest) {
         // 2. Check user_wallets table
         const { data: walletData, error: walletDataError } = await adminClient
           .from('user_wallets')
-          .select('available_balance, balance, locked_balance, reserved_balance')
+          .select('balance, locked_balance, reserved_balance')
           .eq('user_id', user.id)
           .ilike('asset_symbol', coinType)
           .maybeSingle();
@@ -234,7 +240,13 @@ export async function POST(request: NextRequest) {
         }
 
         if (walletData) {
-          const net = Number(walletData.available_balance ?? (Number(walletData.balance || 0) - Number(walletData.locked_balance || 0)));
+          const balance = Number(walletData.balance ?? 0);
+          const locked = Number(walletData.locked_balance ?? 0);
+          const reserved = Number(walletData.reserved_balance ?? 0);
+          if (![balance, locked, reserved].every(Number.isFinite)) {
+            return NextResponse.json({ error: 'Wallet balance data is invalid; sell ad creation is blocked.' }, { status: 503 });
+          }
+          const net = Math.max(0, balance - locked - reserved);
           if (net > availableBalance) availableBalance = net;
         }
 
@@ -253,7 +265,14 @@ export async function POST(request: NextRequest) {
             String(w.currency || w.chain || '').toUpperCase() === coinType.toUpperCase()
           );
           matchingWallets.forEach((w: any) => {
-            const val = Number(w.available_balance ?? w.balance ?? 0);
+            const available = w.available_balance;
+            const balance = Number(available ?? w.balance ?? 0);
+            const locked = available !== null && available !== undefined ? 0 : Number(w.locked_balance ?? 0);
+            const reserved = available !== null && available !== undefined ? 0 : Number(w.reserved_balance ?? 0);
+            if (![balance, locked, reserved].every(Number.isFinite)) {
+              throw new Error('Invalid wallet balance data');
+            }
+            const val = Math.max(0, balance - locked - reserved);
             if (val > availableBalance) availableBalance = val;
           });
         }
