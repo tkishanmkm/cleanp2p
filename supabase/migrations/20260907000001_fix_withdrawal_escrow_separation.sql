@@ -6,7 +6,7 @@
 -- ============================================================================
 
 -- 1. Ensure wallet_transactions has required columns
-DO $
+DO $$
 BEGIN
     -- This legacy relation is not present in every supported schema generation.
     -- Only add compatibility columns when the table itself exists.
@@ -25,7 +25,7 @@ BEGIN
             ALTER TABLE public.wallet_transactions ADD COLUMN fee NUMERIC(36, 18) DEFAULT 0.0;
         END IF;
     END IF;
-END $;
+END $$;
 
 -- 2. Stored Procedure: request_withdrawal (Core Signature)
 CREATE OR REPLACE FUNCTION public.request_withdrawal(
