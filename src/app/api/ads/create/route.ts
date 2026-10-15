@@ -75,6 +75,10 @@ export async function POST(req: Request) {
           },
           { onConflict: 'id', ignoreDuplicates: true }
         );
+      if (profileUpsertError) {
+        console.error('[Profile ensure query failed in /api/ads/create]:', profileUpsertError);
+        return NextResponse.json({ error: 'Account profile is temporarily unavailable.', code: 'PROFILE_UNAVAILABLE' }, { status: 503 });
+      }
     } catch (profileUpsertErr) {
       console.error('[Profile ensure failed in /api/ads/create]:', profileUpsertErr);
       return NextResponse.json(
