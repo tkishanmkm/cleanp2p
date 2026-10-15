@@ -1,6 +1,13 @@
 -- Migration: 20261004000000_secure_global_platform_controls.sql
 -- Description: Establishes secure canonical global platform controls in public.system_settings and hardens user_blocks permissions.
 
+-- The admin fields are introduced by a later profile-hardening migration.
+-- Provision them before defining policies that reference them so clean replay is valid.
+ALTER TABLE public.profiles
+    ADD COLUMN IF NOT EXISTS role TEXT DEFAULT 'user',
+    ADD COLUMN IF NOT EXISTS is_admin BOOLEAN DEFAULT FALSE,
+    ADD COLUMN IF NOT EXISTS is_admin_account BOOLEAN DEFAULT FALSE;
+
 -- 1. Ensure system_settings table exists with proper schema
 CREATE TABLE IF NOT EXISTS public.system_settings (
     key TEXT PRIMARY KEY,
