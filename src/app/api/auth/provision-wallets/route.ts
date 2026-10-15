@@ -7,15 +7,16 @@ import { getOrDeriveUserDepositAddresses } from '@/lib/hd-derivation-engine';
 export const dynamic = 'force-dynamic';
 
 function getAdminClient() {
-  const supabaseUrl =
-    process.env.NEXT_PUBLIC_SUPABASE_URL ||
-    process.env.SUPABASE_URL ||
-    'https://eaiwgfxoiwxepinvcykg.supabase.co';
+  // This route reads privileged profile fields; never downgrade to an anon key
+  // or silently target a hard-coded production project.
+  const supabaseUrl = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
-  const serviceRoleKey =
-    process.env.SUPABASE_SERVICE_ROLE_KEY ||
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ||
-    'placeholder-key';
+  if (!supabaseUrl || !serviceRoleKey) {
+    throw new Error(
+      'Wallet provisioning admin client is not configured: SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are required.'
+    );
+  }
 
   return createSupabaseClient(supabaseUrl, serviceRoleKey, {
     auth: { persistSession: false, autoRefreshToken: false },
