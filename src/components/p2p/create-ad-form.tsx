@@ -229,11 +229,12 @@ export function CreateAdForm({ ad }: CreateAdFormProps) {
   const adCreatorId = ad?.userId || user?.uid;
 
   useEffect(() => {
-    if (!adCreatorId) return;
+    const creatorId = adCreatorId;
+    if (!creatorId) return;
     let isMounted = true;
     async function loadBalances() {
       try {
-        const balances = await getUserWalletBalances(adCreatorId);
+        const balances = await getUserWalletBalances(creatorId);
         if (isMounted && balances) {
           setUserBalances(balances);
         }
