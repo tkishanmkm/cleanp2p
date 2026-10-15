@@ -306,7 +306,10 @@ export async function POST(req: Request) {
       cleanPayload.available_amount = requiredCrypto;
 
       // Query authoritative balance and subtract funds already committed to escrow.
-      const { data: assetWallet, error: walletError } = await supabase
+      // Use the server-side client for the authoritative balance read because
+      // user-facing RLS may hide wallet rows; scope the privileged query to this user.
+      const balanceClient = getSupabaseAdminClient();
+      const { data: assetWallet, error: walletError } = await balanceClient
         .from('wallet_assets')
         .select('balance, in_escrow')
         .eq('user_id', user.id)
