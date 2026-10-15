@@ -202,6 +202,29 @@ export async function POST(req: Request) {
     if (cleanPayload.rate_percent !== undefined) cleanPayload.rate_percent = cleanPayload.rate_percent ? Number(cleanPayload.rate_percent) : 0;
     if (cleanPayload.rate_adjustment !== undefined) cleanPayload.rate_adjustment = cleanPayload.rate_adjustment ? Number(cleanPayload.rate_adjustment) : 0;
     if (cleanPayload.margin_percentage !== undefined) cleanPayload.margin_percentage = cleanPayload.margin_percentage ? Number(cleanPayload.margin_percentage) : 0;
+    if (cleanPayload.payment_methods !== undefined) {
+      if (!Array.isArray(cleanPayload.payment_methods) || cleanPayload.payment_methods.length < 1 || cleanPayload.payment_methods.length > 20) {
+        return NextResponse.json({ error: 'Payment methods must be a list containing 1 to 20 entries.', code: 'INVALID_PAYMENT_METHODS' }, { status: 400 });
+      }
+      const normalizedPaymentMethods: string[] = [];
+      const seenPaymentMethods = new Set<string>();
+      for (const method of cleanPayload.payment_methods) {
+        if (typeof method !== 'string' || method.trim().length < 1 || method.trim().length > 80) {
+          return NextResponse.json({ error: 'Each payment method must be a string between 1 and 80 characters.', code: 'INVALID_PAYMENT_METHODS' }, { status: 400 });
+        }
+        const displayValue = method.trim();
+        const normalizedKey = displayValue.toLowerCase();
+        if (!seenPaymentMethods.has(normalizedKey)) {
+          seenPaymentMethods.add(normalizedKey);
+          normalizedPaymentMethods.push(displayValue);
+        }
+      }
+      if (normalizedPaymentMethods.length === 0) {
+        return NextResponse.json({ error: 'At least one valid payment method is required.', code: 'INVALID_PAYMENT_METHODS' }, { status: 400 });
+      }
+      cleanPayload.payment_methods = normalizedPaymentMethods;
+    }
+
     if (cleanPayload.payment_window !== undefined && cleanPayload.payment_window !== null && cleanPayload.payment_window !== '') {
       const paymentWindow = Number(cleanPayload.payment_window);
       if (!Number.isInteger(paymentWindow) || paymentWindow < 30 || paymentWindow > 1440) {
