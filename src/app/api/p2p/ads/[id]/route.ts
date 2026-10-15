@@ -408,7 +408,7 @@ export async function PATCH(
     return NextResponse.json({ success: true, data: updatedResult || existingAd });
   } catch (err: any) {
     console.error('Error updating ad:', err);
-    return NextResponse.json({ error: err.message || 'Internal Server Error' }, { status: 500 });
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }
 
