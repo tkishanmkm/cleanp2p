@@ -114,6 +114,14 @@ export async function POST(request: NextRequest) {
     const requestedMax = Number(body.max_amount ?? body.max_limit ?? body.maxAmount ?? 5000);
     const requestedMin = Number(body.min_amount ?? body.min_limit ?? body.minAmount ?? 100);
 
+    if (!Number.isFinite(requestedMin) || !Number.isFinite(requestedMax) ||
+        requestedMin <= 0 || requestedMax <= 0 || requestedMax < requestedMin) {
+      return NextResponse.json(
+        { error: 'Minimum and maximum trade limits must be finite positive numbers, and maximum must be at least minimum.', code: 'INVALID_TRADE_LIMITS' },
+        { status: 400 }
+      );
+    }
+
     // Enforce dynamic minimum limit equivalent to at least $10.00 USD
     const dynamicMinThreshold = calculateMinimumFiatAmount(10.00, fiatType);
     if (requestedMin < dynamicMinThreshold) {
