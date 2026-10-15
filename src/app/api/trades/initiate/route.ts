@@ -80,6 +80,96 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: 'Advertisement ID is required' }, { status: 400 });
     }
 
+    // Replay an existing idempotent request before looking up the ad. This lets a
+    // legitimate retry succeed if the advertisement was later paused or deleted.
+    // The stored trade is authoritative; the key alone never authorizes access.
+    const replayAdmin = getSupabaseAdminClient();
+    const { data: existingTrade, error: replayLookupError } = await replayAdmin
+      .from('trades')
+      .select('id, public_id, buyer_id, seller_id, ad_id, public_ad_id, crypto_amount, fiat_amount, fiat_currency, price, unit_price, rate, payment_method, crypto, asset_code, status, escrow_status, idempotency_key')
+      .eq('idempotency_key', idempotencyKey)
+      .maybeSingle();
+
+    if (replayLookupError) {
+      console.error('[trades/initiate] Idempotency lookup failed:', replayLookupError);
+      return NextResponse.json(
+        { success: false, code: 'IDEMPOTENCY_LOOKUP_FAILED', error: 'Unable to verify this retry safely.' },
+        { status: 503 }
+      );
+    }
+
+    if (existingTrade) {
+      const callerIsParticipant =
+        String(existingTrade.buyer_id) === user.id ||
+        String(existingTrade.seller_id) === user.id;
+      const requestedAd = String(adId).trim();
+      const adMatches =
+        String(existingTrade.ad_id ?? '') === requestedAd ||
+        String(existingTrade.public_ad_id ?? '') === requestedAd;
+
+      const retryCryptoRaw = rawCrypto == null || rawCrypto === '' ? NaN : Number(rawCrypto);
+      const retryFiatRaw = rawFiat == null || rawFiat === '' ? NaN : Number(rawFiat);
+      const storedPrice = Number(existingTrade.price ?? existingTrade.unit_price ?? existingTrade.rate);
+      const storedCrypto = Number(existingTrade.crypto_amount);
+      const storedFiat = Number(existingTrade.fiat_amount);
+      const requestedCrypto = Number.isFinite(retryCryptoRaw) && retryCryptoRaw > 0
+        ? Number(retryCryptoRaw.toFixed(8))
+        : (Number.isFinite(retryFiatRaw) && retryFiatRaw > 0 && storedPrice > 0
+          ? Number((retryFiatRaw / storedPrice).toFixed(8))
+          : NaN);
+      const requestedPayment = typeof customPaymentMethod === 'string' ? customPaymentMethod.trim().toLowerCase() : '';
+      const storedPayment = String(existingTrade.payment_method ?? '').trim().toLowerCase();
+      const retryAmountsValid =
+        Number.isFinite(requestedCrypto) &&
+        Number.isFinite(storedPrice) && storedPrice > 0 &&
+        requestedCrypto === storedCrypto &&
+        Number((requestedCrypto * storedPrice).toFixed(2)) === storedFiat &&
+        (!Number.isFinite(retryFiatRaw) || retryFiatRaw <= 0 || Number(retryFiatRaw.toFixed(2)) === storedFiat);
+
+      if (!callerIsParticipant || !adMatches || !retryAmountsValid ||
+          (requestedPayment !== '' && requestedPayment !== storedPayment)) {
+        return NextResponse.json(
+          { success: false, code: 'IDEMPOTENCY_KEY_REUSE_CONFLICT', error: 'This idempotency key was already used for a different or unauthorized trade request.' },
+          { status: 409 }
+        );
+      }
+
+      return NextResponse.json({
+        success: true,
+        tradeId: existingTrade.id,
+        id: existingTrade.id,
+        publicId: existingTrade.public_id,
+        message: 'Trade already initiated (idempotent replay)',
+        data: {
+          success: true,
+          trade_id: existingTrade.id,
+          public_id: existingTrade.public_id,
+          buyer_id: existingTrade.buyer_id,
+          seller_id: existingTrade.seller_id,
+          crypto_amount: existingTrade.crypto_amount,
+          fiat_amount: existingTrade.fiat_amount,
+          fiat_currency: existingTrade.fiat_currency,
+          asset: existingTrade.crypto || existingTrade.asset_code,
+          status: existingTrade.status,
+          escrow_status: existingTrade.escrow_status,
+          message: 'Trade already initiated (idempotent replay)',
+        },
+        trade: {
+          trade_id: existingTrade.id,
+          public_id: existingTrade.public_id,
+          buyer_id: existingTrade.buyer_id,
+          seller_id: existingTrade.seller_id,
+          crypto_amount: existingTrade.crypto_amount,
+          fiat_amount: existingTrade.fiat_amount,
+          fiat_currency: existingTrade.fiat_currency,
+          asset: existingTrade.crypto || existingTrade.asset_code,
+          status: existingTrade.status,
+          escrow_status: existingTrade.escrow_status,
+          message: 'Trade already initiated (idempotent replay)',
+        },
+      });
+    }
+
     const isIdUUID = isValidUUID(adId);
 
     // 1. Fetch Ad safely to read metadata
