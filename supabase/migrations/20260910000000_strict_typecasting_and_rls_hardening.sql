@@ -254,35 +254,52 @@ CREATE POLICY "disputes_update_policy" ON public.disputes
         public.is_admin()
     );
 
--- P2P ADS
-DROP POLICY IF EXISTS "p2p_ads_select_policy" ON public.p2p_ads;
-DROP POLICY IF EXISTS "p2p_ads_insert_policy" ON public.p2p_ads;
-DROP POLICY IF EXISTS "p2p_ads_update_policy" ON public.p2p_ads;
-DROP POLICY IF EXISTS "p2p_ads_delete_policy" ON public.p2p_ads;
+-- P2P ADS: this is an optional legacy table; canonical schema uses public.ads.
+DO $$
+BEGIN
+    IF to_regclass('public.p2p_ads') IS NOT NULL THEN
+        EXECUTE $policy$DROP POLICY IF EXISTS "p2p_ads_select_policy" ON public.p2p_ads$policy$;
+        EXECUTE $policy$DROP POLICY IF EXISTS "p2p_ads_insert_policy" ON public.p2p_ads$policy$;
+        EXECUTE $policy$DROP POLICY IF EXISTS "p2p_ads_update_policy" ON public.p2p_ads$policy$;
+        EXECUTE $policy$DROP POLICY IF EXISTS "p2p_ads_delete_policy" ON public.p2p_ads$policy$;
 
-CREATE POLICY "p2p_ads_select_policy" ON public.p2p_ads
-    FOR SELECT USING (
-        status = 'active' OR
-        (auth.uid()::uuid IS NOT NULL AND user_id::uuid = auth.uid()::uuid) OR
-        public.is_admin()
-    );
+        EXECUTE $policy$
+            CREATE POLICY "p2p_ads_select_policy" ON public.p2p_ads
+            FOR SELECT USING (
+                status = 'active' OR
+                (auth.uid()::uuid IS NOT NULL AND user_id::uuid = auth.uid()::uuid) OR
+                public.is_admin()
+            )
+        $policy$;
 
-CREATE POLICY "p2p_ads_insert_policy" ON public.p2p_ads
-    FOR INSERT WITH CHECK (
-        auth.uid()::uuid IS NOT NULL AND (user_id::uuid = auth.uid()::uuid OR public.is_admin())
-    );
+        EXECUTE $policy$
+            CREATE POLICY "p2p_ads_insert_policy" ON public.p2p_ads
+            FOR INSERT WITH CHECK (
+                auth.uid()::uuid IS NOT NULL AND
+                (user_id::uuid = auth.uid()::uuid OR public.is_admin())
+            )
+        $policy$;
 
-CREATE POLICY "p2p_ads_update_policy" ON public.p2p_ads
-    FOR UPDATE USING (
-        auth.uid()::uuid IS NOT NULL AND (user_id::uuid = auth.uid()::uuid OR public.is_admin())
-    ) WITH CHECK (
-        auth.uid()::uuid IS NOT NULL AND (user_id::uuid = auth.uid()::uuid OR public.is_admin())
-    );
+        EXECUTE $policy$
+            CREATE POLICY "p2p_ads_update_policy" ON public.p2p_ads
+            FOR UPDATE USING (
+                auth.uid()::uuid IS NOT NULL AND
+                (user_id::uuid = auth.uid()::uuid OR public.is_admin())
+            ) WITH CHECK (
+                auth.uid()::uuid IS NOT NULL AND
+                (user_id::uuid = auth.uid()::uuid OR public.is_admin())
+            )
+        $policy$;
 
-CREATE POLICY "p2p_ads_delete_policy" ON public.p2p_ads
-    FOR DELETE USING (
-        auth.uid()::uuid IS NOT NULL AND (user_id::uuid = auth.uid()::uuid OR public.is_admin())
-    );
+        EXECUTE $policy$
+            CREATE POLICY "p2p_ads_delete_policy" ON public.p2p_ads
+            FOR DELETE USING (
+                auth.uid()::uuid IS NOT NULL AND
+                (user_id::uuid = auth.uid()::uuid OR public.is_admin())
+            )
+        $policy$;
+    END IF;
+END $$;
 
 -- USER BLOCKS
 DROP POLICY IF EXISTS "user_blocks_select_policy" ON public.user_blocks;
