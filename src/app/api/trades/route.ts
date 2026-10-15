@@ -4,6 +4,7 @@ import { generateTradeId } from '@/lib/id-generator';
 import { sendNewTradeNotificationEmail } from '@/lib/email/tradeEmailService';
 import { assertPlatformControlAllowed } from '@/lib/platform-guard';
 import { hasPendingWithdrawalApproval } from '@/lib/withdrawal-security';
+import { checkTradeEligibility } from '@/lib/trading-eligibility';
 
 export const dynamic = 'force-dynamic';
 
@@ -67,6 +68,14 @@ export async function POST(req: NextRequest) {
 
     if (authError || !user) {
       return NextResponse.json({ error: 'Unauthorized. Please sign in.' }, { status: 401 });
+    }
+
+    const callerEligibility = await checkTradeEligibility(user.id);
+    if (!callerEligibility.allowed) {
+      return NextResponse.json(
+        { error: callerEligibility.message, code: callerEligibility.code },
+        { status: callerEligibility.statusCode }
+      );
     }
 
     // Pending Withdrawal Approval Lockout Check
@@ -146,6 +155,14 @@ export async function POST(req: NextRequest) {
       return NextResponse.json(
         { error: 'You cannot trade with your own advertisement.' },
         { status: 400 }
+      );
+    }
+
+    const advertiserEligibility = await checkTradeEligibility(String(ad.user_id || ''));
+    if (!advertiserEligibility.allowed) {
+      return NextResponse.json(
+        { error: 'This advertisement owner is not currently eligible to trade.', code: advertiserEligibility.code },
+        { status: advertiserEligibility.statusCode }
       );
     }
 
