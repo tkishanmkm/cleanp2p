@@ -25,6 +25,13 @@ assert.match(sql.trimEnd(), /COMMIT;$/, 'migration must end with COMMIT');
 const uuidGuard = sql.indexOf('v_trade.seller_id !~*');
 const firstWalletOperation = sql.indexOf('-- 3. Lock Wallet Assets');
 assert.ok(uuidGuard >= 0 && firstWalletOperation > uuidGuard, 'participant UUID guards must precede wallet operations');
+const amountGuard = sql.indexOf('IF v_trade.crypto_amount IS NULL OR v_trade.crypto_amount <= 0 THEN');
+const totalAssignment = sql.indexOf('v_total_escrow := v_trade.crypto_amount + COALESCE(v_trade.escrow_fee, 0);');
+const firstWalletMutation = sql.indexOf('UPDATE public.wallet_assets');
+assert.ok(amountGuard >= 0 && totalAssignment > amountGuard, 'crypto amount must be validated before calculating escrow liability');
+assert.ok(negativeFeeGuard >= 0 && totalAssignment > negativeFeeGuard, 'fee must be validated before calculating escrow liability');
+assert.ok(totalAssignment >= 0 && firstWalletMutation > totalAssignment, 'escrow liability must be calculated before wallet mutations');
+
 const negativeFeeGuard = sql.indexOf("RAISE EXCEPTION 'Invalid negative escrow fee");
 assert.ok(negativeFeeGuard >= 0 && negativeFeeGuard < firstWalletOperation, 'negative fee guard must precede wallet operations');
 
