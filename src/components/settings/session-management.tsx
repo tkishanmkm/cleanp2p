@@ -48,6 +48,7 @@ export function SessionManagement() {
 
       const mapped: Session[] = (data || []).map((s: any) => ({
         id: s.id,
+        userId: s.user_id || authUser.uid,
         userAgent: s.user_agent || '',
         ipAddress: s.ip_address || '',
         lastLogin: s.last_login || new Date().toISOString(),
@@ -143,7 +144,7 @@ export function SessionManagement() {
             return (
               <Alert
                 key={session.id}
-                variant={isCurrent ? 'default' : 'secondary'}
+                variant={isCurrent ? 'default' : 'destructive'}
                 className={isCurrent ? 'border-primary' : ''}
               >
                 <div className="flex items-center gap-4">
