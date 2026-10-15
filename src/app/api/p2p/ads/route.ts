@@ -475,7 +475,7 @@ export async function POST(request: NextRequest) {
         };
         const { error: p2pSyncError } = await admin
           .from('p2p_ads')
-          .upsert(p2pRow, { onConflict: 'id', ignoreDuplicates: true });
+          .upsert(p2pRow, { onConflict: 'id', ignoreDuplicates: false });
         if (p2pSyncError) {
           console.error('[P2P Ad Marketplace Sync Error]:', p2pSyncError);
         } else {
