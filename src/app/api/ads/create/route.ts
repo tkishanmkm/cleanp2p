@@ -13,33 +13,36 @@ export async function POST(req: Request) {
   try {
     const supabase = await createClient();
 
-    // Support Bearer token header if provided by frontend
-    const authHeader = req.headers.get('Authorization') || req.headers.get('authorization');
-    const bearerToken = authHeader?.startsWith('Bearer ') ? authHeader.substring(7).trim() : null;
+    // A supplied Authorization header is authoritative: never fall back to cookie
+    // identity when that header is malformed or its bearer token is invalid.
+    const authHeader = req.headers.get('authorization');
+    const bearerMatch = authHeader?.match(/^Bearer\\s+(.+)$/i);
+    const bearerToken = bearerMatch?.[1]?.trim();
 
     // 1. Explicit Auth Check
     let user = null;
     let authError: any = null;
 
-    if (bearerToken) {
+    if (authHeader !== null) {
+      if (!bearerToken) {
+        return NextResponse.json(
+          { error: 'Invalid authorization header.', code: 'INVALID_AUTHORIZATION' },
+          { status: 401 }
+        );
+      }
       const tokenAuth = await supabase.auth.getUser(bearerToken);
       user = tokenAuth.data?.user;
       authError = tokenAuth.error;
-    }
-
-    if (!user) {
+    } else {
       const cookieAuth = await supabase.auth.getUser();
       user = cookieAuth.data?.user;
       authError = cookieAuth.error;
     }
 
     if (authError || !user) {
-      console.error('[Auth Error Details in /api/ads/create]:', authError?.message);
+      console.warn('[Auth] Advertisement creation rejected because no valid session was found.');
       return NextResponse.json(
-        { 
-          error: 'No active session found! Please refresh or log in again.', 
-          details: authError?.message 
-        }, 
+        { error: 'No active session found. Please refresh or log in again.', code: 'UNAUTHENTICATED' },
         { status: 401 }
       );
     }
