@@ -364,7 +364,7 @@ export async function POST(request: NextRequest) {
       label: resolvedLabel,
       ad_tags: resolvedTags,
       tags: resolvedTags,
-      auto_reply: body.auto_reply || body.autoReply || '',
+      auto_reply: typeof body.auto_reply === 'string' ? body.auto_reply.trim().slice(0, 2000) : (typeof body.autoReply === 'string' ? body.autoReply.trim().slice(0, 2000) : ''),
       
       is_active: true,
       active: true,
