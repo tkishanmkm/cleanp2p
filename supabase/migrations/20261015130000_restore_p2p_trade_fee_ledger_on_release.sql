@@ -50,14 +50,27 @@ BEGIN
         RAISE EXCEPTION 'Trade % not found', p_trade_id;
     END IF;
 
-    v_crypto_symbol := UPPER(NULLIF(TRIM(v_trade.crypto::TEXT), ''));
+    -- Resolve the asset code from the final row shape without assuming a legacy column exists.
+    -- The migration history has used crypto, asset, crypto_currency, asset_symbol and asset_code.
+    v_crypto_symbol := UPPER(COALESCE(
+        NULLIF(TRIM(to_jsonb(v_trade)->>'crypto'), ''),
+        NULLIF(TRIM(to_jsonb(v_trade)->>'asset'), ''),
+        NULLIF(TRIM(to_jsonb(v_trade)->>'crypto_currency'), ''),
+        NULLIF(TRIM(to_jsonb(v_trade)->>'asset_symbol'), ''),
+        NULLIF(TRIM(to_jsonb(v_trade)->>'asset_code'), ''),
+        NULLIF(TRIM(to_jsonb(v_trade)->>'coin'), '')
+    ));
+
+    IF v_crypto_symbol IS NULL THEN
+        RAISE EXCEPTION 'Trade % has no resolvable asset code', p_trade_id;
+    END IF;
 
     v_total_escrow := v_trade.crypto_amount + COALESCE(v_trade.escrow_fee, 0.0);
 
     -- 3. Lock Wallet Assets FOR UPDATE (Defensive ::TEXT casting)
     SELECT balance, in_escrow INTO v_seller_bal, v_seller_escrow
     FROM public.wallet_assets
-    WHERE user_id::TEXT = v_trade.seller_id::TEXT AND asset_symbol = v_trade.crypto
+    WHERE user_id::TEXT = v_trade.seller_id::TEXT AND asset_symbol = v_crypto_symbol
     FOR UPDATE;
 
     IF NOT FOUND THEN
@@ -75,7 +88,7 @@ BEGIN
     )
     VALUES (
         v_trade.buyer_id::UUID,
-        v_trade.crypto,
+        v_crypto_symbol,
         0.0,
         0.0,
         NOW(),
@@ -85,7 +98,7 @@ BEGIN
 
     SELECT balance, in_escrow INTO v_buyer_bal, v_buyer_escrow
     FROM public.wallet_assets
-    WHERE user_id::TEXT = v_trade.buyer_id::TEXT AND asset_symbol = v_trade.crypto
+    WHERE user_id::TEXT = v_trade.buyer_id::TEXT AND asset_symbol = v_crypto_symbol
     FOR UPDATE;
 
     -- 4. Release Payment Guard (ENUM safe: explicit status::TEXT before COALESCE)
@@ -168,7 +181,7 @@ BEGIN
     SET in_escrow = in_escrow - v_total_escrow,
         updated_at = NOW()
     WHERE user_id::TEXT = v_trade.seller_id::TEXT
-      AND asset_symbol = v_trade.crypto
+      AND asset_symbol = v_crypto_symbol
       AND in_escrow >= v_total_escrow
     RETURNING balance, in_escrow INTO v_seller_bal_after, v_seller_escrow_after;
 
@@ -189,8 +202,8 @@ BEGIN
         status
     ) VALUES (
         v_trade.seller_id::UUID,
-        v_trade.crypto,
-        v_trade.crypto,
+        v_crypto_symbol,
+        v_crypto_symbol,
         0.0,
         'transfer',
         'trade_rel_seller:' || p_trade_id::TEXT,
@@ -208,7 +221,7 @@ BEGIN
     SET balance = balance + v_trade.crypto_amount,
         updated_at = NOW()
     WHERE user_id::TEXT = v_trade.buyer_id::TEXT
-      AND asset_symbol = v_trade.crypto
+      AND asset_symbol = v_crypto_symbol
     RETURNING balance, in_escrow INTO v_buyer_bal_after, v_buyer_escrow_after;
 
     IF NOT FOUND THEN
@@ -228,8 +241,8 @@ BEGIN
         status
     ) VALUES (
         v_trade.buyer_id::UUID,
-        v_trade.crypto,
-        v_trade.crypto,
+        v_crypto_symbol,
+        v_crypto_symbol,
         +v_trade.crypto_amount,
         'transfer',
         'trade_rel_buyer:' || p_trade_id::TEXT,
