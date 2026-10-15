@@ -1292,7 +1292,7 @@ async function scanTronDeposits(
           expectedCheckpointBlock = lastScannedBlock;
         } else {
           const startBlockEnv = process.env.TRON_DEPOSIT_START_BLOCK;
-          if (!startBlockEnv || !/^\\d+$/.test(startBlockEnv)) {
+          if (!startBlockEnv || !/^\d+$/.test(startBlockEnv)) {
             throw new Error('Missing TRON_DEPOSIT_START_BLOCK; configure the verified historical start block before first scan');
           }
           fromBlock = Number(startBlockEnv);
