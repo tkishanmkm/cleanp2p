@@ -65,10 +65,11 @@ export async function verifyServerAdmin(req?: NextRequest): Promise<AdminAuthRes
       .maybeSingle();
 
     if (profile) {
+      // profiles has a self-update policy, so role/is_admin fields read here are
+      // not an authoritative privilege source. Keep this row only for the
+      // existing 2FA settings lookup; admin membership is checked below using
+      // trusted app_metadata, app_admins, or the server environment allowlist.
       adminProfile = profile;
-      if (profile.role === "admin" || profile.is_admin === true || profile.is_admin_account === true) {
-        isAdmin = true;
-      }
     }
 
     // Check app_admins table
