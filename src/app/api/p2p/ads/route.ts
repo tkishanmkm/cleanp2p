@@ -302,6 +302,14 @@ export async function POST(request: NextRequest) {
     }
 
     // BALANCE VALIDATION: If user is creating a SELL ad (offering to sell coin), check that minimum limit in coin is present in their account
+    const cryptoAmountForMax = requestedMax / Number(priceVal);
+    if (!Number.isFinite(cryptoAmountForMax) || cryptoAmountForMax <= 0) {
+      return NextResponse.json(
+        { error: 'Unable to calculate the crypto amount for this advertisement.', code: 'INVALID_ADVERTISED_AMOUNT' },
+        { status: 400 }
+      );
+    }
+
     if (adSide === 'SELL') {
       const adminClient = getSupabaseAdminClient();
       const { data: walletAssets, error: walletAssetsError } = await adminClient
@@ -337,9 +345,8 @@ export async function POST(request: NextRequest) {
         return total + Math.max(0, balance - locked);
       }, 0);
 
-      const effectiveUnitPrice = priceVal && priceVal > 0 ? priceVal : 1;
       // Validate against the largest advertised trade, not just the minimum order.
-      const maxCoinRequired = requestedMax / effectiveUnitPrice;
+      const maxCoinRequired = cryptoAmountForMax;
 
       if (!Number.isFinite(availableBalance) || availableBalance < maxCoinRequired) {
         return NextResponse.json({
@@ -381,8 +388,8 @@ export async function POST(request: NextRequest) {
       margin: marginVal,
       min_limit: requestedMin,
       max_limit: requestedMax,
-      total_amount: requestedMax,
-      available_amount: requestedMax,
+      total_amount: cryptoAmountForMax,
+      available_amount: cryptoAmountForMax,
       payment_methods: paymentMethods,
       payment_window: paymentWindow,
       
@@ -441,8 +448,8 @@ export async function POST(request: NextRequest) {
           margin: marginVal,
           min_limit: requestedMin,
           max_limit: requestedMax,
-          total_amount: requestedMax,
-          available_amount: requestedMax,
+          total_amount: cryptoAmountForMax,
+          available_amount: cryptoAmountForMax,
           payment_methods: paymentMethods,
           payment_window: paymentWindow,
           is_active: true,
@@ -499,8 +506,8 @@ export async function POST(request: NextRequest) {
               margin: marginVal,
               min_limit: requestedMin,
               max_limit: requestedMax,
-              total_amount: requestedMax,
-              available_amount: requestedMax,
+              total_amount: cryptoAmountForMax,
+              available_amount: cryptoAmountForMax,
               payment_methods: paymentMethods,
               payment_window: paymentWindow,
               is_active: true,
