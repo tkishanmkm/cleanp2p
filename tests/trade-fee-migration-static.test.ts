@@ -32,8 +32,23 @@ const adminOverviewMigrationPath = join(
 const adminOverviewMigrationSql = readFileSync(adminOverviewMigrationPath, 'utf8');
 assert.match(
   adminOverviewMigrationSql,
-  /CREATE OR REPLACE VIEW public\.admin_financial_overview[\s\S]*?COALESCE\(main_balance, 0\)/,
+  /CREATE VIEW public\\.admin_financial_overview[\\s\\S]*?COALESCE\\(main_balance, 0\\)/,
   'admin overview must use the actual main_balance column exposed by user_wallets'
+);
+assert.match(
+  adminOverviewMigrationSql,
+  /to_regclass\('public\.sweep_logs'\)[\s\S]*?v_swept_expr :=/,
+  'admin overview must guard the optional sweep_logs relation before referencing it'
+);
+assert.match(
+  adminOverviewMigrationSql,
+  /to_regclass\('public\.withdrawals'\)[\s\S]*?v_withdrawal_fee_expr :=/,
+  'admin overview must guard optional withdrawal metrics before referencing their table'
+);
+assert.match(
+  adminOverviewMigrationSql,
+  /to_regclass\('public\.escrow_ledger'\)[\s\S]*?v_p2p_fee_expr :=/,
+  'admin overview must guard optional escrow ledger metrics before referencing their table'
 );
 assert.doesNotMatch(
   adminOverviewMigrationSql,
