@@ -117,7 +117,7 @@ jobs:
         run: |
           set -euo pipefail
           status="$(supabase status -o env)"
-          db_url="$(printf '%s\\n' "$status" | sed -n 's/^DB_URL="\\(.*\\)"$/\\1/p')"
+          db_url="$(printf '%s\n' "$status" | sed -n 's/^DB_URL="\(.*\)"$/\1/p')"
           if [ -z "$db_url" ]; then
             echo "Could not read local DB_URL from Supabase CLI status."
             exit 1
