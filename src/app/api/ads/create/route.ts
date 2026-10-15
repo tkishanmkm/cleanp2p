@@ -228,6 +228,9 @@ export async function POST(req: Request) {
     if (cleanPayload.rate_percent !== undefined) cleanPayload.rate_percent = cleanPayload.rate_percent ? Number(cleanPayload.rate_percent) : 0;
     if (cleanPayload.rate_adjustment !== undefined) cleanPayload.rate_adjustment = cleanPayload.rate_adjustment ? Number(cleanPayload.rate_adjustment) : 0;
     if (cleanPayload.margin_percentage !== undefined) cleanPayload.margin_percentage = cleanPayload.margin_percentage ? Number(cleanPayload.margin_percentage) : 0;
+    if (cleanPayload.payment_methods === undefined || cleanPayload.payment_methods === null) {
+      return NextResponse.json({ error: 'At least one payment method is required.', code: 'INVALID_PAYMENT_METHODS' }, { status: 400 });
+    }
     if (cleanPayload.payment_methods !== undefined) {
       if (!Array.isArray(cleanPayload.payment_methods) || cleanPayload.payment_methods.length < 1 || cleanPayload.payment_methods.length > 20) {
         return NextResponse.json({ error: 'Payment methods must be a list containing 1 to 20 entries.', code: 'INVALID_PAYMENT_METHODS' }, { status: 400 });
