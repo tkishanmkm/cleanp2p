@@ -486,7 +486,13 @@ REVOKE EXECUTE ON FUNCTION public.verify_sweep_ownership(UUID, TEXT, TEXT) FROM 
 REVOKE EXECUTE ON FUNCTION public.extend_sweep_lease(UUID, TEXT, INTEGER) FROM PUBLIC, anon, authenticated;
 REVOKE EXECUTE ON FUNCTION public.reserve_utxos_for_sweep(UUID, TEXT, JSONB, INTEGER) FROM PUBLIC, anon, authenticated;
 REVOKE EXECUTE ON FUNCTION public.claim_gas_funding_operation(UUID, TEXT, TEXT, NUMERIC, TEXT) FROM PUBLIC, anon, authenticated;
-REVOKE EXECUTE ON FUNCTION public.allocate_hot_wallet_nonce(INTEGER) FROM PUBLIC, anon, authenticated;
+DO $nonce_acl$
+BEGIN
+    IF to_regprocedure('public.allocate_hot_wallet_nonce(integer)') IS NOT NULL THEN
+        REVOKE EXECUTE ON FUNCTION public.allocate_hot_wallet_nonce(INTEGER) FROM PUBLIC, anon, authenticated;
+    END IF;
+END
+$nonce_acl$;
 
 GRANT EXECUTE ON FUNCTION public.claim_next_deposit_sweep(TEXT, INTEGER) TO service_role, postgres;
 GRANT EXECUTE ON FUNCTION public.update_sweep_operation_status(UUID, TEXT, TEXT, TEXT, TEXT, NUMERIC, TEXT, INTEGER) TO service_role, postgres;
@@ -494,6 +500,12 @@ GRANT EXECUTE ON FUNCTION public.verify_sweep_ownership(UUID, TEXT, TEXT) TO ser
 GRANT EXECUTE ON FUNCTION public.extend_sweep_lease(UUID, TEXT, INTEGER) TO service_role, postgres;
 GRANT EXECUTE ON FUNCTION public.reserve_utxos_for_sweep(UUID, TEXT, JSONB, INTEGER) TO service_role, postgres;
 GRANT EXECUTE ON FUNCTION public.claim_gas_funding_operation(UUID, TEXT, TEXT, NUMERIC, TEXT) TO service_role, postgres;
-GRANT EXECUTE ON FUNCTION public.allocate_hot_wallet_nonce(INTEGER) TO service_role, postgres;
+DO $nonce_acl$
+BEGIN
+    IF to_regprocedure('public.allocate_hot_wallet_nonce(integer)') IS NOT NULL THEN
+        GRANT EXECUTE ON FUNCTION public.allocate_hot_wallet_nonce(INTEGER) TO service_role, postgres;
+    END IF;
+END
+$nonce_acl$;
 
 COMMIT;
