@@ -34,6 +34,7 @@ export interface P2PAd {
   userId: string;
   publicAdId?: string;
   user?: {
+    id?: string;
     username: string;
     country?: string;
     feedbackScore: number;
