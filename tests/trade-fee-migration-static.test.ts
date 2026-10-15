@@ -41,6 +41,24 @@ assert.doesNotMatch(
   'financial RPC hardening must not guard a different signature by function name alone'
 );
 
+const optionalAdsGuards = [
+  /v_legacy_ad RECORD;/,
+  /IF to_regclass\('public\.ads'\) IS NOT NULL THEN[\s\S]*?FROM public\.ads/,
+  /IF NOT v_found_ad AND to_regclass\('public\.ads'\) IS NOT NULL THEN[\s\S]*?FROM public\.ads/,
+];
+for (const guard of optionalAdsGuards) {
+  assert.match(
+    canonicalP2pStateMachineSql,
+    guard,
+    'canonical trade RPC must not require the optional legacy public.ads relation'
+  );
+}
+assert.doesNotMatch(
+  canonicalP2pStateMachineSql,
+  /v_legacy_ad public\.ads%ROWTYPE/,
+  'legacy ads row type must not be resolved when the table is absent'
+);
+
 const canonicalP2pStateMachinePath = join(
   process.cwd(),
   'supabase/migrations/20260928070000_canonical_p2p_state_machine_and_rpcs.sql'
