@@ -33,6 +33,10 @@ export async function POST(req: NextRequest) {
       .eq('id', adminId)
       .single();
 
+    if (!profile) {
+      return NextResponse.json({ error: 'Administrator security profile not found' }, { status: 403 });
+    }
+
     let isAuthValid = false;
     let authMethodUsed = '';
 
