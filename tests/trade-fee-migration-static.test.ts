@@ -9,6 +9,24 @@ const migrationPath = join(
   'supabase/migrations/20261015130000_restore_p2p_trade_fee_ledger_on_release.sql'
 );
 const sql = readFileSync(migrationPath, 'utf8');
+const ledgerHelperPath = join(
+  process.cwd(),
+  'supabase/migrations/20260928000000_platform_ledger_entries.sql'
+);
+const ledgerHelperSql = readFileSync(ledgerHelperPath, 'utf8');
+
+assert.match(ledgerHelperSql, /'trade_fee_collected'/,
+  'platform ledger schema must permit trade fee entries');
+assert.match(ledgerHelperSql, /asset_code TEXT NOT NULL[\s\S]*?REFERENCES public\.assets\(code\)/,
+  'platform fee asset must reference a registered asset code');
+assert.match(ledgerHelperSql, /amount NUMERIC\(36,18\) NOT NULL[\s\S]*?CHECK \(amount > 0\)/,
+  'platform ledger must reject zero or negative fee entries');
+assert.match(ledgerHelperSql, /idempotency_key TEXT NOT NULL UNIQUE/,
+  'platform ledger must enforce unique idempotency keys');
+assert.match(ledgerHelperSql, /ON CONFLICT \(idempotency_key\) DO NOTHING/,
+  'platform ledger helper must make repeated inserts idempotent');
+assert.match(ledgerHelperSql, /v_existing\.entry_type IS DISTINCT FROM p_entry_type[\s\S]*?v_existing\.amount IS DISTINCT FROM p_amount/,
+  'reused idempotency keys must reject conflicting financial fields');
 
 const releaseStart = sql.indexOf('CREATE OR REPLACE FUNCTION public.release_trade_escrow');
 assert.notEqual(releaseStart, -1, 'migration must redefine release_trade_escrow');
