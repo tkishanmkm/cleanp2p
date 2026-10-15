@@ -3,6 +3,7 @@ import { createServerClient } from '@supabase/ssr';
 import { generateTradeId } from '@/lib/id-generator';
 import { assertPlatformControlAllowed } from '@/lib/platform-guard';
 import { hasPendingWithdrawalApproval } from '@/lib/withdrawal-security';
+import { checkTradeEligibility } from '@/lib/trading-eligibility';
 import { isTier2User } from '@/lib/kyc';
 
 function isValidUUID(str: any): boolean {
@@ -27,6 +28,14 @@ export async function POST(req: NextRequest) {
     const { data: { user }, error: authError } = await supabase.auth.getUser();
     if (authError || !user) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+
+    const eligibility = await checkTradeEligibility(user.id);
+    if (!eligibility.allowed) {
+      return NextResponse.json(
+        { success: false, error: eligibility.message, code: eligibility.code },
+        { status: eligibility.statusCode }
+      );
     }
 
     // Pending Withdrawal Approval Lockout Check
