@@ -477,66 +477,8 @@ export async function POST(request: NextRequest) {
         }
       }
 
-      // If RLS blocked the user or table not accessible via client, try service role admin client
-      if (dbError && (dbError.code === '42501' || dbError.message?.toLowerCase().includes('row-level security') || dbError.code === '42P01')) {
-        try {
-          const admin = getSupabaseAdminClient();
-          const { data: adminResult, error: adminError } = await admin
-            .from('ads')
-            .insert([basePayload])
-            .select()
-            .single();
-
-          if (!adminError) {
-            data = adminResult;
-            dbError = null;
-          } else {
-            // Try minimal payload with admin
-            const minAdminPayload: Record<string, any> = {
-              ad_id: uniqueAdId,
-              public_id: uniqueAdId,
-              user_id: user.id,
-              type: adSide,
-              trade_type: adSide,
-              asset_symbol: coinType,
-              fiat_symbol: fiatType,
-              price: priceVal,
-              unit_price: priceVal,
-              pricing_type: pricingType,
-              margin: marginVal,
-              min_limit: requestedMin,
-              max_limit: requestedMax,
-              total_amount: cryptoAmountForMax,
-              available_amount: cryptoAmountForMax,
-              payment_methods: paymentMethods,
-              payment_window: paymentWindow,
-              is_active: true,
-              active: true,
-              status: 'active',
-              is_fixed: pricingType === 'FIXED',
-              terms: resolvedTerms,
-              offer_label: resolvedLabel,
-              label: resolvedLabel,
-              ad_tags: resolvedTags,
-              tags: resolvedTags,
-            };
-            const { data: minAdminRes, error: minAdminErr } = await admin
-              .from('ads')
-              .insert([minAdminPayload])
-              .select()
-              .single();
-
-            if (!minAdminErr) {
-              data = minAdminRes;
-              dbError = null;
-            } else {
-              dbError = minAdminErr;
-            }
-          }
-        } catch (adminEx: any) {
-          console.error('Admin insertion exception:', adminEx);
-        }
-      }
+      // Do not bypass authenticated-user RLS with service-role insertion.
+      // A policy/configuration failure must fail closed and be corrected at the database layer.
     }
 
     if (dbError) {
