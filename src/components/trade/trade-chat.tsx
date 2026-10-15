@@ -927,7 +927,9 @@ export function TradeChat({
       toast({
         variant: 'destructive',
         title: 'Message Blocked by Security Protocol',
-        description: offPlatformCheck.reason || 'Off-platform communication is strictly prohibited.'
+        description: offPlatformCheck.matchedTerm
+          ? `Off-platform communication is blocked (matched: ${offPlatformCheck.matchedTerm}).`
+          : 'Off-platform communication is strictly prohibited.'
       });
 
       // Insert official Paxones System Message warning to chat
