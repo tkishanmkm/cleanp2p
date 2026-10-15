@@ -146,7 +146,7 @@ BEGIN
         IF COALESCE(v_trade.escrow_fee, 0) > 0 THEN
             PERFORM public.record_platform_ledger_entry(
                 p_entry_type := 'trade_fee_collected',
-                p_asset_code := v_trade.crypto,
+                p_asset_code := v_crypto_symbol,
                 p_amount := v_trade.escrow_fee,
                 p_direction := 'CREDIT',
                 p_related_user_id := v_trade.seller_id,
@@ -263,7 +263,7 @@ BEGIN
     IF COALESCE(v_trade.escrow_fee, 0) > 0 THEN
         PERFORM public.record_platform_ledger_entry(
             p_entry_type := 'trade_fee_collected',
-            p_asset_code := v_trade.crypto,
+            p_asset_code := v_crypto_symbol,
             p_amount := v_trade.escrow_fee,
             p_direction := 'CREDIT',
             p_related_user_id := v_trade.seller_id,
