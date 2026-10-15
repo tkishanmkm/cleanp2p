@@ -63,55 +63,61 @@ $view$;
 
 GRANT SELECT ON public.admin_financial_overview TO authenticated, service_role;
 
--- 2. RLS Policies for sweep_logs and sweep_queue (Fixes Info 0008)
-ALTER TABLE IF EXISTS public.sweep_logs ENABLE ROW LEVEL SECURITY;
-DROP POLICY IF EXISTS "sweep_logs_service_role_all" ON public.sweep_logs;
-CREATE POLICY "sweep_logs_service_role_all" ON public.sweep_logs
-    FOR ALL USING (auth.role() = 'service_role');
+-- 2. RLS Policies for optional legacy sweep tables.
+DO $sweep_rls$
+BEGIN
+    IF to_regclass('public.sweep_logs') IS NOT NULL THEN
+        ALTER TABLE public.sweep_logs ENABLE ROW LEVEL SECURITY;
+        DROP POLICY IF EXISTS "sweep_logs_service_role_all" ON public.sweep_logs;
+        CREATE POLICY "sweep_logs_service_role_all" ON public.sweep_logs
+            FOR ALL USING (auth.role() = 'service_role');
+    END IF;
 
-ALTER TABLE IF EXISTS public.sweep_queue ENABLE ROW LEVEL SECURITY;
-DROP POLICY IF EXISTS "sweep_queue_service_role_all" ON public.sweep_queue;
-CREATE POLICY "sweep_queue_service_role_all" ON public.sweep_queue
-    FOR ALL USING (auth.role() = 'service_role');
+    IF to_regclass('public.sweep_queue') IS NOT NULL THEN
+        ALTER TABLE public.sweep_queue ENABLE ROW LEVEL SECURITY;
+        DROP POLICY IF EXISTS "sweep_queue_service_role_all" ON public.sweep_queue;
+        CREATE POLICY "sweep_queue_service_role_all" ON public.sweep_queue
+            FOR ALL USING (auth.role() = 'service_role');
+    END IF;
 
+    IF to_regclass('public.trade_attachments') IS NOT NULL THEN
+        ALTER TABLE public.trade_attachments ENABLE ROW LEVEL SECURITY;
+        DROP POLICY IF EXISTS "Allow authenticated users to read and insert trade attachments" ON public.trade_attachments;
+        DROP POLICY IF EXISTS "trade_attachments_participant_select" ON public.trade_attachments;
+        DROP POLICY IF EXISTS "trade_attachments_participant_insert" ON public.trade_attachments;
 
--- 3. Hardened RLS policy for trade_attachments (Fixes Warn 0024)
--- Types: trade_attachments.trade_id is TEXT; trades.id is UUID; trades.trade_id is TEXT; trades.buyer_id is TEXT; trades.seller_id is TEXT.
-ALTER TABLE IF EXISTS public.trade_attachments ENABLE ROW LEVEL SECURITY;
-DROP POLICY IF EXISTS "Allow authenticated users to read and insert trade attachments" ON public.trade_attachments;
-DROP POLICY IF EXISTS "trade_attachments_participant_select" ON public.trade_attachments;
-DROP POLICY IF EXISTS "trade_attachments_participant_insert" ON public.trade_attachments;
+        CREATE POLICY "trade_attachments_participant_select" ON public.trade_attachments
+            FOR SELECT USING (
+                auth.role() = 'service_role' OR
+                EXISTS (
+                    SELECT 1 FROM public.trades t
+                    WHERE (t.id::TEXT = trade_attachments.trade_id OR t.trade_id = trade_attachments.trade_id)
+                      AND (t.buyer_id = auth.uid()::TEXT OR t.seller_id = auth.uid()::TEXT)
+                ) OR
+                EXISTS (
+                    SELECT 1 FROM public.p2p_trades pt
+                    WHERE pt.id::TEXT = trade_attachments.trade_id
+                      AND (pt.buyer_id = auth.uid() OR pt.seller_id = auth.uid())
+                ) OR
+                EXISTS (
+                    SELECT 1 FROM public.app_admins a
+                    WHERE a.user_id = auth.uid()
+                )
+            );
 
-CREATE POLICY "trade_attachments_participant_select" ON public.trade_attachments
-    FOR SELECT USING (
-        auth.role() = 'service_role' OR
-        EXISTS (
-            SELECT 1 FROM public.trades t
-            WHERE (t.id::TEXT = trade_attachments.trade_id OR t.trade_id = trade_attachments.trade_id)
-              AND (t.buyer_id = auth.uid()::TEXT OR t.seller_id = auth.uid()::TEXT)
-        ) OR
-        EXISTS (
-            SELECT 1 FROM public.p2p_trades pt
-            WHERE pt.id::TEXT = trade_attachments.trade_id
-              AND (pt.buyer_id = auth.uid() OR pt.seller_id = auth.uid())
-        ) OR
-        EXISTS (
-            SELECT 1 FROM public.app_admins a
-            WHERE a.user_id = auth.uid()
-        )
-    );
-
-CREATE POLICY "trade_attachments_participant_insert" ON public.trade_attachments
-    FOR INSERT WITH CHECK (
-        auth.role() = 'service_role' OR
-        sender_id = auth.uid() OR
-        EXISTS (
-            SELECT 1 FROM public.trades t
-            WHERE (t.id::TEXT = trade_attachments.trade_id OR t.trade_id = trade_attachments.trade_id)
-              AND (t.buyer_id = auth.uid()::TEXT OR t.seller_id = auth.uid()::TEXT)
-        )
-    );
-
+        CREATE POLICY "trade_attachments_participant_insert" ON public.trade_attachments
+            FOR INSERT WITH CHECK (
+                auth.role() = 'service_role' OR
+                sender_id = auth.uid() OR
+                EXISTS (
+                    SELECT 1 FROM public.trades t
+                    WHERE (t.id::TEXT = trade_attachments.trade_id OR t.trade_id = trade_attachments.trade_id)
+                      AND (t.buyer_id = auth.uid()::TEXT OR t.seller_id = auth.uid()::TEXT)
+                )
+            );
+    END IF;
+END
+$sweep_rls$;
 
 -- 4. Revoke anon/public access from sensitive internal financial RPCs (Fixes Warn 0028 & 0029)
 DO $$
