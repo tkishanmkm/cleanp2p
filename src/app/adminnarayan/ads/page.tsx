@@ -73,14 +73,20 @@ export default function AdminAdsPage() {
 
         const formattedAds: P2PAd[] = (data || []).map((ad: any) => ({
           id: ad.id,
-          publicAdId: ad.public_ad_id || ad.publicAdId || ad.id,
+          publicAdId: String(ad.public_ad_id || ad.publicAdId || ad.id || ''),
           userId: ad.user_id || ad.userId,
-          user: ad.user || {
-            username: ad.user_display_name || 'User',
-            feedbackScore: 100,
-            positiveFeedback: 0,
-            negativeFeedback: 0,
-            completedTrades: 0,
+          user: {
+            ...(ad.user || {}),
+            username:
+              typeof ad.user?.username === 'string' && ad.user.username.trim()
+                ? ad.user.username
+                : typeof ad.user_display_name === 'string' && ad.user_display_name.trim()
+                  ? ad.user_display_name
+                  : 'User',
+            feedbackScore: ad.user?.feedbackScore ?? 100,
+            positiveFeedback: ad.user?.positiveFeedback ?? 0,
+            negativeFeedback: ad.user?.negativeFeedback ?? 0,
+            completedTrades: ad.user?.completedTrades ?? 0,
           },
           adType: ad.ad_type || ad.adType || 'buy',
           crypto: ad.crypto || 'USDT',
