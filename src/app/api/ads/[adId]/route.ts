@@ -218,7 +218,7 @@ export async function DELETE(
       authError = tokenAuth.error;
     }
 
-    if (!user) {
+    if (!user && !authHeader) {
       const cookieAuth = await supabase.auth.getUser();
       user = cookieAuth.data?.user;
       authError = cookieAuth.error;
@@ -391,7 +391,7 @@ export async function PATCH(
       authError = tokenAuth.error;
     }
 
-    if (!user) {
+    if (!user && !authHeader) {
       const cookieAuth = await supabase.auth.getUser();
       user = cookieAuth.data?.user;
       authError = cookieAuth.error;
@@ -609,7 +609,7 @@ export async function PUT(
       authError = tokenAuth.error;
     }
 
-    if (!user) {
+    if (!user && !authHeader) {
       const cookieAuth = await supabase.auth.getUser();
       user = cookieAuth.data?.user;
       authError = cookieAuth.error;
