@@ -331,6 +331,14 @@ export async function POST(req: Request) {
       }
     }
 
+    if (cleanPayload.min_amount === null || cleanPayload.min_amount === undefined ||
+        cleanPayload.max_amount === null || cleanPayload.max_amount === undefined) {
+      return NextResponse.json(
+        { error: 'Both minimum and maximum trade limits are required.', code: 'TRADE_LIMITS_REQUIRED' },
+        { status: 400 }
+      );
+    }
+
     // Validate min/max and price constraints
     let effectivePrice = cleanPayload.price !== null && cleanPayload.price !== undefined ? cleanPayload.price : (cleanPayload.fixed_rate ? Number(cleanPayload.fixed_rate) : null);
     if (effectivePrice !== null && (!Number.isFinite(effectivePrice) || effectivePrice <= 0)) {
