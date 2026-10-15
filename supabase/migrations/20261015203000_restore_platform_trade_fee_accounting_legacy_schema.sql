@@ -58,6 +58,9 @@ BEGIN
        OR v_trade.buyer_id !~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN
         RAISE EXCEPTION 'Invalid buyer or seller UUID in trade %', p_trade_id;
     END IF;
+    IF v_trade.seller_id = v_trade.buyer_id THEN
+        RAISE EXCEPTION 'Buyer and seller must be different users for trade %', p_trade_id;
+    END IF;
 
     -- Reject invalid fee data before wallet locks or settlement mutations.
     IF COALESCE(v_trade.escrow_fee, 0) < 0 THEN
