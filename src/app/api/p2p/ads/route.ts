@@ -353,67 +353,16 @@ export async function POST(request: NextRequest) {
         }
       }
 
-      // If RLS blocked the user or table not accessible via client, try service role admin client
-      if (dbError && (dbError.code === '42501' || dbError.message?.toLowerCase().includes('row-level security') || dbError.code === '42P01')) {
-        try {
-          const admin = getSupabaseAdminClient();
-          const { data: adminResult, error: adminError } = await admin
-            .from('ads')
-            .insert([basePayload])
-            .select()
-            .single();
-
-          if (!adminError) {
-            data = adminResult;
-            dbError = null;
-          } else {
-            // Try minimal payload with admin
-            const minAdminPayload: Record<string, any> = {
-              user_id: user.id,
-              type: adSide,
-              asset_symbol: coinType,
-              fiat_symbol: fiatType,
-              price: priceVal,
-              min_limit: requestedMin,
-              max_limit: requestedMax,
-              payment_methods: paymentMethods,
-              is_active: true,
-              terms: resolvedTerms,
-              offer_label: resolvedLabel,
-              label: resolvedLabel,
-              ad_tags: resolvedTags,
-              tags: resolvedTags,
-            };
-            const { data: minAdminRes, error: minAdminErr } = await admin
-              .from('ads')
-              .insert([minAdminPayload])
-              .select()
-              .single();
-
-            if (!minAdminErr) {
-              data = minAdminRes;
-              dbError = null;
-            } else {
-              dbError = minAdminErr;
-            }
-          }
-        } catch (adminEx: any) {
-          console.error('Admin insertion exception:', adminEx);
-        }
+      // Never bypass authenticated-user RLS with a service-role insert. Configure
+      // the appropriate owner-scoped INSERT policy if this write is denied.
       }
     }
 
     if (dbError) {
-      console.error('[P2P Ad Creation Error]:', dbError);
+      console.error('[P2P Ad Creation Error]:', { code: dbError.code, message: dbError.message });
       return NextResponse.json(
-        { 
-          error: dbError.message || 'Database error creating ad', 
-          realError: `${dbError.message} (Code: ${dbError.code || 'UNKNOWN'}${dbError.details ? ` - ${dbError.details}` : ''})`,
-          code: dbError.code,
-          details: dbError.details,
-          hint: dbError.hint
-        }, 
-        { status: 400 }
+        { error: 'Unable to create advertisement. Please verify your details or try again later.' },
+        { status: dbError.code === '42501' ? 403 : 500 }
       );
     }
 
@@ -441,10 +390,7 @@ export async function POST(request: NextRequest) {
   } catch (err: any) {
     console.error('Unhandled ad creation error:', err);
     return NextResponse.json(
-      { 
-        error: err.message || 'Internal Server Error',
-        realError: String(err)
-      }, 
+      { error: 'Internal server error.' },
       { status: 500 }
     );
   }
