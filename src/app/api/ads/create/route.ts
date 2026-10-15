@@ -440,27 +440,28 @@ export async function POST(req: Request) {
       cleanPayload.unit_price = effectivePrice;
     }
 
-    // 6. Server-Side SELL Ad Spendable Balance Validation against public.wallet_assets.
+    // 6. Derive advertised crypto quantities server-side for both BUY and SELL.
     // min_amount/max_amount are fiat limits; total_amount/available_amount are crypto quantities.
-    if (resolvedDirection === 'SELL') {
-      const maxFiatAmount = Number(cleanPayload.max_amount);
-      if (!Number.isFinite(maxFiatAmount) || maxFiatAmount <= 0 ||
-          !Number.isFinite(effectivePrice) || effectivePrice <= 0) {
-        return NextResponse.json(
-          { error: 'A valid maximum fiat limit and unit price are required for SELL advertisements.', code: 'INVALID_SELL_AMOUNT' },
-          { status: 400 }
-        );
-      }
+    const maxFiatAmount = Number(cleanPayload.max_amount);
+    if (!Number.isFinite(maxFiatAmount) || maxFiatAmount <= 0 ||
+        !Number.isFinite(effectivePrice) || effectivePrice <= 0) {
+      return NextResponse.json(
+        { error: 'A valid maximum fiat limit and unit price are required.', code: 'INVALID_AD_AMOUNT' },
+        { status: 400 }
+      );
+    }
+    const requiredCrypto = maxFiatAmount / effectivePrice;
+    if (!Number.isFinite(requiredCrypto) || requiredCrypto <= 0) {
+      return NextResponse.json(
+        { error: 'Unable to calculate the crypto quantity for this advertisement.', code: 'INVALID_AD_AMOUNT' },
+        { status: 400 }
+      );
+    }
+    cleanPayload.total_amount = requiredCrypto;
+    cleanPayload.available_amount = requiredCrypto;
 
-      const requiredCrypto = maxFiatAmount / effectivePrice;
-      if (!Number.isFinite(requiredCrypto) || requiredCrypto <= 0) {
-        return NextResponse.json(
-          { error: 'Unable to calculate the crypto quantity for this advertisement.', code: 'INVALID_SELL_AMOUNT' },
-          { status: 400 }
-        );
-      }
-      cleanPayload.total_amount = requiredCrypto;
-      cleanPayload.available_amount = requiredCrypto;
+    // SELL advertisements must also have sufficient spendable wallet balance.
+    if (resolvedDirection === 'SELL') {
 
       // Query authoritative balance and subtract funds already committed to escrow.
       // Use the server-side client for the authoritative balance read because
