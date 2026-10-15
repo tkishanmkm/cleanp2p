@@ -225,8 +225,42 @@ export async function PATCH(
 
     const minLimit = validatedNumbers['minimum trade limit'];
     const maxLimit = validatedNumbers['maximum trade limit'];
-    if (minLimit !== undefined && maxLimit !== undefined && minLimit > maxLimit) {
+    const existingMin = Number(existingAd.min_limit ?? existingAd.min_amount ?? 0);
+    const existingMax = Number(existingAd.max_limit ?? existingAd.max_amount ?? existingAd.max_amount_fiat ?? 0);
+    const effectiveMin = minLimit ?? (Number.isFinite(existingMin) && existingMin > 0 ? existingMin : undefined);
+    const effectiveMax = maxLimit ?? (Number.isFinite(existingMax) && existingMax > 0 ? existingMax : undefined);
+    if (effectiveMin !== undefined && effectiveMax !== undefined && effectiveMin > effectiveMax) {
       return NextResponse.json({ error: 'Minimum trade limit cannot exceed maximum trade limit.' }, { status: 400 });
+    }
+
+    // Revalidate fixed prices on edits against the current server-side market reference.
+    const requestedPricingType = String(rawBody.pricing_type ?? existingAd.pricing_type ?? existingAd.rate_type ?? '').toUpperCase();
+    const fixedPricing = requestedPricingType === 'FIXED' || String(rawBody.rate_type ?? existingAd.rate_type ?? '').toUpperCase() === 'FIXED' || rawBody.is_fixed === true || existingAd.is_fixed === true;
+    const suppliedPrice = rawBody.price !== undefined && rawBody.price !== null && rawBody.price !== '';
+    if (fixedPricing && (suppliedPrice || rawBody.pricing_type !== undefined || rawBody.rate_type !== undefined || rawBody.is_fixed !== undefined)) {
+      const effectivePrice = suppliedPrice ? Number(rawBody.price) : Number(existingAd.price);
+      if (!Number.isFinite(effectivePrice) || effectivePrice <= 0) {
+        return NextResponse.json({ error: 'A valid positive fixed price is required.' }, { status: 400 });
+      }
+      const coin = String(rawBody.coin ?? rawBody.crypto ?? rawBody.asset_symbol ?? existingAd.crypto ?? existingAd.coin ?? existingAd.asset ?? 'USDT').toUpperCase();
+      const fiat = String(rawBody.fiat ?? rawBody.fiat_currency ?? rawBody.fiat_symbol ?? existingAd.fiat ?? existingAd.fiat_currency ?? 'USD').toUpperCase();
+      const marketClient = createClient(
+        process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL || 'https://placeholder.supabase.co',
+        process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'placeholder-anon-key'
+      );
+      const { data: marketRow, error: marketError } = await marketClient
+        .from('crypto_market_prices')
+        .select('price_in_fiat, updated_at')
+        .eq('asset_symbol', coin)
+        .eq('fiat_symbol', fiat)
+        .maybeSingle();
+      const referencePrice = Number(marketRow?.price_in_fiat);
+      if (marketError || !Number.isFinite(referencePrice) || referencePrice <= 0) {
+        return NextResponse.json({ error: 'Market reference price is unavailable; fixed-price edit rejected.' }, { status: 400 });
+      }
+      if (effectivePrice < referencePrice * 0.5 || effectivePrice > referencePrice * 1.5) {
+        return NextResponse.json({ error: 'Fixed price must remain within ±50% of the current reference market price.' }, { status: 400 });
+      }
     }
 
     // Sanitize payload data types
