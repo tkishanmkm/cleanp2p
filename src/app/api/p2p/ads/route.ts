@@ -170,10 +170,15 @@ export async function POST(request: NextRequest) {
     const rawPaymentMethods = Array.isArray(body.payment_methods) && body.payment_methods.length > 0
       ? body.payment_methods
       : (Array.isArray(body.paymentMethods) ? body.paymentMethods : ['Bank Transfer']);
-    const paymentMethods = rawPaymentMethods
-      .filter((method: unknown): method is string => typeof method === 'string')
-      .map((method: string) => method.trim())
-      .filter((method: string) => method.length > 0 && method.length <= 80);
+    if (rawPaymentMethods.some((method: unknown) =>
+      typeof method !== 'string' || method.trim().length === 0 || method.trim().length > 80
+    )) {
+      return NextResponse.json(
+        { error: 'Each payment method must be a non-empty string of at most 80 characters.', code: 'INVALID_PAYMENT_METHODS' },
+        { status: 400 }
+      );
+    }
+    const paymentMethods = [...new Set((rawPaymentMethods as string[]).map((method) => method.trim()))];
 
     if (!Number.isFinite(marginVal) || !['FIXED', 'FLOAT'].includes(String(pricingType).toUpperCase())) {
       return NextResponse.json(
