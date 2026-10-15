@@ -141,46 +141,24 @@ export async function getMarketplaceAds(
 }
 
 export async function fetchMyAds() {
-  try {
-    const { data: { session } } = await supabase.auth.getSession();
-    const headers: Record<string, string> = {};
-    if (session?.access_token) {
-      headers['Authorization'] = `Bearer ${session.access_token}`;
-    }
+  const { data: { session } } = await supabase.auth.getSession();
+  const headers: Record<string, string> = {};
+  if (session?.access_token) headers['Authorization'] = `Bearer ${session.access_token}`;
 
-    const res = await fetch('/api/p2p/my-ads', {
-      headers,
-      credentials: 'include',
-    });
-
-    if (res.ok) {
-      const json = await res.json();
-      if (json.ads) return json.ads;
-    }
-  } catch (err) {
-    console.warn('API fetchMyAds failed, falling back to direct query:', err);
+  const response = await fetch('/api/p2p/my-ads', {
+    headers,
+    credentials: 'include',
+    cache: 'no-store',
+  });
+  const result = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(result.error || result.message || `Failed to fetch advertisements (HTTP ${response.status})`);
   }
-
-  const { data: { user } } = await supabase.auth.getUser();
-
-  if (!user) {
-    console.warn("No active session found when fetching My Ads");
-    return [];
+  if (!Array.isArray(result.ads)) {
+    throw new Error('The advertisements API returned an invalid response.');
   }
-
-  const { data, error } = await supabase
-    .from('p2p_ads')
-    .select('*')
-    .eq('user_id', user.id)
-    .order('created_at', { ascending: false });
-
-  if (error) {
-    console.error("My Ads fetch error:", error.message);
-    throw error;
-  }
-  return data || [];
+  return result.ads;
 }
-
 export const handleCreateAd = async (adData: any) => {
   // Clean payload: cast numeric columns and ensure booleans are boolean
   const cleanPayload = {
