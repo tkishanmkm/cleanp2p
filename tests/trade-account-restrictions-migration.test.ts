@@ -31,7 +31,7 @@ const guardedRoutes = [
 for (const routePath of guardedRoutes) {
   const route = readFileSync(join(process.cwd(), routePath), 'utf8');
   const rpcIndex = route.indexOf("initiate_trade_with_escrow");
-  const eligibilityIndex = route.indexOf('checkTradeEligibility');
+  const eligibilityIndex = route.indexOf('await checkTradeEligibility(user.id)');
   assert.ok(rpcIndex >= 0, `${routePath} must call the escrow RPC`);
   assert.ok(eligibilityIndex >= 0, `${routePath} must import/use the eligibility guard`);
   assert.ok(eligibilityIndex < rpcIndex, `${routePath} must check eligibility before the escrow RPC`);
