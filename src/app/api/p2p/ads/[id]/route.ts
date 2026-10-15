@@ -189,7 +189,8 @@ export async function PATCH(
     }
 
     const adOwnerId = existingAd.user_id || existingAd.userId;
-    if (adOwnerId && String(adOwnerId) !== String(user.id)) {
+    if (typeof adOwnerId !== 'string' || !adOwnerId.trim() || String(adOwnerId) !== String(user.id)) {
+      // Fail closed when the resolved record has no trustworthy owner identifier.
       return NextResponse.json({ error: 'Forbidden. You do not own this advertisement.' }, { status: 403 });
     }
 
@@ -407,7 +408,8 @@ export async function DELETE(
     }
 
     const adOwnerId = existingAd.user_id || existingAd.userId;
-    if (adOwnerId && String(adOwnerId) !== String(user.id)) {
+    if (typeof adOwnerId !== 'string' || !adOwnerId.trim() || String(adOwnerId) !== String(user.id)) {
+      // Fail closed when the resolved record has no trustworthy owner identifier.
       return NextResponse.json({ error: 'Forbidden. You do not own this advertisement.' }, { status: 403 });
     }
 
