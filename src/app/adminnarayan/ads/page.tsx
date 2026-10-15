@@ -103,7 +103,7 @@ export default function AdminAdsPage() {
             return [];
           })(),
           terms: ad.terms || '',
-          active: ad.active ?? true,
+          active: ad.active === true,
           offerLabel: ad.offer_label || ad.offerLabel,
           tags: (() => {
             const value = ad.tags;
