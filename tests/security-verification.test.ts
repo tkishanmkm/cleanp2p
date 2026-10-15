@@ -1,9 +1,49 @@
 import { createClient } from '@supabase/supabase-js';
 import crypto from 'crypto';
 
-// Setup Supabase admin client for test assertions
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL || 'https://placeholder.supabase.co';
-const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'placeholder-key';
+// Fail closed: security probes send attack requests and must target an explicitly
+// designated disposable test environment. Never fall back to generic/prod env vars.
+const supabaseUrl = process.env.P2P_SECURITY_TEST_SUPABASE_URL;
+const supabaseKey = process.env.P2P_SECURITY_TEST_SERVICE_ROLE_KEY;
+const BASE_URL = process.env.P2P_SECURITY_TEST_APP_URL;
+const allowAttacks = process.env.P2P_SECURITY_TEST_ALLOW_ATTACKS === 'true';
+const knownProductionProjectRef = 'eaiwgfxoiwxepinvcykg';
+
+function refuseUnsafeTarget(reason: string): never {
+  console.error(`Refusing to run security verification: ${reason}`);
+  process.exit(1);
+}
+
+if (!allowAttacks) {
+  refuseUnsafeTarget('set P2P_SECURITY_TEST_ALLOW_ATTACKS=true only for an approved disposable test environment.');
+}
+if (!supabaseUrl || !supabaseKey || !BASE_URL) {
+  refuseUnsafeTarget('P2P_SECURITY_TEST_SUPABASE_URL, P2P_SECURITY_TEST_SERVICE_ROLE_KEY, and P2P_SECURITY_TEST_APP_URL are all required.');
+}
+if (supabaseKey === process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY) {
+  refuseUnsafeTarget('a public anon key is not accepted; provide the dedicated test service-role key.');
+}
+
+let parsedSupabaseUrl: URL;
+let parsedAppUrl: URL;
+try {
+  parsedSupabaseUrl = new URL(supabaseUrl);
+  parsedAppUrl = new URL(BASE_URL);
+} catch {
+  refuseUnsafeTarget('test Supabase/app URL is invalid.');
+}
+if (parsedSupabaseUrl.protocol !== 'https:' && parsedSupabaseUrl.hostname !== 'localhost' && parsedSupabaseUrl.hostname !== '127.0.0.1') {
+  refuseUnsafeTarget('Supabase test URL must use HTTPS except for localhost.');
+}
+if (parsedAppUrl.protocol !== 'https:' && parsedAppUrl.hostname !== 'localhost' && parsedAppUrl.hostname !== '127.0.0.1') {
+  refuseUnsafeTarget('test app URL must use HTTPS except for localhost.');
+}
+if (parsedSupabaseUrl.hostname === `${knownProductionProjectRef}.supabase.co`) {
+  refuseUnsafeTarget('the known production Supabase project is blocked.');
+}
+if (parsedAppUrl.hostname === 'paxones.com' || parsedAppUrl.hostname.endsWith('.paxones.com')) {
+  refuseUnsafeTarget('the production Paxones domain is blocked; use a disposable staging app.');
+}
 
 const supabase = createClient(supabaseUrl, supabaseKey, {
   auth: { persistSession: false, autoRefreshToken: false },
