@@ -16,10 +16,18 @@ export async function GET(
     const resolvedParams = await Promise.resolve(params);
     const id = (resolvedParams.id || '').trim();
 
-    const supabaseAdmin = createClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL || 'https://placeholder.supabase.co',
-      process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'placeholder-anon-key'
-    );
+    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL;
+    const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+
+    // This public GET handler only needs public profile fields; never use a service-role key here.
+    if (!supabaseUrl || !supabaseAnonKey) {
+      console.error('Supabase public configuration is missing for ad details.');
+      return NextResponse.json({ error: 'Service temporarily unavailable.' }, { status: 503 });
+    }
+
+    const supabasePublic = createClient(supabaseUrl, supabaseAnonKey, {
+      auth: { persistSession: false, autoRefreshToken: false },
+    });
 
     // 1. Fetch ad by id, public_ad_id, public_id, or ad_id using universal resolver
     const resolved = await findAdById(id);
@@ -33,9 +41,9 @@ export async function GET(
     let creatorProfile: any = null;
 
     if (creatorId) {
-      const { data: prof } = await supabaseAdmin
+      const { data: prof } = await supabasePublic
         .from('profiles')
-        .select('*')
+        .select('id, username, avatar_url, photo_url, created_at, updated_at')
         .eq('id', creatorId)
         .maybeSingle();
       if (prof) {
@@ -47,7 +55,7 @@ export async function GET(
     if (!creatorProfile && ad.user_display_name) {
       const { data: prof } = await supabaseAdmin
         .from('profiles')
-        .select('*')
+        .select('id, username, avatar_url, photo_url, created_at, updated_at')
         .ilike('username', ad.user_display_name)
         .maybeSingle();
       if (prof) {
