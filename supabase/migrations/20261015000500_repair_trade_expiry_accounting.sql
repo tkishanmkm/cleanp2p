@@ -40,8 +40,8 @@ BEGIN
       CONTINUE;
     END;
 
-    v_total_locked := coalesce(v_trade.crypto_amount, v_trade.amount, 0)
-                    + coalesce(v_trade.escrow_fee, v_trade.fee_crypto, 0);
+    v_total_locked := coalesce(nullif(v_trade.crypto_amount, 0), v_trade.amount, 0)
+                    + coalesce(nullif(v_trade.escrow_fee, 0), v_trade.fee_crypto, 0);
 
     IF v_total_locked <= 0 THEN
       CONTINUE;
@@ -87,8 +87,8 @@ BEGIN
       jsonb_build_object(
         'action', 'trade_expiry_refund',
         'trade_id', v_trade.id,
-        'crypto_amount', coalesce(v_trade.crypto_amount, v_trade.amount, 0),
-        'escrow_fee_refunded', coalesce(v_trade.escrow_fee, v_trade.fee_crypto, 0),
+        'crypto_amount', coalesce(nullif(v_trade.crypto_amount, 0), v_trade.amount, 0),
+        'escrow_fee_refunded', coalesce(nullif(v_trade.escrow_fee, 0), v_trade.fee_crypto, 0),
         'total_refunded', v_total_locked
       ),
       'completed'
