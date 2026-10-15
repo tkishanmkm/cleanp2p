@@ -301,30 +301,37 @@ BEGIN
     END IF;
 END $$;
 
--- USER BLOCKS
-DROP POLICY IF EXISTS "user_blocks_select_policy" ON public.user_blocks;
-DROP POLICY IF EXISTS "user_blocks_insert_policy" ON public.user_blocks;
-DROP POLICY IF EXISTS "user_blocks_delete_policy" ON public.user_blocks;
+-- USER BLOCKS: optional legacy table; skip policy DDL when it is absent.
+DO $$
+BEGIN
+    IF to_regclass('public.user_blocks') IS NOT NULL THEN
+        EXECUTE $policy$
+            DROP POLICY IF EXISTS "user_blocks_select_policy" ON public.user_blocks;
+            DROP POLICY IF EXISTS "user_blocks_insert_policy" ON public.user_blocks;
+            DROP POLICY IF EXISTS "user_blocks_delete_policy" ON public.user_blocks;
 
-CREATE POLICY "user_blocks_select_policy" ON public.user_blocks
-    FOR SELECT USING (
-        auth.uid()::uuid IS NOT NULL AND (
-            blocker_id::uuid = auth.uid()::uuid OR
-            blocked_id::uuid = auth.uid()::uuid OR
-            public.is_admin()
-        )
-    );
+            CREATE POLICY "user_blocks_select_policy" ON public.user_blocks
+                FOR SELECT USING (
+                    auth.uid()::uuid IS NOT NULL AND (
+                        blocker_id::uuid = auth.uid()::uuid OR
+                        blocked_id::uuid = auth.uid()::uuid OR
+                        public.is_admin()
+                    )
+                );
 
-CREATE POLICY "user_blocks_insert_policy" ON public.user_blocks
-    FOR INSERT WITH CHECK (
-        auth.uid()::uuid IS NOT NULL AND (
-            blocker_id::uuid = auth.uid()::uuid OR public.is_admin()
-        )
-    );
+            CREATE POLICY "user_blocks_insert_policy" ON public.user_blocks
+                FOR INSERT WITH CHECK (
+                    auth.uid()::uuid IS NOT NULL AND (
+                        blocker_id::uuid = auth.uid()::uuid OR public.is_admin()
+                    )
+                );
 
-CREATE POLICY "user_blocks_delete_policy" ON public.user_blocks
-    FOR DELETE USING (
-        auth.uid()::uuid IS NOT NULL AND (
-            blocker_id::uuid = auth.uid()::uuid OR public.is_admin()
-        )
-    );
+            CREATE POLICY "user_blocks_delete_policy" ON public.user_blocks
+                FOR DELETE USING (
+                    auth.uid()::uuid IS NOT NULL AND (
+                        blocker_id::uuid = auth.uid()::uuid OR public.is_admin()
+                    )
+                );
+        $policy$;
+    END IF;
+END $$;
