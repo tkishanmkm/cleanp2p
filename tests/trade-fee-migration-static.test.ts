@@ -390,5 +390,17 @@ assert.match(
   'resolve_trade_dispute replacement must preserve existing trailing argument defaults'
 );
 
+
+const platformControlsMigrationPath = join(
+  process.cwd(),
+  'supabase/migrations/20261004000000_secure_global_platform_controls.sql'
+);
+const platformControlsSql = readFileSync(platformControlsMigrationPath, 'utf8');
+assert.match(
+  platformControlsSql,
+  /ALTER TABLE public\.profiles\s+ADD COLUMN IF NOT EXISTS role TEXT DEFAULT 'user',\s+ADD COLUMN IF NOT EXISTS is_admin BOOLEAN DEFAULT FALSE,\s+ADD COLUMN IF NOT EXISTS is_admin_account BOOLEAN DEFAULT FALSE;/,
+  'platform control policies must not reference admin profile columns before they exist on a clean replay'
+);
+
 console.log('PASS: escrow fee migration static safety checks');
 console.log('NOTE: run integration tests against a fully initialized disposable Supabase project before deployment.');
