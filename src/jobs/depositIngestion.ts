@@ -803,32 +803,62 @@ async function scanBtcDeposits(
 
   const btcApiBase = getBtcMempoolApi();
 
+  // Confirmation counts must be derived from the current chain tip. If this
+  // request fails, do not ingest BTC transactions using guessed confirmations.
+  let tipHeight: number;
+  try {
+    const tipRes = await fetch(`${btcApiBase}/blocks/tip/height`);
+    if (!tipRes.ok) {
+      errors.push(`Unable to retrieve Bitcoin tip height (HTTP ${tipRes.status}); BTC ingestion skipped.`);
+      return { detected, credited, errors };
+    }
+    const tipText = (await tipRes.text()).trim();
+    tipHeight = Number(tipText);
+    if (!Number.isSafeInteger(tipHeight) || tipHeight < 0) {
+      errors.push('Bitcoin tip-height response was invalid; BTC ingestion skipped.');
+      return { detected, credited, errors };
+    }
+  } catch (err: any) {
+    errors.push(`Unable to retrieve Bitcoin tip height; BTC ingestion skipped: ${err?.message || 'request failed'}`);
+    return { detected, credited, errors };
+  }
+
   for (const btcAddr of Array.from(monitoredBtcAddresses)) {
     try {
       const res = await fetch(`${btcApiBase}/address/${btcAddr}/txs`);
-      if (!res.ok) continue;
+      if (!res.ok) {
+        errors.push(`Bitcoin address scan failed for ${btcAddr} (HTTP ${res.status}).`);
+        continue;
+      }
 
       const txs = await res.json();
-      if (!Array.isArray(txs)) continue;
+      if (!Array.isArray(txs)) {
+        errors.push(`Bitcoin address scan returned invalid data for ${btcAddr}.`);
+        continue;
+      }
 
       for (const tx of txs) {
-        let outputAmountSat = 0;
-        let voutIndex = 0;
+        if (typeof tx?.txid !== 'string' || !Array.isArray(tx?.vout)) continue;
 
-        for (let i = 0; i < (tx.vout || []).length; i++) {
-          const out = tx.vout[i];
-          if (out.scriptpubkey_address === btcAddr) {
-            outputAmountSat += out.value || 0;
-            voutIndex = i;
-          }
-        }
+        const isConfirmed = tx.status?.confirmed === true;
+        const blockHeight = tx.status?.block_height;
+        const confirmations =
+          isConfirmed && Number.isSafeInteger(blockHeight) && blockHeight > 0 && blockHeight <= tipHeight
+            ? tipHeight - blockHeight + 1
+            : 0;
 
-        if (outputAmountSat > 0) {
+        // A tx may have more than one output to the same address. Process each
+        // vout independently so amount and output_index always identify the
+        // same on-chain output (never sum outputs under one vout index).
+        for (let outputIndex = 0; outputIndex < tx.vout.length; outputIndex++) {
+          const out = tx.vout[outputIndex];
+          if (out?.scriptpubkey_address !== btcAddr) continue;
+
+          const satoshis = Number(out.value);
+          if (!Number.isSafeInteger(satoshis) || satoshis <= 0) continue;
+
           detected++;
-          const btcAmount = outputAmountSat / 100_000_000;
-          const isConfirmed = tx.status?.confirmed === true;
-          const blockHeight = tx.status?.block_height;
-          let confirmations = isConfirmed ? 2 : 0;
+          const btcAmount = satoshis / 100_000_000;
 
           const { data, error } = await supabaseAdmin.rpc('process_deposit_atomic', {
             p_destination_address: btcAddr,
@@ -836,8 +866,8 @@ async function scanBtcDeposits(
             p_network_code: 'BTC',
             p_amount: btcAmount,
             p_tx_hash: tx.txid,
-            p_output_index: voutIndex,
-            p_block_number: blockHeight || null,
+            p_output_index: outputIndex,
+            p_block_number: confirmations > 0 ? blockHeight : null,
             p_from_address: null,
             p_token_contract: null,
             p_confirmations: confirmations,
@@ -845,17 +875,15 @@ async function scanBtcDeposits(
           });
 
           if (error) {
-            errors.push(`RPC error for BTC deposit ${tx.txid}: ${error.message}`);
+            errors.push(`RPC error for BTC deposit ${tx.txid} output ${outputIndex}: ${error.message}`);
           } else {
-            const res = typeof data === 'string' ? JSON.parse(data) : data;
-            if (res?.status === 'credited' || (res?.success && confirmations >= 2)) {
-              credited++;
-            }
+            const result = typeof data === 'string' ? JSON.parse(data) : data;
+            if (result?.status === 'credited') credited++;
           }
         }
       }
     } catch (err: any) {
-      errors.push(`Failed scanning BTC for ${btcAddr}: ${err?.message}`);
+      errors.push(`Failed scanning BTC for ${btcAddr}: ${err?.message || 'request failed'}`);
     }
   }
 
