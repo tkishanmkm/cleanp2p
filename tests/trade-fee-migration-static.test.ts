@@ -30,6 +30,23 @@ assert.match(releaseFn, /IF COALESCE\(v_trade\.escrow_fee, 0\) > 0 THEN[\s\S]*?p
   'positive fee must create a platform fee ledger entry');
 assert.match(releaseFn, /'completed'[\s\S]*?Already released \(idempotent success\)/,
   'completed-trade replay path must remain');
+
+const replayStart = releaseFn.indexOf('-- 6. Terminal State & Replay Safety');
+const replayEnd = releaseFn.indexOf('-- 7. Atomic Financial Settlement Mutations', replayStart);
+assert.ok(replayStart >= 0 && replayEnd > replayStart,
+  'replay and settlement sections must remain separately identifiable');
+const replaySection = releaseFn.slice(replayStart, replayEnd);
+assert.ok(replaySection.indexOf('record_platform_ledger_entry(') < replaySection.indexOf('RETURN jsonb_build_object('),
+  'replay must ensure the platform fee entry before returning success');
+
+const settlementFeeCall = releaseFn.indexOf('record_platform_ledger_entry(', replayEnd);
+const tradeCompletionUpdate = releaseFn.indexOf('UPDATE public.trades', settlementFeeCall);
+assert.ok(settlementFeeCall > replayEnd && tradeCompletionUpdate > settlementFeeCall,
+  'settlement must record the platform fee before marking the trade completed');
+assert.match(releaseFn, /p_asset_code := v_trade\.crypto[\s\S]*?p_amount := v_trade\.escrow_fee[\s\S]*?p_direction := 'CREDIT'/,
+  'fee entry must use the trade asset, recorded fee amount, and CREDIT direction');
+assert.match(releaseFn, /'trade_id', p_trade_id[\s\S]*?'escrow_fee', v_trade\.escrow_fee[\s\S]*?'seller_id', v_trade\.seller_id/,
+  'fee metadata must identify the trade, fee, and seller');
 assert.match(sql, /REVOKE ALL ON FUNCTION public\.release_trade_escrow\(UUID, UUID\) FROM PUBLIC, anon;/,
   'public and anon execute permissions must be revoked');
 assert.match(sql, /GRANT EXECUTE ON FUNCTION public\.release_trade_escrow\(UUID, UUID\) TO authenticated, service_role, postgres;/,
