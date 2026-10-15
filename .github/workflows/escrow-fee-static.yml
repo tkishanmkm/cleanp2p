@@ -1,6 +1,7 @@
 name: Escrow fee static regression
 
 on:
+  workflow_dispatch:
   push:
     branches:
       - audit/phase-02-platform-ledger-replay-metadata
