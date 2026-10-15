@@ -51,17 +51,8 @@ export async function GET(
       }
     }
 
-    // Fallback: If not found by id, try matching by username/display name
-    if (!creatorProfile && ad.user_display_name) {
-      const { data: prof } = await supabaseAdmin
-        .from('profiles')
-        .select('id, username, avatar_url, photo_url, created_at, updated_at')
-        .ilike('username', ad.user_display_name)
-        .maybeSingle();
-      if (prof) {
-        creatorProfile = prof;
-      }
-    }
+    // Do not fall back to a username-based profile lookup. Public profile details are
+    // optional; an unreadable owner profile must not trigger a privileged-client lookup.
 
     // Fetch creator's wallet balance for the ad coin
     let creatorBalance: number | null = null;
