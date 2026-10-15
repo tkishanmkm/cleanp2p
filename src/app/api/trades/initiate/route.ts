@@ -119,6 +119,10 @@ export async function POST(req: Request) {
           : NaN);
       const requestedPayment = typeof customPaymentMethod === 'string' ? customPaymentMethod.trim().toLowerCase() : '';
       const storedPayment = String(existingTrade.payment_method ?? '').trim().toLowerCase();
+      const requestedCurrencyRaw = body.fiatCurrency ?? body.fiat_currency;
+      const requestedCurrency = typeof requestedCurrencyRaw === 'string' ? requestedCurrencyRaw.trim().toUpperCase() : '';
+      const storedCurrency = String(existingTrade.fiat_currency ?? '').trim().toUpperCase();
+      const retryCurrencyValid = !requestedCurrency || requestedCurrency === storedCurrency;
       const retryAmountsValid =
         Number.isFinite(requestedCrypto) &&
         Number.isFinite(storedPrice) && storedPrice > 0 &&
@@ -126,7 +130,7 @@ export async function POST(req: Request) {
         Number((requestedCrypto * storedPrice).toFixed(2)) === storedFiat &&
         (!Number.isFinite(retryFiatRaw) || retryFiatRaw <= 0 || Number(retryFiatRaw.toFixed(2)) === storedFiat);
 
-      if (!callerIsParticipant || !adMatches || !retryAmountsValid ||
+      if (!callerIsParticipant || !adMatches || !retryAmountsValid || !retryCurrencyValid ||
           (requestedPayment !== '' && requestedPayment !== storedPayment)) {
         return NextResponse.json(
           { success: false, code: 'IDEMPOTENCY_KEY_REUSE_CONFLICT', error: 'This idempotency key was already used for a different or unauthorized trade request.' },
