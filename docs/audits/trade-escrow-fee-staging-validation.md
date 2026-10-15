@@ -49,3 +49,16 @@ Create isolated buyer and seller users with UUID-formatted IDs, plus one support
 ## Exit criteria
 
 Do not call this production-ready until every required case passes on staging, the migration is reviewed, the repository CI is green, and a rollback/recovery plan exists. Do not deploy this migration to the live project as part of this checklist.
+
+## Follow-up read-only live-schema inspection (2026-10-15)
+
+Read-only catalog queries against the configured Supabase project confirmed:
+
+- `public.record_platform_ledger_entry(text,text,numeric,text,uuid,text,text,text,text,text,jsonb)` exists and is `SECURITY DEFINER` with `search_path=public, pg_temp`.
+- The helper validates a non-empty idempotency key, non-empty entry type/asset, positive amount, and direction restricted to `CREDIT` or `DEBIT`.
+- The helper inserts with `ON CONFLICT (idempotency_key) DO NOTHING`, then compares core financial fields on an existing entry and raises on mismatch.
+- A unique index exists on `public.platform_ledger_entries(idempotency_key)`.
+- Catalog ACL output showed the helper granted to `postgres`, `service_role`, and `supabase_auth_admin`; `release_trade_escrow(uuid,uuid)` was granted to `postgres` and `service_role`. Both are security-definer functions with the fixed search path noted above.
+
+These observations reduce uncertainty around fee-entry idempotency, but they do **not** validate the proposed migration itself. The helper does not compare `metadata` during idempotency replay, so metadata equality should not be treated as an invariant. No rows were inserted or updated, no function was changed in Supabase, and the migration has not been executed. The staging preflight and the full settlement/rollback matrix remain outstanding.
+
