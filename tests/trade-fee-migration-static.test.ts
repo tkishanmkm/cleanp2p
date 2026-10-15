@@ -25,6 +25,22 @@ assert.doesNotMatch(
   'trade-chat policies must not directly reference a possibly missing legacy column'
 );
 
+const legacyAdsMigrationPath = join(
+  process.cwd(),
+  'supabase/migrations/20260906000000_name_privacy_and_trader_requirements.sql'
+);
+const legacyAdsMigrationSql = readFileSync(legacyAdsMigrationPath, 'utf8');
+assert.match(
+  legacyAdsMigrationSql,
+  /IF to_regclass\('public\.p2p_ads'\) IS NOT NULL THEN[\s\S]*?ALTER TABLE public\.p2p_ads/,
+  'legacy p2p_ads changes must be guarded because clean installs use canonical public.ads'
+);
+assert.match(
+  legacyAdsMigrationSql,
+  /COMMENT ON COLUMN public\.profiles\.name_visibility IS/,
+  'profile name privacy documentation must remain independent of the optional legacy ads table'
+);
+
 const ledgerHelperPath = join(
   process.cwd(),
   'supabase/migrations/20260928000000_platform_ledger_entries.sql'
