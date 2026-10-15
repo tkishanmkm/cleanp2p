@@ -336,7 +336,9 @@ export async function POST(req: Request) {
     cleanPayload.user_id = user.id;
 
     // Determine target table
-    const targetTable = cleanPayload.table || (cleanPayload.title && cleanPayload.description ? 'ads' : 'p2p_ads');
+    // This endpoint creates canonical marketplace ads only. Never allow a client
+    // field to select an arbitrary Supabase table or fall back to the legacy table.
+    const targetTable = 'ads';
     delete cleanPayload.table;
 
     // 8. Execute Authorized Database Insert without service-role escape hatch
@@ -346,22 +348,7 @@ export async function POST(req: Request) {
       .select()
       .single();
 
-    // Fallback between 'p2p_ads' and 'ads' if table does not exist
-    if (dbError && (dbError.code === '42P01' || dbError.message?.includes('does not exist'))) {
-      const altTable = targetTable === 'ads' ? 'p2p_ads' : 'ads';
-      const altResult = await supabase
-        .from(altTable)
-        .insert([cleanPayload])
-        .select()
-        .single();
-
-      if (!altResult.error) {
-        data = altResult.data;
-        dbError = null;
-      } else {
-        dbError = altResult.error;
-      }
-    }
+    // Canonical ads-table failures fail closed; no legacy-table fallback.
 
     // If RLS or authorization denies operation, fail-closed without service role bypass
     if (dbError) {
