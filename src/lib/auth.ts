@@ -17,6 +17,7 @@ export interface UserProfile {
   /** Verification and P2P fields returned by the profiles row when present. */
   is_verified?: boolean | null;
   id_verified?: boolean | null;
+  is_id_verified?: boolean | null;
   kyc_status?: string | null;
   verification_tier?: number | string | null;
   completed_trades?: number | null;
