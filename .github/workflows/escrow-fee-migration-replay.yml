@@ -1,0 +1,106 @@
+name: Escrow fee migration replay
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - audit/phase-02-platform-ledger-replay-metadata
+    paths:
+      - "supabase/migrations/**"
+      - ".github/workflows/escrow-fee-migration-replay.yml"
+  pull_request:
+    paths:
+      - "supabase/migrations/**"
+      - ".github/workflows/escrow-fee-migration-replay.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  migration-replay:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Install Supabase CLI
+        uses: supabase/setup-cli@v1
+        with:
+          version: latest
+
+      - name: Generate local-only Supabase config
+        run: supabase init --force
+
+      - name: Start disposable local Supabase stack
+        run: supabase start
+
+      - name: Apply the complete migration history
+        run: supabase db reset --local
+
+      - name: Verify escrow fee function and ledger schema
+        env:
+          PGPASSWORD: postgres
+        shell: bash
+        run: |
+          set -euo pipefail
+          status="$(supabase status -o env)"
+          db_url="$(printf '%s\n' "$status" | sed -n 's/^DB_URL="\(.*\)"$/\1/p')"
+          if [ -z "$db_url" ]; then
+            echo "Could not read local DB_URL from Supabase CLI status."
+            exit 1
+          fi
+          psql "$db_url" -v ON_ERROR_STOP=1 <<'SQL'
+          DO $$
+          DECLARE
+            v_release_definition TEXT;
+            v_helper_definition TEXT;
+          BEGIN
+            SELECT pg_get_functiondef(p.oid)
+              INTO v_release_definition
+            FROM pg_proc p
+            JOIN pg_namespace n ON n.oid = p.pronamespace
+            WHERE n.nspname = 'public'
+              AND p.proname = 'release_trade_escrow';
+
+            IF v_release_definition IS NULL THEN
+              RAISE EXCEPTION 'release_trade_escrow function missing after migration replay';
+            END IF;
+
+            IF position('record_platform_ledger_entry' IN v_release_definition) = 0 THEN
+              RAISE EXCEPTION 'release_trade_escrow does not record platform ledger entries';
+            END IF;
+
+            IF position('public.is_admin()' IN v_release_definition) = 0 THEN
+              RAISE EXCEPTION 'release_trade_escrow admin authorization helper is missing';
+            END IF;
+
+            SELECT pg_get_functiondef(p.oid)
+              INTO v_helper_definition
+            FROM pg_proc p
+            JOIN pg_namespace n ON n.oid = p.pronamespace
+            WHERE n.nspname = 'public'
+              AND p.proname = 'record_platform_ledger_entry';
+
+            IF v_helper_definition IS NULL THEN
+              RAISE EXCEPTION 'record_platform_ledger_entry helper missing after migration replay';
+            END IF;
+
+            IF NOT EXISTS (
+              SELECT 1
+              FROM pg_constraint c
+              JOIN pg_class t ON t.oid = c.conrelid
+              JOIN pg_namespace n ON n.oid = t.relnamespace
+              WHERE n.nspname = 'public'
+                AND t.relname = 'platform_ledger_entries'
+                AND c.contype = 'u'
+                AND pg_get_constraintdef(c.oid) ILIKE '%idempotency_key%'
+            ) THEN
+              RAISE EXCEPTION 'platform ledger idempotency uniqueness constraint missing';
+            END IF;
+          END $$;
+          SQL
+
+      - name: Stop disposable local Supabase stack
+        if: always()
+        run: supabase stop --no-backup
