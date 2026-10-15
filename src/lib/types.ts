@@ -22,6 +22,10 @@ export interface UserProfile {
   username: string;
   country?: string;
   feedbackScore: number;
+  positiveFeedback?: number;
+  negativeFeedback?: number;
+  tradeVolume?: number;
+  photoURL?: string;
   avgReleaseTime: number; // in minutes
   completedTrades: number;
   lastActive: string | Date;
