@@ -61,8 +61,6 @@ export async function POST(req: Request) {
     const rawFiat = body.fiatAmount ?? body.fiat_amount;
     const rawCrypto = body.cryptoAmount ?? body.crypto_amount;
     const customPaymentMethod = body.paymentMethod || body.payment_method;
-    const customPrice = body.price || body.rate;
-    const customFiatCurrency = body.fiatCurrency || body.fiat_currency;
     const tradeRef = body.tradeRef || body.trade_ref || generateTradeId();
     const idempotencyKey =
       (body.idempotencyKey ||
@@ -119,7 +117,8 @@ export async function POST(req: Request) {
     }
 
     // 3. Resolve numerical amounts with exact precision
-    const rawPrice = customPrice ?? ad.fixed_rate ?? ad.price;
+    // Use the ad's stored price only; client-supplied price/rate is untrusted.
+    const rawPrice = ad.price ?? ad.unit_price ?? ad.fixed_rate;
     const unitPrice = Number(rawPrice);
     if (!rawPrice || isNaN(unitPrice) || unitPrice <= 0) {
       return NextResponse.json(
@@ -188,7 +187,8 @@ export async function POST(req: Request) {
       resolvedPaymentMethod = trimmedCustom || 'Bank Transfer';
     }
 
-    const resolvedFiatCurrency = customFiatCurrency || ad.fiat_currency || ad.fiat || 'USD';
+    // Use the ad's stored fiat currency only; client-supplied currency is untrusted.
+    const resolvedFiatCurrency = ad.fiat_symbol || ad.fiat_currency || ad.fiat || 'USD';
     const adIdentifier = String(ad.id || ad.public_ad_id || adId);
 
     // 5. Call Canonical Atomic Database RPC
