@@ -33,6 +33,6 @@ export async function GET(request: Request) {
     return NextResponse.json(result);
   } catch (err: any) {
     console.error('[Market Prices Cron Route] Execution error:', err);
-    return NextResponse.json({ success: false, error: err.message }, { status: 500 });
+    return NextResponse.json({ success: false, error: 'Market price update failed' }, { status: 500 });
   }
 }
