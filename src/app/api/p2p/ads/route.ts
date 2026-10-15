@@ -146,9 +146,26 @@ export async function POST(request: NextRequest) {
     const marginVal = Number(body.margin ?? body.rate_percent ?? body.margin_percentage ?? body.price_margin ?? 0);
     const pricingType = body.pricing_type || (body.rate_type === 'fixed' || body.is_fixed ? 'FIXED' : 'FLOAT');
     const paymentWindow = Math.max(30, parseInt(String(body.payment_window || body.payment_window_minutes || 30), 10) || 30);
-    const paymentMethods = Array.isArray(body.payment_methods) && body.payment_methods.length > 0
+    const rawPaymentMethods = Array.isArray(body.payment_methods) && body.payment_methods.length > 0
       ? body.payment_methods
       : (Array.isArray(body.paymentMethods) ? body.paymentMethods : ['Bank Transfer']);
+    const paymentMethods = rawPaymentMethods
+      .filter((method: unknown): method is string => typeof method === 'string')
+      .map((method: string) => method.trim())
+      .filter((method: string) => method.length > 0 && method.length <= 80);
+
+    if (!Number.isFinite(marginVal) || !['FIXED', 'FLOAT'].includes(String(pricingType).toUpperCase())) {
+      return NextResponse.json(
+        { error: 'Pricing type must be FIXED or FLOAT, and margin must be a valid finite number.', code: 'INVALID_PRICING' },
+        { status: 400 }
+      );
+    }
+    if (paymentMethods.length === 0 || paymentMethods.length > 20) {
+      return NextResponse.json(
+        { error: 'Provide between 1 and 20 valid payment methods.', code: 'INVALID_PAYMENT_METHODS' },
+        { status: 400 }
+      );
+    }
 
     // Authoritative Server-Side ±50% Reference Market Price Validation (Applies to both BUY and SELL ads)
     const isFixedPricing = pricingType === 'FIXED' || body.rate_type === 'fixed' || Boolean(body.is_fixed);
