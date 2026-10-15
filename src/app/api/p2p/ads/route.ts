@@ -69,8 +69,9 @@ export async function POST(request: NextRequest) {
     }
 
     // Support Bearer token header if provided by frontend
-    const authHeader = request.headers.get('Authorization') || request.headers.get('authorization');
-    const bearerToken = authHeader?.startsWith('Bearer ') ? authHeader.substring(7).trim() : null;
+    const authHeader = request.headers.get('authorization');
+    const bearerMatch = authHeader?.match(/^Bearer\s+(.+)$/i);
+    const bearerToken = bearerMatch?.[1]?.trim() || null;
 
     // 1. Authenticate user session
     let user: any = null;
@@ -82,7 +83,7 @@ export async function POST(request: NextRequest) {
       authError = tokenAuth.error;
     }
 
-    if (!user) {
+    if (!user && !authHeader) {
       const cookieAuth = await supabase.auth.getUser();
       user = cookieAuth.data?.user;
       authError = cookieAuth.error;
