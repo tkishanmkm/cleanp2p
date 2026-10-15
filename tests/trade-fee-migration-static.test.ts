@@ -409,5 +409,22 @@ assert.match(
   'platform controls migration must tolerate schemas where the optional user_blocks table is absent'
 );
 
+
+const profileHardeningMigrationPath = join(
+  process.cwd(),
+  'supabase/migrations/20261004080000_admin_security_foundation_hardening.sql'
+);
+const profileHardeningSql = readFileSync(profileHardeningMigrationPath, 'utf8');
+assert.match(
+  profileHardeningSql,
+  /information_schema\.columns[\s\S]*column_name = ANY \(ARRAY\[[\s\S]*'trade_volume'[\s\S]*\]\)[\s\S]*EXECUTE format\([\s\S]*GRANT SELECT \(%s\) ON public\.profiles TO anon, authenticated/,
+  'profile column grants must filter the explicit allowlist against columns present in legacy schemas'
+);
+assert.doesNotMatch(
+  profileHardeningSql,
+  /GRANT SELECT\s*\([\s\S]*?\)\s*ON public\.profiles TO anon, authenticated;/,
+  'profile hardening must not statically grant columns that may be absent'
+);
+
 console.log('PASS: escrow fee migration static safety checks');
 console.log('NOTE: run integration tests against a fully initialized disposable Supabase project before deployment.');
