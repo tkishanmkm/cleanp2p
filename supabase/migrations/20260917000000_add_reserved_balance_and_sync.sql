@@ -22,13 +22,31 @@ BEGIN
     END IF;
 END $guard$;
 
-ALTER TABLE IF EXISTS public.balances 
-    ADD COLUMN IF NOT EXISTS reserved_balance NUMERIC(28, 8) DEFAULT 0,
-    ADD COLUMN IF NOT EXISTS locked_balance NUMERIC(28, 8) DEFAULT 0;
+-- Legacy balance relations are optional and may be absent or views.
+DO $guard$
+BEGIN
+    IF EXISTS (
+        SELECT 1 FROM pg_class c
+        JOIN pg_namespace n ON n.oid = c.relnamespace
+        WHERE n.nspname = 'public' AND c.relname = 'balances'
+          AND c.relkind IN ('r', 'p')
+    ) THEN
+        ALTER TABLE public.balances
+            ADD COLUMN IF NOT EXISTS reserved_balance NUMERIC(28, 8) DEFAULT 0,
+            ADD COLUMN IF NOT EXISTS locked_balance NUMERIC(28, 8) DEFAULT 0;
+    END IF;
 
-ALTER TABLE IF EXISTS public.user_balances 
-    ADD COLUMN IF NOT EXISTS reserved_balance NUMERIC(28, 8) DEFAULT 0,
-    ADD COLUMN IF NOT EXISTS locked_balance NUMERIC(28, 8) DEFAULT 0;
+    IF EXISTS (
+        SELECT 1 FROM pg_class c
+        JOIN pg_namespace n ON n.oid = c.relnamespace
+        WHERE n.nspname = 'public' AND c.relname = 'user_balances'
+          AND c.relkind IN ('r', 'p')
+    ) THEN
+        ALTER TABLE public.user_balances
+            ADD COLUMN IF NOT EXISTS reserved_balance NUMERIC(28, 8) DEFAULT 0,
+            ADD COLUMN IF NOT EXISTS locked_balance NUMERIC(28, 8) DEFAULT 0;
+    END IF;
+END $guard$;
 
 ALTER TABLE IF EXISTS public.wallet_assets 
     ADD COLUMN IF NOT EXISTS reserved_balance NUMERIC(28, 8) DEFAULT 0,
@@ -53,9 +71,19 @@ BEGIN
     END IF;
 END $guard$;
 
-UPDATE public.balances 
-SET reserved_balance = COALESCE(locked_balance, 0) 
-WHERE reserved_balance IS NULL OR reserved_balance = 0;
+DO $guard$
+BEGIN
+    IF EXISTS (
+        SELECT 1 FROM pg_class c
+        JOIN pg_namespace n ON n.oid = c.relnamespace
+        WHERE n.nspname = 'public' AND c.relname = 'balances'
+          AND c.relkind IN ('r', 'p')
+    ) THEN
+        UPDATE public.balances
+        SET reserved_balance = COALESCE(locked_balance, 0)
+        WHERE reserved_balance IS NULL OR reserved_balance = 0;
+    END IF;
+END $guard$;
 
 -- 3. Automatic synchronization trigger so updates to either column sync both
 CREATE OR REPLACE FUNCTION public.sync_wallet_locked_reserved_balances()
@@ -93,7 +121,17 @@ BEGIN
     END IF;
 END $guard$;
 
-DROP TRIGGER IF EXISTS trg_sync_balances ON public.balances;
-CREATE TRIGGER trg_sync_balances
-BEFORE INSERT OR UPDATE ON public.balances
-FOR EACH ROW EXECUTE FUNCTION public.sync_wallet_locked_reserved_balances();
+DO $guard$
+BEGIN
+    IF EXISTS (
+        SELECT 1 FROM pg_class c
+        JOIN pg_namespace n ON n.oid = c.relnamespace
+        WHERE n.nspname = 'public' AND c.relname = 'balances'
+          AND c.relkind IN ('r', 'p')
+    ) THEN
+        EXECUTE 'DROP TRIGGER IF EXISTS trg_sync_balances ON public.balances';
+        EXECUTE 'CREATE TRIGGER trg_sync_balances
+                 BEFORE INSERT OR UPDATE ON public.balances
+                 FOR EACH ROW EXECUTE FUNCTION public.sync_wallet_locked_reserved_balances()';
+    END IF;
+END $guard$;
