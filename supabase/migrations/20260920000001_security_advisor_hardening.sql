@@ -17,10 +17,10 @@ CREATE OR REPLACE VIEW public.admin_financial_overview
 WITH (security_invoker = true)
 AS
 SELECT 
-    COALESCE((SELECT SUM(COALESCE(balance, 0) + COALESCE(locked_balance, 0)) FROM public.user_wallets WHERE UPPER(asset_symbol::text) = 'USDT'), 0)::NUMERIC AS total_user_usdt_balance,
-    COALESCE((SELECT SUM(COALESCE(balance, 0) + COALESCE(locked_balance, 0)) FROM public.user_wallets WHERE UPPER(asset_symbol::text) = 'BTC'), 0)::NUMERIC AS total_user_btc_balance,
-    COALESCE((SELECT SUM(COALESCE(balance, 0) + COALESCE(locked_balance, 0)) FROM public.user_wallets WHERE UPPER(asset_symbol::text) = 'ETH'), 0)::NUMERIC AS total_user_eth_balance,
-    COALESCE((SELECT SUM(COALESCE(balance, 0) + COALESCE(locked_balance, 0)) FROM public.user_wallets WHERE UPPER(asset_symbol::text) = 'LTC'), 0)::NUMERIC AS total_user_ltc_balance,
+    COALESCE((SELECT SUM(COALESCE(main_balance, 0) + COALESCE(locked_balance, 0)) FROM public.user_wallets WHERE UPPER(asset_symbol::text) = 'USDT'), 0)::NUMERIC AS total_user_usdt_balance,
+    COALESCE((SELECT SUM(COALESCE(main_balance, 0) + COALESCE(locked_balance, 0)) FROM public.user_wallets WHERE UPPER(asset_symbol::text) = 'BTC'), 0)::NUMERIC AS total_user_btc_balance,
+    COALESCE((SELECT SUM(COALESCE(main_balance, 0) + COALESCE(locked_balance, 0)) FROM public.user_wallets WHERE UPPER(asset_symbol::text) = 'ETH'), 0)::NUMERIC AS total_user_eth_balance,
+    COALESCE((SELECT SUM(COALESCE(main_balance, 0) + COALESCE(locked_balance, 0)) FROM public.user_wallets WHERE UPPER(asset_symbol::text) = 'LTC'), 0)::NUMERIC AS total_user_ltc_balance,
     COALESCE((SELECT SUM(COALESCE(amount_swept, 0)) FROM public.sweep_logs WHERE UPPER(status::text) = 'SUCCESS'), 0)::NUMERIC AS total_funds_swept,
     COALESCE((SELECT SUM(COALESCE(fee, 0)) FROM public.withdrawals WHERE UPPER(status::text) IN ('COMPLETED', 'CONFIRMED')), 0)::NUMERIC AS total_withdrawal_fees_collected,
     COALESCE((SELECT SUM(COALESCE(fee_amount, 0)) FROM public.escrow_ledger), 0)::NUMERIC AS total_p2p_fees_collected,
