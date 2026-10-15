@@ -97,7 +97,14 @@ export async function POST(req: Request) {
 
     let formData: unknown;
     try {
-      formData = await req.json();
+      const rawBody = await req.text();
+      if (new TextEncoder().encode(rawBody).byteLength > 32 * 1024) {
+        return NextResponse.json(
+          { error: 'Advertisement request is too large.', code: 'REQUEST_BODY_TOO_LARGE' },
+          { status: 413 }
+        );
+      }
+      formData = JSON.parse(rawBody);
     } catch {
       return NextResponse.json(
         { error: 'Request body must contain valid JSON.', code: 'INVALID_JSON' },
