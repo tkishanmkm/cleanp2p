@@ -139,6 +139,22 @@ assert.match(
   'trade attachment policies must be guarded when the optional legacy table is absent'
 );
 
+const depositSnapshotMigrationPath = join(
+  process.cwd(),
+  'supabase/migrations/20261001010000_part6k14_controlled_blocker_remediation.sql'
+);
+const depositSnapshotMigrationSql = readFileSync(depositSnapshotMigrationPath, 'utf8');
+assert.match(
+  depositSnapshotMigrationSql,
+  /to_jsonb\(uda\)->>'chain'[\s\S]*?to_jsonb\(uda\)->>'asset_code'[\s\S]*?to_jsonb\(uda\)->>'network_code'[\s\S]*?FROM public\.user_deposit_addresses AS uda/,
+  'deposit-address snapshot must read optional legacy columns through JSON rather than direct column references'
+);
+assert.doesNotMatch(
+  depositSnapshotMigrationSql,
+  /SELECT id, user_id, network::text, address, asset_symbol, created_at, updated_at, chain, asset_code, network_code\s+FROM public\.user_deposit_addresses/,
+  'deposit-address snapshot must not assume optional chain or asset-code columns exist'
+);
+
 const tradeFlowHardeningPath = join(
   process.cwd(),
   'supabase/migrations/20260928080000_p2p_trade_flow_and_rls_hardening.sql'
