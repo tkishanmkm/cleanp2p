@@ -194,7 +194,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Authoritative Server-Side ±50% Reference Market Price Validation (Applies to both BUY and SELL ads)
-    const isFixedPricing = pricingType === 'FIXED' || body.rate_type === 'fixed' || Boolean(body.is_fixed);
+    const isFixedPricing = pricingType === 'FIXED'; // Normalized pricing_type is authoritative; ignore conflicting legacy flags.
 
     if (isFixedPricing) {
       if (priceVal === null || isNaN(priceVal) || priceVal <= 0) {
