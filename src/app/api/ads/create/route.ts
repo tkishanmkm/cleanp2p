@@ -186,7 +186,14 @@ export async function POST(req: Request) {
       margin: strippedFormData.margin !== undefined && strippedFormData.margin !== null && strippedFormData.margin !== '' ? Number(strippedFormData.margin) : (strippedFormData.price_margin ? Number(strippedFormData.price_margin) : null),
       min_amount: strippedFormData.min_amount !== undefined && strippedFormData.min_amount !== null && strippedFormData.min_amount !== '' ? Number(strippedFormData.min_amount) : (strippedFormData.min_order ? Number(strippedFormData.min_order) : null),
       max_amount: strippedFormData.max_amount !== undefined && strippedFormData.max_amount !== null && strippedFormData.max_amount !== '' ? Number(strippedFormData.max_amount) : (strippedFormData.max_order ? Number(strippedFormData.max_order) : null),
-      is_fixed: Boolean(strippedFormData.is_fixed ?? (typeof strippedFormData.fixed_rate === 'boolean' ? strippedFormData.fixed_rate : false)),
+      is_fixed: (() => {
+        const fixedValue = strippedFormData.is_fixed ?? (typeof strippedFormData.fixed_rate === 'boolean' ? strippedFormData.fixed_rate : false);
+        if (typeof fixedValue === 'boolean') return fixedValue;
+        if (typeof fixedValue === 'string' && ['true', 'false'].includes(fixedValue.trim().toLowerCase())) {
+          return fixedValue.trim().toLowerCase() === 'true';
+        }
+        return false;
+      })(),
     };
 
     if (typeof cleanPayload.fixed_rate === 'boolean') {
