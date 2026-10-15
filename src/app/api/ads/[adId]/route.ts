@@ -581,6 +581,19 @@ export async function PUT(
       );
     }
 
+    // Apply the emergency account freeze to owner edits; authorized admins retain remediation access.
+    if (user && !isAdmin) {
+      try {
+        const { assertUserNotEmergencyFrozen } = await import('@/lib/user-freeze');
+        await assertUserNotEmergencyFrozen(user.id);
+      } catch (freezeErr: any) {
+        return NextResponse.json(
+          { error: freezeErr.message || 'Your account is under an emergency security freeze.', code: 'USER_EMERGENCY_FROZEN' },
+          { status: 403 }
+        );
+      }
+    }
+
     // 4. Parse & Sanitize Edit Payload
     const body = await request.json();
 
