@@ -75,6 +75,9 @@ BEGIN
         RAISE EXCEPTION 'Invalid negative escrow fee for trade %', p_trade_id;
     END IF;
 
+    -- Compute the full escrow liability only after validating amount and fee.
+    v_total_escrow := v_trade.crypto_amount + COALESCE(v_trade.escrow_fee, 0);
+
     -- 3. Lock Wallet Assets FOR UPDATE (Defensive ::TEXT casting)
     SELECT balance, in_escrow INTO v_seller_bal, v_seller_escrow
     FROM public.wallet_assets
