@@ -99,8 +99,8 @@ BEGIN
     -- 4. Release Payment Guard
     v_is_paid := (v_trade.paid_at IS NOT NULL)
               OR (v_trade.marked_paid_at IS NOT NULL)
-              OR (LOWER(COALESCE(v_trade.escrow_status::TEXT, '')) = 'paid')
-              OR (LOWER(COALESCE(v_trade.status::TEXT, '')) IN ('paid', 'buyer_marked_paid', 'payment_sent', 'disputed', 'dispute'));
+              OR (LOWER(COALESCE(v_trade.escrow_status::TEXT, '')) IN ('paid', 'completed', 'released'))
+              OR (LOWER(COALESCE(v_trade.status::TEXT, '')) IN ('paid', 'buyer_marked_paid', 'payment_sent', 'disputed', 'dispute', 'completed', 'released'));
 
     IF NOT v_is_paid THEN
         RAISE EXCEPTION 'Trade % cannot be released before payment is marked.', p_trade_id;
