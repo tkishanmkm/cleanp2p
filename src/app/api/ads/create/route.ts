@@ -63,7 +63,7 @@ export async function POST(req: Request) {
       const profileName = user.user_metadata?.full_name || user.user_metadata?.name || user.email?.split('@')[0] || 'Trader';
       const cleanUsername = user.user_metadata?.username || (user.email?.split('@')[0] || 'trader').toLowerCase().replace(/[^a-z0-9_]/g, '_');
 
-      await admin
+      const { error: profileUpsertError } = await admin
         .from('profiles')
         .upsert(
           {
