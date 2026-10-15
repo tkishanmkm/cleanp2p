@@ -7,6 +7,7 @@ import { useWallet } from '@/context/wallet-context';
 import { usePrices } from '@/context/price-context';
 import { calculateMinimumFiatAmount, BASE_PLATFORM_USD_MINIMUM } from '@/lib/currency';
 import { CryptoCurrency } from '@/lib/types';
+import { isTier2User } from '@/lib/kyc';
 import { toast } from 'sonner';
 import { 
   Check, 
@@ -627,14 +628,30 @@ export default function CreateP2PAdPage() {
       : Number(fixedPrice || 1);
 
     if (adType === 'sell') {
-      const isTier2 = Boolean(
-        profile?.is_verified === true ||
-        profile?.id_verified === true ||
-        ['approved', 'verified'].includes(String(profile?.kyc_status || '').toLowerCase().trim()) ||
-        ['2', 'tier_2', 'tier2'].includes(String(profile?.verification_tier || '').toLowerCase().trim())
-      );
+      // Read KYC from the authenticated user's profile; never trust client-supplied verification flags.
+      const {
+        data: { user: authenticatedUser },
+        error: authError,
+      } = await supabase.auth.getUser();
 
-      if (!isTier2) {
+      if (authError || !authenticatedUser) {
+        toast.error('Please log in again to verify your account before selling.');
+        return;
+      }
+
+      const { data: sellerProfile, error: profileError } = await supabase
+        .from('profiles')
+        .select('kyc_status')
+        .eq('id', authenticatedUser.id)
+        .maybeSingle();
+
+      if (profileError) {
+        console.error('Unable to verify seller KYC status:', profileError);
+        toast.error('Unable to verify your KYC status right now. Please try again.');
+        return;
+      }
+
+      if (!isTier2User(sellerProfile)) {
         toast.error('KYC verification is required to sell.');
         return;
       }
