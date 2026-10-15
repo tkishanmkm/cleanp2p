@@ -120,7 +120,10 @@ export async function PATCH(
 ) {
   try {
     const resolvedParams = await Promise.resolve(params);
-    const { id } = resolvedParams;
+    const id = (resolvedParams.id || '').trim();
+    if (!id) {
+      return NextResponse.json({ error: 'Advertisement ID is required.' }, { status: 400 });
+    }
 
     const cookieHeader = cookies();
     const cookieStore = typeof (cookieHeader as any)?.then === 'function' ? await cookieHeader : cookieHeader;
@@ -188,8 +191,9 @@ export async function PATCH(
       return NextResponse.json({ error: 'Advertisement not found.' }, { status: 404 });
     }
 
-    const adOwnerId = existingAd.user_id || existingAd.userId;
-    if (adOwnerId && String(adOwnerId) !== String(user.id)) {
+    const adOwnerId = existingAd.user_id ?? existingAd.userId;
+    // Fail closed: privileged database writes must never proceed without a verifiable owner.
+    if (typeof adOwnerId !== 'string' || !adOwnerId.trim() || String(adOwnerId) !== String(user.id)) {
       return NextResponse.json({ error: 'Forbidden. You do not own this advertisement.' }, { status: 403 });
     }
 
@@ -422,8 +426,9 @@ export async function DELETE(
       return NextResponse.json({ error: 'Advertisement not found.' }, { status: 404 });
     }
 
-    const adOwnerId = existingAd.user_id || existingAd.userId;
-    if (adOwnerId && String(adOwnerId) !== String(user.id)) {
+    const adOwnerId = existingAd.user_id ?? existingAd.userId;
+    // Fail closed: privileged database writes must never proceed without a verifiable owner.
+    if (typeof adOwnerId !== 'string' || !adOwnerId.trim() || String(adOwnerId) !== String(user.id)) {
       return NextResponse.json({ error: 'Forbidden. You do not own this advertisement.' }, { status: 403 });
     }
 
