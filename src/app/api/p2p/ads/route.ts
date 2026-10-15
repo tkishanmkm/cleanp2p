@@ -37,6 +37,9 @@ export async function POST(request: NextRequest) {
     );
 
     const body = await request.json();
+    if (!body || typeof body !== 'object' || Array.isArray(body)) {
+      return NextResponse.json({ error: 'Request body must be a JSON object.' }, { status: 400 });
+    }
 
     // Support Bearer token header if provided by frontend
     const authHeader = request.headers.get('Authorization') || request.headers.get('authorization');
@@ -113,6 +116,9 @@ export async function POST(request: NextRequest) {
 
     const requestedMax = Number(body.max_amount ?? body.max_limit ?? body.maxAmount ?? 5000);
     const requestedMin = Number(body.min_amount ?? body.min_limit ?? body.minAmount ?? 100);
+    if (!Number.isFinite(requestedMin) || !Number.isFinite(requestedMax) || requestedMin <= 0 || requestedMax <= 0 || requestedMin > requestedMax) {
+      return NextResponse.json({ error: 'Minimum and maximum trade limits must be finite positive numbers, and minimum cannot exceed maximum.' }, { status: 400 });
+    }
 
     // Enforce dynamic minimum limit equivalent to at least $10.00 USD
     const dynamicMinThreshold = calculateMinimumFiatAmount(10.00, fiatType);
@@ -126,7 +132,17 @@ export async function POST(request: NextRequest) {
     const priceVal = body.price !== undefined && body.price !== null && body.price !== '' ? Number(body.price) : null;
     const marginVal = Number(body.margin ?? body.rate_percent ?? body.margin_percentage ?? body.price_margin ?? 0);
     const pricingType = body.pricing_type || (body.rate_type === 'fixed' || body.is_fixed ? 'FIXED' : 'FLOAT');
-    const paymentWindow = Math.max(30, parseInt(String(body.payment_window || body.payment_window_minutes || 30), 10) || 30);
+    const rawPaymentWindow = body.payment_window ?? body.payment_window_minutes ?? 30;
+    const paymentWindow = Number(rawPaymentWindow);
+    if (!Number.isFinite(marginVal) || marginVal < -50 || marginVal > 50) {
+      return NextResponse.json({ error: 'Margin percentage must be a finite number between -50 and +50.' }, { status: 400 });
+    }
+    if (!Number.isInteger(paymentWindow) || paymentWindow < 30 || paymentWindow > 1440) {
+      return NextResponse.json({ error: 'Payment window must be an integer between 30 and 1440 minutes.' }, { status: 400 });
+    }
+    if (body.price !== undefined && body.price !== null && body.price !== '' && (!Number.isFinite(priceVal) || Number(priceVal) <= 0)) {
+      return NextResponse.json({ error: 'Price must be a finite positive number.' }, { status: 400 });
+    }
     const paymentMethods = Array.isArray(body.payment_methods) && body.payment_methods.length > 0
       ? body.payment_methods
       : (Array.isArray(body.paymentMethods) ? body.paymentMethods : ['Bank Transfer']);
@@ -183,10 +199,14 @@ export async function POST(request: NextRequest) {
 
       try {
         // 1. Check wallet_assets directly by user_id
-        const { data: directAssets } = await adminClient
+        const { data: directAssets, error: directAssetsError } = await adminClient
           .from('wallet_assets')
           .select('*')
           .eq('user_id', user.id);
+        if (directAssetsError) {
+          console.error('Ad creation wallet_assets balance lookup failed:', directAssetsError.message);
+          return NextResponse.json({ error: 'Unable to verify wallet balance right now. Please retry.' }, { status: 503 });
+        }
 
         if (directAssets && directAssets.length > 0) {
           const match = directAssets.find((a: any) => {
@@ -202,12 +222,16 @@ export async function POST(request: NextRequest) {
         }
 
         // 2. Check user_wallets table
-        const { data: walletData } = await adminClient
+        const { data: walletData, error: walletDataError } = await adminClient
           .from('user_wallets')
-          .select('available_balance, balance, locked_balance')
+          .select('available_balance, balance, locked_balance, reserved_balance')
           .eq('user_id', user.id)
           .ilike('asset_symbol', coinType)
           .maybeSingle();
+        if (walletDataError) {
+          console.error('Ad creation user_wallets balance lookup failed:', walletDataError.message);
+          return NextResponse.json({ error: 'Unable to verify wallet balance right now. Please retry.' }, { status: 503 });
+        }
 
         if (walletData) {
           const net = Number(walletData.available_balance ?? (Number(walletData.balance || 0) - Number(walletData.locked_balance || 0)));
@@ -215,10 +239,14 @@ export async function POST(request: NextRequest) {
         }
 
         // 3. Check wallets table
-        const { data: chainWallets } = await adminClient
+        const { data: chainWallets, error: chainWalletsError } = await adminClient
           .from('wallets')
-          .select('balance, available_balance, currency, chain')
+          .select('balance, available_balance, currency, chain, reserved_balance, locked_balance')
           .eq('user_id', user.id);
+        if (chainWalletsError) {
+          console.error('Ad creation wallets balance lookup failed:', chainWalletsError.message);
+          return NextResponse.json({ error: 'Unable to verify wallet balance right now. Please retry.' }, { status: 503 });
+        }
 
         if (chainWallets && chainWallets.length > 0) {
           const matchingWallets = chainWallets.filter((w: any) => 
@@ -231,11 +259,15 @@ export async function POST(request: NextRequest) {
         }
 
         // 4. Check profiles table fallback
-        const { data: prof } = await adminClient
+        const { data: prof, error: profileError } = await adminClient
           .from('profiles')
           .select('*')
           .eq('id', user.id)
           .maybeSingle();
+        if (profileError) {
+          console.error('Ad creation profile balance fallback lookup failed:', profileError.message);
+          return NextResponse.json({ error: 'Unable to verify wallet balance right now. Please retry.' }, { status: 503 });
+        }
 
         if (prof) {
           const col = `${coinType.toLowerCase()}_balance`;
@@ -245,7 +277,8 @@ export async function POST(request: NextRequest) {
           }
         }
       } catch (balErr) {
-        console.warn('Balance check error during ad creation:', balErr);
+        console.error('Balance verification failed during ad creation:', balErr);
+        return NextResponse.json({ error: 'Unable to verify wallet balance right now. Please retry.' }, { status: 503 });
       }
 
       const effectiveUnitPrice = priceVal && priceVal > 0 ? priceVal : 1;
