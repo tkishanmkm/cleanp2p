@@ -372,7 +372,7 @@ function P2PMarketplaceContent() {
               last_seen_at: p.last_seen_at || p.last_seen || p.last_active,
               createdAt: p.created_at,
               blockedUsers: p.blocked_users || [],
-              isVerified: p.is_verified ?? (p.kyc_status === 'VERIFIED') ?? false,
+              isVerified: p.is_verified ?? (p.kyc_status === 'VERIFIED'),
               cryptoBalances: {
                 BTC: Number(p.btc_balance || 0),
                 ETH: Number(p.eth_balance || 0),
