@@ -473,6 +473,9 @@ export async function POST(request: NextRequest) {
           unit_price: priceVal,
           status: 'ACTIVE',
         };
+        if (!p2pRow.id) {
+          throw new Error('Primary ad insert returned no ID; marketplace sync skipped');
+        }
         const { error: p2pSyncError } = await admin
           .from('p2p_ads')
           .upsert(p2pRow, { onConflict: 'id', ignoreDuplicates: true });
