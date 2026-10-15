@@ -103,7 +103,7 @@ export default function AdminAdsPage() {
             return [];
           })(),
           terms: ad.terms || '',
-          active: ad.active === true || ad.active === 1 || ad.active === 'true',
+          active: ad.active === true || ad.active === 1 || (typeof ad.active === 'string' && ['true', 't', '1', 'active'].includes(ad.active.trim().toLowerCase())),
           offerLabel: ad.offer_label || ad.offerLabel,
           tags: (() => {
             const value = ad.tags;
@@ -111,7 +111,7 @@ export default function AdminAdsPage() {
             if (typeof value === 'string') return value.split(',').map((item: string) => item.trim()).filter(Boolean);
             return [];
           })(),
-          createdAt: ad.created_at || ad.createdAt || new Date().toISOString(),
+          createdAt: String(ad.created_at || ad.createdAt || ''),
         }));
 
         setAds(formattedAds);
