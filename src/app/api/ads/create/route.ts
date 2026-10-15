@@ -205,7 +205,18 @@ export async function POST(req: Request) {
     } else {
       cleanPayload.payment_window = 30;
     }
-    if (cleanPayload.min_completed_trades !== undefined) cleanPayload.min_completed_trades = parseInt(String(cleanPayload.min_completed_trades), 10) || 0;
+    if (cleanPayload.min_completed_trades !== undefined && cleanPayload.min_completed_trades !== null && cleanPayload.min_completed_trades !== '') {
+      const minCompletedTrades = Number(cleanPayload.min_completed_trades);
+      if (!Number.isSafeInteger(minCompletedTrades) || minCompletedTrades < 0) {
+        return NextResponse.json(
+          { error: 'Minimum completed trades must be a non-negative whole number.', code: 'INVALID_MIN_COMPLETED_TRADES' },
+          { status: 400 }
+        );
+      }
+      cleanPayload.min_completed_trades = minCompletedTrades;
+    } else {
+      cleanPayload.min_completed_trades = 0;
+    }
 
     // Normalize and strictly validate ad trade direction (BUY/SELL)
     const resolvedDirection = resolveTradeType(cleanPayload);
