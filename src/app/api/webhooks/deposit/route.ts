@@ -172,7 +172,7 @@ export async function POST(req: Request) {
         p_block_number: item.blockNumber ?? null,
         p_from_address: item.from || null,
         p_token_contract: tokenContract,
-        p_confirmations: item.confirmations ?? 12,
+        p_confirmations: item.confirmations ?? 0,
         p_provider: 'deposit_webhook',
       });
 
