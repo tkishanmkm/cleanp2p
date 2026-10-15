@@ -16,7 +16,7 @@ export async function POST(req: Request) {
     // A supplied Authorization header is authoritative: never fall back to cookie
     // identity when that header is malformed or its bearer token is invalid.
     const authHeader = req.headers.get('authorization');
-    const bearerMatch = authHeader?.match(/^Bearer\\s+(.+)$/i);
+    const bearerMatch = authHeader?.match(/^Bearer\s+(.+)$/i);
     const bearerToken = bearerMatch?.[1]?.trim();
 
     // 1. Explicit Auth Check
@@ -342,12 +342,13 @@ export async function POST(req: Request) {
       console.error('[Database Insert Error in /api/ads/create]:', dbError);
       const isRlsError = dbError.code === '42501' || dbError.message?.toLowerCase().includes('row-level security');
       return NextResponse.json(
-        { 
-          error: isRlsError ? 'Access denied: You do not have permission to create this advertisement.' : 'Failed to create ad in database.', 
-          code: dbError.code,
-          details: dbError.message 
-        }, 
-        { status: isRlsError ? 403 : 400 }
+        {
+          error: isRlsError
+            ? 'Access denied: You do not have permission to create this advertisement.'
+            : 'Unable to create advertisement. Please review the submitted fields or try again later.',
+          code: isRlsError ? 'ADVERTISEMENT_ACCESS_DENIED' : 'AD_CREATION_FAILED'
+        },
+        { status: isRlsError ? 403 : 500 }
       );
     }
 
@@ -356,7 +357,7 @@ export async function POST(req: Request) {
   } catch (err: any) {
     console.error('[Unhandled Server Error in /api/ads/create]:', err);
     return NextResponse.json(
-      { error: err.message || 'Internal Server Error' }, 
+      { error: 'Unable to create advertisement at this time.', code: 'AD_CREATION_FAILED' },
       { status: 500 }
     );
   }
