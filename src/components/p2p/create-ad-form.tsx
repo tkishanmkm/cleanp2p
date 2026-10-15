@@ -447,7 +447,7 @@ export function CreateAdForm({ ad }: CreateAdFormProps) {
           completedTrades: profile.completedTrades ?? 0,
           photoURL: profile.photoURL,
           badges: profile.badges,
-          lastActive: profile.lastActive,
+          lastActive: profile.lastActive instanceof Date ? profile.lastActive.toISOString() : profile.lastActive,
         });
         toast({ title: "Ad Created", description: "Your ad has been successfully posted." });
         router.push(data.adType === 'sell' ? '/buy' : '/sell');
