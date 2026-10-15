@@ -500,7 +500,7 @@ export async function POST(request: NextRequest) {
           error: 'Unable to create advertisement. Please review the submitted fields or try again later.',
           code: 'AD_CREATION_FAILED',
         },
-        { status: 400 }
+        { status: 500 }
       );
     }
 
