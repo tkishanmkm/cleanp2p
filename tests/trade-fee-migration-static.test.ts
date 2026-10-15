@@ -40,6 +40,16 @@ assert.equal(
   (reservedBalanceMigrationSql.match(/END \\$guard\\$;/g) ?? []).length,
   'each guarded wallet migration block must have a matching closing delimiter'
 );
+assert.match(
+  reservedBalanceMigrationSql,
+  /IF EXISTS \([\s\S]*?c\.relname = 'balances'[\s\S]*?UPDATE public\.balances[\s\S]*?END IF;/,
+  'legacy balances backfill must only run when public.balances is a real table'
+);
+assert.match(
+  reservedBalanceMigrationSql,
+  /c\.relname = 'balances'[\s\S]*?EXECUTE 'CREATE TRIGGER trg_sync_balances/,
+  'legacy balances trigger must only be created when public.balances is a real table'
+);
 
 const legacyAdsMigrationPath = join(
   process.cwd(),
