@@ -367,22 +367,57 @@ export async function POST(request: NextRequest) {
     }
 
     if (data) {
-      try {
-        const admin = getSupabaseAdminClient();
-        const p2pRow = {
-          ...basePayload,
-          id: data.id || basePayload.id,
-          public_ad_id: uniqueAdId,
-          crypto: coinType,
-          fiat_currency: fiatType,
-          ad_type: adSide.toLowerCase(),
-          trade_type: adSide,
-          unit_price: priceVal,
-          status: 'ACTIVE',
-        };
-        await admin.from('p2p_ads').upsert(p2pRow, { onConflict: 'id', ignoreDuplicates: true });
-      } catch (p2pSyncErr) {
-        // Silently continue if p2p_ads is a view or non-updatable
+      const admin = getSupabaseAdminClient();
+      const p2pRow = {
+        public_ad_id: uniqueAdId,
+        user_id: user.id,
+        ad_type: String(adSide).toLowerCase(),
+        crypto_currency: coinType,
+        fiat_currency: fiatType,
+        price: priceVal,
+        min_limit: requestedMin,
+        max_limit: requestedMax,
+        payment_method: paymentMethods[0],
+        payment_methods: paymentMethods,
+        terms: resolvedTerms,
+        active: true,
+        is_active: true,
+        is_deleted: false,
+        coin: coinType,
+        pricing_type: String(pricingType).toLowerCase(),
+        margin: marginVal,
+        asset_symbol: coinType,
+        fiat_symbol: fiatType,
+        type: adSide,
+        status: 'ACTIVE',
+      };
+
+      const { error: p2pSyncError } = await admin.from('p2p_ads').insert(p2pRow);
+      if (p2pSyncError) {
+        console.error('P2P ad synchronization failed:', {
+          code: p2pSyncError.code,
+          message: p2pSyncError.message,
+        });
+
+        // Fail closed: don't leave an ad discoverable if the canonical P2P row
+        // was not created. Keep the row for diagnostics, but deactivate it.
+        const { error: deactivateError } = await admin
+          .from('ads')
+          .update({ active: false, is_active: false, status: 'inactive' })
+          .eq('id', data.id)
+          .eq('user_id', user.id);
+
+        if (deactivateError) {
+          console.error('Failed to deactivate unsynchronized ad:', {
+            code: deactivateError.code,
+            message: deactivateError.message,
+          });
+        }
+
+        return NextResponse.json(
+          { error: 'Unable to publish advertisement right now. Please try again later.' },
+          { status: 500 }
+        );
       }
     }
 
