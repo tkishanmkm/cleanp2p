@@ -39,11 +39,17 @@ jobs:
       # Optional authenticated pulls reduce Docker Hub rate-limit failures in CI.
       # Configure DOCKERHUB_USERNAME and DOCKERHUB_TOKEN as repository Actions secrets.
       - name: Authenticate Docker Hub (when secrets are configured)
-        if: ${{ secrets.DOCKERHUB_USERNAME != '' && secrets.DOCKERHUB_TOKEN != '' }}
-        uses: docker/login-action@v3
-        with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
+        shell: bash
+        env:
+          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [[ -n "${DOCKERHUB_USERNAME}" && -n "${DOCKERHUB_TOKEN}" ]]; then
+            printf '%s' "${DOCKERHUB_TOKEN}" | docker login --username "${DOCKERHUB_USERNAME}" --password-stdin
+          else
+            echo "Docker Hub credentials are not configured; continuing anonymously."
+          fi
 
       - name: Start disposable local Supabase stack
         shell: bash
