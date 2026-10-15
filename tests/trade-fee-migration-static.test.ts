@@ -32,7 +32,7 @@ const releaseStart = sql.indexOf('CREATE OR REPLACE FUNCTION public.release_trad
 assert.notEqual(releaseStart, -1, 'migration must redefine release_trade_escrow');
 const releaseEnd = sql.indexOf('$function$;', releaseStart + 3);
 assert.notEqual(releaseEnd, -1, 'release function must terminate');
-const releaseFn = sql.slice(releaseStart, releaseEnd + 3);
+const releaseFn = sql.slice(releaseStart, releaseEnd + '$function$;'.length);
 
 assert.match(releaseFn, /Caller ID mismatch: unauthorized impersonation\./,
   'caller identity mismatch guard must remain');
