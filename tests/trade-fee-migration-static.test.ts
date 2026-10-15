@@ -426,5 +426,15 @@ assert.doesNotMatch(
   'profile hardening must not statically grant columns that may be absent'
 );
 
+
+const adCreationRoutePath = join(process.cwd(), 'src/app/api/ads/create/route.ts');
+const adCreationRoute = readFileSync(adCreationRoutePath, 'utf8');
+assert.match(adCreationRoute, /const MAX_MARKET_PRICE_AGE_MS = 15 \* 60 \* 1000;/,
+  'ad creation must centralize the maximum market-price age');
+assert.equal((adCreationRoute.match(/marketAgeMs > MAX_MARKET_PRICE_AGE_MS/g) ?? []).length, 2,
+  'fixed and floating ad pricing must both reject stale market data');
+assert.equal((adCreationRoute.match(/\.select\('price_in_fiat, updated_at'\)/g) ?? []).length, 2,
+  'both pricing modes must load the market timestamp before accepting a reference price');
+
 console.log('PASS: escrow fee migration static safety checks');
 console.log('NOTE: run integration tests against a fully initialized disposable Supabase project before deployment.');
