@@ -88,7 +88,7 @@ export default function AdminAdsPage() {
             negativeFeedback: ad.user?.negativeFeedback ?? 0,
             completedTrades: ad.user?.completedTrades ?? 0,
           },
-          adType: String(ad.ad_type || ad.adType || 'buy').toLowerCase(),
+          adType: String(ad.ad_type || ad.adType || 'buy').toLowerCase() === 'sell' ? 'sell' : 'buy',
           crypto: ad.crypto || 'USDT',
           fiatCurrency: ad.fiat_currency || ad.fiatCurrency || 'USD',
           rateType: ad.rate_type || ad.rateType || 'fixed',
