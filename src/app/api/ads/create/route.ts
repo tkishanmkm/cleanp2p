@@ -220,8 +220,11 @@ export async function POST(req: Request) {
     }
 
     // Authoritative Server-Side ±50% Reference Market Price Validation
-    const normalizedPricingType = String(cleanPayload.pricing_type || cleanPayload.rate_type || '').trim().toUpperCase();
-    const isFixedPricing = normalizedPricingType ? normalizedPricingType === 'FIXED' : cleanPayload.is_fixed === true;
+    const normalizedPricingType = String(cleanPayload.pricing_type || cleanPayload.rate_type || (cleanPayload.is_fixed === true ? 'FIXED' : 'FLOAT')).trim().toUpperCase();
+    if (!['FIXED', 'FLOAT', 'FLOATING', 'MARGIN', 'DYNAMIC'].includes(normalizedPricingType)) {
+      return NextResponse.json({ error: 'Unsupported pricing type.', code: 'INVALID_PRICING_TYPE' }, { status: 400 });
+    }
+    const isFixedPricing = normalizedPricingType === 'FIXED';
 
     if (isFixedPricing) {
       if (effectivePrice === null || effectivePrice <= 0) {
@@ -256,8 +259,9 @@ export async function POST(req: Request) {
       }
     } else {
       // Floating/margin pricing validation (-50% to +50%)
-      const marginPct = cleanPayload.margin_percentage !== undefined ? Number(cleanPayload.margin_percentage) : 0;
-      if (marginPct < -50 || marginPct > 50) {
+      const marginSource = cleanPayload.margin_percentage !== undefined ? cleanPayload.margin_percentage : cleanPayload.margin;
+      const marginPct = marginSource !== undefined && marginSource !== null ? Number(marginSource) : 0;
+      if (!Number.isFinite(marginPct) || marginPct < -50 || marginPct > 50) {
         return NextResponse.json(
           { error: 'Margin percentage for dynamic pricing must be between -50% and +50%.' },
           { status: 400 }
