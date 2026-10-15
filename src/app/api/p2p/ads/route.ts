@@ -519,9 +519,15 @@ export async function POST(request: NextRequest) {
           unit_price: priceVal,
           status: 'ACTIVE',
         };
-        await admin.from('p2p_ads').upsert(p2pRow, { onConflict: 'id', ignoreDuplicates: true });
+        const { error: p2pSyncError } = await admin
+          .from('p2p_ads')
+          .upsert(p2pRow, { onConflict: 'id', ignoreDuplicates: true });
+        if (p2pSyncError) {
+          // Canonical ads persistence has succeeded; record legacy-sync failure for operators.
+          console.warn('[P2P Ad Creation] Legacy p2p_ads synchronization failed:', p2pSyncError.message);
+        }
       } catch (p2pSyncErr) {
-        // Silently continue if p2p_ads is a view or non-updatable
+        console.warn('[P2P Ad Creation] Legacy p2p_ads synchronization threw:', p2pSyncErr);
       }
     }
 
