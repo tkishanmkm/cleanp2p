@@ -254,12 +254,12 @@ export function AdCard({ ad, marketPriceUsd: propMarketPriceUsd, fiatExchangeRat
           )}
           
           <div className="flex flex-wrap gap-1">
-            {(ad.paymentMethods || []).map(pm => <Badge key={pm} variant="outline" className="text-xs">{pm}</Badge>)}
+            {(ad.paymentMethods || []).map((pm: string) => <Badge key={pm} variant="outline" className="text-xs">{pm}</Badge>)}
           </div>
           
           {ad.tags && ad.tags.length > 0 && (
             <div className="flex flex-wrap gap-1">
-              {ad.tags.map(tag => <Badge key={tag} variant="secondary">{tag}</Badge>)}
+              {ad.tags.map((tag: string) => <Badge key={tag} variant="secondary">{tag}</Badge>)}
             </div>
           )}
         </div>
