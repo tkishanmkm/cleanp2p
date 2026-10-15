@@ -110,6 +110,114 @@ jobs:
           END $$;
           SQL
 
+      - name: Verify platform ledger idempotency behavior
+        env:
+          PGPASSWORD: postgres
+        shell: bash
+        run: |
+          set -euo pipefail
+          status="$(supabase status -o env)"
+          db_url="$(printf '%s\\n' "$status" | sed -n 's/^DB_URL="\\(.*\\)"$/\\1/p')"
+          if [ -z "$db_url" ]; then
+            echo "Could not read local DB_URL from Supabase CLI status."
+            exit 1
+          fi
+          psql "$db_url" -v ON_ERROR_STOP=1 <<'SQL'
+          BEGIN;
+          DO $
+          DECLARE
+            v_first UUID;
+            v_duplicate UUID;
+            v_conflict_rejected BOOLEAN := FALSE;
+            v_zero_rejected BOOLEAN := FALSE;
+          BEGIN
+            v_first := public.record_platform_ledger_entry(
+              p_entry_type := 'trade_fee_collected',
+              p_asset_code := 'BTC',
+              p_amount := 0.001,
+              p_direction := 'CREDIT',
+              p_related_user_id := NULL,
+              p_ref_table := 'ci_test',
+              p_ref_id := 'escrow-fee-idempotency',
+              p_network_code := NULL,
+              p_tx_hash := NULL,
+              p_idempotency_key := 'ci_escrow_fee_idempotency_test',
+              p_metadata := '{"test":true}'::jsonb
+            );
+
+            v_duplicate := public.record_platform_ledger_entry(
+              p_entry_type := 'trade_fee_collected',
+              p_asset_code := 'BTC',
+              p_amount := 0.001,
+              p_direction := 'CREDIT',
+              p_related_user_id := NULL,
+              p_ref_table := 'ci_test',
+              p_ref_id := 'escrow-fee-idempotency',
+              p_network_code := NULL,
+              p_tx_hash := NULL,
+              p_idempotency_key := 'ci_escrow_fee_idempotency_test',
+              p_metadata := '{"test":true}'::jsonb
+            );
+
+            IF v_first IS DISTINCT FROM v_duplicate THEN
+              RAISE EXCEPTION 'Duplicate idempotency call returned a different ledger ID';
+            END IF;
+
+            BEGIN
+              PERFORM public.record_platform_ledger_entry(
+                p_entry_type := 'trade_fee_collected',
+                p_asset_code := 'BTC',
+                p_amount := 0.002,
+                p_direction := 'CREDIT',
+                p_related_user_id := NULL,
+                p_ref_table := 'ci_test',
+                p_ref_id := 'escrow-fee-idempotency',
+                p_network_code := NULL,
+                p_tx_hash := NULL,
+                p_idempotency_key := 'ci_escrow_fee_idempotency_test',
+                p_metadata := '{"test":true}'::jsonb
+              );
+            EXCEPTION WHEN OTHERS THEN
+              IF SQLERRM LIKE 'Financial idempotency conflict%' THEN
+                v_conflict_rejected := TRUE;
+              ELSE
+                RAISE;
+              END IF;
+            END;
+
+            IF NOT v_conflict_rejected THEN
+              RAISE EXCEPTION 'Conflicting financial replay was not rejected';
+            END IF;
+
+            BEGIN
+              PERFORM public.record_platform_ledger_entry(
+                p_entry_type := 'trade_fee_collected',
+                p_asset_code := 'BTC',
+                p_amount := 0,
+                p_direction := 'CREDIT',
+                p_related_user_id := NULL,
+                p_ref_table := 'ci_test',
+                p_ref_id := 'zero-fee',
+                p_network_code := NULL,
+                p_tx_hash := NULL,
+                p_idempotency_key := 'ci_escrow_fee_zero_amount_test',
+                p_metadata := '{"test":true}'::jsonb
+              );
+            EXCEPTION WHEN OTHERS THEN
+              IF SQLERRM LIKE 'Platform ledger amount must be greater than zero%' THEN
+                v_zero_rejected := TRUE;
+              ELSE
+                RAISE;
+              END IF;
+            END;
+
+            IF NOT v_zero_rejected THEN
+              RAISE EXCEPTION 'Zero-amount platform ledger entry was not rejected';
+            END IF;
+          END $;
+          ROLLBACK;
+          SQL
+
       - name: Stop disposable local Supabase stack
         if: always()
         run: supabase stop --no-backup
