@@ -62,6 +62,14 @@ BEGIN
         RAISE EXCEPTION 'Buyer and seller must be different users for trade %', p_trade_id;
     END IF;
 
+    -- Reject invalid settlement amounts/assets before wallet locks or mutations.
+    IF v_trade.crypto_amount IS NULL OR v_trade.crypto_amount <= 0 THEN
+        RAISE EXCEPTION 'Invalid crypto amount for trade %', p_trade_id;
+    END IF;
+    IF v_trade.crypto IS NULL OR BTRIM(v_trade.crypto) = '' THEN
+        RAISE EXCEPTION 'Invalid crypto asset for trade %', p_trade_id;
+    END IF;
+
     -- Reject invalid fee data before wallet locks or settlement mutations.
     IF COALESCE(v_trade.escrow_fee, 0) < 0 THEN
         RAISE EXCEPTION 'Invalid negative escrow fee for trade %', p_trade_id;
