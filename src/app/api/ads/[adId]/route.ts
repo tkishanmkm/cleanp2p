@@ -449,8 +449,25 @@ export async function PATCH(
     let isActive: boolean;
     let newStatus: string;
 
+    if (body.active !== undefined && typeof body.active !== 'boolean') {
+      return NextResponse.json(
+        { error: 'The active field must be a boolean.', code: 'INVALID_AD_STATUS' },
+        { status: 400 }
+      );
+    }
+
+    if (body.active !== undefined && body.status !== undefined) {
+      const statusMatchesActive = String(body.status).toUpperCase().trim() === (body.active ? 'ACTIVE' : 'INACTIVE');
+      if (!statusMatchesActive) {
+        return NextResponse.json(
+          { error: 'The active and status fields must describe the same state.', code: 'CONFLICTING_AD_STATUS' },
+          { status: 400 }
+        );
+      }
+    }
+
     if (body.active !== undefined) {
-      isActive = Boolean(body.active);
+      isActive = body.active;
       newStatus = isActive ? 'ACTIVE' : 'INACTIVE';
     } else if (body.status !== undefined) {
       const requestedStatus = String(body.status).toUpperCase().trim();
