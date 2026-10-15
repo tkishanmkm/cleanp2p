@@ -58,7 +58,7 @@ BEGIN
        OR v_trade.buyer_id !~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN
         RAISE EXCEPTION 'Invalid buyer or seller UUID in trade %', p_trade_id;
     END IF;
-    IF v_trade.seller_id = v_trade.buyer_id THEN
+    IF v_trade.seller_id::UUID = v_trade.buyer_id::UUID THEN
         RAISE EXCEPTION 'Buyer and seller must be different users for trade %', p_trade_id;
     END IF;
 
