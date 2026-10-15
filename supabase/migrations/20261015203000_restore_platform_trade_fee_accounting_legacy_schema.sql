@@ -68,8 +68,20 @@ BEGIN
     END IF;
 
     -- Participant columns are legacy text, while wallet/ledger writes require UUIDs.
-    -- Fail before any wallet mutation if either identifier is malformed.
-    IF v_trade.seller_id IS NULL OR v_trade.seller_id !~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}
+    -- Validate both IDs before any wallet mutations or casts elsewhere in the function.
+    IF v_trade.seller_id IS NULL OR v_trade.buyer_id IS NULL THEN
+        RAISE EXCEPTION 'Trade % has a missing participant ID', p_trade_id;
+    END IF;
+    BEGIN
+        PERFORM v_trade.seller_id::UUID;
+        PERFORM v_trade.buyer_id::UUID;
+    EXCEPTION WHEN invalid_text_representation THEN
+        RAISE EXCEPTION 'Trade % has a malformed participant UUID', p_trade_id;
+    END;
+
+    IF COALESCE(v_trade.escrow_fee, 0) < 0 THEN
+        RAISE EXCEPTION 'Invalid negative escrow fee for trade %', p_trade_id;
+    END IF;
 
     -- 3. Lock Wallet Assets FOR UPDATE (Defensive ::TEXT casting)
     SELECT balance, in_escrow INTO v_seller_bal, v_seller_escrow
