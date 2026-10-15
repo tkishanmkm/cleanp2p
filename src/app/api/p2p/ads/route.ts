@@ -192,117 +192,56 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // BALANCE VALIDATION: If user is creating a SELL ad (offering to sell coin), check that minimum limit in coin is present in their account
+    // SELL ads must use the wallet balance endpoint's documented authoritative source.
+    // Do not take the maximum across legacy tables: those may be mirrors of the same funds.
     if (adSide === 'SELL') {
       const adminClient = getSupabaseAdminClient();
-      let availableBalance = 0;
-
-      try {
-        // 1. Check wallet_assets directly by user_id
-        const { data: directAssets, error: directAssetsError } = await adminClient
-          .from('wallet_assets')
-          .select('*')
-          .eq('user_id', user.id);
-        if (directAssetsError) {
-          console.error('Ad creation wallet_assets balance lookup failed:', directAssetsError.message);
-          return NextResponse.json({ error: 'Unable to verify wallet balance right now. Please retry.' }, { status: 503 });
-        }
-
-        if (directAssets && directAssets.length > 0) {
-          const match = directAssets.find((a: any) => {
-            const sym = String(a.asset_symbol || a.asset_code || a.symbol || a.crypto || '').toUpperCase();
-            return sym === coinType.toUpperCase();
-          });
-          if (match) {
-            const avail = Number(match.available ?? match.balance ?? match.amount ?? 0);
-            const locked = Number(match.locked_escrow ?? match.locked ?? match.locked_balance ?? 0);
-            const reserved = Number(match.reserved_balance ?? 0);
-            const escrow = Number(match.in_escrow ?? 0);
-            const withdrawal = Number(match.in_withdrawal ?? 0);
-            if (![avail, locked, reserved, escrow, withdrawal].every(Number.isFinite)) {
-              return NextResponse.json({ error: 'Wallet balance data is invalid; sell ad creation is blocked.' }, { status: 503 });
-            }
-            const net = Math.max(0, avail - locked - reserved - escrow - withdrawal);
-            if (net > availableBalance) availableBalance = net;
-          }
-        }
-
-        // 2. Check user_wallets table
-        const { data: walletData, error: walletDataError } = await adminClient
-          .from('user_wallets')
-          .select('balance, locked_balance, reserved_balance')
-          .eq('user_id', user.id)
-          .ilike('asset_symbol', coinType)
-          .maybeSingle();
-        if (walletDataError) {
-          console.error('Ad creation user_wallets balance lookup failed:', walletDataError.message);
-          return NextResponse.json({ error: 'Unable to verify wallet balance right now. Please retry.' }, { status: 503 });
-        }
-
-        if (walletData) {
-          const balance = Number(walletData.balance ?? 0);
-          const locked = Number(walletData.locked_balance ?? 0);
-          const reserved = Number(walletData.reserved_balance ?? 0);
-          if (![balance, locked, reserved].every(Number.isFinite)) {
-            return NextResponse.json({ error: 'Wallet balance data is invalid; sell ad creation is blocked.' }, { status: 503 });
-          }
-          const net = Math.max(0, balance - locked - reserved);
-          if (net > availableBalance) availableBalance = net;
-        }
-
-        // 3. Check wallets table
-        const { data: chainWallets, error: chainWalletsError } = await adminClient
-          .from('wallets')
-          .select('balance, available_balance, currency, chain, reserved_balance, locked_balance')
-          .eq('user_id', user.id);
-        if (chainWalletsError) {
-          console.error('Ad creation wallets balance lookup failed:', chainWalletsError.message);
-          return NextResponse.json({ error: 'Unable to verify wallet balance right now. Please retry.' }, { status: 503 });
-        }
-
-        if (chainWallets && chainWallets.length > 0) {
-          const matchingWallets = chainWallets.filter((w: any) => 
-            String(w.currency || w.chain || '').toUpperCase() === coinType.toUpperCase()
-          );
-          matchingWallets.forEach((w: any) => {
-            const available = w.available_balance;
-            const balance = Number(available ?? w.balance ?? 0);
-            const locked = available !== null && available !== undefined ? 0 : Number(w.locked_balance ?? 0);
-            const reserved = available !== null && available !== undefined ? 0 : Number(w.reserved_balance ?? 0);
-            if (![balance, locked, reserved].every(Number.isFinite)) {
-              throw new Error('Invalid wallet balance data');
-            }
-            const val = Math.max(0, balance - locked - reserved);
-            if (val > availableBalance) availableBalance = val;
-          });
-        }
-
-        // 4. Check profiles table fallback
-        const { data: prof, error: profileError } = await adminClient
-          .from('profiles')
-          .select('*')
-          .eq('id', user.id)
-          .maybeSingle();
-        if (profileError) {
-          console.error('Ad creation profile balance fallback lookup failed:', profileError.message);
-          return NextResponse.json({ error: 'Unable to verify wallet balance right now. Please retry.' }, { status: 503 });
-        }
-
-        if (prof) {
-          const col = `${coinType.toLowerCase()}_balance`;
-          if (prof[col] !== undefined) {
-            const val = Number(prof[col] || 0);
-            if (val > availableBalance) availableBalance = val;
-          }
-        }
-      } catch (balErr) {
-        console.error('Balance verification failed during ad creation:', balErr);
-        return NextResponse.json({ error: 'Unable to verify wallet balance right now. Please retry.' }, { status: 503 });
-      }
-
       const effectiveUnitPrice = priceVal && priceVal > 0 ? priceVal : 1;
       const minCoinRequired = requestedMin / effectiveUnitPrice;
 
+      const { data: walletAssetRows, error: walletAssetError } = await adminClient
+        .from('wallet_assets')
+        .select('asset_symbol, asset_code, balance, locked_balance, reserved_balance, in_escrow, in_withdrawal')
+        .eq('user_id', user.id);
+
+      if (walletAssetError) {
+        console.error('Authoritative wallet_assets balance lookup failed during sell-ad creation:', walletAssetError.message);
+        return NextResponse.json({ error: 'Unable to verify wallet balance right now. Please retry.' }, { status: 503 });
+      }
+
+      const matchingAssets = (walletAssetRows || []).filter((row: any) =>
+        String(row.asset_symbol || row.asset_code || '').trim().toUpperCase() === coinType
+      );
+
+      // Multiple rows for the same asset make the spendable amount ambiguous.
+      if (matchingAssets.length > 1) {
+        console.error('Multiple authoritative wallet_assets rows found for sell-ad creation', { userId: user.id, coinType });
+        return NextResponse.json({ error: 'Wallet balance records need reconciliation before a sell offer can be created.' }, { status: 409 });
+      }
+
+      if (matchingAssets.length === 0) {
+        return NextResponse.json({
+          error: `Insufficient ${coinType} balance. No authoritative wallet balance record was found.`,
+          code: 'INSUFFICIENT_BALANCE',
+        }, { status: 400 });
+      }
+
+      const walletAsset = matchingAssets[0];
+      const balance = Number(walletAsset.balance ?? 0);
+      const locked = Number(walletAsset.locked_balance ?? 0);
+      const reserved = Number(walletAsset.reserved_balance ?? 0);
+      const escrow = Number(walletAsset.in_escrow ?? 0);
+      const withdrawal = Number(walletAsset.in_withdrawal ?? 0);
+
+      if (![balance, locked, reserved, escrow, withdrawal].every(Number.isFinite) ||
+          balance < 0 || locked < 0 || reserved < 0 || escrow < 0 || withdrawal < 0) {
+        console.error('Invalid authoritative wallet balance values; blocking sell-ad creation', { userId: user.id, coinType });
+        return NextResponse.json({ error: 'Wallet balance data is invalid; sell ad creation is blocked.' }, { status: 503 });
+      }
+
+      // locked_balance and in_escrow can describe the same escrowed funds; subtract the larger,
+      // then subtract separately tracked reservations and withdrawals.
+      const availableBalance = Math.max(0, balance - Math.max(locked, escrow) - reserved - withdrawal);
       if (availableBalance < minCoinRequired) {
         return NextResponse.json({
           error: `Insufficient ${coinType} balance. You must have at least ${minCoinRequired.toFixed(6)} ${coinType} in your wallet to create a sell offer with a minimum limit of ${requestedMin} ${fiatType}. Current available: ${availableBalance.toFixed(6)} ${coinType}.`,
