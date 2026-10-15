@@ -76,7 +76,11 @@ export async function POST(req: Request) {
           { onConflict: 'id', ignoreDuplicates: true }
         );
     } catch (profileUpsertErr) {
-      console.warn('Profile auto-ensure warning in /api/ads/create:', profileUpsertErr);
+      console.error('[Profile ensure failed in /api/ads/create]:', profileUpsertErr);
+      return NextResponse.json(
+        { error: 'Account profile is temporarily unavailable. Please try again.', code: 'PROFILE_UNAVAILABLE' },
+        { status: 503 }
+      );
     }
 
     const contentLength = Number(req.headers.get('content-length') || 0);
