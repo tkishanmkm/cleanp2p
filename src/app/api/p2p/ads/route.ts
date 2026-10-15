@@ -6,6 +6,7 @@ import { generateAdId } from '@/lib/id-generator';
 import { calculateMinimumFiatAmount } from '@/lib/currency';
 import { resolveTradeType } from '@/utils/p2p-helpers';
 import { assertPlatformControlAllowed } from '@/lib/platform-guard';
+import { isTier2User } from '@/lib/kyc';
 
 export const dynamic = 'force-dynamic';
 
@@ -142,6 +143,32 @@ export async function POST(request: NextRequest) {
         { error: 'Invalid or missing ad trade direction (BUY/SELL).' },
         { status: 400 }
       );
+    }
+
+    // Enforce Tier 2 KYC at the endpoint actually used by the ad-creation page.
+    // This check is server-side and must fail closed if the profile cannot be verified.
+    if (adSide === 'SELL') {
+      const adminClient = getSupabaseAdminClient();
+      const { data: sellerProfile, error: sellerProfileError } = await adminClient
+        .from('profiles')
+        .select('kyc_status')
+        .eq('id', user.id)
+        .maybeSingle();
+
+      if (sellerProfileError) {
+        console.error('[P2P Ad KYC Check] profile lookup failed:', sellerProfileError);
+        return NextResponse.json(
+          { error: 'Unable to verify your KYC status right now. Please try again.', code: 'KYC_CHECK_UNAVAILABLE' },
+          { status: 503 }
+        );
+      }
+
+      if (!isTier2User(sellerProfile)) {
+        return NextResponse.json(
+          { error: 'KYC verification is required to sell.', code: 'KYC_REQUIRED', requires_kyc: true },
+          { status: 403 }
+        );
+      }
     }
 
     const requestedMax = Number(body.max_amount ?? body.max_limit ?? body.maxAmount ?? 5000);
