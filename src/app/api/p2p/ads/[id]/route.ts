@@ -369,7 +369,10 @@ export async function DELETE(
 ) {
   try {
     const resolvedParams = await Promise.resolve(params);
-    const { id } = resolvedParams;
+    const id = (resolvedParams.id || '').trim();
+    if (!id) {
+      return NextResponse.json({ error: 'Advertisement ID is required.' }, { status: 400 });
+    }
 
     const cookieHeader = cookies();
     const cookieStore = typeof (cookieHeader as any)?.then === 'function' ? await cookieHeader : cookieHeader;
@@ -417,6 +420,16 @@ export async function DELETE(
 
     if (authError || !user) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+
+    try {
+      const { assertUserNotEmergencyFrozen } = await import('@/lib/user-freeze');
+      await assertUserNotEmergencyFrozen(user.id);
+    } catch (freezeErr: any) {
+      return NextResponse.json(
+        { error: freezeErr.message || 'Your account is under an emergency security freeze.', code: 'USER_EMERGENCY_FROZEN' },
+        { status: 403 }
+      );
     }
 
     // Resolve ad across ads / p2p_ads using universal resolver
