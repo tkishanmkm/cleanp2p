@@ -252,14 +252,14 @@ export async function POST(req: Request) {
         .eq('fiat_symbol', rawFiat)
         .maybeSingle();
 
-      if (marketError || !marketRow || !marketRow.price_in_fiat || Number(marketRow.price_in_fiat) <= 0) {
+      const refPrice = Number(marketRow?.price_in_fiat);
+      if (marketError || !marketRow || !Number.isFinite(refPrice) || refPrice <= 0) {
+        console.error('[Market price lookup failed in /api/ads/create]:', marketError || 'Missing or invalid reference price');
         return NextResponse.json(
-          { error: `Market reference price is currently unavailable for ${rawAsset}/${rawFiat}. Please try again later.` },
-          { status: 400 }
+          { error: `Market reference price is currently unavailable for ${rawAsset}/${rawFiat}. Please try again later.`, code: 'MARKET_PRICE_UNAVAILABLE' },
+          { status: 503 }
         );
       }
-
-      const refPrice = Number(marketRow.price_in_fiat);
       const minAllowedPrice = refPrice * 0.50;
       const maxAllowedPrice = refPrice * 1.50;
 
