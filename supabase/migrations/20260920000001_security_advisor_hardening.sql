@@ -9,25 +9,59 @@
 -- 5. Revoke anon/public execution from sensitive RPCs (Warn 0028 & 0029)
 -- ==============================================================================
 
--- 1. Recreate admin_financial_overview VIEW with security_invoker = true
--- Exactly matching table schemas (user_wallets, sweep_logs, withdrawals, escrow_ledger)
+-- 1. Recreate admin_financial_overview VIEW with security_invoker = true.
+-- Legacy financial relations vary between installations, so optional metrics default to zero
+-- when their backing relation/columns are absent. Never make the full migration fail for them.
 DROP VIEW IF EXISTS public.admin_financial_overview CASCADE;
 
-CREATE OR REPLACE VIEW public.admin_financial_overview
-WITH (security_invoker = true)
-AS
-SELECT 
-    COALESCE((SELECT SUM(COALESCE(main_balance, 0) + COALESCE(locked_balance, 0)) FROM public.user_wallets WHERE UPPER(asset_symbol::text) = 'USDT'), 0)::NUMERIC AS total_user_usdt_balance,
-    COALESCE((SELECT SUM(COALESCE(main_balance, 0) + COALESCE(locked_balance, 0)) FROM public.user_wallets WHERE UPPER(asset_symbol::text) = 'BTC'), 0)::NUMERIC AS total_user_btc_balance,
-    COALESCE((SELECT SUM(COALESCE(main_balance, 0) + COALESCE(locked_balance, 0)) FROM public.user_wallets WHERE UPPER(asset_symbol::text) = 'ETH'), 0)::NUMERIC AS total_user_eth_balance,
-    COALESCE((SELECT SUM(COALESCE(main_balance, 0) + COALESCE(locked_balance, 0)) FROM public.user_wallets WHERE UPPER(asset_symbol::text) = 'LTC'), 0)::NUMERIC AS total_user_ltc_balance,
-    COALESCE((SELECT SUM(COALESCE(amount_swept, 0)) FROM public.sweep_logs WHERE UPPER(status::text) = 'SUCCESS'), 0)::NUMERIC AS total_funds_swept,
-    COALESCE((SELECT SUM(COALESCE(fee, 0)) FROM public.withdrawals WHERE UPPER(status::text) IN ('COMPLETED', 'CONFIRMED')), 0)::NUMERIC AS total_withdrawal_fees_collected,
-    COALESCE((SELECT SUM(COALESCE(fee_amount, 0)) FROM public.escrow_ledger), 0)::NUMERIC AS total_p2p_fees_collected,
-    COALESCE((SELECT COUNT(*) FROM public.withdrawals WHERE UPPER(status::text) = 'PENDING' OR requires_admin_approval = true), 0)::BIGINT AS pending_approvals_count;
+DO $view$
+DECLARE
+    v_swept_expr TEXT := '0::NUMERIC';
+    v_withdrawal_fee_expr TEXT := '0::NUMERIC';
+    v_p2p_fee_expr TEXT := '0::NUMERIC';
+    v_pending_expr TEXT := '0::BIGINT';
+BEGIN
+    IF to_regclass('public.sweep_logs') IS NOT NULL
+       AND EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='sweep_logs' AND column_name='amount_swept')
+       AND EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='sweep_logs' AND column_name='status') THEN
+        v_swept_expr := 'COALESCE((SELECT SUM(COALESCE(amount_swept, 0)) FROM public.sweep_logs WHERE UPPER(status::text) = ''SUCCESS''), 0)::NUMERIC';
+    END IF;
+
+    IF to_regclass('public.withdrawals') IS NOT NULL
+       AND EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='withdrawals' AND column_name='fee')
+       AND EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='withdrawals' AND column_name='status') THEN
+        v_withdrawal_fee_expr := 'COALESCE((SELECT SUM(COALESCE(fee, 0)) FROM public.withdrawals WHERE UPPER(status::text) IN (''COMPLETED'', ''CONFIRMED'')), 0)::NUMERIC';
+    END IF;
+
+    IF to_regclass('public.escrow_ledger') IS NOT NULL
+       AND EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='escrow_ledger' AND column_name='fee_amount') THEN
+        v_p2p_fee_expr := 'COALESCE((SELECT SUM(COALESCE(fee_amount, 0)) FROM public.escrow_ledger), 0)::NUMERIC';
+    END IF;
+
+    IF to_regclass('public.withdrawals') IS NOT NULL
+       AND EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='withdrawals' AND column_name='status')
+       AND EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='withdrawals' AND column_name='requires_admin_approval') THEN
+        v_pending_expr := 'COALESCE((SELECT COUNT(*) FROM public.withdrawals WHERE UPPER(status::text) = ''PENDING'' OR requires_admin_approval = true), 0)::BIGINT';
+    END IF;
+
+    EXECUTE format($sql$
+        CREATE VIEW public.admin_financial_overview
+        WITH (security_invoker = true)
+        AS
+        SELECT
+            COALESCE((SELECT SUM(COALESCE(main_balance, 0) + COALESCE(locked_balance, 0)) FROM public.user_wallets WHERE UPPER(asset_symbol::text) = 'USDT'), 0)::NUMERIC AS total_user_usdt_balance,
+            COALESCE((SELECT SUM(COALESCE(main_balance, 0) + COALESCE(locked_balance, 0)) FROM public.user_wallets WHERE UPPER(asset_symbol::text) = 'BTC'), 0)::NUMERIC AS total_user_btc_balance,
+            COALESCE((SELECT SUM(COALESCE(main_balance, 0) + COALESCE(locked_balance, 0)) FROM public.user_wallets WHERE UPPER(asset_symbol::text) = 'ETH'), 0)::NUMERIC AS total_user_eth_balance,
+            COALESCE((SELECT SUM(COALESCE(main_balance, 0) + COALESCE(locked_balance, 0)) FROM public.user_wallets WHERE UPPER(asset_symbol::text) = 'LTC'), 0)::NUMERIC AS total_user_ltc_balance,
+            %s AS total_funds_swept,
+            %s AS total_withdrawal_fees_collected,
+            %s AS total_p2p_fees_collected,
+            %s AS pending_approvals_count
+    $sql$, v_swept_expr, v_withdrawal_fee_expr, v_p2p_fee_expr, v_pending_expr);
+END
+$view$;
 
 GRANT SELECT ON public.admin_financial_overview TO authenticated, service_role;
-
 
 -- 2. RLS Policies for sweep_logs and sweep_queue (Fixes Info 0008)
 ALTER TABLE IF EXISTS public.sweep_logs ENABLE ROW LEVEL SECURITY;
