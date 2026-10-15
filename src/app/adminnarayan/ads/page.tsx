@@ -96,11 +96,21 @@ export default function AdminAdsPage() {
           ratePercent: ad.rate_percent || ad.ratePercent || 0,
           minAmount: ad.min_amount || ad.minAmount || 0,
           maxAmount: ad.max_amount || ad.maxAmount || 0,
-          paymentMethods: ad.payment_methods || ad.paymentMethods || [],
+          paymentMethods: (() => {
+            const value = ad.payment_methods ?? ad.paymentMethods;
+            if (Array.isArray(value)) return value.map(String);
+            if (typeof value === 'string') return value.split(',').map((item: string) => item.trim()).filter(Boolean);
+            return [];
+          })(),
           terms: ad.terms || '',
           active: ad.active ?? true,
           offerLabel: ad.offer_label || ad.offerLabel,
-          tags: ad.tags || [],
+          tags: (() => {
+            const value = ad.tags;
+            if (Array.isArray(value)) return value.map(String);
+            if (typeof value === 'string') return value.split(',').map((item: string) => item.trim()).filter(Boolean);
+            return [];
+          })(),
           createdAt: ad.created_at || ad.createdAt || new Date().toISOString(),
         }));
 
