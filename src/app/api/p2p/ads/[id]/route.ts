@@ -237,10 +237,15 @@ export async function PATCH(
       }
       const coin = String(rawBody.coin ?? rawBody.crypto ?? rawBody.asset_symbol ?? existingAd.crypto ?? existingAd.coin ?? existingAd.asset ?? 'USDT').toUpperCase();
       const fiat = String(rawBody.fiat ?? rawBody.fiat_currency ?? rawBody.fiat_symbol ?? existingAd.fiat ?? existingAd.fiat_currency ?? 'USD').toUpperCase();
-      const marketClient = createClient(
-        process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL || 'https://placeholder.supabase.co',
-        process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'placeholder-anon-key'
-      );
+      const marketSupabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL;
+      const marketServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+      if (!marketSupabaseUrl || !marketServiceRoleKey) {
+        console.error('Supabase configuration is missing for fixed-price market validation.');
+        return NextResponse.json({ error: 'Service temporarily unavailable.' }, { status: 503 });
+      }
+      const marketClient = createClient(marketSupabaseUrl, marketServiceRoleKey, {
+        auth: { persistSession: false, autoRefreshToken: false },
+      });
       const { data: marketRow, error: marketError } = await marketClient
         .from('crypto_market_prices')
         .select('price_in_fiat, updated_at')
