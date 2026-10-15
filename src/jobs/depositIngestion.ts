@@ -1267,14 +1267,46 @@ async function scanTronDeposits(
       }
     }
 
-    // 4. Strategy C: JSON-RPC eth_getLogs on configured RPC endpoint (Alchemy TRON compatible)
+    // 4. Strategy C: JSON-RPC eth_getLogs on configured RPC endpoint (Alchemy TRON compatible).
+    // A persisted cursor is required so an outage cannot permanently hide older TRON events.
     if (latestBlock && (tronHost.includes('alchemy.com') || tronHost.includes('rpc'))) {
       try {
-        const scanWindow = 100;
-        const fromBlock = Math.max(0, latestBlock - scanWindow);
+        const checkpointNetwork = 'TRC20';
+        const { data: checkpoint, error: checkpointError } = await supabaseAdmin
+          .from('deposit_scan_checkpoints')
+          .select('last_scanned_block')
+          .eq('network', checkpointNetwork)
+          .maybeSingle();
+        if (checkpointError) {
+          throw new Error(`Failed to read TRON deposit checkpoint: ${checkpointError.message}`);
+        }
+
+        let fromBlock: number;
+        let expectedCheckpointBlock: number;
+        if (checkpoint) {
+          const lastScannedBlock = Number(checkpoint.last_scanned_block);
+          if (!Number.isSafeInteger(lastScannedBlock) || lastScannedBlock < 0 || lastScannedBlock >= Number.MAX_SAFE_INTEGER) {
+            throw new Error('Invalid stored TRON deposit checkpoint');
+          }
+          fromBlock = lastScannedBlock + 1;
+          expectedCheckpointBlock = lastScannedBlock;
+        } else {
+          const startBlockEnv = process.env.TRON_DEPOSIT_START_BLOCK;
+          if (!startBlockEnv || !/^\\d+$/.test(startBlockEnv)) {
+            throw new Error('Missing TRON_DEPOSIT_START_BLOCK; configure the verified historical start block before first scan');
+          }
+          fromBlock = Number(startBlockEnv);
+          if (!Number.isSafeInteger(fromBlock) || fromBlock < 0) {
+            throw new Error('Invalid TRON_DEPOSIT_START_BLOCK');
+          }
+          expectedCheckpointBlock = fromBlock - 1;
+        }
+
+        // Bound each cycle so subsequent runs catch up after downtime.
+        const toBlock = Math.min(latestBlock, fromBlock + 99);
         const ranges: Array<{ from: number; to: number }> = [];
-        for (let b = fromBlock; b <= latestBlock; b += 9) {
-          ranges.push({ from: b, to: Math.min(b + 8, latestBlock) });
+        for (let b = fromBlock; b <= toBlock; b += 9) {
+          ranges.push({ from: b, to: Math.min(b + 8, toBlock) });
         }
 
         const allLogs: any[] = [];
@@ -1401,6 +1433,24 @@ async function scanTronDeposits(
             if (res?.status === 'credited' || (res?.success && confirmations >= TRON_CONFIG.requiredConfirmations)) {
               credited++;
             }
+          }
+        }
+
+        // Persist progress only after the entire bounded range succeeded, including
+        // verification and database handling for every matching monitored event.
+        if (fromBlock <= toBlock && errors.length === 0) {
+          const { data: checkpointAdvanced, error: checkpointWriteError } = await supabaseAdmin.rpc(
+            'advance_deposit_scan_checkpoint',
+            {
+              p_network: checkpointNetwork,
+              p_expected_previous_block: expectedCheckpointBlock,
+              p_new_block: toBlock,
+            }
+          );
+          if (checkpointWriteError) {
+            errors.push(`Failed to persist TRON deposit checkpoint: ${checkpointWriteError.message}`);
+          } else if (checkpointAdvanced !== true) {
+            errors.push('TRON deposit checkpoint compare-and-set failed; another worker may have advanced it');
           }
         }
       } catch (rpcErr: any) {
