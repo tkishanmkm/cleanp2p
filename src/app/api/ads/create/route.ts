@@ -440,6 +440,10 @@ export async function POST(req: Request) {
       cleanPayload.unit_price = effectivePrice;
     }
 
+    // Persist the validated price consistently for fixed and floating ads.
+    cleanPayload.price = effectivePrice;
+    cleanPayload.unit_price = effectivePrice;
+
     // 6. Derive advertised crypto quantities server-side for both BUY and SELL.
     // min_amount/max_amount are fiat limits; total_amount/available_amount are crypto quantities.
     const maxFiatAmount = Number(cleanPayload.max_amount);
