@@ -159,3 +159,27 @@ assert.match(worker, /const indexRequired =\s*[\s\S]*normNet === 'BTC'[\s\S]*nor
   'confirmation worker must require output/event indexes for UTXO outputs and supported token events');
 assert.match(worker, /Required output\/event index is missing; credit RPC not called\./,
   'confirmation worker must keep deposits pending when required index is missing');
+
+
+// Migration compatibility preflight: fail CI if the database RPC signature,
+ // worker argument, or checkpoint access controls drift independently.
+const oldSignature = 'public.process_deposit_atomic(text,text,text,numeric,text,integer,bigint,text,text,integer,text)';
+const newSignature = 'public.process_deposit_atomic(text,text,text,numeric,text,integer,bigint,text,text,integer,text,text)';
+assert.match(sql, new RegExp('DROP FUNCTION\\\\s+' + oldSignature.replace(/[.*+?^${}()|[\\]\\\\]/g, '\\\\$&'), 'migration must explicitly remove the obsolete 11-argument RPC signature before creating the 12-argument signature');
+assert.match(sql, /CREATE OR REPLACE FUNCTION public\\.process_deposit_atomic\\([\\s\\S]*?p_block_hash text DEFAULT NULL::text\\)/,
+  'migration must define the new RPC signature with p_block_hash as the twelfth argument');
+assert.match(sql, /REVOKE ALL ON FUNCTION public\\.process_deposit_atomic\\(text,text,text,numeric,text,integer,bigint,text,text,integer,text,text\\) FROM PUBLIC;/,
+  'new RPC signature must revoke inherited PUBLIC execution');
+assert.match(sql, /GRANT EXECUTE ON FUNCTION public\\.process_deposit_atomic\\(text,text,text,numeric,text,integer,bigint,text,text,integer,text,text\\) TO service_role;/,
+  'new RPC signature must grant execution to service_role');
+
+const checkpointMigration = readFileSync('supabase/migrations/20261015090000_create_deposit_scan_checkpoints.sql', 'utf8');
+const checkpointRpcMigration = readFileSync('supabase/migrations/20261015100000_compare_and_set_deposit_scan_checkpoint.sql', 'utf8');
+assert.match(checkpointMigration, /CREATE TABLE IF NOT EXISTS public\\.deposit_scan_checkpoints/);
+assert.match(checkpointMigration, /REVOKE ALL ON TABLE public\\.deposit_scan_checkpoints FROM PUBLIC, anon, authenticated/);
+assert.match(checkpointRpcMigration, /CREATE OR REPLACE FUNCTION public\\.advance_deposit_scan_checkpoint/);
+assert.match(checkpointRpcMigration, /REVOKE ALL ON FUNCTION public\\.advance_deposit_scan_checkpoint\\(text, bigint, bigint\\) FROM PUBLIC, anon, authenticated/);
+assert.match(checkpointRpcMigration, /GRANT EXECUTE ON FUNCTION public\\.advance_deposit_scan_checkpoint\\(text, bigint, bigint\\) TO service_role/);
+assert.match(workerForHash.slice(rpcCall, rpcCall + 1000), /p_block_hash: canonicalVerifiedBlockHash/,
+  'worker must send canonical block hash to match the migrated RPC signature');
+console.log('Deposit RPC migration compatibility static checks passed. This is not a live migration test.');
