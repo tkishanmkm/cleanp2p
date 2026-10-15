@@ -351,5 +351,32 @@ assert.doesNotMatch(releaseFn, /raw_user_meta_data|user_metadata/i,
 assert.match(sql, /BEGIN;[\s\S]*COMMIT;\s*$/,
   'migration must be transaction-wrapped');
 
+
+const hotWalletNonceMigrationPath = join(
+  process.cwd(),
+  'supabase/migrations/20261001040000_final_production_consistency_hardening.sql'
+);
+const hotWalletNonceMigrationSql = readFileSync(hotWalletNonceMigrationPath, 'utf8');
+assert.match(
+  hotWalletNonceMigrationSql,
+  /ALTER TABLE public\\.hot_wallet_nonces ADD COLUMN IF NOT EXISTS chain_id INTEGER;/,
+  'hot-wallet nonce migration must upgrade the legacy network_code-keyed table in place'
+);
+assert.match(
+  hotWalletNonceMigrationSql,
+  /UPDATE public\\.hot_wallet_nonces[\\s\\S]*?WHEN 'ERC20' THEN 1[\\s\\S]*?WHEN 'BEP20' THEN 56[\\s\\S]*?WHERE chain_id IS NULL;/,
+  'existing ERC20 and BEP20 nonce rows must be mapped to their EVM chain IDs'
+);
+assert.match(
+  hotWalletNonceMigrationSql,
+  /CREATE UNIQUE INDEX IF NOT EXISTS idx_hot_wallet_nonces_chain_id[\\s\\S]*?WHERE chain_id IS NOT NULL;/,
+  'chain ID mapping must be unique without rejecting legacy non-EVM nonce rows'
+);
+assert.match(
+  hotWalletNonceMigrationSql,
+  /INSERT INTO public\\.hot_wallet_nonces[\\s\\S]*?network_code, current_nonce, hot_wallet_address[\\s\\S]*?ON CONFLICT DO NOTHING[\\s\\S]*?SELECT current_nonce INTO v_current_nonce[\\s\\S]*?WHERE chain_id = v_chain_id[\\s\\S]*?FOR UPDATE;/,
+  'nonce allocation must preserve legacy required columns and lock the canonical chain row'
+);
+
 console.log('PASS: escrow fee migration static safety checks');
 console.log('NOTE: run integration tests against a fully initialized disposable Supabase project before deployment.');
