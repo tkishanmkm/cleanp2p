@@ -59,6 +59,11 @@ BEGIN
         RAISE EXCEPTION 'Invalid buyer or seller UUID in trade %', p_trade_id;
     END IF;
 
+    -- Reject invalid fee data before wallet locks or settlement mutations.
+    IF COALESCE(v_trade.escrow_fee, 0) < 0 THEN
+        RAISE EXCEPTION 'Invalid negative escrow fee for trade %', p_trade_id;
+    END IF;
+
     v_total_escrow := v_trade.crypto_amount + COALESCE(v_trade.escrow_fee, 0.0);
 
     -- 3. Lock Wallet Assets FOR UPDATE (Defensive ::TEXT casting)
@@ -241,9 +246,6 @@ BEGIN
     );
 
     -- Record platform fee atomically with escrow settlement.
-    IF COALESCE(v_trade.escrow_fee, 0) < 0 THEN
-        RAISE EXCEPTION 'Invalid negative escrow fee for trade %', p_trade_id;
-    END IF;
     IF COALESCE(v_trade.escrow_fee, 0) > 0 THEN
         PERFORM public.record_platform_ledger_entry(
             p_entry_type := 'trade_fee_collected',
