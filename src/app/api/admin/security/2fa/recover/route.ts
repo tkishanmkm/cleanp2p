@@ -30,6 +30,10 @@ export async function POST(req: NextRequest) {
       .eq('id', adminId)
       .single();
 
+    if (!profile) {
+      return NextResponse.json({ error: 'Administrator security profile not found' }, { status: 403 });
+    }
+
     if (!profile.admin_2fa_recovery_hash) {
       return NextResponse.json({ error: 'No 2FA recovery password exists for this account' }, { status: 400 });
     }
