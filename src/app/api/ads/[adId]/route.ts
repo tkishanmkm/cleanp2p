@@ -941,6 +941,9 @@ export async function PUT(
     });
   } catch (err: any) {
     console.error('Error in PUT /api/ads/[adId]:', err);
-    return NextResponse.json({ error: err.message || 'Failed to update ad' }, { status: 500 });
+    return NextResponse.json(
+      { error: 'Unable to update advertisement. Please try again later.', code: 'AD_UPDATE_FAILED' },
+      { status: 500 }
+    );
   }
 }
