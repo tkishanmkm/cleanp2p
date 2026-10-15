@@ -95,7 +95,15 @@ export async function POST(req: Request) {
       );
     }
 
-    const formData = await req.json();
+    let formData: unknown;
+    try {
+      formData = await req.json();
+    } catch {
+      return NextResponse.json(
+        { error: 'Request body must contain valid JSON.', code: 'INVALID_JSON' },
+        { status: 400 }
+      );
+    }
     if (!formData || typeof formData !== 'object' || Array.isArray(formData)) {
       return NextResponse.json(
         { error: 'Request body must be a JSON object.', code: 'INVALID_REQUEST_BODY' },
