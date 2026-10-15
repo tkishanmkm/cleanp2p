@@ -529,10 +529,10 @@ export async function POST(request: NextRequest) {
   } catch (err: any) {
     console.error('Unhandled ad creation error:', err);
     return NextResponse.json(
-      { 
-        error: err.message || 'Internal Server Error',
-        realError: String(err)
-      }, 
+      {
+        error: 'Unable to create advertisement. Please try again later.',
+        code: 'AD_CREATION_FAILED',
+      },
       { status: 500 }
     );
   }
