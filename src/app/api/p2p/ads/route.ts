@@ -158,7 +158,7 @@ export async function POST(request: NextRequest) {
 
     const priceVal = body.price !== undefined && body.price !== null && body.price !== '' ? Number(body.price) : null;
     const marginVal = Number(body.margin ?? body.rate_percent ?? body.margin_percentage ?? body.price_margin ?? 0);
-    const pricingType = body.pricing_type || (body.rate_type === 'fixed' || body.is_fixed ? 'FIXED' : 'FLOAT');
+    const pricingType = String(body.pricing_type ?? (body.rate_type === 'fixed' || body.is_fixed ? 'FIXED' : 'FLOAT')).trim().toUpperCase();
     const rawPaymentWindow = Number(body.payment_window ?? body.payment_window_minutes ?? 30);
     if (!Number.isInteger(rawPaymentWindow) || rawPaymentWindow < 30 || rawPaymentWindow > 1440) {
       return NextResponse.json(
