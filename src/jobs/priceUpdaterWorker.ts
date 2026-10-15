@@ -1,7 +1,7 @@
 import { createClient } from '@supabase/supabase-js';
 
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL || 'https://placeholder.supabase.co';
-const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'placeholder-key';
+const supabaseUrl = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL || '';
+const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
 
 const supabaseAdmin = createClient(supabaseUrl, supabaseKey, {
   auth: {
@@ -59,6 +59,11 @@ export interface PriceUpdateResult {
  * and upserts them into public.crypto_market_prices.
  */
 export async function runMarketPriceUpdate(): Promise<PriceUpdateResult> {
+  if (!supabaseUrl || !supabaseKey) {
+    console.error('[Market Prices Worker] Missing Supabase URL or service-role key.');
+    return { success: false, error: 'SUPABASE_SERVICE_CONFIGURATION_MISSING' };
+  }
+
   try {
     // 1. Fetch Live Global Fiat Rates from Live Providers
     let usdToFiat: Record<string, number> = {};
