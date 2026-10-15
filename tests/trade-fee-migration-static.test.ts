@@ -445,5 +445,10 @@ assert.match(marketPriceWorker, /if \(!supabaseUrl \|\| !supabaseKey\)[\s\S]*?SU
 assert.doesNotMatch(marketPriceWorker, /NEXT_PUBLIC_SUPABASE_ANON_KEY|placeholder\.supabase\.co|placeholder-key/,
   'market-price worker must not fall back to public anon credentials or placeholder configuration');
 
+const marketPriceCronRoutePath = join(process.cwd(), 'src/app/api/cron/update-prices/route.ts');
+const marketPriceCronRoute = readFileSync(marketPriceCronRoutePath, 'utf8');
+assert.match(marketPriceCronRoute, /result\.error === 'SUPABASE_SERVICE_CONFIGURATION_MISSING'[\s\S]*?\? 503 : 500/,
+  'cron endpoint must report missing server credentials as service unavailable, not a generic internal error');
+
 console.log('PASS: escrow fee migration static safety checks');
 console.log('NOTE: run integration tests against a fully initialized disposable Supabase project before deployment.');
