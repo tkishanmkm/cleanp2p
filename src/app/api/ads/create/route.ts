@@ -202,13 +202,20 @@ export async function POST(req: Request) {
 
     // Validate min/max and price constraints
     const effectivePrice = cleanPayload.price !== null && cleanPayload.price !== undefined ? cleanPayload.price : (cleanPayload.fixed_rate ? Number(cleanPayload.fixed_rate) : null);
-    if (effectivePrice !== null && effectivePrice <= 0) {
-      return NextResponse.json({ error: 'Ad price must be greater than 0.' }, { status: 400 });
+    if (effectivePrice !== null && (!Number.isFinite(effectivePrice) || effectivePrice <= 0)) {
+      return NextResponse.json({ error: 'Ad price must be a valid number greater than 0.' }, { status: 400 });
     }
-    if (cleanPayload.min_amount !== null && cleanPayload.min_amount <= 0) {
-      return NextResponse.json({ error: 'Minimum trade limit must be greater than 0.' }, { status: 400 });
+    if (cleanPayload.min_amount !== null && cleanPayload.min_amount !== undefined &&
+        (!Number.isFinite(cleanPayload.min_amount) || cleanPayload.min_amount <= 0)) {
+      return NextResponse.json({ error: 'Minimum trade limit must be a valid number greater than 0.' }, { status: 400 });
     }
-    if (cleanPayload.min_amount !== null && cleanPayload.max_amount !== null && cleanPayload.max_amount < cleanPayload.min_amount) {
+    if (cleanPayload.max_amount !== null && cleanPayload.max_amount !== undefined &&
+        (!Number.isFinite(cleanPayload.max_amount) || cleanPayload.max_amount <= 0)) {
+      return NextResponse.json({ error: 'Maximum trade limit must be a valid number greater than 0.' }, { status: 400 });
+    }
+    if (cleanPayload.min_amount !== null && cleanPayload.min_amount !== undefined &&
+        cleanPayload.max_amount !== null && cleanPayload.max_amount !== undefined &&
+        cleanPayload.max_amount < cleanPayload.min_amount) {
       return NextResponse.json({ error: 'Maximum trade limit must be greater than or equal to minimum limit.' }, { status: 400 });
     }
 
