@@ -41,6 +41,7 @@ export default function MyTicketsPage() {
 
             const mapped: SupportTicket[] = (data || []).map((t: any) => ({
                 id: t.id,
+                email: t.email || authUser.email || '',
                 userId: t.user_id || t.userId,
                 category: t.category,
                 subject: t.subject,
