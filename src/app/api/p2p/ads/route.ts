@@ -156,7 +156,7 @@ export async function POST(request: NextRequest) {
       }, { status: 400 });
     }
 
-    const priceVal = body.price !== undefined && body.price !== null && body.price !== '' ? Number(body.price) : null;
+    let priceVal = body.price !== undefined && body.price !== null && body.price !== '' ? Number(body.price) : null;
     const marginVal = Number(body.margin ?? body.rate_percent ?? body.margin_percentage ?? body.price_margin ?? 0);
     const pricingType = String(body.pricing_type ?? (body.rate_type === 'fixed' || body.is_fixed ? 'FIXED' : 'FLOAT')).trim().toUpperCase();
     const rawPaymentWindow = Number(body.payment_window ?? body.payment_window_minutes ?? 30);
@@ -229,10 +229,33 @@ export async function POST(request: NextRequest) {
         );
       }
     } else {
-      // Floating/margin pricing validation (-50% to +50%)
+      // Floating ads still require a positive stored price in the canonical ads schema.
       if (marginVal < -50 || marginVal > 50) {
         return NextResponse.json(
           { error: 'Margin percentage for dynamic pricing must be between -50% and +50%.' },
+          { status: 400 }
+        );
+      }
+      if (priceVal === null) {
+        const adminClient = getSupabaseAdminClient();
+        const { data: marketRow, error: marketError } = await adminClient
+          .from('crypto_market_prices')
+          .select('price_in_fiat, updated_at')
+          .eq('asset_symbol', coinType)
+          .eq('fiat_symbol', fiatType)
+          .maybeSingle();
+        const referencePrice = Number(marketRow?.price_in_fiat);
+        if (marketError || !Number.isFinite(referencePrice) || referencePrice <= 0) {
+          return NextResponse.json(
+            { error: `Market reference price is unavailable for ${coinType}/${fiatType}; a floating price cannot be calculated.`, code: 'MARKET_PRICE_UNAVAILABLE' },
+            { status: 400 }
+          );
+        }
+        priceVal = Number((referencePrice * (1 + marginVal / 100)).toFixed(8));
+      }
+      if (!Number.isFinite(priceVal) || priceVal <= 0) {
+        return NextResponse.json(
+          { error: 'A valid positive price is required for floating ads.', code: 'INVALID_FLOATING_PRICE' },
           { status: 400 }
         );
       }
