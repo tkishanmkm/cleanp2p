@@ -195,6 +195,12 @@ export async function POST(req: Request) {
       delete cleanPayload.fixed_rate;
     }
 
+    // Normalize the camelCase API alias and never persist duplicate client field names.
+    if (cleanPayload.payment_methods === undefined && strippedFormData.paymentMethods !== undefined) {
+      cleanPayload.payment_methods = strippedFormData.paymentMethods;
+    }
+    delete cleanPayload.paymentMethods;
+
     if (cleanPayload.min_order !== undefined) cleanPayload.min_order = cleanPayload.min_order ? Number(cleanPayload.min_order) : null;
     if (cleanPayload.max_order !== undefined) cleanPayload.max_order = cleanPayload.max_order ? Number(cleanPayload.max_order) : null;
     if (cleanPayload.total_amount !== undefined) cleanPayload.total_amount = cleanPayload.total_amount ? Number(cleanPayload.total_amount) : null;
