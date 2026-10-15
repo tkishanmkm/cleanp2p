@@ -456,6 +456,13 @@ export async function PATCH(
       );
     }
 
+    if (body.status !== undefined && (typeof body.status !== 'string' || body.status.trim().length === 0 || body.status.trim().length > 40)) {
+      return NextResponse.json(
+        { error: 'The status field must be a non-empty string of at most 40 characters.', code: 'INVALID_AD_STATUS' },
+        { status: 400 }
+      );
+    }
+
     if (body.active !== undefined && body.status !== undefined) {
       const statusMatchesActive = String(body.status).toUpperCase().trim() === (body.active ? 'ACTIVE' : 'INACTIVE');
       if (!statusMatchesActive) {
