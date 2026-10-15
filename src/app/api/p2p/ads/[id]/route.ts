@@ -427,8 +427,13 @@ export async function DELETE(
     const cookieHeader = cookies();
     const cookieStore = typeof (cookieHeader as any)?.then === 'function' ? await cookieHeader : cookieHeader;
 
-    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL || 'https://placeholder.supabase.co';
-    const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'placeholder-anon-key';
+    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL;
+    const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+
+    if (!supabaseUrl || !supabaseAnonKey) {
+      console.error('Supabase public configuration is missing for ad deletion.');
+      return NextResponse.json({ error: 'Service temporarily unavailable.' }, { status: 503 });
+    }
 
     const supabase = createServerClient(
       supabaseUrl,
@@ -496,10 +501,17 @@ export async function DELETE(
       return NextResponse.json({ error: 'Forbidden. You do not own this advertisement.' }, { status: 403 });
     }
 
-    const supabaseAdmin = createClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL || 'https://placeholder.supabase.co',
-      process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'placeholder-anon-key'
-    );
+    const supabaseServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+
+    // Deletion uses privileged database writes; never fall back to the anonymous key.
+    if (!supabaseServiceRoleKey) {
+      console.error('Supabase service-role configuration is missing for ad deletion.');
+      return NextResponse.json({ error: 'Service temporarily unavailable.' }, { status: 503 });
+    }
+
+    const supabaseAdmin = createClient(supabaseUrl, supabaseServiceRoleKey, {
+      auth: { persistSession: false, autoRefreshToken: false },
+    });
 
     const { p2pAdsRow, adsRow } = await resolveBothTargetRows(existingAd, id, supabaseAdmin);
 
