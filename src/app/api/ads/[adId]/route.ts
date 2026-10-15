@@ -205,8 +205,9 @@ export async function DELETE(
     const admin = getSupabaseAdminClient();
 
     // 1. Authenticate Requesting User
-    const authHeader = request.headers.get('Authorization') || request.headers.get('authorization');
-    const bearerToken = authHeader?.startsWith('Bearer ') ? authHeader.substring(7).trim() : null;
+    const authHeader = request.headers.get('authorization');
+    const bearerMatch = authHeader?.match(/^Bearer\s+(.+)$/i);
+    const bearerToken = bearerMatch?.[1]?.trim() || null;
 
     let user: any = null;
     let authError: any = null;
@@ -377,8 +378,9 @@ export async function PATCH(
     const admin = getSupabaseAdminClient();
 
     // 1. Authenticate Requesting User
-    const authHeader = request.headers.get('Authorization') || request.headers.get('authorization');
-    const bearerToken = authHeader?.startsWith('Bearer ') ? authHeader.substring(7).trim() : null;
+    const authHeader = request.headers.get('authorization');
+    const bearerMatch = authHeader?.match(/^Bearer\s+(.+)$/i);
+    const bearerToken = bearerMatch?.[1]?.trim() || null;
 
     let user: any = null;
     let authError: any = null;
@@ -594,8 +596,9 @@ export async function PUT(
     const admin = getSupabaseAdminClient();
 
     // 1. Authenticate Requesting User
-    const authHeader = request.headers.get('Authorization') || request.headers.get('authorization');
-    const bearerToken = authHeader?.startsWith('Bearer ') ? authHeader.substring(7).trim() : null;
+    const authHeader = request.headers.get('authorization');
+    const bearerMatch = authHeader?.match(/^Bearer\s+(.+)$/i);
+    const bearerToken = bearerMatch?.[1]?.trim() || null;
 
     let user: any = null;
     let authError: any = null;
