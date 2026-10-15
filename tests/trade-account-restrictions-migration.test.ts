@@ -15,6 +15,10 @@ assert.match(sql, /COALESCE\(p\.is_on_hold, FALSE\)/);
 assert.match(sql, /LOWER\(COALESCE\(p\.account_status, ''\)\) IN \('on_hold', 'suspended', 'blocked'\)/);
 assert.match(sql, /LOWER\(COALESCE\(p\.status::TEXT, ''\)\) IN \('banned', 'restricted', 'suspended', 'disabled', 'deactivated'\)/);
 assert.match(sql, /DETAIL = 'ACCOUNT_RESTRICTED'/);
+assert.match(sql, /WHERE p\.id IN \(v_effective_caller, v_ad_user_id\)/, 'database guard must cover both the caller and advertisement owner');
+assert.match(sql, /COALESCE\(p\.is_banned, FALSE\)/);
+assert.match(sql, /COALESCE\(p\.is_suspended, FALSE\)/);
+assert.match(sql, /COALESCE\(p\.is_on_hold, FALSE\)/);
 
 const guardIndex = sql.indexOf('5.6 Authoritative account restrictions');
 const walletMutationIndex = sql.indexOf('INSERT INTO public.wallet_assets');
