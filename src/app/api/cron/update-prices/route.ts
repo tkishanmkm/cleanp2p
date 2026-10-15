@@ -26,7 +26,7 @@ export async function GET(request: Request) {
     if (!result.success) {
       return NextResponse.json(
         { success: false, error: result.error },
-        { status: result.error?.includes('UNAVAILABLE') ? 503 : 500 }
+        { status: result.error?.includes('UNAVAILABLE') || result.error === 'SUPABASE_SERVICE_CONFIGURATION_MISSING' ? 503 : 500 }
       );
     }
 
