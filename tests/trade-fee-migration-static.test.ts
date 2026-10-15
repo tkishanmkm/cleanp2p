@@ -450,5 +450,12 @@ const marketPriceCronRoute = readFileSync(marketPriceCronRoutePath, 'utf8');
 assert.match(marketPriceCronRoute, /result\.error === 'SUPABASE_SERVICE_CONFIGURATION_MISSING'[\s\S]*?\? 503 : 500/,
   'cron endpoint must report missing server credentials as service unavailable, not a generic internal error');
 
+assert.ok(
+  marketPriceCronRoute.indexOf('if (!auth.authorized)') < marketPriceCronRoute.indexOf('await runMarketPriceUpdate()'),
+  'price cron route must reject unauthorized requests before running the market-price worker'
+);
+assert.match(marketPriceCronRoute, /status: 401/,
+  'price cron route must return HTTP 401 for failed worker authentication');
+
 console.log('PASS: escrow fee migration static safety checks');
 console.log('NOTE: run integration tests against a fully initialized disposable Supabase project before deployment.');
