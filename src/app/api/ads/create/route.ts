@@ -319,7 +319,11 @@ export async function POST(req: Request) {
     }
 
     // Authoritative Server-Side ±50% Reference Market Price Validation
-    const normalizedPricingType = String(cleanPayload.pricing_type || cleanPayload.rate_type || (cleanPayload.is_fixed === true ? 'FIXED' : 'FLOAT')).trim().toUpperCase();
+    const explicitPricingType = strippedFormData.pricing_type ?? strippedFormData.rate_type;
+    if (explicitPricingType !== undefined && (typeof explicitPricingType !== 'string' || explicitPricingType.trim().length === 0 || explicitPricingType.trim().length > 20)) {
+      return NextResponse.json({ error: 'Pricing type must be a non-empty string up to 20 characters.', code: 'INVALID_PRICING_TYPE' }, { status: 400 });
+    }
+    const normalizedPricingType = String(explicitPricingType ?? (cleanPayload.is_fixed === true ? 'FIXED' : 'FLOAT')).trim().toUpperCase();
     if (!['FIXED', 'FLOAT', 'FLOATING', 'MARGIN', 'DYNAMIC'].includes(normalizedPricingType)) {
       return NextResponse.json({ error: 'Unsupported pricing type.', code: 'INVALID_PRICING_TYPE' }, { status: 400 });
     }
