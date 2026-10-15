@@ -1415,6 +1415,52 @@ async function scanTronDeposits(
 }
 
 /**
+ * Fetch the full transaction history exposed by mempool.space-compatible APIs.
+ * The first endpoint returns only the newest page; older pages require the
+ * last transaction ID from the preceding page. A hard page ceiling and cursor
+ * validation fail the scan visibly rather than silently treating partial
+ * history as complete.
+ */
+async function fetchAllUtxoAddressTransactions(apiBase: string, address: string): Promise<any[]> {
+  const transactions: any[] = [];
+  const pageSize = 25;
+  const maxPages = 1000;
+  let lastSeenTxid: string | null = null;
+  const seenCursors = new Set<string>();
+
+  for (let pageNumber = 0; pageNumber < maxPages; pageNumber++) {
+    const url = lastSeenTxid
+      ? `${apiBase}/address/${encodeURIComponent(address)}/txs/chain/${encodeURIComponent(lastSeenTxid)}`
+      : `${apiBase}/address/${encodeURIComponent(address)}/txs`;
+    const res = await fetch(url);
+    if (!res.ok) {
+      throw new Error(`UTXO provider returned HTTP ${res.status} for address transaction page ${pageNumber + 1}`);
+    }
+
+    const page = await res.json();
+    if (!Array.isArray(page)) {
+      throw new Error(`UTXO provider returned invalid transaction page ${pageNumber + 1}`);
+    }
+    if (page.length === 0) return transactions;
+
+    transactions.push(...page);
+    if (page.length < pageSize) return transactions;
+
+    const nextCursor = page[page.length - 1]?.txid;
+    if (typeof nextCursor !== 'string' || !/^[a-fA-F0-9]{64}$/.test(nextCursor)) {
+      throw new Error(`UTXO provider returned an invalid pagination cursor on page ${pageNumber + 1}`);
+    }
+    if (seenCursors.has(nextCursor) || nextCursor === lastSeenTxid) {
+      throw new Error('UTXO provider repeated a transaction-history pagination cursor');
+    }
+    seenCursors.add(nextCursor);
+    lastSeenTxid = nextCursor;
+  }
+
+  throw new Error(`UTXO address history exceeded the ${maxPages}-page safety limit; scan is incomplete`);
+}
+
+/**
  * Scans Bitcoin (BTC Native SegWit / Bech32) UTXO deposits for monitored addresses
  */
 async function scanBtcDeposits(
@@ -1431,13 +1477,7 @@ async function scanBtcDeposits(
 
   for (const btcAddr of Array.from(monitoredBtcAddresses)) {
     try {
-      const res = await fetch(`${btcApiBase}/address/${btcAddr}/txs`);
-      if (!res.ok) {
-        errors.push(`BTC provider returned HTTP ${res.status} for address scan`);
-        continue;
-      }
-      const txs = await res.json();
-      if (!Array.isArray(txs)) continue;
+      const txs = await fetchAllUtxoAddressTransactions(btcApiBase, btcAddr);
 
       for (const tx of txs) {
         if (typeof tx?.txid !== 'string' || !/^[a-fA-F0-9]{64}$/.test(tx.txid) || !Array.isArray(tx.vout)) continue;
@@ -1510,13 +1550,7 @@ async function scanLtcDeposits(
 
   for (const ltcAddr of Array.from(monitoredLtcAddresses)) {
     try {
-      const res = await fetch(`${ltcApiBase}/address/${ltcAddr}/txs`);
-      if (!res.ok) {
-        errors.push(`LTC provider returned HTTP ${res.status} for address scan`);
-        continue;
-      }
-      const txs = await res.json();
-      if (!Array.isArray(txs)) continue;
+      const txs = await fetchAllUtxoAddressTransactions(ltcApiBase, ltcAddr);
 
       for (const tx of txs) {
         if (typeof tx?.txid !== 'string' || !/^[a-fA-F0-9]{64}$/.test(tx.txid) || !Array.isArray(tx.vout)) continue;
@@ -1582,16 +1616,39 @@ export async function refreshPendingDepositConfirmations(): Promise<{
   let newlyCredited = 0;
 
   try {
-    const { data: pendingDeposits, error } = await supabaseAdmin
-      .from('onchain_deposits')
-      .select('*')
-      .eq('status', 'PENDING')
-      .limit(50);
+    // Keyset pagination avoids a fixed first-page ceiling and avoids offset skips
+    // when rows leave PENDING while the refresh is running.
+    const pendingDeposits: any[] = [];
+    const pageSize = 50;
+    let lastPendingId: string | null = null;
+    for (;;) {
+      let query = supabaseAdmin
+        .from('onchain_deposits')
+        .select('*')
+        .eq('status', 'PENDING')
+        .order('id', { ascending: true })
+        .limit(pageSize);
+      if (lastPendingId) query = query.gt('id', lastPendingId);
+      const { data: page, error } = await query;
 
-    if (error) {
-      throw new Error(`Failed to query pending deposits for confirmation refresh: ${error.message}`);
+      if (error) {
+        throw new Error(`Failed to query pending deposits for confirmation refresh: ${error.message}`);
+      }
+      if (!page || page.length === 0) break;
+      pendingDeposits.push(...page);
+
+      const nextId = page[page.length - 1]?.id;
+      if (typeof nextId !== 'string' || !nextId) {
+        throw new Error('Pending deposit page is missing a stable id cursor');
+      }
+      if (lastPendingId && nextId <= lastPendingId) {
+        throw new Error('Pending deposit pagination cursor did not advance');
+      }
+      lastPendingId = nextId;
+      if (page.length < pageSize) break;
     }
-    if (!pendingDeposits || pendingDeposits.length === 0) {
+
+    if (pendingDeposits.length === 0) {
       return { checked: 0, newlyCredited: 0 };
     }
 
