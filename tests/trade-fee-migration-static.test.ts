@@ -457,5 +457,10 @@ assert.ok(
 assert.match(marketPriceCronRoute, /status: 401/,
   'price cron route must return HTTP 401 for failed worker authentication');
 
+assert.match(marketPriceCronRoute, /error: 'Market price update failed'/,
+  'price cron route must return a generic error instead of exposing internal exception details');
+assert.doesNotMatch(marketPriceCronRoute, /error: err\.message/,
+  'price cron route must not send raw exception messages to clients');
+
 console.log('PASS: escrow fee migration static safety checks');
 console.log('NOTE: run integration tests against a fully initialized disposable Supabase project before deployment.');
