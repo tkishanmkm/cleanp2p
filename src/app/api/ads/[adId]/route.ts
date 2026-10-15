@@ -355,7 +355,10 @@ export async function DELETE(
     return NextResponse.json({ success: true, message: 'Ad deleted successfully.' });
   } catch (err: any) {
     console.error('Error in DELETE /api/ads/[adId]:', err);
-    return NextResponse.json({ error: err.message || 'Failed to delete ad' }, { status: 500 });
+    return NextResponse.json(
+      { error: 'Unable to delete advertisement. Please try again later.', code: 'AD_DELETE_FAILED' },
+      { status: 500 }
+    );
   }
 }
 
@@ -569,7 +572,10 @@ export async function PATCH(
     return NextResponse.json({ success: true, status: newStatus, active: isActive });
   } catch (err: any) {
     console.error('Error in PATCH /api/ads/[adId]:', err);
-    return NextResponse.json({ error: err.message || 'Failed to update ad' }, { status: 500 });
+    return NextResponse.json(
+      { error: 'Unable to change advertisement status. Please try again later.', code: 'AD_STATUS_UPDATE_FAILED' },
+      { status: 500 }
+    );
   }
 }
 
