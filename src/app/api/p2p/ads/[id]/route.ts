@@ -110,7 +110,7 @@ export async function GET(
     });
   } catch (err: any) {
     console.error('Error in GET /api/p2p/ads/[id]:', err);
-    return NextResponse.json({ error: err.message || 'Internal server error' }, { status: 500 });
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }
 
