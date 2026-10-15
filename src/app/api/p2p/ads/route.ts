@@ -264,81 +264,45 @@ export async function POST(request: NextRequest) {
     // BALANCE VALIDATION: If user is creating a SELL ad (offering to sell coin), check that minimum limit in coin is present in their account
     if (adSide === 'SELL') {
       const adminClient = getSupabaseAdminClient();
-      let availableBalance = 0;
+      const { data: walletAssets, error: walletAssetsError } = await adminClient
+        .from('wallet_assets')
+        .select('*')
+        .eq('user_id', user.id);
 
-      try {
-        // 1. Check wallet_assets directly by user_id
-        const { data: directAssets } = await adminClient
-          .from('wallet_assets')
-          .select('*')
-          .eq('user_id', user.id);
-
-        if (directAssets && directAssets.length > 0) {
-          const match = directAssets.find((a: any) => {
-            const sym = String(a.asset_symbol || a.asset_code || a.symbol || a.crypto || '').toUpperCase();
-            return sym === coinType.toUpperCase();
-          });
-          if (match) {
-            const avail = Number(match.available ?? match.balance ?? match.amount ?? 0);
-            const locked = Number(match.locked_escrow ?? match.locked ?? match.locked_balance ?? 0);
-            const net = Math.max(0, avail - locked);
-            if (net > availableBalance) availableBalance = net;
-          }
-        }
-
-        // 2. Check user_wallets table
-        const { data: walletData } = await adminClient
-          .from('user_wallets')
-          .select('available_balance, balance, locked_balance')
-          .eq('user_id', user.id)
-          .ilike('asset_symbol', coinType)
-          .maybeSingle();
-
-        if (walletData) {
-          const net = Number(walletData.available_balance ?? (Number(walletData.balance || 0) - Number(walletData.locked_balance || 0)));
-          if (net > availableBalance) availableBalance = net;
-        }
-
-        // 3. Check wallets table
-        const { data: chainWallets } = await adminClient
-          .from('wallets')
-          .select('balance, available_balance, currency, chain')
-          .eq('user_id', user.id);
-
-        if (chainWallets && chainWallets.length > 0) {
-          const matchingWallets = chainWallets.filter((w: any) => 
-            String(w.currency || w.chain || '').toUpperCase() === coinType.toUpperCase()
-          );
-          matchingWallets.forEach((w: any) => {
-            const val = Number(w.available_balance ?? w.balance ?? 0);
-            if (val > availableBalance) availableBalance = val;
-          });
-        }
-
-        // 4. Check profiles table fallback
-        const { data: prof } = await adminClient
-          .from('profiles')
-          .select('*')
-          .eq('id', user.id)
-          .maybeSingle();
-
-        if (prof) {
-          const col = `${coinType.toLowerCase()}_balance`;
-          if (prof[col] !== undefined) {
-            const val = Number(prof[col] || 0);
-            if (val > availableBalance) availableBalance = val;
-          }
-        }
-      } catch (balErr) {
-        console.warn('Balance check error during ad creation:', balErr);
+      // Never create a sell offer when the authoritative wallet balance cannot be verified.
+      if (walletAssetsError) {
+        console.error('Unable to verify wallet balance for sell ad:', walletAssetsError);
+        return NextResponse.json(
+          { error: 'Wallet balance could not be verified. Please retry later.', code: 'WALLET_BALANCE_UNAVAILABLE' },
+          { status: 503 }
+        );
       }
+
+      const matchingAssets = (walletAssets || []).filter((asset: any) => {
+        const symbol = String(asset.asset_symbol || asset.asset_code || asset.symbol || asset.crypto || '').trim().toUpperCase();
+        return symbol === coinType;
+      });
+
+      const availableBalance = matchingAssets.reduce((total: number, asset: any) => {
+        const available = Number(asset.available);
+        if (asset.available !== null && asset.available !== undefined && Number.isFinite(available)) {
+          // Canonical available is already spendable; do not subtract locks twice.
+          return total + Math.max(0, available);
+        }
+        const balance = Number(asset.balance);
+        const locked = Number(asset.locked_balance ?? 0) +
+          Number(asset.locked_escrow ?? 0) +
+          Number(asset.locked_withdrawal ?? 0);
+        if (!Number.isFinite(balance) || !Number.isFinite(locked)) return total;
+        return total + Math.max(0, balance - locked);
+      }, 0);
 
       const effectiveUnitPrice = priceVal && priceVal > 0 ? priceVal : 1;
       const minCoinRequired = requestedMin / effectiveUnitPrice;
 
-      if (availableBalance < minCoinRequired) {
+      if (!Number.isFinite(availableBalance) || availableBalance < minCoinRequired) {
         return NextResponse.json({
-          error: `Insufficient ${coinType} balance. You must have at least ${minCoinRequired.toFixed(6)} ${coinType} in your wallet to create a sell offer with a minimum limit of ${requestedMin} ${fiatType}. Current available: ${availableBalance.toFixed(6)} ${coinType}.`,
+          error: `Insufficient ${coinType} balance or wallet balance unavailable. At least ${minCoinRequired.toFixed(6)} ${coinType} is required; verified available balance: ${Number.isFinite(availableBalance) ? availableBalance.toFixed(6) : '0.000000'} ${coinType}.`,
           code: 'INSUFFICIENT_BALANCE',
         }, { status: 400 });
       }
