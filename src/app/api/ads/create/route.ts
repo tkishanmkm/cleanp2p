@@ -328,6 +328,9 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: 'Unsupported pricing type.', code: 'INVALID_PRICING_TYPE' }, { status: 400 });
     }
     const isFixedPricing = normalizedPricingType === 'FIXED';
+    // Keep persisted legacy boolean semantics aligned with the validated canonical pricing type.
+    cleanPayload.is_fixed = isFixedPricing;
+    cleanPayload.pricing_type = normalizedPricingType;
 
     if (isFixedPricing) {
       if (effectivePrice === null || effectivePrice <= 0) {
