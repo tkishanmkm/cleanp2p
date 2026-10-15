@@ -72,9 +72,9 @@ export default function AdminAdsPage() {
         if (error) throw error;
 
         const formattedAds: P2PAd[] = (data || []).map((ad: any) => ({
-          id: ad.id,
+          id: String(ad.id ?? ''),
           publicAdId: String(ad.public_ad_id || ad.publicAdId || ad.id || ''),
-          userId: ad.user_id || ad.userId,
+          userId: String(ad.user_id ?? ad.userId ?? ''),
           user: {
             ...(ad.user || {}),
             username:
