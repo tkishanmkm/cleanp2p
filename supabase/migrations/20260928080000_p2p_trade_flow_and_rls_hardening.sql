@@ -698,7 +698,7 @@ CREATE POLICY "trades_insert_policy" ON public.trades
 DROP POLICY IF EXISTS "Users and admins can view trade messages" ON public.trade_messages;
 DROP POLICY IF EXISTS "Users can insert trade messages" ON public.trade_messages;
 DROP POLICY IF EXISTS "trade_messages_select_policy" ON public.trade_messages;
-DROP POLICYIF EXISTS "trade_messages_insert_policy" ON public.trade_messages;
+DROP POLICY IF EXISTS "trade_messages_insert_policy" ON public.trade_messages;
 DROP POLICY IF EXISTS "Participants can view trade messages" ON public.trade_messages;
 DROP POLICY IF EXISTS "Participants can insert trade messages" ON public.trade_messages;
 
