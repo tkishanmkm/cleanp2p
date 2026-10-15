@@ -239,7 +239,7 @@ export async function POST(req: Request) {
     }
 
     // Validate min/max and price constraints
-    const effectivePrice = cleanPayload.price !== null && cleanPayload.price !== undefined ? cleanPayload.price : (cleanPayload.fixed_rate ? Number(cleanPayload.fixed_rate) : null);
+    let effectivePrice = cleanPayload.price !== null && cleanPayload.price !== undefined ? cleanPayload.price : (cleanPayload.fixed_rate ? Number(cleanPayload.fixed_rate) : null);
     if (effectivePrice !== null && (!Number.isFinite(effectivePrice) || effectivePrice <= 0)) {
       return NextResponse.json({ error: 'Ad price must be a valid number greater than 0.' }, { status: 400 });
     }
@@ -304,6 +304,30 @@ export async function POST(req: Request) {
           { error: 'Margin percentage for dynamic pricing must be between -50% and +50%.' },
           { status: 400 }
         );
+      }
+      if (effectivePrice === null) {
+        const { data: marketRow, error: marketError } = await supabase
+          .from('crypto_market_prices')
+          .select('price_in_fiat')
+          .eq('asset_symbol', rawAsset)
+          .eq('fiat_symbol', rawFiat)
+          .maybeSingle();
+        const referencePrice = Number(marketRow?.price_in_fiat);
+        if (marketError || !Number.isFinite(referencePrice) || referencePrice <= 0) {
+          console.error('[Floating market price lookup failed in /api/ads/create]:', marketError || 'Missing or invalid reference price');
+          return NextResponse.json(
+            { error: 'Market reference price is currently unavailable. Please try again later.', code: 'MARKET_PRICE_UNAVAILABLE' },
+            { status: 503 }
+          );
+        }
+        effectivePrice = Number((referencePrice * (1 + marginPct / 100)).toFixed(8));
+        if (!Number.isFinite(effectivePrice) || effectivePrice <= 0) {
+          return NextResponse.json(
+            { error: 'Unable to calculate a valid floating price.', code: 'INVALID_FLOATING_PRICE' },
+            { status: 400 }
+          );
+        }
+        cleanPayload.price = effectivePrice;
       }
     }
 
