@@ -41,6 +41,27 @@ assert.match(
   'profile name privacy documentation must remain independent of the optional legacy ads table'
 );
 
+
+const securityHotfixPath = join(
+  process.cwd(),
+  'supabase/migrations/20260907000000_security_hotfix.sql'
+);
+const securityHotfixSql = readFileSync(securityHotfixPath, 'utf8');
+const profileUpdatePolicyStart = securityHotfixSql.indexOf('CREATE POLICY "Users can update own profile"');
+const profileUpdatePolicyEnd = securityHotfixSql.indexOf(';', profileUpdatePolicyStart);
+assert.ok(profileUpdatePolicyStart >= 0 && profileUpdatePolicyEnd > profileUpdatePolicyStart,
+  'security hotfix must define the profile update policy');
+const profileUpdatePolicy = securityHotfixSql.slice(profileUpdatePolicyStart, profileUpdatePolicyEnd);
+assert.doesNotMatch(profileUpdatePolicy, /\b(?:role|is_admin)\b/,
+  'profile update policy must not reference role/is_admin columns absent from canonical profiles schema');
+const checkAdminStart = securityHotfixSql.indexOf('CREATE OR REPLACE FUNCTION public.check_is_admin');
+const checkAdminEnd = securityHotfixSql.indexOf('$;', checkAdminStart);
+assert.ok(checkAdminStart >= 0 && checkAdminEnd > checkAdminStart,
+  'security hotfix must define check_is_admin');
+const checkAdminFunction = securityHotfixSql.slice(checkAdminStart, checkAdminEnd);
+assert.doesNotMatch(checkAdminFunction, /FROM public\.profiles[\s\S]*?\b(?:role|is_admin)\b/,
+  'admin authorization must not query nonexistent role/is_admin profile columns');
+
 const ledgerHelperPath = join(
   process.cwd(),
   'supabase/migrations/20260928000000_platform_ledger_entries.sql'
