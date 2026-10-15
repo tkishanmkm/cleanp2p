@@ -494,14 +494,12 @@ export async function POST(request: NextRequest) {
 
     if (dbError) {
       console.error('[P2P Ad Creation Error]:', dbError);
+      // Keep schema, SQL and internal database details in server logs only.
       return NextResponse.json(
-        { 
-          error: dbError.message || 'Database error creating ad', 
-          realError: `${dbError.message} (Code: ${dbError.code || 'UNKNOWN'}${dbError.details ? ` - ${dbError.details}` : ''})`,
-          code: dbError.code,
-          details: dbError.details,
-          hint: dbError.hint
-        }, 
+        {
+          error: 'Unable to create advertisement. Please review the submitted fields or try again later.',
+          code: 'AD_CREATION_FAILED',
+        },
         { status: 400 }
       );
     }
