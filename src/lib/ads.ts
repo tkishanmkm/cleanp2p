@@ -108,25 +108,24 @@ export async function getMarketplaceAds(
   fiat: string = 'ALL',
   paymentMethod: string = 'ALL'
 ) {
-  // P2P Inversion: To BUY crypto, show SELL ads. To SELL crypto, show BUY ads.
+  // To BUY crypto, show SELL ads; to SELL crypto, show BUY ads.
   const queryType = side === 'BUY' ? 'SELL' : 'BUY';
 
   let query = supabase
-    .from('p2p_ads')
+    .from('ads')
     .select('*')
     .eq('type', queryType)
     .ilike('status', 'active');
 
   if (coin && coin !== 'ALL') {
-    query = query.eq('coin', coin.toUpperCase());
+    query = query.eq('asset_symbol', coin.toUpperCase());
   }
 
   if (fiat && fiat !== 'ALL') {
-    query = query.eq('fiat', fiat.toUpperCase());
+    query = query.eq('fiat_symbol', fiat.toUpperCase());
   }
 
   if (paymentMethod && paymentMethod !== 'ALL') {
-    // Array column containment check for payment_methods
     query = query.contains('payment_methods', [paymentMethod]);
   }
 
@@ -139,7 +138,6 @@ export async function getMarketplaceAds(
 
   return data || [];
 }
-
 export async function fetchMyAds() {
   const { data: { session } } = await supabase.auth.getSession();
   const headers: Record<string, string> = {};
