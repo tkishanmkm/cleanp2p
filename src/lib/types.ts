@@ -48,6 +48,7 @@ export interface P2PAd {
     photoURL?: string;
     badges?: string[];
     lastActive?: string;
+    last_seen?: string;
     isVerified?: boolean;
     is_verified?: boolean;
   };
