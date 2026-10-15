@@ -12,10 +12,30 @@ BEGIN;
 
 -- 1. Ensure hot_wallet_nonces table and chain_id constraint (Chain ID 1 = ERC20/ETH, Chain ID 56 = BEP20/BSC)
 CREATE TABLE IF NOT EXISTS public.hot_wallet_nonces (
-    chain_id INTEGER PRIMARY KEY,
+    chain_id INTEGER UNIQUE,
+    network_code TEXT UNIQUE,
     current_nonce BIGINT NOT NULL DEFAULT 0,
+    hot_wallet_address TEXT,
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+-- Earlier migrations created this table with network_code as its primary key.
+-- Upgrade that legacy shape in place instead of assuming CREATE TABLE changed it.
+ALTER TABLE public.hot_wallet_nonces ADD COLUMN IF NOT EXISTS chain_id INTEGER;
+ALTER TABLE public.hot_wallet_nonces ADD COLUMN IF NOT EXISTS network_code TEXT;
+ALTER TABLE public.hot_wallet_nonces ADD COLUMN IF NOT EXISTS hot_wallet_address TEXT;
+
+UPDATE public.hot_wallet_nonces
+SET chain_id = CASE UPPER(COALESCE(network_code, ''))
+    WHEN 'ERC20' THEN 1 WHEN 'ETH' THEN 1 WHEN 'ETHEREUM' THEN 1
+    WHEN 'BEP20' THEN 56 WHEN 'BSC' THEN 56 WHEN 'BINANCE' THEN 56
+    ELSE chain_id
+END
+WHERE chain_id IS NULL;
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_hot_wallet_nonces_chain_id
+    ON public.hot_wallet_nonces (chain_id)
+    WHERE chain_id IS NOT NULL;
 
 ALTER TABLE public.hot_wallet_nonces
     DROP CONSTRAINT IF EXISTS chk_hot_wallet_nonces_network;
@@ -42,39 +62,53 @@ AS $$
 DECLARE
     v_norm_network TEXT := UPPER(TRIM(COALESCE(p_network, '')));
     v_chain_id INTEGER;
+    v_network_code TEXT;
     v_current_nonce BIGINT;
 BEGIN
-    -- Map production network codes/aliases to EVM chain ID
     IF v_norm_network IN ('ETH', 'ETHEREUM', 'ERC20') THEN
         v_chain_id := 1;
+        v_network_code := 'ERC20';
     ELSIF v_norm_network IN ('BSC', 'BINANCE', 'BEP20') THEN
         v_chain_id := 56;
+        v_network_code := 'BEP20';
     ELSE
         RAISE EXCEPTION 'Unsupported network for hot wallet nonce allocation: %. Supported production networks: ERC20 (Chain 1), BEP20 (Chain 56)', p_network;
     END IF;
 
-    -- Row-level lock on nonce record for this chain_id
+    -- Initialize missing rows compatibly with both legacy and canonical schemas.
+    -- The following row lock serializes allocators after first-use initialization.
+    INSERT INTO public.hot_wallet_nonces
+        (chain_id, network_code, current_nonce, hot_wallet_address, updated_at)
+    VALUES (
+        v_chain_id,
+        v_network_code,
+        COALESCE(p_onchain_pending_nonce, 0),
+        COALESCE(NULLIF(p_wallet_address, ''), '0x0000000000000000000000000000000000000000'),
+        NOW()
+    )
+    ON CONFLICT DO NOTHING;
+
     SELECT current_nonce INTO v_current_nonce
     FROM public.hot_wallet_nonces
     WHERE chain_id = v_chain_id
     FOR UPDATE;
 
     IF NOT FOUND THEN
-        -- Initialize row for this chain_id if not existing
-        v_current_nonce := COALESCE(p_onchain_pending_nonce, 0);
-        INSERT INTO public.hot_wallet_nonces (chain_id, current_nonce, updated_at)
-        VALUES (v_chain_id, v_current_nonce + 1, NOW());
-        RETURN v_current_nonce;
+        RAISE EXCEPTION 'Unable to initialize nonce record for EVM chain %', v_chain_id;
     END IF;
 
-    -- Reconcile with on-chain pending count if the on-chain pending count is higher
-    IF p_onchain_pending_nonce > v_current_nonce THEN
+    IF COALESCE(p_onchain_pending_nonce, 0) > v_current_nonce THEN
         v_current_nonce := p_onchain_pending_nonce;
     END IF;
 
-    -- Increment and save
     UPDATE public.hot_wallet_nonces
     SET current_nonce = v_current_nonce + 1,
+        network_code = v_network_code,
+        hot_wallet_address = COALESCE(
+            NULLIF(p_wallet_address, ''),
+            hot_wallet_address,
+            '0x0000000000000000000000000000000000000000'
+        ),
         updated_at = NOW()
     WHERE chain_id = v_chain_id;
 
