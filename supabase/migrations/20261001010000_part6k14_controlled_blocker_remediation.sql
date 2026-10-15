@@ -118,8 +118,24 @@ BEGIN
 
     IF NOT EXISTS (SELECT 1 FROM public._snapshot_6k14o_p2p_baseline) THEN
         INSERT INTO public._snapshot_6k14o_p2p_baseline (id, status, crypto_amount, escrow_fee)
-        SELECT id, status, COALESCE(crypto_amount, amount), COALESCE(escrow_fee, platform_fee, 0)
-        FROM public.trades;
+        SELECT
+            (to_jsonb(t)->>'id')::uuid,
+            to_jsonb(t)->>'status',
+            COALESCE(
+                (to_jsonb(t)->>'crypto_amount')::numeric,
+                (to_jsonb(t)->>'amount')::numeric,
+                0
+            ),
+            COALESCE(
+                (to_jsonb(t)->>'escrow_fee')::numeric,
+                (to_jsonb(t)->>'platform_fee')::numeric,
+                0
+            )
+        FROM public.trades AS t
+        WHERE COALESCE(
+            to_jsonb(t)->>'crypto_amount',
+            to_jsonb(t)->>'amount'
+        ) IS NOT NULL;
     END IF;
 END $$;
 
