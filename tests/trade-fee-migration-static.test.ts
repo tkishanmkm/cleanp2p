@@ -63,7 +63,9 @@ const settlementFeeCall = releaseFn.indexOf('record_platform_ledger_entry(', rep
 const tradeCompletionUpdate = releaseFn.indexOf('UPDATE public.trades', settlementFeeCall);
 assert.ok(settlementFeeCall > replayEnd && tradeCompletionUpdate > settlementFeeCall,
   'settlement must record the platform fee before marking the trade completed');
-assert.match(releaseFn, /p_asset_code := v_trade\.crypto[\s\S]*?p_amount := v_trade\.escrow_fee[\s\S]*?p_direction := 'CREDIT'/,
+assert.match(releaseFn, /v_crypto_symbol := UPPER\(COALESCE\(/,
+  'ledger asset code must be normalized before use');
+assert.match(releaseFn, /p_asset_code := v_crypto_symbol[\s\S]*?p_amount := v_trade\.escrow_fee[\s\S]*?p_direction := 'CREDIT'/,
   'fee entry must use the trade asset, recorded fee amount, and CREDIT direction');
 assert.match(releaseFn, /'trade_id', p_trade_id[\s\S]*?'escrow_fee', v_trade\.escrow_fee[\s\S]*?'seller_id', v_trade\.seller_id/,
   'fee metadata must identify the trade, fee, and seller');
