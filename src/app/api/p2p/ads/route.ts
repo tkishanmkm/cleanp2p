@@ -209,14 +209,15 @@ export async function POST(request: NextRequest) {
         .eq('fiat_symbol', fiatType)
         .maybeSingle();
 
-      if (marketError || !marketRow || !marketRow.price_in_fiat || Number(marketRow.price_in_fiat) <= 0) {
+      const fixedReferencePrice = Number(marketRow?.price_in_fiat);
+      if (marketError || !Number.isFinite(fixedReferencePrice) || fixedReferencePrice <= 0) {
         return NextResponse.json(
           { error: `Market reference price is currently unavailable for ${coinType}/${fiatType}. Please try again later.` },
           { status: 503 }
         );
       }
 
-      const refPrice = Number(marketRow.price_in_fiat);
+      const refPrice = fixedReferencePrice;
       const minAllowedPrice = refPrice * 0.50;
       const maxAllowedPrice = refPrice * 1.50;
 
