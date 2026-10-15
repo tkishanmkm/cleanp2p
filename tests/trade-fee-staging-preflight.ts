@@ -70,31 +70,7 @@ async function main() {
     }
   }
 
-  // Check the fee helper's PostgREST exposure without invoking it. A missing
-  // RPC can also mean schema-cache exposure is unavailable; investigate manually.
-  const { error: rpcError } = await supabase.rpc('record_platform_ledger_entry', {
-    p_entry_type: 'preflight_noop',
-    p_asset_code: 'PREFLIGHT',
-    p_amount: 1,
-    p_direction: 'CREDIT',
-    p_related_user_id: null,
-    p_ref_table: 'preflight',
-    p_ref_id: 'preflight-only',
-    p_network_code: null,
-    p_tx_hash: null,
-    p_idempotency_key: 'preflight-must-not-run',
-    p_metadata: { preflight: true },
-  });
-
-  // Never accept a successful RPC here: that would mean the probe wrote data.
-  if (!rpcError) {
-    failed = true;
-    console.error('[FAIL] Fee helper unexpectedly executed successfully; inspect and remove any preflight ledger row immediately in staging.');
-  } else if (/not found|schema cache|could not find/i.test(rpcError.message)) {
-    console.warn(`[WARN] Fee helper not discoverable through PostgREST: ${rpcError.message}`);
-  } else {
-    console.log('[INFO] Fee helper rejected the probe; no successful RPC response was returned. Confirm the exact function signature and grants in staging SQL.');
-  }
+  console.log('[INFO] This preflight deliberately does not invoke RPCs or mutate data.');
 
   if (failed) {
     console.error('Preflight failed. Do not run settlement tests or apply the migration.');
