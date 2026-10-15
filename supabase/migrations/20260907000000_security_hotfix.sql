@@ -12,9 +12,8 @@ CREATE POLICY "Users can update own profile"
     USING (auth.uid() = id) 
     WITH CHECK (
         auth.uid() = id 
-        -- Prevent regular users from tampering with role and is_admin
-        AND (role IS NOT DISTINCT FROM (SELECT role FROM public.profiles WHERE id = auth.uid()))
-        AND (is_admin IS NOT DISTINCT FROM (SELECT is_admin FROM public.profiles WHERE id = auth.uid()))
+        -- The base profiles schema has no role/is_admin columns. Privileges live
+        -- in app_admins and are not writable through this profile policy.
         -- Prevent unbanning or lifting hold on own account
         AND (is_banned IS NOT DISTINCT FROM (SELECT is_banned FROM public.profiles WHERE id = auth.uid()))
         AND (is_on_hold IS NOT DISTINCT FROM (SELECT is_on_hold FROM public.profiles WHERE id = auth.uid()))
@@ -58,13 +57,9 @@ BEGIN
         RETURN TRUE;
     END IF;
 
-    -- 3. Check profiles table with strict boolean check
-    SELECT (COALESCE(role, '') = 'admin' AND is_admin IS TRUE)
-    INTO v_is_admin
-    FROM public.profiles
-    WHERE id = v_uid;
-
-    RETURN COALESCE(v_is_admin, FALSE);
+    -- 3. The canonical profiles schema does not contain role/is_admin.
+    -- Do not query nonexistent columns or grant admin access from profile data.
+    RETURN FALSE;
 END;
 $$;
 
