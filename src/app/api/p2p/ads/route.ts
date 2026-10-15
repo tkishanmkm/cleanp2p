@@ -178,7 +178,7 @@ export async function POST(request: NextRequest) {
         { status: 400 }
       );
     }
-    const paymentMethods = [...new Set((rawPaymentMethods as string[]).map((method) => method.trim()))];
+    const paymentMethods = [...new Map((rawPaymentMethods as string[]).map((method) => { const normalized = method.trim(); return [normalized.toLocaleLowerCase('en-US'), normalized] as const; })).values()];
 
     if (!Number.isFinite(marginVal) || !['FIXED', 'FLOAT'].includes(String(pricingType).toUpperCase())) {
       return NextResponse.json(
