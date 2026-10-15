@@ -36,6 +36,14 @@ export async function POST(request: NextRequest) {
       }
     );
 
+    const contentLength = Number(request.headers.get('content-length') || 0);
+    if (Number.isFinite(contentLength) && contentLength > 32 * 1024) {
+      return NextResponse.json(
+        { error: 'Request body exceeds the 32 KB limit.', code: 'REQUEST_BODY_TOO_LARGE' },
+        { status: 413 }
+      );
+    }
+
     const rawBody = await request.text();
     if (new TextEncoder().encode(rawBody).byteLength > 32 * 1024) {
       return NextResponse.json(
