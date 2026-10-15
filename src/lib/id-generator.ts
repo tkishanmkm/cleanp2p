@@ -13,16 +13,14 @@ export function generate12CharId(options?: { uppercaseOnly?: boolean; prefix?: s
   const randomLength = Math.max(0, targetLength - prefix.length);
 
   let randomPart = '';
-  if (typeof crypto !== 'undefined' && crypto.getRandomValues) {
-    const bytes = new Uint8Array(randomLength);
-    crypto.getRandomValues(bytes);
-    for (let i = 0; i < randomLength; i++) {
-      randomPart += chars[bytes[i] % chars.length];
-    }
-  } else {
-    for (let i = 0; i < randomLength; i++) {
-      randomPart += chars.charAt(Math.floor(Math.random() * chars.length));
-    }
+  if (typeof crypto === 'undefined' || typeof crypto.getRandomValues !== 'function') {
+    throw new Error('Cryptographically secure randomness is unavailable; refusing to generate an ID');
+  }
+
+  const bytes = new Uint8Array(randomLength);
+  crypto.getRandomValues(bytes);
+  for (let i = 0; i < randomLength; i++) {
+    randomPart += chars[bytes[i] % chars.length];
   }
 
   const result = `${prefix}${randomPart}`;
