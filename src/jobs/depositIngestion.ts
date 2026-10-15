@@ -404,7 +404,13 @@ async function scanTronDeposits(
   try {
     const tronWeb = getTronWeb(false);
     const tronHost = (process.env.TRON_RPC_URL || TRON_CONFIG.fullHost || 'https://api.trongrid.io').replace(/\/$/, '');
-    const contractAddress = process.env.USDT_CONTRACT_TRC20 || TRON_CONFIG.usdtContract || CANONICAL_USDT_CONTRACTS.TRC20;
+    const canonicalTrc20Usdt = CANONICAL_USDT_CONTRACTS.TRC20;
+    const configuredTrc20Usdt = process.env.USDT_CONTRACT_TRC20 || TRON_CONFIG.usdtContract || canonicalTrc20Usdt;
+    if (configuredTrc20Usdt.trim().toLowerCase() !== canonicalTrc20Usdt.toLowerCase()) {
+      errors.push('Configured TRC-20 USDT contract does not match the canonical mainnet contract; TRON ingestion skipped.');
+      return { detected, credited, errors };
+    }
+    const contractAddress = canonicalTrc20Usdt;
 
     // Determine TronGrid REST host (Mainnet)
     const getTronGridHost = (rpcUrl: string): string => {
@@ -531,7 +537,13 @@ async function scanTronDeposits(
             const amount = parseFloat(formattedAmount);
             if (amount <= 0) continue;
 
-            const tokenContract = item.token_info?.address || contractAddress;
+            const tokenContract = item.token_info?.address;
+            if (typeof tokenContract !== 'string' || tokenContract.trim().toLowerCase() !== contractAddress.toLowerCase()) {
+              continue; // Do not infer a token contract from missing provider metadata.
+            }
+            if (decimals !== 6) {
+              continue; // Canonical TRC-20 USDT uses six decimals.
+            }
 
             // Fetch block number from TRON RPC if missing from account event
             let eventBlock = item.block_number || 0;
@@ -585,7 +597,7 @@ async function scanTronDeposits(
     }
 
     // 3. Strategy B: TronGrid Contract Event Ingestion (Transfer events on known USDT contracts)
-    for (const cAddr of knownContracts) {
+    for (const cAddr of knownContracts.filter((candidate) => candidate.toLowerCase() === contractAddress.toLowerCase())) {
       try {
         const eventUrl = `${tronGridHost}/v1/contracts/${cAddr}/events?event_name=Transfer&limit=50&order_by=block_timestamp,desc`;
         const res = await fetch(eventUrl, { headers: tronGridHeaders });
