@@ -30,6 +30,8 @@ assert.match(releaseFn, /IF COALESCE\(v_trade\.escrow_fee, 0\) > 0 THEN[\s\S]*?p
   'positive fee must create a platform fee ledger entry');
 assert.match(releaseFn, /'completed'[\s\S]*?Already released \(idempotent success\)/,
   'completed-trade replay path must remain');
+assert.match(releaseFn, /v_is_paid :=[\s\S]*?escrow_status::TEXT, ''\)\) IN \('paid', 'completed', 'released'\)/,
+  'completed or released escrow state must not be rejected by the paid-state guard');
 
 const replayStart = releaseFn.indexOf('-- 6. Terminal State & Replay Safety');
 const replayEnd = releaseFn.indexOf('-- 7. Atomic Financial Settlement Mutations', replayStart);
