@@ -1,0 +1,32 @@
+name: Escrow fee static regression
+
+on:
+  push:
+    branches:
+      - audit/phase-02-platform-ledger-replay-metadata
+  pull_request:
+    paths:
+      - "supabase/migrations/20261015130000_restore_p2p_trade_fee_ledger_on_release.sql"
+      - "tests/trade-fee-migration-static.test.ts"
+      - "package.json"
+      - "package-lock.json"
+      - ".github/workflows/escrow-fee-static.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  escrow-fee-static:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Install locked dependencies
+        run: npm ci
+      - name: Run escrow fee static regression checks
+        run: npm run test:trade-fee-static
