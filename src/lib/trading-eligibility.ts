@@ -13,7 +13,7 @@ export async function checkTradeEligibility(userId: string): Promise<TradeEligib
     const admin = getSupabaseAdminClient();
     const { data: profile, error } = await admin
       .from('profiles')
-      .select('status, ban_policy, banned_at')
+      .select('status, is_banned, is_restricted')
       .eq('id', userId)
       .maybeSingle();
 
@@ -28,25 +28,19 @@ export async function checkTradeEligibility(userId: string): Promise<TradeEligib
     }
 
     const status = String(profile.status ?? '').trim().toLowerCase();
-    if (status === 'banned') {
-      const banExpiry = profile.banned_at ? new Date(profile.banned_at) : null;
-      if (banExpiry) banExpiry.setMonth(banExpiry.getMonth() + 3);
-      const temporaryBanExpired =
-        String(profile.ban_policy ?? '').trim().toLowerCase() === 'three_months' &&
-        Boolean(banExpiry && !Number.isNaN(banExpiry.getTime())) &&
-        Date.now() >= (banExpiry?.getTime() ?? Number.POSITIVE_INFINITY);
-
-      if (!temporaryBanExpired) {
-        return {
-          allowed: false,
-          statusCode: 403,
-          code: 'ACCOUNT_BANNED',
-          message: 'Your account is not permitted to initiate trades.',
-        };
-      }
+    if (profile.is_banned === true || status === 'banned') {
+      return {
+        allowed: false,
+        statusCode: 403,
+        code: 'ACCOUNT_BANNED',
+        message: 'Your account is not permitted to initiate trades.',
+      };
     }
 
-    if (['restricted', 'suspended', 'disabled', 'deactivated'].includes(status)) {
+    if (
+      profile.is_restricted === true ||
+      ['restricted', 'suspended', 'disabled', 'deactivated'].includes(status)
+    ) {
       return {
         allowed: false,
         statusCode: 403,
