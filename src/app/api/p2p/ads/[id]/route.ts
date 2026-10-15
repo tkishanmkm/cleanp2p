@@ -199,6 +199,35 @@ export async function PATCH(
     }
 
     const rawBody = await request.json();
+    if (!rawBody || typeof rawBody !== 'object' || Array.isArray(rawBody)) {
+      return NextResponse.json({ error: 'Request body must be a JSON object.' }, { status: 400 });
+    }
+
+    // Validate numeric input before coercion; Number('abc') and Infinity must never reach privileged writes.
+    const numericAliases: Array<[string[], string, (value: number) => boolean, string]> = [
+      [['price'], 'price', value => value > 0, 'Price must be a finite number greater than zero.'],
+      [['margin', 'rate_percent', 'price_margin'], 'margin', value => value >= -50 && value <= 50, 'Margin must be between -50 and 50.'],
+      [['min_amount', 'min_limit'], 'minimum trade limit', value => value > 0, 'Minimum trade limit must be greater than zero.'],
+      [['max_amount', 'max_limit'], 'maximum trade limit', value => value > 0, 'Maximum trade limit must be greater than zero.'],
+      [['payment_window', 'payment_window_minutes'], 'payment window', value => Number.isInteger(value) && value >= 30 && value <= 1440, 'Payment window must be an integer between 30 and 1440 minutes.'],
+      [['min_completed_trades'], 'minimum completed trades', value => Number.isInteger(value) && value >= 0, 'Minimum completed trades must be a non-negative integer.'],
+    ];
+    const validatedNumbers: Record<string, number> = {};
+    for (const [aliases, label, predicate, message] of numericAliases) {
+      const key = aliases.find(alias => rawBody[alias] !== undefined && rawBody[alias] !== null && rawBody[alias] !== '');
+      if (!key) continue;
+      const value = Number(rawBody[key]);
+      if (!Number.isFinite(value) || !predicate(value)) {
+        return NextResponse.json({ error: message, field: label }, { status: 400 });
+      }
+      validatedNumbers[label] = value;
+    }
+
+    const minLimit = validatedNumbers['minimum trade limit'];
+    const maxLimit = validatedNumbers['maximum trade limit'];
+    if (minLimit !== undefined && maxLimit !== undefined && minLimit > maxLimit) {
+      return NextResponse.json({ error: 'Minimum trade limit cannot exceed maximum trade limit.' }, { status: 400 });
+    }
 
     // Sanitize payload data types
     const body: Record<string, any> = { ...rawBody };
