@@ -286,7 +286,6 @@ BEGIN
         'escrow_status', 'RELEASED'
     );
 END;
-$function$
-;
+$function$;
 
 COMMIT;
