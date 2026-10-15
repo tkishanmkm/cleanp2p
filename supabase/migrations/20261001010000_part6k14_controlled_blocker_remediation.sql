@@ -932,52 +932,9 @@ BEGIN
 END;
 $$;
 
--- ----------------------------------------------------------------------------
--- STEP 4: PRECHECK & VERIFICATION OF USER ROUTE INTEGRITY
--- ----------------------------------------------------------------------------
-DO $$
-DECLARE
-    v_target_user UUID := '8925fed8-c8bf-44a3-97fa-bd806aade05a';
-    v_uda_count INT;
-    v_wallets_count INT;
-BEGIN
-    SELECT COUNT(*) INTO v_uda_count
-    FROM public.user_deposit_addresses
-    WHERE user_id = v_target_user;
-
-    SELECT COUNT(*) INTO v_wallets_count
-    FROM public.wallets
-    WHERE user_id = v_target_user;
-
-    IF v_uda_count < 3 THEN
-        RAISE EXCEPTION 'PRECHECK FAILED: Target user expects at least 3 deposit address routes (found %)', v_uda_count;
-    END IF;
-
-    IF v_wallets_count < 4 THEN
-        RAISE EXCEPTION 'PRECHECK FAILED: Target user expects 4 wallet chain records (BTC, EVM, LTC, TRON) (found %)', v_wallets_count;
-    END IF;
-END $$;
-
--- ----------------------------------------------------------------------------
--- STEP 5: FINAL TRANSACTION VERIFICATION ASSERTIONS
--- ----------------------------------------------------------------------------
-DO $$
-DECLARE
-    v_target_user UUID := '8925fed8-c8bf-44a3-97fa-bd806aade05a';
-    v_btc_wallet_count INT;
-    v_evm_wallet_count INT;
-    v_ltc_wallet_count INT;
-    v_tron_wallet_count INT;
-BEGIN
-    SELECT COUNT(*) INTO v_btc_wallet_count FROM public.wallets WHERE user_id = v_target_user AND chain = 'BTC' AND funding_status = 'active';
-    SELECT COUNT(*) INTO v_evm_wallet_count FROM public.wallets WHERE user_id = v_target_user AND chain = 'EVM' AND funding_status = 'active';
-    SELECT COUNT(*) INTO v_ltc_wallet_count FROM public.wallets WHERE user_id = v_target_user AND chain = 'LTC' AND funding_status = 'active';
-    SELECT COUNT(*) INTO v_tron_wallet_count FROM public.wallets WHERE user_id = v_target_user AND chain = 'TRON' AND funding_status = 'active';
-
-    IF v_btc_wallet_count <> 1 OR v_evm_wallet_count <> 1 OR v_ltc_wallet_count <> 1 OR v_tron_wallet_count <> 1 THEN
-        RAISE EXCEPTION 'MIGRATION ASSERTION FAILED: Target user active wallets missing or ambiguous (BTC=%, EVM=%, LTC=%, TRON=%)',
-            v_btc_wallet_count, v_evm_wallet_count, v_ltc_wallet_count, v_tron_wallet_count;
-    END IF;
-END $$;
+-- User-specific wallet/deposit-route verification intentionally does not run in
+-- a schema migration. Clean installs have no target user's operational records.
+-- Validate existing production wallet routing separately with an approved,
+-- read-only operational check after deployment.
 
 COMMIT;
