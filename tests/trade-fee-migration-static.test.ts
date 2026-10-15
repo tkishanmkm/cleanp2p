@@ -402,5 +402,12 @@ assert.match(
   'platform control policies must not reference admin profile columns before they exist on a clean replay'
 );
 
+
+assert.match(
+  platformControlsSql,
+  /IF to_regclass\('public\.user_blocks'\) IS NOT NULL THEN[\s\S]*?Skipping user_blocks hardening/,
+  'platform controls migration must tolerate schemas where the optional user_blocks table is absent'
+);
+
 console.log('PASS: escrow fee migration static safety checks');
 console.log('NOTE: run integration tests against a fully initialized disposable Supabase project before deployment.');
