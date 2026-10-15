@@ -485,7 +485,7 @@ export async function POST(req: Request) {
         );
       }
 
-      if (!Number.isFinite(walletBalance) || !Number.isFinite(escrowBalance)) {
+      if (!Number.isFinite(walletBalance) || !Number.isFinite(escrowBalance) || walletBalance < 0 || escrowBalance < 0 || escrowBalance > walletBalance) {
         return NextResponse.json(
           { error: 'Wallet balance data is invalid; advertisement cannot be created.', code: 'INVALID_WALLET_BALANCE' },
           { status: 503 }
