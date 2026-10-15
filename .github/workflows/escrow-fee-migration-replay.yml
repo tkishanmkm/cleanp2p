@@ -124,7 +124,7 @@ jobs:
           fi
           psql "$db_url" -v ON_ERROR_STOP=1 <<'SQL'
           BEGIN;
-          DO $
+          DO $$
           DECLARE
             v_first UUID;
             v_duplicate UUID;
@@ -214,7 +214,7 @@ jobs:
             IF NOT v_zero_rejected THEN
               RAISE EXCEPTION 'Zero-amount platform ledger entry was not rejected';
             END IF;
-          END $;
+          END $$;
           ROLLBACK;
           SQL
 
