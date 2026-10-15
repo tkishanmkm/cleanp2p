@@ -183,6 +183,19 @@ export async function PATCH(
       return NextResponse.json({ error: 'Request body must be a JSON object.' }, { status: 400 });
     }
 
+    // Status flags must be actual booleans. In JavaScript Boolean("false") is true,
+    // so accepting string values here could unintentionally activate/deactivate an ad.
+    for (const flag of ['active', 'is_active'] as const) {
+      if (rawBody[flag] !== undefined && typeof rawBody[flag] !== 'boolean') {
+        return NextResponse.json({ error: `${flag} must be a boolean.`, field: flag }, { status: 400 });
+      }
+    }
+    if (rawBody.status !== undefined) {
+      if (typeof rawBody.status !== 'string' || !['ACTIVE', 'INACTIVE'].includes(rawBody.status.trim().toUpperCase())) {
+        return NextResponse.json({ error: 'Status must be ACTIVE or INACTIVE.', field: 'status' }, { status: 400 });
+      }
+    }
+
     // Validate numeric input before coercion; Number('abc') and Infinity must never reach privileged writes.
     const numericAliases: Array<[string[], string, (value: number) => boolean, string]> = [
       [['price'], 'price', value => value > 0, 'Price must be a finite number greater than zero.'],
