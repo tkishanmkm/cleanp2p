@@ -42,6 +42,17 @@ assert.match(
 );
 
 
+const withdrawalCompatibilityPath = join(
+  process.cwd(),
+  'supabase/migrations/20260907000001_fix_withdrawal_escrow_separation.sql'
+);
+const withdrawalCompatibilitySql = readFileSync(withdrawalCompatibilityPath, 'utf8');
+assert.match(
+  withdrawalCompatibilitySql,
+  /IF to_regclass\('public\.wallet_transactions'\) IS NOT NULL THEN[\s\S]*?ALTER TABLE public\.wallet_transactions/,
+  'legacy wallet_transactions column changes must be guarded when the optional table is absent'
+);
+
 const securityHotfixPath = join(
   process.cwd(),
   'supabase/migrations/20260907000000_security_hotfix.sql'
