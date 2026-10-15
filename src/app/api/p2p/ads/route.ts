@@ -60,9 +60,9 @@ export async function POST(request: NextRequest) {
 
     if (!user) {
       return NextResponse.json(
-        { 
-          error: 'No active session found! Please refresh or log in again.', 
-          details: authError?.message || 'Authentication required'
+        {
+          error: 'Authentication required. Please log in again.',
+          code: 'AUTHENTICATION_REQUIRED'
         }, 
         { status: 401 }
       );
