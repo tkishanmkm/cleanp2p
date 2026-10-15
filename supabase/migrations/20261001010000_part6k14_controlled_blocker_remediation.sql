@@ -105,8 +105,15 @@ BEGIN
 
     IF NOT EXISTS (SELECT 1 FROM public._snapshot_6k14o_wallets) THEN
         INSERT INTO public._snapshot_6k14o_wallets (id, user_id, chain, address, funding_status, created_at, updated_at)
-        SELECT id, user_id, chain, address, funding_status, created_at, updated_at
-        FROM public.wallets;
+        SELECT
+            (to_jsonb(w)->>'id')::uuid,
+            (to_jsonb(w)->>'user_id')::uuid,
+            COALESCE(to_jsonb(w)->>'chain', to_jsonb(w)->>'network', to_jsonb(w)->>'chain_code', 'unknown'),
+            COALESCE(to_jsonb(w)->>'address', ''),
+            COALESCE(to_jsonb(w)->>'funding_status', 'unknown'),
+            COALESCE((to_jsonb(w)->>'created_at')::timestamptz, NOW()),
+            COALESCE((to_jsonb(w)->>'updated_at')::timestamptz, NOW())
+        FROM public.wallets AS w;
     END IF;
 
     IF NOT EXISTS (SELECT 1 FROM public._snapshot_6k14o_p2p_baseline) THEN
