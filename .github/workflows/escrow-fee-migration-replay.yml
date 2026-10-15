@@ -13,6 +13,10 @@ on:
       - "supabase/migrations/**"
       - ".github/workflows/escrow-fee-migration-replay.yml"
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.head.ref || github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
 
