@@ -13,6 +13,10 @@ on:
       - "package-lock.json"
       - ".github/workflows/escrow-fee-static.yml"
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.head.ref || github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
 
