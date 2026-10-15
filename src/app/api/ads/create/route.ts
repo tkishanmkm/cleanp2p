@@ -132,14 +132,11 @@ export async function POST(req: Request) {
     delete strippedFormData.is_verified;
 
     // 3. Validate Supported Crypto Asset (USDT, BTC, ETH, LTC)
-    const rawAsset = (
-      strippedFormData.crypto || 
-      strippedFormData.asset || 
-      strippedFormData.asset_symbol || 
-      strippedFormData.crypto_symbol || 
-      strippedFormData.coin || 
-      'USDT'
-    ).toString().toUpperCase().trim();
+    const assetInput = strippedFormData.crypto ?? strippedFormData.asset ?? strippedFormData.asset_symbol ?? strippedFormData.crypto_symbol ?? strippedFormData.coin ?? 'USDT';
+    if (typeof assetInput !== 'string') {
+      return NextResponse.json({ error: 'Crypto asset must be a string.', code: 'INVALID_ASSET' }, { status: 400 });
+    }
+    const rawAsset = assetInput.toUpperCase().trim();
 
     if (!VALID_SUPPORTED_ASSETS.includes(rawAsset)) {
       return NextResponse.json(
@@ -151,14 +148,11 @@ export async function POST(req: Request) {
     }
 
     // 4. Validate Supported Fiat Currency
-    const rawFiat = (
-      strippedFormData.fiatCurrency || 
-      strippedFormData.fiat || 
-      strippedFormData.fiat_currency || 
-      strippedFormData.fiat_symbol || 
-      strippedFormData.currency || 
-      'USD'
-    ).toString().toUpperCase().trim();
+    const fiatInput = strippedFormData.fiatCurrency ?? strippedFormData.fiat ?? strippedFormData.fiat_currency ?? strippedFormData.fiat_symbol ?? strippedFormData.currency ?? 'USD';
+    if (typeof fiatInput !== 'string') {
+      return NextResponse.json({ error: 'Fiat currency must be a string.', code: 'INVALID_FIAT' }, { status: 400 });
+    }
+    const rawFiat = fiatInput.toUpperCase().trim();
 
     const isValidFiat = FIAT_CURRENCIES.some(f => f.code.toUpperCase() === rawFiat);
     if (!isValidFiat) {
