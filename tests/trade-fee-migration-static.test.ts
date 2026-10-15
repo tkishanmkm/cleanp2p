@@ -59,7 +59,7 @@ const checkAdminEnd = securityHotfixSql.indexOf('$;', checkAdminStart);
 assert.ok(checkAdminStart >= 0 && checkAdminEnd > checkAdminStart,
   'security hotfix must define check_is_admin');
 const checkAdminFunction = securityHotfixSql.slice(checkAdminStart, checkAdminEnd);
-assert.doesNotMatch(checkAdminFunction, /FROM public\.profiles[\s\S]*?\b(?:role|is_admin)\b/,
+assert.doesNotMatch(checkAdminFunction, /FROM public\.profiles/,
   'admin authorization must not query nonexistent role/is_admin profile columns');
 
 const ledgerHelperPath = join(
