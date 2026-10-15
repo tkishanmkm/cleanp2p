@@ -1,8 +1,18 @@
 import { createClient } from '@supabase/supabase-js';
 
-// Initialize Supabase admin client
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL || 'https://placeholder.supabase.co';
-const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'placeholder-key';
+// This integration suite writes wallets, balances, ads, and trades. It must only
+// run against a dedicated test project, never a developer's default/prod project.
+const supabaseUrl = process.env.P2P_TEST_SUPABASE_URL;
+const supabaseKey = process.env.P2P_TEST_SUPABASE_SERVICE_ROLE_KEY;
+const allowMutations = process.env.P2P_TEST_ALLOW_MUTATIONS === 'true';
+
+if (!supabaseUrl || !supabaseKey || !allowMutations) {
+  console.error(
+    'Refusing to run mutating P2P integration tests. Set P2P_TEST_SUPABASE_URL, ' +
+    'P2P_TEST_SUPABASE_SERVICE_ROLE_KEY, and P2P_TEST_ALLOW_MUTATIONS=true for a dedicated test project.'
+  );
+  process.exit(1);
+}
 
 const supabase = createClient(supabaseUrl, supabaseKey, {
   auth: { persistSession: false, autoRefreshToken: false },
