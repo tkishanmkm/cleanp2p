@@ -87,7 +87,6 @@ export async function GET(req: NextRequest) {
         },
         userId: result.userId,
         walletIndex: result.walletIndex,
-        profile: result.profile || null,
         records: result.records,
         metadata: result.metadata,
       });
