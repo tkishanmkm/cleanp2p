@@ -440,7 +440,7 @@ export function CreateAdForm({ ad }: CreateAdFormProps) {
         await createP2PAd(null, adData, {
           id: user.uid,
           username: profile.username || 'User',
-          country: profile.country,
+          country: profile.country || undefined,
           feedbackScore: profile.feedbackScore ?? 100,
           positiveFeedback: profile.positiveFeedback ?? 0,
           negativeFeedback: profile.negativeFeedback ?? 0,
