@@ -30,7 +30,7 @@ CREATE POLICY "Users and admins can view trade messages"
             sender_id = auth.uid()
             OR EXISTS (
                 SELECT 1 FROM public.trades t
-                WHERE (t.id::text = trade_messages.trade_id OR t.firestore_trade_id = trade_messages.trade_id)
+                WHERE (t.id::text = trade_messages.trade_id OR to_jsonb(t)->>'firestore_trade_id' = trade_messages.trade_id)
                 AND (t.buyer_id = auth.uid() OR t.seller_id = auth.uid())
             )
             OR EXISTS (
@@ -51,7 +51,7 @@ CREATE POLICY "Users can insert trade messages"
             AND (
                 EXISTS (
                     SELECT 1 FROM public.trades t
-                    WHERE (t.id::text = trade_messages.trade_id OR t.firestore_trade_id = trade_messages.trade_id)
+                    WHERE (t.id::text = trade_messages.trade_id OR to_jsonb(t)->>'firestore_trade_id' = trade_messages.trade_id)
                     AND (t.buyer_id = auth.uid() OR t.seller_id = auth.uid())
                 )
                 OR EXISTS (
