@@ -41,6 +41,11 @@ assert.doesNotMatch(
   'financial RPC hardening must not guard a different signature by function name alone'
 );
 
+const canonicalP2pStateMachinePath = join(
+  process.cwd(),
+  'supabase/migrations/20260928070000_canonical_p2p_state_machine_and_rpcs.sql'
+);
+const canonicalP2pStateMachineSql = readFileSync(canonicalP2pStateMachinePath, 'utf8');
 const optionalAdsGuards = [
   /v_legacy_ad RECORD;/,
   /IF to_regclass\('public\.ads'\) IS NOT NULL THEN[\s\S]*?FROM public\.ads/,
@@ -59,11 +64,6 @@ assert.doesNotMatch(
   'legacy ads row type must not be resolved when the table is absent'
 );
 
-const canonicalP2pStateMachinePath = join(
-  process.cwd(),
-  'supabase/migrations/20260928070000_canonical_p2p_state_machine_and_rpcs.sql'
-);
-const canonicalP2pStateMachineSql = readFileSync(canonicalP2pStateMachinePath, 'utf8');
 assert.match(
   canonicalP2pStateMachineSql,
   /v_p2p_ad RECORD;[\s\S]*?IF to_regclass\('public\.p2p_ads'\) IS NOT NULL THEN[\s\S]*?FROM public\.p2p_ads/,
