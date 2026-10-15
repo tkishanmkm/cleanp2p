@@ -86,7 +86,7 @@ export async function POST(req: NextRequest) {
     }
 
     const authHeader = req.headers.get('authorization') || '';
-    const bearerToken = authHeader.match(/^Bearer\\s+(.+)$/i)?.[1]?.trim() || '';
+    const bearerToken = authHeader.match(/^Bearer\s+(.+)$/i)?.[1]?.trim() || '';
     const internalSecret = process.env.WALLET_PROVISIONING_BEARER || '';
     let isInternalProvisioning = false;
 
