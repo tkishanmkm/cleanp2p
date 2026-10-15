@@ -25,6 +25,22 @@ assert.doesNotMatch(
   'trade-chat policies must not directly reference a possibly missing legacy column'
 );
 
+const adminOverviewMigrationPath = join(
+  process.cwd(),
+  'supabase/migrations/20260920000001_security_advisor_hardening.sql'
+);
+const adminOverviewMigrationSql = readFileSync(adminOverviewMigrationPath, 'utf8');
+assert.match(
+  adminOverviewMigrationSql,
+  /CREATE OR REPLACE VIEW public\.admin_financial_overview[\s\S]*?COALESCE\(main_balance, 0\)/,
+  'admin overview must use the actual main_balance column exposed by user_wallets'
+);
+assert.doesNotMatch(
+  adminOverviewMigrationSql,
+  /COALESCE\(balance, 0\)/,
+  'admin overview must not reference a nonexistent balance column on user_wallets'
+);
+
 const reservedBalanceMigrationPath = join(
   process.cwd(),
   'supabase/migrations/20260917000000_add_reserved_balance_and_sync.sql'
