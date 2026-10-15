@@ -91,7 +91,8 @@ BEGIN
             FROM auth.users
             WHERE id::TEXT = v_effective_caller::TEXT
               AND (
-                    raw_app_meta_data->>'role' = 'admin'                 OR COALESCE(
+                    raw_app_meta_data->>'role' = 'admin'
+                 OR COALESCE(
                         (raw_app_meta_data->>'is_admin')::BOOLEAN,
                         FALSE
                     ) = TRUE
