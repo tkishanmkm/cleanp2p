@@ -139,6 +139,22 @@ assert.match(
   'trade attachment policies must be guarded when the optional legacy table is absent'
 );
 
+const tradeFlowHardeningPath = join(
+  process.cwd(),
+  'supabase/migrations/20260928080000_p2p_trade_flow_and_rls_hardening.sql'
+);
+const tradeFlowHardeningSql = readFileSync(tradeFlowHardeningPath, 'utf8');
+assert.doesNotMatch(
+  tradeFlowHardeningSql,
+  /DROP POLICYIF/,
+  'trade flow migration must not contain malformed DROP POLICY syntax'
+);
+assert.match(
+  tradeFlowHardeningSql,
+  /DROP POLICY IF EXISTS "trade_messages_insert_policy" ON public\.trade_messages;/,
+  'trade message insert policy must be dropped with valid SQL syntax'
+);
+
 const reservedBalanceMigrationPath = join(
   process.cwd(),
   'supabase/migrations/20260917000000_add_reserved_balance_and_sync.sql'
