@@ -166,6 +166,17 @@ assert.doesNotMatch(
   'wallet snapshot must not assume the legacy chain column exists'
 );
 
+assert.match(
+  depositSnapshotMigrationSql,
+  /to_jsonb\(t\)->>'crypto_amount'[\s\S]*?to_jsonb\(t\)->>'amount'[\s\S]*?to_jsonb\(t\)->>'escrow_fee'[\s\S]*?to_jsonb\(t\)->>'platform_fee'[\s\S]*?FROM public\.trades AS t/,
+  'trade baseline snapshot must tolerate optional legacy amount and fee columns'
+);
+assert.doesNotMatch(
+  depositSnapshotMigrationSql,
+  /COALESCE\(crypto_amount, amount\), COALESCE\(escrow_fee, platform_fee, 0\)/,
+  'trade baseline snapshot must not directly reference optional legacy columns'
+);
+
 const tradeFlowHardeningPath = join(
   process.cwd(),
   'supabase/migrations/20260928080000_p2p_trade_flow_and_rls_hardening.sql'
