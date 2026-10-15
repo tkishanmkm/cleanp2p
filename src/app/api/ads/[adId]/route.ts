@@ -790,6 +790,8 @@ export async function PUT(
         const adsPayload: Record<string, any> = {
           updated_at: timestamp,
         };
+        if (updatedAsset) adsPayload.asset_symbol = String(updatedAsset).toUpperCase();
+        if (updatedFiat) adsPayload.fiat_symbol = String(updatedFiat).toUpperCase();
         if (price !== undefined) adsPayload.price = price;
         if (minAmount !== undefined) adsPayload.min_limit = minAmount;
         if (maxAmount !== undefined) adsPayload.max_limit = maxAmount;
@@ -822,7 +824,10 @@ export async function PUT(
     // Authoritative Success Check:
     // If canonical p2p_ads row exists, canonical update MUST succeed.
     // If only legacy ads row exists, legacy update MUST succeed.
-    const overallSuccess = p2pAdsRow ? p2pUpdated : adsUpdated;
+    const overallSuccess =
+      targetTable === 'p2p_ads' ? p2pUpdated :
+      targetTable === 'ads' ? adsUpdated :
+      (p2pUpdated || adsUpdated);
 
     if (!overallSuccess) {
       console.error('[PUT /api/ads/[adId]] Canonical advertisement record update failed:', {
