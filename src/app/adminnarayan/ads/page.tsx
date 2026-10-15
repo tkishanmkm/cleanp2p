@@ -120,13 +120,18 @@ export default function AdminAdsPage() {
     if (!ads) return null;
     if (!searchTerm.trim()) return ads;
     const lower = searchTerm.toLowerCase();
-    return ads.filter(
-      (ad) =>
-        ad.publicAdId.toLowerCase().includes(lower) ||
-        ad.user.username.toLowerCase().includes(lower) ||
-        ad.crypto.toLowerCase().includes(lower) ||
-        ad.fiatCurrency.toLowerCase().includes(lower)
-    );
+    return ads.filter((ad) => {
+      const publicAdId = String(ad.publicAdId ?? '');
+      const username = String(ad.user?.username ?? '');
+      const crypto = String(ad.crypto ?? '');
+      const fiatCurrency = String(ad.fiatCurrency ?? '');
+      return (
+        publicAdId.toLowerCase().includes(lower) ||
+        username.toLowerCase().includes(lower) ||
+        crypto.toLowerCase().includes(lower) ||
+        fiatCurrency.toLowerCase().includes(lower)
+      );
+    });
   }, [ads, searchTerm]);
 
   const fetchAdStats = async (adId: string) => {
