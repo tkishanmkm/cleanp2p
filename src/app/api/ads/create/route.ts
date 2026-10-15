@@ -428,7 +428,7 @@ export async function POST(req: Request) {
       const referencePrice = Number(marketRow?.price_in_fiat);
       const marketUpdatedAt = marketRow?.updated_at ? Date.parse(marketRow.updated_at) : Number.NaN;
       const marketAgeMs = Date.now() - marketUpdatedAt;
-      const marketDataStale = !Number.isFinite(marketUpdatedAt) || marketAgeMs < 0 || marketAgeMs > 15 * 60 * 1000;
+      const marketDataStale = !Number.isFinite(marketUpdatedAt) || marketAgeMs < 0 || marketAgeMs > MAX_MARKET_PRICE_AGE_MS;
       if (marketError || !Number.isFinite(referencePrice) || referencePrice <= 0 || marketDataStale) {
         console.error('[Floating market price lookup failed in /api/ads/create]:', marketError || 'Missing or invalid reference price');
         return NextResponse.json(
