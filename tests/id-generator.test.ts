@@ -1,5 +1,13 @@
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { generateAdId, generateTradeId, generate12CharId } from '../src/lib/id-generator';
+
+const generatorSource = readFileSync(join(process.cwd(), 'src/lib/id-generator.ts'), 'utf8');
+assert.match(generatorSource, /crypto\.getRandomValues/);
+assert.match(generatorSource, /Cryptographically secure randomness is unavailable/);
+assert.match(generatorSource, /Rejection sampling avoids modulo bias/);
+assert.doesNotMatch(generatorSource, /Math\.random\s*\(/, 'ID generation must not fall back to Math.random');
 
 const adIds = Array.from({ length: 1000 }, () => generateAdId());
 const tradeIds = Array.from({ length: 1000 }, () => generateTradeId());
