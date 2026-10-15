@@ -32,6 +32,10 @@ export async function POST(req: NextRequest) {
       .eq('id', adminId)
       .single();
 
+    if (!profile) {
+      return NextResponse.json({ error: 'Administrator security profile not found' }, { status: 403 });
+    }
+
     const secret = profile.admin_2fa_secret || profile.two_factor_secret;
     if (!secret) {
       return NextResponse.json({ error: 'No 2FA enrollment pending. Please start 2FA setup first.' }, { status: 400 });
