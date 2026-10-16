@@ -270,6 +270,11 @@ const checks: Array<[string, string, RegExp]> = [
     'src/jobs/sweeperWorker.ts',
     /Revalidate ownership immediately before broadcasting the persisted transaction[\s\S]*?assertPreBroadcastOwnership\(sweepId, workerId, 'GAS_FUNDING'\)[\s\S]*?Sweep ID and worker ID are required before TRON gas funding broadcast[\s\S]*?sendRawTransaction\(signedTx\)/i,
   ],
+  [
+    'TRON gas funding rejects missing sweep or worker identity before side effects',
+    'src/jobs/sweeperWorker.ts',
+    /export async function fundTronGasForAddress[\s\S]*?if \(!sweepId \|\| !workerId\)[\s\S]*?Sweep ID and worker ID are required for durable TRON gas funding[\s\S]*?claim_gas_funding_operation/i,
+  ],
 ];
 
 let failed = 0;
