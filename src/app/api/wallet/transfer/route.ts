@@ -402,6 +402,7 @@ export async function POST(req: NextRequest) {
       !Number.isFinite(netAmount) || netAmount < 0 ||
       !Number.isFinite(feeAmount) || feeAmount < 0 ||
       !Number.isFinite(totalDeduction) || totalDeduction < 0 ||
+      totalDeduction + 1e-8 < grossAmount ||
       (senderBalanceAfter !== undefined && (!Number.isFinite(senderBalanceAfter) || senderBalanceAfter < 0)) ||
       (recipientBalanceAfter !== undefined && (!Number.isFinite(recipientBalanceAfter) || recipientBalanceAfter < 0))
     ) {
