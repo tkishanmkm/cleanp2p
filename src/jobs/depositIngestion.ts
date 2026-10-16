@@ -1448,8 +1448,9 @@ async function scanLtcDeposits(
 }
 
 /**
-// Parse BTC/LTC decimal amounts exactly into integer base units (satoshis).
-// Returns null for malformed values or precision beyond the chain's 8 decimals.
+ * Parse BTC/LTC decimal amounts exactly into integer base units (satoshis).
+ * Returns null for malformed values or precision beyond the chain's 8 decimals.
+ */
 function parseBaseUnits8(value: unknown): bigint | null {
   const raw = typeof value === 'string' || typeof value === 'number' ? String(value) : '';
   const match = /^(0|[1-9]\d*)(?:\.(\d{1,8}))?$/.exec(raw);
