@@ -1,8 +1,24 @@
 import { createClient } from '@supabase/supabase-js';
 import { runFinancialReconciliation } from '../src/lib/security/reconciliation';
 
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL || 'https://placeholder.supabase.co';
-const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'placeholder-key';
+// This suite injects a deliberate financial anomaly into wallet tables.
+// Require a dedicated disposable test project; never fall back to app credentials.
+const supabaseUrl = process.env.TEST_SUPABASE_URL;
+const supabaseKey = process.env.TEST_SUPABASE_SERVICE_ROLE_KEY;
+
+if (process.env.TEST_ALLOW_DESTRUCTIVE_RECONCILIATION_TESTS !== 'true') {
+  throw new Error(
+    'Refusing to run destructive reconciliation tests. Set TEST_ALLOW_DESTRUCTIVE_RECONCILIATION_TESTS=true only for a dedicated disposable test project.'
+  );
+}
+if (!supabaseUrl || !supabaseKey) {
+  throw new Error(
+    'Missing TEST_SUPABASE_URL or TEST_SUPABASE_SERVICE_ROLE_KEY. Do not use production credentials.'
+  );
+}
+if (!/^https:\/\/[a-z0-9-]+\.supabase\.co$/i.test(supabaseUrl)) {
+  throw new Error('TEST_SUPABASE_URL must be a valid Supabase project URL.');
+}
 
 const supabase = createClient(supabaseUrl, supabaseKey, {
   auth: { persistSession: false, autoRefreshToken: false },
