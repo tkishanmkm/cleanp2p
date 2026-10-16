@@ -382,11 +382,14 @@ export async function fundGasForAddress(
           console.log(`[Sweeper Gas Recovery] Tx already in mempool/blockchain: ${errMsg}`);
         } else {
           console.error(`[Sweeper Gas Recovery] Rebroadcast exception:`, rebroadcastErr);
-          await supabaseAdmin.from('gas_funding_operations').update({
+          const { error: recoveryPersistErr } = await supabaseAdmin.from('gas_funding_operations').update({
             status: 'RECOVERY_REQUIRED',
             error_message: errMsg,
             updated_at: new Date().toISOString(),
           }).eq('sweep_id', sweepId);
+          if (recoveryPersistErr) {
+            throw new Error(`Gas funding rebroadcast failed (${errMsg}) and RECOVERY_REQUIRED status persistence also failed: ${recoveryPersistErr.message}`);
+          }
           throw rebroadcastErr;
         }
       }
