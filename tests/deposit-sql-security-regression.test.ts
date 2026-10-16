@@ -71,6 +71,11 @@ const checks: Array<[string, string, RegExp]> = [
     /NULLIF\(u\.banned_until, ''\)::timestamptz > NOW\(\)/,
   ],
   [
+    'withdrawal worker handles returned refund RPC errors',
+    'src/jobs/withdrawalWorker.ts',
+    /const \{ error: refundError \} = await supabaseAdmin\.rpc\('process_failed_withdrawal'[\s\S]*if \(refundError\)[\s\S]*Refund RPC returned an error/i,
+  ],
+  [
     'withdrawal worker detects returned lock-release RPC errors',
     'src/jobs/withdrawalWorker.ts',
     /const \{ error: unlockError \} = await supabaseAdmin\.rpc\('release_withdrawal_worker_lock'\)[\s\S]*if \(unlockError\)[\s\S]*Lock release RPC failed; operator intervention may be required/i,
