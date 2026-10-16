@@ -1279,17 +1279,33 @@ async function refreshPendingDepositConfirmations(): Promise<{
               console.error('[Deposit Ingestion] Pending EVM USDT verification configuration or amount is invalid; deposit remains pending');
               continue;
             }
+            if (!Array.isArray(receipt.logs) ||
+                typeof receipt.blockHash !== 'string' ||
+                !/^0x[0-9a-fA-F]{64}$/.test(receipt.blockHash)) {
+              console.error('[Deposit Ingestion] Pending EVM USDT receipt has malformed logs or block hash; deposit remains pending');
+              continue;
+            }
             const matchingLogs = receipt.logs.filter((log) => log.index === outputIndex);
             if (matchingLogs.length !== 1) {
               console.error('[Deposit Ingestion] Pending EVM USDT receipt does not contain exactly one log at the stored index; deposit remains pending');
               continue;
             }
             const transferLog = matchingLogs[0];
-            if (transferLog.address.toLowerCase() !== canonicalContract.toLowerCase() ||
+            if (!transferLog ||
+                typeof transferLog.address !== 'string' ||
+                !/^0x[0-9a-fA-F]{40}$/.test(transferLog.address) ||
+                typeof transferLog.transactionHash !== 'string' ||
+                !/^0x[0-9a-fA-F]{64}$/.test(transferLog.transactionHash) ||
+                typeof transferLog.blockHash !== 'string' ||
+                !/^0x[0-9a-fA-F]{64}$/.test(transferLog.blockHash) ||
+                !Array.isArray(transferLog.topics) ||
+                transferLog.topics.length === 0 ||
+                typeof transferLog.topics[0] !== 'string' ||
+                transferLog.address.toLowerCase() !== canonicalContract.toLowerCase() ||
                 transferLog.transactionHash.toLowerCase() !== String(dep.tx_hash).toLowerCase() ||
                 transferLog.blockNumber !== receipt.blockNumber ||
                 transferLog.blockHash.toLowerCase() !== receipt.blockHash.toLowerCase() ||
-                transferLog.topics[0]?.toLowerCase() !== transferTopic.toLowerCase()) {
+                transferLog.topics[0].toLowerCase() !== transferTopic.toLowerCase()) {
               console.error('[Deposit Ingestion] Pending EVM USDT receipt log identity or contract mismatch; deposit remains pending');
               continue;
             }
