@@ -105,26 +105,27 @@ export async function getMonitoredAddresses(): Promise<{
     // 2. Fetch from user_deposit_addresses
     const { data: fallbackAddresses, error: fErr } = await supabaseAdmin
       .from('user_deposit_addresses')
-      .select('address, network, coin');
+      .select('address, network, network_code, asset_code');
 
     if (!fErr && fallbackAddresses) {
       for (const row of fallbackAddresses) {
         if (!row.address) continue;
         const clean = row.address.trim();
-        const normNet = normalizeDepositNetwork(row.network || '');
-        const normCoin = (row.coin || '').toUpperCase().trim();
+        const normNet = normalizeDepositNetwork(row.network_code || row.network || '');
+        const normCoin = (row.asset_code || '').toUpperCase().trim();
 
         if (normNet === 'TRC20' || isValidTronAddress(clean)) {
           tronAddresses.add(clean);
         } else if (
           normNet === 'BTC' ||
+          normNet === 'BITCOIN' ||
           normCoin === 'BTC' ||
           clean.startsWith('bc1') ||
           clean.startsWith('1') ||
           clean.startsWith('3')
         ) {
           btcAddresses.add(clean);
-        } else if (normNet === 'LTC' || normCoin === 'LTC' || clean.startsWith('ltc1') || clean.startsWith('L') || clean.startsWith('M')) {
+        } else if (normNet === 'LTC' || normNet === 'LITECOIN' || normCoin === 'LTC' || clean.startsWith('ltc1') || clean.startsWith('L') || clean.startsWith('M')) {
           ltcAddresses.add(clean);
         } else if (clean.startsWith('0x')) {
           evmAddresses.add(clean.toLowerCase());
