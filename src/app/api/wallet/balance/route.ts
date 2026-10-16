@@ -52,12 +52,17 @@ export async function GET(request: Request) {
     };
 
     try {
-      const { data: activeTrades } = await supabaseAdmin
+      const { data: activeTrades, error: activeTradesError } = await supabaseAdmin
         .from('trades')
         .select('crypto, coin, asset, amount, crypto_amount, escrow_fee, platform_fee, status, escrow_status')
         .eq('seller_id', effectiveUserId);
 
-      if (activeTrades && activeTrades.length > 0) {
+      if (activeTradesError || !activeTrades) {
+        console.error('[Wallet Balance] Active trade escrow lookup unavailable:', activeTradesError?.code || 'NO_DATA');
+        return NextResponse.json({ success: false, error: 'Wallet balance could not be verified safely.' }, { status: 503 });
+      }
+
+      if (activeTrades.length > 0) {
         const terminalStatuses = ['completed', 'cancelled', 'canceled', 'refunded', 'released', 'closed', 'expired', 'settled', 'resolved'];
         activeTrades.forEach((t: any) => {
           const st = String(t.status || '').toLowerCase().trim();
@@ -80,12 +85,17 @@ export async function GET(request: Request) {
       }
 
       // Also query p2p_trades table if present
-      const { data: p2pTrades } = await supabaseAdmin
+      const { data: p2pTrades, error: p2pTradesError } = await supabaseAdmin
         .from('p2p_trades')
         .select('crypto, coin, asset, amount, crypto_amount, escrow_fee, platform_fee, status, escrow_status')
         .eq('seller_id', effectiveUserId);
 
-      if (p2pTrades && p2pTrades.length > 0) {
+      if (p2pTradesError || !p2pTrades) {
+        console.error('[Wallet Balance] P2P trade escrow lookup unavailable:', p2pTradesError?.code || 'NO_DATA');
+        return NextResponse.json({ success: false, error: 'Wallet balance could not be verified safely.' }, { status: 503 });
+      }
+
+      if (p2pTrades.length > 0) {
         const terminalStatuses = ['completed', 'cancelled', 'canceled', 'refunded', 'released', 'closed', 'expired', 'settled', 'resolved'];
         p2pTrades.forEach((t: any) => {
           const st = String(t.status || '').toLowerCase().trim();
