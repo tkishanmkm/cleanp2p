@@ -34,13 +34,13 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: 'Request body must be a JSON object.' }, { status: 400 });
     }
     const { tradeId, reportedUserId, category, description, evidenceUrls } = body as Record<string, unknown>;
-    if (typeof tradeId !== 'string' || tradeId.trim().length === 0 || tradeId.length > 128 ||
-        typeof category !== 'string' || category.trim().length === 0 || category.length > 100 ||
-        typeof description !== 'string' || description.trim().length === 0 || description.length > 10000) {
+    if (typeof tradeId !== 'string' || tradeId.trim().length === 0 || tradeId.trim().length > 128 ||
+        typeof category !== 'string' || category.trim().length === 0 || category.trim().length > 100 ||
+        typeof description !== 'string' || description.trim().length === 0 || description.trim().length > 10000) {
       return NextResponse.json({ error: 'Trade ID, category, or description is invalid or too long.' }, { status: 400 });
     }
     if (reportedUserId !== undefined && reportedUserId !== null &&
-        (typeof reportedUserId !== 'string' || reportedUserId.trim().length === 0 || reportedUserId.length > 128)) {
+        (typeof reportedUserId !== 'string' || reportedUserId.trim().length === 0 || reportedUserId.trim().length > 128)) {
       return NextResponse.json({ error: 'Reported user ID is invalid.' }, { status: 400 });
     }
     if (evidenceUrls !== undefined && (!Array.isArray(evidenceUrls) || evidenceUrls.length > 20 ||
