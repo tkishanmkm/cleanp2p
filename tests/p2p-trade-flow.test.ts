@@ -1,8 +1,23 @@
 import { createClient } from '@supabase/supabase-js';
 
-// Initialize Supabase admin client
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL || 'https://placeholder.supabase.co';
-const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'placeholder-key';
+// This integration suite writes fixed test users, wallets, assets, ads, and trades.
+// Never fall back to app/production credentials or an anonymous key.
+const supabaseUrl = process.env.TEST_SUPABASE_URL;
+const supabaseKey = process.env.TEST_SUPABASE_SERVICE_ROLE_KEY;
+
+if (process.env.TEST_ALLOW_DESTRUCTIVE_P2P_TESTS !== 'true') {
+  throw new Error(
+    'Refusing to run destructive P2P integration tests. Set TEST_ALLOW_DESTRUCTIVE_P2P_TESTS=true only for a dedicated disposable test project.'
+  );
+}
+if (!supabaseUrl || !supabaseKey) {
+  throw new Error(
+    'Missing TEST_SUPABASE_URL or TEST_SUPABASE_SERVICE_ROLE_KEY. Do not use production credentials.'
+  );
+}
+if (!/^https:\/\/[a-z0-9-]+\.supabase\.co$/i.test(supabaseUrl)) {
+  throw new Error('TEST_SUPABASE_URL must be a valid Supabase project URL.');
+}
 
 const supabase = createClient(supabaseUrl, supabaseKey, {
   auth: { persistSession: false, autoRefreshToken: false },
