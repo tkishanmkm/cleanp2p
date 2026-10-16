@@ -743,7 +743,14 @@ export async function fundTronGasForAddress(
     }
   }
 
-  // 4. Broadcast exact persisted transaction
+  // 4. Revalidate ownership immediately before broadcasting the persisted transaction.
+  if (sweepId && workerId) {
+    await assertPreBroadcastOwnership(sweepId, workerId, 'GAS_FUNDING');
+  } else {
+    throw new Error('Sweep ID and worker ID are required before TRON gas funding broadcast');
+  }
+
+  // Broadcast exact persisted transaction
   try {
     const broadcastRes = await tronWeb.trx.sendRawTransaction(signedTx);
     if (!broadcastRes || !broadcastRes.result) {
