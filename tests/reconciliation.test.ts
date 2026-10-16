@@ -136,6 +136,15 @@ async function runReconciliationTests() {
   } catch (err: any) {
     console.error(red(`\nFatal error in reconciliation tests: ${err.message}`));
   } finally {
+    // Best-effort safety net: always remove this run's unique fixture,
+    // even if a reconciliation assertion or RPC fails.
+    const { error: finalAssetsCleanupErr } = await supabase.from('wallet_assets').delete().eq('wallet_id', rogueWalletId);
+    const { error: finalWalletCleanupErr } = await supabase.from('wallets').delete().eq('id', rogueWalletId);
+    if (finalAssetsCleanupErr || finalWalletCleanupErr) {
+      process.exitCode = 1;
+      console.error(red(`Fixture cleanup failed: ${finalAssetsCleanupErr?.message ?? finalWalletCleanupErr?.message}`));
+    }
+
     console.log(bold(cyan('\n------------------------------------------------------')));
     console.log(bold(`Results: ${passedTests}/${totalTests} tests passed.`));
     console.log(bold(cyan('------------------------------------------------------\n')));
