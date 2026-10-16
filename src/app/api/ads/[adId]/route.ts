@@ -561,7 +561,18 @@ export async function PUT(
       authError = cookieAuth.error;
     }
 
-    // 2. Resolve the Ad Record across tables (ads, p2p_ads, offers)
+    // Verify authentication/administrator status before resolving an ad with the
+    // privileged client, avoiding unauthenticated existence probing.
+    const adminAuth = await verifyServerAdmin(request);
+    const isAdmin = adminAuth.authorized;
+    if (!user && !isAdmin) {
+      return NextResponse.json(
+        { error: 'Unauthorized. Please log in to edit your advertisement.' },
+        { status: 401 }
+      );
+    }
+
+    // 2. Resolve the Ad Record across tables only after authentication.
     const resolved = await findAdById(adId);
     const existingAd = resolved?.ad || null;
     const targetTable = resolved?.tableName || null;
@@ -572,16 +583,7 @@ export async function PUT(
 
     // 3. Authorization Check: Ensure authenticated user is the ad owner or authorized admin
     const adOwnerId = existingAd.user_id || existingAd.userId;
-    const isOwner = adOwnerId && String(adOwnerId) === String(user?.id);
-    const adminAuth = await verifyServerAdmin(request);
-    const isAdmin = adminAuth.authorized;
-
-    if (!user && !isAdmin) {
-      return NextResponse.json(
-        { error: 'Unauthorized. Please log in to edit your advertisement.' },
-        { status: 401 }
-      );
-    }
+    const isOwner = Boolean(user && adOwnerId && String(adOwnerId) === String(user.id));
 
     if (!isOwner && !isAdmin) {
       return NextResponse.json(
