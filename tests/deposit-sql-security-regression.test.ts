@@ -86,6 +86,11 @@ const checks: Array<[string, string, RegExp]> = [
     /allocatedNonce === null[\s\S]*allocatedNonce === undefined[\s\S]*!\\/\\^\\d\\+\\$\\/\.test\\(allocatedNonce\\)/i,
   ],
   [
+    'nonce allocation rejects a hot-wallet address mismatch and validates inputs',
+    'supabase/migrations/20261016000007_bind_nonce_allocation_to_hot_wallet.sql',
+    /NULLIF\(TRIM\(p_wallet_address\), ''\) IS NULL[\s\S]*p_onchain_pending_nonce < 0[\s\S]*LOWER\(TRIM\(v_hot_wallet_address\)\) <> LOWER\(TRIM\(p_wallet_address\)\)[\s\S]*REVOKE ALL ON FUNCTION public\.allocate_hot_wallet_nonce/i,
+  ],
+  [
     'withdrawal worker rejects invalid numeric nonce and guards parsing errors',
     'src/jobs/withdrawalWorker.ts',
     /!Number\.isSafeInteger\(allocatedNonce\)[\s\S]*BigInt\(allocatedNonce\)[\s\S]*catch \{[\s\S]*unparsable nonce/i,
