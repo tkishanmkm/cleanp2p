@@ -1103,8 +1103,18 @@ async function scanBtcDeposits(
             });
             if (error) errors.push(`RPC error for BTC deposit ${tx.txid}:${index}: ${error.message}`);
             else {
-              const result = typeof data === 'string' ? JSON.parse(data) : data;
-              if (result?.status === 'credited') credited++;
+              let result: any;
+              try {
+                result = typeof data === 'string' ? JSON.parse(data) : data;
+              } catch {
+                errors.push(`Invalid RPC result for BTC deposit ${tx.txid}:${index}`);
+                continue;
+              }
+              if (!result || typeof result !== 'object' || Array.isArray(result) || typeof result.status !== 'string') {
+                errors.push(`Malformed RPC result for BTC deposit ${tx.txid}:${index}`);
+                continue;
+              }
+              if (result.status === 'credited') credited++;
             }
           }
         }
@@ -1169,8 +1179,18 @@ async function scanLtcDeposits(
             });
             if (error) errors.push(`RPC error for LTC deposit ${tx.txid}:${index}: ${error.message}`);
             else {
-              const result = typeof data === 'string' ? JSON.parse(data) : data;
-              if (result?.status === 'credited') credited++;
+              let result: any;
+              try {
+                result = typeof data === 'string' ? JSON.parse(data) : data;
+              } catch {
+                errors.push(`Invalid RPC result for LTC deposit ${tx.txid}:${index}`);
+                continue;
+              }
+              if (!result || typeof result !== 'object' || Array.isArray(result) || typeof result.status !== 'string') {
+                errors.push(`Malformed RPC result for LTC deposit ${tx.txid}:${index}`);
+                continue;
+              }
+              if (result.status === 'credited') credited++;
             }
           }
         }
