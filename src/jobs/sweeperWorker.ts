@@ -1053,7 +1053,24 @@ export async function undelegateEnergyToPool(
   }
 
   let deterministicTxHash = delegation.undelegation_tx_hash;
-  let signedTx = delegation.signed_undelegation_hex ? JSON.parse(delegation.signed_undelegation_hex) : null;
+  let signedTx: any = null;
+  if (delegation.signed_undelegation_hex) {
+    try {
+      signedTx = JSON.parse(delegation.signed_undelegation_hex);
+    } catch {
+      throw new Error('Persisted TRON undelegation transaction is not valid JSON; refusing to broadcast');
+    }
+    if (
+      !signedTx ||
+      typeof signedTx !== 'object' ||
+      typeof signedTx.txID !== 'string' ||
+      !/^[0-9a-fA-F]{64}$/.test(signedTx.txID) ||
+      typeof deterministicTxHash !== 'string' ||
+      signedTx.txID.toLowerCase() !== deterministicTxHash.toLowerCase()
+    ) {
+      throw new Error('Persisted TRON undelegation transaction hash is missing or mismatched; refusing to broadcast');
+    }
+  }
 
   // 2. Build and sign if not already signed & persisted
   if (!signedTx) {
