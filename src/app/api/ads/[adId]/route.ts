@@ -172,7 +172,7 @@ export async function GET(
     ) ?? 'USD';
 
     // Include the canonical trade_type field for rows that do not carry legacy type aliases.
-    const rawAdType = firstNonEmptyString(ad.type, ad.ad_type, ad.trade_type);
+    const rawAdType = firstNonEmptyString(ad.trade_type, ad.ad_type, ad.type);
     const adType = rawAdType === 'BUY' || rawAdType === 'SELL' ? rawAdType : 'SELL';
     const rawTerms = typeof ad.terms === 'string' ? ad.terms : '';
     const rawTermsConditions = typeof ad.terms_conditions === 'string' ? ad.terms_conditions : '';
