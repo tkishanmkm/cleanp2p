@@ -73,7 +73,9 @@ export async function getMonitoredAddresses(): Promise<{
     // 1. Fetch from deposit_addresses
     const { data: primaryAddresses, error: pErr } = await supabaseAdmin
       .from('deposit_addresses')
-      .select('address, network_code, asset_code');
+      .select('address, network_code, asset_code, is_active, status')
+      .eq('is_active', true)
+      .eq('status', 'active');
 
     if (!pErr && primaryAddresses) {
       for (const row of primaryAddresses) {
@@ -130,35 +132,9 @@ export async function getMonitoredAddresses(): Promise<{
       }
     }
 
-    // 3. Fetch from wallets (User dashboard wallets)
-    const { data: userWallets, error: wErr } = await supabaseAdmin
-      .from('wallets')
-      .select('address, chain, currency');
+    // Do not scan the generic wallets table as a deposit-address source.
+    // It may contain withdrawal, trading, or otherwise non-deposit addresses.
 
-    if (!wErr && userWallets) {
-      for (const row of userWallets) {
-        if (!row.address) continue;
-        const clean = row.address.trim();
-        const normNet = normalizeDepositNetwork(row.chain || '');
-        const normCoin = (row.currency || '').toUpperCase().trim();
-
-        if (normNet === 'TRC20' || isValidTronAddress(clean)) {
-          tronAddresses.add(clean);
-        } else if (
-          normNet === 'BTC' ||
-          normCoin === 'BTC' ||
-          clean.startsWith('bc1') ||
-          clean.startsWith('1') ||
-          clean.startsWith('3')
-        ) {
-          btcAddresses.add(clean);
-        } else if (normNet === 'LTC' || normCoin === 'LTC' || clean.startsWith('ltc1') || clean.startsWith('L') || clean.startsWith('M')) {
-          ltcAddresses.add(clean);
-        } else if (clean.startsWith('0x')) {
-          evmAddresses.add(clean.toLowerCase());
-        }
-      }
-    }
   } catch (err) {
     console.error('[Deposit Ingestion] Error querying monitored deposit addresses:', err);
   }
