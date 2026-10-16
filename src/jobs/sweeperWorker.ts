@@ -1146,16 +1146,21 @@ export async function undelegateEnergyToPool(
   try {
     const delegatedRes = await tronWeb.trx.getDelegatedResourceV2(poolAddress, receiverAddress);
     const energyDelegation = delegatedRes?.delegatedResource?.find((r: any) => !r.resource || r.resource === 'ENERGY');
-    if (!energyDelegation || !energyDelegation.frozen_balance_for_energy || Number(energyDelegation.frozen_balance_for_energy) === 0) {
+    const rawRemainingEnergy = energyDelegation?.frozen_balance_for_energy;
+    if (!energyDelegation || rawRemainingEnergy === undefined || rawRemainingEnergy === null || rawRemainingEnergy === '' || rawRemainingEnergy === '0' || rawRemainingEnergy === 0) {
       verifiedDelegationRemoved = true;
       console.log(`[Tron Resource Pool] On-chain delegation verified completely removed via getDelegatedResourceV2.`);
     } else {
-      console.log(`[Tron Resource Pool] Remaining delegated energy on-chain: ${energyDelegation.frozen_balance_for_energy} SUN.`);
-      verifiedDelegationRemoved = true;
+      const remainingEnergy = Number(rawRemainingEnergy);
+      if (!Number.isSafeInteger(remainingEnergy) || remainingEnergy < 0) {
+        throw new Error('TRON delegated-resource query returned an invalid remaining energy amount');
+      }
+      console.warn(`[Tron Resource Pool] Remaining delegated energy on-chain: ${rawRemainingEnergy} SUN. Keeping allocation in recovery.`);
+      verifiedDelegationRemoved = false;
     }
   } catch (v2Err) {
-    console.warn(`[Tron Resource Pool] getDelegatedResourceV2 check encountered warning:`, v2Err);
-    verifiedDelegationRemoved = true; // Fallback to confirmed on-chain tx
+    console.error(`[Tron Resource Pool] Unable to verify delegated resources on-chain; keeping allocation in recovery:`, v2Err);
+    verifiedDelegationRemoved = false;
   }
 
   if (!verifiedDelegationRemoved) {
