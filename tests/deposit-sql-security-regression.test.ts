@@ -265,6 +265,11 @@ const checks: Array<[string, string, RegExp]> = [
     'src/jobs/sweeperWorker.ts',
     /!Number\.isSafeInteger\(cooldownSecs\) \|\| cooldownSecs < 0[\s\S]*?!Number\.isFinite\(dailyLimitNative\) \|\| dailyLimitNative <= 0[\s\S]*?!Number\.isSafeInteger\(dailyMaxOps\) \|\| dailyMaxOps <= 0[\s\S]*?Invalid gas funding abuse-protection configuration; refusing to fund/i,
   ],
+  [
+    'TRON gas funding revalidates sweep ownership immediately before broadcast',
+    'src/jobs/sweeperWorker.ts',
+    /Revalidate ownership immediately before broadcasting the persisted transaction[\s\S]*?assertPreBroadcastOwnership\(sweepId, workerId, 'GAS_FUNDING'\)[\s\S]*?Sweep ID and worker ID are required before TRON gas funding broadcast[\s\S]*?sendRawTransaction\(signedTx\)/i,
+  ],
 ];
 
 let failed = 0;
