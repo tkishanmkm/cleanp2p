@@ -1707,7 +1707,7 @@ export function formatSystemMessageContent(
 
   const safeLabel = (value: unknown, fallback: string): string => {
     if (typeof value !== 'string') return fallback;
-    const cleaned = value.replace(/[\\u0000-\\u001F\\u007F]/g, ' ').replace(/\\s+/g, ' ').trim().slice(0, 80);
+    const cleaned = value.replace(/[\u0000-\u001F\u007F]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 80);
     return cleaned || fallback;
   };
   const safeBuyerUsername = safeLabel(buyerUsername, 'Buyer');
@@ -1735,16 +1735,16 @@ export function formatSystemMessageContent(
         `🔒 TRADE INITIATED\n` +
         `------------------------\n` +
         `• ${formattedAmount} ${cleanCoin} is safely held in Paxones Escrow.\n` +
-        `• Buyer (@${buyerUsername}): Please transfer payment according to the seller's payment instructions before the timer expires, then click "I have paid".\n` +
-        `• Seller (@${sellerUsername}): Do NOT release escrow until you have verified incoming funds in your own account/statement.\n` +
+        `• Buyer (@${safeBuyerUsername}): Please transfer payment according to the seller's payment instructions before the timer expires, then click "I have paid".\n` +
+        `• Seller (@${safeSellerUsername}): Do NOT release escrow until you have verified incoming funds in your own account/statement.\n` +
         `• Security: Never share passwords, OTPs, or communicate off-platform.`
       );
 
     case 'TRADE_COMPLETED':
     case 'TRADE_RELEASED':
       return (
-        `@${sellerUsername} sold ${formattedAmount} ${cleanCoin} successfully to @${buyerUsername}.\n` +
-        `@${buyerUsername} bought ${formattedAmount} ${cleanCoin} successfully from @${sellerUsername}.`
+        `@${safeSellerUsername} sold ${formattedAmount} ${cleanCoin} successfully to @${safeBuyerUsername}.\n` +
+        `@${safeBuyerUsername} bought ${formattedAmount} ${cleanCoin} successfully from @${safeSellerUsername}.`
       );
 
     case 'TRADE_CANCELLED':
@@ -1761,7 +1761,7 @@ export function formatSystemMessageContent(
 
     case 'TRADE_DISPUTED': {
       let instructions = '';
-      const method = (paymentMethod || '').toLowerCase();
+      const method = (safePaymentMethod || '').toLowerCase();
 
       if (
         method.includes('bank') ||
@@ -1812,15 +1812,15 @@ export function formatSystemMessageContent(
           `2. Seller: Upload screen recording or screenshot of the redemption attempt error showing time of redemption or already redeemed timestamp from merchant.`;
       } else {
         instructions =
-          `Instructions for ${paymentMethod || 'Selected Payment Method'}:\n` +
+          `Instructions for ${safePaymentMethod || 'Selected Payment Method'}:\n` +
           `1. Buyer: Upload proof of payment (statement, receipt, transaction ID, or video confirmation).\n` +
           `2. Seller: Upload proof of non-receipt (account statement covering trade timeframe).`;
       }
 
       return (
         `Trade is now in dispute.\n` +
-        `Reason: ${disputeReason}\n` +
-        `Dispute opened by: @${openerUsername}\n\n` +
+        `Reason: ${safeReason}\n` +
+        `Dispute opened by: @${safeOpenerUsername}\n\n` +
         `Please provide any requested evidence, documents, payment receipts, screenshots, or other supporting information within the specified timeframe. If files exceed direct upload limits (>30 MB video / >5 MB image/doc), upload to Google Drive or Dropbox and paste the view-only share link in chat (never share passwords or credentials).\n\n` +
         instructions
       );
@@ -1828,30 +1828,30 @@ export function formatSystemMessageContent(
 
     case 'POSITIVE_FEEDBACK':
       return trimmedComment
-        ? `@${openerUsername} left positive feedback "${trimmedComment}"`
-        : `@${openerUsername} left positive feedback.`;
+        ? `@${safeOpenerUsername} left positive feedback "${trimmedComment}"`
+        : `@${safeOpenerUsername} left positive feedback.`;
 
     case 'NEGATIVE_FEEDBACK':
       return trimmedComment
-        ? `@${openerUsername} left negative feedback "${trimmedComment}"`
-        : `@${openerUsername} left negative feedback.`;
+        ? `@${safeOpenerUsername} left negative feedback "${trimmedComment}"`
+        : `@${safeOpenerUsername} left negative feedback.`;
 
     case 'USER_BLOCKED':
       return (
-        `@${openerUsername} (${initiatorRole}) blocked @${blockedUsername} (${targetRole}). Do not cancel or release trade if funds were sent/received.`
+        `@${safeOpenerUsername} (${safeInitiatorRole}) blocked @${safeBlockedUsername} (${safeTargetRole}). Do not cancel or release trade if funds were sent/received.`
       );
 
     case 'ISSUE_REPORTED':
       return (
-        `@${openerUsername} reported an issue.` +
-        `${issueCategory ? `\nCategory: ${issueCategory}` : ''}\n` +
-        `Details: ${issueDetails}`
+        `@${safeOpenerUsername} reported an issue.` +
+        `${safeIssueCategory ? `\nCategory: ${safeIssueCategory}` : ''}\n` +
+        `Details: ${safeIssueDetails}`
       );
 
     case 'MARKED_PAID':
       return (
-        `Buyer @${buyerUsername} has marked the trade as paid. ` +
-        `@${sellerUsername}, please validate payment in your receiving account before releasing.`
+        `Buyer @${safeBuyerUsername} has marked the trade as paid. ` +
+        `@${safeSellerUsername}, please validate payment in your receiving account before releasing.`
       );
 
     case 'MODERATOR_JOINED':
