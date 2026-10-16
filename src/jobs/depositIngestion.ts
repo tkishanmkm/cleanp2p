@@ -518,9 +518,19 @@ async function scanTronDeposits(
               } catch (_) {}
             }
 
-            const confirmations = (latestBlock && eventBlock && latestBlock >= eventBlock)
-              ? latestBlock - eventBlock + 1
-              : 1;
+            // Never treat missing/unverified chain height as one confirmation.
+            // Without both heights, fail closed and let a later scan retry.
+            if (
+              !Number.isSafeInteger(eventBlock) ||
+              eventBlock <= 0 ||
+              !Number.isSafeInteger(latestBlock) ||
+              latestBlock <= 0 ||
+              eventBlock > latestBlock
+            ) {
+              errors.push(`Rejected TRON deposit with unavailable or invalid block height: ${txId}`);
+              continue;
+            }
+            const confirmations = latestBlock - eventBlock + 1;
 
             detected++;
 
