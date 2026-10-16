@@ -376,6 +376,11 @@ const checks: Array<[string, string, RegExp]> = [
     /export async function fundTronGasForAddress[\s\S]*?const insolvMsg = `TRON hot wallet[\s\S]*?insolvencyPersistErr[\s\S]*?status: 'RECOVERY_REQUIRED'[\s\S]*?RECOVERY_REQUIRED persistence failed/i,
   ],
   [
+    'TRON resource delegation initialization requires explicit RPC success',
+    'src/jobs/sweeperWorker.ts',
+    /claim_or_initialize_resource_delegation[\s\S]*?if \(initErr \|\| !initRes \|\| initRes\.success !== true\)[\s\S]*?Failed to initialize resource delegation record/i,
+  ],
+  [
     'TRON delegation signed-transaction persistence requires explicit RPC success',
     'src/jobs/sweeperWorker.ts',
     /persist_signed_delegation[\s\S]*?if \(persistErr \|\| !persistRes \|\| persistRes\.success !== true\)[\s\S]*?Failed to persist signed delegation transaction/i,
