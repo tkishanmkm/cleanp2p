@@ -359,7 +359,10 @@ export async function POST(req: NextRequest) {
     if (
       typeof transferData.transfer_id !== 'string' ||
       transferData.transfer_id.trim().length === 0 ||
-      (transferData.public_id !== undefined && transferData.public_id !== null && (typeof transferData.public_id !== 'string' || transferData.public_id.trim().length === 0)) ||
+      transferData.transfer_id !== transferData.transfer_id.trim() ||
+      (transferData.public_id !== undefined && transferData.public_id !== null &&
+        (typeof transferData.public_id !== 'string' || transferData.public_id.trim().length === 0 ||
+          transferData.public_id !== transferData.public_id.trim())) ||
       (typeof transferData.status !== 'string' || transferData.status.trim().length === 0) ||
       (transferData.idempotent_replay !== undefined && typeof transferData.idempotent_replay !== 'boolean') ||
       (transferData.sender_id !== undefined && transferData.sender_id !== user.id) ||
