@@ -184,13 +184,21 @@ export async function processWithdrawalQueue(): Promise<WithdrawalProcessResult>
       throw new Error(`EVM Hot Wallet signer not available for network ${network}. Check EVM_HOT_WALLET_PRIVATE_KEY.`);
     }
 
+    const normNet = normalizeNetworkCode(network);
+    const chainConfig = SUPPORTED_EVM_CHAINS[normNet];
+    if (!chainConfig) {
+      throw new Error(`No trusted EVM chain configuration exists for network ${network}`);
+    }
+    const connectedNetwork = await provider.getNetwork();
+    if (connectedNetwork.chainId !== BigInt(chainConfig.chainId)) {
+      throw new Error(`RPC chain ID mismatch for ${normNet}: expected ${chainConfig.chainId}, received ${connectedNetwork.chainId.toString()}`);
+    }
+
     const nonce = await allocateEvmNonce(network, address, provider);
     const feeOverrides = await getEip1559FeeOverrides(provider, 1.25);
     let tx: ethers.TransactionResponse;
 
-    const normNet = normalizeNetworkCode(network);
-    const chainConfig = SUPPORTED_EVM_CHAINS[normNet];
-    const isNativeTransfer = chainConfig && assetSymbol === chainConfig.nativeSymbol;
+    const isNativeTransfer = assetSymbol === chainConfig.nativeSymbol;
 
     if (isNativeTransfer) {
       // Native transfer (ETH)
