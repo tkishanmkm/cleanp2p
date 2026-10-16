@@ -62,16 +62,14 @@ export async function POST(req: Request) {
       );
     }
 
-    const ingestHeader = req.headers.get('x-ingest-secret') || req.headers.get('x-api-key');
-    const isDirectHeaderValid = ingestHeader && secret && crypto.timingSafeEqual(Buffer.from(ingestHeader), Buffer.from(secret));
-
-    if (!isDirectHeaderValid) {
-      if (!signature || !verifySignature(rawBody, signature)) {
-        return NextResponse.json(
-          { error: 'UNAUTHORIZED: Invalid or missing HMAC-SHA256 signature.' },
-          { status: 401 }
-        );
-      }
+    // Require the provider's HMAC signature over the exact raw body. A shared-secret
+    // header is not sufficient here: it would let anyone holding the secret forge
+    // arbitrary deposit events without proving the provider signed this payload.
+    if (!signature || !verifySignature(rawBody, signature)) {
+      return NextResponse.json(
+        { error: 'UNAUTHORIZED: Invalid or missing HMAC-SHA256 signature.' },
+        { status: 401 }
+      );
     }
 
     let payload: any = {};
