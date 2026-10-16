@@ -31,6 +31,21 @@ const checks: Array<[string, string, RegExp]> = [
     /GET DIAGNOSTICS v_ledger_rows = ROW_COUNT;[\s\S]*IF v_ledger_rows <> 1 THEN[\s\S]*RAISE EXCEPTION/i,
   ],
   [
+    'withdrawal claim batch uses row locking to avoid double claims',
+    'supabase/migrations/20261016000006_bound_withdrawal_claim_batch.sql',
+    /FOR UPDATE SKIP LOCKED/i,
+  ],
+  [
+    'withdrawal claim RPC revokes authenticated execution in bounded migration',
+    'supabase/migrations/20261016000006_bound_withdrawal_claim_batch.sql',
+    /REVOKE ALL ON FUNCTION public\\.claim_pending_withdrawals\\(INTEGER\\) FROM authenticated/i,
+  ],
+  [
+    'withdrawal claim RPC grants only service role in bounded migration',
+    'supabase/migrations/20261016000006_bound_withdrawal_claim_batch.sql',
+    /GRANT EXECUTE ON FUNCTION public\\.claim_pending_withdrawals\\(INTEGER\\) TO service_role/i,
+  ],
+  [
     'withdrawal claim batch is bounded and browser roles remain revoked',
     'supabase/migrations/20261016000006_bound_withdrawal_claim_batch.sql',
     /p_limit IS NULL OR p_limit < 1 OR p_limit > 100/i,
