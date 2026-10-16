@@ -654,12 +654,15 @@ export async function fundGasForAddress(
     throw new Error(`Timed out waiting for gas funding confirmation on ${deterministicTxHash}`);
   }
 
-  // Step 13: Transition to CONFIRMED
+  // Step 13: Transition to CONFIRMED only if the durable state write succeeds.
   if (sweepId) {
-    await supabaseAdmin.from('gas_funding_operations').update({
+    const { error: confirmedStatusErr } = await supabaseAdmin.from('gas_funding_operations').update({
       status: 'CONFIRMED',
       updated_at: new Date().toISOString(),
     }).eq('sweep_id', sweepId);
+    if (confirmedStatusErr) {
+      throw new Error(`Gas funding tx ${deterministicTxHash} is confirmed on-chain but CONFIRMED status persistence failed: ${confirmedStatusErr.message}`);
+    }
     console.log(`[Sweeper Gas] Gas funding tx ${deterministicTxHash} CONFIRMED on-chain.`);
   }
 }
