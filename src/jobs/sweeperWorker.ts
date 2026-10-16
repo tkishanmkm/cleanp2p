@@ -1148,11 +1148,16 @@ export async function undelegateEnergyToPool(
   let verifiedDelegationRemoved = false;
   try {
     const delegatedRes = await tronWeb.trx.getDelegatedResourceV2(poolAddress, receiverAddress);
-    const energyDelegation = delegatedRes?.delegatedResource?.find((r: any) => !r.resource || r.resource === 'ENERGY');
+    if (!delegatedRes || !Array.isArray(delegatedRes.delegatedResource)) {
+      throw new Error('TRON delegated-resource query returned a missing or malformed delegatedResource list');
+    }
+    const energyDelegation = delegatedRes.delegatedResource.find((r: any) => !r.resource || r.resource === 'ENERGY');
     const rawRemainingEnergy = energyDelegation?.frozen_balance_for_energy;
-    if (!energyDelegation || rawRemainingEnergy === undefined || rawRemainingEnergy === null || rawRemainingEnergy === '' || rawRemainingEnergy === '0' || rawRemainingEnergy === 0) {
+    if (!energyDelegation || rawRemainingEnergy === '0' || rawRemainingEnergy === 0) {
       verifiedDelegationRemoved = true;
       console.log(`[Tron Resource Pool] On-chain delegation verified completely removed via getDelegatedResourceV2.`);
+    } else if (rawRemainingEnergy === undefined || rawRemainingEnergy === null || rawRemainingEnergy === '') {
+      throw new Error('TRON delegated-resource query returned an ENERGY record without a remaining balance');
     } else {
       const remainingEnergy = Number(rawRemainingEnergy);
       if (!Number.isSafeInteger(remainingEnergy) || remainingEnergy < 0) {
