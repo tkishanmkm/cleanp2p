@@ -897,7 +897,7 @@ export async function PUT(
     const effectiveFiat = String(updatedFiat ?? existingAd.fiat_symbol ?? existingAd.fiat_currency ?? existingAd.fiatCurrency ?? existingAd.fiat ?? existingAd.currency ?? 'USD').toUpperCase().trim();
 
     if (isFixed) {
-      const effectiveEditPrice = price !== undefined ? price : Number(existingAd.price ?? existingAd.unit_price ?? 0);
+      const effectiveEditPrice = price !== undefined ? price : Number(existingAd.price ?? existingAd.unit_price ?? existingAd.fixed_rate ?? 0);
       if (!Number.isFinite(effectiveEditPrice) || effectiveEditPrice <= 0) {
         return NextResponse.json({ error: 'Valid fixed price is required for fixed-rate ads.' }, { status: 400 });
       }
