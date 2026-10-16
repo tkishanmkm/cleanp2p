@@ -334,9 +334,23 @@ export async function executeCanonicalWithdrawal(input: WithdrawalRequestInput):
     };
   }
 
+  if (
+    (input.asset !== undefined && input.asset !== null && typeof input.asset !== 'string') ||
+    (input.network !== undefined && input.network !== null && typeof input.network !== 'string') ||
+    (input.chain !== undefined && input.chain !== null && typeof input.chain !== 'string')
+  ) {
+    return {
+      success: false,
+      status: 'INVALID_ASSET_OR_NETWORK',
+      error: 'Asset and network must be strings.',
+      message: 'Invalid asset or network.',
+      statusCode: 400,
+    };
+  }
+
   const assetSymbol = (input.asset || 'USDT').toUpperCase().trim();
   const rawNetwork = input.network || input.chain || 'TRC20';
-  const networkCode = normalizeNetwork(String(rawNetwork));
+  const networkCode = normalizeNetwork(rawNetwork);
 
   if (!SUPPORTED_ASSETS.includes(assetSymbol as any)) {
     return {
