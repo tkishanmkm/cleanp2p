@@ -745,8 +745,18 @@ async function scanTronDeposits(
             if (error) {
               errors.push(`RPC error for TRON deposit ${txId}: ${error.message}`);
             } else {
-              const r = typeof rpcData === 'string' ? JSON.parse(rpcData) : rpcData;
-              if (r?.status === 'credited') {
+              let r: any;
+              try {
+                r = typeof rpcData === 'string' ? JSON.parse(rpcData) : rpcData;
+              } catch {
+                errors.push(`Invalid RPC result for TRON deposit ${txId}`);
+                continue;
+              }
+              if (!r || typeof r !== 'object' || Array.isArray(r) || typeof r.status !== 'string') {
+                errors.push(`Malformed RPC result for TRON deposit ${txId}`);
+                continue;
+              }
+              if (r.status === 'credited') {
                 credited++;
               }
             }
