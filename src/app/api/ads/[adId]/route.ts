@@ -657,8 +657,24 @@ export async function PUT(
       }
     }
 
-    // 4. Parse & Sanitize Edit Payload
-    const body = await request.json();
+    // 4. Parse & Sanitize Edit Payload with bounded input and explicit JSON errors
+    const contentLength = Number(request.headers.get('content-length') || 0);
+    if (Number.isFinite(contentLength) && contentLength > 32768) {
+      return NextResponse.json({ error: 'Request body is too large.', code: 'REQUEST_TOO_LARGE' }, { status: 413 });
+    }
+    let body: any;
+    try {
+      const rawBody = await request.text();
+      if (rawBody.length > 32768) {
+        return NextResponse.json({ error: 'Request body is too large.', code: 'REQUEST_TOO_LARGE' }, { status: 413 });
+      }
+      body = JSON.parse(rawBody);
+    } catch {
+      return NextResponse.json({ error: 'Invalid JSON body.', code: 'INVALID_JSON' }, { status: 400 });
+    }
+    if (!body || typeof body !== 'object' || Array.isArray(body)) {
+      return NextResponse.json({ error: 'Request body must be a JSON object.', code: 'INVALID_BODY' }, { status: 400 });
+    }
 
     // Strip client-controlled identity and administrative fields to prevent spoofing
     delete body.user_id;
@@ -684,11 +700,20 @@ export async function PUT(
       ? Number(body.margin) 
       : (body.rate_percent !== undefined && body.rate_percent !== null && body.rate_percent !== '' ? Number(body.rate_percent) : undefined);
 
-    if (price !== undefined && price <= 0) {
-      return NextResponse.json({ error: 'Price must be greater than 0.' }, { status: 400 });
+    if (price !== undefined && (!Number.isFinite(price) || price <= 0)) {
+      return NextResponse.json({ error: 'Price must be a finite number greater than 0.' }, { status: 400 });
     }
-    if (minAmount !== undefined && minAmount <= 0) {
-      return NextResponse.json({ error: 'Minimum limit must be greater than 0.' }, { status: 400 });
+    if (unitPrice !== undefined && (!Number.isFinite(unitPrice) || unitPrice <= 0)) {
+      return NextResponse.json({ error: 'Unit price must be a finite number greater than 0.' }, { status: 400 });
+    }
+    if (minAmount !== undefined && (!Number.isFinite(minAmount) || minAmount <= 0)) {
+      return NextResponse.json({ error: 'Minimum limit must be a finite number greater than 0.' }, { status: 400 });
+    }
+    if (maxAmount !== undefined && (!Number.isFinite(maxAmount) || maxAmount <= 0)) {
+      return NextResponse.json({ error: 'Maximum limit must be a finite number greater than 0.' }, { status: 400 });
+    }
+    if (margin !== undefined && (!Number.isFinite(margin) || margin < -50 || margin > 50)) {
+      return NextResponse.json({ error: 'Margin must be a finite number between -50% and +50%.' }, { status: 400 });
     }
     if (minAmount !== undefined && maxAmount !== undefined && maxAmount < minAmount) {
       return NextResponse.json({ error: 'Maximum limit must be greater than or equal to minimum limit.' }, { status: 400 });
