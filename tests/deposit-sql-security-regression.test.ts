@@ -764,7 +764,7 @@ const checks: Array<[string, string, RegExp]> = [
   [
     'pending withdrawal approval check fails closed when both lookups fail',
     'src/lib/withdrawal-security.ts',
-    /if \(onchainError\)[\s\S]*?Unable to verify pending withdrawal approval state[\s\S]*?throw err instanceof Error/i,
+    /if \(error\)[\s\S]*?primary approval-lock query is authoritative[\s\S]*?Unable to verify pending withdrawal approval state/i,
   ],
   [
     'withdrawal rejects when hold or pending-approval security checks fail',
