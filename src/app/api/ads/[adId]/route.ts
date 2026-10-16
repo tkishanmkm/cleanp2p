@@ -44,6 +44,34 @@ export async function GET(
     let presence = 'Online';
     let profileData: any = null;
     const adOwnerUserId = ad.user_id || ad.userId || ad.seller_id || ad.creator_id || ad.user?.id;
+
+    // Admin-backed lookup bypasses RLS, so do not expose inactive/deleted ads
+    // publicly. Owners and authorized administrators may still retrieve them.
+    const unavailableAd =
+      ad.active === false ||
+      ad.is_active === false ||
+      ad.is_deleted === true ||
+      ['INACTIVE', 'DELETED'].includes(String(ad.status || '').toUpperCase());
+    if (unavailableAd) {
+      const supabase = await createClient();
+      const authHeader = request.headers.get('Authorization') || request.headers.get('authorization');
+      const bearerToken = authHeader?.startsWith('Bearer ') ? authHeader.substring(7).trim() : null;
+      let requester = null;
+      if (bearerToken) {
+        const tokenAuth = await supabase.auth.getUser(bearerToken);
+        requester = tokenAuth.data?.user || null;
+      }
+      if (!requester) {
+        const cookieAuth = await supabase.auth.getUser();
+        requester = cookieAuth.data?.user || null;
+      }
+      const isOwner = Boolean(requester && adOwnerUserId && requester.id === String(adOwnerUserId));
+      const adminAuth = await verifyServerAdmin(request);
+      if (!isOwner && !adminAuth.authorized) {
+        return NextResponse.json({ error: 'Advertisement not found.' }, { status: 404 });
+      }
+    }
+
     if (adOwnerUserId) {
       try {
         const { data: profile } = await admin
