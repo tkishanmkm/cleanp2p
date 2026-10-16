@@ -607,7 +607,7 @@ async function scanTronDeposits(
     // Queries each monitored TRON address for incoming TRC-20 transfers (works reliably regardless of block depth)
     for (const monitoredAddr of monitoredTronAddresses) {
       try {
-        const accountUrl = `${tronGridHost}/v1/accounts/`${monitoredAddr}/transactions/trc20?limit=200&only_confirmed=true&contract_address=`${CANONICAL_USDT_CONTRACTS.TRC20}`;
+        const accountUrl = tronGridHost + '/v1/accounts/' + encodeURIComponent(monitoredAddr) + '/transactions/trc20?limit=200&only_confirmed=true&contract_address=' + encodeURIComponent(CANONICAL_USDT_CONTRACTS.TRC20);
         // Collect a bounded set of TronGrid pages. If the provider cannot supply
         // a progressing cursor, report an incomplete scan rather than implying
         // the address history was fully checked.
