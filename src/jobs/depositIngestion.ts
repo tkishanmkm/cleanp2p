@@ -1389,7 +1389,8 @@ async function refreshPendingDepositConfirmations(): Promise<{
               p_output_index: outputIndex,
               p_block_number: receipt.blockNumber,
               p_from_address: receipt.from?.toLowerCase() || dep.from_address || null,
-              p_token_contract: tokenContract,
+              // Native ETH must not be sent with the ERC-20 USDT contract.
+              p_token_contract: assetSymbol === 'USDT' ? tokenContract : null,
               p_confirmations: confs,
               p_provider: 'confirmations_worker',
             });
