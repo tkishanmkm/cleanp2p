@@ -162,7 +162,9 @@ export async function POST(req: Request) {
 
     // 5. Validate boolean fields before normalization. Boolean("false") is true in
     // JavaScript, so coercing arbitrary client values would silently enable flags.
-    for (const key of ['is_fixed', 'fixed_rate', 'require_full_name_verified', 'require_verified_users']) {
+    // fixed_rate is a legacy alias that may be numeric (price) or boolean (pricing mode).
+    // Validate the dedicated canonical flags here; normalize the legacy alias below.
+    for (const key of ['is_fixed', 'require_full_name_verified', 'require_verified_users']) {
       if (strippedFormData[key] !== undefined && strippedFormData[key] !== null &&
           typeof strippedFormData[key] !== 'boolean') {
         return NextResponse.json({ error: `${key} must be a boolean.` }, { status: 400 });
