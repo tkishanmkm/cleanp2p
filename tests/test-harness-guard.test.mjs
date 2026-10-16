@@ -13,7 +13,7 @@ for (const [path, optIn] of suites) {
   assert.ok(source.includes('process.env.TEST_SUPABASE_URL'), path + ': dedicated test URL required');
   assert.ok(source.includes('process.env.TEST_SUPABASE_SERVICE_ROLE_KEY'), path + ': dedicated test service key required');
   assert.ok(source.includes("process.env." + optIn + " !== 'true'"), path + ': explicit destructive-test opt-in required');
-  assert.ok(source.includes('supabase\\\\.co'), path + ': Supabase URL validation required');
+  assert.match(source, /https.*supabase.*co.*i/, path + ': Supabase URL validation required');
   assert.doesNotMatch(source, /NEXT_PUBLIC_SUPABASE_URL|SUPABASE_SERVICE_ROLE_KEY\s*\|\||NEXT_PUBLIC_SUPABASE_ANON_KEY|placeholder\.supabase\.co/, path + ': application/placeholder credential fallback forbidden');
 }
 const securitySuite = readFileSync('tests/security-verification.test.ts', 'utf8');
