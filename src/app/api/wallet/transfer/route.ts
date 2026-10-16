@@ -91,11 +91,19 @@ export async function POST(req: NextRequest) {
     }
 
     // 1. Fetch sender profile & check banned / restricted / emergency frozen status
-    const { data: senderProfile } = await admin
+    const { data: senderProfile, error: senderProfileError } = await admin
       .from('profiles')
       .select('id, username, is_banned, is_restricted, is_emergency_frozen, account_status, is_2fa_enabled, is_mfa_enabled, two_factor_enabled, totp_secret, two_factor_secret, is_verified, id_verified, is_id_verified, kyc_status, verification_tier')
       .eq('id', user.id)
       .maybeSingle();
+
+    if (senderProfileError) {
+      console.error('[Internal Transfer] Sender security profile lookup failed:', senderProfileError.code);
+      return NextResponse.json({
+        error: 'Account security status could not be verified. Please try again later.',
+        code: 'SECURITY_CHECK_UNAVAILABLE',
+      }, { status: 503 });
+    }
 
     if (!senderProfile) {
       return NextResponse.json({ error: 'Sender profile not found.' }, { status: 404 });
