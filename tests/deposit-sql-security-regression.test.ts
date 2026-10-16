@@ -802,6 +802,11 @@ const checks: Array<[string, string, RegExp]> = [
     /const \{ data: past24hWithdrawals, error: past24hWithdrawalsError \}[\s\S]*?if \(past24hWithdrawalsError \|\| !past24hWithdrawals\)[\s\S]*?status: 'SECURITY_CHECK_UNAVAILABLE'[\s\S]*?statusCode: 503/i,
   ],
   [
+    'withdrawal limits fail closed when persisted settings are invalid',
+    'src/lib/services/withdrawalService.ts',
+    /const hardMaxUsd = Number\(settings\.max_single_withdrawal_usd\)[\s\S]*?!Number\.isFinite\(hardMaxUsd\)[\s\S]*?status: 'SECURITY_CHECK_UNAVAILABLE'/,
+  ],
+  [
     'withdrawal destination addresses have a maximum input length',
     'src/lib/services/withdrawalService.ts',
     /if \(clean\.length > 128\)[\s\S]*?Destination address is too long/,
