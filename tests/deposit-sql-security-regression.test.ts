@@ -6,6 +6,11 @@ const root = process.cwd();
 const read = (relativePath: string) => readFileSync(join(root, relativePath), 'utf8');
 const checks: Array<[string, string, RegExp]> = [
   [
+    'BTC/LTC recovery hash mismatch checks recovery-state persistence',
+    'src/jobs/sweeperWorker.ts',
+    /Hash consistency check failed on recovery: derived[\s\S]*?BTC\/LTC Sweep Recovery Persistence Failure[\s\S]*?recoveryRes\.success !== true/i,
+  ],
+  [
     'BTC/LTC recovery hash calculation failure checks recovery-state persistence',
     'src/jobs/sweeperWorker.ts',
     /Hash calculation error:[\s\S]*?BTC\/LTC Sweep Recovery Persistence Failure[\s\S]*?recoveryRes\.success !== true/i,
