@@ -96,8 +96,9 @@ export async function POST(
     });
 
     if (rpcError || (rpcData && !rpcData.success)) {
-      const errorMsg = rpcError?.message || rpcData?.message || 'Failed to open dispute.';
-      return NextResponse.json({ error: errorMsg }, { status: 400 });
+      // Keep database internals out of public API responses.
+      console.error('raise_trade_dispute failed:', rpcError?.code || 'RPC_REJECTED');
+      return NextResponse.json({ error: 'Unable to open a dispute for this trade. Check the trade status and try again.' }, { status: 400 });
     }
 
     // Service-role admin client for official system message and notification insertion
