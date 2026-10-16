@@ -797,11 +797,24 @@ export async function fundTronGasForAddress(
     }
 
     if (isGasConfirmed) {
-      await supabaseAdmin
+      const { error: confirmUpdateErr } = await supabaseAdmin
         .from('gas_funding_operations')
         .update({ status: 'CONFIRMED', tx_hash: deterministicTxHash, updated_at: new Date().toISOString() })
         .eq('sweep_id', sweepId);
+      if (confirmUpdateErr) {
+        throw new Error(`Failed to persist TRON gas funding confirmation: ${confirmUpdateErr.message}`);
+      }
       console.log(`[Tron Gas] Gas funding tx ${deterministicTxHash} confirmed on-chain.`);
+    } else {
+      const reason = 'Timed out waiting for TRON gas funding transaction confirmation';
+      const { error: recoveryUpdateErr } = await supabaseAdmin
+        .from('gas_funding_operations')
+        .update({ status: 'RECOVERY_REQUIRED', error_message: reason, updated_at: new Date().toISOString() })
+        .eq('sweep_id', sweepId);
+      if (recoveryUpdateErr) {
+        throw new Error(`${reason}; failed to persist recovery status: ${recoveryUpdateErr.message}`);
+      }
+      throw new Error(reason);
     }
   }
 }
