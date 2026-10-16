@@ -376,6 +376,11 @@ const checks: Array<[string, string, RegExp]> = [
     /export async function fundTronGasForAddress[\s\S]*?const insolvMsg = `TRON hot wallet[\s\S]*?insolvencyPersistErr[\s\S]*?status: 'RECOVERY_REQUIRED'[\s\S]*?RECOVERY_REQUIRED persistence failed/i,
   ],
   [
+    'BTC and LTC UTXO reservations require explicit RPC success',
+    'src/jobs/sweeperWorker.ts',
+    /reserve_utxos_for_sweep[\s\S]*?p_network: 'BTC'[\s\S]*?reserveRes\.success !== true[\s\S]*?reserve_utxos_for_sweep[\s\S]*?p_network: 'LTC'[\s\S]*?reserveRes\.success !== true/i,
+  ],
+  [
     'TRON resource delegation initialization requires explicit RPC success',
     'src/jobs/sweeperWorker.ts',
     /claim_or_initialize_resource_delegation[\s\S]*?if \(initErr \|\| !initRes \|\| initRes\.success !== true\)[\s\S]*?Failed to initialize resource delegation record/i,
