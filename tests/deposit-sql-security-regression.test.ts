@@ -45,6 +45,21 @@ const checks: Array<[string, string, RegExp]> = [
     'src/jobs/depositIngestion.ts',
     /receipt\.blockHash\.toLowerCase\(\) !== log\.blockHash\.toLowerCase\(\)/i,
   ],
+  [
+    'deposit ingestion requires the service-role secret and has no anon-key fallback',
+    'src/jobs/depositIngestion.ts',
+    /const serviceRoleKey = process\.env\.SUPABASE_SERVICE_ROLE_KEY;[\s\S]{0,500}Missing SUPABASE_URL\/NEXT_PUBLIC_SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY/i,
+  ],
+  [
+    'confirmed-deposit RPC refuses unconfigured or disabled assets',
+    'supabase/migrations/20261016000001_require_confirmed_deposit_before_credit.sql',
+    /FROM public\.assets[\s\S]{0,120}code = v_asset_code[\s\S]{0,100}is_enabled IS TRUE[\s\S]{0,180}Deposit asset % is not configured and enabled/i,
+  ],
+  [
+    'legacy caller-parameter deposit RPC cannot perform a credit',
+    'supabase/migrations/20261016000003_disable_legacy_process_user_deposit.sql',
+    /CREATE OR REPLACE FUNCTION public\.process_user_deposit[\s\S]{0,700}RAISE EXCEPTION/i,
+  ],
 ];
 
 let failed = 0;
