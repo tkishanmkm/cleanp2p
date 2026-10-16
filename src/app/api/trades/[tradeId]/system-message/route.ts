@@ -90,13 +90,6 @@ export async function POST(
     let buyerUsername = '';
     let sellerUsername = '';
 
-    if (metadata.buyerUsername && metadata.buyerUsername.toLowerCase() !== 'buyer' && metadata.buyerUsername.toLowerCase() !== 'trader') {
-      buyerUsername = metadata.buyerUsername;
-    }
-    if (metadata.sellerUsername && metadata.sellerUsername.toLowerCase() !== 'seller' && metadata.sellerUsername.toLowerCase() !== 'trader') {
-      sellerUsername = metadata.sellerUsername;
-    }
-
     if (trade.buyer_id) {
       try {
         const { data: bp } = await supabaseAdmin
@@ -154,8 +147,8 @@ export async function POST(
     }
 
     // Secondary fallback to trade records / metadata if still unassigned
-    if (!buyerUsername) buyerUsername = trade.buyer_username || metadata.buyerUsername || 'Trader';
-    if (!sellerUsername) sellerUsername = trade.seller_username || metadata.sellerUsername || 'Trader';
+    if (!buyerUsername) buyerUsername = trade.buyer_username || 'Trader';
+    if (!sellerUsername) sellerUsername = trade.seller_username || 'Trader';
 
     const payload: SystemMessagePayload = {
       tradeId: actualTradeId,
@@ -163,9 +156,9 @@ export async function POST(
       buyerUsername,
       sellerUsername,
       openerUsername: user.user_metadata?.username || user.email?.split('@')[0] || 'Trader',
-      coinAmount: trade.crypto_amount || trade.amount || metadata.coinAmount || '0.00',
-      coinSymbol: trade.crypto || trade.asset_symbol || metadata.coinSymbol || 'USDT',
-      paymentMethod: trade.payment_method || metadata.paymentMethod || '',
+      coinAmount: trade.crypto_amount || trade.amount || '0.00',
+      coinSymbol: trade.crypto || trade.asset_symbol || 'USDT',
+      paymentMethod: trade.payment_method || '',
       disputeReason: metadata.disputeReason || '',
       issueDetails: metadata.issueDetails || '',
       issueCategory: metadata.issueCategory || '',
