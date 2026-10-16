@@ -385,6 +385,9 @@ export async function checkSubmittedWithdrawals(): Promise<{
       .select('*')
       .in('status', ['BROADCASTED', 'PROCESSING', 'AMBIGUOUS_BROADCAST'])
       .not('tx_hash', 'is', null)
+      // Process least-recently-updated rows first so a fixed batch limit cannot
+      // permanently starve older pending withdrawals.
+      .order('updated_at', { ascending: true, nullsFirst: true })
       .limit(30);
 
     if (error || !pendingTxs || pendingTxs.length === 0) {
