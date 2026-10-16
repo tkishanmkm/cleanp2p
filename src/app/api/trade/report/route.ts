@@ -52,7 +52,6 @@ export async function POST(req: Request) {
     }
 
     const cleanTradeId = tradeId.trim();
-    const cleanPublicId = typeof tradePublicId === 'string' ? tradePublicId.trim() : cleanTradeId;
     const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(cleanTradeId);
     let tradeQuery = supabase.from('trades').select('id, trade_id, buyer_id, seller_id');
     tradeQuery = isUuid
@@ -67,6 +66,9 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: 'Only participants in this trade can submit a report.' }, { status: 403 });
     }
     const otherParticipantId = trade.buyer_id === user.id ? trade.seller_id : trade.buyer_id;
+    const cleanPublicId = typeof trade.trade_id === 'string' && trade.trade_id.trim()
+      ? trade.trade_id.trim()
+      : trade.id;
     if (typeof reportedUserId === 'string' && reportedUserId.trim() !== otherParticipantId) {
       return NextResponse.json({ error: 'Reported user must be the other participant in this trade.' }, { status: 400 });
     }
