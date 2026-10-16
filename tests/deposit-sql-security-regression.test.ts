@@ -6,6 +6,11 @@ const root = process.cwd();
 const read = (relativePath: string) => readFileSync(join(root, relativePath), 'utf8');
 const checks: Array<[string, string, RegExp]> = [
   [
+    'EVM recovery rebroadcast exception checks recovery-state persistence',
+    'src/jobs/sweeperWorker.ts',
+    /EVM Sweeper Broadcast Exception during READY_TO_BROADCAST recovery[\s\S]*?EVM Sweep Recovery Persistence Failure after broadcast exception[\s\S]*?recoveryRes\.success !== true/i,
+  ],
+  [
     'EVM recovery nonce mismatch checks recovery-state persistence',
     'src/jobs/sweeperWorker.ts',
     /Nonce consistency check failed on recovery[\s\S]*?recoveryRes\.success !== true[\s\S]*?EVM Sweep Recovery Persistence Failure/i,
