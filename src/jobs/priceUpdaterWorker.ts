@@ -152,7 +152,10 @@ export async function runMarketPriceUpdate(): Promise<PriceUpdateResult> {
     }
 
     const liveAssets = Object.keys(cryptoUsdPrices);
-    if (liveAssets.length === 0) {
+    // USDT is a configured peg, not evidence that either live crypto provider
+    // succeeded. Do not report a successful refresh using only the synthetic peg.
+    const liveMarketAssets = liveAssets.filter((asset) => asset !== 'USDT');
+    if (liveMarketAssets.length === 0) {
       console.error('[Market Prices Worker] All live crypto price providers failed.');
       return { success: false, error: 'LIVE_CRYPTO_PROVIDER_UNAVAILABLE' };
     }
