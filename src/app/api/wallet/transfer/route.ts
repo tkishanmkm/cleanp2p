@@ -296,7 +296,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({
         error: 'Transfer could not be completed. Please verify your details and try again.',
         code: 'TRANSFER_RPC_ERROR',
-      }, { status: 400 });
+      }, { status: 503 });
     }
 
     // Fail closed: Ensure RPC response is valid and explicitly reports success
