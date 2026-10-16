@@ -1325,9 +1325,13 @@ async function refreshPendingDepositConfirmations(): Promise<{
                 !/^0x[0-9a-fA-F]{64}$/.test(transferLog.transactionHash) ||
                 typeof transferLog.blockHash !== 'string' ||
                 !/^0x[0-9a-fA-F]{64}$/.test(transferLog.blockHash) ||
+                !Number.isSafeInteger(transferLog.index) ||
+                transferLog.index < 0 ||
                 !Array.isArray(transferLog.topics) ||
-                transferLog.topics.length === 0 ||
-                typeof transferLog.topics[0] !== 'string' ||
+                transferLog.topics.length !== 3 ||
+                !transferLog.topics.every((topic) => typeof topic === 'string' && /^0x[0-9a-fA-F]{64}$/.test(topic)) ||
+                typeof transferLog.data !== 'string' ||
+                !/^0x[0-9a-fA-F]{64}$/.test(transferLog.data) ||
                 transferLog.address.toLowerCase() !== canonicalContract.toLowerCase() ||
                 transferLog.transactionHash.toLowerCase() !== String(dep.tx_hash).toLowerCase() ||
                 transferLog.blockNumber !== receipt.blockNumber ||
