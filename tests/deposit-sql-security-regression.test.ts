@@ -907,6 +907,16 @@ const checks: Array<[string, string, RegExp]> = [
     /suppliedKey === 'string' && suppliedKey\\.length <= 128[\\s\\S]*?\\/\\^\\[A-Za-z0-9\\._:-\\]\\{8,128\\}\\$\\//,
   ],
   [
+    'internal transfer returns service unavailable on RPC failure without logging raw details',
+    'src/app/api/wallet/transfer/route.ts',
+    /if \(rpcError\)[\s\S]*?code: rpcError\.code \|\| 'UNKNOWN'[\s\S]*?code: 'TRANSFER_RPC_ERROR'[\s\S]*?status: 503/i,
+  ],
+  [
+    'internal transfer bounds raw amount string length',
+    'src/app/api/wallet/transfer/route.ts',
+    /typeof amount === 'string' && \(amount\.length > 80 \|\| !\/\^\\d\+\(\?:\\\.\\d\+\)\?\$\/\.test\(amount\.trim\(\)\)\)/,
+  ],
+  [
     'sweep reconciliation exception checks recovery-state persistence',
     'src/jobs/sweeperWorker.ts',
     /\[Reconcile Sweep Exception\][\s\S]*?const \{ data: recoveryRes, error: recoveryErr \} = await supabaseAdmin\.rpc\('update_sweep_operation_status'[\s\S]*?p_new_status: 'RECOVERY_REQUIRED'[\s\S]*?recoveryRes\.success !== true[\s\S]*?Reconcile Sweep Critical/i,
