@@ -584,7 +584,12 @@ async function scanTronDeposits(
     if (!latestBlock) {
       try {
         const curBlock = await tronWeb.trx.getCurrentBlock();
-        latestBlock = curBlock?.block_header?.raw_data?.number || 0;
+        const candidate = curBlock?.block_header?.raw_data?.number;
+        if (Number.isSafeInteger(candidate) && candidate > 0) {
+          latestBlock = candidate;
+        } else {
+          errors.push('TRON SDK returned an invalid current block height');
+        }
       } catch (_) {}
     }
 
