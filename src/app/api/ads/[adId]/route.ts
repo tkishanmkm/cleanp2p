@@ -665,7 +665,17 @@ export async function PUT(
       return NextResponse.json({ error: 'Provide at most 30 valid tags, each no longer than 50 characters.' }, { status: 400 });
     }
 
-    const isFixed = body.rate_type === 'fixed' || body.pricing_type === 'FIXED' || body.is_fixed === true;
+    const pricingModeWasProvided = body.rate_type !== undefined || body.pricing_type !== undefined || body.is_fixed !== undefined;
+    const existingIsFixed = String(existingAd.rate_type || '').toLowerCase() === 'fixed'
+      || String(existingAd.pricing_type || '').toUpperCase() === 'FIXED'
+      || existingAd.is_fixed === true;
+    const isFixed = pricingModeWasProvided
+      ? (body.rate_type !== undefined
+          ? String(body.rate_type).toLowerCase() === 'fixed'
+          : body.pricing_type !== undefined
+            ? String(body.pricing_type).toUpperCase() === 'FIXED'
+            : body.is_fixed === true)
+      : existingIsFixed;
     const pricingType = isFixed ? 'FIXED' : 'FLOAT';
     const rateType = isFixed ? 'fixed' : 'market';
 
