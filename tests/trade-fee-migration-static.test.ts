@@ -450,8 +450,11 @@ assert.ok(safeFetchJsonSource.indexOf('return await res.json()') < safeFetchJson
 assert.match(safeFetchJsonSource, /finally\s*\{\s*clearTimeout\(timeoutId\);/s,
   'provider timeout must always be cleared after request/body completion');
 
-assert.equal((marketPriceWorker.match(/\\/\\^\\[A-Z\\]\\{3\\}\\\\\$\\/g) ?? []).length, 2,
-  'both fiat providers must only contribute three-letter currency codes');
+assert.equal(
+  marketPriceWorker.split('if (/^[A-Z]{3}$/.test(fiatCode) && Number.isFinite(numRate) && numRate > 0)').length - 1,
+  2,
+  'both fiat providers must only contribute three-letter currency codes'
+);
 assert.match(marketPriceWorker, /ASSETS\.includes\(coin\)[\s\S]*?Number\.isFinite\(p\) && p > 0/,
   'market-price worker must only accept positive finite tickers for explicitly supported assets');
 
