@@ -1040,7 +1040,17 @@ export async function undelegateEnergyToPool(
   }
 
   const receiverAddress = delegation.receiver_address;
-  const trxNeededSun = Number(delegation.delegated_amount_sun);
+  const rawDelegatedAmount = String(delegation.delegated_amount_sun ?? '');
+  const trxNeededSun = Number(rawDelegatedAmount);
+  if (
+    typeof receiverAddress !== 'string' ||
+    !tronWeb.isAddress(receiverAddress) ||
+    !/^\d+$/.test(rawDelegatedAmount) ||
+    !Number.isSafeInteger(trxNeededSun) ||
+    trxNeededSun <= 0
+  ) {
+    throw new Error('TRON delegation record contains an invalid receiver address or delegated amount');
+  }
 
   let deterministicTxHash = delegation.undelegation_tx_hash;
   let signedTx = delegation.signed_undelegation_hex ? JSON.parse(delegation.signed_undelegation_hex) : null;
