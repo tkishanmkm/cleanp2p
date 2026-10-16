@@ -3,13 +3,6 @@ import { createClient } from '@supabase/supabase-js';
 const supabaseUrl = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL || '';
 const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
 
-const supabaseAdmin = createClient(supabaseUrl, supabaseKey, {
-  auth: {
-    persistSession: false,
-    autoRefreshToken: false,
-  },
-});
-
 const ASSETS = ['BTC', 'ETH', 'USDT', 'BNB', 'SOL', 'XRP', 'LTC', 'TRX'];
 
 const COINGECKO_MAP: Record<string, string> = {
@@ -63,6 +56,15 @@ export async function runMarketPriceUpdate(): Promise<PriceUpdateResult> {
     console.error('[Market Prices Worker] Missing Supabase URL or service-role key.');
     return { success: false, error: 'SUPABASE_SERVICE_CONFIGURATION_MISSING' };
   }
+
+  // Defer client construction until after configuration validation so importing
+  // this worker with missing secrets fails closed with a controlled result.
+  const supabaseAdmin = createClient(supabaseUrl, supabaseKey, {
+    auth: {
+      persistSession: false,
+      autoRefreshToken: false,
+    },
+  });
 
   try {
     // 1. Fetch Live Global Fiat Rates from Live Providers
