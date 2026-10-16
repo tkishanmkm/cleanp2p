@@ -1182,6 +1182,10 @@ async function refreshPendingDepositConfirmations(): Promise<{
               const r = typeof data === 'string' ? JSON.parse(data) : data;
               if (r?.status === 'credited') newlyCredited++;
             }
+          } else {
+            console.error('[Deposit Ingestion] Pending BTC provider returned a non-success HTTP status; deposit remains pending', {
+              txStatus: txResponse.status, statusStatus: statusResponse.status, tipStatus: tipResponse.status,
+            });
           }
         } catch (err) {
           console.error('[Deposit Ingestion] Pending BTC/LTC verification failed; deposit left pending:', err instanceof Error ? err.message : 'unknown provider error');
@@ -1238,6 +1242,10 @@ async function refreshPendingDepositConfirmations(): Promise<{
               const r = typeof data === 'string' ? JSON.parse(data) : data;
               if (r?.status === 'credited') newlyCredited++;
             }
+          } else {
+            console.error('[Deposit Ingestion] Pending LTC provider returned a non-success HTTP status; deposit remains pending', {
+              txStatus: txResponse.status, statusStatus: statusResponse.status, tipStatus: tipResponse.status,
+            });
           }
         } catch (err) {
           console.error('[Deposit Ingestion] Pending BTC/LTC verification failed; deposit left pending:', err instanceof Error ? err.message : 'unknown provider error');
