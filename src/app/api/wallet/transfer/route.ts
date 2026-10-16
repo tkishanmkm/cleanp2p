@@ -145,8 +145,8 @@ export async function POST(req: NextRequest) {
     const secret = senderProfile?.totp_secret || senderProfile?.two_factor_secret;
 
     if (is2faActive) {
-      if (!totpCode || typeof totpCode !== 'string' || totpCode.trim().length < 4) {
-        return NextResponse.json({ error: '6-digit Authenticator TOTP code is required' }, { status: 403 });
+      if (typeof totpCode !== 'string' || !/^\d{4,8}$/.test(totpCode.trim())) {
+        return NextResponse.json({ error: 'A valid numeric authenticator code is required' }, { status: 403 });
       }
 
       const isValidTotp = verify2FAOTP(secret, totpCode.trim(), is2faActive);
