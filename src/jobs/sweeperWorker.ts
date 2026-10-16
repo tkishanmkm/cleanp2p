@@ -866,8 +866,14 @@ export async function delegateEnergyFromPool(
   const tronWeb = getTronWebInstance(tronHost, poolPrivateKey);
   const poolAddress = tronWeb.defaultAddress.base58;
 
-  if (!poolAddress) {
-    throw new Error('Failed to resolve TRON pool address from private key');
+  if (!poolAddress || !tronWeb.isAddress(poolAddress)) {
+    throw new Error('Failed to resolve a valid TRON pool address from private key');
+  }
+  if (!tronWeb.isAddress(receiverAddress) || receiverAddress === poolAddress) {
+    throw new Error('TRON delegation receiver address is invalid or matches the pool address');
+  }
+  if (!Number.isSafeInteger(energyNeeded) || energyNeeded <= 0) {
+    throw new Error('TRON delegation energy requirement must be a positive safe integer');
   }
 
   // 1. Query network-wide parameters dynamically to calculate exact stake weight
