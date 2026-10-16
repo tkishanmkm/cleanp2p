@@ -377,7 +377,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({
         error: 'Transfer result could not be verified safely.',
         code: 'INVALID_RPC_RESPONSE',
-      }, { status: 500 });
+      }, { status: 503 });
     }
 
     // 5. Dispatch confirmation notification for sender only on new transfer (not replay)
