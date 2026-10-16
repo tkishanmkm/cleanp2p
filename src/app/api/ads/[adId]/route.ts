@@ -167,11 +167,13 @@ export async function GET(
       ad.fiat_symbol, ad.fiat_currency, ad.fiatCurrency, ad.fiat, ad.currency
     ) ?? 'USD';
 
+    const rawAdType = firstNonEmptyString(ad.type, ad.ad_type);
+    const adType = rawAdType === 'BUY' || rawAdType === 'SELL' ? rawAdType : 'SELL';
     const formatted = {
       ...ad,
       id: ad.id,
       userId: adOwnerUserId,
-      type: (ad.type || ad.ad_type || 'SELL').toUpperCase(),
+      type: adType,
       asset: assetSym,
       asset_symbol: assetSym,
       crypto: assetSym,
@@ -233,7 +235,7 @@ export async function GET(
         negative_feedback: 0,
       },
       // Legacy compatibility
-      adType: (ad.ad_type || ad.type || 'sell').toLowerCase(),
+      adType: adType.toLowerCase(),
       rateType: (String(ad.rate_type ?? '').toUpperCase() === 'FIXED' || String(ad.pricing_type ?? '').toUpperCase() === 'FIXED' || ad.is_fixed === true) ? 'fixed' : 'market',
       fixedRate: ad.fixed_rate ?? ad.price,
       ratePercent: marginPercent,
