@@ -323,8 +323,8 @@ export async function GET(request: Request) {
           balanceMap['USDT'] = { available: usdt, inEscrow: activeEscrowMap['USDT'], inWithdrawal: 0, total: usdt + activeEscrowMap['USDT'] };
         }
       }
-    } catch (err) {
-      console.warn('profiles query notice:', err);
+    } catch (err: unknown) {
+      console.warn('Wallet balance profile fallback failed:', { errorName: err instanceof Error ? err.name : 'UnknownError' });
     }
 
     // 7. Ensure active escrow is accurately recorded and sync other tables
