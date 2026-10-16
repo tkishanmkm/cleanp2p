@@ -33,20 +33,9 @@ export async function hasPendingWithdrawalApproval(userId: string): Promise<bool
       .maybeSingle();
 
     if (error) {
-      console.warn('[WithdrawalSecurity] Error checking pending withdrawal approval:', error.message);
-      // Fail-safe: query onchain_withdrawals
-      const { data: onchainData, error: onchainError } = await supabaseAdmin
-        .from('onchain_withdrawals')
-        .select('id')
-        .eq('user_id', userId)
-        .in('status', ['PENDING_APPROVAL', 'pending_approval'])
-        .limit(1)
-        .maybeSingle();
-
-      if (onchainError) {
-        throw new Error(`Unable to verify pending withdrawal approval state: ${onchainError.message}`);
-      }
-      return Boolean(onchainData?.id);
+      // The primary approval-lock query is authoritative. A fallback table cannot
+      // prove that no pending record exists in the primary table, so fail closed.
+      throw new Error(`Unable to verify pending withdrawal approval state: ${error.message}`);
     }
 
     return Boolean(data?.id);
