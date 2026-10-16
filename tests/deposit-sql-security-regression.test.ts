@@ -285,6 +285,11 @@ const checks: Array<[string, string, RegExp]> = [
     'src/jobs/sweeperWorker.ts',
     /export async function fundTronGasForAddress[\s\S]*?if \(!targetAddress \|\| !Number\.isSafeInteger\(amountSun\) \|\| amountSun <= 0\)[\s\S]*?Invalid TRON gas funding recipient or amount[\s\S]*?claim_gas_funding_operation/i,
   ],
+  [
+    'missing TRON hot-wallet key records recovery and aborts instead of silently skipping',
+    'src/jobs/sweeperWorker.ts',
+    /const tronPrivKey = resolveTronHotWalletPrivateKey\(\)[\s\S]*?if \(!tronPrivKey\)[\s\S]*?status: 'RECOVERY_REQUIRED'[\s\S]*?HOT_WALLET_TRON_PRIVATE_KEY is not configured[\s\S]*?throw new Error\(message\)/i,
+  ],
 ];
 
 let failed = 0;
