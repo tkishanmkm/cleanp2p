@@ -282,24 +282,50 @@ export async function GET(
   try {
     const resolvedParams = typeof (params as any)?.then === 'function' ? await params : params;
     const tradeId = resolvedParams?.tradeId;
+    if (!tradeId || tradeId.length > 128) {
+      return NextResponse.json({ error: 'Valid trade ID is required' }, { status: 400 });
+    }
 
-    if (!tradeId) {
-      return NextResponse.json({ error: 'Trade ID is required' }, { status: 400 });
+    const supabase = await createClient();
+    const { data: { user }, error: authError } = await supabase.auth.getUser();
+    if (authError || !user) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+
+    const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(tradeId);
+    let tradeQuery = supabaseAdmin.from('trades').select('id, trade_id, buyer_id, seller_id');
+    tradeQuery = isUuid
+      ? tradeQuery.or(`id.eq.${tradeId},trade_id.eq.${tradeId}`)
+      : tradeQuery.eq('trade_id', tradeId);
+    const { data: trade, error: tradeError } = await tradeQuery.maybeSingle();
+    if (tradeError) {
+      console.error('System-message read authorization lookup failed:', tradeError.code || 'UNKNOWN');
+      return NextResponse.json({ error: 'Unable to verify trade access.' }, { status: 500 });
+    }
+    if (!trade) {
+      return NextResponse.json({ error: 'Trade not found' }, { status: 404 });
+    }
+
+    const isAdmin = user.app_metadata?.role === 'admin';
+    if (!isAdmin && trade.buyer_id !== user.id && trade.seller_id !== user.id) {
+      return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
     }
 
     const { data: messages, error } = await supabaseAdmin
       .from('trade_messages')
-      .select('*')
-      .eq('trade_id', tradeId)
+      .select('id, trade_id, sender_id, sender_username, message, created_at, visibility')
+      .eq('trade_id', trade.id)
       .eq('sender_id', '00000000-0000-0000-0000-000000000000')
       .order('created_at', { ascending: true });
 
     if (error) {
-      return NextResponse.json({ error: error.message }, { status: 500 });
+      console.error('System-message read failed:', error.code || 'UNKNOWN');
+      return NextResponse.json({ error: 'Unable to load system messages.' }, { status: 500 });
     }
-
     return NextResponse.json({ messages: messages || [] });
-  } catch (error: any) {
-    return NextResponse.json({ error: error.message || 'Internal server error' }, { status: 500 });
+  } catch (error: unknown) {
+    const errorName = error instanceof Error ? error.name : 'UnknownError';
+    console.error('System-message GET failed:', errorName);
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }
