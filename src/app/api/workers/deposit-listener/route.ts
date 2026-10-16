@@ -233,10 +233,12 @@ async function processDepositWorker(req: NextRequest) {
   }
 }
 
-export async function GET(req: NextRequest) {
-  return processDepositWorker(req);
+// DECOMMISSIONED: the legacy listener trusted transaction calldata, caller-selected
+// blocks, and fixed confirmations. Deposit crediting must use canonical ingestion.
+export async function GET() {
+  return NextResponse.json({ error: 'DEPRECATED_ENDPOINT', decommissioned: true }, { status: 410 });
 }
 
-export async function POST(req: NextRequest) {
-  return processDepositWorker(req);
+export async function POST() {
+  return NextResponse.json({ error: 'DEPRECATED_ENDPOINT', decommissioned: true }, { status: 410 });
 }
