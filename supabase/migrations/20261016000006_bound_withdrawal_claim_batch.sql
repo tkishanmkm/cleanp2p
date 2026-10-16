@@ -26,12 +26,12 @@ BEGIN
         SELECT w.id
         FROM public.withdrawals w
         WHERE w.status IN ('QUEUED', 'approved', 'PENDING')
-          AND NOT EXISTS (
+          AND EXISTS (
               SELECT 1
               FROM public.wallets wal
               WHERE wal.id = w.wallet_id
-                AND (wal.status IS DISTINCT FROM 'active'
-                     OR wal.provisioning_status IS DISTINCT FROM 'completed')
+                AND wal.status = 'active'
+                AND wal.provisioning_status = 'completed'
           )
           AND NOT EXISTS (
               SELECT 1
@@ -39,7 +39,7 @@ BEGIN
               WHERE u.id = w.user_id
                 AND (
                     COALESCE(u.banned_until > NOW(), FALSE)
-                    OR COALESCE((u.raw_app_meta_data ->> 'restricted')::boolean, FALSE)
+                    OR lower(COALESCE(u.raw_app_meta_data ->> 'restricted', 'false')) = 'true'
                 )
           )
         ORDER BY w.created_at ASC
