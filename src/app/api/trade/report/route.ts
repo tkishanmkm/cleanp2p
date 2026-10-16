@@ -34,7 +34,7 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: 'Request body must be a JSON object.' }, { status: 400 });
     }
     const { tradeId, reportedUserId, category, description, evidenceUrls } = body as Record<string, unknown>;
-    if (typeof tradeId !== 'string' || tradeId.trim().length === 0 || tradeId.trim().length > 128 ||
+    if (typeof tradeId !== 'string' || tradeId.trim().length === 0 || tradeId.length > 128 ||
         typeof category !== 'string' || category.trim().length === 0 || category.trim().length > 100 ||
         typeof description !== 'string' || description.trim().length === 0 || description.trim().length > 10000) {
       return NextResponse.json({ error: 'Trade ID, category, or description is invalid or too long.' }, { status: 400 });
