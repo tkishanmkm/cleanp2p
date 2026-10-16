@@ -1142,6 +1142,10 @@ async function refreshPendingDepositConfirmations(): Promise<{
             const tx = await txResponse.json();
             const statusData = await statusResponse.json();
             const tipHeight = Number((await tipResponse.text()).trim());
+            if (typeof tx?.txid !== 'string' || tx.txid.toLowerCase() !== String(dep.tx_hash).toLowerCase()) {
+              console.error('[Deposit Ingestion] Pending BTC/LTC provider returned a mismatched transaction id; deposit remains pending');
+              continue;
+            }
             const output = Array.isArray(tx.vout) ? tx.vout[outputIndex] : null;
             // Pending rechecks only advance mined transactions with a valid
             // confirmed block at or below the provider's current chain tip.
@@ -1202,6 +1206,10 @@ async function refreshPendingDepositConfirmations(): Promise<{
             const tx = await txResponse.json();
             const statusData = await statusResponse.json();
             const tipHeight = Number((await tipResponse.text()).trim());
+            if (typeof tx?.txid !== 'string' || tx.txid.toLowerCase() !== String(dep.tx_hash).toLowerCase()) {
+              console.error('[Deposit Ingestion] Pending BTC/LTC provider returned a mismatched transaction id; deposit remains pending');
+              continue;
+            }
             const output = Array.isArray(tx.vout) ? tx.vout[outputIndex] : null;
             // Pending rechecks only advance mined transactions with a valid
             // confirmed block at or below the provider's current chain tip.
