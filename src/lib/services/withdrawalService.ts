@@ -123,13 +123,25 @@ export async function executeCanonicalWithdrawal(input: WithdrawalRequestInput):
   const supabaseAdmin = getSupabaseAdminClient();
 
   // 1. Check Global Emergency Pause
-  const { data: settings } = await supabaseAdmin
+  const { data: settings, error: settingsError } = await supabaseAdmin
     .from('platform_settings')
     .select('global_kill_switch_active, withdrawals_enabled, max_single_withdrawal_usd, withdrawal_approval_threshold_usd, daily_withdrawal_limit_usd')
     .eq('id', 1)
     .maybeSingle();
 
-  if (settings && (settings.global_kill_switch_active || !settings.withdrawals_enabled)) {
+  // Financial safety controls must be readable before any withdrawal is allowed.
+  if (settingsError || !settings) {
+    console.error('Withdrawal platform settings could not be verified:', settingsError?.message || 'missing settings row');
+    return {
+      success: false,
+      status: 'SECURITY_CHECK_UNAVAILABLE',
+      error: 'Withdrawal security settings are temporarily unavailable.',
+      message: 'Withdrawals are temporarily unavailable. Please try again later.',
+      statusCode: 503,
+    };
+  }
+
+  if (settings.global_kill_switch_active || !settings.withdrawals_enabled) {
     return {
       success: false,
       status: 'REJECTED',
@@ -171,14 +183,35 @@ export async function executeCanonicalWithdrawal(input: WithdrawalRequestInput):
   }
 
   // 3. User Profile Verification & Security Checks
-  const { data: userProfile } = await supabaseAdmin
+  const { data: userProfile, error: userProfileError } = await supabaseAdmin
     .from('profiles')
     .select('id, is_verified, kyc_status, id_verified, is_2fa_enabled, is_mfa_enabled, two_factor_enabled, totp_secret, two_factor_secret, is_banned, is_on_hold, is_withdrawal_locked, account_status')
     .eq('id', user.id)
     .maybeSingle();
 
+  // Missing/unreadable account controls must never be interpreted as an unrestricted user.
+  if (userProfileError) {
+    console.error('Withdrawal account security profile lookup failed:', userProfileError.message);
+    return {
+      success: false,
+      status: 'SECURITY_CHECK_UNAVAILABLE',
+      error: 'Account security checks are temporarily unavailable.',
+      message: 'Withdrawals are temporarily unavailable. Please try again later.',
+      statusCode: 503,
+    };
+  }
+  if (!userProfile) {
+    return {
+      success: false,
+      status: 'ACCOUNT_PROFILE_UNAVAILABLE',
+      error: 'Account security profile is unavailable.',
+      message: 'Your account could not be verified for withdrawal.',
+      statusCode: 403,
+    };
+  }
+
   if (
-    userProfile?.is_banned ||
+    userProfile.is_banned ||
     userProfile?.is_on_hold ||
     userProfile?.is_withdrawal_locked ||
     userProfile?.account_status === 'restricted' ||
