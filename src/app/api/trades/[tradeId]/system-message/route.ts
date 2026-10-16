@@ -96,7 +96,8 @@ export async function POST(
       return NextResponse.json({ error: 'Forbidden: You are not a participant in this trade' }, { status: 403 });
     }
 
-    const adminOnlyTypes = new Set(['CUSTOM', 'USER_BLOCKED', 'ISSUE_REPORTED', 'MESSAGE_BLOCKED', 'SECURITY_REMINDER']);
+    // Messages asserting that escrow funds were released/completed must not be participant-forgeable.
+    const adminOnlyTypes = new Set(['CUSTOM', 'USER_BLOCKED', 'ISSUE_REPORTED', 'MESSAGE_BLOCKED', 'SECURITY_REMINDER', 'TRADE_RELEASED', 'TRADE_COMPLETED']);
     if (!isAdmin && adminOnlyTypes.has(typeof type === 'string' ? type : 'CUSTOM')) {
       return NextResponse.json({ error: 'Administrator privileges are required for this message type.' }, { status: 403 });
     }
