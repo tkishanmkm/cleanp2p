@@ -600,13 +600,32 @@ export async function executeCanonicalWithdrawal(input: WithdrawalRequestInput):
     }
 
     if (existing && (existing.status === 'completed' || existing.status === 'processing' || existing.status === 'QUEUED' || existing.status === 'PENDING_APPROVAL')) {
+      const existingFee = Number(existing.network_fee);
+      if (
+        typeof existing.id !== 'string' ||
+        existing.id.trim().length === 0 ||
+        existing.network_fee === null ||
+        existing.network_fee === undefined ||
+        !Number.isFinite(existingFee) ||
+        existingFee < 0
+      ) {
+        console.error('Existing withdrawal record has invalid replay fields.');
+        return {
+          success: false,
+          status: 'SECURITY_CHECK_UNAVAILABLE',
+          error: 'Existing withdrawal details could not be verified.',
+          message: 'Withdrawals are temporarily unavailable. Please contact support.',
+          statusCode: 503,
+        };
+      }
+
       return {
         success: true,
         status: existing.status,
         withdrawalId: existing.id,
         amountRequested: parsedAmount,
-        networkFee: Number(existing.network_fee || networkFee),
-        totalDebited: parsedAmount + Number(existing.network_fee || networkFee),
+        networkFee: existingFee,
+        totalDebited: parsedAmount + existingFee,
         message: 'Withdrawal already submitted (idempotent replay).',
         statusCode: 200,
       };
