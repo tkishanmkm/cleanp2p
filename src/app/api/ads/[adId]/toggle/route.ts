@@ -22,18 +22,20 @@ export async function PATCH(
 
     // 1. Authenticate Requesting User
     const authHeader = request.headers.get('Authorization') || request.headers.get('authorization');
-    const bearerToken = authHeader?.startsWith('Bearer ') ? authHeader.substring(7).trim() : null;
+    const bearerMatch = authHeader?.match(/^Bearer\s+(.+)$/i);
+    const bearerToken = bearerMatch?.[1]?.trim();
 
     let user: any = null;
     let authError: any = null;
 
-    if (bearerToken) {
+    if (authHeader !== null) {
+      if (!bearerToken) {
+        return NextResponse.json({ error: 'Invalid authorization header.', code: 'INVALID_AUTHORIZATION' }, { status: 401 });
+      }
       const tokenAuth = await supabase.auth.getUser(bearerToken);
       user = tokenAuth.data?.user;
       authError = tokenAuth.error;
-    }
-
-    if (!user) {
+    } else {
       const cookieAuth = await supabase.auth.getUser();
       user = cookieAuth.data?.user;
       authError = cookieAuth.error;
@@ -68,12 +70,59 @@ export async function PATCH(
     }
 
     if (!isAdmin) {
+      try {
+        const { assertUserNotEmergencyFrozen } = await import('@/lib/user-freeze');
+        await assertUserNotEmergencyFrozen(user.id);
+      } catch (freezeErr: any) {
+        return NextResponse.json(
+          { error: freezeErr.message || 'Your account is under an emergency security freeze.', code: 'USER_EMERGENCY_FROZEN' },
+          { status: 403 }
+        );
+      }
       const { assertPlatformControlAllowed } = await import('@/lib/platform-guard');
       await assertPlatformControlAllowed('new_ad', { userId: user.id });
     }
 
-    const body = await request.json();
-    const newStatus = body.status ? String(body.status).toUpperCase().trim() : (body.active ? 'ACTIVE' : 'INACTIVE');
+    const contentLength = Number(request.headers.get('content-length') || 0);
+    if (Number.isFinite(contentLength) && contentLength > 4096) {
+      return NextResponse.json({ error: 'Request body is too large.', code: 'REQUEST_TOO_LARGE' }, { status: 413 });
+    }
+
+    let bodyText: string;
+    try {
+      bodyText = await request.text();
+    } catch {
+      return NextResponse.json({ error: 'Unable to read request body.', code: 'INVALID_BODY' }, { status: 400 });
+    }
+    if (bodyText.length > 4096) {
+      return NextResponse.json({ error: 'Request body is too large.', code: 'REQUEST_TOO_LARGE' }, { status: 413 });
+    }
+    let body: any;
+    try {
+      body = JSON.parse(bodyText);
+    } catch {
+      return NextResponse.json({ error: 'Invalid JSON body.', code: 'INVALID_JSON' }, { status: 400 });
+    }
+    if (!body || typeof body !== 'object' || Array.isArray(body)) {
+      return NextResponse.json({ error: 'Request body must be a JSON object.', code: 'INVALID_BODY' }, { status: 400 });
+    }
+    if (body.active !== undefined && typeof body.active !== 'boolean') {
+      return NextResponse.json({ error: 'The active field must be a boolean.', code: 'INVALID_AD_STATUS' }, { status: 400 });
+    }
+    if (body.status !== undefined && (typeof body.status !== 'string' || !['ACTIVE', 'INACTIVE'].includes(body.status.toUpperCase().trim()))) {
+      return NextResponse.json({ error: 'Status must be ACTIVE or INACTIVE.', code: 'INVALID_AD_STATUS' }, { status: 400 });
+    }
+    if (body.status !== undefined && body.active !== undefined &&
+        body.status.toUpperCase().trim() !== (body.active ? 'ACTIVE' : 'INACTIVE')) {
+      return NextResponse.json({ error: 'The active and status fields must describe the same state.', code: 'CONFLICTING_AD_STATUS' }, { status: 400 });
+    }
+    if (body.status === undefined && body.active === undefined) {
+      return NextResponse.json({ error: 'Missing active or status field.', code: 'INVALID_AD_STATUS' }, { status: 400 });
+    }
+    const newStatus = body.status !== undefined ? body.status.toUpperCase().trim() : (body.active ? 'ACTIVE' : 'INACTIVE');
+    if (!isAdmin && !['ACTIVE', 'INACTIVE'].includes(newStatus)) {
+      return NextResponse.json({ error: 'Status must be ACTIVE or INACTIVE.', code: 'INVALID_AD_STATUS' }, { status: 400 });
+    }
     const isActive = newStatus === 'ACTIVE';
 
     // 4. Independently resolve both target rows

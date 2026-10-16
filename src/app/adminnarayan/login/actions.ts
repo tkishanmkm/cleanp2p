@@ -6,18 +6,26 @@ import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 
 export async function loginAdminAction(formData: FormData) {
-  const email = formData.get("email") as string;
-  const password = formData.get("password") as string;
+  const emailValue = formData.get("email");
+  const passwordValue = formData.get("password");
+  const email = typeof emailValue === "string" ? emailValue.trim() : "";
+  const password = typeof passwordValue === "string" ? passwordValue : "";
 
   if (!email || !password) {
     return { error: "Please provide both email and password." };
   }
 
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+  if (!supabaseUrl || !supabaseAnonKey) {
+    return { error: "Unable to sign in right now. Please try again later." };
+  }
+
   const cookieStore = await cookies();
 
   const supabase = createServerClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://placeholder.supabase.co',
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'placeholder-anon-key',
+    supabaseUrl,
+    supabaseAnonKey,
     {
       cookies: {
         getAll() {
@@ -42,12 +50,8 @@ export async function loginAdminAction(formData: FormData) {
     password,
   });
 
-  if (authError) {
-    return { error: `[Auth Error]: ${authError.message}` };
-  }
-
-  if (!authData.user) {
-    return { error: "[Auth Error]: Account authenticated, but user record was null." };
+  if (authError || !authData.user) {
+    return { error: "Invalid email or password." };
   }
 
   // 2. Query admin profile bypassing RLS with service role client

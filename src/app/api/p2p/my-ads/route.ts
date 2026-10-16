@@ -60,37 +60,22 @@ export async function GET(request: NextRequest) {
     let ads: any[] = [];
     let queryError: any = null;
 
-    // 1. Try querying p2p_ads view
-    const { data: viewAds, error: viewError } = await supabase
-      .from('p2p_ads')
+    // Canonical source of advertisements is public.ads; do not query the removed p2p_ads table.
+    const { data: tableAds, error: tableError } = await supabase
+      .from('ads')
       .select('*')
       .eq('user_id', user.id)
       .neq('status', 'DELETED')
       .order('created_at', { ascending: false });
 
-    if (!viewError && Array.isArray(viewAds)) {
-      ads = viewAds;
+    if (!tableError && Array.isArray(tableAds)) {
+      ads = tableAds;
     } else {
-      queryError = viewError;
-
-      // 2. Try querying ads base table
-      const { data: tableAds, error: tableError } = await supabase
-        .from('ads')
-        .select('*')
-        .eq('user_id', user.id)
-        .neq('status', 'DELETED')
-        .order('created_at', { ascending: false });
-
-      if (!tableError && Array.isArray(tableAds)) {
-        ads = tableAds;
-        queryError = null;
-      } else {
-        queryError = tableError;
-      }
+      queryError = tableError;
     }
 
-    // 3. Fallback to admin client if RLS is preventing read
-    if (ads.length === 0) {
+    // Service-role fallback remains scoped to the authenticated user's own rows.
+    if (queryError || ads.length === 0) {
       try {
         const { data: adminAds, error: adminErr } = await admin
           .from('ads')
@@ -99,9 +84,11 @@ export async function GET(request: NextRequest) {
           .neq('status', 'DELETED')
           .order('created_at', { ascending: false });
 
-        if (!adminErr && Array.isArray(adminAds) && adminAds.length > 0) {
+        if (!adminErr && Array.isArray(adminAds)) {
           ads = adminAds;
           queryError = null;
+        } else if (adminErr) {
+          queryError = adminErr;
         }
       } catch (adminEx) {
         console.warn('Admin fallback in my-ads failed:', adminEx);

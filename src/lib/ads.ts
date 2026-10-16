@@ -40,18 +40,20 @@ export async function createP2PAd(
 }
 
 export async function updateAd(_db: any, adId: string, adData: Partial<Omit<P2PAd, 'id' | 'createdAt' | 'user' | 'userId' | 'publicAdId'>>) {
-  const { data, error } = await supabase
-    .from('p2p_ads')
-    .update(adData)
-    .eq('id', adId)
-    .select();
+  const { data: { session } } = await supabase.auth.getSession();
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  if (session?.access_token) headers['Authorization'] = `Bearer ${session.access_token}`;
 
-  if (error) {
-    throw new Error(error.message);
-  }
-  return data;
+  const response = await fetch(`/api/ads/${encodeURIComponent(adId)}`, {
+    method: 'PUT',
+    headers,
+    credentials: 'include',
+    body: JSON.stringify(adData),
+  });
+  const result = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(result.error || result.message || `Failed to update advertisement (HTTP ${response.status})`);
+  return result.ad || result.data || result;
 }
-
 export async function updateAdStatus(_db: any, adId: string, active: boolean) {
   const { data: { session } } = await supabase.auth.getSession();
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
@@ -60,7 +62,7 @@ export async function updateAdStatus(_db: any, adId: string, active: boolean) {
   }
 
   // Call canonical status update endpoint
-  const res = await fetch(`/api/ads/${adId}`, {
+  const res = await fetch(`/api/ads/${encodeURIComponent(adId)}`, {
     method: 'PATCH',
     headers,
     credentials: 'include',
@@ -106,25 +108,24 @@ export async function getMarketplaceAds(
   fiat: string = 'ALL',
   paymentMethod: string = 'ALL'
 ) {
-  // P2P Inversion: To BUY crypto, show SELL ads. To SELL crypto, show BUY ads.
+  // To BUY crypto, show SELL ads; to SELL crypto, show BUY ads.
   const queryType = side === 'BUY' ? 'SELL' : 'BUY';
 
   let query = supabase
-    .from('p2p_ads')
+    .from('ads')
     .select('*')
     .eq('type', queryType)
     .ilike('status', 'active');
 
   if (coin && coin !== 'ALL') {
-    query = query.eq('coin', coin.toUpperCase());
+    query = query.eq('asset_symbol', coin.toUpperCase());
   }
 
   if (fiat && fiat !== 'ALL') {
-    query = query.eq('fiat', fiat.toUpperCase());
+    query = query.eq('fiat_symbol', fiat.toUpperCase());
   }
 
   if (paymentMethod && paymentMethod !== 'ALL') {
-    // Array column containment check for payment_methods
     query = query.contains('payment_methods', [paymentMethod]);
   }
 
@@ -137,48 +138,25 @@ export async function getMarketplaceAds(
 
   return data || [];
 }
-
 export async function fetchMyAds() {
-  try {
-    const { data: { session } } = await supabase.auth.getSession();
-    const headers: Record<string, string> = {};
-    if (session?.access_token) {
-      headers['Authorization'] = `Bearer ${session.access_token}`;
-    }
+  const { data: { session } } = await supabase.auth.getSession();
+  const headers: Record<string, string> = {};
+  if (session?.access_token) headers['Authorization'] = `Bearer ${session.access_token}`;
 
-    const res = await fetch('/api/p2p/my-ads', {
-      headers,
-      credentials: 'include',
-    });
-
-    if (res.ok) {
-      const json = await res.json();
-      if (json.ads) return json.ads;
-    }
-  } catch (err) {
-    console.warn('API fetchMyAds failed, falling back to direct query:', err);
+  const response = await fetch('/api/p2p/my-ads', {
+    headers,
+    credentials: 'include',
+    cache: 'no-store',
+  });
+  const result = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(result.error || result.message || `Failed to fetch advertisements (HTTP ${response.status})`);
   }
-
-  const { data: { user } } = await supabase.auth.getUser();
-
-  if (!user) {
-    console.warn("No active session found when fetching My Ads");
-    return [];
+  if (!Array.isArray(result.ads)) {
+    throw new Error('The advertisements API returned an invalid response.');
   }
-
-  const { data, error } = await supabase
-    .from('p2p_ads')
-    .select('*')
-    .eq('user_id', user.id)
-    .order('created_at', { ascending: false });
-
-  if (error) {
-    console.error("My Ads fetch error:", error.message);
-    throw error;
-  }
-  return data || [];
+  return result.ads;
 }
-
 export const handleCreateAd = async (adData: any) => {
   // Clean payload: cast numeric columns and ensure booleans are boolean
   const cleanPayload = {

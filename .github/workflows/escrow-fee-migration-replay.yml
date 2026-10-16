@@ -1,0 +1,255 @@
+name: Escrow fee migration replay
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - audit/phase-02-platform-ledger-replay-metadata
+    paths:
+      - "supabase/migrations/**"
+      - ".github/workflows/escrow-fee-migration-replay.yml"
+  pull_request:
+    paths:
+      - "supabase/migrations/**"
+      - ".github/workflows/escrow-fee-migration-replay.yml"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.head.ref || github.ref_name }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  migration-replay:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Install Supabase CLI
+        uses: supabase/setup-cli@v1
+        with:
+          version: latest
+
+      - name: Generate local-only Supabase config
+        run: supabase init --force
+
+      # Optional authenticated pulls reduce Docker Hub rate-limit failures in CI.
+      # Configure DOCKERHUB_USERNAME and DOCKERHUB_TOKEN as repository Actions secrets.
+      - name: Authenticate Docker Hub (when secrets are configured)
+        shell: bash
+        env:
+          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [[ -n "${DOCKERHUB_USERNAME}" && -n "${DOCKERHUB_TOKEN}" ]]; then
+            printf '%s' "${DOCKERHUB_TOKEN}" | docker login --username "${DOCKERHUB_USERNAME}" --password-stdin
+          else
+            echo "Docker Hub credentials are not configured; continuing anonymously."
+          fi
+
+      - name: Start disposable local Supabase stack
+        shell: bash
+        run: |
+          set -euo pipefail
+          for attempt in 1 2; do
+            echo "Starting disposable Supabase stack (attempt ${attempt}/2)..."
+            if timeout 12m supabase start; then
+              exit 0
+            fi
+
+            echo "Supabase startup attempt ${attempt} failed; collecting diagnostics."
+            docker ps -a || true
+            supabase status || true
+            supabase stop --no-backup || true
+
+            if [[ "${attempt}" -eq 1 ]]; then
+              echo "Retrying once after cleanup to recover from transient container startup failures."
+              sleep 10
+            fi
+          done
+
+          echo "Supabase stack failed to start after two attempts."
+          docker info || true
+          exit 1
+
+      - name: Apply the complete migration history
+        run: supabase db reset --local
+
+      - name: Verify escrow fee function and ledger schema
+        env:
+          PGPASSWORD: postgres
+        shell: bash
+        run: |
+          set -euo pipefail
+          status="$(supabase status -o env)"
+          db_url="$(printf '%s\n' "$status" | sed -n 's/^DB_URL="\(.*\)"$/\1/p')"
+          if [ -z "$db_url" ]; then
+            echo "Could not read local DB_URL from Supabase CLI status."
+            exit 1
+          fi
+          psql "$db_url" -v ON_ERROR_STOP=1 <<'SQL'
+          DO $$
+          DECLARE
+            v_release_definition TEXT;
+            v_helper_definition TEXT;
+          BEGIN
+            SELECT pg_get_functiondef(p.oid)
+              INTO v_release_definition
+            FROM pg_proc p
+            JOIN pg_namespace n ON n.oid = p.pronamespace
+            WHERE n.nspname = 'public'
+              AND p.proname = 'release_trade_escrow';
+
+            IF v_release_definition IS NULL THEN
+              RAISE EXCEPTION 'release_trade_escrow function missing after migration replay';
+            END IF;
+
+            IF position('record_platform_ledger_entry' IN v_release_definition) = 0 THEN
+              RAISE EXCEPTION 'release_trade_escrow does not record platform ledger entries';
+            END IF;
+
+            IF position('public.is_admin()' IN v_release_definition) = 0 THEN
+              RAISE EXCEPTION 'release_trade_escrow admin authorization helper is missing';
+            END IF;
+
+            SELECT pg_get_functiondef(p.oid)
+              INTO v_helper_definition
+            FROM pg_proc p
+            JOIN pg_namespace n ON n.oid = p.pronamespace
+            WHERE n.nspname = 'public'
+              AND p.proname = 'record_platform_ledger_entry';
+
+            IF v_helper_definition IS NULL THEN
+              RAISE EXCEPTION 'record_platform_ledger_entry helper missing after migration replay';
+            END IF;
+
+            IF NOT EXISTS (
+              SELECT 1
+              FROM pg_constraint c
+              JOIN pg_class t ON t.oid = c.conrelid
+              JOIN pg_namespace n ON n.oid = t.relnamespace
+              WHERE n.nspname = 'public'
+                AND t.relname = 'platform_ledger_entries'
+                AND c.contype = 'u'
+                AND pg_get_constraintdef(c.oid) ILIKE '%idempotency_key%'
+            ) THEN
+              RAISE EXCEPTION 'platform ledger idempotency uniqueness constraint missing';
+            END IF;
+          END $$;
+          SQL
+
+      - name: Verify platform ledger idempotency behavior
+        env:
+          PGPASSWORD: postgres
+        shell: bash
+        run: |
+          set -euo pipefail
+          status="$(supabase status -o env)"
+          db_url="$(printf '%s\n' "$status" | sed -n 's/^DB_URL="\(.*\)"$/\1/p')"
+          if [ -z "$db_url" ]; then
+            echo "Could not read local DB_URL from Supabase CLI status."
+            exit 1
+          fi
+          psql "$db_url" -v ON_ERROR_STOP=1 <<'SQL'
+          BEGIN;
+          DO $$
+          DECLARE
+            v_first UUID;
+            v_duplicate UUID;
+            v_conflict_rejected BOOLEAN := FALSE;
+            v_zero_rejected BOOLEAN := FALSE;
+          BEGIN
+            v_first := public.record_platform_ledger_entry(
+              p_entry_type := 'trade_fee_collected',
+              p_asset_code := 'BTC',
+              p_amount := 0.001,
+              p_direction := 'CREDIT',
+              p_related_user_id := NULL,
+              p_ref_table := 'ci_test',
+              p_ref_id := 'escrow-fee-idempotency',
+              p_network_code := NULL,
+              p_tx_hash := NULL,
+              p_idempotency_key := 'ci_escrow_fee_idempotency_test',
+              p_metadata := '{"test":true}'::jsonb
+            );
+
+            v_duplicate := public.record_platform_ledger_entry(
+              p_entry_type := 'trade_fee_collected',
+              p_asset_code := 'BTC',
+              p_amount := 0.001,
+              p_direction := 'CREDIT',
+              p_related_user_id := NULL,
+              p_ref_table := 'ci_test',
+              p_ref_id := 'escrow-fee-idempotency',
+              p_network_code := NULL,
+              p_tx_hash := NULL,
+              p_idempotency_key := 'ci_escrow_fee_idempotency_test',
+              p_metadata := '{"test":true}'::jsonb
+            );
+
+            IF v_first IS DISTINCT FROM v_duplicate THEN
+              RAISE EXCEPTION 'Duplicate idempotency call returned a different ledger ID';
+            END IF;
+
+            BEGIN
+              PERFORM public.record_platform_ledger_entry(
+                p_entry_type := 'trade_fee_collected',
+                p_asset_code := 'BTC',
+                p_amount := 0.002,
+                p_direction := 'CREDIT',
+                p_related_user_id := NULL,
+                p_ref_table := 'ci_test',
+                p_ref_id := 'escrow-fee-idempotency',
+                p_network_code := NULL,
+                p_tx_hash := NULL,
+                p_idempotency_key := 'ci_escrow_fee_idempotency_test',
+                p_metadata := '{"test":true}'::jsonb
+              );
+            EXCEPTION WHEN OTHERS THEN
+              IF SQLERRM LIKE 'Financial idempotency conflict%' THEN
+                v_conflict_rejected := TRUE;
+              ELSE
+                RAISE;
+              END IF;
+            END;
+
+            IF NOT v_conflict_rejected THEN
+              RAISE EXCEPTION 'Conflicting financial replay was not rejected';
+            END IF;
+
+            BEGIN
+              PERFORM public.record_platform_ledger_entry(
+                p_entry_type := 'trade_fee_collected',
+                p_asset_code := 'BTC',
+                p_amount := 0,
+                p_direction := 'CREDIT',
+                p_related_user_id := NULL,
+                p_ref_table := 'ci_test',
+                p_ref_id := 'zero-fee',
+                p_network_code := NULL,
+                p_tx_hash := NULL,
+                p_idempotency_key := 'ci_escrow_fee_zero_amount_test',
+                p_metadata := '{"test":true}'::jsonb
+              );
+            EXCEPTION WHEN OTHERS THEN
+              IF SQLERRM LIKE 'Platform ledger amount must be greater than zero%' THEN
+                v_zero_rejected := TRUE;
+              ELSE
+                RAISE;
+              END IF;
+            END;
+
+            IF NOT v_zero_rejected THEN
+              RAISE EXCEPTION 'Zero-amount platform ledger entry was not rejected';
+            END IF;
+          END $$;
+          ROLLBACK;
+          SQL
+
+      - name: Stop disposable local Supabase stack
+        if: always()
+        run: supabase stop --no-backup

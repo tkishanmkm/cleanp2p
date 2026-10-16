@@ -70,8 +70,18 @@ BEGIN
         INSERT INTO public._snapshot_6k14o_user_deposit_addresses (
             id, user_id, network, address, asset_symbol, created_at, updated_at, chain, asset_code, network_code
         )
-        SELECT id, user_id, network::text, address, asset_symbol, created_at, updated_at, chain, asset_code, network_code
-        FROM public.user_deposit_addresses;
+        SELECT
+            (to_jsonb(uda)->>'id')::uuid,
+            (to_jsonb(uda)->>'user_id')::uuid,
+            to_jsonb(uda)->>'network',
+            to_jsonb(uda)->>'address',
+            to_jsonb(uda)->>'asset_symbol',
+            (to_jsonb(uda)->>'created_at')::timestamptz,
+            (to_jsonb(uda)->>'updated_at')::timestamptz,
+            to_jsonb(uda)->>'chain',
+            to_jsonb(uda)->>'asset_code',
+            to_jsonb(uda)->>'network_code'
+        FROM public.user_deposit_addresses AS uda;
     END IF;
 
     IF NOT EXISTS (SELECT 1 FROM public._snapshot_6k14o_functions WHERE function_signature = 'process_deposit_atomic') THEN
@@ -95,14 +105,37 @@ BEGIN
 
     IF NOT EXISTS (SELECT 1 FROM public._snapshot_6k14o_wallets) THEN
         INSERT INTO public._snapshot_6k14o_wallets (id, user_id, chain, address, funding_status, created_at, updated_at)
-        SELECT id, user_id, chain, address, funding_status, created_at, updated_at
-        FROM public.wallets;
+        SELECT
+            (to_jsonb(w)->>'id')::uuid,
+            (to_jsonb(w)->>'user_id')::uuid,
+            COALESCE(to_jsonb(w)->>'chain', to_jsonb(w)->>'network', to_jsonb(w)->>'chain_code', 'unknown'),
+            COALESCE(to_jsonb(w)->>'address', ''),
+            COALESCE(to_jsonb(w)->>'funding_status', 'unknown'),
+            COALESCE((to_jsonb(w)->>'created_at')::timestamptz, NOW()),
+            COALESCE((to_jsonb(w)->>'updated_at')::timestamptz, NOW())
+        FROM public.wallets AS w;
     END IF;
 
     IF NOT EXISTS (SELECT 1 FROM public._snapshot_6k14o_p2p_baseline) THEN
         INSERT INTO public._snapshot_6k14o_p2p_baseline (id, status, crypto_amount, escrow_fee)
-        SELECT id, status, COALESCE(crypto_amount, amount), COALESCE(escrow_fee, platform_fee, 0)
-        FROM public.trades;
+        SELECT
+            (to_jsonb(t)->>'id')::uuid,
+            to_jsonb(t)->>'status',
+            COALESCE(
+                (to_jsonb(t)->>'crypto_amount')::numeric,
+                (to_jsonb(t)->>'amount')::numeric,
+                0
+            ),
+            COALESCE(
+                (to_jsonb(t)->>'escrow_fee')::numeric,
+                (to_jsonb(t)->>'platform_fee')::numeric,
+                0
+            )
+        FROM public.trades AS t
+        WHERE COALESCE(
+            to_jsonb(t)->>'crypto_amount',
+            to_jsonb(t)->>'amount'
+        ) IS NOT NULL;
     END IF;
 END $$;
 
@@ -899,52 +932,9 @@ BEGIN
 END;
 $$;
 
--- ----------------------------------------------------------------------------
--- STEP 4: PRECHECK & VERIFICATION OF USER ROUTE INTEGRITY
--- ----------------------------------------------------------------------------
-DO $$
-DECLARE
-    v_target_user UUID := '8925fed8-c8bf-44a3-97fa-bd806aade05a';
-    v_uda_count INT;
-    v_wallets_count INT;
-BEGIN
-    SELECT COUNT(*) INTO v_uda_count
-    FROM public.user_deposit_addresses
-    WHERE user_id = v_target_user;
-
-    SELECT COUNT(*) INTO v_wallets_count
-    FROM public.wallets
-    WHERE user_id = v_target_user;
-
-    IF v_uda_count < 3 THEN
-        RAISE EXCEPTION 'PRECHECK FAILED: Target user expects at least 3 deposit address routes (found %)', v_uda_count;
-    END IF;
-
-    IF v_wallets_count < 4 THEN
-        RAISE EXCEPTION 'PRECHECK FAILED: Target user expects 4 wallet chain records (BTC, EVM, LTC, TRON) (found %)', v_wallets_count;
-    END IF;
-END $$;
-
--- ----------------------------------------------------------------------------
--- STEP 5: FINAL TRANSACTION VERIFICATION ASSERTIONS
--- ----------------------------------------------------------------------------
-DO $$
-DECLARE
-    v_target_user UUID := '8925fed8-c8bf-44a3-97fa-bd806aade05a';
-    v_btc_wallet_count INT;
-    v_evm_wallet_count INT;
-    v_ltc_wallet_count INT;
-    v_tron_wallet_count INT;
-BEGIN
-    SELECT COUNT(*) INTO v_btc_wallet_count FROM public.wallets WHERE user_id = v_target_user AND chain = 'BTC' AND funding_status = 'active';
-    SELECT COUNT(*) INTO v_evm_wallet_count FROM public.wallets WHERE user_id = v_target_user AND chain = 'EVM' AND funding_status = 'active';
-    SELECT COUNT(*) INTO v_ltc_wallet_count FROM public.wallets WHERE user_id = v_target_user AND chain = 'LTC' AND funding_status = 'active';
-    SELECT COUNT(*) INTO v_tron_wallet_count FROM public.wallets WHERE user_id = v_target_user AND chain = 'TRON' AND funding_status = 'active';
-
-    IF v_btc_wallet_count <> 1 OR v_evm_wallet_count <> 1 OR v_ltc_wallet_count <> 1 OR v_tron_wallet_count <> 1 THEN
-        RAISE EXCEPTION 'MIGRATION ASSERTION FAILED: Target user active wallets missing or ambiguous (BTC=%, EVM=%, LTC=%, TRON=%)',
-            v_btc_wallet_count, v_evm_wallet_count, v_ltc_wallet_count, v_tron_wallet_count;
-    END IF;
-END $$;
+-- User-specific wallet/deposit-route verification intentionally does not run in
+-- a schema migration. Clean installs have no target user's operational records.
+-- Validate existing production wallet routing separately with an approved,
+-- read-only operational check after deployment.
 
 COMMIT;

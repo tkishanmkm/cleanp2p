@@ -14,6 +14,9 @@ BEGIN;
 -- ------------------------------------------------------------------------------
 -- PART 1: SYNCHRONIZE WALLET INDEX SEQUENCE
 -- ------------------------------------------------------------------------------
+-- Canonical clean installs may not have this legacy provisioning column yet.
+ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS wallet_index INTEGER;
+
 CREATE SEQUENCE IF NOT EXISTS public.user_wallet_index_seq;
 
 -- Safely synchronize sequence to max(profiles.wallet_index, current last_value)

@@ -1,6 +1,5 @@
 'use client';
 import { supabase } from '@/lib/supabase/client';
-import { countries } from './countries';
 
 export async function blockUser(_db: any, currentUserId: string, targetUsername: string) {
   // Find target user by username or userId
@@ -52,20 +51,21 @@ export async function unblockUser(_db: any, currentUserId: string, targetUserIdT
 }
 
 export async function createUserSession(_db: any, user: { uid?: string; id?: string }): Promise<string | undefined> {
-  const userId = user.uid || user.id;
-  if (!userId) return;
-
-  const simulatedIp = `192.168.1.${Math.floor(Math.random() * 254) + 1}`;
-  const randomIpCountry = countries[Math.floor(Math.random() * countries.length)].code;
+  const requestedUserId = user.uid || user.id;
+  if (!requestedUserId) return;
 
   try {
-    const { data } = await supabase
+    const { data: { user: authenticatedUser }, error: authError } = await supabase.auth.getUser();
+    if (authError || !authenticatedUser || authenticatedUser.id !== requestedUserId) {
+      throw new Error('Cannot create a session for a different or unauthenticated user.');
+    }
+    const userId = authenticatedUser.id;
+    const { data, error } = await supabase
       .from('user_sessions')
       .insert([
         {
           user_id: userId,
           user_agent: typeof navigator !== 'undefined' ? navigator.userAgent : '',
-          ip_address: simulatedIp,
           last_login: new Date().toISOString(),
           is_active: true,
         },
@@ -73,11 +73,7 @@ export async function createUserSession(_db: any, user: { uid?: string; id?: str
       .select('id')
       .single();
 
-    await supabase
-      .from('profiles')
-      .update({ ip_based_country: randomIpCountry })
-      .eq('id', userId);
-
+    if (error) throw error;
     return data?.id;
   } catch (err) {
     console.error('createUserSession failed:', err);
@@ -89,9 +85,16 @@ export async function logoutSessions(_db: any, userId: string, sessionIdsToLogou
     throw new Error('User ID and session IDs are required.');
   }
 
-  await supabase
+  const { data: { user: authenticatedUser }, error: authError } = await supabase.auth.getUser();
+  if (authError || !authenticatedUser || authenticatedUser.id !== userId) {
+    throw new Error('You can only revoke sessions belonging to your authenticated account.');
+  }
+
+  const { error } = await supabase
     .from('user_sessions')
     .update({ is_active: false })
     .in('id', sessionIdsToLogout)
-    .eq('user_id', userId);
+    .eq('user_id', authenticatedUser.id);
+
+  if (error) throw error;
 }

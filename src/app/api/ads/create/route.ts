@@ -8,39 +8,54 @@ import { isTier2User } from '@/lib/kyc';
 export const dynamic = 'force-dynamic';
 
 const VALID_SUPPORTED_ASSETS = ['USDT', 'BTC', 'ETH', 'LTC'];
+const MAX_MARKET_PRICE_AGE_MS = 15 * 60 * 1000;
 
 export async function POST(req: Request) {
   try {
     const supabase = await createClient();
 
-    // Support Bearer token header if provided by frontend
-    const authHeader = req.headers.get('Authorization') || req.headers.get('authorization');
-    const bearerToken = authHeader?.startsWith('Bearer ') ? authHeader.substring(7).trim() : null;
+    // A supplied Authorization header is authoritative: never fall back to cookie
+    // identity when that header is malformed or its bearer token is invalid.
+    const authHeader = req.headers.get('authorization');
+    const bearerMatch = authHeader?.match(/^Bearer\s+(.+)$/i);
+    const bearerToken = bearerMatch?.[1]?.trim();
 
     // 1. Explicit Auth Check
     let user = null;
     let authError: any = null;
 
-    if (bearerToken) {
+    if (authHeader !== null) {
+      if (!bearerToken) {
+        return NextResponse.json(
+          { error: 'Invalid authorization header.', code: 'INVALID_AUTHORIZATION' },
+          { status: 401 }
+        );
+      }
       const tokenAuth = await supabase.auth.getUser(bearerToken);
       user = tokenAuth.data?.user;
       authError = tokenAuth.error;
-    }
-
-    if (!user) {
+    } else {
       const cookieAuth = await supabase.auth.getUser();
       user = cookieAuth.data?.user;
       authError = cookieAuth.error;
     }
 
     if (authError || !user) {
-      console.error('[Auth Error Details in /api/ads/create]:', authError?.message);
+      console.warn('[Auth] Advertisement creation rejected because no valid session was found.');
       return NextResponse.json(
-        { 
-          error: 'No active session found! Please refresh or log in again.', 
-          details: authError?.message 
-        }, 
+        { error: 'No active session found. Please refresh or log in again.', code: 'UNAUTHENTICATED' },
         { status: 401 }
+      );
+    }
+
+    // Block ad creation for accounts under an emergency security freeze.
+    try {
+      const { assertUserNotEmergencyFrozen } = await import('@/lib/user-freeze');
+      await assertUserNotEmergencyFrozen(user.id);
+    } catch (freezeErr: any) {
+      return NextResponse.json(
+        { error: freezeErr.message || 'Your account is under an emergency security freeze.', code: 'USER_EMERGENCY_FROZEN' },
+        { status: 403 }
       );
     }
 
@@ -60,7 +75,7 @@ export async function POST(req: Request) {
       const profileName = user.user_metadata?.full_name || user.user_metadata?.name || user.email?.split('@')[0] || 'Trader';
       const cleanUsername = user.user_metadata?.username || (user.email?.split('@')[0] || 'trader').toLowerCase().replace(/[^a-z0-9_]/g, '_');
 
-      await admin
+      const { error: profileUpsertError } = await admin
         .from('profiles')
         .upsert(
           {
@@ -72,11 +87,48 @@ export async function POST(req: Request) {
           },
           { onConflict: 'id', ignoreDuplicates: true }
         );
+      if (profileUpsertError) {
+        console.error('[Profile ensure query failed in /api/ads/create]:', profileUpsertError);
+        return NextResponse.json({ error: 'Account profile is temporarily unavailable.', code: 'PROFILE_UNAVAILABLE' }, { status: 503 });
+      }
     } catch (profileUpsertErr) {
-      console.warn('Profile auto-ensure warning in /api/ads/create:', profileUpsertErr);
+      console.error('[Profile ensure failed in /api/ads/create]:', profileUpsertErr);
+      return NextResponse.json(
+        { error: 'Account profile is temporarily unavailable. Please try again.', code: 'PROFILE_UNAVAILABLE' },
+        { status: 503 }
+      );
     }
 
-    const formData = await req.json();
+    const contentLength = Number(req.headers.get('content-length') || 0);
+    if (Number.isFinite(contentLength) && contentLength > 32 * 1024) {
+      return NextResponse.json(
+        { error: 'Advertisement request is too large.', code: 'REQUEST_BODY_TOO_LARGE' },
+        { status: 413 }
+      );
+    }
+
+    let formData: unknown;
+    try {
+      const rawBody = await req.text();
+      if (new TextEncoder().encode(rawBody).byteLength > 32 * 1024) {
+        return NextResponse.json(
+          { error: 'Advertisement request is too large.', code: 'REQUEST_BODY_TOO_LARGE' },
+          { status: 413 }
+        );
+      }
+      formData = JSON.parse(rawBody);
+    } catch {
+      return NextResponse.json(
+        { error: 'Request body must contain valid JSON.', code: 'INVALID_JSON' },
+        { status: 400 }
+      );
+    }
+    if (!formData || typeof formData !== 'object' || Array.isArray(formData)) {
+      return NextResponse.json(
+        { error: 'Request body must be a JSON object.', code: 'INVALID_REQUEST_BODY' },
+        { status: 400 }
+      );
+    }
 
     // 2. Strip all client-controlled identity and administrative fields to prevent spoofing
     const strippedFormData = { ...formData };
@@ -92,14 +144,11 @@ export async function POST(req: Request) {
     delete strippedFormData.is_verified;
 
     // 3. Validate Supported Crypto Asset (USDT, BTC, ETH, LTC)
-    const rawAsset = (
-      strippedFormData.crypto || 
-      strippedFormData.asset || 
-      strippedFormData.asset_symbol || 
-      strippedFormData.crypto_symbol || 
-      strippedFormData.coin || 
-      'USDT'
-    ).toString().toUpperCase().trim();
+    const assetInput = strippedFormData.crypto ?? strippedFormData.asset ?? strippedFormData.asset_symbol ?? strippedFormData.crypto_symbol ?? strippedFormData.coin ?? 'USDT';
+    if (typeof assetInput !== 'string') {
+      return NextResponse.json({ error: 'Crypto asset must be a string.', code: 'INVALID_ASSET' }, { status: 400 });
+    }
+    const rawAsset = assetInput.toUpperCase().trim();
 
     if (!VALID_SUPPORTED_ASSETS.includes(rawAsset)) {
       return NextResponse.json(
@@ -111,14 +160,11 @@ export async function POST(req: Request) {
     }
 
     // 4. Validate Supported Fiat Currency
-    const rawFiat = (
-      strippedFormData.fiatCurrency || 
-      strippedFormData.fiat || 
-      strippedFormData.fiat_currency || 
-      strippedFormData.fiat_symbol || 
-      strippedFormData.currency || 
-      'USD'
-    ).toString().toUpperCase().trim();
+    const fiatInput = strippedFormData.fiatCurrency ?? strippedFormData.fiat ?? strippedFormData.fiat_currency ?? strippedFormData.fiat_symbol ?? strippedFormData.currency ?? 'USD';
+    if (typeof fiatInput !== 'string') {
+      return NextResponse.json({ error: 'Fiat currency must be a string.', code: 'INVALID_FIAT' }, { status: 400 });
+    }
+    const rawFiat = fiatInput.toUpperCase().trim();
 
     const isValidFiat = FIAT_CURRENCIES.some(f => f.code.toUpperCase() === rawFiat);
     if (!isValidFiat) {
@@ -126,6 +172,35 @@ export async function POST(req: Request) {
         { 
           error: `Unsupported fiat currency '${rawFiat}'. Please select a valid supported currency.` 
         },
+        { status: 400 }
+      );
+    }
+
+    // Reject coercible non-numeric JSON values (for example true or []) before Number() can normalize them.
+    const numericInputKeys = [
+      'price', 'unit_price', 'margin', 'price_margin', 'margin_percentage',
+      'min_amount', 'max_amount', 'min_order', 'max_order', 'min_limit', 'max_limit',
+      'total_amount', 'available_amount', 'rate_percent', 'rate_adjustment',
+      'payment_window', 'min_completed_trades',
+    ];
+    for (const key of numericInputKeys) {
+      const value = strippedFormData[key];
+      if (value === undefined || value === null || value === '') continue;
+      if ((typeof value !== 'number' && typeof value !== 'string') ||
+          (typeof value === 'string' && value.trim() === '') ||
+          !Number.isFinite(Number(value))) {
+        return NextResponse.json(
+          { error: `Field '${key}' must be a finite number.`, code: 'INVALID_NUMERIC_FIELD' },
+          { status: 400 }
+        );
+      }
+    }
+
+    if (strippedFormData.is_fixed !== undefined &&
+        typeof strippedFormData.is_fixed !== 'boolean' &&
+        !(typeof strippedFormData.is_fixed === 'string' && ['true', 'false'].includes(strippedFormData.is_fixed.trim().toLowerCase()))) {
+      return NextResponse.json(
+        { error: 'is_fixed must be a boolean.', code: 'INVALID_PRICING_FLAG' },
         { status: 400 }
       );
     }
@@ -143,15 +218,29 @@ export async function POST(req: Request) {
       fiat_symbol: rawFiat,
       currency: rawFiat,
       price: strippedFormData.price !== undefined && strippedFormData.price !== null && strippedFormData.price !== '' ? Number(strippedFormData.price) : null,
-      margin: strippedFormData.margin !== undefined && strippedFormData.margin !== null && strippedFormData.margin !== '' ? Number(strippedFormData.margin) : (strippedFormData.price_margin ? Number(strippedFormData.price_margin) : null),
-      min_amount: strippedFormData.min_amount !== undefined && strippedFormData.min_amount !== null && strippedFormData.min_amount !== '' ? Number(strippedFormData.min_amount) : (strippedFormData.min_order ? Number(strippedFormData.min_order) : null),
-      max_amount: strippedFormData.max_amount !== undefined && strippedFormData.max_amount !== null && strippedFormData.max_amount !== '' ? Number(strippedFormData.max_amount) : (strippedFormData.max_order ? Number(strippedFormData.max_order) : null),
-      is_fixed: Boolean(strippedFormData.is_fixed ?? (typeof strippedFormData.fixed_rate === 'boolean' ? strippedFormData.fixed_rate : false)),
+      margin: strippedFormData.margin !== undefined && strippedFormData.margin !== null && strippedFormData.margin !== '' ? Number(strippedFormData.margin) : (strippedFormData.price_margin !== undefined && strippedFormData.price_margin !== null && strippedFormData.price_margin !== '' ? Number(strippedFormData.price_margin) : null),
+      margin_percentage: strippedFormData.margin_percentage !== undefined && strippedFormData.margin_percentage !== null && strippedFormData.margin_percentage !== '' ? Number(strippedFormData.margin_percentage) : (strippedFormData.margin !== undefined && strippedFormData.margin !== null && strippedFormData.margin !== '' ? Number(strippedFormData.margin) : (strippedFormData.price_margin !== undefined && strippedFormData.price_margin !== null && strippedFormData.price_margin !== '' ? Number(strippedFormData.price_margin) : 0)),
+      min_amount: strippedFormData.min_amount !== undefined && strippedFormData.min_amount !== null && strippedFormData.min_amount !== '' ? Number(strippedFormData.min_amount) : (strippedFormData.min_order !== undefined && strippedFormData.min_order !== null && strippedFormData.min_order !== '' ? Number(strippedFormData.min_order) : null),
+      max_amount: strippedFormData.max_amount !== undefined && strippedFormData.max_amount !== null && strippedFormData.max_amount !== '' ? Number(strippedFormData.max_amount) : (strippedFormData.max_order !== undefined && strippedFormData.max_order !== null && strippedFormData.max_order !== '' ? Number(strippedFormData.max_order) : null),
+      is_fixed: (() => {
+        const fixedValue = strippedFormData.is_fixed ?? (typeof strippedFormData.fixed_rate === 'boolean' ? strippedFormData.fixed_rate : false);
+        if (typeof fixedValue === 'boolean') return fixedValue;
+        if (typeof fixedValue === 'string' && ['true', 'false'].includes(fixedValue.trim().toLowerCase())) {
+          return fixedValue.trim().toLowerCase() === 'true';
+        }
+        return false;
+      })(),
     };
 
     if (typeof cleanPayload.fixed_rate === 'boolean') {
       delete cleanPayload.fixed_rate;
     }
+
+    // Normalize the camelCase API alias and never persist duplicate client field names.
+    if (cleanPayload.payment_methods === undefined && strippedFormData.paymentMethods !== undefined) {
+      cleanPayload.payment_methods = strippedFormData.paymentMethods;
+    }
+    delete cleanPayload.paymentMethods;
 
     if (cleanPayload.min_order !== undefined) cleanPayload.min_order = cleanPayload.min_order ? Number(cleanPayload.min_order) : null;
     if (cleanPayload.max_order !== undefined) cleanPayload.max_order = cleanPayload.max_order ? Number(cleanPayload.max_order) : null;
@@ -160,8 +249,56 @@ export async function POST(req: Request) {
     if (cleanPayload.rate_percent !== undefined) cleanPayload.rate_percent = cleanPayload.rate_percent ? Number(cleanPayload.rate_percent) : 0;
     if (cleanPayload.rate_adjustment !== undefined) cleanPayload.rate_adjustment = cleanPayload.rate_adjustment ? Number(cleanPayload.rate_adjustment) : 0;
     if (cleanPayload.margin_percentage !== undefined) cleanPayload.margin_percentage = cleanPayload.margin_percentage ? Number(cleanPayload.margin_percentage) : 0;
-    if (cleanPayload.payment_window !== undefined) cleanPayload.payment_window = parseInt(String(cleanPayload.payment_window), 10) || 30;
-    if (cleanPayload.min_completed_trades !== undefined) cleanPayload.min_completed_trades = parseInt(String(cleanPayload.min_completed_trades), 10) || 0;
+    if (cleanPayload.payment_methods === undefined || cleanPayload.payment_methods === null) {
+      return NextResponse.json({ error: 'At least one payment method is required.', code: 'INVALID_PAYMENT_METHODS' }, { status: 400 });
+    }
+    if (cleanPayload.payment_methods !== undefined) {
+      if (!Array.isArray(cleanPayload.payment_methods) || cleanPayload.payment_methods.length < 1 || cleanPayload.payment_methods.length > 20) {
+        return NextResponse.json({ error: 'Payment methods must be a list containing 1 to 20 entries.', code: 'INVALID_PAYMENT_METHODS' }, { status: 400 });
+      }
+      const normalizedPaymentMethods: string[] = [];
+      const seenPaymentMethods = new Set<string>();
+      for (const method of cleanPayload.payment_methods) {
+        if (typeof method !== 'string' || method.trim().length < 1 || method.trim().length > 80) {
+          return NextResponse.json({ error: 'Each payment method must be a string between 1 and 80 characters.', code: 'INVALID_PAYMENT_METHODS' }, { status: 400 });
+        }
+        const displayValue = method.trim();
+        const normalizedKey = displayValue.toLowerCase();
+        if (!seenPaymentMethods.has(normalizedKey)) {
+          seenPaymentMethods.add(normalizedKey);
+          normalizedPaymentMethods.push(displayValue);
+        }
+      }
+      if (normalizedPaymentMethods.length === 0) {
+        return NextResponse.json({ error: 'At least one valid payment method is required.', code: 'INVALID_PAYMENT_METHODS' }, { status: 400 });
+      }
+      cleanPayload.payment_methods = normalizedPaymentMethods;
+    }
+
+    if (cleanPayload.payment_window !== undefined && cleanPayload.payment_window !== null && cleanPayload.payment_window !== '') {
+      const paymentWindow = Number(cleanPayload.payment_window);
+      if (!Number.isInteger(paymentWindow) || paymentWindow < 30 || paymentWindow > 1440) {
+        return NextResponse.json(
+          { error: 'Payment window must be a whole number between 30 and 1440 minutes.', code: 'INVALID_PAYMENT_WINDOW' },
+          { status: 400 }
+        );
+      }
+      cleanPayload.payment_window = paymentWindow;
+    } else {
+      cleanPayload.payment_window = 30;
+    }
+    if (cleanPayload.min_completed_trades !== undefined && cleanPayload.min_completed_trades !== null && cleanPayload.min_completed_trades !== '') {
+      const minCompletedTrades = Number(cleanPayload.min_completed_trades);
+      if (!Number.isSafeInteger(minCompletedTrades) || minCompletedTrades < 0) {
+        return NextResponse.json(
+          { error: 'Minimum completed trades must be a non-negative whole number.', code: 'INVALID_MIN_COMPLETED_TRADES' },
+          { status: 400 }
+        );
+      }
+      cleanPayload.min_completed_trades = minCompletedTrades;
+    } else {
+      cleanPayload.min_completed_trades = 0;
+    }
 
     // Normalize and strictly validate ad trade direction (BUY/SELL)
     const resolvedDirection = resolveTradeType(cleanPayload);
@@ -171,17 +308,26 @@ export async function POST(req: Request) {
         { status: 400 }
       );
     }
+    // Keep legacy and canonical direction fields identical; never persist a conflicting client-supplied type.
     cleanPayload.trade_type = resolvedDirection;
-    cleanPayload.type = cleanPayload.type ? String(cleanPayload.type).toUpperCase() : resolvedDirection;
+    cleanPayload.type = resolvedDirection;
 
     // Enforce Tier 2 KYC for SELL ads (Tier 1 is blocked from selling)
     if (cleanPayload.type === 'SELL' || resolvedDirection === 'SELL') {
       const admin = getSupabaseAdminClient();
-      const { data: creatorProf } = await admin
+      const { data: creatorProf, error: creatorProfileError } = await admin
         .from('profiles')
         .select('is_verified, id_verified, is_id_verified, kyc_status, verification_tier')
         .eq('id', user.id)
         .maybeSingle();
+
+      if (creatorProfileError || !creatorProf) {
+        console.error('[KYC profile lookup failed in /api/ads/create]:', creatorProfileError || 'Profile not found');
+        return NextResponse.json(
+          { error: 'KYC status is temporarily unavailable. Please try again.', code: 'KYC_STATUS_UNAVAILABLE' },
+          { status: 503 }
+        );
+      }
 
       const isCreatorTier2 = isTier2User(creatorProf);
 
@@ -197,20 +343,46 @@ export async function POST(req: Request) {
       }
     }
 
+    if (cleanPayload.min_amount === null || cleanPayload.min_amount === undefined ||
+        cleanPayload.max_amount === null || cleanPayload.max_amount === undefined) {
+      return NextResponse.json(
+        { error: 'Both minimum and maximum trade limits are required.', code: 'TRADE_LIMITS_REQUIRED' },
+        { status: 400 }
+      );
+    }
+
     // Validate min/max and price constraints
-    const effectivePrice = cleanPayload.price !== null && cleanPayload.price !== undefined ? cleanPayload.price : (cleanPayload.fixed_rate ? Number(cleanPayload.fixed_rate) : null);
-    if (effectivePrice !== null && effectivePrice <= 0) {
-      return NextResponse.json({ error: 'Ad price must be greater than 0.' }, { status: 400 });
+    let effectivePrice = cleanPayload.price !== null && cleanPayload.price !== undefined ? cleanPayload.price : (cleanPayload.fixed_rate ? Number(cleanPayload.fixed_rate) : null);
+    if (effectivePrice !== null && (!Number.isFinite(effectivePrice) || effectivePrice <= 0)) {
+      return NextResponse.json({ error: 'Ad price must be a valid number greater than 0.' }, { status: 400 });
     }
-    if (cleanPayload.min_amount !== null && cleanPayload.min_amount <= 0) {
-      return NextResponse.json({ error: 'Minimum trade limit must be greater than 0.' }, { status: 400 });
+    if (cleanPayload.min_amount !== null && cleanPayload.min_amount !== undefined &&
+        (!Number.isFinite(cleanPayload.min_amount) || cleanPayload.min_amount <= 0)) {
+      return NextResponse.json({ error: 'Minimum trade limit must be a valid number greater than 0.' }, { status: 400 });
     }
-    if (cleanPayload.min_amount !== null && cleanPayload.max_amount !== null && cleanPayload.max_amount < cleanPayload.min_amount) {
+    if (cleanPayload.max_amount !== null && cleanPayload.max_amount !== undefined &&
+        (!Number.isFinite(cleanPayload.max_amount) || cleanPayload.max_amount <= 0)) {
+      return NextResponse.json({ error: 'Maximum trade limit must be a valid number greater than 0.' }, { status: 400 });
+    }
+    if (cleanPayload.min_amount !== null && cleanPayload.min_amount !== undefined &&
+        cleanPayload.max_amount !== null && cleanPayload.max_amount !== undefined &&
+        cleanPayload.max_amount < cleanPayload.min_amount) {
       return NextResponse.json({ error: 'Maximum trade limit must be greater than or equal to minimum limit.' }, { status: 400 });
     }
 
     // Authoritative Server-Side ±50% Reference Market Price Validation
-    const isFixedPricing = String(cleanPayload.pricing_type || cleanPayload.rate_type || '').toUpperCase() === 'FIXED' || Boolean(cleanPayload.is_fixed);
+    const explicitPricingType = strippedFormData.pricing_type ?? strippedFormData.rate_type;
+    if (explicitPricingType !== undefined && (typeof explicitPricingType !== 'string' || explicitPricingType.trim().length === 0 || explicitPricingType.trim().length > 20)) {
+      return NextResponse.json({ error: 'Pricing type must be a non-empty string up to 20 characters.', code: 'INVALID_PRICING_TYPE' }, { status: 400 });
+    }
+    const normalizedPricingType = String(explicitPricingType ?? (cleanPayload.is_fixed === true ? 'FIXED' : 'FLOAT')).trim().toUpperCase();
+    if (!['FIXED', 'FLOAT', 'FLOATING', 'MARGIN', 'DYNAMIC'].includes(normalizedPricingType)) {
+      return NextResponse.json({ error: 'Unsupported pricing type.', code: 'INVALID_PRICING_TYPE' }, { status: 400 });
+    }
+    const isFixedPricing = normalizedPricingType === 'FIXED';
+    // Keep persisted legacy boolean semantics aligned with the validated canonical pricing type.
+    cleanPayload.is_fixed = isFixedPricing;
+    cleanPayload.pricing_type = normalizedPricingType;
 
     if (isFixedPricing) {
       if (effectivePrice === null || effectivePrice <= 0) {
@@ -224,14 +396,17 @@ export async function POST(req: Request) {
         .eq('fiat_symbol', rawFiat)
         .maybeSingle();
 
-      if (marketError || !marketRow || !marketRow.price_in_fiat || Number(marketRow.price_in_fiat) <= 0) {
+      const refPrice = Number(marketRow?.price_in_fiat);
+      const marketUpdatedAt = marketRow?.updated_at ? Date.parse(marketRow.updated_at) : Number.NaN;
+      const marketAgeMs = Date.now() - marketUpdatedAt;
+      const marketDataStale = !Number.isFinite(marketUpdatedAt) || marketAgeMs < 0 || marketAgeMs > MAX_MARKET_PRICE_AGE_MS;
+      if (marketError || !marketRow || !Number.isFinite(refPrice) || refPrice <= 0 || marketDataStale) {
+        console.error('[Market price lookup failed in /api/ads/create]:', marketError || 'Missing or invalid reference price');
         return NextResponse.json(
-          { error: `Market reference price is currently unavailable for ${rawAsset}/${rawFiat}. Please try again later.` },
-          { status: 400 }
+          { error: `Market reference price is currently unavailable for ${rawAsset}/${rawFiat}. Please try again later.`, code: 'MARKET_PRICE_UNAVAILABLE' },
+          { status: 503 }
         );
       }
-
-      const refPrice = Number(marketRow.price_in_fiat);
       const minAllowedPrice = refPrice * 0.50;
       const maxAllowedPrice = refPrice * 1.50;
 
@@ -245,39 +420,102 @@ export async function POST(req: Request) {
       }
     } else {
       // Floating/margin pricing validation (-50% to +50%)
-      const marginPct = cleanPayload.margin_percentage !== undefined ? Number(cleanPayload.margin_percentage) : 0;
-      if (marginPct < -50 || marginPct > 50) {
+      const marginSource = cleanPayload.margin_percentage !== undefined ? cleanPayload.margin_percentage : cleanPayload.margin;
+      const marginPct = marginSource !== undefined && marginSource !== null ? Number(marginSource) : 0;
+      if (!Number.isFinite(marginPct) || marginPct < -50 || marginPct > 50) {
         return NextResponse.json(
           { error: 'Margin percentage for dynamic pricing must be between -50% and +50%.' },
           { status: 400 }
         );
       }
+      // Derive floating prices on the server; never trust a client-supplied price
+      // that could disagree with the validated margin and current market reference.
+      const { data: marketRow, error: marketError } = await supabase
+        .from('crypto_market_prices')
+        .select('price_in_fiat, updated_at')
+        .eq('asset_symbol', rawAsset)
+        .eq('fiat_symbol', rawFiat)
+        .maybeSingle();
+      const referencePrice = Number(marketRow?.price_in_fiat);
+      const marketUpdatedAt = marketRow?.updated_at ? Date.parse(marketRow.updated_at) : Number.NaN;
+      const marketAgeMs = Date.now() - marketUpdatedAt;
+      const marketDataStale = !Number.isFinite(marketUpdatedAt) || marketAgeMs < 0 || marketAgeMs > MAX_MARKET_PRICE_AGE_MS;
+      if (marketError || !Number.isFinite(referencePrice) || referencePrice <= 0 || marketDataStale) {
+        console.error('[Floating market price lookup failed in /api/ads/create]:', marketError || 'Missing or invalid reference price');
+        return NextResponse.json(
+          { error: 'Market reference price is currently unavailable. Please try again later.', code: 'MARKET_PRICE_UNAVAILABLE' },
+          { status: 503 }
+        );
+      }
+      effectivePrice = Number((referencePrice * (1 + marginPct / 100)).toFixed(8));
+      if (!Number.isFinite(effectivePrice) || effectivePrice <= 0) {
+        return NextResponse.json(
+          { error: 'Unable to calculate a valid floating price.', code: 'INVALID_FLOATING_PRICE' },
+          { status: 400 }
+        );
+      }
+      cleanPayload.price = effectivePrice;
+      cleanPayload.unit_price = effectivePrice;
     }
 
-    // 6. Server-Side SELL Ad Spendable Balance Validation against public.wallet_assets
-    if (resolvedDirection === 'SELL') {
-      let requiredCrypto = 0;
-      if (cleanPayload.available_amount && cleanPayload.available_amount > 0) {
-        requiredCrypto = cleanPayload.available_amount;
-      } else if (cleanPayload.total_amount && cleanPayload.total_amount > 0) {
-        requiredCrypto = cleanPayload.total_amount;
-      } else if (cleanPayload.max_amount && effectivePrice && effectivePrice > 0) {
-        requiredCrypto = cleanPayload.max_amount / effectivePrice;
-      } else if (cleanPayload.min_amount && effectivePrice && effectivePrice > 0) {
-        requiredCrypto = cleanPayload.min_amount / effectivePrice;
-      }
+    // Persist the validated price consistently for fixed and floating ads.
+    cleanPayload.price = effectivePrice;
+    cleanPayload.unit_price = effectivePrice;
 
-      // Query authoritative spendable balance from public.wallet_assets
-      const { data: assetWallet, error: walletError } = await supabase
+    // 6. Derive advertised crypto quantities server-side for both BUY and SELL.
+    // min_amount/max_amount are fiat limits; total_amount/available_amount are crypto quantities.
+    const maxFiatAmount = Number(cleanPayload.max_amount);
+    if (!Number.isFinite(maxFiatAmount) || maxFiatAmount <= 0 ||
+        !Number.isFinite(effectivePrice) || effectivePrice <= 0) {
+      return NextResponse.json(
+        { error: 'A valid maximum fiat limit and unit price are required.', code: 'INVALID_AD_AMOUNT' },
+        { status: 400 }
+      );
+    }
+    const requiredCrypto = maxFiatAmount / effectivePrice;
+    if (!Number.isFinite(requiredCrypto) || requiredCrypto <= 0) {
+      return NextResponse.json(
+        { error: 'Unable to calculate the crypto quantity for this advertisement.', code: 'INVALID_AD_AMOUNT' },
+        { status: 400 }
+      );
+    }
+    cleanPayload.total_amount = requiredCrypto;
+    cleanPayload.available_amount = requiredCrypto;
+
+    // SELL advertisements must also have sufficient spendable wallet balance.
+    if (resolvedDirection === 'SELL') {
+
+      // Query authoritative balance and subtract funds already committed to escrow.
+      // Use the server-side client for the authoritative balance read because
+      // user-facing RLS may hide wallet rows; scope the privileged query to this user.
+      const balanceClient = getSupabaseAdminClient();
+      const { data: assetWallet, error: walletError } = await balanceClient
         .from('wallet_assets')
         .select('balance, in_escrow')
         .eq('user_id', user.id)
         .eq('asset_symbol', rawAsset)
         .maybeSingle();
 
-      const spendableBalance = Number(assetWallet?.balance || 0);
+      const walletBalance = Number(assetWallet?.balance);
+      const escrowBalance = Number(assetWallet?.in_escrow ?? 0);
+      const spendableBalance = walletBalance - escrowBalance;
 
-      if (walletError || spendableBalance <= 0 || (requiredCrypto > 0 && spendableBalance < requiredCrypto)) {
+      if (walletError) {
+        console.error('[Wallet balance lookup failed in /api/ads/create]:', walletError);
+        return NextResponse.json(
+          { error: 'Wallet balance is temporarily unavailable. Please try again.', code: 'WALLET_BALANCE_UNAVAILABLE' },
+          { status: 503 }
+        );
+      }
+
+      if (!Number.isFinite(walletBalance) || !Number.isFinite(escrowBalance) || walletBalance < 0 || escrowBalance < 0 || escrowBalance > walletBalance) {
+        return NextResponse.json(
+          { error: 'Wallet balance data is invalid; advertisement cannot be created.', code: 'INVALID_WALLET_BALANCE' },
+          { status: 503 }
+        );
+      }
+
+      if (spendableBalance <= 0 || spendableBalance < requiredCrypto) {
         return NextResponse.json(
           {
             error: `Insufficient spendable balance in your ${rawAsset} wallet. You have ${spendableBalance.toFixed(8)} ${rawAsset} available, but require at least ${requiredCrypto.toFixed(8)} ${rawAsset} to post this SELL advertisement.`,
@@ -295,7 +533,9 @@ export async function POST(req: Request) {
     cleanPayload.user_id = user.id;
 
     // Determine target table
-    const targetTable = cleanPayload.table || (cleanPayload.title && cleanPayload.description ? 'ads' : 'p2p_ads');
+    // This endpoint creates canonical marketplace ads only. Never allow a client
+    // field to select an arbitrary Supabase table or fall back to the legacy table.
+    const targetTable = 'ads';
     delete cleanPayload.table;
 
     // 8. Execute Authorized Database Insert without service-role escape hatch
@@ -305,34 +545,28 @@ export async function POST(req: Request) {
       .select()
       .single();
 
-    // Fallback between 'p2p_ads' and 'ads' if table does not exist
-    if (dbError && (dbError.code === '42P01' || dbError.message?.includes('does not exist'))) {
-      const altTable = targetTable === 'ads' ? 'p2p_ads' : 'ads';
-      const altResult = await supabase
-        .from(altTable)
-        .insert([cleanPayload])
-        .select()
-        .single();
-
-      if (!altResult.error) {
-        data = altResult.data;
-        dbError = null;
-      } else {
-        dbError = altResult.error;
-      }
-    }
+    // Canonical ads-table failures fail closed; no legacy-table fallback.
 
     // If RLS or authorization denies operation, fail-closed without service role bypass
     if (dbError) {
       console.error('[Database Insert Error in /api/ads/create]:', dbError);
       const isRlsError = dbError.code === '42501' || dbError.message?.toLowerCase().includes('row-level security');
+      const isAdLimitError =
+        dbError.code === '23514' &&
+        (dbError.message?.includes('ads_user_limit_check') ||
+          dbError.message?.toLowerCase().includes('advertisement limit reached'));
       return NextResponse.json(
-        { 
-          error: isRlsError ? 'Access denied: You do not have permission to create this advertisement.' : 'Failed to create ad in database.', 
-          code: dbError.code,
-          details: dbError.message 
-        }, 
-        { status: isRlsError ? 403 : 400 }
+        {
+          error: isAdLimitError
+            ? 'You have reached the limit of 10 advertisements. Delete an existing advertisement before creating another.'
+            : isRlsError
+              ? 'Access denied: You do not have permission to create this advertisement.'
+              : 'Unable to create advertisement. Please review the submitted fields or try again later.',
+          code: isAdLimitError
+            ? 'ADVERTISEMENT_LIMIT_REACHED'
+            : isRlsError ? 'ADVERTISEMENT_ACCESS_DENIED' : 'AD_CREATION_FAILED'
+        },
+        { status: isAdLimitError ? 409 : isRlsError ? 403 : 500 }
       );
     }
 
@@ -341,7 +575,7 @@ export async function POST(req: Request) {
   } catch (err: any) {
     console.error('[Unhandled Server Error in /api/ads/create]:', err);
     return NextResponse.json(
-      { error: err.message || 'Internal Server Error' }, 
+      { error: 'Unable to create advertisement at this time.', code: 'AD_CREATION_FAILED' },
       { status: 500 }
     );
   }

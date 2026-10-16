@@ -8,18 +8,22 @@
 -- 1. Ensure wallet_transactions has required columns
 DO $$
 BEGIN
-    IF NOT EXISTS (
-        SELECT 1 FROM information_schema.columns 
-        WHERE table_schema = 'public' AND table_name = 'wallet_transactions' AND column_name = 'tx_type'
-    ) THEN
-        ALTER TABLE public.wallet_transactions ADD COLUMN tx_type TEXT;
-    END IF;
+    -- This legacy relation is not present in every supported schema generation.
+    -- Only add compatibility columns when the table itself exists.
+    IF to_regclass('public.wallet_transactions') IS NOT NULL THEN
+        IF NOT EXISTS (
+            SELECT 1 FROM information_schema.columns
+            WHERE table_schema = 'public' AND table_name = 'wallet_transactions' AND column_name = 'tx_type'
+        ) THEN
+            ALTER TABLE public.wallet_transactions ADD COLUMN tx_type TEXT;
+        END IF;
 
-    IF NOT EXISTS (
-        SELECT 1 FROM information_schema.columns 
-        WHERE table_schema = 'public' AND table_name = 'wallet_transactions' AND column_name = 'fee'
-    ) THEN
-        ALTER TABLE public.wallet_transactions ADD COLUMN fee NUMERIC(36, 18) DEFAULT 0.0;
+        IF NOT EXISTS (
+            SELECT 1 FROM information_schema.columns
+            WHERE table_schema = 'public' AND table_name = 'wallet_transactions' AND column_name = 'fee'
+        ) THEN
+            ALTER TABLE public.wallet_transactions ADD COLUMN fee NUMERIC(36, 18) DEFAULT 0.0;
+        END IF;
     END IF;
 END $$;
 

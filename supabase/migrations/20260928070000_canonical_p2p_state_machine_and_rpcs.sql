@@ -36,8 +36,8 @@ DECLARE
     v_effective_caller UUID;
 
     -- Strongly-typed record variables for each relation
-    v_p2p_ad public.p2p_ads%ROWTYPE;
-    v_legacy_ad public.ads%ROWTYPE;
+    v_p2p_ad RECORD;
+    v_legacy_ad RECORD;
 
     -- Normalized scalar variables
     v_found_ad BOOLEAN := FALSE;
@@ -86,72 +86,78 @@ BEGIN
         v_effective_caller := p_caller_id;
     END IF;
 
-    -- 2. Lookup in Canonical public.p2p_ads Table
-    IF p_ad_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN
-        SELECT * INTO v_p2p_ad
-        FROM public.p2p_ads
-        WHERE id = p_ad_id::UUID
-           OR public_ad_id = p_ad_id
-        LIMIT 1;
-    ELSE
-        SELECT * INTO v_p2p_ad
-        FROM public.p2p_ads
-        WHERE public_ad_id = p_ad_id
-           OR id::TEXT = p_ad_id
-        LIMIT 1;
+    -- 2. Lookup in Canonical public.p2p_ads Table (optional on legacy deployments)
+    IF to_regclass('public.p2p_ads') IS NOT NULL THEN
+        IF p_ad_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN
+            SELECT * INTO v_p2p_ad
+            FROM public.p2p_ads
+            WHERE id = p_ad_id::UUID
+               OR public_ad_id = p_ad_id
+            LIMIT 1;
+        ELSE
+            SELECT * INTO v_p2p_ad
+            FROM public.p2p_ads
+            WHERE public_ad_id = p_ad_id
+               OR id::TEXT = p_ad_id
+            LIMIT 1;
+        END IF;
+
+        IF v_p2p_ad.id IS NOT NULL THEN
+            v_found_ad := TRUE;
+            v_ad_id := v_p2p_ad.id;
+            v_ad_user_id := v_p2p_ad.user_id;
+            v_ad_public_ad_id := v_p2p_ad.public_ad_id;
+
+            -- Resolve legacy ads FK only when the optional legacy table exists.
+            IF to_regclass('public.ads') IS NOT NULL THEN
+                SELECT id INTO v_trade_ad_id
+                FROM public.ads
+                WHERE public_ad_id = v_p2p_ad.public_ad_id
+                   OR id = v_p2p_ad.id::TEXT
+                LIMIT 1;
+            END IF;
+
+            v_ad_type := UPPER(COALESCE(
+                v_p2p_ad.ad_type,
+                v_p2p_ad.type,
+                'SELL'
+            ));
+
+            v_ad_asset := UPPER(COALESCE(
+                v_p2p_ad.asset_symbol,
+                v_p2p_ad.crypto_currency,
+                v_p2p_ad.coin,
+                'USDT'
+            ));
+
+            v_ad_price := COALESCE(
+                NULLIF(p_price, 0),
+                v_p2p_ad.price,
+                1.0
+            );
+
+            v_ad_fiat_currency := UPPER(COALESCE(
+                NULLIF(p_fiat_currency, ''),
+                v_p2p_ad.fiat_currency,
+                v_p2p_ad.fiat_symbol,
+                'USD'
+            ));
+
+            v_ad_payment_window_mins := 30;
+
+            v_ad_is_active := COALESCE(v_p2p_ad.active, TRUE)
+                          AND COALESCE(v_p2p_ad.is_active, TRUE)
+                          AND NOT COALESCE(v_p2p_ad.is_deleted, FALSE)
+                          AND UPPER(COALESCE(v_p2p_ad.status, 'ACTIVE')) = 'ACTIVE';
+
+            v_ad_source := 'p2p_ads';
+        END IF;
+
+
     END IF;
 
-    IF v_p2p_ad.id IS NOT NULL THEN
-        v_found_ad := TRUE;
-        v_ad_id := v_p2p_ad.id;
-        v_ad_user_id := v_p2p_ad.user_id;
-        v_ad_public_ad_id := v_p2p_ad.public_ad_id;
-
-        -- Resolve corresponding legacy public.ads.id strictly for foreign key trades_ad_id_fkey
-        SELECT id INTO v_trade_ad_id
-        FROM public.ads
-        WHERE public_ad_id = v_p2p_ad.public_ad_id
-           OR id = v_p2p_ad.id::TEXT
-        LIMIT 1;
-
-        v_ad_type := UPPER(COALESCE(
-            v_p2p_ad.ad_type,
-            v_p2p_ad.type,
-            'SELL'
-        ));
-
-        v_ad_asset := UPPER(COALESCE(
-            v_p2p_ad.asset_symbol,
-            v_p2p_ad.crypto_currency,
-            v_p2p_ad.coin,
-            'USDT'
-        ));
-
-        v_ad_price := COALESCE(
-            NULLIF(p_price, 0),
-            v_p2p_ad.price,
-            1.0
-        );
-
-        v_ad_fiat_currency := UPPER(COALESCE(
-            NULLIF(p_fiat_currency, ''),
-            v_p2p_ad.fiat_currency,
-            v_p2p_ad.fiat_symbol,
-            'USD'
-        ));
-
-        v_ad_payment_window_mins := 30;
-
-        v_ad_is_active := COALESCE(v_p2p_ad.active, TRUE)
-                      AND COALESCE(v_p2p_ad.is_active, TRUE)
-                      AND NOT COALESCE(v_p2p_ad.is_deleted, FALSE)
-                      AND UPPER(COALESCE(v_p2p_ad.status, 'ACTIVE')) = 'ACTIVE';
-
-        v_ad_source := 'p2p_ads';
-    END IF;
-
-    -- 3. Fallback Lookup in Legacy public.ads Table (if not found in p2p_ads)
-    IF NOT v_found_ad THEN
+    -- 3. Fallback Lookup in optional Legacy public.ads Table
+    IF NOT v_found_ad AND to_regclass('public.ads') IS NOT NULL THEN
         SELECT * INTO v_legacy_ad
         FROM public.ads
         WHERE public_id = p_ad_id
@@ -168,7 +174,8 @@ BEGIN
             -- Resolve ad UUID strictly without fabricating synthetic IDs
             IF v_legacy_ad.id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN
                 v_ad_id := v_legacy_ad.id::UUID;
-            ELSIF v_legacy_ad.public_ad_id IS NOT NULL THEN
+            ELSIF v_legacy_ad.public_ad_id IS NOT NULL
+                  AND to_regclass('public.p2p_ads') IS NOT NULL THEN
                 SELECT pa.id INTO v_ad_id
                 FROM public.p2p_ads pa
                 WHERE pa.public_ad_id = v_legacy_ad.public_ad_id

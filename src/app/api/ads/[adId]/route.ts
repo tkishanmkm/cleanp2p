@@ -184,7 +184,7 @@ export async function GET(
   } catch (err: any) {
     console.error('Error in /api/ads/[adId] GET:', err);
     return NextResponse.json(
-      { error: err.message || 'Failed to fetch ad' },
+      { error: 'Unable to fetch advertisement. Please try again later.', code: 'AD_FETCH_FAILED' },
       { status: 500 }
     );
   }
@@ -205,19 +205,24 @@ export async function DELETE(
     const admin = getSupabaseAdminClient();
 
     // 1. Authenticate Requesting User
-    const authHeader = request.headers.get('Authorization') || request.headers.get('authorization');
-    const bearerToken = authHeader?.startsWith('Bearer ') ? authHeader.substring(7).trim() : null;
+    const authHeader = request.headers.get('authorization');
+    const bearerMatch = authHeader?.match(/^Bearer\s+(.+)$/i);
+    const bearerToken = bearerMatch?.[1]?.trim();
 
     let user: any = null;
     let authError: any = null;
 
-    if (bearerToken) {
+    if (authHeader !== null) {
+      if (!bearerToken) {
+        return NextResponse.json(
+          { error: 'Invalid authorization header.', code: 'INVALID_AUTHORIZATION' },
+          { status: 401 }
+        );
+      }
       const tokenAuth = await supabase.auth.getUser(bearerToken);
       user = tokenAuth.data?.user;
       authError = tokenAuth.error;
-    }
-
-    if (!user) {
+    } else {
       const cookieAuth = await supabase.auth.getUser();
       user = cookieAuth.data?.user;
       authError = cookieAuth.error;
@@ -250,6 +255,18 @@ export async function DELETE(
         { error: 'Forbidden. You do not have permission to delete this advertisement.' },
         { status: 403 }
       );
+    }
+
+    if (!isAdmin) {
+      try {
+        const { assertUserNotEmergencyFrozen } = await import('@/lib/user-freeze');
+        await assertUserNotEmergencyFrozen(user.id);
+      } catch (freezeErr: any) {
+        return NextResponse.json(
+          { error: freezeErr.message || 'Your account is under an emergency security freeze.', code: 'USER_EMERGENCY_FROZEN' },
+          { status: 403 }
+        );
+      }
     }
 
     // 4. Perform Soft-Delete & Deletion on independently resolved target IDs
@@ -290,10 +307,18 @@ export async function DELETE(
 
     if (adsRow) {
       try {
-        await admin
+        const { error: softDeleteError } = await admin
           .from('ads')
-          .update({ status: 'DELETED', is_active: false, updated_at: new Date().toISOString() })
+          .update({
+            status: 'DELETED',
+            is_active: false,
+            is_deleted: true,
+            updated_at: new Date().toISOString(),
+          })
           .eq('id', adsRow.id);
+        if (softDeleteError) {
+          console.warn('[DELETE /api/ads/[adId]] Legacy ads soft-delete warning:', softDeleteError.message);
+        }
       } catch (softErr: any) {
         console.warn('[DELETE /api/ads/[adId]] Legacy ads soft-delete warning:', softErr?.message);
       }
@@ -309,10 +334,10 @@ export async function DELETE(
       } else {
         const { data: adsCheck } = await admin
           .from('ads')
-          .select('status')
+          .select('status, is_deleted')
           .eq('id', adsRow.id)
           .maybeSingle();
-        if (adsCheck && adsCheck.status === 'DELETED') {
+        if (adsCheck && (adsCheck.status === 'DELETED' || adsCheck.is_deleted === true)) {
           adsMutated = true;
         }
       }
@@ -322,7 +347,10 @@ export async function DELETE(
       return NextResponse.json({ error: 'Advertisement record not found.' }, { status: 404 });
     }
 
-    const overallDeleteSuccess = p2pAdsRow ? p2pMutated : adsMutated;
+    const overallDeleteSuccess =
+      targetTable === 'p2p_ads' ? p2pMutated :
+      targetTable === 'ads' ? adsMutated :
+      (p2pMutated || adsMutated);
 
     if (!overallDeleteSuccess) {
       console.error('[DELETE /api/ads/[adId]] Failed row mutation:', { p2pRowId: p2pAdsRow?.id, p2pMutated, adsRowId: adsRow?.id, adsMutated });
@@ -340,7 +368,10 @@ export async function DELETE(
     return NextResponse.json({ success: true, message: 'Ad deleted successfully.' });
   } catch (err: any) {
     console.error('Error in DELETE /api/ads/[adId]:', err);
-    return NextResponse.json({ error: err.message || 'Failed to delete ad' }, { status: 500 });
+    return NextResponse.json(
+      { error: 'Unable to delete advertisement. Please try again later.', code: 'AD_DELETE_FAILED' },
+      { status: 500 }
+    );
   }
 }
 
@@ -359,19 +390,24 @@ export async function PATCH(
     const admin = getSupabaseAdminClient();
 
     // 1. Authenticate Requesting User
-    const authHeader = request.headers.get('Authorization') || request.headers.get('authorization');
-    const bearerToken = authHeader?.startsWith('Bearer ') ? authHeader.substring(7).trim() : null;
+    const authHeader = request.headers.get('authorization');
+    const bearerMatch = authHeader?.match(/^Bearer\s+(.+)$/i);
+    const bearerToken = bearerMatch?.[1]?.trim();
 
     let user: any = null;
     let authError: any = null;
 
-    if (bearerToken) {
+    if (authHeader !== null) {
+      if (!bearerToken) {
+        return NextResponse.json(
+          { error: 'Invalid authorization header.', code: 'INVALID_AUTHORIZATION' },
+          { status: 401 }
+        );
+      }
       const tokenAuth = await supabase.auth.getUser(bearerToken);
       user = tokenAuth.data?.user;
       authError = tokenAuth.error;
-    }
-
-    if (!user) {
+    } else {
       const cookieAuth = await supabase.auth.getUser();
       user = cookieAuth.data?.user;
       authError = cookieAuth.error;
@@ -406,8 +442,36 @@ export async function PATCH(
       );
     }
 
+    if (!isAdmin) {
+      try {
+        const { assertUserNotEmergencyFrozen } = await import('@/lib/user-freeze');
+        await assertUserNotEmergencyFrozen(user.id);
+      } catch (freezeErr: any) {
+        return NextResponse.json(
+          { error: freezeErr.message || 'Your account is under an emergency security freeze.', code: 'USER_EMERGENCY_FROZEN' },
+          { status: 403 }
+        );
+      }
+    }
+
     // 4. Parse & Strictly Validate Allowlisted Fields
-    const body = await request.json();
+    const contentLength = Number(request.headers.get('content-length') || 0);
+    if (Number.isFinite(contentLength) && contentLength > 4096) {
+      return NextResponse.json({ error: 'Request body is too large.', code: 'REQUEST_TOO_LARGE' }, { status: 413 });
+    }
+    let body: any;
+    try {
+      const rawBody = await request.text();
+      if (rawBody.length > 4096) {
+        return NextResponse.json({ error: 'Request body is too large.', code: 'REQUEST_TOO_LARGE' }, { status: 413 });
+      }
+      body = JSON.parse(rawBody);
+    } catch {
+      return NextResponse.json({ error: 'Invalid JSON body.', code: 'INVALID_JSON' }, { status: 400 });
+    }
+    if (!body || typeof body !== 'object' || Array.isArray(body)) {
+      return NextResponse.json({ error: 'Request body must be a JSON object.', code: 'INVALID_BODY' }, { status: 400 });
+    }
 
     // Never trust client-supplied identity fields in PATCH body
     delete body.user_id;
@@ -422,8 +486,32 @@ export async function PATCH(
     let isActive: boolean;
     let newStatus: string;
 
+    if (body.active !== undefined && typeof body.active !== 'boolean') {
+      return NextResponse.json(
+        { error: 'The active field must be a boolean.', code: 'INVALID_AD_STATUS' },
+        { status: 400 }
+      );
+    }
+
+    if (body.status !== undefined && (typeof body.status !== 'string' || !['ACTIVE', 'INACTIVE'].includes(body.status.toUpperCase().trim()))) {
+      return NextResponse.json(
+        { error: 'Status must be ACTIVE or INACTIVE. Use the delete endpoint to remove an advertisement.', code: 'INVALID_AD_STATUS' },
+        { status: 400 }
+      );
+    }
+
+    if (body.active !== undefined && body.status !== undefined) {
+      const statusMatchesActive = String(body.status).toUpperCase().trim() === (body.active ? 'ACTIVE' : 'INACTIVE');
+      if (!statusMatchesActive) {
+        return NextResponse.json(
+          { error: 'The active and status fields must describe the same state.', code: 'CONFLICTING_AD_STATUS' },
+          { status: 400 }
+        );
+      }
+    }
+
     if (body.active !== undefined) {
-      isActive = Boolean(body.active);
+      isActive = body.active;
       newStatus = isActive ? 'ACTIVE' : 'INACTIVE';
     } else if (body.status !== undefined) {
       const requestedStatus = String(body.status).toUpperCase().trim();
@@ -442,6 +530,19 @@ export async function PATCH(
         { error: 'Missing active or status field in PATCH request.' },
         { status: 400 }
       );
+    }
+
+    // Re-enabling an advertisement must respect platform-wide controls.
+    if (isActive && !isAdmin) {
+      try {
+        const { assertPlatformControlAllowed } = await import('@/lib/platform-guard');
+        await assertPlatformControlAllowed('new_ad', { userId: user.id });
+      } catch (controlErr: any) {
+        return NextResponse.json(
+          { error: controlErr.message || 'Advertisement activation is temporarily unavailable.', code: 'PLATFORM_CONTROL_BLOCKED' },
+          { status: 403 }
+        );
+      }
     }
 
     // 5. Independently resolve both target rows
@@ -497,7 +598,10 @@ export async function PATCH(
 
     // Canonical p2p_ads is authoritative. If p2pAdsRow exists, canonical p2p update must succeed.
     // If only legacy adsRow exists, ads update must succeed.
-    const overallSuccess = p2pAdsRow ? p2pMutated : adsMutated;
+    const overallSuccess =
+      targetTable === 'p2p_ads' ? p2pMutated :
+      targetTable === 'ads' ? adsMutated :
+      (p2pMutated || adsMutated);
 
     if (!overallSuccess) {
       console.error('[PATCH /api/ads/[adId]] Failed canonical row status update:', { p2pRowId: p2pAdsRow?.id, p2pMutated, adsRowId: adsRow?.id, adsMutated });
@@ -515,7 +619,10 @@ export async function PATCH(
     return NextResponse.json({ success: true, status: newStatus, active: isActive });
   } catch (err: any) {
     console.error('Error in PATCH /api/ads/[adId]:', err);
-    return NextResponse.json({ error: err.message || 'Failed to update ad' }, { status: 500 });
+    return NextResponse.json(
+      { error: 'Unable to change advertisement status. Please try again later.', code: 'AD_STATUS_UPDATE_FAILED' },
+      { status: 500 }
+    );
   }
 }
 
@@ -534,22 +641,34 @@ export async function PUT(
     const admin = getSupabaseAdminClient();
 
     // 1. Authenticate Requesting User
-    const authHeader = request.headers.get('Authorization') || request.headers.get('authorization');
-    const bearerToken = authHeader?.startsWith('Bearer ') ? authHeader.substring(7).trim() : null;
+    const authHeader = request.headers.get('authorization');
+    const bearerMatch = authHeader?.match(/^Bearer\s+(.+)$/i);
+    const bearerToken = bearerMatch?.[1]?.trim();
 
     let user: any = null;
     let authError: any = null;
 
-    if (bearerToken) {
+    if (authHeader !== null) {
+      if (!bearerToken) {
+        return NextResponse.json(
+          { error: 'Invalid authorization header.', code: 'INVALID_AUTHORIZATION' },
+          { status: 401 }
+        );
+      }
       const tokenAuth = await supabase.auth.getUser(bearerToken);
       user = tokenAuth.data?.user;
       authError = tokenAuth.error;
-    }
-
-    if (!user) {
+    } else {
       const cookieAuth = await supabase.auth.getUser();
       user = cookieAuth.data?.user;
       authError = cookieAuth.error;
+    }
+
+    if (authError && !user) {
+      return NextResponse.json(
+        { error: 'Unauthorized. Please log in to manage your advertisement.' },
+        { status: 401 }
+      );
     }
 
     // 2. Resolve the Ad Record across tables (ads, p2p_ads, offers)
@@ -581,8 +700,37 @@ export async function PUT(
       );
     }
 
-    // 4. Parse & Sanitize Edit Payload
-    const body = await request.json();
+    // Apply the emergency account freeze to owner edits; authorized admins retain remediation access.
+    if (user && !isAdmin) {
+      try {
+        const { assertUserNotEmergencyFrozen } = await import('@/lib/user-freeze');
+        await assertUserNotEmergencyFrozen(user.id);
+      } catch (freezeErr: any) {
+        return NextResponse.json(
+          { error: freezeErr.message || 'Your account is under an emergency security freeze.', code: 'USER_EMERGENCY_FROZEN' },
+          { status: 403 }
+        );
+      }
+    }
+
+    // 4. Parse & Sanitize Edit Payload with bounded input and explicit JSON errors
+    const contentLength = Number(request.headers.get('content-length') || 0);
+    if (Number.isFinite(contentLength) && contentLength > 32768) {
+      return NextResponse.json({ error: 'Request body is too large.', code: 'REQUEST_TOO_LARGE' }, { status: 413 });
+    }
+    let body: any;
+    try {
+      const rawBody = await request.text();
+      if (rawBody.length > 32768) {
+        return NextResponse.json({ error: 'Request body is too large.', code: 'REQUEST_TOO_LARGE' }, { status: 413 });
+      }
+      body = JSON.parse(rawBody);
+    } catch {
+      return NextResponse.json({ error: 'Invalid JSON body.', code: 'INVALID_JSON' }, { status: 400 });
+    }
+    if (!body || typeof body !== 'object' || Array.isArray(body)) {
+      return NextResponse.json({ error: 'Request body must be a JSON object.', code: 'INVALID_BODY' }, { status: 400 });
+    }
 
     // Strip client-controlled identity and administrative fields to prevent spoofing
     delete body.user_id;
@@ -608,20 +756,49 @@ export async function PUT(
       ? Number(body.margin) 
       : (body.rate_percent !== undefined && body.rate_percent !== null && body.rate_percent !== '' ? Number(body.rate_percent) : undefined);
 
-    if (price !== undefined && price <= 0) {
-      return NextResponse.json({ error: 'Price must be greater than 0.' }, { status: 400 });
+    if (price !== undefined && (!Number.isFinite(price) || price <= 0)) {
+      return NextResponse.json({ error: 'Price must be a finite number greater than 0.' }, { status: 400 });
     }
-    if (minAmount !== undefined && minAmount <= 0) {
-      return NextResponse.json({ error: 'Minimum limit must be greater than 0.' }, { status: 400 });
+    if (unitPrice !== undefined && (!Number.isFinite(unitPrice) || unitPrice <= 0)) {
+      return NextResponse.json({ error: 'Unit price must be a finite number greater than 0.' }, { status: 400 });
+    }
+    if (minAmount !== undefined && (!Number.isFinite(minAmount) || minAmount <= 0)) {
+      return NextResponse.json({ error: 'Minimum limit must be a finite number greater than 0.' }, { status: 400 });
+    }
+    if (maxAmount !== undefined && (!Number.isFinite(maxAmount) || maxAmount <= 0)) {
+      return NextResponse.json({ error: 'Maximum limit must be a finite number greater than 0.' }, { status: 400 });
+    }
+    if (margin !== undefined && (!Number.isFinite(margin) || margin < -50 || margin > 50)) {
+      return NextResponse.json({ error: 'Margin must be a finite number between -50% and +50%.' }, { status: 400 });
     }
     if (minAmount !== undefined && maxAmount !== undefined && maxAmount < minAmount) {
       return NextResponse.json({ error: 'Maximum limit must be greater than or equal to minimum limit.' }, { status: 400 });
     }
 
+    for (const flag of ['require_full_name_verified', 'require_verified_users']) {
+      if (body[flag] !== undefined && typeof body[flag] !== 'boolean') {
+        return NextResponse.json(
+          { error: `${flag} must be a boolean.`, code: 'INVALID_BOOLEAN_FIELD' },
+          { status: 400 }
+        );
+      }
+    }
+    if (body.min_completed_trades !== undefined) {
+      const completedTrades = Number(body.min_completed_trades);
+      if (!Number.isInteger(completedTrades) || completedTrades < 0 || completedTrades > 1000000) {
+        return NextResponse.json(
+          { error: 'Minimum completed trades must be an integer between 0 and 1,000,000.', code: 'INVALID_MIN_COMPLETED_TRADES' },
+          { status: 400 }
+        );
+      }
+    }
+
     const paymentMethods = Array.isArray(body.payment_methods) 
       ? body.payment_methods 
       : (Array.isArray(body.paymentMethods) ? body.paymentMethods : undefined);
-    const paymentWindow = body.payment_window ? Math.max(30, parseInt(String(body.payment_window), 10) || 30) : 30;
+    const paymentWindow = body.payment_window !== undefined && body.payment_window !== null && body.payment_window !== ''
+      ? Number(body.payment_window)
+      : 30;
 
     const termsText = body.terms !== undefined 
       ? String(body.terms) 
@@ -632,6 +809,28 @@ export async function PUT(
     const rawTags = Array.isArray(body.tags) 
       ? body.tags 
       : (Array.isArray(body.offer_tags) ? body.offer_tags : (Array.isArray(body.ad_tags) ? body.ad_tags : undefined));
+
+    // Bound user-editable text and list fields before they reach database writes.
+    if (paymentMethods && (paymentMethods.length > 20 ||
+        paymentMethods.some((item: unknown) => typeof item !== 'string' || item.trim().length === 0 || item.length > 80))) {
+      return NextResponse.json({ error: 'Payment methods must contain at most 20 non-empty strings of 80 characters or fewer.', code: 'INVALID_PAYMENT_METHODS' }, { status: 400 });
+    }
+    if (rawTags && (rawTags.length > 20 ||
+        rawTags.some((item: unknown) => typeof item !== 'string' || item.trim().length === 0 || item.length > 40))) {
+      return NextResponse.json({ error: 'Tags must contain at most 20 non-empty strings of 40 characters or fewer.', code: 'INVALID_TAGS' }, { status: 400 });
+    }
+    if (termsText !== undefined && termsText.length > 5000) {
+      return NextResponse.json({ error: 'Terms must be 5,000 characters or fewer.', code: 'TERMS_TOO_LONG' }, { status: 400 });
+    }
+    if (offerLabel !== undefined && offerLabel.length > 120) {
+      return NextResponse.json({ error: 'Offer label must be 120 characters or fewer.', code: 'OFFER_LABEL_TOO_LONG' }, { status: 400 });
+    }
+    if (body.payment_window !== undefined) {
+      const parsedWindow = Number(body.payment_window);
+      if (!Number.isInteger(parsedWindow) || parsedWindow < 30 || parsedWindow > 1440) {
+        return NextResponse.json({ error: 'Payment window must be an integer between 30 and 1440 minutes.', code: 'INVALID_PAYMENT_WINDOW' }, { status: 400 });
+      }
+    }
 
     const isFixed = body.rate_type === 'fixed' || body.pricing_type === 'FIXED' || Boolean(body.is_fixed);
     const pricingType = isFixed ? 'FIXED' : 'FLOAT';
@@ -765,7 +964,7 @@ export async function PUT(
       }
       if (body.require_full_name_verified !== undefined) p2pPayload.require_full_name_verified = Boolean(body.require_full_name_verified);
       if (body.require_verified_users !== undefined) p2pPayload.require_verified_users = Boolean(body.require_verified_users);
-      if (body.min_completed_trades !== undefined) p2pPayload.min_completed_trades = parseInt(String(body.min_completed_trades), 10) || 0;
+      if (body.min_completed_trades !== undefined) p2pPayload.min_completed_trades = Number(body.min_completed_trades);
       p2pPayload.payment_window = paymentWindow;
       p2pPayload.payment_window_minutes = paymentWindow;
       p2pPayload.payment_time_limit = paymentWindow;
@@ -790,6 +989,8 @@ export async function PUT(
         const adsPayload: Record<string, any> = {
           updated_at: timestamp,
         };
+        if (updatedAsset) adsPayload.asset_symbol = String(updatedAsset).toUpperCase();
+        if (updatedFiat) adsPayload.fiat_symbol = String(updatedFiat).toUpperCase();
         if (price !== undefined) adsPayload.price = price;
         if (minAmount !== undefined) adsPayload.min_limit = minAmount;
         if (maxAmount !== undefined) adsPayload.max_limit = maxAmount;
@@ -822,7 +1023,10 @@ export async function PUT(
     // Authoritative Success Check:
     // If canonical p2p_ads row exists, canonical update MUST succeed.
     // If only legacy ads row exists, legacy update MUST succeed.
-    const overallSuccess = p2pAdsRow ? p2pUpdated : adsUpdated;
+    const overallSuccess =
+      targetTable === 'p2p_ads' ? p2pUpdated :
+      targetTable === 'ads' ? adsUpdated :
+      (p2pUpdated || adsUpdated);
 
     if (!overallSuccess) {
       console.error('[PUT /api/ads/[adId]] Canonical advertisement record update failed:', {
@@ -869,6 +1073,9 @@ export async function PUT(
     });
   } catch (err: any) {
     console.error('Error in PUT /api/ads/[adId]:', err);
-    return NextResponse.json({ error: err.message || 'Failed to update ad' }, { status: 500 });
+    return NextResponse.json(
+      { error: 'Unable to update advertisement. Please try again later.', code: 'AD_UPDATE_FAILED' },
+      { status: 500 }
+    );
   }
 }

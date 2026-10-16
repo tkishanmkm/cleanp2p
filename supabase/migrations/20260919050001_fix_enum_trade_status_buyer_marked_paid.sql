@@ -1,5 +1,5 @@
 -- ==============================================================================
--- Migration: 20260919050000_fix_enum_trade_status_buyer_marked_paid.sql
+-- Migration: 20260919050001_fix_enum_trade_status_buyer_marked_paid.sql
 -- Purpose: Permanently resolve PostgreSQL Error 22P02:
 --          "invalid input value for enum trade_status: 'buyer_marked_paid'"
 --          and ensure seamless trade initiation, payment marking, & completion.

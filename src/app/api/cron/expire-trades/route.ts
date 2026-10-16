@@ -29,7 +29,7 @@ export async function GET(req: NextRequest) {
 
     if (error) {
       console.error('[Expire Trades Error]:', error.message);
-      return NextResponse.json({ error: error.message }, { status: 500 });
+      return NextResponse.json({ error: 'Expired trade processing failed' }, { status: 500 });
     }
 
     return NextResponse.json({
@@ -38,8 +38,8 @@ export async function GET(req: NextRequest) {
       result: data,
     });
   } catch (err: any) {
-    console.error('[Expire Trades Route Error]:', err.message);
-    return NextResponse.json({ error: err.message }, { status: 500 });
+    console.error('[Expire Trades Route Error]:', err);
+    return NextResponse.json({ error: 'Expired trade processing failed' }, { status: 500 });
   }
 }
 

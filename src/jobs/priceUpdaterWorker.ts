@@ -1,14 +1,7 @@
 import { createClient } from '@supabase/supabase-js';
 
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL || 'https://placeholder.supabase.co';
-const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'placeholder-key';
-
-const supabaseAdmin = createClient(supabaseUrl, supabaseKey, {
-  auth: {
-    persistSession: false,
-    autoRefreshToken: false,
-  },
-});
+const supabaseUrl = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL || '';
+const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
 
 const ASSETS = ['BTC', 'ETH', 'USDT', 'BNB', 'SOL', 'XRP', 'LTC', 'TRX'];
 
@@ -32,14 +25,18 @@ async function safeFetchJson(url: string, timeoutMs: number = 8000) {
   try {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
-    const res = await fetch(url, {
-      headers: COMMON_HEADERS,
-      cache: 'no-store',
-      signal: controller.signal,
-    });
-    clearTimeout(timeoutId);
-    if (!res.ok) return null;
-    return await res.json();
+    try {
+      const res = await fetch(url, {
+        headers: COMMON_HEADERS,
+        cache: 'no-store',
+        signal: controller.signal,
+      });
+      if (!res.ok) return null;
+      // Keep the timeout active while consuming the response body as well.
+      return await res.json();
+    } finally {
+      clearTimeout(timeoutId);
+    }
   } catch {
     return null;
   }
@@ -59,6 +56,20 @@ export interface PriceUpdateResult {
  * and upserts them into public.crypto_market_prices.
  */
 export async function runMarketPriceUpdate(): Promise<PriceUpdateResult> {
+  if (!supabaseUrl || !supabaseKey) {
+    console.error('[Market Prices Worker] Missing Supabase URL or service-role key.');
+    return { success: false, error: 'SUPABASE_SERVICE_CONFIGURATION_MISSING' };
+  }
+
+  // Defer client construction until after configuration validation so importing
+  // this worker with missing secrets fails closed with a controlled result.
+  const supabaseAdmin = createClient(supabaseUrl, supabaseKey, {
+    auth: {
+      persistSession: false,
+      autoRefreshToken: false,
+    },
+  });
+
   try {
     // 1. Fetch Live Global Fiat Rates from Live Providers
     let usdToFiat: Record<string, number> = {};
@@ -67,9 +78,10 @@ export async function runMarketPriceUpdate(): Promise<PriceUpdateResult> {
     const fiatData = await safeFetchJson('https://open.er-api.com/v6/latest/USD');
     if (fiatData?.result === 'success' && fiatData.rates && typeof fiatData.rates === 'object') {
       for (const [code, rate] of Object.entries(fiatData.rates)) {
+        const fiatCode = code.toUpperCase();
         const numRate = Number(rate);
-        if (!isNaN(numRate) && isFinite(numRate) && numRate > 0) {
-          usdToFiat[code.toUpperCase()] = numRate;
+        if (/^[A-Z]{3}$/.test(fiatCode) && Number.isFinite(numRate) && numRate > 0) {
+          usdToFiat[fiatCode] = numRate;
         }
       }
     }
@@ -80,9 +92,10 @@ export async function runMarketPriceUpdate(): Promise<PriceUpdateResult> {
       if (frankfurterData?.rates && typeof frankfurterData.rates === 'object') {
         usdToFiat.USD = 1.0;
         for (const [code, rate] of Object.entries(frankfurterData.rates)) {
+          const fiatCode = code.toUpperCase();
           const numRate = Number(rate);
-          if (!isNaN(numRate) && isFinite(numRate) && numRate > 0) {
-            usdToFiat[code.toUpperCase()] = numRate;
+          if (/^[A-Z]{3}$/.test(fiatCode) && Number.isFinite(numRate) && numRate > 0) {
+            usdToFiat[fiatCode] = numRate;
           }
         }
       }
@@ -108,9 +121,13 @@ export async function runMarketPriceUpdate(): Promise<PriceUpdateResult> {
 
     if (Array.isArray(binanceData)) {
       binanceData.forEach((item: { symbol: string; price: string }) => {
-        const coin = item.symbol.replace('USDT', '');
-        const p = parseFloat(item.price);
-        if (!isNaN(p) && isFinite(p) && p > 0) {
+        if (!item || typeof item.symbol !== 'string' || typeof item.price !== 'string') return;
+        const coin = item.symbol.endsWith('USDT')
+          ? item.symbol.slice(0, -'USDT'.length)
+          : '';
+        if (!ASSETS.includes(coin) || item.symbol !== `${coin}USDT`) return;
+        const p = Number(item.price);
+        if (Number.isFinite(p) && p > 0) {
           cryptoUsdPrices[coin] = p;
         }
       });
@@ -123,10 +140,12 @@ export async function runMarketPriceUpdate(): Promise<PriceUpdateResult> {
       if (geckoIds) {
         const cgData = await safeFetchJson(`https://api.coingecko.com/api/v3/simple/price?ids=${geckoIds}&vs_currencies=usd`);
         if (cgData && typeof cgData === 'object') {
-          Object.entries(COINGECKO_MAP).forEach(([symbol, id]) => {
+          missingGeckoAssets.forEach((symbol) => {
+            const id = COINGECKO_MAP[symbol];
+            if (!id) return;
             const val = cgData[id]?.usd;
-            const p = typeof val === 'number' ? val : parseFloat(val);
-            if (!isNaN(p) && isFinite(p) && p > 0) {
+            const p = typeof val === 'number' ? val : Number(val);
+            if (Number.isFinite(p) && p > 0 && !cryptoUsdPrices[symbol]) {
               cryptoUsdPrices[symbol] = p;
             }
           });
@@ -135,7 +154,10 @@ export async function runMarketPriceUpdate(): Promise<PriceUpdateResult> {
     }
 
     const liveAssets = Object.keys(cryptoUsdPrices);
-    if (liveAssets.length === 0) {
+    // USDT is a configured peg, not evidence that either live crypto provider
+    // succeeded. Do not report a successful refresh using only the synthetic peg.
+    const liveMarketAssets = liveAssets.filter((asset) => asset !== 'USDT');
+    if (liveMarketAssets.length === 0) {
       console.error('[Market Prices Worker] All live crypto price providers failed.');
       return { success: false, error: 'LIVE_CRYPTO_PROVIDER_UNAVAILABLE' };
     }
@@ -173,6 +195,10 @@ export async function runMarketPriceUpdate(): Promise<PriceUpdateResult> {
             finalPrice = Number(calculatedPrice.toFixed(8));
           }
 
+          // Rounding can underflow tiny calculated values to zero; never
+          // persist a zero or non-finite market price.
+          if (!Number.isFinite(finalPrice) || finalPrice <= 0) continue;
+
           upsertRows.push({
             asset_symbol: asset,
             fiat_symbol: fiat.toUpperCase(),
@@ -181,6 +207,11 @@ export async function runMarketPriceUpdate(): Promise<PriceUpdateResult> {
           });
         }
       }
+    }
+
+    if (upsertRows.length === 0) {
+      console.error('[Market Prices Worker] No valid market price rows were generated.');
+      return { success: false, error: 'NO_VALID_MARKET_PRICE_ROWS' };
     }
 
     // Batch upsert to Supabase in chunks of 500

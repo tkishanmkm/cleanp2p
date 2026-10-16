@@ -168,8 +168,8 @@ $$;
 -- ----------------------------------------------------------------------------
 CREATE OR REPLACE FUNCTION public.resolve_trade_dispute(
     p_dispute_id UUID,
-    p_resolution TEXT,
-    p_winner_id UUID,
+    p_resolution TEXT DEFAULT NULL,
+    p_winner_id UUID DEFAULT NULL,
     p_caller_id UUID DEFAULT NULL
 )
 RETURNS JSONB

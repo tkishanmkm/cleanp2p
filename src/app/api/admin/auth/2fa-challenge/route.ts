@@ -15,17 +15,17 @@ export const dynamic = 'force-dynamic';
 export async function POST(req: NextRequest) {
   try {
     const supabase = await createClient();
-    const { data: { session } } = await supabase.auth.getSession();
+    const { data: { user }, error: authError } = await supabase.auth.getUser();
 
-    if (!session?.user) {
+    if (authError || !user) {
       return NextResponse.json(
         { success: false, error: 'Authentication required. Please sign in.' },
         { status: 401 }
       );
     }
 
-    const adminId = session.user.id;
-    const adminEmail = session.user.email || 'admin';
+    const adminId = user.id;
+    const adminEmail = user.email || 'admin';
     const adminDb = createAdminClient();
 
     // 1. Authoritative Admin Role Verification
@@ -43,7 +43,7 @@ export async function POST(req: NextRequest) {
       profile.role === 'admin' ||
       profile.is_admin === true ||
       profile.is_admin_account === true ||
-      session.user.app_metadata?.role === 'admin'
+      user.app_metadata?.role === 'admin'
     );
 
     if (!isAdmin) {
@@ -87,9 +87,31 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // 3. Parse and Validate Credentials
-    const body = await req.json().catch(() => ({}));
-    const { code, recoveryPassword } = body;
+    // 3. Bound and validate credential input before parsing or hashing.
+    const contentLength = Number(req.headers.get('content-length') || '0');
+    if (Number.isFinite(contentLength) && contentLength > 4096) {
+      return NextResponse.json({ success: false, error: 'Request body is too large.' }, { status: 413 });
+    }
+
+    let body: unknown;
+    try {
+      const rawBody = await req.text();
+      if (rawBody.length > 4096) {
+        return NextResponse.json({ success: false, error: 'Request body is too large.' }, { status: 413 });
+      }
+      body = JSON.parse(rawBody);
+    } catch {
+      return NextResponse.json({ success: false, error: 'Invalid request body.' }, { status: 400 });
+    }
+
+    if (!body || typeof body !== 'object' || Array.isArray(body)) {
+      return NextResponse.json({ success: false, error: 'Invalid request body.' }, { status: 400 });
+    }
+    const { code, recoveryPassword } = body as { code?: unknown; recoveryPassword?: unknown };
+    if ((code !== undefined && typeof code !== 'string' && typeof code !== 'number') ||
+        (recoveryPassword !== undefined && typeof recoveryPassword !== 'string')) {
+      return NextResponse.json({ success: false, error: 'Invalid credential format.' }, { status: 400 });
+    }
 
     if (!code && !recoveryPassword) {
       return NextResponse.json(
@@ -120,13 +142,21 @@ export async function POST(req: NextRequest) {
         const newHash = hashRecoveryPassword(newRecoveryPassword);
         const nowIso = new Date().toISOString();
 
-        await adminDb
+        const { error: recoveryRotationError } = await adminDb
           .from('profiles')
           .update({
             admin_2fa_recovery_hash: newHash,
             admin_2fa_recovery_updated_at: nowIso,
           })
           .eq('id', adminId);
+
+        if (recoveryRotationError) {
+          console.error('Admin recovery credential rotation failed.');
+          return NextResponse.json(
+            { success: false, error: 'Unable to rotate the recovery credential. Please retry or contact support.' },
+            { status: 500 }
+          );
+        }
 
         const clientIp = req.headers.get('x-forwarded-for') || req.headers.get('x-real-ip') || 'unknown';
         await logAdminSecurityAudit({

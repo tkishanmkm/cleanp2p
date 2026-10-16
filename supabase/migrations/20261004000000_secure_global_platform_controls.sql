@@ -1,6 +1,13 @@
 -- Migration: 20261004000000_secure_global_platform_controls.sql
 -- Description: Establishes secure canonical global platform controls in public.system_settings and hardens user_blocks permissions.
 
+-- The admin fields are introduced by a later profile-hardening migration.
+-- Provision them before defining policies that reference them so clean replay is valid.
+ALTER TABLE public.profiles
+    ADD COLUMN IF NOT EXISTS role TEXT DEFAULT 'user',
+    ADD COLUMN IF NOT EXISTS is_admin BOOLEAN DEFAULT FALSE,
+    ADD COLUMN IF NOT EXISTS is_admin_account BOOLEAN DEFAULT FALSE;
+
 -- 1. Ensure system_settings table exists with proper schema
 CREATE TABLE IF NOT EXISTS public.system_settings (
     key TEXT PRIMARY KEY,
@@ -57,64 +64,64 @@ VALUES
     ('maintenance_mode', 'false'::jsonb, NOW())
 ON CONFLICT (key) DO NOTHING;
 
--- 3. Harden user_blocks permissions
--- Anon must NEVER be able to read or mutate user_blocks
-REVOKE ALL ON TABLE public.user_blocks FROM anon;
-GRANT SELECT, INSERT, DELETE ON TABLE public.user_blocks TO authenticated;
-GRANT ALL ON TABLE public.user_blocks TO service_role;
+-- 3. Harden user_blocks permissions when the optional feature table exists.
+-- Some clean installs do not include this legacy table; do not make all migrations fail.
+DO $user_blocks_hardening$
+BEGIN
+    IF to_regclass('public.user_blocks') IS NOT NULL THEN
+        EXECUTE 'REVOKE ALL ON TABLE public.user_blocks FROM anon';
+        EXECUTE 'GRANT SELECT, INSERT, DELETE ON TABLE public.user_blocks TO authenticated';
+        EXECUTE 'GRANT ALL ON TABLE public.user_blocks TO service_role';
+        EXECUTE 'ALTER TABLE public.user_blocks ENABLE ROW LEVEL SECURITY';
 
--- Ensure RLS on user_blocks is enabled and strict
-ALTER TABLE public.user_blocks ENABLE ROW LEVEL SECURITY;
+        EXECUTE 'DROP POLICY IF EXISTS "user_blocks_select_policy" ON public.user_blocks';
+        EXECUTE 'DROP POLICY IF EXISTS "user_blocks_insert_policy" ON public.user_blocks';
+        EXECUTE 'DROP POLICY IF EXISTS "user_blocks_delete_policy" ON public.user_blocks';
 
-DROP POLICY IF EXISTS "user_blocks_select_policy" ON public.user_blocks;
-DROP POLICY IF EXISTS "user_blocks_insert_policy" ON public.user_blocks;
-DROP POLICY IF EXISTS "user_blocks_delete_policy" ON public.user_blocks;
-
-CREATE POLICY "user_blocks_select_policy" ON public.user_blocks
-    FOR SELECT USING (
-        auth.uid() IS NOT NULL AND (
-            blocker_id::uuid = auth.uid()::uuid OR
-            blocked_id::uuid = auth.uid()::uuid OR
-            EXISTS (
-                SELECT 1 FROM public.profiles
-                WHERE id = auth.uid()::uuid
-                  AND (
-                    role = 'admin'
-                    OR is_admin = true
-                    OR is_admin_account = true
-                  )
+        EXECUTE $policy$
+            CREATE POLICY "user_blocks_select_policy" ON public.user_blocks
+            FOR SELECT USING (
+                auth.uid() IS NOT NULL AND (
+                    blocker_id::uuid = auth.uid()::uuid OR
+                    blocked_id::uuid = auth.uid()::uuid OR
+                    EXISTS (
+                        SELECT 1 FROM public.profiles
+                        WHERE id = auth.uid()::uuid
+                          AND (role = 'admin' OR is_admin = true OR is_admin_account = true)
+                    )
+                )
             )
-        )
-    );
+        $policy$;
 
-CREATE POLICY "user_blocks_insert_policy" ON public.user_blocks
-    FOR INSERT WITH CHECK (
-        auth.uid() IS NOT NULL AND (
-            blocker_id::uuid = auth.uid()::uuid OR
-            EXISTS (
-                SELECT 1 FROM public.profiles
-                WHERE id = auth.uid()::uuid
-                  AND (
-                    role = 'admin'
-                    OR is_admin = true
-                    OR is_admin_account = true
-                  )
+        EXECUTE $policy$
+            CREATE POLICY "user_blocks_insert_policy" ON public.user_blocks
+            FOR INSERT WITH CHECK (
+                auth.uid() IS NOT NULL AND (
+                    blocker_id::uuid = auth.uid()::uuid OR
+                    EXISTS (
+                        SELECT 1 FROM public.profiles
+                        WHERE id = auth.uid()::uuid
+                          AND (role = 'admin' OR is_admin = true OR is_admin_account = true)
+                    )
+                )
             )
-        )
-    );
+        $policy$;
 
-CREATE POLICY "user_blocks_delete_policy" ON public.user_blocks
-    FOR DELETE USING (
-        auth.uid() IS NOT NULL AND (
-            blocker_id::uuid = auth.uid()::uuid OR
-            EXISTS (
-                SELECT 1 FROM public.profiles
-                WHERE id = auth.uid()::uuid
-                  AND (
-                    role = 'admin'
-                    OR is_admin = true
-                    OR is_admin_account = true
-                  )
+        EXECUTE $policy$
+            CREATE POLICY "user_blocks_delete_policy" ON public.user_blocks
+            FOR DELETE USING (
+                auth.uid() IS NOT NULL AND (
+                    blocker_id::uuid = auth.uid()::uuid OR
+                    EXISTS (
+                        SELECT 1 FROM public.profiles
+                        WHERE id = auth.uid()::uuid
+                          AND (role = 'admin' OR is_admin = true OR is_admin_account = true)
+                    )
+                )
             )
-        )
-    );
+        $policy$;
+    ELSE
+        RAISE NOTICE 'Skipping user_blocks hardening: public.user_blocks is not present in this schema';
+    END IF;
+END
+$user_blocks_hardening$;
