@@ -186,12 +186,12 @@ export async function processWithdrawalQueue(): Promise<WithdrawalProcessResult>
       });
       const txHash = res.txHash;
 
-      const { error: completionError } = await supabaseAdmin.rpc('complete_onchain_withdrawal', {
+      const { data: completionData, error: completionError } = await supabaseAdmin.rpc('complete_onchain_withdrawal', {
         p_withdrawal_id: withdrawal.id,
         p_tx_hash: txHash,
       });
-      if (completionError) {
-        throw new Error(`Payout was broadcast but withdrawal completion RPC failed: ${completionError.message}`);
+      if (completionError || !completionData || completionData.success !== true) {
+        throw new Error(`Payout was broadcast but withdrawal completion RPC failed or was not confirmed: ${completionError?.message || JSON.stringify(completionData)}`);
       }
 
       console.log(`[Withdrawal Worker] Dispatched TRON payout ${withdrawal.id} (tx: ${txHash})`);
