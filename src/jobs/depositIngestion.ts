@@ -1192,7 +1192,9 @@ async function refreshPendingDepositConfirmations(): Promise<{
         if (chain) {
           const provider = getEvmProvider(normNet);
           const receipt = await provider.getTransactionReceipt(dep.tx_hash);
-          if (receipt && receipt.blockNumber) {
+          // A mined receipt is not proof of a successful transaction. Never
+          // advance a pending deposit from a reverted EVM transaction.
+          if (receipt && receipt.status === 1 && receipt.blockNumber) {
             const currentBlock = await provider.getBlockNumber();
             if (!Number.isSafeInteger(receipt.blockNumber) || receipt.blockNumber <= 0 ||
                 !Number.isSafeInteger(currentBlock) || currentBlock < receipt.blockNumber) {
