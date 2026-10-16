@@ -1742,7 +1742,7 @@ export async function sweepBtcDepositAddress(
         p_lease_seconds: 300,
       });
 
-      if (reserveErr || !reserveRes || !reserveRes.success) {
+      if (reserveErr || !reserveRes || reserveRes.success !== true) {
         stopHeartbeat();
         return {
           address: depositAddress,
@@ -1960,7 +1960,7 @@ export async function sweepLtcDepositAddress(
         p_lease_seconds: 300,
       });
 
-      if (reserveErr || !reserveRes || !reserveRes.success) {
+      if (reserveErr || !reserveRes || reserveRes.success !== true) {
         stopHeartbeat();
         return {
           address: depositAddress,
