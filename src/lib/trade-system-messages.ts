@@ -1705,6 +1705,21 @@ export function formatSystemMessageContent(
     customText
   } = payload;
 
+  const safeLabel = (value: unknown, fallback: string): string => {
+    if (typeof value !== 'string') return fallback;
+    const cleaned = value.replace(/[\\u0000-\\u001F\\u007F]/g, ' ').replace(/\\s+/g, ' ').trim().slice(0, 80);
+    return cleaned || fallback;
+  };
+  const safeBuyerUsername = safeLabel(buyerUsername, 'Buyer');
+  const safeSellerUsername = safeLabel(sellerUsername, 'Seller');
+  const safeOpenerUsername = safeLabel(openerUsername, 'Trader');
+  const safeBlockedUsername = safeLabel(blockedUsername, 'User');
+  const safeInitiatorRole = safeLabel(initiatorRole, 'Buyer');
+  const safeTargetRole = safeLabel(targetRole, 'Seller');
+  const safeReason = safeLabel(disputeReason, 'Payment issue').slice(0, 2000);
+  const safePaymentMethod = safeLabel(paymentMethod, 'Selected Payment Method').slice(0, 100);
+  const safeIssueDetails = safeLabel(issueDetails, '').slice(0, 2000);
+  const safeIssueCategory = safeLabel(issueCategory, '').slice(0, 100);
   const formattedAmount = formatCryptoAmount(coinAmount, coinSymbol);
   const normalizedCoin = typeof coinSymbol === 'string' ? coinSymbol.toUpperCase().replace(/[^A-Z0-9.-]/g, '').slice(0, 16) : '';
   const cleanCoin = normalizedCoin || 'USDT';
