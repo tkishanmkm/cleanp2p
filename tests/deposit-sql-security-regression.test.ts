@@ -51,6 +51,11 @@ const checks: Array<[string, string, RegExp]> = [
     /const \{ error: onchainStatusError \}[\s\S]*if \(onchainStatusError\)[\s\S]*const \{ error: withdrawalStatusError \}[\s\S]*if \(withdrawalStatusError\)/i,
   ],
   [
+    'EVM withdrawal worker waits for a successful receipt before completing accounting',
+    'src/jobs/withdrawalWorker.ts',
+    /tx = await (?:signer\.sendTransaction|tokenContract\.transfer)\([\s\S]*?const receipt = await tx\.wait\(1\)[\s\S]*?if \(!receipt \|\| receipt\.status !== 1\)[\s\S]*?complete_onchain_withdrawal/i,
+  ],
+  [
     'withdrawal worker treats completion RPC errors after broadcast as ambiguous failures',
     'src/jobs/withdrawalWorker.ts',
     /const \{ error: completionError \} = await supabaseAdmin\.rpc\('complete_onchain_withdrawal'[\s\S]*?if \(completionError\)[\s\S]*?throw new Error[\s\S]*?const \{ error: completionError \} = await supabaseAdmin\.rpc\('complete_onchain_withdrawal'[\s\S]*?if \(completionError\)[\s\S]*?throw new Error/i,
