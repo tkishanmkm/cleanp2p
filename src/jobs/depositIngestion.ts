@@ -1125,7 +1125,8 @@ async function scanBtcDeposits(
             const output = tx.vout[index];
             if (output?.scriptpubkey_address !== address || !Number.isSafeInteger(output.value) || output.value <= 0) continue;
             detected++;
-            const amount = (output.value / 100_000_000).toFixed(8).replace(/0+$/, '').replace(/\.$/, '');
+            const satoshis = BigInt(output.value);
+            const amount = `${satoshis / 100_000_000n}.${(satoshis % 100_000_000n).toString().padStart(8, '0')}`.replace(/\.?0+$/, '');
             const blockHeight = tx.status?.block_height;
             const confirmations = tx.status?.confirmed === true && Number.isSafeInteger(blockHeight) && blockHeight > 0
               ? Math.max(0, tipHeight - blockHeight + 1) : 0;
@@ -1201,7 +1202,8 @@ async function scanLtcDeposits(
             const output = tx.vout[index];
             if (output?.scriptpubkey_address !== address || !Number.isSafeInteger(output.value) || output.value <= 0) continue;
             detected++;
-            const amount = (output.value / 100_000_000).toFixed(8).replace(/0+$/, '').replace(/\.$/, '');
+            const litoshis = BigInt(output.value);
+            const amount = `${litoshis / 100_000_000n}.${(litoshis % 100_000_000n).toString().padStart(8, '0')}`.replace(/\.?0+$/, '');
             const blockHeight = tx.status?.block_height;
             const confirmations = tx.status?.confirmed === true && Number.isSafeInteger(blockHeight) && blockHeight > 0
               ? Math.max(0, tipHeight - blockHeight + 1) : 0;
