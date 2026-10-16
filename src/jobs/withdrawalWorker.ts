@@ -485,8 +485,21 @@ export async function processAllPendingWithdrawals(maxBatch: number = 20): Promi
       return { totalProcessed: 0, results: [], locked: true };
     }
   } catch (lockRpcErr) {
-    // If RPC is unavailable, proceed defensively
-    hasLock = false;
+    console.error('[Withdrawal Worker Singleton] Lock RPC failed; refusing to dispatch withdrawals.', lockRpcErr);
+    return {
+      totalProcessed: 0,
+      results: [],
+      locked: true,
+    };
+  }
+
+  if (!hasLock) {
+    console.error('[Withdrawal Worker Singleton] Lock was not acquired; refusing to dispatch withdrawals.');
+    return {
+      totalProcessed: 0,
+      results: [],
+      locked: true,
+    };
   }
 
   const results: WithdrawalProcessResult[] = [];
