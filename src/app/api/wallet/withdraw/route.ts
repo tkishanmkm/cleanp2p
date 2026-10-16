@@ -5,6 +5,14 @@ export const dynamic = 'force-dynamic';
 
 export async function POST(req: NextRequest): Promise<NextResponse> {
   try {
+    const contentLength = req.headers.get('content-length');
+    if (contentLength !== null) {
+      const declaredLength = Number(contentLength);
+      if (!Number.isSafeInteger(declaredLength) || declaredLength < 0 || declaredLength > 16_384) {
+        return NextResponse.json({ error: 'Request body is too large or invalid.' }, { status: 413 });
+      }
+    }
+
     const authHeader = req.headers.get('authorization');
     const idempotencyKey = req.headers.get('x-idempotency-key');
     let body: unknown;
