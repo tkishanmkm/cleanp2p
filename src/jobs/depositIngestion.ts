@@ -1272,6 +1272,16 @@ async function refreshPendingDepositConfirmations(): Promise<{
         if (chain) {
           const provider = getEvmProvider(normNet);
           const receipt = await provider.getTransactionReceipt(dep.tx_hash);
+          const evmTransaction = await provider.getTransaction(dep.tx_hash);
+          if (evmTransaction && (!evmTransaction.hash || evmTransaction.hash.toLowerCase() !== String(dep.tx_hash).toLowerCase())) {
+            console.error('[Deposit Ingestion] Pending EVM provider returned a mismatched transaction; deposit remains pending');
+            continue;
+          }
+          if (receipt && evmTransaction && receipt.blockNumber !== null &&
+              evmTransaction.blockNumber !== null && receipt.blockNumber !== evmTransaction.blockNumber) {
+            console.error('[Deposit Ingestion] Pending EVM receipt/transaction block mismatch; deposit remains pending');
+            continue;
+          }
           if (receipt && (!receipt.hash || receipt.hash.toLowerCase() !== String(dep.tx_hash).toLowerCase())) {
             console.error('[Deposit Ingestion] Pending EVM provider returned a mismatched receipt transaction hash; deposit remains pending');
             continue;
