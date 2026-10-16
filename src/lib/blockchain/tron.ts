@@ -166,16 +166,33 @@ export async function getTronTransactionConfirmations(txHash: string): Promise<{
     }
 
     const confirmations = Math.max(0, currentHeight - txInfo.blockNumber + 1);
-    const receiptResult = txInfo.receipt?.result;
-    // Fail closed if the explorer has not supplied an execution result. A
-    // missing result is not evidence of success and must not trigger a refund.
-    const hasTerminalResult = typeof receiptResult === 'string' && receiptResult.length > 0;
+    const receiptResult = typeof txInfo.receipt?.result === 'string'
+      ? txInfo.receipt.result.trim().toUpperCase()
+      : '';
+    // Only recognized terminal receipt outcomes may trigger settlement/refund.
+    // Unknown values (including provider-specific placeholders) remain pending.
+    const terminalFailureResults = new Set([
+      'REVERT',
+      'OUT_OF_ENERGY',
+      'OUT_OF_TIME',
+      'JVM_STACK_OVER_FLOW',
+      'UNKNOWN',
+      'TRANSFER_FAILED',
+      'UNRECOGNIZED_TOKEN',
+      'BAD_JUMP_DESTINATION',
+      'OUT_OF_MEMORY',
+      'PRECOMPILED_CONTRACT',
+      'STACK_TOO_SMALL',
+      'STACK_TOO_LARGE',
+      'ILLEGAL_OPERATION',
+      'STACK_OVERFLOW',
+    ]);
     const success = receiptResult === 'SUCCESS';
+    const hasTerminalResult = success || terminalFailureResults.has(receiptResult);
 
     return {
       confirmations,
-      // Only treat a transaction as final for settlement/refund when both the
-      // required depth and an explicit terminal receipt result are available.
+      // Unknown receipt results must never be interpreted as a failed transfer.
       isConfirmed: confirmations >= TRON_CONFIG.requiredConfirmations && hasTerminalResult,
       success,
       blockNumber: txInfo.blockNumber,
