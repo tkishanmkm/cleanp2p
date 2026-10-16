@@ -165,20 +165,27 @@ export async function POST(
     if (!buyerUsername) buyerUsername = trade.buyer_username || 'Trader';
     if (!sellerUsername) sellerUsername = trade.seller_username || 'Trader';
 
+    const safeMetadata = metadata as Record<string, unknown>;
+    const readSafeText = (key: string, maxLength: number): string | undefined => {
+      const value = safeMetadata[key];
+      if (typeof value !== 'string') return undefined;
+      const normalized = value.trim();
+      return normalized && normalized.length <= maxLength ? normalized : undefined;
+    };
     const payload: SystemMessagePayload = {
       tradeId: actualTradeId,
-      type: type || 'CUSTOM',
+      type: (typeof type === 'string' ? type : 'CUSTOM') as SystemMessagePayload['type'],
       buyerUsername,
       sellerUsername,
       openerUsername: user.user_metadata?.username || user.email?.split('@')[0] || 'Trader',
       coinAmount: trade.crypto_amount || trade.amount || '0.00',
       coinSymbol: trade.crypto || trade.asset_symbol || 'USDT',
       paymentMethod: trade.payment_method || '',
-      disputeReason: metadata.disputeReason || '',
-      issueDetails: metadata.issueDetails || '',
-      issueCategory: metadata.issueCategory || '',
-      feedbackComment: metadata.feedbackComment || '',
-      customText: typeof customText === 'string' ? customText : undefined,
+      disputeReason: readSafeText('disputeReason', 500),
+      issueDetails: readSafeText('issueDetails', 2000),
+      issueCategory: readSafeText('issueCategory', 100),
+      feedbackComment: readSafeText('feedbackComment', 1000),
+      customText: typeof customText === 'string' ? customText.trim() : undefined,
     };
 
     const text = formatSystemMessageContent(payload);
