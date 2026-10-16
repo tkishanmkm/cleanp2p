@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useMemo, useEffect } from 'react';
+import { useState, useMemo, useEffect, useCallback } from 'react';
 import type { User } from '@/lib/types';
 import { useToast } from '@/hooks/use-toast';
 import { blockUser, unblockUser } from '@/lib/users';
@@ -41,6 +41,8 @@ export function BlockedUsersManagement({ user: currentUserData }: { user: User }
 
   const [blockedUsers, setBlockedUsers] = useState<User[]>([]);
   const [areBlockedUsersLoading, setAreBlockedUsersLoading] = useState(true);
+
+  const blockedUserIds = currentUserData?.blockedUsers || [];
 
   const blockedUserIdsKey = useMemo(() => {
     const list = currentUserData?.blockedUsers || [];
