@@ -1206,7 +1206,11 @@ export async function sweepTronDepositAddress(
     const tronHost = process.env.TRON_RPC_URL || 'https://api.trongrid.io';
     const tronWeb = getTronWebInstance(tronHost, childTronPrivKey);
 
-    const usdtContractAddress = process.env.USDT_CONTRACT_TRC20 || 'TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t';
+    // Never silently use the TRON mainnet USDT contract with a custom RPC/network.
+    const usdtContractAddress = process.env.USDT_CONTRACT_TRC20?.trim();
+    if (!usdtContractAddress || !tronWeb.isAddress(usdtContractAddress)) {
+      throw new Error('USDT_CONTRACT_TRC20 is missing or invalid; configure the token contract for the selected TRON network');
+    }
     const contract = await tronWeb.contract().at(usdtContractAddress);
 
     // Check TRC20 USDT balance
