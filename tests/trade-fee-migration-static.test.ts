@@ -468,6 +468,9 @@ assert.match(geckoFallbackBlock, /&& !cryptoUsdPrices\[symbol\]/,
 assert.match(geckoFallbackBlock, /Number\.isFinite\(p\) && p > 0/,
   'CoinGecko fallback must reject non-finite and non-positive prices');
 
+assert.match(marketPriceWorker, /if \(upsertRows\.length === 0\)[\s\S]*?NO_VALID_MARKET_PRICE_ROWS/,
+  'worker must fail instead of reporting success when no valid market price rows are generated');
+
 assert.match(marketPriceWorker, /if \(!Number\.isFinite\(finalPrice\) \|\| finalPrice <= 0\) continue;/,
   'rounded market prices must remain finite and strictly positive before database upsert');
 
