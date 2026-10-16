@@ -49,24 +49,30 @@ async function runP2PTradeFlowTests() {
     console.log(cyan('[Setup] Initializing test wallets & ledger state...'));
 
     // Create or get seller wallet
-    const { data: sellerWallet } = await supabase
+    const { data: sellerWallet, error: sellerWalletErr } = await supabase
       .from('wallets')
       .insert({ id: randomUUID(), user_id: testSellerId })
       .select()
       .single();
+    if (sellerWalletErr || !sellerWallet?.id) {
+      throw new Error(`Unable to create seller test wallet: ${sellerWalletErr?.message ?? 'no wallet returned'}`);
+    }
 
     // Create or get buyer wallet
-    const { data: buyerWallet } = await supabase
+    const { data: buyerWallet, error: buyerWalletErr } = await supabase
       .from('wallets')
       .insert({ id: randomUUID(), user_id: testBuyerId })
       .select()
       .single();
+    if (buyerWalletErr || !buyerWallet?.id) {
+      throw new Error(`Unable to create buyer test wallet: ${buyerWalletErr?.message ?? 'no wallet returned'}`);
+    }
 
     const sellerWalletId = sellerWallet?.id;
     const buyerWalletId = buyerWallet?.id;
 
     // Seed seller with 500 USDT available balance
-    await supabase.from('wallet_assets').upsert(
+    const { error: sellerAssetErr } = await supabase.from('wallet_assets').upsert(
       {
         wallet_id: sellerWalletId,
         asset_code: 'USDT',
@@ -76,9 +82,10 @@ async function runP2PTradeFlowTests() {
       },
       { onConflict: 'wallet_id,asset_code' }
     );
+    if (sellerAssetErr) throw new Error(`Unable to seed seller test balance: ${sellerAssetErr.message}`);
 
     // Ensure buyer has asset entry
-    await supabase.from('wallet_assets').upsert(
+    const { error: buyerAssetErr } = await supabase.from('wallet_assets').upsert(
       {
         wallet_id: buyerWalletId,
         asset_code: 'USDT',
@@ -88,10 +95,11 @@ async function runP2PTradeFlowTests() {
       },
       { onConflict: 'wallet_id,asset_code' }
     );
+    if (buyerAssetErr) throw new Error(`Unable to seed buyer test balance: ${buyerAssetErr.message}`);
 
     // Create a test Sell Ad
     const testAdId = randomUUID();
-    await supabase.from('ads').upsert(
+    const { error: adErr } = await supabase.from('ads').upsert(
       {
         id: testAdId,
         user_id: testSellerId,
@@ -109,6 +117,7 @@ async function runP2PTradeFlowTests() {
       },
       { onConflict: 'id' }
     );
+    if (adErr) throw new Error(`Unable to seed P2P test ad: ${adErr.message}`);
 
     console.log(green('  ✓ Seeded wallets and active P2P advertisement\n'));
 
