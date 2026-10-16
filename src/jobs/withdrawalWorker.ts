@@ -116,7 +116,7 @@ export async function processWithdrawalQueue(): Promise<WithdrawalProcessResult>
       throw new Error('Withdrawal record is missing a valid ID or amount');
     }
     amountStr = String(withdrawal.amount).trim();
-    if (!/^\\d+(?:\\.\\d+)?$/.test(amountStr) || !Number.isFinite(Number(amountStr)) || Number(amountStr) <= 0) {
+    if (!/^\d+(?:\.\d+)?$/.test(amountStr) || !Number.isFinite(Number(amountStr)) || Number(amountStr) <= 0) {
       throw new Error('Withdrawal amount must be a finite positive decimal');
     }
     if (typeof withdrawal.to_address !== 'string') {
