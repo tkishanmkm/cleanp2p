@@ -423,10 +423,16 @@ export async function PATCH(
     let newStatus: string;
 
     if (body.active !== undefined) {
-      isActive = Boolean(body.active);
+      if (typeof body.active !== 'boolean') {
+        return NextResponse.json({ error: 'active must be a boolean.' }, { status: 400 });
+      }
+      isActive = body.active;
       newStatus = isActive ? 'ACTIVE' : 'INACTIVE';
     } else if (body.status !== undefined) {
       const requestedStatus = String(body.status).toUpperCase().trim();
+      if (!['ACTIVE', 'INACTIVE', 'DELETED'].includes(requestedStatus)) {
+        return NextResponse.json({ error: 'Unsupported advertisement status.' }, { status: 400 });
+      }
       
       // Ordinary users can only set status to ACTIVE or INACTIVE
       if (!isAdmin && requestedStatus !== 'ACTIVE' && requestedStatus !== 'INACTIVE') {
