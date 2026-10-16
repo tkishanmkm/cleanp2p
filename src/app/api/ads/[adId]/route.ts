@@ -380,8 +380,8 @@ export async function PATCH(
     }
 
     // 3. Authorization Check: Ensure authenticated user is the ad owner or an authorized administrator
-    const adOwnerId = existingAd.user_id || existingAd.userId;
-    const isOwner = adOwnerId && String(adOwnerId) === String(user.id);
+    const adOwnerId = existingAd.user_id || existingAd.userId || existingAd.seller_id || existingAd.creator_id;
+    const isOwner = Boolean(adOwnerId && String(adOwnerId) === String(user.id));
     const adminAuth = await verifyServerAdmin(request);
     const isAdmin = adminAuth.authorized;
 
