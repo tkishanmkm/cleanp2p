@@ -141,13 +141,19 @@ export async function POST(
       // Fetch opener username & trade payment method
       let openerName = 'Trader';
       try {
-        const { data: opProfile } = await adminClient
+        const { data: opProfile, error: profileError } = await adminClient
           .from('profiles')
           .select('username')
           .eq('id', user.id)
           .maybeSingle();
-        if (opProfile?.username) openerName = opProfile.username;
-      } catch {}
+        if (profileError) {
+          console.warn('Dispute opener profile lookup failed:', profileError.code || 'UNKNOWN');
+        } else if (typeof opProfile?.username === 'string' && opProfile.username.trim()) {
+          openerName = opProfile.username.trim().replace(/[\u0000-\u001F\u007F]/g, ' ').replace(/\s+/g, ' ').slice(0, 80);
+        }
+      } catch (profileError) {
+        console.warn('Dispute opener profile lookup threw:', profileError instanceof Error ? profileError.name : 'UnknownError');
+      }
   
       const tradePaymentMethod = trade?.payment_method || 'Bank Transfer';
   
