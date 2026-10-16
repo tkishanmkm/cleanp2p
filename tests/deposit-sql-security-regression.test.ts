@@ -757,6 +757,16 @@ const checks: Array<[string, string, RegExp]> = [
   ],
 
   [
+    'middleware fails closed for API requests when security checks throw',
+    'src/middleware.ts',
+    /catch \(e\)[\s\S]*?Middleware security check failed[\s\S]*?pathname\.startsWith\('\/api\/'\)[\s\S]*?code: 'SECURITY_CHECK_UNAVAILABLE'[\s\S]*?status: 503/i,
+  ],
+  [
+    'middleware redirects protected pages when security checks throw',
+    'src/middleware.ts',
+    /const protectedPage = \[[\s\S]*?'\/dashboard'[\s\S]*?'\/wallet'[\s\S]*?'\/withdraw'[\s\S]*?if \(protectedPage\)[\s\S]*?url\.pathname = '\/login'[\s\S]*?security_check_unavailable/i,
+  ],
+  [
     'sweep reconciliation exception checks recovery-state persistence',
     'src/jobs/sweeperWorker.ts',
     /\[Reconcile Sweep Exception\][\s\S]*?const \{ data: recoveryRes, error: recoveryErr \} = await supabaseAdmin\.rpc\('update_sweep_operation_status'[\s\S]*?p_new_status: 'RECOVERY_REQUIRED'[\s\S]*?recoveryRes\.success !== true[\s\S]*?Reconcile Sweep Critical/i,
