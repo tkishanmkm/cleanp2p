@@ -669,6 +669,32 @@ export async function PUT(
     const existingIsFixed = String(existingAd.rate_type || '').toLowerCase() === 'fixed'
       || String(existingAd.pricing_type || '').toUpperCase() === 'FIXED'
       || existingAd.is_fixed === true;
+    if (body.require_full_name_verified !== undefined && typeof body.require_full_name_verified !== 'boolean') {
+      return NextResponse.json({ error: 'require_full_name_verified must be a boolean.' }, { status: 400 });
+    }
+    if (body.require_verified_users !== undefined && typeof body.require_verified_users !== 'boolean') {
+      return NextResponse.json({ error: 'require_verified_users must be a boolean.' }, { status: 400 });
+    }
+    let minCompletedTrades: number | undefined;
+    if (body.min_completed_trades !== undefined) {
+      minCompletedTrades = Number(body.min_completed_trades);
+      if (!Number.isSafeInteger(minCompletedTrades) || minCompletedTrades < 0 || minCompletedTrades > 1000000) {
+        return NextResponse.json({ error: 'min_completed_trades must be a whole number between 0 and 1,000,000.' }, { status: 400 });
+      }
+    }
+
+    const validRateTypes = ['fixed', 'market', 'float', 'floating'];
+    const validPricingTypes = ['FIXED', 'FLOAT', 'MARKET', 'DYNAMIC'];
+    if (body.rate_type !== undefined && !validRateTypes.includes(String(body.rate_type).toLowerCase())) {
+      return NextResponse.json({ error: 'Unsupported rate_type.' }, { status: 400 });
+    }
+    if (body.pricing_type !== undefined && !validPricingTypes.includes(String(body.pricing_type).toUpperCase())) {
+      return NextResponse.json({ error: 'Unsupported pricing_type.' }, { status: 400 });
+    }
+    if (body.is_fixed !== undefined && typeof body.is_fixed !== 'boolean') {
+      return NextResponse.json({ error: 'is_fixed must be a boolean.' }, { status: 400 });
+    }
+
     const isFixed = pricingModeWasProvided
       ? (body.rate_type !== undefined
           ? String(body.rate_type).toLowerCase() === 'fixed'
@@ -805,9 +831,9 @@ export async function PUT(
         p2pPayload.trade_type = directionFromPayload;
         p2pPayload.type = directionFromPayload;
       }
-      if (body.require_full_name_verified !== undefined) p2pPayload.require_full_name_verified = Boolean(body.require_full_name_verified);
-      if (body.require_verified_users !== undefined) p2pPayload.require_verified_users = Boolean(body.require_verified_users);
-      if (body.min_completed_trades !== undefined) p2pPayload.min_completed_trades = parseInt(String(body.min_completed_trades), 10) || 0;
+      if (body.require_full_name_verified !== undefined) p2pPayload.require_full_name_verified = body.require_full_name_verified;
+      if (body.require_verified_users !== undefined) p2pPayload.require_verified_users = body.require_verified_users;
+      if (minCompletedTrades !== undefined) p2pPayload.min_completed_trades = minCompletedTrades;
       if (paymentWindow !== undefined) {
         p2pPayload.payment_window = paymentWindow;
         p2pPayload.payment_window_minutes = paymentWindow;
