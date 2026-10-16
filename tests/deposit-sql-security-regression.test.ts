@@ -305,6 +305,11 @@ const checks: Array<[string, string, RegExp]> = [
     'src/jobs/sweeperWorker.ts',
     /Unable to verify the exact TRON account creation fee[\s\S]*?p_expected_status: currentStatus[\s\S]*?p_new_status: 'RECOVERY_REQUIRED'[\s\S]*?throw new Error\(reason\)/i,
   ],
+  [
+    'TRON energy estimation failure verifies recovery status persistence',
+    'src/jobs/sweeperWorker.ts',
+    /Dynamic energy estimation failed:[\s\S]*?const \{ data: recoveryRes, error: recoveryErr \}[\s\S]*?recoveryRes\.success !== true[\s\S]*?failed to persist sweep recovery status/i,
+  ],
 ];
 
 let failed = 0;
