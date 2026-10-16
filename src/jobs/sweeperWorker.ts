@@ -850,18 +850,24 @@ export async function fundTronGasForAddress(
     }
 
     if (sweepId) {
-      await supabaseAdmin
+      const { error: broadcastPersistErr } = await supabaseAdmin
         .from('gas_funding_operations')
-        .update({ status: 'BROADCASTED', updated_at: new Date().toISOString() })
+        .update({ status: 'BROADCASTED', tx_hash: deterministicTxHash, updated_at: new Date().toISOString() })
         .eq('sweep_id', sweepId);
+      if (broadcastPersistErr) {
+        throw new Error(`TRON gas funding was broadcast but BROADCASTED state persistence failed: ${broadcastPersistErr.message}`);
+      }
     }
   } catch (sendErr: any) {
     console.error(`[Tron Gas Funding Broadcast Exception] ${targetAddress}:`, sendErr);
     if (sweepId) {
-      await supabaseAdmin
+      const { error: recoveryPersistErr } = await supabaseAdmin
         .from('gas_funding_operations')
-        .update({ status: 'RECOVERY_REQUIRED', updated_at: new Date().toISOString() })
+        .update({ status: 'RECOVERY_REQUIRED', tx_hash: deterministicTxHash, error_message: String(sendErr?.message || sendErr), updated_at: new Date().toISOString() })
         .eq('sweep_id', sweepId);
+      if (recoveryPersistErr) {
+        throw new Error(`TRON gas funding broadcast outcome requires recovery: ${sendErr?.message || String(sendErr)}; RECOVERY_REQUIRED persistence failed: ${recoveryPersistErr.message}`);
+      }
     }
     throw sendErr;
   }
