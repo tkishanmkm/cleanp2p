@@ -546,6 +546,11 @@ const checks: Array<[string, string, RegExp]> = [
     /export async function undelegateEnergyToPool[\s\S]*?if \(fetchErr\) \{\s*throw new Error\(`Failed to load TRON delegation record[\s\S]*?if \(!delegation\)/i,
   ],
   [
+    'TRON undelegation requires explicit true from signed-transaction persistence RPC',
+    'src/jobs/sweeperWorker.ts',
+    /persist_signed_undelegation[\s\S]*?persistRes\.success !== true/i,
+  ],
+  [
     'TRON undelegation validates pool address before reading delegation records',
     'src/jobs/sweeperWorker.ts',
     /export async function undelegateEnergyToPool[\s\S]*?Failed to resolve a valid TRON pool address from private key[\s\S]*?Retrieve the existing delegation record/i,
