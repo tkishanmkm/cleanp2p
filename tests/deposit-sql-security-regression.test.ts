@@ -6,6 +6,11 @@ const root = process.cwd();
 const read = (relativePath: string) => readFileSync(join(root, relativePath), 'utf8');
 const checks: Array<[string, string, RegExp]> = [
   [
+    'EVM invalid signed transaction hash checks recovery-state persistence',
+    'src/jobs/sweeperWorker.ts',
+    /catch \(hashErr: any\)[\s\S]*?Hash calculation error:[\s\S]*?recoveryRes\.success !== true[\s\S]*?EVM Sweep Recovery Persistence Failure/i,
+  ],
+  [
     'EVM sweep missing signed transaction logs recovery persistence failure',
     'src/jobs/sweeperWorker.ts',
     /if \(!signed_tx_hex\)[\s\S]*?const \{ data: recoveryRes, error: recoveryErr \} = await supabaseAdmin\.rpc\('update_sweep_operation_status'[\s\S]*?recoveryRes\.success !== true[\s\S]*?EVM Sweep Recovery Persistence Failure/i,
