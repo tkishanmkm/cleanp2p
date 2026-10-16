@@ -287,7 +287,7 @@ export async function executeCanonicalWithdrawal(input: WithdrawalRequestInput):
   const secret = userProfile?.totp_secret || userProfile?.two_factor_secret;
 
   if (is2faActive) {
-    if (!input.totpCode || typeof input.totpCode !== 'string' || input.totpCode.trim().length < 4) {
+    if (!input.totpCode || typeof input.totpCode !== 'string' || !/^\d{4,8}$/.test(input.totpCode.trim())) {
       return {
         success: false,
         status: 'TWO_FACTOR_REQUIRED',
@@ -296,7 +296,17 @@ export async function executeCanonicalWithdrawal(input: WithdrawalRequestInput):
         statusCode: 403,
       };
     }
-    const isValidTotp = verify2FAOTP(secret, String(input.totpCode).trim(), is2faActive);
+    if (typeof secret !== 'string' || secret.trim().length === 0) {
+      console.error('Two-factor authentication is enabled but the user secret is unavailable.');
+      return {
+        success: false,
+        status: 'SECURITY_CHECK_UNAVAILABLE',
+        error: 'Two-factor verification could not be completed.',
+        message: 'Withdrawals are temporarily unavailable. Please contact support.',
+        statusCode: 503,
+      };
+    }
+    const isValidTotp = verify2FAOTP(secret, input.totpCode.trim(), is2faActive);
     if (!isValidTotp) {
       return {
         success: false,
