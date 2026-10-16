@@ -319,7 +319,7 @@ export async function DELETE(
     return NextResponse.json({ success: true, message: 'Ad deleted successfully.' });
   } catch (err: any) {
     console.error('Error in DELETE /api/ads/[adId]:', err);
-    return NextResponse.json({ error: err.message || 'Failed to delete ad' }, { status: 500 });
+    return NextResponse.json({ error: 'An unexpected error occurred while deleting the advertisement.' }, { status: 500 });
   }
 }
 
