@@ -146,8 +146,8 @@ export async function GET(
       Number.isSafeInteger(rawMinTrades) && rawMinTrades >= 0 && rawMinTrades <= 1000000
         ? rawMinTrades
         : 0;
-    const requireFullName = Boolean(ad.require_full_name_verified);
-    const requireVerified = Boolean(ad.require_verified_users);
+    const requireFullName = ad.require_full_name_verified === true;
+    const requireVerified = ad.require_verified_users === true;
 
     const assetSym = (
       ad.asset_symbol ||
