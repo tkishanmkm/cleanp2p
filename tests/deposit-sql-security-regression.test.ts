@@ -230,6 +230,11 @@ const checks: Array<[string, string, RegExp]> = [
     'supabase/migrations/20261001020000_gas_funding_broadcast_durability_and_abuse_protection.sql',
     /IF v_hot_addr IS NULL OR TRIM\\(v_hot_addr\\) = '' THEN[\\s\\S]*RAISE EXCEPTION[\\s\\S]*RETURN public\\.allocate_hot_wallet_nonce\\(v_net, v_hot_addr, 0\\)/i,
   ],
+  [
+    'gas funding eligibility validates network, address, amount and abuse limits',
+    'supabase/migrations/20261001020000_gas_funding_broadcast_durability_and_abuse_protection.sql',
+    /IF p_deposit_address IS NULL OR TRIM\\(p_deposit_address\\) = '' THEN[\\s\\S]*IF v_norm_net NOT IN \\(\'ERC20\', \'BEP20\'\\) THEN[\\s\\S]*IF p_amount_allocated IS NULL OR p_amount_allocated <= 0 THEN[\\s\\S]*p_daily_max_operations IS NULL OR p_daily_max_operations <= 0/i,
+  ],
 ];
 
 let failed = 0;
