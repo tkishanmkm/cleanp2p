@@ -326,9 +326,16 @@ export async function POST(req: Request) {
     // 7. Attach strictly authenticated server user_id
     cleanPayload.user_id = user.id;
 
-    // Determine target table
-    const targetTable = cleanPayload.table || (cleanPayload.title && cleanPayload.description ? 'ads' : 'p2p_ads');
+    // Only allow the two explicitly supported ad tables; never let request data select
+    // arbitrary PostgREST tables. Default to the canonical ads table.
+    const requestedTable = typeof cleanPayload.table === 'string' ? cleanPayload.table.trim() : '';
     delete cleanPayload.table;
+    if (requestedTable && !['ads', 'p2p_ads'].includes(requestedTable)) {
+      return NextResponse.json({ error: 'Unsupported advertisement storage target.' }, { status: 400 });
+    }
+    const targetTable: 'ads' | 'p2p_ads' = requestedTable
+      ? requestedTable as 'ads' | 'p2p_ads'
+      : 'ads';
 
     // 8. Execute Authorized Database Insert without service-role escape hatch
     let { data, error: dbError } = await supabase
