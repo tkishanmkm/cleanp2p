@@ -300,6 +300,11 @@ const checks: Array<[string, string, RegExp]> = [
     'src/jobs/sweeperWorker.ts',
     /p_expected_status: 'GAS_FUNDING'[\s\S]*?p_new_status: 'RECOVERY_REQUIRED'[\s\S]*?failed to persist sweep recovery status[\s\S]*?throw new Error\(disabledReason\)/i,
   ],
+  [
+    'TRON account activation refuses default fee when chain parameters are unavailable or invalid',
+    'src/jobs/sweeperWorker.ts',
+    /Unable to verify the exact TRON account creation fee[\s\S]*?p_expected_status: currentStatus[\s\S]*?p_new_status: 'RECOVERY_REQUIRED'[\s\S]*?throw new Error\(reason\)/i,
+  ],
 ];
 
 let failed = 0;
