@@ -100,8 +100,9 @@ export async function openDispute(
     p_reason: fullReason,
   });
 
-  if (rpcError || (rpcData && !rpcData.success)) {
-    throw new Error(rpcError?.message || rpcData?.message || 'Failed to raise dispute via canonical RPC.');
+  if (rpcError || !rpcData || rpcData.success !== true) {
+    // Treat empty or malformed RPC responses as failure, never as a successful dispute.
+    throw new Error('Failed to raise dispute via canonical RPC.');
   }
 
   try {
