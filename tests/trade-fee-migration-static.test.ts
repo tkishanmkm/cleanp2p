@@ -490,6 +490,15 @@ assert.ok(marketWorkerClientIndex > marketWorkerConfigGuardIndex,
 assert.doesNotMatch(marketPriceWorker, /NEXT_PUBLIC_SUPABASE_ANON_KEY|placeholder\.supabase\.co|placeholder-key/,
   'market-price worker must not fall back to public anon credentials or placeholder configuration');
 
+const indexerCronRoutePath = join(process.cwd(), 'src/app/api/cron/indexer/route.ts');
+const indexerCronRoute = readFileSync(indexerCronRoutePath, 'utf8');
+assert.match(indexerCronRoute, /checkQueryParam: false/,
+  'deposit indexer cron must not accept URL query-string secrets');
+assert.match(indexerCronRoute, /error: 'Deposit indexing failed'/,
+  'deposit indexer cron must return a generic error on failure');
+assert.doesNotMatch(indexerCronRoute, /error: error\.message/,
+  'deposit indexer cron must not expose internal errors to clients');
+
 const expireTradesRoutePath = join(process.cwd(), 'src/app/api/cron/expire-trades/route.ts');
 const expireTradesRoute = readFileSync(expireTradesRoutePath, 'utf8');
 assert.equal((expireTradesRoute.match(/error: 'Expired trade processing failed'/g) ?? []).length, 2,
