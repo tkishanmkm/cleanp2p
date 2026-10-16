@@ -151,38 +151,45 @@ export async function processWithdrawalQueue(): Promise<WithdrawalProcessResult>
       throw new Error(`EVM Hot Wallet signer not available for network ${network}. Check EVM_HOT_WALLET_PRIVATE_KEY.`);
     }
 
-    const nonce = await allocateEvmNonce(network, address, provider);
-    const feeOverrides = await getEip1559FeeOverrides(provider, 1.25);
-    let tx: ethers.TransactionResponse;
-
     const normNet = normalizeNetworkCode(network);
     const chainConfig = SUPPORTED_EVM_CHAINS[normNet];
-    const isNativeTransfer = chainConfig && assetSymbol === chainConfig.nativeSymbol;
+    const isNativeTransfer = !!chainConfig && assetSymbol === chainConfig.nativeSymbol;
 
-    if (isNativeTransfer) {
-      // Native transfer (ETH)
-      const parsedAmount = ethers.parseUnits(amountStr, chainConfig.nativeDecimals);
-      isLocalCheckStage = false;
+    // Finish all deterministic local validation before reserving a hot-wallet nonce.
+    // A validation/configuration failure after nonce allocation can leave a nonce gap.
+    let parsedAmount: bigint;
+    let tokenContract: ethers.Contract | null = null;
+    if (isNativeTransfer && chainConfig) {
+      parsedAmount = ethers.parseUnits(amountStr, chainConfig.nativeDecimals);
+    } else {
+      const decimals = getTokenDecimals(network, assetSymbol);
+      const contractAddress = getTokenContractAddress(network, assetSymbol);
+      if (!contractAddress) {
+        throw new Error(`No token contract address configured for ${assetSymbol} on ${network}`);
+      }
+      parsedAmount = ethers.parseUnits(amountStr, decimals);
+      tokenContract = new ethers.Contract(contractAddress, ERC20_ABI, signer);
+    }
+
+    const feeOverrides = await getEip1559FeeOverrides(provider, 1.25);
+    const nonce = await allocateEvmNonce(network, address, provider);
+    let tx: ethers.TransactionResponse;
+    isLocalCheckStage = false;
+
+    if (isNativeTransfer && chainConfig) {
       tx = await signer.sendTransaction({
         to: destination,
         value: parsedAmount,
         nonce,
         ...feeOverrides,
       });
-    } else {
-      // ERC-20 Token Transfer (USDT ERC20 / BEP20)
-      const decimals = getTokenDecimals(network, assetSymbol);
-      const contractAddress = getTokenContractAddress(network, assetSymbol);
-      if (!contractAddress) {
-        throw new Error(`No token contract address configured for ${assetSymbol} on ${network}`);
-      }
-      const tokenContract = new ethers.Contract(contractAddress, ERC20_ABI, signer);
-      const parsedAmount = ethers.parseUnits(amountStr, decimals);
-      isLocalCheckStage = false;
+    } else if (tokenContract) {
       tx = await tokenContract.transfer(destination, parsedAmount, {
         nonce,
         ...feeOverrides,
       });
+    } else {
+      throw new Error('Unsupported EVM withdrawal asset configuration');
     }
 
     await supabaseAdmin.rpc('complete_onchain_withdrawal', {
