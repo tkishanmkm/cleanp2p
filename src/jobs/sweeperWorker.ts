@@ -686,8 +686,19 @@ export async function fundTronGasForAddress(
 
   const tronPrivKey = resolveTronHotWalletPrivateKey();
   if (!tronPrivKey) {
-    console.warn('[Tron Gas] HOT_WALLET_TRON_PRIVATE_KEY not configured. Skipping gas auto-funding.');
-    return;
+    const message = 'HOT_WALLET_TRON_PRIVATE_KEY is not configured; refusing to continue TRON gas funding';
+    const { error: recoveryUpdateErr } = await supabaseAdmin
+      .from('gas_funding_operations')
+      .update({
+        status: 'RECOVERY_REQUIRED',
+        error_message: message,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('sweep_id', sweepId);
+    if (recoveryUpdateErr) {
+      throw new Error(`TRON gas funding key is missing and recovery status could not be persisted: ${recoveryUpdateErr.message}`);
+    }
+    throw new Error(message);
   }
 
   const tronWeb = getTronWebInstance(
