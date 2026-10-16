@@ -720,6 +720,28 @@ async function scanTronDeposits(
               continue;
             }
 
+            // Verify that the transaction itself is included at the claimed height;
+            // a valid block at that height alone does not bind this transfer to it.
+            const txInfoRes = await fetch(`${tronHost}/wallet/gettransactioninfobyid`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ value: txId }),
+            });
+            if (!txInfoRes.ok) {
+              errors.push(`TRON transaction-info request failed with HTTP ${txInfoRes.status} for ${txId}`);
+              continue;
+            }
+            const txInfo = await txInfoRes.json();
+            if (
+              !txInfo ||
+              typeof txInfo.id !== 'string' ||
+              txInfo.id.toLowerCase() !== txId.toLowerCase() ||
+              txInfo.blockNumber !== eventBlock
+            ) {
+              errors.push(`Rejected TRON account transfer with unverifiable transaction inclusion: ${txId}`);
+              continue;
+            }
+
             // Confirm the account API's block assignment against the chain RPC
             // before reserving the event key or attempting a credit.
             const canonicalRes = await fetch(`${tronHost}/wallet/getblockbynum`, {
