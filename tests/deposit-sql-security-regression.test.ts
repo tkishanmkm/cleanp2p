@@ -386,6 +386,11 @@ const checks: Array<[string, string, RegExp]> = [
     /const totalEnergyLimit = Number\(resources\?\.TotalEnergyLimit\)[\s\S]*?Number\.isSafeInteger\(totalEnergyLimit\)[\s\S]*?refusing estimated delegation/i,
   ],
   [
+    'TRON delegation validates receiver address and positive safe energy requirement',
+    'src/jobs/sweeperWorker.ts',
+    /!tronWeb\.isAddress\(receiverAddress\) \|\| receiverAddress === poolAddress[\s\S]*?Number\.isSafeInteger\(energyNeeded\)[\s\S]*?energy requirement must be a positive safe integer/i,
+  ],
+  [
     'TRON ambiguous delegation broadcast remains in recovery rather than being marked failed',
     'src/jobs/sweeperWorker.ts',
     /Delegation broadcast outcome is ambiguous; preserving operation for reconciliation[\s\S]*?p_new_status: 'RECOVERY_REQUIRED'[\s\S]*?failed to persist RECOVERY_REQUIRED state/i,
