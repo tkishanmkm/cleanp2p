@@ -785,11 +785,14 @@ export async function fundTronGasForAddress(
     const insolvMsg = `TRON hot wallet ${hotWalletAddress} has insufficient TRX (${hotBalanceSun / 1_000_000} TRX). Required: ${(Number(amountSun) + Number(tronMinReserveSun)) / 1_000_000} TRX.`;
     console.error(`[Tron Hot Wallet Insolvency] ${insolvMsg}`);
     if (sweepId) {
-      await supabaseAdmin.from('gas_funding_operations').update({
+      const { error: insolvencyPersistErr } = await supabaseAdmin.from('gas_funding_operations').update({
         status: 'RECOVERY_REQUIRED',
         error_message: insolvMsg,
         updated_at: new Date().toISOString(),
       }).eq('sweep_id', sweepId);
+      if (insolvencyPersistErr) {
+        throw new Error(`HOT_WALLET_INSOLVENT: ${insolvMsg}; RECOVERY_REQUIRED persistence failed: ${insolvencyPersistErr.message}`);
+      }
     }
     throw new Error(`HOT_WALLET_INSOLVENT: ${insolvMsg}`);
   }
