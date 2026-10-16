@@ -317,7 +317,10 @@ export async function executeCanonicalWithdrawal(input: WithdrawalRequestInput):
     };
   }
 
-  const parsedAmount = typeof rawAmount === 'number' ? rawAmount : parseFloat(String(rawAmount));
+  const amountText = typeof rawAmount === 'string' ? rawAmount.trim() : '';
+  const parsedAmount = typeof rawAmount === 'number'
+    ? rawAmount
+    : (/^(?:\d+(?:\.\d*)?|\.\d+)$/.test(amountText) ? Number(amountText) : Number.NaN);
   if (!Number.isFinite(parsedAmount) || parsedAmount <= 0) {
     return {
       success: false,
