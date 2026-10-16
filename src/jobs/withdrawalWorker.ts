@@ -88,6 +88,14 @@ export async function allocateEvmNonce(
     throw new Error('Atomic hot-wallet nonce allocation unavailable; refusing withdrawal broadcast');
   }
 
+  if (
+    allocatedNonce === null ||
+    allocatedNonce === undefined ||
+    (typeof allocatedNonce !== 'number' && typeof allocatedNonce !== 'string') ||
+    (typeof allocatedNonce === 'string' && !/^\\d+$/.test(allocatedNonce))
+  ) {
+    throw new Error('Atomic nonce allocation returned no valid nonce; refusing withdrawal broadcast');
+  }
   const nonce = typeof allocatedNonce === 'number' ? allocatedNonce : Number(allocatedNonce);
   if (!Number.isSafeInteger(nonce) || nonce < onchainPending) {
     throw new Error('Atomic nonce allocation returned an invalid or stale nonce; refusing withdrawal broadcast');
