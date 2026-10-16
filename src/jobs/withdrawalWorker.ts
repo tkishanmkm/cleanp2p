@@ -377,13 +377,17 @@ export async function checkSubmittedWithdrawals(): Promise<{
         
         if (isConfirmed && success) {
           const actualTrxStr = actualCostTrx && actualCostTrx.trim().length > 0 ? actualCostTrx.trim() : '0';
-          const { error: confErr } = await supabaseAdmin.rpc('complete_onchain_withdrawal', {
+          const { data: confData, error: confErr } = await supabaseAdmin.rpc('complete_onchain_withdrawal', {
             p_withdrawal_id: w.id,
             p_tx_hash: w.tx_hash,
             p_actual_gas_amount: actualTrxStr,
             p_gas_asset: 'TRX',
           });
-          if (!confErr) confirmed++;
+          if (!confErr && confData?.success === true) {
+            confirmed++;
+          } else {
+            console.error(`[Withdrawal Worker] TRON confirmation RPC did not confirm completion for ${w.id}; retaining unresolved state.`, confErr || confData);
+          }
         } else if (isFailed && !success) {
           const { error: failedErr } = await supabaseAdmin.rpc('process_failed_withdrawal', {
             p_withdrawal_id: w.id,
@@ -403,13 +407,17 @@ export async function checkSubmittedWithdrawals(): Promise<{
 
         if (confirmations >= chain.requiredConfirmations && status !== 0) {
           const actualGasStr = actualGasCost && actualGasCost.trim().length > 0 ? actualGasCost.trim() : '0';
-          const { error: confErr } = await supabaseAdmin.rpc('complete_onchain_withdrawal', {
+          const { data: confData, error: confErr } = await supabaseAdmin.rpc('complete_onchain_withdrawal', {
             p_withdrawal_id: w.id,
             p_tx_hash: w.tx_hash,
             p_actual_gas_amount: actualGasStr,
             p_gas_asset: gasAsset,
           });
-          if (!confErr) confirmed++;
+          if (!confErr && confData?.success === true) {
+            confirmed++;
+          } else {
+            console.error(`[Withdrawal Worker] EVM confirmation RPC did not confirm completion for ${w.id}; retaining unresolved state.`, confErr || confData);
+          }
         } else if (status === 0) {
           const { error: failedErr } = await supabaseAdmin.rpc('process_failed_withdrawal', {
             p_withdrawal_id: w.id,
