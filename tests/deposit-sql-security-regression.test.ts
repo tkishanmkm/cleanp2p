@@ -6,6 +6,11 @@ const root = process.cwd();
 const read = (relativePath: string) => readFileSync(join(root, relativePath), 'utf8');
 const checks: Array<[string, string, RegExp]> = [
   [
+    'sweep reconciliation checks failed-status persistence',
+    'src/jobs/sweeperWorker.ts',
+    /if \(isFailed\)[\s\S]*?p_new_status: 'FAILED'[\s\S]*?Failed to persist failed sweep status[\s\S]*?failedRes\.success !== true/i,
+  ],
+  [
     'sweep missing transaction hash checks recovery-state persistence',
     'src/jobs/sweeperWorker.ts',
     /Ambiguous sweep in \$\{status\} without transaction hash[\s\S]*?Sweep Recovery Persistence Failure: missing transaction hash[\s\S]*?recoveryRes\.success !== true/i,
