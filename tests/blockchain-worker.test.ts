@@ -8,7 +8,7 @@ import { CANONICAL_USDT_CONTRACTS } from '../src/jobs/depositIngestion';
 // run only in a disposable local test environment with mocked chain providers.
 const supabaseUrl = process.env.TEST_SUPABASE_URL;
 const supabaseKey = process.env.TEST_SUPABASE_SERVICE_ROLE_KEY;
-const isLocalTestUrl = !!supabaseUrl && /^https?:\\/\\/(localhost|127\\.0\\.0\\.1)(:\\d+)?(?:\\/|$)/i.test(supabaseUrl);
+const isLocalTestUrl = !!supabaseUrl && /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?(?:\/|$)/i.test(supabaseUrl);
 
 if (
   process.env.NODE_ENV !== 'test' ||
