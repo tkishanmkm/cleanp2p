@@ -80,6 +80,9 @@ export async function GET(request: Request) {
             const cryptoAmt = Number(t.crypto_amount ?? t.amount ?? 0);
             const feeAmt = Number(t.escrow_fee ?? t.platform_fee ?? (cryptoAmt * 0.015));
             const totalTradeLock = cryptoAmt + feeAmt;
+            if (!Number.isFinite(cryptoAmt) || cryptoAmt < 0 || !Number.isFinite(feeAmt) || feeAmt < 0 || !Number.isFinite(totalTradeLock)) {
+              throw new Error('Invalid financial values in active escrow records');
+            }
             if (totalTradeLock > 0) {
               activeEscrowMap[sym] = (activeEscrowMap[sym] || 0) + totalTradeLock;
             }
@@ -114,6 +117,9 @@ export async function GET(request: Request) {
             const cryptoAmt = Number(t.crypto_amount ?? t.amount ?? 0);
             const feeAmt = Number(t.escrow_fee ?? t.platform_fee ?? (cryptoAmt * 0.015));
             const totalTradeLock = cryptoAmt + feeAmt;
+            if (!Number.isFinite(cryptoAmt) || cryptoAmt < 0 || !Number.isFinite(feeAmt) || feeAmt < 0 || !Number.isFinite(totalTradeLock)) {
+              throw new Error('Invalid financial values in active escrow records');
+            }
             if (totalTradeLock > 0) {
               activeEscrowMap[sym] = (activeEscrowMap[sym] || 0) + totalTradeLock;
             }
