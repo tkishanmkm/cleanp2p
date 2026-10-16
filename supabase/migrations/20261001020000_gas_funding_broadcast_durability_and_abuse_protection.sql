@@ -217,6 +217,22 @@ DECLARE
     v_cooldown_cutoff TIMESTAMPTZ := NOW() - (p_cooldown_seconds || ' seconds')::INTERVAL;
     v_daily_cutoff TIMESTAMPTZ := NOW() - INTERVAL '24 hours';
 BEGIN
+    -- Reject malformed inputs before they can bypass or distort abuse limits.
+    IF p_deposit_address IS NULL OR TRIM(p_deposit_address) = '' THEN
+        RAISE EXCEPTION 'Deposit address is required for gas funding eligibility';
+    END IF;
+    IF v_norm_net NOT IN ('ERC20', 'BEP20') THEN
+        RAISE EXCEPTION 'Unsupported gas funding network: %', p_network;
+    END IF;
+    IF p_amount_allocated IS NULL OR p_amount_allocated <= 0 THEN
+        RAISE EXCEPTION 'Gas funding amount must be positive';
+    END IF;
+    IF p_cooldown_seconds IS NULL OR p_cooldown_seconds < 0
+       OR p_daily_limit IS NULL OR p_daily_limit <= 0
+       OR p_daily_max_operations IS NULL OR p_daily_max_operations <= 0 THEN
+        RAISE EXCEPTION 'Gas funding abuse-protection limits must be valid positive values';
+    END IF;
+
     -- 1. Check for cooldown against recent funding operation for this address
     SELECT id, status, created_at, tx_hash INTO v_recent_op
     FROM public.gas_funding_operations
