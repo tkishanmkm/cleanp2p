@@ -6,6 +6,16 @@ const root = process.cwd();
 const read = (relativePath: string) => readFileSync(join(root, relativePath), 'utf8');
 const checks: Array<[string, string, RegExp]> = [
   [
+    'reconciliation alert persistence errors are explicitly handled',
+    'src/lib/security/reconciliation.ts',
+    /const \{ error: alertInsertError \}[\s\S]*?if \(alertInsertError\)[\s\S]*?Error persisting security alert/i,
+  ],
+  [
+    'reconciliation snapshot persistence errors are explicitly handled',
+    'src/lib/security/reconciliation.ts',
+    /const \{ error: snapshotInsertError \}[\s\S]*?if \(snapshotInsertError\)[\s\S]*?Could not save system_reconciliations snapshot/i,
+  ],
+  [
     'deposit credit RPCs are not executable by browser roles',
     'supabase/migrations/20261016000000_restrict_deposit_credit_rpc.sql',
     /REVOKE ALL ON FUNCTION public\.process_confirmed_deposit\(uuid\) FROM PUBLIC;[\s\S]*REVOKE ALL ON FUNCTION public\.process_confirmed_deposit\(uuid\) FROM anon;[\s\S]*REVOKE ALL ON FUNCTION public\.process_confirmed_deposit\(uuid\) FROM authenticated;[\s\S]*GRANT EXECUTE ON FUNCTION public\.process_confirmed_deposit\(uuid\) TO service_role;/i,
