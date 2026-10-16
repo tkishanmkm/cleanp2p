@@ -1779,11 +1779,12 @@ export async function runDepositIngestion(): Promise<{
     try {
       const provider = getEvmProvider(netKey);
       const latestBlock = await provider.getBlockNumber();
-      // Scan a safe trailing block window of 100 blocks
+      // Scan at most 100 blocks, counting both endpoints. The scanners
+      // clamp this range to the provider tip and enforce their own range guards.
       const scanWindow = 100;
-      const fromBlock = Math.max(0, latestBlock - scanWindow);
+      const fromBlock = Math.max(0, latestBlock - scanWindow + 1);
 
-      netResult.scannedBlocks = latestBlock - fromBlock;
+      netResult.scannedBlocks = latestBlock - fromBlock + 1;
 
       if (evmAddresses.size > 0) {
         // Scan ERC20 / BEP20 USDT
