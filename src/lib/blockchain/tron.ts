@@ -1,4 +1,5 @@
 import { TronWeb } from 'tronweb';
+import { classifyTronReceiptResult } from './tronReceiptStatus';
 
 export interface TronConfig {
   fullHost: string;
@@ -165,30 +166,11 @@ export async function getTronTransactionConfirmations(txHash: string): Promise<{
       return { confirmations: 1, isConfirmed: false, success: !txInfo.receipt?.result, actualCostTrx };
     }
 
-    const confirmations = Math.max(0, currentHeight - txInfo.blockNumber + 1);
-    const receiptResult = typeof txInfo.receipt?.result === 'string'
-      ? txInfo.receipt.result.trim().toUpperCase()
-      : '';
-    // Only recognized terminal receipt outcomes may trigger settlement/refund.
-    // Unknown values (including provider-specific placeholders) remain pending.
-    const terminalFailureResults = new Set([
-      'REVERT',
-      'OUT_OF_ENERGY',
-      'OUT_OF_TIME',
-      'JVM_STACK_OVER_FLOW',
-      'UNKNOWN',
-      'TRANSFER_FAILED',
-      'UNRECOGNIZED_TOKEN',
-      'BAD_JUMP_DESTINATION',
-      'OUT_OF_MEMORY',
-      'PRECOMPILED_CONTRACT',
-      'STACK_TOO_SMALL',
-      'STACK_TOO_LARGE',
-      'ILLEGAL_OPERATION',
-      'STACK_OVERFLOW',
-    ]);
-    const success = receiptResult === 'SUCCESS';
-    const hasTerminalResult = success || terminalFailureResults.has(receiptResult);
+    const conf    const outcome = classifyTronReceiptResult(txInfo.receipt?.result);
+    const success = outcome === 'success';
+    const hasTerminalResult = outcome !== 'pending';
+
+lResult = success || terminalFailureResults.has(receiptResult);
 
     return {
       confirmations,
