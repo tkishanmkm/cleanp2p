@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
+import { getSupabaseAdminClient } from '@/utils/supabase/server';
 import { insertPaxonesSystemMessage } from '@/lib/trade-system-messages';
 
 export async function POST(req: Request) {
@@ -70,7 +71,10 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: 'Reported user must be the other participant in this trade.' }, { status: 400 });
     }
 
-    const { data, error } = await supabase
+    // Authenticated users intentionally cannot write audit/report tables directly.
+    // Use the server-only service client only after verifying trade participation above.
+    const adminClient = getSupabaseAdminClient();
+    const { data, error } = await adminClient
       .from('trade_reports')
       .insert({
         trade_id: trade.id,
@@ -98,7 +102,7 @@ export async function POST(req: Request) {
     } catch {}
 
     // Post official Paxones system message to trade chat
-    await insertPaxonesSystemMessage(supabase, {
+    await insertPaxonesSystemMessage(adminClient, {
       tradeId: trade.id,
       type: 'ISSUE_REPORTED',
       openerUsername: reporterUsername,
