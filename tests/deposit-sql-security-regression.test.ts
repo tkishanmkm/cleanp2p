@@ -797,6 +797,11 @@ const checks: Array<[string, string, RegExp]> = [
     /const \{ data: past24hWithdrawals, error: past24hWithdrawalsError \}[\s\S]*?if \(past24hWithdrawalsError \|\| !past24hWithdrawals\)[\s\S]*?status: 'SECURITY_CHECK_UNAVAILABLE'[\s\S]*?statusCode: 503/i,
   ],
   [
+    'withdrawal rejects an unconfirmed reservation RPC result',
+    'src/lib/services/withdrawalService.ts',
+    /const withdrawalId = rpcResult\?\.withdrawal_id[\s\S]*?RESERVATION_UNCONFIRMED[\s\S]*?statusCode: 503/i,
+  ],
+  [
     'withdrawal rejects when duplicate-withdrawal lookup fails',
     'src/lib/services/withdrawalService.ts',
     /const \{ data: existing, error: existingError \}[\s\S]*?if \(existingError\)[\s\S]*?Duplicate-withdrawal verification is temporarily unavailable[\s\S]*?statusCode: 503/i,
