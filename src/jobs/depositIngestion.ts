@@ -1083,7 +1083,13 @@ async function refreshPendingDepositConfirmations(): Promise<{
         continue;
       }
       const destinationAddress = dep.to_address || dep.address;
-      const outputIndex = dep.output_index ?? dep.log_index ?? 0;
+      const rawOutputIndex = dep.output_index ?? dep.log_index;
+      if (typeof destinationAddress !== 'string' || destinationAddress.trim() === '' ||
+          !Number.isSafeInteger(rawOutputIndex) || rawOutputIndex < 0) {
+        console.error('[Deposit Ingestion] Skipping pending deposit with invalid destination or output index');
+        continue;
+      }
+      const outputIndex = rawOutputIndex;
       const assetSymbol = (dep.asset_symbol || 'USDT').toUpperCase().trim();
       const tokenContract = CANONICAL_USDT_CONTRACTS[normNet] || null;
 
