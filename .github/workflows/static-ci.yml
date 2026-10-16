@@ -61,6 +61,31 @@ jobs:
           audit_status=$?
           echo "npm audit exit code: ${audit_status}"
           exit "${audit_status}"
+      - name: Summarize production dependency vulnerabilities
+        if: always()
+        shell: bash
+        run: |
+          node <<'NODE'
+          const fs = require('node:fs');
+          const file = 'npm-audit-report.json';
+          if (!fs.existsSync(file)) {
+            console.error('npm audit report was not generated.');
+            process.exit(0);
+          }
+          try {
+            const report = JSON.parse(fs.readFileSync(file, 'utf8'));
+            const counts = report.metadata?.vulnerabilities || {};
+            console.log('Production dependency vulnerability counts:');
+            for (const severity of ['critical', 'high', 'moderate', 'low', 'info']) {
+              console.log(`- ${severity}: ${counts[severity] ?? 0}`);
+            }
+            for (const [name, item] of Object.entries(report.vulnerabilities || {})) {
+              console.log(`- ${name}: ${item.severity}; direct=${item.isDirect}; fixAvailable=${JSON.stringify(item.fixAvailable)}`);
+            }
+          } catch (error) {
+            console.error('Could not parse npm audit report:', error.message);
+          }
+          NODE
       - name: Upload dependency audit report
         if: always()
         uses: actions/upload-artifact@v4
