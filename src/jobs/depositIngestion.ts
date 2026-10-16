@@ -253,6 +253,15 @@ async function scanEvmTokenDeposits(
           errors.push(`Invalid or non-canonical block height for tx ${log.transactionHash}`);
           continue;
         }
+        // A log's block height alone does not protect against a stale/reorged
+        // provider response. Re-check the canonical block hash before crediting.
+        const canonicalBlock = await provider.getBlock(log.blockNumber);
+        if (!canonicalBlock || typeof canonicalBlock.hash !== 'string' ||
+            !/^0x[0-9a-fA-F]{64}$/.test(canonicalBlock.hash) ||
+            canonicalBlock.hash.toLowerCase() !== log.blockHash.toLowerCase()) {
+          errors.push(`Rejected EVM token log from a non-canonical block for tx ${log.transactionHash}`);
+          continue;
+        }
         const confirmations = latestBlock - log.blockNumber + 1;
         detected++;
 
