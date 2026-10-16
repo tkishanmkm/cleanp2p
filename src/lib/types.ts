@@ -156,7 +156,7 @@ export type Withdrawal = {
   address: string;
   amount: number;
   fee?: number;
-  status: 'pending' | 'approved' | 'declined' | 'cancelled';
+  status: 'pending' | 'pending_approval' | 'PENDING_APPROVAL' | 'queued' | 'approved' | 'declined' | 'cancelled';
   txHash?: string;
   adminId?: string;
   createdAt: string;
