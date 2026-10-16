@@ -6,6 +6,16 @@ const root = process.cwd();
 const read = (relativePath: string) => readFileSync(join(root, relativePath), 'utf8');
 const checks: Array<[string, string, RegExp]> = [
   [
+    'blockchain deposit test fails when wallet fixture setup fails',
+    'tests/blockchain-worker.test.ts',
+    /walletSetupError[\s\S]*Unable to create test wallet[\s\S]*assetSetupError[\s\S]*Unable to create test wallet asset[\s\S]*addressSetupError[\s\S]*Unable to register test deposit address/i,
+  ],
+  [
+    'blockchain deposit test checks balance reads and removes its own fixtures',
+    'tests/blockchain-worker.test.ts',
+    /duplicateBalanceReadError[\s\S]*addressCleanupError[\s\S]*assetCleanupError[\s\S]*walletCleanupError[\s\S]*Test fixture cleanup failed/i,
+  ],
+  [
     'reconciliation alert persistence errors are explicitly handled',
     'src/lib/security/reconciliation.ts',
     /const \{ error: alertInsertError \}[\s\S]*?if \(alertInsertError\)[\s\S]*?Error persisting security alert/i,
