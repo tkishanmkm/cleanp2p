@@ -473,6 +473,18 @@ export async function PATCH(
     let isActive: boolean;
     let newStatus: string;
 
+    if (body.active !== undefined && body.status !== undefined) {
+      const normalizedStatus = String(body.status).toUpperCase().trim();
+      const statusImpliesActive = normalizedStatus === 'ACTIVE';
+      if (!['ACTIVE', 'INACTIVE', 'DELETED'].includes(normalizedStatus) ||
+          body.active !== statusImpliesActive) {
+        return NextResponse.json(
+          { error: 'active and status fields must describe the same supported state.' },
+          { status: 400 }
+        );
+      }
+    }
+
     if (body.active !== undefined) {
       if (typeof body.active !== 'boolean') {
         return NextResponse.json({ error: 'active must be a boolean.' }, { status: 400 });
