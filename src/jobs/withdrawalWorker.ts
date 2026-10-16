@@ -96,7 +96,16 @@ export async function allocateEvmNonce(
   ) {
     throw new Error('Atomic nonce allocation returned no valid nonce; refusing withdrawal broadcast');
   }
-  const nonce = typeof allocatedNonce === 'number' ? allocatedNonce : Number(allocatedNonce);
+  let nonce: number;
+  if (typeof allocatedNonce === 'number') {
+    nonce = allocatedNonce;
+  } else {
+    const parsedNonce = BigInt(allocatedNonce);
+    if (parsedNonce > BigInt(Number.MAX_SAFE_INTEGER)) {
+      throw new Error('Atomic nonce allocation exceeded the safe integer range; refusing withdrawal broadcast');
+    }
+    nonce = Number(parsedNonce);
+  }
   if (!Number.isSafeInteger(nonce) || nonce < onchainPending) {
     throw new Error('Atomic nonce allocation returned an invalid or stale nonce; refusing withdrawal broadcast');
   }
