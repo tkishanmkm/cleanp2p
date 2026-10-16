@@ -1240,15 +1240,30 @@ export async function sweepTronDepositAddress(
 
     if (!isActivated) {
       // Query exact dynamic account creation fee from chain parameters (Blocker #4)
-      let accountCreationFeeSun = 1_000_000;
+      let accountCreationFeeSun: number;
       try {
         const chainParams = await tronWeb.trx.getChainParameters();
         const param = chainParams.find((p: any) => p.key === 'getAccountCreationFee');
-        if (param && param.value !== undefined) {
-          accountCreationFeeSun = Number(param.value);
+        const configuredFee = param?.value;
+        if (configuredFee === undefined || !Number.isSafeInteger(Number(configuredFee)) || Number(configuredFee) <= 0) {
+          throw new Error('TRON chain parameters did not provide a valid positive account creation fee');
         }
-      } catch (paramErr) {
-        console.warn('[Tron Sweeper] Failed to fetch dynamic account creation fee, defaulting to 1.0 TRX:', paramErr);
+        accountCreationFeeSun = Number(configuredFee);
+      } catch (paramErr: any) {
+        const reason = `Unable to verify the exact TRON account creation fee; refusing to fund: ${paramErr?.message || paramErr}`;
+        if (sweepId && workerId) {
+          const { data: recoveryRes, error: recoveryErr } = await supabaseAdmin.rpc('update_sweep_operation_status', {
+            p_sweep_id: sweepId,
+            p_worker_id: workerId,
+            p_expected_status: currentStatus,
+            p_new_status: 'RECOVERY_REQUIRED',
+            p_error_message: reason,
+          });
+          if (recoveryErr || !recoveryRes || recoveryRes.success !== true) {
+            throw new Error(`${reason}; failed to persist sweep recovery status: ${recoveryErr?.message || recoveryRes?.message || 'unknown RPC response'}`);
+          }
+        }
+        throw new Error(reason);
       }
 
       console.log(`[Tron Sweeper] Unactivated deposit address detected. Funding exact account creation fee: ${accountCreationFeeSun / 1_000_000} TRX...`);
