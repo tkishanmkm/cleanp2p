@@ -456,9 +456,14 @@ export async function fundGasForAddress(
     p_daily_max_operations: dailyMaxOps,
   });
 
+  // Abuse protection is a mandatory gate: RPC errors or malformed responses must fail closed.
   if (eligErr) {
-    console.warn(`[Gas Abuse Check] RPC check_gas_funding_eligibility error:`, eligErr);
-  } else if (eligibilityRes && !eligibilityRes.eligible) {
+    throw new Error(`Gas funding eligibility check failed; refusing to fund: ${eligErr.message}`);
+  }
+  if (!eligibilityRes || typeof eligibilityRes.eligible !== 'boolean') {
+    throw new Error('Gas funding eligibility returned an invalid response; refusing to fund');
+  }
+  if (!eligibilityRes.eligible) {
     const rejectReason = eligibilityRes.reason || 'GAS_FUNDING_POLICY_REJECTED';
     const rejectMsg = eligibilityRes.message || 'Gas funding policy limit reached';
     console.warn(`[Gas Abuse Check] Address ${targetAddress} rejected: ${rejectReason} - ${rejectMsg}`);
