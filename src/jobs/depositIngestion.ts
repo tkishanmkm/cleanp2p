@@ -1019,15 +1019,33 @@ export async function refreshPendingDepositConfirmations(): Promise<{
       } else if (normNet === 'BTC') {
         const btcApiBase = process.env.BTC_MEMPOOL_API || 'https://mempool.space/api';
         try {
-          const res = await fetch(`${btcApiBase}/tx/${dep.tx_hash}/status`);
-          if (res.ok) {
-            const statusData = await res.json();
-            const confs = statusData.confirmed ? 2 : 0;
+          const [txResponse, statusResponse, tipResponse] = await Promise.all([
+            fetch(`${btcApiBase}/tx/${dep.tx_hash}`),
+            fetch(`${btcApiBase}/tx/${dep.tx_hash}/status`),
+            fetch(`${btcApiBase}/blocks/tip/height`),
+          ]);
+          if (txResponse.ok && statusResponse.ok && tipResponse.ok) {
+            const tx = await txResponse.json();
+            const statusData = await statusResponse.json();
+            const tipHeight = Number((await tipResponse.text()).trim());
+            const output = Array.isArray(tx.vout) ? tx.vout[outputIndex] : null;
+            const storedAmount = Number(dep.amount);
+            const observedAmount = Number(output?.value) / 100_000_000;
+            if (!output || output.scriptpubkey_address !== destinationAddress ||
+                !Number.isFinite(storedAmount) || storedAmount <= 0 ||
+                !Number.isSafeInteger(tipHeight) || tipHeight < 0 ||
+                !Number.isFinite(observedAmount) ||
+                Math.abs(observedAmount - storedAmount) > Math.max(1e-8, storedAmount * 1e-10)) {
+              continue;
+            }
+            const confs = statusData.confirmed && Number.isSafeInteger(statusData.block_height)
+              ? Math.max(0, tipHeight - statusData.block_height + 1)
+              : 0;
             const { data, error: rpcErr } = await supabaseAdmin.rpc('process_deposit_atomic', {
               p_destination_address: destinationAddress,
               p_asset_symbol: 'BTC',
               p_network_code: 'BTC',
-              p_amount: Number(dep.amount),
+              p_amount: storedAmount,
               p_tx_hash: dep.tx_hash,
               p_output_index: outputIndex,
               p_block_number: statusData.block_height || null,
@@ -1045,15 +1063,33 @@ export async function refreshPendingDepositConfirmations(): Promise<{
       } else if (normNet === 'LTC') {
         const ltcApiBase = process.env.LTC_MEMPOOL_API || 'https://litecoinspace.org/api';
         try {
-          const res = await fetch(`${ltcApiBase}/tx/${dep.tx_hash}/status`);
-          if (res.ok) {
-            const statusData = await res.json();
-            const confs = statusData.confirmed ? 6 : 0;
+          const [txResponse, statusResponse, tipResponse] = await Promise.all([
+            fetch(`${ltcApiBase}/tx/${dep.tx_hash}`),
+            fetch(`${ltcApiBase}/tx/${dep.tx_hash}/status`),
+            fetch(`${ltcApiBase}/blocks/tip/height`),
+          ]);
+          if (txResponse.ok && statusResponse.ok && tipResponse.ok) {
+            const tx = await txResponse.json();
+            const statusData = await statusResponse.json();
+            const tipHeight = Number((await tipResponse.text()).trim());
+            const output = Array.isArray(tx.vout) ? tx.vout[outputIndex] : null;
+            const storedAmount = Number(dep.amount);
+            const observedAmount = Number(output?.value) / 100_000_000;
+            if (!output || output.scriptpubkey_address !== destinationAddress ||
+                !Number.isFinite(storedAmount) || storedAmount <= 0 ||
+                !Number.isSafeInteger(tipHeight) || tipHeight < 0 ||
+                !Number.isFinite(observedAmount) ||
+                Math.abs(observedAmount - storedAmount) > Math.max(1e-8, storedAmount * 1e-10)) {
+              continue;
+            }
+            const confs = statusData.confirmed && Number.isSafeInteger(statusData.block_height)
+              ? Math.max(0, tipHeight - statusData.block_height + 1)
+              : 0;
             const { data, error: rpcErr } = await supabaseAdmin.rpc('process_deposit_atomic', {
               p_destination_address: destinationAddress,
               p_asset_symbol: 'LTC',
               p_network_code: 'LTC',
-              p_amount: Number(dep.amount),
+              p_amount: storedAmount,
               p_tx_hash: dep.tx_hash,
               p_output_index: outputIndex,
               p_block_number: statusData.block_height || null,
