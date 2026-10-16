@@ -21,6 +21,7 @@ DECLARE
     v_locked_withdrawal NUMERIC(36, 18);
     v_new_available NUMERIC(36, 18);
     v_idempotency_key TEXT;
+    v_ledger_rows INTEGER;
 BEGIN
     SELECT * INTO v_deposit
     FROM public.onchain_deposits
@@ -143,6 +144,14 @@ BEGIN
         'ledger_' || v_idempotency_key
     )
     ON CONFLICT (idempotency_key) DO NOTHING;
+
+    -- If the immutable ledger entry already exists, abort the entire transaction.
+    -- This rolls back the balance mutation above instead of crediting without a
+    -- newly recorded ledger entry.
+    GET DIAGNOSTICS v_ledger_rows = ROW_COUNT;
+    IF v_ledger_rows <> 1 THEN
+        RAISE EXCEPTION 'Deposit ledger idempotency conflict for %', v_idempotency_key;
+    END IF;
 
     -- 5. Mark onchain_deposits status as CREDITED
     UPDATE public.onchain_deposits
