@@ -54,6 +54,11 @@ export async function POST(req: Request) {
     if (!cleanReason || (typeof explanation === 'string' && explanation.trim() && !cleanExplanation)) {
       return NextResponse.json({ error: 'Dispute reason and explanation must contain readable text.' }, { status: 400 });
     }
+    const normalizedCombinedLength = cleanReason.length +
+      (cleanExplanation ? cleanExplanation.length + 2 : 0);
+    if (normalizedCombinedLength > 2000) {
+      return NextResponse.json({ error: 'Combined dispute reason and explanation must be 2,000 characters or fewer after normalization.' }, { status: 400 });
+    }
 
     await openDispute({
       tradeId: tradeId.trim(),
