@@ -26,6 +26,16 @@ const checks: Array<[string, string, RegExp]> = [
     /duplicateBalanceReadError[\s\S]*addressCleanupError[\s\S]*assetCleanupError[\s\S]*walletCleanupError[\s\S]*Test fixture cleanup failed/i,
   ],
   [
+    'gas funding recovery checks confirmed-status persistence errors',
+    'src/jobs/sweeperWorker.ts',
+    /const \{ error: confirmedPersistErr \}[\s\S]*?status: 'CONFIRMED'[\s\S]*?if \(confirmedPersistErr\)[\s\S]*?CONFIRMED status persistence failed/i,
+  ],
+  [
+    'gas funding recovery checks rebroadcast-status persistence errors',
+    'src/jobs/sweeperWorker.ts',
+    /const \{ error: rebroadcastPersistErr \}[\s\S]*?status: 'BROADCASTED'[\s\S]*?if \(rebroadcastPersistErr\)[\s\S]*?BROADCASTED status persistence failed/i,
+  ],
+  [
     'reconciliation alert persistence errors are explicitly handled',
     'src/lib/security/reconciliation.ts',
     /const \{ error: alertInsertError \}[\s\S]*?if \(alertInsertError\)[\s\S]*?Error persisting security alert/i,
