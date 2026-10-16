@@ -865,6 +865,9 @@ async function refreshPendingDepositConfirmations(): Promise<{
       .from('onchain_deposits')
       .select('*')
       .eq('status', 'PENDING')
+      // Process the oldest pending rows first so a backlog larger than the batch
+      // limit does not indefinitely starve older deposits.
+      .order('created_at', { ascending: true })
       .limit(50);
 
     if (error || !pendingDeposits || pendingDeposits.length === 0) {
