@@ -47,7 +47,7 @@ export async function POST(req: Request) {
       explanation: typeof explanation === 'string' ? explanation.trim() : undefined,
     });
 
-    return NextResponse.json({ success: true, message: 'Dispute opened and instructions dispatched.' });
+    return NextResponse.json({ success: true, message: 'Dispute opened successfully.' });
   } catch (error: any) {
     console.error('Failed to open trade dispute:', error);
     return NextResponse.json({ error: 'Failed to open dispute. Please try again later.' }, { status: 500 });
