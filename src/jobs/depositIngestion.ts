@@ -407,7 +407,6 @@ async function scanEvmNativeDeposits(
         const toClean = tx.to.toLowerCase();
 
         if (monitoredEvmAddresses.has(toClean) && tx.value > BigInt(0)) {
-          detected++;
           const formattedAmount = ethers.formatUnits(tx.value, chainConfig.nativeDecimals);
           // Keep the exact decimal string from bigint formatting; converting native
           // coin amounts to Number can silently round financially meaningful digits.
@@ -420,6 +419,7 @@ async function scanEvmNativeDeposits(
             continue;
           }
           const confirmations = latestBlock - b + 1;
+          detected++;
 
           const { data, error } = await supabaseAdmin.rpc('process_deposit_atomic', {
             p_destination_address: toClean,
