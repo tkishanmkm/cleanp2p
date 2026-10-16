@@ -225,14 +225,13 @@ const checks: Array<[string, string, RegExp]> = [
     'supabase/migrations/20261016000003_disable_legacy_process_user_deposit.sql',
     /CREATE OR REPLACE FUNCTION public\.process_user_deposit[\s\S]{0,700}RAISE EXCEPTION/i,
   ],
-];
-
   [
     'chain-id nonce allocator fails closed when the network hot wallet is missing',
     'supabase/migrations/20261001020000_gas_funding_broadcast_durability_and_abuse_protection.sql',
     /IF v_hot_addr IS NULL OR TRIM\\(v_hot_addr\\) = '' THEN[\\s\\S]*RAISE EXCEPTION[\\s\\S]*RETURN public\\.allocate_hot_wallet_nonce\\(v_net, v_hot_addr, 0\\)/i,
   ],
-  
+];
+
 let failed = 0;
 for (const [name, path, pattern] of checks) {
   try {
