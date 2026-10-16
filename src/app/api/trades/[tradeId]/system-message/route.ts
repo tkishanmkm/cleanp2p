@@ -304,7 +304,7 @@ export async function POST(
           visibility: 'all',
           created_at: now
         }
-      ]).select().maybeSingle();
+      ]).select('id, trade_id, sender_id, message, created_at').maybeSingle();
 
       if (richInsert.error) {
         // Retry with the minimal schema only for compatibility.
@@ -315,7 +315,7 @@ export async function POST(
             message: text,
             created_at: now
           }
-        ]).select().maybeSingle();
+        ]).select('id, trade_id, sender_id, message, created_at').maybeSingle();
 
         if (baseInsert.error) {
           console.error('System-message persistence failed:', baseInsert.error.code || richInsert.error.code || 'UNKNOWN');
