@@ -1122,6 +1122,8 @@ async function scanTronDeposits(
             receipt.blockNumber.toLowerCase() !== blockHex.toLowerCase() ||
             typeof receipt.blockHash !== 'string' ||
             !/^0x[0-9a-fA-F]{64}$/.test(receipt.blockHash) ||
+            typeof log.blockHash !== 'string' ||
+            receipt.blockHash.toLowerCase() !== log.blockHash.toLowerCase() ||
             !Array.isArray(receipt.logs)
           ) {
             errors.push(`Rejected TRON RPC log without a successful matching transaction receipt: ${txHash}`);
