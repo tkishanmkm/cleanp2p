@@ -326,9 +326,8 @@ export async function POST(req: NextRequest) {
     const transferData = rpcResult as TransferRpcResponse | null;
 
     if (!transferData || transferData.success !== true) {
-      const errorMsg = transferData?.error || 'Failed to execute internal transfer.';
       return NextResponse.json({
-        error: errorMsg,
+        error: 'Transfer was rejected and no successful result was confirmed.',
         code: 'TRANSFER_REJECTED',
       }, { status: 400 });
     }
