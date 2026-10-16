@@ -324,7 +324,7 @@ export async function fundGasForAddress(
       p_worker_id: workerId,
     });
 
-    if (claimErr || !claimRes) {
+    if (claimErr || !claimRes || typeof claimRes !== 'object' || Array.isArray(claimRes)) {
       throw new Error(`Gas funding claim RPC failed: ${claimErr?.message || 'UNKNOWN'}`);
     }
 
