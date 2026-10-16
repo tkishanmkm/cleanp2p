@@ -69,3 +69,8 @@ export function getSupabaseAdminClient(): SupabaseClient {
 
   return serverAdminClient;
 }
+
+/** Compatibility alias for routes that use the createAdminClient name. */
+export function createAdminClient(): SupabaseClient {
+  return getSupabaseAdminClient();
+}
