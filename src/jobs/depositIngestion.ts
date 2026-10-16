@@ -186,6 +186,11 @@ async function scanEvmTokenDeposits(
       return { detected: 0, credited: 0, errors: ['Failed to compute Transfer topic'] };
     }
 
+    const providerNetwork = await provider.getNetwork();
+    if (providerNetwork.chainId !== BigInt(chainConfig.chainId)) {
+      return { detected, credited, errors: [`EVM token RPC chain ID mismatch for ${normNet}`] };
+    }
+
     const latestBlock = await provider.getBlockNumber();
     if (
       !Number.isSafeInteger(fromBlock) ||
@@ -336,6 +341,11 @@ async function scanEvmNativeDeposits(
   const provider = getEvmProvider(normNet);
 
   try {
+    const providerNetwork = await provider.getNetwork();
+    if (providerNetwork.chainId !== BigInt(chainConfig.chainId)) {
+      return { detected, credited, errors: [`EVM native RPC chain ID mismatch for ${normNet}`] };
+    }
+
     const latestBlock = await provider.getBlockNumber();
 
     // Scan only canonical recent blocks. Do not ingest provider-supplied historical
