@@ -1139,6 +1139,13 @@ async function refreshPendingDepositConfirmations(): Promise<{
             const statusData = await statusResponse.json();
             const tipHeight = Number((await tipResponse.text()).trim());
             const output = Array.isArray(tx.vout) ? tx.vout[outputIndex] : null;
+            // Pending rechecks only advance mined transactions with a valid
+            // confirmed block at or below the provider's current chain tip.
+            if (!statusData?.confirmed || !Number.isSafeInteger(statusData.block_height) ||
+                statusData.block_height <= 0 || !Number.isSafeInteger(tipHeight) ||
+                tipHeight < statusData.block_height) {
+              continue;
+            }
             const storedBaseUnits = parseBaseUnits8(dep.amount);
             const observedBaseUnits = Number.isSafeInteger(output?.value) && output.value >= 0
               ? BigInt(output.value)
@@ -1186,6 +1193,13 @@ async function refreshPendingDepositConfirmations(): Promise<{
             const statusData = await statusResponse.json();
             const tipHeight = Number((await tipResponse.text()).trim());
             const output = Array.isArray(tx.vout) ? tx.vout[outputIndex] : null;
+            // Pending rechecks only advance mined transactions with a valid
+            // confirmed block at or below the provider's current chain tip.
+            if (!statusData?.confirmed || !Number.isSafeInteger(statusData.block_height) ||
+                statusData.block_height <= 0 || !Number.isSafeInteger(tipHeight) ||
+                tipHeight < statusData.block_height) {
+              continue;
+            }
             const storedBaseUnits = parseBaseUnits8(dep.amount);
             const observedBaseUnits = Number.isSafeInteger(output?.value) && output.value >= 0
               ? BigInt(output.value)
