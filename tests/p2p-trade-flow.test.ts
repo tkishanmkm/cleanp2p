@@ -1,4 +1,5 @@
 import { createClient } from '@supabase/supabase-js';
+import { randomUUID } from 'node:crypto';
 
 // SAFETY: This integration suite writes financial balances, ads, and escrow orders.
 // It must never run against hosted or production Supabase.
@@ -50,19 +51,19 @@ async function runP2PTradeFlowTests() {
     // Create or get seller wallet
     const { data: sellerWallet } = await supabase
       .from('wallets')
-      .upsert({ id: '11111111-1111-1111-1111-111111111111', user_id: testSellerId }, { onConflict: 'id' })
+      .insert({ id: randomUUID(), user_id: testSellerId })
       .select()
       .single();
 
     // Create or get buyer wallet
     const { data: buyerWallet } = await supabase
       .from('wallets')
-      .upsert({ id: '22222222-2222-2222-2222-222222222222', user_id: testBuyerId }, { onConflict: 'id' })
+      .insert({ id: randomUUID(), user_id: testBuyerId })
       .select()
       .single();
 
-    const sellerWalletId = sellerWallet?.id || '11111111-1111-1111-1111-111111111111';
-    const buyerWalletId = buyerWallet?.id || '22222222-2222-2222-2222-222222222222';
+    const sellerWalletId = sellerWallet?.id;
+    const buyerWalletId = buyerWallet?.id;
 
     // Seed seller with 500 USDT available balance
     await supabase.from('wallet_assets').upsert(
@@ -89,7 +90,7 @@ async function runP2PTradeFlowTests() {
     );
 
     // Create a test Sell Ad
-    const testAdId = '33333333-3333-3333-3333-333333333333';
+    const testAdId = randomUUID();
     await supabase.from('ads').upsert(
       {
         id: testAdId,
