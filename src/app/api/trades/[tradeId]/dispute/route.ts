@@ -19,14 +19,23 @@ export async function POST(
     const cleanTradeId = tradeId.trim();
 
     let supabase = await createClient();
-    const authHeader = req.headers.get('Authorization') || req.headers.get('authorization');
-    if (authHeader && authHeader.startsWith('Bearer ')) {
-      const token = authHeader.substring(7).trim();
-      supabase = createSupabaseClient(
-        process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://placeholder.supabase.co',
-        process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'placeholder-key',
-        { global: { headers: { Authorization: `Bearer ${token}` } } }
-      );
+    const authHeader = req.headers.get('authorization');
+    if (authHeader !== null) {
+      const bearerMatch = /^Bearer\s+(.+)$/i.exec(authHeader.trim());
+      if (!bearerMatch) {
+        return NextResponse.json({ error: 'Authorization header is invalid.' }, { status: 401 });
+      }
+      const token = bearerMatch[1].trim();
+      const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+      const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+      if (!supabaseUrl || !supabaseAnonKey) {
+        console.error('Bearer dispute auth is not configured.');
+        return NextResponse.json({ error: 'Authentication is temporarily unavailable.' }, { status: 500 });
+      }
+      supabase = createSupabaseClient(supabaseUrl, supabaseAnonKey, {
+        auth: { persistSession: false, autoRefreshToken: false },
+        global: { headers: { Authorization: `Bearer ${token}` } },
+      });
     }
 
     const { data: { user }, error: authError } = await supabase.auth.getUser();
