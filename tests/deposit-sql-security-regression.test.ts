@@ -31,6 +31,16 @@ const checks: Array<[string, string, RegExp]> = [
     /const \{ error: recoveryPersistErr \}[\s\S]*?status: 'RECOVERY_REQUIRED'[\s\S]*?if \(recoveryPersistErr\)[\s\S]*?RECOVERY_REQUIRED status persistence also failed/i,
   ],
   [
+    'gas funding policy rejection checks FAILED-state persistence',
+    'src/jobs/sweeperWorker.ts',
+    /const \{ error: rejectionPersistErr \}[\s\S]*?status: 'FAILED'[\s\S]*?FAILED status persistence also failed/i,
+  ],
+  [
+    'hot-wallet insolvency checks RECOVERY_REQUIRED persistence',
+    'src/jobs/sweeperWorker.ts',
+    /const \{ error: insolvencyPersistErr \}[\s\S]*?status: 'RECOVERY_REQUIRED'[\s\S]*?RECOVERY_REQUIRED persistence failed/i,
+  ],
+  [
     'EVM gas funding timeout checks recovery-state persistence errors',
     'src/jobs/sweeperWorker.ts',
     /const \{ error: timeoutStatusErr \}[\s\S]*?status: 'RECOVERY_REQUIRED'[\s\S]*?RECOVERY_REQUIRED persistence failed/i,
