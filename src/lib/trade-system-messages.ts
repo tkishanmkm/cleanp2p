@@ -1673,7 +1673,7 @@ export function formatCryptoAmount(
   symbol?: string
 ): string {
   const num = typeof amount === 'number' ? amount : Number(amount || 0);
-  if (isNaN(num)) return '0.00';
+  if (!Number.isFinite(num) || num < 0) return '0.00';
   const s = (symbol || '').toUpperCase();
   if (s === 'USDT' || s === 'USDC' || s === 'DAI' || s === 'BUSD') {
     return num.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
