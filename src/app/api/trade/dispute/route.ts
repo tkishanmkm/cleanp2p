@@ -65,8 +65,9 @@ export async function POST(req: Request) {
     });
 
     return NextResponse.json({ success: true, message: 'Dispute opened successfully.' });
-  } catch (error: any) {
-    console.error('Failed to open trade dispute:', error);
+  } catch (error: unknown) {
+    const errorName = error instanceof Error ? error.name : 'UnknownError';
+    console.error('Failed to open trade dispute:', errorName);
     return NextResponse.json({ error: 'Failed to open dispute. Please try again later.' }, { status: 500 });
   }
 }
