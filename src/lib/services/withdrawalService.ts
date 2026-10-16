@@ -384,12 +384,12 @@ export async function executeCanonicalWithdrawal(input: WithdrawalRequestInput):
   }
 
   // Validate Destination Address Format
-  if (!input.destinationAddress) {
+  if (typeof input.destinationAddress !== 'string' || input.destinationAddress.trim().length === 0) {
     return {
       success: false,
       status: 'INVALID_ADDRESS',
-      error: 'Destination address is required',
-      message: 'Destination address is required',
+      error: 'A valid destination address string is required.',
+      message: 'Invalid destination address.',
       statusCode: 400,
     };
   }
