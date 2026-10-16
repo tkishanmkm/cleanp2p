@@ -335,6 +335,11 @@ const checks: Array<[string, string, RegExp]> = [
     'src/jobs/sweeperWorker.ts',
     /const usdtContractAddress = process\.env\.USDT_CONTRACT_TRC20\?\.trim\(\)[\s\S]*?!tronWeb\.isAddress\(usdtContractAddress\)[\s\S]*?USDT_CONTRACT_TRC20 is missing or invalid/i,
   ],
+  [
+    'TRON pre-broadcast cleanup fails closed on RPC errors and checks undelegation result',
+    'src/jobs/sweeperWorker.ts',
+    /const \{ data: cleanupRes, error: cleanupErr \} = await supabaseAdmin\.rpc\('verify_and_lock_pre_broadcast_cleanup'[\s\S]*?if \(cleanupErr \|\| !cleanupRes \|\| cleanupRes\.can_undelegate !== true\)[\s\S]*?const undelegated = await undelegateEnergyToPool\(sweepId, workerId\)[\s\S]*?if \(!undelegated\)/i,
+  ],
 ];
 
 let failed = 0;
