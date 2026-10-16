@@ -60,7 +60,9 @@ export async function POST(req: NextRequest) {
     const rawAsset = asset ?? crypto ?? 'USDT';
     if (
       typeof rawRecipient !== 'string' ||
+      rawRecipient.length > 320 ||
       typeof rawAsset !== 'string' ||
+      rawAsset.length > 20 ||
       (typeof amount !== 'string' && typeof amount !== 'number') ||
       (typeof amount === 'string' && (amount.length > 80 || !/^\d+(?:\.\d+)?$/.test(amount.trim())))
     ) {
