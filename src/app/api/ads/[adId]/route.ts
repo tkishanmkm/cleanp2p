@@ -124,7 +124,7 @@ export async function GET(
       fiatCurrency: fiatSym,
       fiat: fiatSym,
       currency: fiatSym,
-      price: priceVal || 1000,
+      price: Number.isFinite(priceVal) && priceVal > 0 ? priceVal : null,
       pricing_type: (ad.rate_type === 'fixed' || ad.pricing_type === 'FIXED' || ad.is_fixed) ? 'FIXED' : 'FLOAT',
       rate_type: (ad.rate_type === 'fixed' || ad.pricing_type === 'FIXED' || ad.is_fixed) ? 'fixed' : 'market',
       is_fixed: Boolean(ad.rate_type === 'fixed' || ad.pricing_type === 'FIXED' || ad.is_fixed),
