@@ -1213,7 +1213,8 @@ export async function undelegateEnergyToPool(
     }
   } catch (broadcastErr: any) {
     const errMsg = broadcastErr?.message || String(broadcastErr);
-    if (!errMsg.includes('DUP') && !errMsg.includes('already exist')) {
+    const normalizedErrMsg = errMsg.toLowerCase();
+    if (!normalizedErrMsg.includes('dup') && !normalizedErrMsg.includes('already exist')) {
       console.error(`[Tron Resource Pool] Undelegation broadcast failed/ambiguous:`, broadcastErr);
       return false; // Leave in UNDELEGATING status for recovery reconciliation
     }
