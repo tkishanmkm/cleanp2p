@@ -381,6 +381,11 @@ const checks: Array<[string, string, RegExp]> = [
     /persist_signed_delegation[\s\S]*?if \(persistErr \|\| !persistRes \|\| persistRes\.success !== true\)[\s\S]*?Failed to persist signed delegation transaction/i,
   ],
   [
+    'TRON gas funding broadcast requires explicit boolean success',
+    'src/jobs/sweeperWorker.ts',
+    /Broadcast exact persisted transaction[\s\S]*?const broadcastRes = await tronWeb\.trx\.sendRawTransaction\(signedTx\)[\s\S]*?if \(!broadcastRes \|\| broadcastRes\.result !== true\)[\s\S]*?TRON gas funding broadcast rejected/i,
+  ],
+  [
     'TRON resource delegation broadcast requires explicit boolean success',
     'src/jobs/sweeperWorker.ts',
     /\/\/ 6\. Broadcast delegation transaction[\s\S]*?const broadcastRes = await tronWeb\.trx\.sendRawTransaction\(signedTx\)[\s\S]*?if \(!broadcastRes \|\| broadcastRes\.result !== true\)[\s\S]*?TRON delegation raw broadcast rejected/i,
