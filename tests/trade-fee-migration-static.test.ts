@@ -458,7 +458,7 @@ const geckoFallbackEnd = marketPriceWorker.indexOf('});', geckoFallbackStart);
 assert.ok(geckoFallbackStart >= 0 && geckoFallbackEnd > geckoFallbackStart,
   'CoinGecko fallback must iterate only assets missing from the primary provider');
 const geckoFallbackBlock = marketPriceWorker.slice(geckoFallbackStart, geckoFallbackEnd);
-assert.match(geckoFallbackBlock, /if \(!cryptoUsdPrices\[symbol\]\)/,
+assert.match(geckoFallbackBlock, /&& !cryptoUsdPrices\[symbol\]/,
   'CoinGecko fallback must not overwrite a valid primary-provider price');
 assert.match(geckoFallbackBlock, /Number\.isFinite\(p\) && p > 0/,
   'CoinGecko fallback must reject non-finite and non-positive prices');
