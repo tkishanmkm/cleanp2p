@@ -1072,6 +1072,11 @@ async function refreshPendingDepositConfirmations(): Promise<{
 
     for (const dep of pendingDeposits) {
       const normNet = normalizeDepositNetwork(dep.network);
+      if (normNet !== 'TRC20' && normNet !== 'BTC' && normNet !== 'LTC' &&
+          !Object.prototype.hasOwnProperty.call(SUPPORTED_EVM_CHAINS, normNet)) {
+        console.error('[Deposit Ingestion] Skipping pending deposit with unsupported network');
+        continue;
+      }
       // Validate persisted transaction identifiers before querying providers or
       // passing them back to the privileged credit RPC.
       const txHash = typeof dep.tx_hash === 'string' ? dep.tx_hash : '';
