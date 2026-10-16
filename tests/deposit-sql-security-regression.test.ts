@@ -86,6 +86,11 @@ const checks: Array<[string, string, RegExp]> = [
     /allocatedNonce === null[\s\S]*allocatedNonce === undefined[\s\S]*!\\/\\^\\d\\+\\$\\/\.test\\(allocatedNonce\\)/i,
   ],
   [
+    'nonce allocation binds seeded zero-address placeholder without allowing wallet switching',
+    'supabase/migrations/20261016000007_bind_nonce_allocation_to_hot_wallet.sql',
+    /Existing migrations seed placeholder zero addresses[\s\S]*LOWER\(TRIM\(COALESCE\(v_hot_wallet_address, ''\)\)\) = '0x0{40}'[\s\S]*RAISE EXCEPTION 'Configured hot-wallet address mismatch/i,
+  ],
+  [
     'nonce allocation rejects a hot-wallet address mismatch and validates inputs',
     'supabase/migrations/20261016000007_bind_nonce_allocation_to_hot_wallet.sql',
     /NULLIF\(TRIM\(p_wallet_address\), ''\) IS NULL[\s\S]*p_onchain_pending_nonce < 0[\s\S]*LOWER\(TRIM\(v_hot_wallet_address\)\) <> LOWER\(TRIM\(p_wallet_address\)\)[\s\S]*REVOKE ALL ON FUNCTION public\.allocate_hot_wallet_nonce/i,
