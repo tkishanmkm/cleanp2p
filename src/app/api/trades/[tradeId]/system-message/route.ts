@@ -13,7 +13,7 @@ export async function POST(
     const resolvedParams = typeof (params as any)?.then === 'function' ? await params : params;
     const tradeId = resolvedParams?.tradeId;
 
-    if (!tradeId || tradeId.length > 128) {
+    if (typeof tradeId !== 'string' || !tradeId.trim() || tradeId.length > 128) {
       return NextResponse.json({ error: 'Valid trade ID is required' }, { status: 400 });
     }
 
