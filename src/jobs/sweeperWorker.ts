@@ -2633,13 +2633,16 @@ export async function reconcileAmbiguousSweep(sweepId: string, workerId: string)
         throw new Error(`Unsupported recovery network: ${net}`);
       }
     } catch (hashErr: any) {
-      await supabaseAdmin.rpc('update_sweep_operation_status', {
+      const { data: recoveryRes, error: recoveryErr } = await supabaseAdmin.rpc('update_sweep_operation_status', {
         p_sweep_id: sweepId,
         p_worker_id: workerId,
         p_expected_status: 'READY_TO_BROADCAST',
         p_new_status: 'RECOVERY_REQUIRED',
         p_error_message: `Hash calculation error: ${hashErr?.message || 'invalid signed hex'}`,
       });
+      if (recoveryErr || !recoveryRes || recoveryRes.success !== true) {
+        console.error(`[BTC/LTC Sweep Recovery Persistence Failure] ${sweepId}: ${recoveryErr?.message || recoveryRes?.message || 'invalid RPC response'}`);
+      }
       return false;
     }
 
