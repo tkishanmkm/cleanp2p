@@ -441,6 +441,16 @@ const checks: Array<[string, string, RegExp]> = [
     /p_actual_gas_amount: actualGasStr,[\s\S]*?confData\?\.success === true/i,
   ],
   [
+    'BTC withdrawal confirmation poll requires explicit RPC success',
+    'src/jobs/withdrawalWorker.ts',
+    /p_gas_asset: 'BTC',[\s\S]*?confData\?\.success !== true/i,
+  ],
+  [
+    'LTC withdrawal confirmation poll requires explicit RPC success',
+    'src/jobs/withdrawalWorker.ts',
+    /p_gas_asset: 'LTC',[\s\S]*?confData\?\.success === true/i,
+  ],
+  [
     'TRON withdrawal completion requires explicit successful RPC result',
     'src/jobs/withdrawalWorker.ts',
     /const { data: completionData, error: completionError } = await supabaseAdmin\.rpc\('complete_onchain_withdrawal'[\s\S]*?completionData\.success !== true/i,
