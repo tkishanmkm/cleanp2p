@@ -512,7 +512,7 @@ export async function executeCanonicalWithdrawal(input: WithdrawalRequestInput):
 
   // 7. Idempotency Check
   if (input.idempotencyKey) {
-    const { data: existing } = await supabaseAdmin
+    const { data: existing, error: existingError } = await supabaseAdmin
       .from('withdrawals')
       .select('*')
       .eq('user_id', user.id)
@@ -521,6 +521,17 @@ export async function executeCanonicalWithdrawal(input: WithdrawalRequestInput):
       .order('created_at', { ascending: false })
       .limit(1)
       .maybeSingle();
+
+    if (existingError) {
+      console.error('Unable to verify possible duplicate withdrawal:', existingError.message);
+      return {
+        success: false,
+        status: 'SECURITY_CHECK_UNAVAILABLE',
+        error: 'Duplicate-withdrawal verification is temporarily unavailable.',
+        message: 'Withdrawals are temporarily unavailable. Please try again later.',
+        statusCode: 503,
+      };
+    }
 
     if (existing && (existing.status === 'completed' || existing.status === 'processing' || existing.status === 'QUEUED' || existing.status === 'PENDING_APPROVAL')) {
       return {
