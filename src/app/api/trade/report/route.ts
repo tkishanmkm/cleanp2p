@@ -61,6 +61,9 @@ export async function POST(req: Request) {
 
     const cleanCategory = category.replace(/[\u0000-\u001F\u007F]/g, ' ').replace(/\s+/g, ' ').trim();
     const cleanDescription = description.replace(/[\u0000-\u001F\u007F]/g, ' ').replace(/\s+/g, ' ').trim();
+    if (!cleanCategory || !cleanDescription) {
+      return NextResponse.json({ error: 'Category and description must contain readable text.' }, { status: 400 });
+    }
 
     const cleanTradeId = tradeId.trim();
     const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(cleanTradeId);
