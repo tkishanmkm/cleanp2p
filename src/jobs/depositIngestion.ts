@@ -288,65 +288,10 @@ async function scanEvmNativeDeposits(
   try {
     const latestBlock = await provider.getBlockNumber();
 
-    // 1. Direct address balance and Alchemy Asset Transfers check for instant accurate ingestion
-    for (const address of Array.from(monitoredEvmAddresses)) {
-      try {
-        const bal = await provider.getBalance(address);
-        if (bal > BigInt(0)) {
-          try {
-            const transfers: any = await provider.send('alchemy_getAssetTransfers', [
-              {
-                fromBlock: '0x0',
-                toBlock: 'latest',
-                toAddress: address,
-                category: ['external'],
-                order: 'desc',
-                maxCount: '0xa',
-              },
-            ]);
-
-            if (transfers?.transfers && Array.isArray(transfers.transfers) && transfers.transfers.length > 0) {
-              for (const tx of transfers.transfers) {
-                const txHash = tx.hash;
-                const valueNum = Number(tx.value || 0);
-                if (valueNum <= 0) continue;
-                const assetSymbol = (tx.asset || chainConfig.nativeSymbol).toUpperCase();
-                const txBlock = parseInt(tx.blockNum, 16);
-                const confirmations = latestBlock >= txBlock ? latestBlock - txBlock + 1 : 1;
-
-                detected++;
-                const { data, error } = await supabaseAdmin.rpc('process_deposit_atomic', {
-                  p_destination_address: address.toLowerCase(),
-                  p_asset_symbol: assetSymbol === 'ETH' ? 'ETH' : assetSymbol,
-                  p_network_code: normNet === 'ERC20' ? 'ETH' : normNet,
-                  p_amount: valueNum,
-                  p_tx_hash: txHash,
-                  p_output_index: 0,
-                  p_block_number: isNaN(txBlock) ? null : txBlock,
-                  p_from_address: tx.from?.toLowerCase() || null,
-                  p_token_contract: null,
-                  p_confirmations: confirmations,
-                  p_provider: 'deposit_ingestion',
-                });
-
-                if (!error) {
-                  const res = typeof data === 'string' ? JSON.parse(data) : data;
-                  if (res?.status === 'credited' || (res?.success && confirmations >= chainConfig.requiredConfirmations)) {
-                    credited++;
-                  }
-                }
-              }
-            }
-          } catch (_) {
-            // If provider is standard RPC without alchemy_getAssetTransfers, fallback gracefully
-          }
-        }
-      } catch (addrErr: any) {
-        // Continue scanning other addresses
-      }
-    }
-
-    // 2. Iterate through blocks in range (constrained to max 25 blocks for native scan)
+    // Scan only canonical recent blocks. Do not ingest provider-supplied historical
+    // asset-transfer summaries: they can be incomplete, use ambiguous output indexes,
+    // and may replay old transactions outside the intended scan window.
+    // Iterate through blocks in range (constrained to max 25 blocks for native scan)
     const start = Math.max(fromBlock, toBlock - 25);
     for (let b = start; b <= toBlock; b++) {
       const block = await provider.getBlock(b, true);
