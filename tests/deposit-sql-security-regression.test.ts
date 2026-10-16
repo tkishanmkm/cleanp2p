@@ -757,6 +757,16 @@ const checks: Array<[string, string, RegExp]> = [
   ],
 
   [
+    'withdrawal rejects when platform security settings cannot be read',
+    'src/lib/services/withdrawalService.ts',
+    /const \{ data: settings, error: settingsError \}[\s\S]*?if \(settingsError \|\| !settings\)[\s\S]*?statusCode: 503/i,
+  ],
+  [
+    'withdrawal rejects when account security profile lookup fails or is missing',
+    'src/lib/services/withdrawalService.ts',
+    /const \{ data: userProfile, error: userProfileError \}[\s\S]*?if \(userProfileError\)[\s\S]*?statusCode: 503[\s\S]*?if \(!userProfile\)[\s\S]*?statusCode: 403/i,
+  ],
+  [
     'middleware fails closed for API requests when security checks throw',
     'src/middleware.ts',
     /catch \(e\)[\s\S]*?Middleware security check failed[\s\S]*?pathname\.startsWith\('\/api\/'\)[\s\S]*?code: 'SECURITY_CHECK_UNAVAILABLE'[\s\S]*?status: 503/i,
