@@ -98,8 +98,8 @@ export async function POST(
     }
 
     // Verify trade status allows dispute
-    const currentStatus = String(trade?.status || '').toLowerCase();
-    const escrowStatus = String(trade?.escrow_status || '').toLowerCase();
+    const currentStatus = String(trade?.status || '').trim().toLowerCase();
+    const escrowStatus = String(trade?.escrow_status || '').trim().toLowerCase();
     if (
       ['completed', 'released', 'cancelled', 'canceled', 'expired'].includes(currentStatus) ||
       ['completed', 'released', 'cancelled', 'canceled', 'expired'].includes(escrowStatus)
