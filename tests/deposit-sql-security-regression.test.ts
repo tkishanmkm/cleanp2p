@@ -401,6 +401,11 @@ const checks: Array<[string, string, RegExp]> = [
     /Persisted TRON delegation amount is malformed; refusing to reuse existing delegation[\s\S]*?BigInt\(String\(persistedAmountSun\)\) <= 0n/i,
   ],
   [
+    'TRON undelegation validates pool address before reading delegation records',
+    'src/jobs/sweeperWorker.ts',
+    /export async function undelegateEnergyToPool[\s\S]*?Failed to resolve a valid TRON pool address from private key[\s\S]*?Retrieve the existing delegation record/i,
+  ],
+  [
     'TRON ambiguous delegation broadcast remains in recovery rather than being marked failed',
     'src/jobs/sweeperWorker.ts',
     /Delegation broadcast outcome is ambiguous; preserving operation for reconciliation[\s\S]*?p_new_status: 'RECOVERY_REQUIRED'[\s\S]*?failed to persist RECOVERY_REQUIRED state/i,
