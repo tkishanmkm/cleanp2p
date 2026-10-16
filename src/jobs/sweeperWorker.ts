@@ -645,11 +645,14 @@ export async function fundGasForAddress(
 
   if (!isConfirmed) {
     if (sweepId) {
-      await supabaseAdmin.from('gas_funding_operations').update({
+      const { error: timeoutStatusErr } = await supabaseAdmin.from('gas_funding_operations').update({
         status: 'RECOVERY_REQUIRED',
         error_message: 'Timed out waiting for on-chain gas funding receipt',
         updated_at: new Date().toISOString(),
       }).eq('sweep_id', sweepId);
+      if (timeoutStatusErr) {
+        throw new Error(`Timed out waiting for gas funding confirmation on ${deterministicTxHash}; RECOVERY_REQUIRED persistence failed: ${timeoutStatusErr.message}`);
+      }
     }
     throw new Error(`Timed out waiting for gas funding confirmation on ${deterministicTxHash}`);
   }
