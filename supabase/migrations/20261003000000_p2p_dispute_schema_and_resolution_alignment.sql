@@ -206,6 +206,19 @@ BEGIN
         v_effective_caller := p_caller_id;
     END IF;
 
+    -- Bound and normalize resolution input even when the RPC is called outside an API route.
+    IF p_resolution IS NULL OR char_length(p_resolution) > 2000 THEN
+        RAISE EXCEPTION 'Resolution must be present and no longer than 2000 characters.';
+    END IF;
+
+    p_resolution := TRIM(REGEXP_REPLACE(
+        REGEXP_REPLACE(p_resolution, '[[:cntrl:]]', ' ', 'g'),
+        '[[:space:]]+', ' ', 'g'
+    ));
+    IF p_resolution = '' THEN
+        RAISE EXCEPTION 'Resolution must contain readable text.';
+    END IF;
+
     -- 2. Admin Authorization Check
     v_is_admin := public.is_admin()
                OR EXISTS (
