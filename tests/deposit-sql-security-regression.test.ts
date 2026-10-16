@@ -51,6 +51,11 @@ const checks: Array<[string, string, RegExp]> = [
     /EXISTS \([\s\S]*FROM public\.wallets wal[\s\S]*wal\.status = 'active'[\s\S]*wal\.provisioning_status = 'completed'/i,
   ],
   [
+    'withdrawal claims require an existing eligible auth user',
+    'supabase/migrations/20261016000006_bound_withdrawal_claim_batch.sql',
+    /AND EXISTS \([\s\S]*FROM auth\.users u[\s\S]*u\.id = w\.user_id[\s\S]*NOT COALESCE\(u\.banned_until > NOW\(\), FALSE\)/i,
+  ],
+  [
     'withdrawal claims exclude banned or restricted owners',
     'supabase/migrations/20261016000006_bound_withdrawal_claim_batch.sql',
     /FROM auth\.users u[\s\S]*u\.banned_until > NOW\(\)[\s\S]*raw_app_meta_data ->> 'restricted'/i,
