@@ -1,6 +1,5 @@
 'use client';
 import { supabase } from '@/lib/supabase/client';
-import { countries } from './countries';
 
 export async function blockUser(_db: any, currentUserId: string, targetUsername: string) {
   // Find target user by username or userId
@@ -55,9 +54,6 @@ export async function createUserSession(_db: any, user: { uid?: string; id?: str
   const userId = user.uid || user.id;
   if (!userId) return;
 
-  const simulatedIp = `192.168.1.${Math.floor(Math.random() * 254) + 1}`;
-  const randomIpCountry = countries[Math.floor(Math.random() * countries.length)].code;
-
   try {
     const { data } = await supabase
       .from('user_sessions')
@@ -65,18 +61,12 @@ export async function createUserSession(_db: any, user: { uid?: string; id?: str
         {
           user_id: userId,
           user_agent: typeof navigator !== 'undefined' ? navigator.userAgent : '',
-          ip_address: simulatedIp,
           last_login: new Date().toISOString(),
           is_active: true,
         },
       ])
       .select('id')
       .single();
-
-    await supabase
-      .from('profiles')
-      .update({ ip_based_country: randomIpCountry })
-      .eq('id', userId);
 
     return data?.id;
   } catch (err) {
