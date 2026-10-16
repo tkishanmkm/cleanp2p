@@ -344,7 +344,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({
         error: 'Transfer failed: Incomplete financial response received from database.',
         code: 'INVALID_RPC_RESPONSE',
-      }, { status: 500 });
+      }, { status: 503 });
     }
 
     const isIdempotentReplay = Boolean(transferData.idempotent_replay);
