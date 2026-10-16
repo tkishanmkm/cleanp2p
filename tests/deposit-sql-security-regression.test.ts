@@ -411,6 +411,11 @@ const checks: Array<[string, string, RegExp]> = [
     /export async function undelegateEnergyToPool[\s\S]*?receiverAddress === poolAddress/i,
   ],
   [
+    'TRON undelegation duplicate broadcast detection is case-insensitive',
+    'src/jobs/sweeperWorker.ts',
+    /const normalizedErr = errStr\.toLowerCase\(\)[\s\S]*?!normalizedErr\.includes\('dup'\)[\s\S]*?!normalizedErr\.includes\('already exist'\)/i,
+  ],
+  [
     'TRON ambiguous delegation broadcast remains in recovery rather than being marked failed',
     'src/jobs/sweeperWorker.ts',
     /Delegation broadcast outcome is ambiguous; preserving operation for reconciliation[\s\S]*?p_new_status: 'RECOVERY_REQUIRED'[\s\S]*?failed to persist RECOVERY_REQUIRED state/i,
