@@ -2712,13 +2712,16 @@ export async function reconcileAmbiguousSweep(sweepId: string, workerId: string)
   // Case D & B: Status is BROADCASTED or READY_TO_BROADCAST or RECOVERY_REQUIRED without transaction hash
   if ((status === 'BROADCASTED' || status === 'READY_TO_BROADCAST' || status === 'RECOVERY_REQUIRED') && !sweep_tx_hash) {
     if (status !== 'RECOVERY_REQUIRED') {
-      await supabaseAdmin.rpc('update_sweep_operation_status', {
+      const { data: recoveryRes, error: recoveryErr } = await supabaseAdmin.rpc('update_sweep_operation_status', {
         p_sweep_id: sweepId,
         p_worker_id: workerId,
         p_expected_status: status,
         p_new_status: 'RECOVERY_REQUIRED',
         p_error_message: `Ambiguous sweep in ${status} without transaction hash - manual inspection required`,
       });
+      if (recoveryErr || !recoveryRes || recoveryRes.success !== true) {
+        console.error(`[Sweep Recovery Persistence Failure: missing transaction hash] ${sweepId}: ${recoveryErr?.message || recoveryRes?.message || 'invalid RPC response'}`);
+      }
     }
     return false; // NEVER re-broadcast without deterministic transaction identifier
   }
