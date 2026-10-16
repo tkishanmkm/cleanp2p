@@ -6,6 +6,16 @@ const root = process.cwd();
 const read = (relativePath: string) => readFileSync(join(root, relativePath), 'utf8');
 const checks: Array<[string, string, RegExp]> = [
   [
+    'P2P escrow integration tests reject hosted Supabase endpoints',
+    'tests/p2p-trade-flow.test.ts',
+    /isLocalTestUrl[\s\S]*localhost\|127\.0\.0\.1[\s\S]*ALLOW_P2P_INTEGRATION_TESTS[\s\S]*Blocked unsafe P2P integration tests/i,
+  ],
+  [
+    'P2P escrow integration suite returns a failing process status on incomplete assertions',
+    'tests/p2p-trade-flow.test.ts',
+    /if \(passedTests === totalTests\)[\s\S]*else[\s\S]*process\.exitCode = 1/i,
+  ],
+  [
     'blockchain deposit test fails when wallet fixture setup fails',
     'tests/blockchain-worker.test.ts',
     /walletSetupError[\s\S]*Unable to create test wallet[\s\S]*assetSetupError[\s\S]*Unable to create test wallet asset[\s\S]*addressSetupError[\s\S]*Unable to register test deposit address/i,
