@@ -1087,6 +1087,73 @@ async function scanTronDeposits(
           const eventBlock = Number.parseInt(blockHex.slice(2), 16);
           if (!Number.isSafeInteger(eventBlock) || eventBlock <= 0 || eventBlock > latestBlock) continue;
 
+          // Independently bind the provider log to the transaction receipt before crediting.
+          const receiptRes = await fetch(tronHost, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              jsonrpc: '2.0',
+              id: 1,
+              method: 'eth_getTransactionReceipt',
+              params: ['0x' + txHash],
+            }),
+          });
+          if (!receiptRes.ok) {
+            errors.push(`TRON transaction-receipt request failed with HTTP ${receiptRes.status}: ${txHash}`);
+            continue;
+          }
+          let receiptJson: any;
+          try {
+            receiptJson = await receiptRes.json();
+          } catch {
+            errors.push(`Invalid TRON transaction-receipt JSON: ${txHash}`);
+            continue;
+          }
+          const receipt = receiptJson?.result;
+          if (
+            receiptJson?.error ||
+            !receipt ||
+            typeof receipt !== 'object' ||
+            Array.isArray(receipt) ||
+            typeof receipt.transactionHash !== 'string' ||
+            receipt.transactionHash.replace(/^0x/i, '').toLowerCase() !== txHash.toLowerCase() ||
+            receipt.status !== '0x1' ||
+            typeof receipt.blockNumber !== 'string' ||
+            receipt.blockNumber.toLowerCase() !== blockHex.toLowerCase() ||
+            typeof receipt.blockHash !== 'string' ||
+            !/^0x[0-9a-fA-F]{64}$/.test(receipt.blockHash) ||
+            !Array.isArray(receipt.logs)
+          ) {
+            errors.push(`Rejected TRON RPC log without a successful matching transaction receipt: ${txHash}`);
+            continue;
+          }
+          const receiptLog = receipt.logs.find((entry: any) =>
+            entry &&
+            typeof entry === 'object' &&
+            !Array.isArray(entry) &&
+            typeof entry.logIndex === 'string' &&
+            entry.logIndex.toLowerCase() === logIndexHex.toLowerCase()
+          );
+          if (
+            !receiptLog ||
+            typeof receiptLog.address !== 'string' ||
+            receiptLog.address.toLowerCase() !== log.address.toLowerCase() ||
+            !Array.isArray(receiptLog.topics) ||
+            receiptLog.topics.length !== log.topics.length ||
+            receiptLog.topics.some((topic: unknown, index: number) =>
+              typeof topic !== 'string' ||
+              typeof log.topics[index] !== 'string' ||
+              topic.toLowerCase() !== log.topics[index].toLowerCase()
+            ) ||
+            typeof receiptLog.data !== 'string' ||
+            receiptLog.data.toLowerCase() !== log.data.toLowerCase() ||
+            typeof receiptLog.blockHash !== 'string' ||
+            receiptLog.blockHash.toLowerCase() !== log.blockHash.toLowerCase()
+          ) {
+            errors.push(`Rejected TRON RPC log not present exactly in its successful receipt: ${txHash}`);
+            continue;
+          }
+
           // Do not credit an event whose block is missing or no longer canonical.
           const logBlockHash = log.blockHash;
           if (typeof logBlockHash !== 'string' || !/^0x[0-9a-fA-F]{64}$/.test(logBlockHash)) {
