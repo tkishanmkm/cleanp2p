@@ -1121,7 +1121,9 @@ async function refreshPendingDepositConfirmations(): Promise<{
             p_provider: 'confirmations_worker',
           });
 
-          if (!rpcErr) {
+          if (rpcErr) {
+            console.error('[Deposit Ingestion] Pending TRON deposit credit RPC failed; row remains pending:', rpcErr.message);
+          } else {
             const res = typeof data === 'string' ? JSON.parse(data) : data;
             if (res?.status === 'credited') {
               newlyCredited++;
@@ -1174,7 +1176,9 @@ async function refreshPendingDepositConfirmations(): Promise<{
               p_confirmations: confs,
               p_provider: 'confirmations_worker',
             });
-            if (!rpcErr) {
+            if (rpcErr) {
+              console.error('[Deposit Ingestion] Pending BTC deposit credit RPC failed; row remains pending:', rpcErr.message);
+            } else {
               const r = typeof data === 'string' ? JSON.parse(data) : data;
               if (r?.status === 'credited') newlyCredited++;
             }
@@ -1265,7 +1269,9 @@ async function refreshPendingDepositConfirmations(): Promise<{
               p_provider: 'confirmations_worker',
             });
 
-            if (!rpcErr) {
+            if (rpcErr) {
+              console.error('[Deposit Ingestion] Pending EVM deposit credit RPC failed; row remains pending:', rpcErr.message);
+            } else {
               const res = typeof data === 'string' ? JSON.parse(data) : data;
               if (res?.status === 'credited') {
                 newlyCredited++;
