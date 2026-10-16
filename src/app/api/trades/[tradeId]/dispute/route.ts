@@ -52,7 +52,7 @@ export async function POST(
     const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(cleanTradeId);
 
     // Fetch trade (by UUID or trade_id)
-    let tradeQuery = supabase.from('trades').select('*');
+    let tradeQuery = supabase.from('trades').select('id, trade_id, buyer_id, seller_id, status, escrow_status, payment_method');
     if (isUuid) {
       tradeQuery = tradeQuery.or(`id.eq.${cleanTradeId},trade_id.eq.${cleanTradeId}`);
     } else {
@@ -61,7 +61,6 @@ export async function POST(
     const { data: trade } = await tradeQuery.maybeSingle();
 
     const actualTradeId = trade?.id || tradeId;
-    const isActualUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(actualTradeId);
 
     // Verify caller is a trade participant
     const isBuyer = trade?.buyer_id === user.id;
@@ -116,7 +115,7 @@ export async function POST(
       if (opProfile?.username) openerName = opProfile.username;
     } catch {}
 
-    const tradePaymentMethod = trade?.payment_method || trade?.paymentMethod || 'Bank Transfer';
+    const tradePaymentMethod = trade?.payment_method || 'Bank Transfer';
 
     // Insert official system notification in trade_messages using admin client to bypass user RLS
     try {
