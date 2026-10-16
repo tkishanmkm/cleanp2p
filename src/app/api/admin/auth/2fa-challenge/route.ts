@@ -87,9 +87,31 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // 3. Parse and Validate Credentials
-    const body = await req.json().catch(() => ({}));
-    const { code, recoveryPassword } = body;
+    // 3. Bound and validate credential input before parsing or hashing.
+    const contentLength = Number(req.headers.get('content-length') || '0');
+    if (Number.isFinite(contentLength) && contentLength > 4096) {
+      return NextResponse.json({ success: false, error: 'Request body is too large.' }, { status: 413 });
+    }
+
+    let body: unknown;
+    try {
+      const rawBody = await req.text();
+      if (rawBody.length > 4096) {
+        return NextResponse.json({ success: false, error: 'Request body is too large.' }, { status: 413 });
+      }
+      body = JSON.parse(rawBody);
+    } catch {
+      return NextResponse.json({ success: false, error: 'Invalid request body.' }, { status: 400 });
+    }
+
+    if (!body || typeof body !== 'object' || Array.isArray(body)) {
+      return NextResponse.json({ success: false, error: 'Invalid request body.' }, { status: 400 });
+    }
+    const { code, recoveryPassword } = body as { code?: unknown; recoveryPassword?: unknown };
+    if ((code !== undefined && typeof code !== 'string' && typeof code !== 'number') ||
+        (recoveryPassword !== undefined && typeof recoveryPassword !== 'string')) {
+      return NextResponse.json({ success: false, error: 'Invalid credential format.' }, { status: 400 });
+    }
 
     if (!code && !recoveryPassword) {
       return NextResponse.json(
