@@ -148,7 +148,7 @@ async function runP2PTradeFlowTests() {
         .eq('asset_code', 'USDT')
         .single();
 
-      if (sellerAsset && Number(sellerAsset.locked_escrow) >= 100) {
+      if (sellerAsset && Number(sellerAsset.locked_escrow) === 100 && Number(sellerAsset.available) === 400) {
         console.log(green(`  ✓ Order created (${tradeId})`));
         console.log(green(`  ✓ Seller available: ${sellerAsset.available}, locked_escrow: ${sellerAsset.locked_escrow}`));
         passedTests++;
@@ -208,7 +208,7 @@ async function runP2PTradeFlowTests() {
             .eq('id', tradeId)
             .single();
 
-          if (finishedTrade?.status === 'RELEASED' && Number(buyerAsset?.available) >= 100) {
+          if (finishedTrade?.status === 'RELEASED' && Number(buyerAsset?.available) === 100) {
             console.log(green('  ✓ Trade status marked RELEASED'));
             console.log(green(`  ✓ Buyer available credited: ${buyerAsset?.available} USDT`));
             passedTests++;
