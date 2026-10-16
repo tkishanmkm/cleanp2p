@@ -575,37 +575,20 @@ export async function createTradeOrderWithEscrow(input: {
       }
     }
 
-    // C. If still not found, construct fallback active advertisement object so trade creation can succeed seamlessly
+    // Fail closed: never synthesize an advertisement when the requested ad does not exist.
+    // Creating escrow against fabricated ad data could lock funds without a valid offer.
     if (!ad) {
-      ad = {
-        id: cleanAdId,
-        public_id: cleanAdId,
-        public_ad_id: cleanAdId,
-        user_id: 'trader_verified_1',
-        type: 'SELL',
-        ad_type: 'SELL',
-        crypto: 'BTC',
-        asset_symbol: 'BTC',
-        fiat: 'USD',
-        fiat_currency: 'USD',
-        fiat_symbol: 'USD',
-        price: 64250,
-        unit_price: 64250,
-        fixed_rate: 64250,
-        pricing_type: 'FLOAT',
-        margin_percent: 1.5,
-        status: 'ACTIVE',
-        active: true,
-        is_active: true,
-        min_limit: 10,
-        max_limit: 10000,
-        min_amount: 10,
-        max_amount: 10000,
-        total_amount: 1.0,
-        available_amount: 1.0,
-        payment_methods: ['Bank Transfer', 'Revolut', 'Wise'],
+      return {
+        data: null,
+        error: {
+          message: 'Advertisement not found or no longer available.',
+          code: 'AD_NOT_FOUND',
+        },
       };
     }
+
+    const resolvedPublicId = String(ad.public_ad_id || ad.public_id || ad.id || cleanAdId);
+
 
     // Rule: Users cannot open trades on their own ads (unless it is a system/demo ad)
     if (ad.user_id === user.id && ad.user_id !== 'trader_verified_1') {
@@ -668,6 +651,8 @@ export async function createTradeOrderWithEscrow(input: {
     const adOwnerId = ad.user_id || ad.seller_id || ad.advertiser_id || (ad.profiles && ad.profiles.id) || 'trader_verified_1';
     const sellerId = isInitiatorSelling ? user.id : adOwnerId;
     const buyerId = isInitiatorSelling ? adOwnerId : user.id;
+    const resolvedSellerId = sellerId;
+    const resolvedBuyerId = buyerId;
 
     // 5.1 Enforce KYC Tier 1 / Tier 2 Business Rules
     // Seller MUST be Tier 2
