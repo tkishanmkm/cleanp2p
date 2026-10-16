@@ -306,8 +306,10 @@ export async function POST(req: Request) {
         { status: 400 }
       );
     }
+    // Keep legacy and canonical direction columns consistent; never persist a conflicting
+    // client-supplied type alongside the validated trade_type.
     cleanPayload.trade_type = resolvedDirection;
-    cleanPayload.type = cleanPayload.type ? String(cleanPayload.type).toUpperCase() : resolvedDirection;
+    cleanPayload.type = resolvedDirection;
 
     // Enforce Tier 2 KYC for SELL ads (Tier 1 is blocked from selling)
     if (cleanPayload.type === 'SELL' || resolvedDirection === 'SELL') {
