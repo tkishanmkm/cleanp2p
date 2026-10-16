@@ -26,8 +26,13 @@ export async function GET(request: Request) {
       // Session fetch failed or not present
     }
 
-    if (!effectiveUserId && paramUserId) {
-      effectiveUserId = paramUserId;
+    // Never trust a client-supplied user ID for balance reads. The authenticated
+    // session is the sole source of identity; mismatched IDs are rejected.
+    if (effectiveUserId && paramUserId && paramUserId !== effectiveUserId) {
+      return NextResponse.json(
+        { success: false, error: 'Forbidden: cannot read another user wallet' },
+        { status: 403 }
+      );
     }
 
     if (!effectiveUserId) {
