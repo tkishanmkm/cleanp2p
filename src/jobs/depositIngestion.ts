@@ -1311,6 +1311,27 @@ async function refreshPendingDepositConfirmations(): Promise<{
             console.error('[Deposit Ingestion] Pending EVM USDT recheck requires Transfer-log verification; deposit remains pending');
             continue;
           }
+          // Native-asset pending rows must match the actual transaction recipient
+          // and exact wei value; receipt success alone is insufficient evidence.
+          if (!evmTransaction.to ||
+              !/^0x[0-9a-fA-F]{40}$/.test(destinationAddress) ||
+              evmTransaction.to.toLowerCase() !== destinationAddress.toLowerCase() ||
+              typeof dep.amount !== 'string' && typeof dep.amount !== 'number') {
+            console.error('[Deposit Ingestion] Pending EVM native transfer recipient or amount is invalid; deposit remains pending');
+            continue;
+          }
+          try {
+            const amountText = String(dep.amount);
+            if (!/^(0|[1-9]\\d*)(?:\\.\\d{1,18})?$/.test(amountText) ||
+                ethers.parseUnits(amountText, 18) <= 0n ||
+                ethers.parseUnits(amountText, 18) !== evmTransaction.value) {
+              console.error('[Deposit Ingestion] Pending EVM native transfer value does not match stored amount; deposit remains pending');
+              continue;
+            }
+          } catch {
+            console.error('[Deposit Ingestion] Pending EVM native amount is malformed; deposit remains pending');
+            continue;
+          }
           const currentBlock = await provider.getBlockNumber();
             if (!Number.isSafeInteger(receipt.blockNumber) || receipt.blockNumber <= 0 ||
                 !Number.isSafeInteger(currentBlock) || currentBlock < receipt.blockNumber) {
