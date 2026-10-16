@@ -8,9 +8,6 @@ export const revalidate = 0;
 
 export async function GET(request: Request) {
   try {
-    const { searchParams } = new URL(request.url);
-    const paramUserId = searchParams.get('userId') || searchParams.get('user_id');
-
     const supabase = await createClient();
 
     // 1. Authenticate User Session
@@ -24,10 +21,6 @@ export async function GET(request: Request) {
       }
     } catch {
       // Session fetch failed or not present
-    }
-
-    if (!effectiveUserId && paramUserId) {
-      effectiveUserId = paramUserId;
     }
 
     if (!effectiveUserId) {
