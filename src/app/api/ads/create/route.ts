@@ -67,7 +67,7 @@ export async function POST(req: Request) {
       const profileName = user.user_metadata?.full_name || user.user_metadata?.name || user.email?.split('@')[0] || 'Trader';
       const cleanUsername = user.user_metadata?.username || (user.email?.split('@')[0] || 'trader').toLowerCase().replace(/[^a-z0-9_]/g, '_');
 
-      await admin
+      const { error: profileUpsertError } = await admin
         .from('profiles')
         .upsert(
           {
@@ -79,8 +79,20 @@ export async function POST(req: Request) {
           },
           { onConflict: 'id', ignoreDuplicates: true }
         );
+
+      if (profileUpsertError) {
+        console.error('Profile auto-ensure failed in /api/ads/create:', profileUpsertError);
+        return NextResponse.json(
+          { error: 'Unable to prepare the account for advertisement creation. Please try again later.' },
+          { status: 500 }
+        );
+      }
     } catch (profileUpsertErr) {
-      console.warn('Profile auto-ensure warning in /api/ads/create:', profileUpsertErr);
+      console.error('Profile auto-ensure failed in /api/ads/create:', profileUpsertErr);
+      return NextResponse.json(
+        { error: 'Unable to prepare the account for advertisement creation. Please try again later.' },
+        { status: 500 }
+      );
     }
 
     let formData: unknown;
