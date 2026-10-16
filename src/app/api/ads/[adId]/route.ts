@@ -518,9 +518,13 @@ export async function PATCH(
       return NextResponse.json({ error: 'Advertisement not found.' }, { status: 404 });
     }
 
-    // Canonical p2p_ads is authoritative. If p2pAdsRow exists, canonical p2p update must succeed.
-    // If only legacy adsRow exists, ads update must succeed.
-    const overallSuccess = p2pAdsRow ? p2pMutated : adsMutated;
+    // If both representations exist, require both writes to succeed so a partial
+    // update cannot silently leave public status inconsistent across tables.
+    const existingRowCount = Number(Boolean(p2pAdsRow)) + Number(Boolean(adsRow));
+    const successfulUpdateCount = Number(p2pMutated) + Number(adsMutated);
+    const overallSuccess = successfulUpdateCount > 0 && (
+      existingRowCount === 1 || successfulUpdateCount === existingRowCount
+    );
 
     if (!overallSuccess) {
       console.error('[PATCH /api/ads/[adId]] Failed canonical row status update:', { p2pRowId: p2pAdsRow?.id, p2pMutated, adsRowId: adsRow?.id, adsMutated });
