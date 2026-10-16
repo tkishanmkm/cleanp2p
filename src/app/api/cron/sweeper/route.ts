@@ -12,7 +12,8 @@ function isAuthorized(req: NextRequest): boolean {
       process.env.WORKER_SECRET,
     ],
     customHeaderNames: ['x-service-key', 'x-worker-secret'],
-    checkQueryParam: true,
+    // Credentials must be sent in headers, never query parameters (URLs are logged).
+    checkQueryParam: false,
   });
 
   return result.authorized;
@@ -30,7 +31,7 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ success: true, timestamp: new Date().toISOString(), result });
   } catch (err: any) {
     console.error('[Cron Sweeper Error]:', err.message);
-    return NextResponse.json({ error: err.message }, { status: 500 });
+    return NextResponse.json({ error: 'Deposit sweeper job failed' }, { status: 500 });
   }
 }
 
