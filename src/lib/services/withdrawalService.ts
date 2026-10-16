@@ -404,7 +404,7 @@ export async function executeCanonicalWithdrawal(input: WithdrawalRequestInput):
   // =========================================================================
   if (usdEquivalent > hardMaxUsd) {
     // AUTOMATIC RESTRICTION
-    await supabaseAdmin
+    const { error: restrictionError } = await supabaseAdmin
       .from('profiles')
       .update({
         account_status: 'restricted',
@@ -413,7 +413,18 @@ export async function executeCanonicalWithdrawal(input: WithdrawalRequestInput):
       })
       .eq('id', user.id);
 
-    await supabaseAdmin.from('admin_audit_logs').insert({
+    if (restrictionError) {
+      console.error('Failed to persist hard-limit withdrawal restriction:', restrictionError.message);
+      return {
+        success: false,
+        status: 'SECURITY_CHECK_UNAVAILABLE',
+        error: 'Security restriction could not be applied. Withdrawals are disabled temporarily.',
+        message: 'Withdrawals are temporarily unavailable. Please contact support.',
+        statusCode: 503,
+      };
+    }
+
+    const { error: auditError } = await supabaseAdmin.from('admin_audit_logs').insert({
       admin_id: user.id,
       admin_email: 'security_monitor@paxones.com',
       action: 'SECURITY_RESTRICTION_HARD_MAX_EXCEEDED',
@@ -425,6 +436,17 @@ export async function executeCanonicalWithdrawal(input: WithdrawalRequestInput):
         amount: parsedAmount,
       },
     });
+
+    if (auditError) {
+      console.error('Failed to audit hard-limit withdrawal restriction:', auditError.message);
+      return {
+        success: false,
+        status: 'SECURITY_CHECK_UNAVAILABLE',
+        error: 'Security audit could not be recorded. Withdrawals are disabled temporarily.',
+        message: 'Withdrawals are temporarily unavailable. Please contact support.',
+        statusCode: 503,
+      };
+    }
 
     return {
       success: false,
@@ -480,7 +502,7 @@ export async function executeCanonicalWithdrawal(input: WithdrawalRequestInput):
 
   if (rolling24hUsd + usdEquivalent > dailyLimitUsd) {
     // AUTOMATIC RESTRICTION
-    await supabaseAdmin
+    const { error: restrictionError } = await supabaseAdmin
       .from('profiles')
       .update({
         account_status: 'restricted',
@@ -489,7 +511,18 @@ export async function executeCanonicalWithdrawal(input: WithdrawalRequestInput):
       })
       .eq('id', user.id);
 
-    await supabaseAdmin.from('admin_audit_logs').insert({
+    if (restrictionError) {
+      console.error('Failed to persist daily-limit withdrawal restriction:', restrictionError.message);
+      return {
+        success: false,
+        status: 'SECURITY_CHECK_UNAVAILABLE',
+        error: 'Security restriction could not be applied. Withdrawals are disabled temporarily.',
+        message: 'Withdrawals are temporarily unavailable. Please contact support.',
+        statusCode: 503,
+      };
+    }
+
+    const { error: auditError } = await supabaseAdmin.from('admin_audit_logs').insert({
       admin_id: user.id,
       admin_email: 'security_monitor@paxones.com',
       action: 'SECURITY_RESTRICTION_DAILY_LIMIT_EXCEEDED',
@@ -500,6 +533,17 @@ export async function executeCanonicalWithdrawal(input: WithdrawalRequestInput):
         daily_limit_usd: dailyLimitUsd,
       },
     });
+
+    if (auditError) {
+      console.error('Failed to audit daily-limit withdrawal restriction:', auditError.message);
+      return {
+        success: false,
+        status: 'SECURITY_CHECK_UNAVAILABLE',
+        error: 'Security audit could not be recorded. Withdrawals are disabled temporarily.',
+        message: 'Withdrawals are temporarily unavailable. Please contact support.',
+        statusCode: 503,
+      };
+    }
 
     return {
       success: false,
