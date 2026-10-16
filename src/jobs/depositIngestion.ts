@@ -208,8 +208,12 @@ async function scanEvmTokenDeposits(
           continue;
         }
 
+        if (!Number.isSafeInteger(log.blockNumber) || log.blockNumber <= 0 || log.blockNumber > latestBlock) {
+          errors.push(`Invalid or non-canonical block height for tx ${log.transactionHash}`);
+          continue;
+        }
+        const confirmations = latestBlock - log.blockNumber + 1;
         detected++;
-        const confirmations = Math.max(1, latestBlock - log.blockNumber + 1);
 
         // Call canonical atomic deposit RPC using the exact decimal amount string.
         const { data, error } = await supabaseAdmin.rpc('process_deposit_atomic', {
@@ -289,7 +293,11 @@ async function scanEvmNativeDeposits(
             errors.push(`Invalid native transfer amount for ${tx.hash}`);
             continue;
           }
-          const confirmations = Math.max(1, latestBlock - b + 1);
+          if (!Number.isSafeInteger(b) || b <= 0 || b > latestBlock) {
+            errors.push(`Invalid or non-canonical block height for native tx ${tx.hash}`);
+            continue;
+          }
+          const confirmations = latestBlock - b + 1;
 
           const { data, error } = await supabaseAdmin.rpc('process_deposit_atomic', {
             p_destination_address: toClean,
