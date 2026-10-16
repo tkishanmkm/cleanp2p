@@ -1,5 +1,5 @@
 import { createClient } from '@supabase/supabase-js';
-import { processWithdrawalQueue } from '../src/jobs/withdrawalWorker';
+import { randomUUID, randomBytes } from 'node:crypto';
 import { CANONICAL_USDT_CONTRACTS } from '../src/jobs/depositIngestion';
 
 // SAFETY: This integration test writes directly to wallet tables and invokes the
@@ -40,11 +40,11 @@ async function runBlockchainWorkerTests() {
   console.log(bold(cyan('======================================================\n')));
 
   let passedTests = 0;
-  const totalTests = 4;
+  const totalTests = 2;
 
-  const testUserId = '00000000-0000-0000-0000-000000000099';
-  const testWalletId = '99999999-9999-9999-9999-999999999999';
-  const testDepositAddress = '0x1111111111111111111111111111111111111111';
+  const testUserId = randomUUID();
+  const testWalletId = randomUUID();
+  const testDepositAddress = `0x${randomBytes(20).toString('hex')}`;
 
   try {
     // ------------------------------------------------------------------------
@@ -163,94 +163,12 @@ async function runBlockchainWorkerTests() {
       }
     }
 
-    // ------------------------------------------------------------------------
-    // TEST 3: Outbound Withdrawal Queue & Nonce Allocation
-    // ------------------------------------------------------------------------
-    console.log(bold('\nTest 3: Outbound Withdrawal Queue Processing & Sequential Nonce'));
-    // Lock 50 USDT for withdrawal
-    await supabase.from('wallet_assets').update({
-      available: 200.0,
-      locked_withdrawal: 50.0,
-    }).eq('wallet_id', testWalletId).eq('asset_code', 'USDT');
+    // IMPORTANT: Withdrawal-worker broadcasting is intentionally excluded from this
+    // integration suite. The worker currently uses real configured chain providers;
+    // setting BLOCKCHAIN_TEST_MODE=mock alone does not inject a mock provider.
+    // Test withdrawal queue/nonce/broadcast behavior only after dependency injection
+    // provides a provably mocked signer/provider. Never broadcast from this suite.
 
-    const testWithdrawalId = '88888888-8888-8888-8888-888888888888';
-    await supabase.from('onchain_withdrawals').upsert(
-      {
-        id: testWithdrawalId,
-        user_id: testUserId,
-        wallet_id: testWalletId,
-        to_address: '0x2222222222222222222222222222222222222222',
-        asset_symbol: 'USDT',
-        amount: 50.0,
-        network: 'BEP20',
-        status: 'PENDING',
-        created_at: new Date().toISOString(),
-      },
-      { onConflict: 'id' }
-    );
-
-    // Run withdrawal processor
-    const workerResult = await processWithdrawalQueue();
-
-    if (!workerResult.processed) {
-      console.log(red(`  ✗ Withdrawal queue did not process record: ${workerResult.error}`));
-    } else {
-      // Query state of withdrawal
-      const { data: processedWithdrawal } = await supabase
-        .from('onchain_withdrawals')
-        .select('status, tx_hash, nonce')
-        .eq('id', testWithdrawalId)
-        .single();
-
-      if (
-        processedWithdrawal &&
-        ['SUBMITTED', 'PROCESSING'].includes(processedWithdrawal.status) &&
-        processedWithdrawal.tx_hash
-      ) {
-        console.log(green(`  ✓ Withdrawal claimed & broadcasted (tx: ${processedWithdrawal.tx_hash})`));
-        console.log(green(`  ✓ Nonce allocated: ${processedWithdrawal.nonce}, status: ${processedWithdrawal.status}`));
-        passedTests++;
-      } else {
-        console.log(red(`  ✗ Withdrawal state invalid: ${JSON.stringify(processedWithdrawal)}`));
-      }
-    }
-
-    // ------------------------------------------------------------------------
-    // TEST 4: On-chain Confirmation & Final Settlement
-    // ------------------------------------------------------------------------
-    console.log(bold('\nTest 4: Withdrawal Final Confirmation (complete_onchain_withdrawal)'));
-    const { data: confirmResult, error: confirmErr } = await supabase.rpc('complete_onchain_withdrawal', {
-      p_withdrawal_id: testWithdrawalId,
-      p_tx_hash: '0xbep20_confirmed_tx_hash_123',
-    });
-
-    if (confirmErr) {
-      console.log(red(`  ✗ complete_onchain_withdrawal failed: ${confirmErr.message}`));
-    } else {
-      const { data: confirmedAsset } = await supabase
-        .from('wallet_assets')
-        .select('available, locked_withdrawal')
-        .eq('wallet_id', testWalletId)
-        .eq('asset_code', 'USDT')
-        .single();
-
-      const { data: finalWithdrawal } = await supabase
-        .from('onchain_withdrawals')
-        .select('status')
-        .eq('id', testWithdrawalId)
-        .single();
-
-      if (
-        finalWithdrawal?.status === 'CONFIRMED' &&
-        Number(confirmedAsset?.locked_withdrawal) === 0
-      ) {
-        console.log(green('  ✓ Withdrawal status marked CONFIRMED'));
-        console.log(green(`  ✓ locked_withdrawal liability cleanly cleared to 0 (available: ${confirmedAsset?.available})`));
-        passedTests++;
-      } else {
-        console.log(red(`  ✗ Final confirmation failed: ${JSON.stringify(confirmedAsset)}`));
-      }
-    }
   } catch (err: any) {
     console.error(red(`\nFatal error in blockchain worker tests: ${err.message}`));
   } finally {
@@ -258,7 +176,10 @@ async function runBlockchainWorkerTests() {
     console.log(bold(`Results: ${passedTests}/${totalTests} tests passed.`));
     console.log(bold(cyan('------------------------------------------------------\n')));
     if (passedTests === totalTests) {
-      console.log(green(bold('ALL BLOCKCHAIN INGESTION & WITHDRAWAL TESTS PASSED!')));
+      console.log(green(bold('ALL BLOCKCHAIN DEPOSIT INTEGRATION TESTS PASSED!')));
+    } else {
+      process.exitCode = 1;
+      console.log(red(bold('BLOCKCHAIN DEPOSIT INTEGRATION TESTS FAILED.')));
     }
   }
 }
