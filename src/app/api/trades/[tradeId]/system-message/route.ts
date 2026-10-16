@@ -117,13 +117,12 @@ export async function POST(
       try {
         const { data: bp } = await supabaseAdmin
           .from('profiles')
-          .select('username, display_name, email')
+          .select('username, display_name')
           .eq('id', trade.buyer_id)
           .maybeSingle();
 
         if (bp?.username) buyerUsername = bp.username;
         else if (bp?.display_name && !buyerUsername) buyerUsername = bp.display_name;
-        else if (bp?.email && !buyerUsername) buyerUsername = bp.email.split('@')[0];
       } catch (bpErr) {
         console.warn('Buyer profile lookup failed in system message:', bpErr instanceof Error ? bpErr.name : 'UnknownError');
       }
@@ -134,8 +133,6 @@ export async function POST(
           const { data: authUser } = await supabaseAdmin.auth.admin.getUserById(trade.buyer_id);
           if (authUser?.user?.user_metadata?.username) {
             buyerUsername = authUser.user.user_metadata.username;
-          } else if (authUser?.user?.email) {
-            buyerUsername = authUser.user.email.split('@')[0];
           }
         } catch (buyerAuthLookupError) {
           console.warn('Buyer auth profile fallback failed:', buyerAuthLookupError instanceof Error ? buyerAuthLookupError.name : 'UnknownError');
@@ -147,13 +144,12 @@ export async function POST(
       try {
         const { data: sp } = await supabaseAdmin
           .from('profiles')
-          .select('username, display_name, email')
+          .select('username, display_name')
           .eq('id', trade.seller_id)
           .maybeSingle();
 
         if (sp?.username) sellerUsername = sp.username;
         else if (sp?.display_name && !sellerUsername) sellerUsername = sp.display_name;
-        else if (sp?.email && !sellerUsername) sellerUsername = sp.email.split('@')[0];
       } catch (spErr) {
         console.warn('Seller profile lookup failed in system message:', spErr instanceof Error ? spErr.name : 'UnknownError');
       }
@@ -164,8 +160,6 @@ export async function POST(
           const { data: authUser } = await supabaseAdmin.auth.admin.getUserById(trade.seller_id);
           if (authUser?.user?.user_metadata?.username) {
             sellerUsername = authUser.user.user_metadata.username;
-          } else if (authUser?.user?.email) {
-            sellerUsername = authUser.user.email.split('@')[0];
           }
         } catch (sellerAuthLookupError) {
           console.warn('Seller auth profile fallback failed:', sellerAuthLookupError instanceof Error ? sellerAuthLookupError.name : 'UnknownError');
