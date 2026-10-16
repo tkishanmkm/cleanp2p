@@ -1338,7 +1338,7 @@ async function refreshPendingDepositConfirmations(): Promise<{
               const amountText = String(dep.amount);
               if (!parsedTransfer || parsedTransfer.name !== 'Transfer' ||
                   (parsedTransfer.args[1] as string).toLowerCase() !== destinationAddress.toLowerCase() ||
-                  !/^(0|[1-9]\\d*)(?:\\.\\d{1,36})?$/.test(amountText) ||
+                  !/^(0|[1-9]\d*)(?:\.\d{1,36})?$/.test(amountText) ||
                   ethers.parseUnits(amountText, tokenDecimals) <= 0n ||
                   ethers.parseUnits(amountText, tokenDecimals) !== parsedTransfer.args[2]) {
                 console.error('[Deposit Ingestion] Pending EVM USDT recipient or raw amount mismatch; deposit remains pending');
