@@ -327,6 +327,7 @@ export default function CreateP2PAdPage() {
   const router = useRouter();
   const { balances } = useWallet();
   const [user, setUser] = useState<any>(null);
+  const [profile, setProfile] = useState<any>(null);
   const [authLoading, setAuthLoading] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
@@ -339,10 +340,14 @@ export default function CreateP2PAdPage() {
         const { data: { session } } = await supabase.auth.getSession();
         if (isMounted && session?.user) {
           setUser(session.user);
+          const { data: profileData } = await supabase.from('profiles').select('is_verified, id_verified, is_id_verified, kyc_status, verification_tier').eq('id', session.user.id).maybeSingle();
+          if (isMounted) setProfile(profileData);
         } else {
           const { data: { user: currentUser } } = await supabase.auth.getUser();
           if (isMounted && currentUser) {
             setUser(currentUser);
+            const { data: profileData } = await supabase.from('profiles').select('is_verified, id_verified, is_id_verified, kyc_status, verification_tier').eq('id', currentUser.id).maybeSingle();
+            if (isMounted) setProfile(profileData);
           }
         }
       } catch (err) {
@@ -360,6 +365,10 @@ export default function CreateP2PAdPage() {
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
       if (isMounted) {
         setUser(session?.user ?? null);
+        setProfile(null);
+        if (session?.user) {
+          void supabase.from('profiles').select('is_verified, id_verified, is_id_verified, kyc_status, verification_tier').eq('id', session.user.id).maybeSingle().then(({ data }) => { if (isMounted) setProfile(data); });
+        }
       }
     });
 
