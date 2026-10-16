@@ -531,7 +531,19 @@ export async function executeCanonicalWithdrawal(input: WithdrawalRequestInput):
     };
   }
 
-  if (rolling24hUsd + usdEquivalent > dailyLimitUsd) {
+  const projected24hUsd = rolling24hUsd + usdEquivalent;
+  if (!Number.isFinite(projected24hUsd) || projected24hUsd < 0) {
+    console.error('Projected rolling withdrawal total is invalid.');
+    return {
+      success: false,
+      status: 'SECURITY_CHECK_UNAVAILABLE',
+      error: 'Daily withdrawal total could not be verified.',
+      message: 'Withdrawals are temporarily unavailable. Please try again later.',
+      statusCode: 503,
+    };
+  }
+
+  if (projected24hUsd > dailyLimitUsd) {
     // AUTOMATIC RESTRICTION
     const { error: restrictionError } = await supabaseAdmin
       .from('profiles')
