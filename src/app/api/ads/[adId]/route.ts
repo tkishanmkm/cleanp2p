@@ -532,6 +532,19 @@ export async function PATCH(
       );
     }
 
+    // Re-enabling an advertisement must respect platform-wide controls.
+    if (isActive && !isAdmin) {
+      try {
+        const { assertPlatformControlAllowed } = await import('@/lib/platform-guard');
+        await assertPlatformControlAllowed('new_ad', { userId: user.id });
+      } catch (controlErr: any) {
+        return NextResponse.json(
+          { error: controlErr.message || 'Advertisement activation is temporarily unavailable.', code: 'PLATFORM_CONTROL_BLOCKED' },
+          { status: 403 }
+        );
+      }
+    }
+
     // 5. Independently resolve both target rows
     const { p2pAdsRow, adsRow } = await resolveBothTargetRows(existingAd, adId, admin);
 
