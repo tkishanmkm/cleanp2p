@@ -219,6 +219,7 @@ export async function POST(
         .from('trade_messages')
         .select('id')
         .eq('trade_id', actualTradeId)
+        .eq('sender_id', systemUuid)
         .or('message.ilike.%TRADE INITIATED%,message.ilike.%PAXONES ESCROW SECURED%,message.ilike.%safely held in Paxones Escrow%')
         .limit(1)
         .maybeSingle();
@@ -246,6 +247,7 @@ export async function POST(
         .from('trade_messages')
         .select('id')
         .eq('trade_id', actualTradeId)
+        .eq('sender_id', systemUuid)
         .or('message.ilike.%TRADE EXPIRED%,message.ilike.%PAYMENT TIME EXCEEDED%')
         .limit(1)
         .maybeSingle();
@@ -262,6 +264,7 @@ export async function POST(
         .from('trade_messages')
         .select('id')
         .eq('trade_id', actualTradeId)
+        .eq('sender_id', systemUuid)
         .ilike('message', '%Trade cancelled%')
         .limit(1)
         .maybeSingle();
@@ -278,6 +281,7 @@ export async function POST(
         .from('trade_messages')
         .select('id')
         .eq('trade_id', actualTradeId)
+        .eq('sender_id', systemUuid)
         .or('message.ilike.%sold%successfully to%,message.ilike.%bought%successfully from%')
         .limit(1)
         .maybeSingle();
