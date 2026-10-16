@@ -371,6 +371,11 @@ const checks: Array<[string, string, RegExp]> = [
     /const disabledReason = 'TRON gas funding is disabled[\s\S]*?update_sweep_operation_status[\s\S]*?p_new_status: 'RECOVERY_REQUIRED'[\s\S]*?recoveryRes\.success !== true[\s\S]*?throw new Error\(disabledReason\)/i,
   ],
   [
+    'TRON hot-wallet insolvency checks RECOVERY_REQUIRED persistence errors',
+    'src/jobs/sweeperWorker.ts',
+    /export async function fundTronGasForAddress[\s\S]*?const insolvMsg = `TRON hot wallet[\s\S]*?insolvencyPersistErr[\s\S]*?status: 'RECOVERY_REQUIRED'[\s\S]*?RECOVERY_REQUIRED persistence failed/i,
+  ],
+  [
     'disabled TRON gas funding moves the sweep from GAS_FUNDING to RECOVERY_REQUIRED',
     'src/jobs/sweeperWorker.ts',
     /p_expected_status: 'GAS_FUNDING'[\s\S]*?p_new_status: 'RECOVERY_REQUIRED'[\s\S]*?failed to persist sweep recovery status[\s\S]*?throw new Error\(disabledReason\)/i,
