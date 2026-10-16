@@ -44,9 +44,21 @@ export async function POST(
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
+    const contentLength = req.headers.get('content-length');
+    if (contentLength !== null) {
+      const parsedLength = Number(contentLength);
+      if (!Number.isFinite(parsedLength) || parsedLength < 0 || parsedLength > 64 * 1024) {
+        return NextResponse.json({ error: 'Request body exceeds the 64 KB limit.' }, { status: 413 });
+      }
+    }
+
     let body: unknown;
     try {
-      body = await req.json();
+      const rawBody = await req.text();
+      if (rawBody.length > 64 * 1024) {
+        return NextResponse.json({ error: 'Request body exceeds the 64 KB limit.' }, { status: 413 });
+      }
+      body = JSON.parse(rawBody);
     } catch {
       return NextResponse.json({ error: 'Request body must contain valid JSON.' }, { status: 400 });
     }
