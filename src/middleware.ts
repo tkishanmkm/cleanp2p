@@ -313,8 +313,30 @@ export async function middleware(request: NextRequest) {
       }
     }
   } catch (e) {
-    // Silently continue if session read fails in middleware
-    console.warn('Middleware auth check warning:', e);
+    // Do not silently allow API requests to proceed when authentication/security
+    // checks could not be completed. Financial and privileged handlers must fail closed.
+    console.error('Middleware security check failed:', e);
+    const pathname = request.nextUrl.pathname;
+
+    if (pathname.startsWith('/api/')) {
+      return NextResponse.json(
+        { success: false, error: 'Security checks temporarily unavailable.', code: 'SECURITY_CHECK_UNAVAILABLE' },
+        { status: 503, headers: { 'Cache-Control': 'no-store' } }
+      );
+    }
+
+    // Keep public pages available, but fail closed for protected application areas.
+    const protectedPage = [
+      '/adminnarayan', '/dashboard', '/wallet', '/deposit', '/withdraw',
+      '/transactions', '/trade', '/ads', '/profile', '/settings'
+    ].some((prefix) => pathname === prefix || pathname.startsWith(prefix + '/'));
+
+    if (protectedPage) {
+      const url = request.nextUrl.clone();
+      url.pathname = '/login';
+      url.searchParams.set('error', 'security_check_unavailable');
+      return NextResponse.redirect(url);
+    }
   }
 
   return supabaseResponse;
