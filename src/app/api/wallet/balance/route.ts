@@ -8,9 +8,6 @@ export const revalidate = 0;
 
 export async function GET(request: Request) {
   try {
-    const { searchParams } = new URL(request.url);
-    const paramUserId = searchParams.get('userId') || searchParams.get('user_id');
-
     const supabase = await createClient();
 
     // 1. Authenticate User Session
@@ -325,10 +322,10 @@ export async function GET(request: Request) {
       wallets: formattedList,
       raw: rawRecords,
     });
-  } catch (err: any) {
+  } catch (err: unknown) {
     console.error('Unhandled balance fetch error:', err);
     return NextResponse.json(
-      { success: false, error: err.message || 'Internal server error' },
+      { success: false, error: 'Unable to retrieve wallet balances right now.' },
       { status: 500 }
     );
   }
