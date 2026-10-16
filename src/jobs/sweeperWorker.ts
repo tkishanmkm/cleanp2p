@@ -1118,6 +1118,7 @@ export async function undelegateEnergyToPool(
   if (
     typeof receiverAddress !== 'string' ||
     !tronWeb.isAddress(receiverAddress) ||
+    receiverAddress === poolAddress ||
     !/^\d+$/.test(rawDelegatedAmount) ||
     !Number.isSafeInteger(trxNeededSun) ||
     trxNeededSun <= 0
