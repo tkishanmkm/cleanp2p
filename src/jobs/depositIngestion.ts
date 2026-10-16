@@ -1383,6 +1383,12 @@ async function refreshPendingDepositConfirmations(): Promise<{
               continue;
             }
             const confs = currentBlock - receipt.blockNumber + 1;
+            if (!Number.isSafeInteger(chain.requiredConfirmations) ||
+                chain.requiredConfirmations < 1 ||
+                confs < chain.requiredConfirmations) {
+              console.info('[Deposit Ingestion] Pending EVM deposit has not reached the configured confirmation threshold; it remains pending');
+              continue;
+            }
 
             const { data, error: rpcErr } = await supabaseAdmin.rpc('process_deposit_atomic', {
               p_destination_address: destinationAddress,
