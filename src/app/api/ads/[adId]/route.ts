@@ -105,16 +105,37 @@ export async function GET(
       }
     }
 
-    const tags = Array.isArray(ad.tags)
+    paymentMethods = paymentMethods
+      .filter((item): item is string => typeof item === 'string')
+      .map(item => item.trim())
+      .filter(item => item.length > 0 && item.length <= 80)
+      .slice(0, 20);
+
+    const rawTags = Array.isArray(ad.tags)
       ? ad.tags
       : Array.isArray(ad.offer_tags)
       ? ad.offer_tags
       : Array.isArray(ad.ad_tags)
       ? ad.ad_tags
       : [];
+    const tags = [...new Set(
+      rawTags
+        .filter((item: unknown): item is string => typeof item === 'string')
+        .map((item: string) => item.trim())
+        .filter((item: string) => item.length > 0 && item.length <= 80)
+    )].slice(0, 50);
 
-    const targetedCountries = Array.isArray(ad.targeted_countries) ? ad.targeted_countries : [];
-    const blockedCountries = Array.isArray(ad.blocked_countries) ? ad.blocked_countries : [];
+    const normalizeCountryList = (value: unknown): string[] =>
+      Array.isArray(value)
+        ? [...new Set(
+            value
+              .filter((item: unknown): item is string => typeof item === 'string')
+              .map((item: string) => item.trim().toUpperCase())
+              .filter((item: string) => item.length > 0 && item.length <= 80)
+          )].slice(0, 50)
+        : [];
+    const targetedCountries = normalizeCountryList(ad.targeted_countries);
+    const blockedCountries = normalizeCountryList(ad.blocked_countries);
     const paymentWindow = Number(ad.payment_window ?? ad.payment_window_minutes ?? 30);
     const minTrades = Number(ad.min_completed_trades ?? 0);
     const requireFullName = Boolean(ad.require_full_name_verified);
