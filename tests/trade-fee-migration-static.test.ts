@@ -492,8 +492,12 @@ assert.doesNotMatch(marketPriceWorker, /NEXT_PUBLIC_SUPABASE_ANON_KEY|placeholde
 
 const marketPriceCronRoutePath = join(process.cwd(), 'src/app/api/cron/update-prices/route.ts');
 const marketPriceCronRoute = readFileSync(marketPriceCronRoutePath, 'utf8');
-assert.match(marketPriceCronRoute, /result\.error === 'SUPABASE_SERVICE_CONFIGURATION_MISSING'[\s\S]*?\? 503 : 500/,
+assert.match(marketPriceCronRoute, /result\.error === 'SUPABASE_SERVICE_CONFIGURATION_MISSING'[\s\S]*?unavailable \? 503 : 500/,
   'cron endpoint must report missing server credentials as service unavailable, not a generic internal error');
+assert.doesNotMatch(marketPriceCronRoute, /error: result\.error/,
+  'cron endpoint must not expose raw worker/provider/database errors to clients');
+assert.match(marketPriceCronRoute, /Market price service unavailable/,
+  'cron endpoint must use a generic service-unavailable message');
 
 assert.ok(
   marketPriceCronRoute.indexOf('if (!auth.authorized)') < marketPriceCronRoute.indexOf('await runMarketPriceUpdate()'),
