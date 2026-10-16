@@ -139,6 +139,8 @@ export async function getTronTransactionConfirmations(txHash: string): Promise<{
   confirmations: number;
   isConfirmed: boolean;
   success: boolean;
+  /** True only when a mined transaction has an explicit non-success receipt. */
+  isFailed: boolean;
   blockNumber?: number;
   actualCostTrx?: string;
 }> {
@@ -148,7 +150,7 @@ export async function getTronTransactionConfirmations(txHash: string): Promise<{
     // Get transaction info
     const txInfo = await tronWeb.trx.getTransactionInfo(txHash);
     if (!txInfo || !txInfo.blockNumber) {
-      return { confirmations: 0, isConfirmed: false, success: false };
+      return { confirmations: 0, isConfirmed: false, success: false, isFailed: false };
     }
 
     // Get current block
@@ -162,7 +164,7 @@ export async function getTronTransactionConfirmations(txHash: string): Promise<{
     const actualCostTrx = `${wholeTrx}.${fractionSun}`;
 
     if (!currentHeight) {
-      return { confirmations: 1, isConfirmed: false, success: !txInfo.receipt?.result, actualCostTrx };
+      return { confirmations: 1, isConfirmed: false, success: !txInfo.receipt?.result || txInfo.receipt.result === 'SUCCESS', isFailed: Boolean(txInfo.receipt?.result && txInfo.receipt.result !== 'SUCCESS'), actualCostTrx };
     }
 
     const confirmations = Math.max(0, currentHeight - txInfo.blockNumber + 1);
@@ -172,6 +174,7 @@ export async function getTronTransactionConfirmations(txHash: string): Promise<{
       confirmations,
       isConfirmed: confirmations >= TRON_CONFIG.requiredConfirmations && success,
       success,
+      isFailed: Boolean(txInfo.receipt?.result && txInfo.receipt.result !== 'SUCCESS'),
       blockNumber: txInfo.blockNumber,
       actualCostTrx,
     };
