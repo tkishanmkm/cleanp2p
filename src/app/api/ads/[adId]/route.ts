@@ -771,6 +771,12 @@ export async function PUT(
     }
     const paymentMethods = Array.isArray(rawPaymentMethods) ? rawPaymentMethods : undefined;
     const rawPaymentWindow = body.payment_window ?? body.payment_window_minutes ?? body.paymentWindow;
+    if (rawPaymentWindow !== undefined && rawPaymentWindow !== null && rawPaymentWindow !== '' && typeof rawPaymentWindow !== 'number' && typeof rawPaymentWindow !== 'string') {
+      return NextResponse.json({ error: 'Payment window must be a whole number between 30 and 1440 minutes.' }, { status: 400 });
+    }
+    if (typeof rawPaymentWindow === 'string' && rawPaymentWindow.trim() === '') {
+      return NextResponse.json({ error: 'Payment window must be a whole number between 30 and 1440 minutes.' }, { status: 400 });
+    }
     const parsedPaymentWindow = rawPaymentWindow !== undefined && rawPaymentWindow !== null && rawPaymentWindow !== ''
       ? Number(rawPaymentWindow)
       : undefined;
