@@ -101,14 +101,19 @@ export async function POST(req: Request) {
       if (prof?.username) reporterUsername = prof.username;
     } catch {}
 
-    // Post official Paxones system message to trade chat
-    await insertPaxonesSystemMessage(adminClient, {
-      tradeId: trade.id,
-      type: 'ISSUE_REPORTED',
-      openerUsername: reporterUsername,
-      issueCategory: category.trim(),
-      issueDetails: description.trim()
-    });
+    // The report record is authoritative. A chat-message failure must not make
+    // clients believe the report itself failed and encourage duplicate submissions.
+    try {
+      await insertPaxonesSystemMessage(adminClient, {
+        tradeId: trade.id,
+        type: 'ISSUE_REPORTED',
+        openerUsername: reporterUsername,
+        issueCategory: category.trim(),
+        issueDetails: description.trim()
+      });
+    } catch (messageError) {
+      console.error('Trade report saved but system message failed:', messageError);
+    }
 
     return NextResponse.json({ success: true, report: data });
   } catch (error: any) {
