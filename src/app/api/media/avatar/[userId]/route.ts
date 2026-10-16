@@ -29,7 +29,7 @@ export async function GET(
         });
       }
       if (cached.buffer && cached.contentType) {
-        return new NextResponse(cached.buffer, {
+        return new NextResponse(new Uint8Array(cached.buffer), {
           headers: {
             'Content-Type': cached.contentType,
             'Cache-Control': 'public, max-age=86400, stale-while-revalidate=604800',
@@ -125,7 +125,7 @@ export async function GET(
           if (fileData && fileData.buffer && fileData.buffer.length > 0) {
             const ct = fileData.contentType || (key.endsWith('.webp') ? 'image/webp' : 'image/jpeg');
             avatarCache.set(userId, { buffer: fileData.buffer, contentType: ct, timestamp: Date.now() });
-            return new NextResponse(fileData.buffer, {
+            return new NextResponse(new Uint8Array(fileData.buffer), {
               headers: {
                 'Content-Type': ct,
                 'Cache-Control': 'public, max-age=86400, stale-while-revalidate=604800',
