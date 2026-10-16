@@ -520,15 +520,16 @@ async function scanTronDeposits(
               continue;
             }
 
-            // Only canonical-token transfers may reserve a transaction/output key;
-            // an unrelated token event must not suppress a real USDT event.
-            const deduplicationKey = `${txId}_0`;
-            if (seenTxIndices.has(deduplicationKey)) continue;
-            seenTxIndices.add(deduplicationKey);
-            const rawVal = BigInt(item.value || '0');
+            const rawVal = BigInt(item.value);
             if (rawVal <= 0n) continue;
             const formattedAmount = ethers.formatUnits(rawVal, 6);
             if (!/^(?:0|[1-9]\d*)(?:\.\d+)?$/.test(formattedAmount)) continue;
+
+            // Reserve the idempotency key only after the event passes validation.
+            // This avoids malformed/zero-value records suppressing a valid retry.
+            const deduplicationKey = `${txId}_0`;
+            if (seenTxIndices.has(deduplicationKey)) continue;
+            seenTxIndices.add(deduplicationKey);
 
             // Fetch block number from TRON RPC if missing from account event
             let eventBlock = item.block_number || 0;
