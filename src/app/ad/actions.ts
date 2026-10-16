@@ -179,6 +179,7 @@ export async function getMarketplaceAds(tradeType: 'BUY' | 'SELL' | 'buy' | 'sel
         )
       `)
       .or(`trade_type.eq.${queryTradeType},type.eq.${queryTradeType.toLowerCase()}`)
+      .eq('is_active', true)
       .order('created_at', { ascending: false });
 
     if (error) {
