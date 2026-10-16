@@ -55,7 +55,7 @@ export async function POST(
     let body: unknown;
     try {
       const rawBody = await req.text();
-      if (rawBody.length > 64 * 1024) {
+      if (new TextEncoder().encode(rawBody).byteLength > 64 * 1024) {
         return NextResponse.json({ error: 'Request body exceeds the 64 KB limit.' }, { status: 413 });
       }
       body = JSON.parse(rawBody);
