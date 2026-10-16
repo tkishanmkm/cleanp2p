@@ -348,7 +348,12 @@ export async function POST(req: Request) {
     }
 
     // Authoritative Server-Side ±50% Reference Market Price Validation
-    const isFixedPricing = String(cleanPayload.pricing_type || cleanPayload.rate_type || '').toUpperCase() === 'FIXED' || Boolean(cleanPayload.is_fixed);
+    const pricingType = String(cleanPayload.pricing_type ?? '').trim().toUpperCase();
+    const rateType = String(cleanPayload.rate_type ?? '').trim().toUpperCase();
+    const isFixedPricing =
+      pricingType === 'FIXED' ||
+      rateType === 'FIXED' ||
+      cleanPayload.is_fixed === true;
 
     if (isFixedPricing) {
       if (effectivePrice === null || effectivePrice <= 0) {
