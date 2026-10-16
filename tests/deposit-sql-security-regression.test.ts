@@ -280,6 +280,11 @@ const checks: Array<[string, string, RegExp]> = [
     'src/jobs/sweeperWorker.ts',
     /Timed out waiting for TRON gas funding transaction confirmation[\s\S]*?status: 'RECOVERY_REQUIRED'[\s\S]*?throw new Error\(reason\)[\s\S]*?TRON gas funding confirmation/i,
   ],
+  [
+    'TRON gas funding validates recipient and positive safe-integer amount before claiming',
+    'src/jobs/sweeperWorker.ts',
+    /export async function fundTronGasForAddress[\s\S]*?if \(!targetAddress \|\| !Number\.isSafeInteger\(amountSun\) \|\| amountSun <= 0\)[\s\S]*?Invalid TRON gas funding recipient or amount[\s\S]*?claim_gas_funding_operation/i,
+  ],
 ];
 
 let failed = 0;
