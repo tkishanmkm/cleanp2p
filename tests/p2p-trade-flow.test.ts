@@ -195,18 +195,24 @@ async function runP2PTradeFlowTests() {
           console.log(red(`  ✗ release_trade_escrow failed: ${releaseErr.message}`));
         } else {
           // Verify buyer received funds
-          const { data: buyerAsset } = await supabase
+          const { data: buyerAsset, error: buyerAssetReadError } = await supabase
             .from('wallet_assets')
             .select('available')
             .eq('wallet_id', buyerWalletId)
             .eq('asset_code', 'USDT')
             .single();
+          if (buyerAssetReadError) {
+            throw new Error(`Unable to verify buyer credit after release: ${buyerAssetReadError.message}`);
+          }
 
-          const { data: finishedTrade } = await supabase
+          const { data: finishedTrade, error: finishedTradeReadError } = await supabase
             .from('trades')
             .select('status')
             .eq('id', tradeId)
             .single();
+          if (finishedTradeReadError) {
+            throw new Error(`Unable to verify trade status after release: ${finishedTradeReadError.message}`);
+          }
 
           if (finishedTrade?.status === 'RELEASED' && Number(buyerAsset?.available) === 100) {
             console.log(green('  ✓ Trade status marked RELEASED'));
