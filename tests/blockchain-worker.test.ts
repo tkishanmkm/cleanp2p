@@ -110,12 +110,13 @@ async function runBlockchainWorkerTests() {
       console.log(red(`  ✗ Ingest RPC failed: ${ingestErr.message}`));
     } else {
       // Check that wallet was credited
-      const { data: asset } = await supabase
+      const { data: asset, error: assetReadError } = await supabase
         .from('wallet_assets')
         .select('available')
         .eq('wallet_id', testWalletId)
         .eq('asset_code', 'USDT')
         .single();
+      if (assetReadError) throw new Error(`Unable to verify credited deposit balance: ${assetReadError.message}`);
 
       if (asset && Number(asset.available) === depositAmount) {
         console.log(green(`  ✓ Deposit recognized with ${requiredConfirmations} confirmations`));
@@ -151,12 +152,15 @@ async function runBlockchainWorkerTests() {
       const isAlreadyProcessed = parsedDup?.already_processed === true;
 
       // Verify balance didn't double
-      const { data: assetAfterDup } = await supabase
+      const { data: assetAfterDup, error: duplicateBalanceReadError } = await supabase
         .from('wallet_assets')
         .select('available')
         .eq('wallet_id', testWalletId)
         .eq('asset_code', 'USDT')
         .single();
+      if (duplicateBalanceReadError) {
+        throw new Error(`Unable to verify balance after duplicate deposit: ${duplicateBalanceReadError.message}`);
+      }
 
       if (isAlreadyProcessed && Number(assetAfterDup?.available) === depositAmount) {
         console.log(green('  ✓ Duplicate transaction detected and rejected'));
