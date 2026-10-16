@@ -448,7 +448,7 @@ const checks: Array<[string, string, RegExp]> = [
   [
     'LTC withdrawal confirmation poll requires explicit RPC success',
     'src/jobs/withdrawalWorker.ts',
-    /p_gas_asset: 'LTC',[\s\S]*?confData\?\.success === true/i,
+    /p_gas_asset: 'LTC',[\s\S]*?confData\?\.success !== true/i,
   ],
   [
     'TRON withdrawal completion requires explicit successful RPC result',
