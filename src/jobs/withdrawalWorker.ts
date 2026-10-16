@@ -498,13 +498,17 @@ export async function checkSubmittedWithdrawals(): Promise<{
                 }
               }
 
-              const { error: confErr } = await supabaseAdmin.rpc('complete_onchain_withdrawal', {
+              const { data: confData, error: confErr } = await supabaseAdmin.rpc('complete_onchain_withdrawal', {
                 p_withdrawal_id: w.id,
                 p_tx_hash: w.tx_hash,
                 p_actual_gas_amount: actualFeeLtc,
                 p_gas_asset: 'LTC',
               });
-              if (!confErr) confirmed++;
+              if (!confErr && confData?.success === true) {
+                confirmed++;
+              } else {
+                console.error(`[Withdrawal Worker] LTC confirmation RPC did not confirm completion for ${w.id}; retaining unresolved state.`, confErr || confData);
+              }
             }
           }
         } catch (ltcErr) {
