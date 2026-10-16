@@ -138,10 +138,12 @@ export async function runMarketPriceUpdate(): Promise<PriceUpdateResult> {
       if (geckoIds) {
         const cgData = await safeFetchJson(`https://api.coingecko.com/api/v3/simple/price?ids=${geckoIds}&vs_currencies=usd`);
         if (cgData && typeof cgData === 'object') {
-          Object.entries(COINGECKO_MAP).forEach(([symbol, id]) => {
+          missingGeckoAssets.forEach((symbol) => {
+            const id = COINGECKO_MAP[symbol];
+            if (!id) return;
             const val = cgData[id]?.usd;
-            const p = typeof val === 'number' ? val : parseFloat(val);
-            if (!isNaN(p) && isFinite(p) && p > 0) {
+            const p = typeof val === 'number' ? val : Number(val);
+            if (Number.isFinite(p) && p > 0 && !cryptoUsdPrices[symbol]) {
               cryptoUsdPrices[symbol] = p;
             }
           });
