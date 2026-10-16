@@ -68,6 +68,8 @@ export interface AdCardProps {
       last_seen?: string | null;
       seller_last_seen?: string | null;
       merchant_tier?: string | null;
+      created_at?: string | null;
+      createdAt?: string | null;
       completed_trades?: number;
       positive_feedback?: number;
       negative_feedback?: number;
