@@ -468,6 +468,9 @@ assert.match(geckoFallbackBlock, /&& !cryptoUsdPrices\[symbol\]/,
 assert.match(geckoFallbackBlock, /Number\.isFinite\(p\) && p > 0/,
   'CoinGecko fallback must reject non-finite and non-positive prices');
 
+assert.match(marketPriceWorker, /if \(!Number\.isFinite\(finalPrice\) \|\| finalPrice <= 0\) continue;/,
+  'rounded market prices must remain finite and strictly positive before database upsert');
+
 assert.match(marketPriceWorker, /liveAssets\.filter\(\(asset\) => asset !== 'USDT'\)/,
   'synthetic USDT peg must not count as a successful live crypto-provider response');
 assert.match(marketPriceWorker, /liveMarketAssets\.length === 0[\s\S]*?LIVE_CRYPTO_PROVIDER_UNAVAILABLE/,
