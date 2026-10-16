@@ -248,7 +248,7 @@ export async function POST(
       ]).select().maybeSingle();
 
       if (richInsert.error) {
-        // Fallback to basic columns if schema is strict
+        // Retry with the minimal schema only for compatibility.
         const baseInsert = await supabaseAdmin.from('trade_messages').insert([
           {
             trade_id: actualTradeId,
@@ -258,12 +258,18 @@ export async function POST(
           }
         ]).select().maybeSingle();
 
+        if (baseInsert.error) {
+          console.error('System-message persistence failed:', baseInsert.error.code || richInsert.error.code || 'UNKNOWN');
+          return NextResponse.json({ error: 'Unable to save system message.' }, { status: 500 });
+        }
         insertResult = baseInsert.data;
       } else {
         insertResult = richInsert.data;
       }
     } catch (insertErr) {
-      console.warn('Error inserting into trade_messages:', insertErr);
+      const errorName = insertErr instanceof Error ? insertErr.name : 'UnknownError';
+      console.error('System-message persistence threw:', errorName);
+      return NextResponse.json({ error: 'Unable to save system message.' }, { status: 500 });
     }
 
     // Also mirror to trade_chat_messages
