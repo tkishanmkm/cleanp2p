@@ -34,7 +34,15 @@ export async function POST(req: NextRequest) {
     }
 
     const admin = getSupabaseAdminClient();
-    const body = await req.json();
+    let body: unknown;
+    try {
+      body = await req.json();
+    } catch {
+      return NextResponse.json({ error: 'Invalid JSON request body.' }, { status: 400 });
+    }
+    if (typeof body !== 'object' || body === null || Array.isArray(body)) {
+      return NextResponse.json({ error: 'Request body must be a JSON object.' }, { status: 400 });
+    }
     const {
       recipientInput,
       recipientUsername,
