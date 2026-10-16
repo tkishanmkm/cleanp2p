@@ -351,10 +351,13 @@ export async function fundGasForAddress(
 
       if (receipt && receipt.status === 1) {
         console.log(`[Sweeper Gas Recovery] Funding tx ${existingTxHash} is already confirmed on-chain!`);
-        await supabaseAdmin.from('gas_funding_operations').update({
+        const { error: confirmedPersistErr } = await supabaseAdmin.from('gas_funding_operations').update({
           status: 'CONFIRMED',
           updated_at: new Date().toISOString(),
         }).eq('sweep_id', sweepId);
+        if (confirmedPersistErr) {
+          throw new Error(`Funding transaction is confirmed on-chain but CONFIRMED status persistence failed: ${confirmedPersistErr.message}`);
+        }
         return;
       }
 
@@ -366,10 +369,13 @@ export async function fundGasForAddress(
       console.log(`[Sweeper Gas Recovery] Rebroadcasting exact persisted signed tx ${existingTxHash}...`);
       try {
         await provider.broadcastTransaction(existingSignedTx);
-        await supabaseAdmin.from('gas_funding_operations').update({
+        const { error: rebroadcastPersistErr } = await supabaseAdmin.from('gas_funding_operations').update({
           status: 'BROADCASTED',
           updated_at: new Date().toISOString(),
         }).eq('sweep_id', sweepId);
+        if (rebroadcastPersistErr) {
+          throw new Error(`Funding transaction rebroadcast may have succeeded but BROADCASTED status persistence failed: ${rebroadcastPersistErr.message}`);
+        }
       } catch (rebroadcastErr: any) {
         const errMsg = rebroadcastErr?.message || '';
         if (errMsg.includes('already known') || errMsg.includes('nonce too low') || errMsg.includes('ALREADY_EXISTS')) {
