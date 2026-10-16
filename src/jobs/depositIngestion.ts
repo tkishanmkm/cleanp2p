@@ -1293,7 +1293,19 @@ async function refreshPendingDepositConfirmations(): Promise<{
           // A mined receipt is not proof of a successful transaction. Never
           // advance a pending deposit from a reverted EVM transaction.
           if (receipt && receipt.status === 1 && receipt.blockNumber) {
-            const currentBlock = await provider.getBlockNumber();
+            if (evmTransaction.blockNumber === null || evmTransaction.blockNumber !== receipt.blockNumber) {
+            console.error('[Deposit Ingestion] Pending EVM transaction is not mined in the receipt block; deposit remains pending');
+            continue;
+          }
+          // ERC-20 pending rows require matching Transfer-log contract, recipient,
+          // raw amount, and log index verification before the privileged credit RPC.
+          // Until that verification is implemented here, fail closed rather than
+          // treating a successful receipt alone as proof of an ERC-20 deposit.
+          if (assetSymbol === 'USDT') {
+            console.error('[Deposit Ingestion] Pending EVM USDT recheck requires Transfer-log verification; deposit remains pending');
+            continue;
+          }
+          const currentBlock = await provider.getBlockNumber();
             if (!Number.isSafeInteger(receipt.blockNumber) || receipt.blockNumber <= 0 ||
                 !Number.isSafeInteger(currentBlock) || currentBlock < receipt.blockNumber) {
               continue;
