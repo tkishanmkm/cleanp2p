@@ -222,7 +222,13 @@ async function scanEvmTokenDeposits(
           !Number.isSafeInteger(log.blockNumber) ||
           log.blockNumber <= 0 ||
           !/^0x[0-9a-fA-F]{64}$/.test(log.transactionHash || '') ||
-          !/^0x[0-9a-fA-F]{64}$/.test(log.blockHash || '')
+          !/^0x[0-9a-fA-F]{64}$/.test(log.blockHash || '') ||
+          !Array.isArray(log.topics) ||
+          log.topics.length !== 3 ||
+          log.topics.some((topic) => typeof topic !== 'string' || !/^0x[0-9a-fA-F]{64}$/.test(topic)) ||
+          log.topics[0].toLowerCase() !== transferTopic.toLowerCase() ||
+          typeof log.data !== 'string' ||
+          !/^0x[0-9a-fA-F]{64}$/.test(log.data)
         ) {
           errors.push('Rejected EVM token log with invalid identifiers');
           continue;
