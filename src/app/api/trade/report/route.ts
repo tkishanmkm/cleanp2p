@@ -50,15 +50,33 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: 'Each evidence item must be a valid HTTP or HTTPS URL.' }, { status: 400 });
     }
 
-    const cleanPublicId = typeof tradePublicId === 'string' ? tradePublicId.trim() : tradeId.trim();
+    const cleanTradeId = tradeId.trim();
+    const cleanPublicId = typeof tradePublicId === 'string' ? tradePublicId.trim() : cleanTradeId;
+    const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(cleanTradeId);
+    let tradeQuery = supabase.from('trades').select('id, trade_id, buyer_id, seller_id');
+    tradeQuery = isUuid
+      ? tradeQuery.or(`id.eq.${cleanTradeId},trade_id.eq.${cleanTradeId}`)
+      : tradeQuery.eq('trade_id', cleanTradeId);
+    const { data: trade, error: tradeLookupError } = await tradeQuery.maybeSingle();
+    if (tradeLookupError) {
+      console.error('Trade report authorization lookup failed:', tradeLookupError.code || 'UNKNOWN');
+      return NextResponse.json({ error: 'Unable to verify trade access right now.' }, { status: 500 });
+    }
+    if (!trade || (trade.buyer_id !== user.id && trade.seller_id !== user.id)) {
+      return NextResponse.json({ error: 'Only participants in this trade can submit a report.' }, { status: 403 });
+    }
+    const otherParticipantId = trade.buyer_id === user.id ? trade.seller_id : trade.buyer_id;
+    if (typeof reportedUserId === 'string' && reportedUserId.trim() !== otherParticipantId) {
+      return NextResponse.json({ error: 'Reported user must be the other participant in this trade.' }, { status: 400 });
+    }
 
     const { data, error } = await supabase
       .from('trade_reports')
       .insert({
-        trade_id: tradeId.trim(),
+        trade_id: trade.id,
         trade_public_id: cleanPublicId,
         reporter_id: user.id,
-        reported_user_id: typeof reportedUserId === 'string' ? reportedUserId.trim() : null,
+        reported_user_id: otherParticipantId,
         category: category.trim(),
         description: description.trim(),
         evidence_urls: Array.isArray(evidenceUrls) ? evidenceUrls.map((url: string) => url.trim()) : [],
@@ -81,7 +99,7 @@ export async function POST(req: Request) {
 
     // Post official Paxones system message to trade chat
     await insertPaxonesSystemMessage(supabase, {
-      tradeId: tradeId.trim(),
+      tradeId: trade.id,
       type: 'ISSUE_REPORTED',
       openerUsername: reporterUsername,
       issueCategory: category.trim(),
