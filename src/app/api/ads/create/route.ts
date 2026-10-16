@@ -206,6 +206,18 @@ export async function POST(req: Request) {
       }
     }
 
+    // Reject blank numeric strings rather than silently coercing them to zero.
+    for (const key of [
+      'price', 'fixed_rate', 'margin', 'price_margin', 'rate_percent',
+      'rate_adjustment', 'margin_percentage', 'min_amount', 'max_amount',
+      'min_order', 'max_order', 'total_amount', 'available_amount',
+    ]) {
+      const value = strippedFormData[key];
+      if (typeof value === 'string' && value.trim() === '') {
+        return NextResponse.json({ error: `${key} must be a valid number.` }, { status: 400 });
+      }
+    }
+
     // Sanitize and cast numeric payload fields before database operations.
     const cleanPayload: Record<string, any> = {
       ...strippedFormData,
