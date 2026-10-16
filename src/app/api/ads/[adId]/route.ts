@@ -939,6 +939,6 @@ export async function PUT(
     });
   } catch (err: any) {
     console.error('Error in PUT /api/ads/[adId]:', err);
-    return NextResponse.json({ error: err.message || 'Failed to update ad' }, { status: 500 });
+    return NextResponse.json({ error: 'An unexpected error occurred while editing the advertisement.' }, { status: 500 });
   }
 }
