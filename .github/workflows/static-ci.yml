@@ -53,6 +53,22 @@ jobs:
           cache: npm
       - name: Install dependencies
         run: npm ci
+      - name: Preview non-breaking dependency remediation
+        shell: bash
+        run: |
+          set +e
+          npm audit fix --omit=dev --dry-run --json > npm-audit-remediation-plan.json
+          plan_status=$?
+          echo "Non-breaking remediation preview exit code: ${plan_status}"
+          exit 0
+      - name: Upload dependency remediation preview
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: production-dependency-remediation-preview
+          path: npm-audit-remediation-plan.json
+          if-no-files-found: warn
+          retention-days: 14
       - name: Audit production dependencies
         shell: bash
         run: |
