@@ -198,11 +198,18 @@ export async function POST(req: NextRequest) {
 
     // 3c. Check by email or full_name in profiles if still not found
     if (!recipientProfile) {
-      const { data: profByEmail } = await admin
+      const { data: profByEmail, error: emailLookupError } = await admin
         .from('profiles')
         .select('id, username, is_banned, is_restricted, is_emergency_frozen, account_status')
         .or(`email.ilike.${cleanTarget},full_name.ilike.${cleanTarget}`)
         .maybeSingle();
+      if (emailLookupError) {
+        console.error('[Internal Transfer] Recipient email/name lookup failed:', emailLookupError.code);
+        return NextResponse.json({
+          error: 'Recipient security status could not be verified. Please try again later.',
+          code: 'RECIPIENT_LOOKUP_UNAVAILABLE',
+        }, { status: 503 });
+      }
       if (profByEmail) {
         recipientProfile = profByEmail;
       }
