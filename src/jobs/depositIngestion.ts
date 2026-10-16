@@ -578,20 +578,22 @@ async function scanTronDeposits(
             if (!monitoredTronAddresses.has(toBase58)) continue;
             seenTxIndices.add(deduplicationKey);
 
-            detected++;
+            const actualContract = evt.contract_address || evt.contractAddress || cAddr;
+            if (actualContract !== contractAddress && actualContract !== 'TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t') continue;
             const rawValBig = BigInt(rawValue);
+            if (rawValBig <= 0n) continue;
             const formattedAmount = ethers.formatUnits(rawValBig, 6);
-            const amount = parseFloat(formattedAmount);
-            const eventBlock = evt.block_number || 0;
-            const confirmations = (latestBlock && eventBlock && latestBlock >= eventBlock)
-              ? latestBlock - eventBlock + 1
-              : 1;
+            if (!/^(?:0|[1-9]\d*)(?:\.\d+)?$/.test(formattedAmount)) continue;
+            const eventBlock = Number(evt.block_number || 0);
+            if (!Number.isSafeInteger(eventBlock) || eventBlock <= 0 || !latestBlock || latestBlock < eventBlock) continue;
+            const confirmations = latestBlock - eventBlock + 1;
+            detected++;
 
             const { data: rpcData, error } = await supabaseAdmin.rpc('process_deposit_atomic', {
               p_destination_address: toBase58,
               p_asset_symbol: 'USDT',
               p_network_code: 'TRC20',
-              p_amount: amount,
+              p_amount: formattedAmount,
               p_tx_hash: txId,
               p_output_index: outputIndex,
               p_block_number: eventBlock || null,
@@ -605,7 +607,7 @@ async function scanTronDeposits(
               errors.push(`RPC error for TRON deposit ${txId}: ${error.message}`);
             } else {
               const r = typeof rpcData === 'string' ? JSON.parse(rpcData) : rpcData;
-              if (r?.status === 'credited' || (r?.success && confirmations >= TRON_CONFIG.requiredConfirmations)) {
+              if (r?.status === 'credited') {
                 credited++;
               }
             }
