@@ -719,9 +719,12 @@ export async function PUT(
     ];
     for (const field of numericEditFields) {
       const value = body[field];
-      if (value !== undefined && value !== null && value !== '' &&
-          typeof value !== 'number' && typeof value !== 'string') {
+      if (value === undefined || value === null) continue;
+      if (typeof value !== 'number' && typeof value !== 'string') {
         return NextResponse.json({ error: `${field} must be a number.` }, { status: 400 });
+      }
+      if (typeof value === 'string' && value.trim() === '') {
+        return NextResponse.json({ error: `${field} must not be blank.` }, { status: 400 });
       }
     }
 
