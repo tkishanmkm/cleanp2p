@@ -55,13 +55,13 @@ export async function POST(req: Request) {
     const { data, error } = await supabase
       .from('trade_reports')
       .insert({
-        trade_id: tradeId,
+        trade_id: tradeId.trim(),
         trade_public_id: cleanPublicId,
         reporter_id: user.id,
-        reported_user_id: reportedUserId || null,
-        category,
-        description,
-        evidence_urls: Array.isArray(evidenceUrls) ? evidenceUrls : [],
+        reported_user_id: typeof reportedUserId === 'string' ? reportedUserId.trim() : null,
+        category: category.trim(),
+        description: description.trim(),
+        evidence_urls: Array.isArray(evidenceUrls) ? evidenceUrls.map((url: string) => url.trim()) : [],
         status: 'PENDING_REVIEW',
       })
       .select()
@@ -81,11 +81,11 @@ export async function POST(req: Request) {
 
     // Post official Paxones system message to trade chat
     await insertPaxonesSystemMessage(supabase, {
-      tradeId,
+      tradeId: tradeId.trim(),
       type: 'ISSUE_REPORTED',
       openerUsername: reporterUsername,
-      issueCategory: category,
-      issueDetails: description
+      issueCategory: category.trim(),
+      issueDetails: description.trim()
     });
 
     return NextResponse.json({ success: true, report: data });
