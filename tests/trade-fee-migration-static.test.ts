@@ -508,6 +508,11 @@ assert.match(marketPriceCronRoute, /status: 401/,
 
 assert.match(marketPriceCronRoute, /error: 'Market price update failed'/,
   'price cron route must return a generic error instead of exposing internal exception details');
+assert.match(marketPriceCronRoute, /Cache-Control': 'no-store, max-age=0'/,
+  'price cron responses must not be cached by browsers or intermediary caches');
+assert.match(marketPriceCronRoute, /revalidate = 0/,
+  'price cron route must disable static revalidation');
+
 assert.doesNotMatch(marketPriceCronRoute, /error: err\.message/,
   'price cron route must not send raw exception messages to clients');
 
