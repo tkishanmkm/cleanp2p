@@ -381,6 +381,11 @@ const checks: Array<[string, string, RegExp]> = [
     /TRON signing returned a malformed delegation transaction[\s\S]*?typeof signedTx\.raw_data_hex !== 'string'[\s\S]*?signedTx\.signature\.length === 0/i,
   ],
   [
+    'TRON delegation fails closed when network energy parameters are invalid',
+    'src/jobs/sweeperWorker.ts',
+    /const totalEnergyLimit = Number\(resources\?\.TotalEnergyLimit\)[\s\S]*?Number\.isSafeInteger\(totalEnergyLimit\)[\s\S]*?refusing estimated delegation/i,
+  ],
+  [
     'TRON ambiguous delegation broadcast remains in recovery rather than being marked failed',
     'src/jobs/sweeperWorker.ts',
     /Delegation broadcast outcome is ambiguous; preserving operation for reconciliation[\s\S]*?p_new_status: 'RECOVERY_REQUIRED'[\s\S]*?failed to persist RECOVERY_REQUIRED state/i,
