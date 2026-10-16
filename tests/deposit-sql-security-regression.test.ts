@@ -356,6 +356,11 @@ const checks: Array<[string, string, RegExp]> = [
     /!delegatedRes \|\| !Array\.isArray\(delegatedRes\.delegatedResource\)[\s\S]*?missing or malformed delegatedResource list[\s\S]*?ENERGY record without a remaining balance/i,
   ],
   [
+    'TRON undelegation refuses malformed persisted transaction or mismatched transaction hash',
+    'src/jobs/sweeperWorker.ts',
+    /Persisted TRON undelegation transaction is not valid JSON[\s\S]*?signedTx\.txID\.toLowerCase\(\) !== deterministicTxHash\.toLowerCase\(\)[\s\S]*?refusing to broadcast/i,
+  ],
+  [
     'TRON failed undelegation receipt checks persistence result before returning',
     'src/jobs/sweeperWorker.ts',
     /const \{ data: failureRes, error: failureErr \} = await supabaseAdmin\.rpc\('update_delegation_status'[\s\S]*?failureRes\.success !== true[\s\S]*?leaving operation for recovery/i,
