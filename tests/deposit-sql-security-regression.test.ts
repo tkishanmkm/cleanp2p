@@ -320,6 +320,11 @@ const checks: Array<[string, string, RegExp]> = [
     'src/jobs/sweeperWorker.ts',
     /const estimatedEnergy = Number\(estimateRes\?\.energy_used\)[\s\S]*?Number\.isSafeInteger\(estimatedEnergy\)[\s\S]*?estimatedEnergy <= 0/i,
   ],
+  [
+    'TRON sweep validates the hot-wallet destination address',
+    'src/jobs/sweeperWorker.ts',
+    /!tronWeb\.isAddress\(hotWalletDestination\)[\s\S]*?TRON hot wallet destination address is missing or invalid/i,
+  ],
 ];
 
 let failed = 0;
