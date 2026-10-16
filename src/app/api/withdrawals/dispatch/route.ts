@@ -42,10 +42,21 @@ export async function POST(req: NextRequest) {
     const formattedKey = rawPrivateKey.startsWith('0x') ? rawPrivateKey : `0x${rawPrivateKey}`;
     const wallet = new ethers.Wallet(formattedKey, provider);
 
-    const assetUpper = (withdrawal.asset_symbol || withdrawal.asset || '').toUpperCase();
-    const targetWithdrawalId = withdrawal.id || withdrawal.withdrawal_id;
-    const destination = withdrawal.to_address || withdrawal.destination_address || withdrawal.destination;
-    const payoutAmount = Number(withdrawal.amount);
+    type ClaimedWithdrawal = {
+      asset_symbol?: string | null;
+      asset?: string | null;
+      id?: string | null;
+      withdrawal_id?: string | null;
+      to_address?: string | null;
+      destination_address?: string | null;
+      destination?: string | null;
+      amount?: number | string | null;
+    };
+    const claimedWithdrawal = withdrawal as ClaimedWithdrawal;
+    const assetUpper = (claimedWithdrawal.asset_symbol || claimedWithdrawal.asset || '').toUpperCase();
+    const targetWithdrawalId = claimedWithdrawal.id || claimedWithdrawal.withdrawal_id;
+    const destination = claimedWithdrawal.to_address || claimedWithdrawal.destination_address || claimedWithdrawal.destination;
+    const payoutAmount = Number(claimedWithdrawal.amount);
 
     // Fail closed before broadcasting any irreversible on-chain transaction.
     if (!targetWithdrawalId || typeof destination !== 'string' || !ethers.isAddress(destination)) {
