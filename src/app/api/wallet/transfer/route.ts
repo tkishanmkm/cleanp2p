@@ -159,11 +159,19 @@ export async function POST(req: NextRequest) {
     const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(cleanTarget);
 
     // 3a. Check by exact / case-insensitive username in profiles
-    const { data: profByUsername } = await admin
+    const { data: profByUsername, error: usernameLookupError } = await admin
       .from('profiles')
       .select('id, username, is_banned, is_restricted, is_emergency_frozen, account_status')
       .ilike('username', cleanTarget)
       .maybeSingle();
+
+    if (usernameLookupError) {
+      console.error('[Internal Transfer] Recipient username lookup failed:', usernameLookupError.code);
+      return NextResponse.json({
+        error: 'Recipient security status could not be verified. Please try again later.',
+        code: 'RECIPIENT_LOOKUP_UNAVAILABLE',
+      }, { status: 503 });
+    }
 
     if (profByUsername) {
       recipientProfile = profByUsername;
