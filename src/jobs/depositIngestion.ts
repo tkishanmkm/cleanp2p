@@ -970,9 +970,13 @@ async function scanTronDeposits(
               continue;
             }
             const txId = evt.transaction_id;
-            const outputIndex = Number(evt.event_index);
-            // A transaction can contain multiple Transfer events. Never collapse
-            // missing/invalid event indices to zero, or different events can collide.
+            const rawEventIndex = evt.event_index;
+            const outputIndex = typeof rawEventIndex === 'number'
+              ? rawEventIndex
+              : typeof rawEventIndex === 'string' && /^\d{1,10}$/.test(rawEventIndex)
+                ? Number(rawEventIndex)
+                : Number.NaN;
+            // Do not coerce null, empty strings, or missing event indices to zero.
             if (!/^[0-9a-fA-F]{64}$/.test(txId || '') ||
                 !Number.isSafeInteger(outputIndex) || outputIndex < 0) {
               errors.push('Rejected TRON contract event with invalid transaction/event index');
