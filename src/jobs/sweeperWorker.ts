@@ -879,11 +879,16 @@ export async function delegateEnergyFromPool(
     throw new Error(`Failed to query TRON account resources: ${err?.message || err}`);
   }
 
-  let totalEnergyLimit = Number(resources.TotalEnergyLimit || 180000000000);
-  let totalEnergyWeight = Number(resources.TotalEnergyWeight || 10000000000);
-
-  if (totalEnergyLimit <= 0) totalEnergyLimit = 180000000000;
-  if (totalEnergyWeight <= 0) totalEnergyWeight = 10000000000;
+  const totalEnergyLimit = Number(resources?.TotalEnergyLimit);
+  const totalEnergyWeight = Number(resources?.TotalEnergyWeight);
+  if (
+    !Number.isSafeInteger(totalEnergyLimit) ||
+    totalEnergyLimit <= 0 ||
+    !Number.isSafeInteger(totalEnergyWeight) ||
+    totalEnergyWeight <= 0
+  ) {
+    throw new Error('TRON account resources returned missing or invalid network energy parameters; refusing estimated delegation');
+  }
 
   const isWeightInSun = totalEnergyWeight > 1000000000000;
   const totalEnergyWeightSun = isWeightInSun ? totalEnergyWeight : totalEnergyWeight * 1000000;
