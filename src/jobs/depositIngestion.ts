@@ -1322,7 +1322,7 @@ async function refreshPendingDepositConfirmations(): Promise<{
           }
           try {
             const amountText = String(dep.amount);
-            if (!/^(0|[1-9]\d*)(?:\\.\d{1,18})?$/.test(amountText) ||
+            if (!/^(0|[1-9]\d*)(?:\.\d{1,18})?$/.test(amountText) ||
                 ethers.parseUnits(amountText, 18) <= 0n ||
                 ethers.parseUnits(amountText, 18) !== evmTransaction.value) {
               console.error('[Deposit Ingestion] Pending EVM native transfer value does not match stored amount; deposit remains pending');
