@@ -465,7 +465,7 @@ async function scanTronDeposits(
     // Queries each monitored TRON address for incoming TRC-20 transfers (works reliably regardless of block depth)
     for (const monitoredAddr of monitoredTronAddresses) {
       try {
-        const accountUrl = `${tronGridHost}/v1/accounts/${monitoredAddr}/transactions/trc20?limit=20`;
+        const accountUrl = `${tronGridHost}/v1/accounts/${monitoredAddr}/transactions/trc20?limit=200&only_confirmed=true&contract_address=${CANONICAL_USDT_CONTRACTS.TRC20}`;
         const res = await fetch(accountUrl, { headers: tronGridHeaders });
         if (!res.ok) {
           errors.push(`TronGrid account-transfer request failed with HTTP ${res.status}`);
