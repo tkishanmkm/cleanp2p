@@ -1723,9 +1723,15 @@ export function formatSystemMessageContent(
   const formattedAmount = formatCryptoAmount(coinAmount, coinSymbol);
   const normalizedCoin = typeof coinSymbol === 'string' ? coinSymbol.toUpperCase().replace(/[^A-Z0-9.-]/g, '').slice(0, 16) : '';
   const cleanCoin = normalizedCoin || 'USDT';
-  const trimmedComment = (feedbackComment || customText || '')
+  const rawComment = typeof feedbackComment === 'string' ? feedbackComment : typeof customText === 'string' ? customText : '';
+  const trimmedComment = rawComment
+    .replace(/[\\u0000-\\u001F\\u007F]/g, ' ')
+    .replace(/\\s+/g, ' ')
     .trim()
     .slice(0, 100);
+  const safeCustomText = typeof customText === 'string'
+    ? customText.replace(/[\\u0000-\\u001F\\u007F]/g, ' ').replace(/\\s+/g, ' ').trim().slice(0, 2000)
+    : '';
 
   switch (type) {
     case 'TRADE_INITIATED':
@@ -1864,7 +1870,7 @@ export function formatSystemMessageContent(
       return `Paxones Security Reminder: Never share your password, 2FA code, private key, seed phrase, or recovery phrase with another user. Paxones Support will not ask you to disclose these credentials.`;
 
     default:
-      return customText || 'Paxones System Notification';
+      return safeCustomText || 'Paxones System Notification';
   }
 }
 
