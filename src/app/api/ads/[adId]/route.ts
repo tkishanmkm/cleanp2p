@@ -408,6 +408,9 @@ export async function PATCH(
 
     // 4. Parse & Strictly Validate Allowlisted Fields
     const body = await request.json();
+    if (!body || typeof body !== 'object' || Array.isArray(body)) {
+      return NextResponse.json({ error: 'Request body must be a JSON object.' }, { status: 400 });
+    }
 
     // Never trust client-supplied identity fields in PATCH body
     delete body.user_id;
@@ -589,6 +592,9 @@ export async function PUT(
 
     // 4. Parse & Sanitize Edit Payload
     const body = await request.json();
+    if (!body || typeof body !== 'object' || Array.isArray(body)) {
+      return NextResponse.json({ error: 'Request body must be a JSON object.' }, { status: 400 });
+    }
 
     // Strip client-controlled identity and administrative fields to prevent spoofing
     delete body.user_id;
