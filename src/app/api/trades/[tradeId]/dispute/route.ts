@@ -161,7 +161,7 @@ export async function POST(
           paymentMethod: tradePaymentMethod,
         });
       } catch (mErr) {
-        console.warn('System message insert error:', mErr);
+        console.warn('System message insert failed:', mErr instanceof Error ? mErr.name : 'UnknownError');
       }
   
       // Insert notifications for both participants in Activity Center (storing link in metadata)
