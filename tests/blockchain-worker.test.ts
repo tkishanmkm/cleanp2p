@@ -82,7 +82,7 @@ async function runBlockchainWorkerTests() {
     // TEST 1: Inbound BEP-20 Deposit Ingestion & Atomic Credit
     // ------------------------------------------------------------------------
     console.log(bold('Test 1: BEP-20 Inbound Deposit Ingestion & Confirmation Check'));
-    const testTxHash = `0xbep20_${Date.now()}_test_tx`;
+    const testTxHash = `0x${randomBytes(32).toString('hex')}`;
     const testLogIndex = 1;
     const depositAmount = 250.0;
     const requiredConfirmations = 15; // BEP20 requires 15 confirmations
@@ -112,7 +112,7 @@ async function runBlockchainWorkerTests() {
         .eq('asset_code', 'USDT')
         .single();
 
-      if (asset && Number(asset.available) >= depositAmount) {
+      if (asset && Number(asset.available) === depositAmount) {
         console.log(green(`  ✓ Deposit recognized with ${requiredConfirmations} confirmations`));
         console.log(green(`  ✓ User wallet credited: ${asset.available} USDT`));
         passedTests++;
