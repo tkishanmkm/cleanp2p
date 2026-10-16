@@ -186,7 +186,7 @@ export async function POST(
       type: (typeof type === 'string' ? type : 'CUSTOM') as SystemMessagePayload['type'],
       buyerUsername,
       sellerUsername,
-      openerUsername: user.user_metadata?.username || user.email?.split('@')[0] || 'Trader',
+      openerUsername: String(user.id) === String(trade.buyer_id) ? buyerUsername : String(user.id) === String(trade.seller_id) ? sellerUsername : 'Administrator',
       coinAmount: trade.crypto_amount || trade.amount || '0.00',
       coinSymbol: trade.crypto || trade.asset_symbol || 'USDT',
       paymentMethod: trade.payment_method || '',
