@@ -503,6 +503,8 @@ assert.ok(
   marketPriceCronRoute.indexOf('if (!auth.authorized)') < marketPriceCronRoute.indexOf('await runMarketPriceUpdate()'),
   'price cron route must reject unauthorized requests before running the market-price worker'
 );
+assert.match(marketPriceCronRoute, /checkQueryParam: false/,
+  'price cron authentication must reject URL query-string secrets');
 assert.match(marketPriceCronRoute, /status: 401/,
   'price cron route must return HTTP 401 for failed worker authentication');
 
