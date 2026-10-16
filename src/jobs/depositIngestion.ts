@@ -335,6 +335,12 @@ async function scanEvmNativeDeposits(
         errors.push(`Provider returned no block for native deposit scan at height ${b}`);
         continue;
       }
+      if (block.number !== b ||
+          typeof block.hash !== 'string' ||
+          !/^0x[0-9a-fA-F]{64}$/.test(block.hash)) {
+        errors.push(`Provider returned an invalid block identity for native deposit scan at height ${b}`);
+        continue;
+      }
       if (!Array.isArray(block.prefetchedTransactions)) {
         errors.push(`Provider returned an invalid transaction list for block ${b}`);
         continue;
@@ -345,7 +351,10 @@ async function scanEvmNativeDeposits(
           !tx.to ||
           !/^0x[0-9a-fA-F]{40}$/.test(tx.to) ||
           !/^0x[0-9a-fA-F]{64}$/.test(tx.hash || '') ||
-          (tx.blockNumber !== null && tx.blockNumber !== undefined && tx.blockNumber !== b)
+          tx.blockNumber !== b ||
+          typeof tx.blockHash !== 'string' ||
+          !/^0x[0-9a-fA-F]{64}$/.test(tx.blockHash) ||
+          tx.blockHash.toLowerCase() !== block.hash.toLowerCase()
         ) {
           continue;
         }
