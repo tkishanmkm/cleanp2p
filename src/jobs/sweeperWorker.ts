@@ -560,7 +560,15 @@ export async function fundGasForAddress(
     }
   }
 
-  // Step 10: Broadcast the EXACT persisted signed transaction
+  // Step 10: Revalidate lease ownership after signing/persistence and immediately before the network side effect.
+  // A lease can expire while the transaction is being built or persisted.
+  if (sweepId && workerId) {
+    await assertPreBroadcastOwnership(sweepId, workerId, 'GAS_FUNDING');
+  } else {
+    throw new Error('Sweep ID and worker ID are required before gas funding broadcast');
+  }
+
+  // Broadcast the EXACT persisted signed transaction
   console.log(`[Sweeper Gas Broadcast] Broadcasting ${ethers.formatEther(fundingAmount)} ${nativeSymbol} to ${targetAddress}. TxHash: ${deterministicTxHash}, Nonce: ${allocatedNonce}`);
   try {
     await provider.broadcastTransaction(signedTxHex);
