@@ -289,7 +289,13 @@ async function runSecurityPenetrationTestSuite() {
 
   if (passedTests === totalTests) {
     console.log(green(bold('🎉 ALL POST-REMEDIATION SECURITY & CHAOS TESTS COMPLETED SUCCESSFULLY!')));
+  } else {
+    process.exitCode = 1;
+    console.log(red(bold('POST-REMEDIATION SECURITY & CHAOS TESTS FAILED.')));
   }
 }
 
-runSecurityPenetrationTestSuite().catch(console.error);
+runSecurityPenetrationTestSuite().catch((err) => {
+  console.error(red(`Fatal security verification test error: ${err instanceof Error ? err.message : String(err)}`));
+  process.exitCode = 1;
+});
