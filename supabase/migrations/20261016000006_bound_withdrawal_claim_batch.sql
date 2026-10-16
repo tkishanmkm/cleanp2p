@@ -37,7 +37,7 @@ BEGIN
               SELECT 1
               FROM auth.users u
               WHERE u.id = w.user_id
-                AND NOT COALESCE(u.banned_until > NOW(), FALSE)
+                AND NOT COALESCE(NULLIF(u.banned_until, '')::timestamptz > NOW(), FALSE)
                 AND lower(COALESCE(u.raw_app_meta_data ->> 'restricted', 'false')) <> 'true'
           )
         ORDER BY w.created_at ASC
