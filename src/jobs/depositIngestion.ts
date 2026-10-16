@@ -347,6 +347,19 @@ async function scanEvmNativeDeposits(
     }
 
     const latestBlock = await provider.getBlockNumber();
+    if (
+      !Number.isSafeInteger(fromBlock) ||
+      !Number.isSafeInteger(toBlock) ||
+      !Number.isSafeInteger(latestBlock) ||
+      fromBlock < 0 ||
+      toBlock < fromBlock ||
+      latestBlock < 0
+    ) {
+      return { detected, credited, errors: ['Invalid EVM native scan block range or provider tip'] };
+    }
+    if (fromBlock > latestBlock) {
+      return { detected, credited, errors: ['EVM native scan start is above the provider tip'] };
+    }
 
     // Scan only canonical recent blocks. Do not ingest provider-supplied historical
     // asset-transfer summaries: they can be incomplete, use ambiguous output indexes,
