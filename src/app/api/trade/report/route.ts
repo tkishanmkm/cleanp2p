@@ -110,7 +110,7 @@ export async function POST(req: Request) {
         evidence_urls: Array.isArray(evidenceUrls) ? evidenceUrls.map((url: string) => url.trim()) : [],
         status: 'PENDING_REVIEW',
       })
-      .select()
+      .select('id, status')
       .maybeSingle();
 
     if (error || !data) {
