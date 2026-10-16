@@ -26,6 +26,11 @@ const checks: Array<[string, string, RegExp]> = [
     /duplicateBalanceReadError[\s\S]*addressCleanupError[\s\S]*assetCleanupError[\s\S]*walletCleanupError[\s\S]*Test fixture cleanup failed/i,
   ],
   [
+    'gas funding recovery surfaces failures persisting RECOVERY_REQUIRED after rebroadcast errors',
+    'src/jobs/sweeperWorker.ts',
+    /const \{ error: recoveryPersistErr \}[\s\S]*?status: 'RECOVERY_REQUIRED'[\s\S]*?if \(recoveryPersistErr\)[\s\S]*?RECOVERY_REQUIRED status persistence also failed/i,
+  ],
+  [
     'gas funding recovery checks confirmed-status persistence errors',
     'src/jobs/sweeperWorker.ts',
     /const \{ error: confirmedPersistErr \}[\s\S]*?status: 'CONFIRMED'[\s\S]*?if \(confirmedPersistErr\)[\s\S]*?CONFIRMED status persistence failed/i,
