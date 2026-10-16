@@ -752,14 +752,13 @@ export async function PUT(
         .eq('fiat_symbol', effectiveFiat)
         .maybeSingle();
 
-      if (marketError || !marketRow || !marketRow.price_in_fiat || Number(marketRow.price_in_fiat) <= 0) {
+      const refPrice = Number(marketRow?.price_in_fiat);
+      if (marketError || !marketRow || !Number.isFinite(refPrice) || refPrice <= 0) {
         return NextResponse.json(
           { error: `Market reference price is currently unavailable for ${effectiveAsset}/${effectiveFiat}. Please try again later.` },
           { status: 400 }
         );
       }
-
-      const refPrice = Number(marketRow.price_in_fiat);
       const minAllowedPrice = refPrice * 0.50;
       const maxAllowedPrice = refPrice * 1.50;
 
