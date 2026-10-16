@@ -757,6 +757,21 @@ const checks: Array<[string, string, RegExp]> = [
   ],
 
   [
+    'password-change withdrawal hold fails closed on database errors',
+    'src/lib/withdrawal-security.ts',
+    /if \(profileRes\.error\) throw[\s\S]*?if \(settingsRes\.error \|\| !settingsRes\.data\)[\s\S]*?Unable to verify password-change withdrawal hold[\s\S]*?throw err instanceof Error/i,
+  ],
+  [
+    'pending withdrawal approval check fails closed when both lookups fail',
+    'src/lib/withdrawal-security.ts',
+    /if \(onchainError\)[\s\S]*?Unable to verify pending withdrawal approval state[\s\S]*?throw err instanceof Error/i,
+  ],
+  [
+    'withdrawal rejects when hold or pending-approval security checks fail',
+    'src/lib/services/withdrawalService.ts',
+    /let pwdHold:[\s\S]*?checkPasswordChangeHold\(user\.id\)[\s\S]*?hasPendingWithdrawalApproval\(user\.id\)[\s\S]*?Withdrawal hold\/approval security checks unavailable[\s\S]*?statusCode: 503/i,
+  ],
+  [
     'withdrawal rejects when platform security settings cannot be read',
     'src/lib/services/withdrawalService.ts',
     /const \{ data: settings, error: settingsError \}[\s\S]*?if \(settingsError \|\| !settings\)[\s\S]*?statusCode: 503/i,
