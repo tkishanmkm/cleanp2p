@@ -83,7 +83,7 @@ const checks: Array<[string, string, RegExp]> = [
   [
     'withdrawal worker rejects null and malformed nonce allocation results',
     'src/jobs/withdrawalWorker.ts',
-    /allocatedNonce === null[\s\S]*allocatedNonce === undefined[\s\S]*typeof allocatedNonce === 'string' && !\/\^\\\\d\+\$\//i,
+    /allocatedNonce === null[\s\S]*allocatedNonce === undefined[\s\S]*!\\/\\^\\d\\+\\$\\/\.test\\(allocatedNonce\\)/i,
   ],
   [
     'withdrawal worker refuses unsafe EVM nonce allocation fallback',
