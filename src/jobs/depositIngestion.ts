@@ -1372,7 +1372,10 @@ async function refreshPendingDepositConfirmations(): Promise<{
             const { data, error: rpcErr } = await supabaseAdmin.rpc('process_deposit_atomic', {
               p_destination_address: destinationAddress,
               p_asset_symbol: assetSymbol,
-              p_network_code: normNet,
+              // The atomic RPC models native ETH as network ETH, while ERC20
+              // is reserved for USDT token deposits. Keep pending ETH recovery
+              // consistent with the primary native-deposit scanner.
+              p_network_code: assetSymbol === 'ETH' && normNet === 'ERC20' ? 'ETH' : normNet,
               p_amount: dep.amount,
               p_tx_hash: dep.tx_hash,
               p_output_index: outputIndex,
