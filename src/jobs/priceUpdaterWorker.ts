@@ -209,6 +209,11 @@ export async function runMarketPriceUpdate(): Promise<PriceUpdateResult> {
       }
     }
 
+    if (upsertRows.length === 0) {
+      console.error('[Market Prices Worker] No valid market price rows were generated.');
+      return { success: false, error: 'NO_VALID_MARKET_PRICE_ROWS' };
+    }
+
     // Batch upsert to Supabase in chunks of 500
     const CHUNK_SIZE = 500;
     for (let i = 0; i < upsertRows.length; i += CHUNK_SIZE) {
