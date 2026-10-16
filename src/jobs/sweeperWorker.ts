@@ -915,14 +915,32 @@ export async function delegateEnergyFromPool(
     }
 
     if (initRes.status === 'DELEGATING' && initRes.signed_delegation_hex) {
-      console.log(`[Tron Resource Pool] Sweep ${sweepId} in DELEGATING state. Attempting recovery broadcast of persisted bytes.`);
+      console.log(`[Tron Resource Pool] Sweep ${sweepId} in DELEGATING state. Validating persisted bytes before recovery broadcast.`);
+      let rawTx: any;
       try {
-        const rawTx = JSON.parse(initRes.signed_delegation_hex);
-        await tronWeb.trx.sendRawTransaction(rawTx);
-      } catch (rebroadcastErr) {
-        console.warn(`[Tron Resource Pool] Rebroadcast of persisted delegation failed or already in mempool:`, rebroadcastErr);
+        rawTx = JSON.parse(initRes.signed_delegation_hex);
+      } catch {
+        throw new Error('Persisted TRON delegation transaction is not valid JSON; refusing recovery broadcast');
       }
-      return { success: true, delegatedAmountSun: BigInt(initRes.delegated_amount_sun) };
+      if (
+        !rawTx ||
+        typeof rawTx !== 'object' ||
+        typeof rawTx.txID !== 'string' ||
+        !/^[0-9a-fA-F]{64}$/.test(rawTx.txID) ||
+        typeof rawTx.raw_data_hex !== 'string' ||
+        !/^[0-9a-fA-F]+$/.test(rawTx.raw_data_hex) ||
+        !Array.isArray(rawTx.signature) ||
+        rawTx.signature.length === 0 ||
+        rawTx.signature.some((signature: unknown) => typeof signature !== 'string' || !/^[0-9a-fA-F]{130}$/.test(signature))
+      ) {
+        throw new Error('Persisted TRON delegation transaction is malformed; refusing recovery broadcast');
+      }
+      const rebroadcastRes = await tronWeb.trx.sendRawTransaction(rawTx);
+      if (!rebroadcastRes || rebroadcastRes.result !== true) {
+        throw new Error(`Persisted TRON delegation rebroadcast was not confirmed accepted for tx ${rawTx.txID}`);
+      }
+      // A node accepting a broadcast does not prove on-chain delegation; reconciliation must confirm it.
+      throw new Error(`Persisted TRON delegation tx ${rawTx.txID} was rebroadcast; awaiting on-chain reconciliation before reporting success`);
     }
   }
 
