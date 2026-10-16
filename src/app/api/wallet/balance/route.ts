@@ -121,7 +121,11 @@ export async function GET(request: Request) {
         });
       }
     } catch (err) {
-      console.warn('Active trades escrow query notice:', err);
+      console.error('[Wallet Balance] Escrow calculation failed; refusing to return an unverified balance.', err instanceof Error ? err.name : 'UNKNOWN_ERROR');
+      return NextResponse.json(
+        { success: false, error: 'Wallet balance could not be verified safely.' },
+        { status: 503 }
+      );
     }
 
     // 2. PRIMARY: Fetch from wallet_assets (authoritative single source of truth)
