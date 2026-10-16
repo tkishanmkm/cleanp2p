@@ -69,7 +69,7 @@ export async function POST(
     const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(tradeId);
 
     // Fetch trade record using supabaseAdmin to guarantee access
-    let tradeQuery = supabaseAdmin.from('trades').select('*');
+    let tradeQuery = supabaseAdmin.from('trades').select('id, trade_id, buyer_id, seller_id, buyer_username, seller_username, crypto_amount, amount, crypto, asset_symbol, payment_method, paid_at, marked_paid_at, escrow_status, status');
     if (isUuid) {
       tradeQuery = tradeQuery.or(`id.eq.${tradeId},trade_id.eq.${tradeId}`);
     } else {
