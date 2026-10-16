@@ -83,7 +83,13 @@ export async function POST(req: Request) {
 
     // Authenticated users intentionally cannot write audit/report tables directly.
     // Use the server-only service client only after verifying trade participation above.
-    const adminClient = getSupabaseAdminClient();
+    let adminClient: ReturnType<typeof getSupabaseAdminClient>;
+    try {
+      adminClient = getSupabaseAdminClient();
+    } catch {
+      console.error('Trade report service client initialization failed.');
+      return NextResponse.json({ error: 'Unable to submit report right now. Please try again later.' }, { status: 503 });
+    }
     const { data, error } = await adminClient
       .from('trade_reports')
       .insert({
