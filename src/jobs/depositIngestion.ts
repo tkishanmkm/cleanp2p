@@ -77,7 +77,10 @@ export async function getMonitoredAddresses(): Promise<{
       .eq('is_active', true)
       .eq('status', 'active');
 
-    if (!pErr && primaryAddresses) {
+    if (pErr) {
+      throw new Error(`Failed to load primary deposit addresses: ${pErr.message}`);
+    }
+    if (primaryAddresses) {
       for (const row of primaryAddresses) {
         if (!row.address) continue;
         const clean = row.address.trim();
@@ -107,7 +110,10 @@ export async function getMonitoredAddresses(): Promise<{
       .from('user_deposit_addresses')
       .select('address, network, network_code, asset_code');
 
-    if (!fErr && fallbackAddresses) {
+    if (fErr) {
+      throw new Error(`Failed to load fallback deposit addresses: ${fErr.message}`);
+    }
+    if (fallbackAddresses) {
       for (const row of fallbackAddresses) {
         if (!row.address) continue;
         const clean = row.address.trim();
@@ -137,7 +143,8 @@ export async function getMonitoredAddresses(): Promise<{
     // It may contain withdrawal, trading, or otherwise non-deposit addresses.
 
   } catch (err) {
-    console.error('[Deposit Ingestion] Error querying monitored deposit addresses:', err);
+    console.error('[Deposit Ingestion] Cannot safely scan deposits because monitored-address loading failed:', err);
+    throw err;
   }
 
   return { evmAddresses, tronAddresses, btcAddresses, ltcAddresses };
