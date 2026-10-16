@@ -46,6 +46,11 @@ const checks: Array<[string, string, RegExp]> = [
     /GRANT EXECUTE ON FUNCTION public\.claim_pending_withdrawals\(INTEGER\) TO service_role/i,
   ],
   [
+    'withdrawal worker fails closed when circuit-breaker settings are unavailable',
+    'src/jobs/withdrawalWorker.ts',
+    /if \(error \|\| !settings\)[\s\S]*return \{ allowed: false[\s\S]*catch \(err\)[\s\S]*return \{ allowed: false/i,
+  ],
+  [
     'withdrawal claims require active provisioned wallets',
     'supabase/migrations/20261016000006_bound_withdrawal_claim_batch.sql',
     /EXISTS \([\s\S]*FROM public\.wallets wal[\s\S]*wal\.status = 'active'[\s\S]*wal\.provisioning_status = 'completed'/i,
