@@ -1101,6 +1101,10 @@ async function refreshPendingDepositConfirmations(): Promise<{
       if (normNet === 'TRC20') {
         const tronWeb = getTronWeb(false);
         const txInfo = await tronWeb.trx.getTransactionInfo(dep.tx_hash);
+        if (!txInfo?.id || txInfo.id.toLowerCase() !== String(dep.tx_hash).toLowerCase()) {
+          console.error('[Deposit Ingestion] Pending TRON provider returned a mismatched transaction id; deposit remains pending');
+          continue;
+        }
         // A mined TRON transaction can still have failed execution. Do not
         // re-credit pending deposits unless the chain receipt reports SUCCESS.
         if (txInfo && txInfo.receipt?.result === 'SUCCESS' && txInfo.blockNumber) {
