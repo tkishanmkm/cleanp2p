@@ -190,8 +190,9 @@ export async function POST(
       success: true,
       message: 'Dispute raised successfully. An admin moderator will review this trade.',
     });
-  } catch (err: any) {
-    console.error('Error in raise dispute route:', err);
+  } catch (err: unknown) {
+    const errorName = err instanceof Error ? err.name : 'UnknownError';
+    console.error('Error in raise dispute route:', errorName);
     return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 });
   }
 }
