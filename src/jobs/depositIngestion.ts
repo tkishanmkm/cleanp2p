@@ -1788,7 +1788,7 @@ async function refreshPendingDepositConfirmations(): Promise<{
 /**
  * Main deposit ingestion cycle execution
  */
-export async function runDepositIngestion(): Promise<{
+async function runDepositIngestionCycle(): Promise<{
   results: IngestionResult[];
   pendingRecheck: { checked: number; newlyCredited: number };
 }> {
@@ -1886,6 +1886,26 @@ export async function runDepositIngestion(): Promise<{
   const pendingRecheck = await refreshPendingDepositConfirmations();
 
   return { results, pendingRecheck };
+}
+
+/**
+ * Coalesce overlapping worker invocations into one in-flight cycle.
+ * The 30-second timer must not launch concurrent scans when a provider or RPC
+ * is slow; all callers await the same cycle result.
+ */
+let ingestionCyclePromise: ReturnType<typeof runDepositIngestionCycle> | null = null;
+
+export function runDepositIngestion(): ReturnType<typeof runDepositIngestionCycle> {
+  if (ingestionCyclePromise) return ingestionCyclePromise;
+
+  const cycle = runDepositIngestionCycle();
+  ingestionCyclePromise = cycle;
+  void cycle.finally(() => {
+    if (ingestionCyclePromise === cycle) ingestionCyclePromise = null;
+  }).catch(() => {
+    // The original promise remains responsible for surfacing cycle failures.
+  });
+  return cycle;
 }
 
 let ingestionInterval: NodeJS.Timeout | null = null;
