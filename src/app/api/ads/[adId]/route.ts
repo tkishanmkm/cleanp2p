@@ -383,19 +383,23 @@ export async function PATCH(
 
     // 1. Authenticate Requesting User
     const authHeader = request.headers.get('authorization');
-    const bearerMatch = authHeader?.match(/^Bearer\s+(.+)$/i);
-    const bearerToken = bearerMatch?.[1]?.trim() || null;
+    const bearerMatch = authHeader?.match(/^Bearer\\s+(.+)$/i);
+    const bearerToken = bearerMatch?.[1]?.trim();
 
     let user: any = null;
     let authError: any = null;
 
-    if (bearerToken) {
+    if (authHeader !== null) {
+      if (!bearerToken) {
+        return NextResponse.json(
+          { error: 'Invalid authorization header.', code: 'INVALID_AUTHORIZATION' },
+          { status: 401 }
+        );
+      }
       const tokenAuth = await supabase.auth.getUser(bearerToken);
       user = tokenAuth.data?.user;
       authError = tokenAuth.error;
-    }
-
-    if (!user && !authHeader) {
+    } else {
       const cookieAuth = await supabase.auth.getUser();
       user = cookieAuth.data?.user;
       authError = cookieAuth.error;
@@ -443,7 +447,23 @@ export async function PATCH(
     }
 
     // 4. Parse & Strictly Validate Allowlisted Fields
-    const body = await request.json();
+    const contentLength = Number(request.headers.get('content-length') || 0);
+    if (Number.isFinite(contentLength) && contentLength > 4096) {
+      return NextResponse.json({ error: 'Request body is too large.', code: 'REQUEST_TOO_LARGE' }, { status: 413 });
+    }
+    let body: any;
+    try {
+      const rawBody = await request.text();
+      if (rawBody.length > 4096) {
+        return NextResponse.json({ error: 'Request body is too large.', code: 'REQUEST_TOO_LARGE' }, { status: 413 });
+      }
+      body = JSON.parse(rawBody);
+    } catch {
+      return NextResponse.json({ error: 'Invalid JSON body.', code: 'INVALID_JSON' }, { status: 400 });
+    }
+    if (!body || typeof body !== 'object' || Array.isArray(body)) {
+      return NextResponse.json({ error: 'Request body must be a JSON object.', code: 'INVALID_BODY' }, { status: 400 });
+    }
 
     // Never trust client-supplied identity fields in PATCH body
     delete body.user_id;
