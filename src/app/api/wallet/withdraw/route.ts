@@ -7,15 +7,24 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   try {
     const authHeader = req.headers.get('authorization');
     const idempotencyKey = req.headers.get('x-idempotency-key');
-    const body = await req.json().catch(() => ({}));
+    let body: unknown;
+    try {
+      body = await req.json();
+    } catch {
+      return NextResponse.json({ error: 'Invalid JSON request body.' }, { status: 400 });
+    }
+    if (typeof body !== 'object' || body === null || Array.isArray(body)) {
+      return NextResponse.json({ error: 'Request body must be a JSON object.' }, { status: 400 });
+    }
+    const payload = body as Record<string, unknown>;
 
     const result = await executeCanonicalWithdrawal({
-      asset: body.asset || body.assetSymbol || body.asset_symbol || body.crypto,
-      amount: body.amount ?? body.amountEth ?? body.amountUsdt,
-      network: body.network || body.chain || body.networkCode,
-      destinationAddress: body.destinationAddress || body.destination_address || body.recipientAddress || body.address || body.toAddress,
-      totpCode: body.totpCode || body.totp_code || body.code,
-      idempotencyKey: idempotencyKey || body.idempotencyKey,
+      asset: payload.asset || payload.assetSymbol || payload.asset_symbol || payload.crypto,
+      amount: payload.amount ?? payload.amountEth ?? payload.amountUsdt,
+      network: payload.network || payload.chain || payload.networkCode,
+      destinationAddress: payload.destinationAddress || payload.destination_address || payload.recipientAddress || payload.address || payload.toAddress,
+      totpCode: payload.totpCode || payload.totp_code || payload.code,
+      idempotencyKey: idempotencyKey || (typeof payload.idempotencyKey === 'string' ? payload.idempotencyKey : undefined),
       authHeader,
     });
 
