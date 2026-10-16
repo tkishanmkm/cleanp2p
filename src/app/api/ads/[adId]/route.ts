@@ -95,6 +95,9 @@ export async function GET(
     const priceVal = Number(ad.price ?? ad.unit_price ?? ad.fixed_rate ?? 0);
     const rawMarginPercent = Number(ad.rate_percent ?? ad.margin_percent ?? ad.margin ?? 0);
     const marginPercent = Number.isFinite(rawMarginPercent) ? rawMarginPercent : 0;
+    const rawAvailableAmount = Number(ad.available_amount ?? ad.total_amount ?? ad.max_amount);
+    const availableAmount =
+      Number.isFinite(rawAvailableAmount) && rawAvailableAmount >= 0 ? rawAvailableAmount : null;
     let paymentMethods: unknown[] = [];
     if (Array.isArray(ad.payment_methods)) {
       paymentMethods = ad.payment_methods;
@@ -211,7 +214,7 @@ export async function GET(
       max_limit: Number.isFinite(Number(ad.max_limit ?? ad.max_amount)) && Number(ad.max_limit ?? ad.max_amount) > 0 ? Number(ad.max_limit ?? ad.max_amount) : null,
       min_amount: Number.isFinite(Number(ad.min_amount ?? ad.min_limit)) && Number(ad.min_amount ?? ad.min_limit) > 0 ? Number(ad.min_amount ?? ad.min_limit) : null,
       max_amount: Number.isFinite(Number(ad.max_amount ?? ad.max_limit)) && Number(ad.max_amount ?? ad.max_limit) > 0 ? Number(ad.max_amount ?? ad.max_limit) : null,
-      available_amount: Number.isFinite(Number(ad.available_amount ?? ad.total_amount ?? ad.max_amount)) && Number(ad.available_amount ?? ad.total_amount ?? ad.max_amount) >= 0 ? Number(ad.available_amount ?? ad.total_amount ?? ad.max_amount) : null,
+      available_amount: availableAmount,
       payment_methods: paymentMethods,
       offer_tags: tags,
       tags: tags,
