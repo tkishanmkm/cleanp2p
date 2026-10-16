@@ -105,11 +105,32 @@ export async function processWithdrawalQueue(): Promise<WithdrawalProcessResult>
   const withdrawal = queue[0];
   const network = withdrawal.network || 'TRC20';
   const assetSymbol = (withdrawal.asset_symbol || 'USDT').toUpperCase().trim();
-  const amountStr = withdrawal.amount.toString();
-  const destination = withdrawal.to_address.trim();
+  let amountStr = '';
+  let destination = '';
   let isLocalCheckStage = true;
 
   try {
+    // Validate queue data before any network interaction. These checks remain in
+    // the pre-broadcast stage so malformed records can be safely refunded.
+    if (!withdrawal.id || typeof withdrawal.amount !== 'string' && typeof withdrawal.amount !== 'number') {
+      throw new Error('Withdrawal record is missing a valid ID or amount');
+    }
+    amountStr = String(withdrawal.amount).trim();
+    if (!/^\\d+(?:\\.\\d+)?$/.test(amountStr) || !Number.isFinite(Number(amountStr)) || Number(amountStr) <= 0) {
+      throw new Error('Withdrawal amount must be a finite positive decimal');
+    }
+    if (typeof withdrawal.to_address !== 'string') {
+      throw new Error('Withdrawal destination is missing');
+    }
+    destination = withdrawal.to_address.trim();
+    if (!destination) {
+      throw new Error('Withdrawal destination is empty');
+    }
+    const normalizedNetwork = normalizeNetworkCode(network);
+    if (normalizedNetwork !== 'TRC20' && normalizedNetwork !== 'ERC20' && normalizedNetwork !== 'BEP20') {
+      throw new Error(`Unsupported withdrawal network: ${network}`);
+    }
+
     // BRANCH A: TRON Network (TRC-20 USDT)
     if (normalizeNetworkCode(network) === 'TRC20') {
       if (!isValidTronAddress(destination)) {
