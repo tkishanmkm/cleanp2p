@@ -817,7 +817,7 @@ export async function PUT(
 
     if (isFixed) {
       const effectiveEditPrice = price !== undefined ? price : Number(existingAd.price ?? existingAd.unit_price ?? 0);
-      if (effectiveEditPrice <= 0) {
+      if (!Number.isFinite(effectiveEditPrice) || effectiveEditPrice <= 0) {
         return NextResponse.json({ error: 'Valid fixed price is required for fixed-rate ads.' }, { status: 400 });
       }
 
