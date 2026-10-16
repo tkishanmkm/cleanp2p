@@ -2816,7 +2816,7 @@ export async function reconcileAmbiguousSweep(sweepId: string, workerId: string)
 
       // If unconfirmed / pending, ensure record remains safely locked in RECOVERY_REQUIRED
       if (status !== 'RECOVERY_REQUIRED') {
-        await supabaseAdmin.rpc('update_sweep_operation_status', {
+        const { data: recoveryRes, error: recoveryErr } = await supabaseAdmin.rpc('update_sweep_operation_status', {
           p_sweep_id: sweepId,
           p_worker_id: workerId,
           p_expected_status: status,
@@ -2824,6 +2824,9 @@ export async function reconcileAmbiguousSweep(sweepId: string, workerId: string)
           p_tx_hash: sweep_tx_hash,
           p_error_message: `Unconfirmed transaction ${sweep_tx_hash} moved to RECOVERY_REQUIRED`,
         });
+        if (recoveryErr || !recoveryRes || typeof recoveryRes !== 'object' || Array.isArray(recoveryRes) || recoveryRes.success !== true) {
+          throw new Error(`Failed to persist pending sweep recovery status for ${sweepId}: ${recoveryErr?.message || recoveryRes?.message || 'invalid RPC response'}`);
+        }
       }
     } catch (err: any) {
       console.error(`[Reconcile Sweep Exception] ${sweepId}:`, err);
