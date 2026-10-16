@@ -88,9 +88,18 @@ export async function PATCH(
       return NextResponse.json({ error: 'Request body is too large.', code: 'REQUEST_TOO_LARGE' }, { status: 413 });
     }
 
+    let bodyText: string;
+    try {
+      bodyText = await request.text();
+    } catch {
+      return NextResponse.json({ error: 'Unable to read request body.', code: 'INVALID_BODY' }, { status: 400 });
+    }
+    if (bodyText.length > 4096) {
+      return NextResponse.json({ error: 'Request body is too large.', code: 'REQUEST_TOO_LARGE' }, { status: 413 });
+    }
     let body: any;
     try {
-      body = await request.json();
+      body = JSON.parse(bodyText);
     } catch {
       return NextResponse.json({ error: 'Invalid JSON body.', code: 'INVALID_JSON' }, { status: 400 });
     }
