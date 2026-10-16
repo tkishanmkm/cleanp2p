@@ -2694,7 +2694,7 @@ export async function reconcileAmbiguousSweep(sweepId: string, workerId: string)
       return true;
     } catch (broadcastErr: any) {
       console.error(`[BTC/LTC Sweeper Broadcast Exception during READY_TO_BROADCAST recovery] ${sweepId}:`, broadcastErr);
-      await supabaseAdmin.rpc('update_sweep_operation_status', {
+      const { data: recoveryRes, error: recoveryErr } = await supabaseAdmin.rpc('update_sweep_operation_status', {
         p_sweep_id: sweepId,
         p_worker_id: workerId,
         p_expected_status: 'READY_TO_BROADCAST',
@@ -2702,6 +2702,9 @@ export async function reconcileAmbiguousSweep(sweepId: string, workerId: string)
         p_tx_hash: sweep_tx_hash,
         p_error_message: broadcastErr?.message || 'BTC/LTC broadcast ambiguous',
       });
+      if (recoveryErr || !recoveryRes || recoveryRes.success !== true) {
+        console.error(`[BTC/LTC Sweep Recovery Persistence Failure after broadcast exception] ${sweepId}: ${recoveryErr?.message || recoveryRes?.message || 'invalid RPC response'}`);
+      }
       return false;
     }
   }
