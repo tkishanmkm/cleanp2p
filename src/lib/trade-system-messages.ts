@@ -1867,7 +1867,11 @@ export async function insertPaxonesSystemMessage(
   const systemUuid = '00000000-0000-0000-0000-000000000000';
 
   // 1. In browser environment: dispatch to server route for authorized service-role insertion
-  if (typeof window !== 'undefined' && payload.tradeId) {
+  if (typeof window !== 'undefined') {
+    if (!payload.tradeId || typeof payload.tradeId !== 'string' || !payload.tradeId.trim()) {
+      console.warn('System message dispatch requires a valid trade ID.');
+      return;
+    }
     try {
       const res = await fetch(`/api/trades/${encodeURIComponent(payload.tradeId)}/system-message`, {
         method: 'POST',
