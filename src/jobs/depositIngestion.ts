@@ -392,6 +392,8 @@ async function scanEvmNativeDeposits(
         if (
           !tx.to ||
           !/^0x[0-9a-fA-F]{40}$/.test(tx.to) ||
+          typeof tx.from !== 'string' ||
+          !/^0x[0-9a-fA-F]{40}$/.test(tx.from) ||
           !/^0x[0-9a-fA-F]{64}$/.test(tx.hash || '') ||
           tx.blockNumber !== b ||
           typeof tx.blockHash !== 'string' ||
