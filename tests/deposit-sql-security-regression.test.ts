@@ -56,6 +56,16 @@ const checks: Array<[string, string, RegExp]> = [
     /const \{ error: completionError \} = await supabaseAdmin\.rpc\('complete_onchain_withdrawal'[\s\S]*?if \(completionError\)[\s\S]*?throw new Error[\s\S]*?const \{ error: completionError \} = await supabaseAdmin\.rpc\('complete_onchain_withdrawal'[\s\S]*?if \(completionError\)[\s\S]*?throw new Error/i,
   ],
   [
+    'withdrawal worker honors the global emergency kill switch',
+    'src/jobs/withdrawalWorker.ts',
+    /if \(settings\.global_kill_switch_active\)[\s\S]*return \{ allowed: false/i,
+  ],
+  [
+    'withdrawal worker honors administrator withdrawal pause',
+    'src/jobs/withdrawalWorker.ts',
+    /if \(!settings\.withdrawals_enabled\)[\s\S]*return \{ allowed: false/i,
+  ],
+  [
     'withdrawal worker fails closed when circuit-breaker settings are unavailable',
     'src/jobs/withdrawalWorker.ts',
     /if \(error \|\| !settings\)[\s\S]*return \{ allowed: false[\s\S]*catch \(err\)[\s\S]*return \{ allowed: false/i,
