@@ -103,12 +103,27 @@ export async function openDispute(
     throw new Error('Failed to raise dispute via canonical RPC.');
   }
 
+  // Notifications are best-effort follow-up work; never turn a successful dispute
+  // into an apparent failure, but do log database errors for operators.
   try {
-    const { data: tradeData } = await supabase.from('trades').select('buyer_id, seller_id').eq('id', tradeId).maybeSingle();
-    const pIds = [tradeData?.buyer_id, tradeData?.seller_id].filter(Boolean);
-    for (const pid of pIds) {
-      await supabase.from('notifications').insert({
-        user_id: pid,
+    const { data: tradeData, error: tradeLookupError } = await supabase
+      .from('trades')
+      .select('buyer_id, seller_id')
+      .eq('id', tradeId)
+      .maybeSingle();
+
+    if (tradeLookupError) {
+      console.warn('Dispute opened, but participant lookup for notifications failed.');
+      return;
+    }
+
+    const participantIds = [...new Set([tradeData?.buyer_id, tradeData?.seller_id].filter(
+      (id): id is string => typeof id === 'string' && id.length > 0
+    ))];
+
+    for (const participantId of participantIds) {
+      const { error: notificationError } = await supabase.from('notifications').insert({
+        user_id: participantId,
         title: 'Trade Disputed',
         message: `Dispute opened for trade: ${fullReason}`,
         type: 'dispute',
@@ -116,6 +131,11 @@ export async function openDispute(
         metadata: { link: `/trade/${tradeId}` },
         created_at: new Date().toISOString(),
       });
+      if (notificationError) {
+        console.warn('Dispute opened, but a participant notification could not be saved.');
+      }
     }
-  } catch (_) {}
+  } catch {
+    console.warn('Dispute opened, but follow-up notifications could not be completed.');
+  }
 }
