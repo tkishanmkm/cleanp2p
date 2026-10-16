@@ -114,11 +114,21 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: 'Unable to submit report right now. Please try again later.' }, { status: 500 });
     }
 
-    let reporterUsername = user.user_metadata?.username || user.email?.split('@')[0] || 'Trader';
+    let reporterUsername = 'Trader';
     try {
-      const { data: prof } = await supabase.from('profiles').select('username').eq('id', user.id).maybeSingle();
-      if (prof?.username) reporterUsername = prof.username;
-    } catch {}
+      const { data: prof, error: profileError } = await supabase
+        .from('profiles')
+        .select('username')
+        .eq('id', user.id)
+        .maybeSingle();
+      if (profileError) {
+        console.warn('Trade report profile lookup failed:', profileError.code || 'UNKNOWN');
+      } else if (typeof prof?.username === 'string' && prof.username.trim()) {
+        reporterUsername = prof.username.trim().slice(0, 80);
+      }
+    } catch (profileError) {
+      console.warn('Trade report profile lookup threw:', profileError instanceof Error ? profileError.name : 'UnknownError');
+    }
 
     // The report record is authoritative. A chat-message failure must not make
     // clients believe the report itself failed and encourage duplicate submissions.
