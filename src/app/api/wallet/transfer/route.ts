@@ -78,7 +78,7 @@ export async function POST(req: NextRequest) {
     // Extract and validate client idempotency key
     const headerIdempotencyKey = req.headers.get('x-idempotency-key') || req.headers.get('idempotency-key');
     const suppliedKey = bodyIdempotencyKey ?? idempotency_key ?? requestId ?? headerIdempotencyKey;
-    const rawKey = typeof suppliedKey === 'string' ? suppliedKey.trim() : '';
+    const rawKey = typeof suppliedKey === 'string' && suppliedKey.length <= 128 ? suppliedKey.trim() : '';
     const idempotencyKey = /^[A-Za-z0-9._:-]{8,128}$/.test(rawKey) ? rawKey : null;
 
     if (!idempotencyKey) {
