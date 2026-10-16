@@ -792,6 +792,11 @@ const checks: Array<[string, string, RegExp]> = [
     /const \{ data: past24hWithdrawals, error: past24hWithdrawalsError \}[\s\S]*?if \(past24hWithdrawalsError \|\| !past24hWithdrawals\)[\s\S]*?status: 'SECURITY_CHECK_UNAVAILABLE'[\s\S]*?statusCode: 503/i,
   ],
   [
+    'withdrawal rejects when duplicate-withdrawal lookup fails',
+    'src/lib/services/withdrawalService.ts',
+    /const \{ data: existing, error: existingError \}[\s\S]*?if \(existingError\)[\s\S]*?Duplicate-withdrawal verification is temporarily unavailable[\s\S]*?statusCode: 503/i,
+  ],
+  [
     'withdrawal rejects when platform security settings cannot be read',
     'src/lib/services/withdrawalService.ts',
     /const \{ data: settings, error: settingsError \}[\s\S]*?if \(settingsError \|\| !settings\)[\s\S]*?statusCode: 503/i,
