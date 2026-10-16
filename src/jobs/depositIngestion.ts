@@ -1349,26 +1349,33 @@ async function refreshPendingDepositConfirmations(): Promise<{
               continue;
             }
           }
-          // Native-asset pending rows must match the actual transaction recipient
-          // and exact wei value; receipt success alone is insufficient evidence.
-          if (!evmTransaction.to ||
-              !/^0x[0-9a-fA-F]{40}$/.test(destinationAddress) ||
-              evmTransaction.to.toLowerCase() !== destinationAddress.toLowerCase() ||
-              typeof dep.amount !== 'string' && typeof dep.amount !== 'number') {
-            console.error('[Deposit Ingestion] Pending EVM native transfer recipient or amount is invalid; deposit remains pending');
-            continue;
-          }
-          try {
-            const amountText = String(dep.amount);
-            if (!/^(0|[1-9]\d*)(?:\.\d{1,18})?$/.test(amountText) ||
-                ethers.parseUnits(amountText, 18) <= 0n ||
-                ethers.parseUnits(amountText, 18) !== evmTransaction.value) {
-              console.error('[Deposit Ingestion] Pending EVM native transfer value does not match stored amount; deposit remains pending');
+          // Native-asset rows must use the chain's configured native symbol and
+          // match the actual transaction recipient and exact wei value. ERC-20
+          // rows were verified against their receipt Transfer log above.
+          if (assetSymbol !== 'USDT') {
+            if (assetSymbol !== chain.nativeSymbol) {
+              console.error('[Deposit Ingestion] Pending EVM asset is neither canonical USDT nor the chain native asset; deposit remains pending');
               continue;
             }
-          } catch {
-            console.error('[Deposit Ingestion] Pending EVM native amount is malformed; deposit remains pending');
-            continue;
+            if (!evmTransaction.to ||
+                !/^0x[0-9a-fA-F]{40}$/.test(destinationAddress) ||
+                evmTransaction.to.toLowerCase() !== destinationAddress.toLowerCase() ||
+                typeof dep.amount !== 'string' && typeof dep.amount !== 'number') {
+              console.error('[Deposit Ingestion] Pending EVM native transfer recipient or amount is invalid; deposit remains pending');
+              continue;
+            }
+            try {
+              const amountText = String(dep.amount);
+              if (!/^(0|[1-9]\d*)(?:\.\d{1,18})?$/.test(amountText) ||
+                  ethers.parseUnits(amountText, 18) <= 0n ||
+                  ethers.parseUnits(amountText, 18) !== evmTransaction.value) {
+                console.error('[Deposit Ingestion] Pending EVM native transfer value does not match stored amount; deposit remains pending');
+                continue;
+              }
+            } catch {
+              console.error('[Deposit Ingestion] Pending EVM native amount is malformed; deposit remains pending');
+              continue;
+            }
           }
           const currentBlock = await provider.getBlockNumber();
             if (!Number.isSafeInteger(receipt.blockNumber) || receipt.blockNumber <= 0 ||
