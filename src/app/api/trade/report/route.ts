@@ -66,6 +66,9 @@ export async function POST(req: Request) {
     if (!cleanCategory || !cleanDescription) {
       return NextResponse.json({ error: 'Category and description must contain readable text.' }, { status: 400 });
     }
+    if (cleanCategory.length > 100 || cleanDescription.length > 10000) {
+      return NextResponse.json({ error: 'Normalized category or description exceeds the allowed length.' }, { status: 400 });
+    }
 
     const cleanTradeId = tradeId.trim();
     const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(cleanTradeId);
