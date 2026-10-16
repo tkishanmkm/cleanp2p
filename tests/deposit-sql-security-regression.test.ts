@@ -56,6 +56,11 @@ const checks: Array<[string, string, RegExp]> = [
     /const \{ error: completionError \} = await supabaseAdmin\.rpc\('complete_onchain_withdrawal'[\s\S]*?if \(completionError\)[\s\S]*?throw new Error[\s\S]*?const \{ error: completionError \} = await supabaseAdmin\.rpc\('complete_onchain_withdrawal'[\s\S]*?if \(completionError\)[\s\S]*?throw new Error/i,
   ],
   [
+    'withdrawal worker validates queued withdrawal fields before network interaction',
+    'src/jobs/withdrawalWorker.ts',
+    /Withdrawal amount must be a finite positive decimal[\s\S]*Withdrawal destination is missing[\s\S]*Unsupported withdrawal network/i,
+  ],
+  [
     'withdrawal worker honors the global emergency kill switch',
     'src/jobs/withdrawalWorker.ts',
     /if \(settings\.global_kill_switch_active\)[\s\S]*return \{ allowed: false/i,
