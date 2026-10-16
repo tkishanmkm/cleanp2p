@@ -186,7 +186,7 @@ export async function POST(
           if (notificationError) {
             console.warn('Dispute notification could not be saved:', notificationError.code || 'UNKNOWN');
           }
-        } catch (nErr) {
+        } catch {
           console.warn('Dispute notification insert threw an exception.');
         }
       }
