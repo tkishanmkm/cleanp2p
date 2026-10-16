@@ -165,8 +165,11 @@ export async function resolveAuthoritativeWithdrawalFee(
     if (normAsset === 'USDT') {
       // For token withdrawals, convert native gas expense to USDT units
       // E.g., TRC20 consumes TRX, ERC20 consumes ETH, BEP20 consumes BNB
-      const feeUsd = gasMetric.estimated_fee_usd || 1.5;
-      baseNetworkFeeCrypto = feeUsd; // 1 USDT = $1 USD
+      const feeUsd = Number(gasMetric.estimated_fee_usd);
+      if (!Number.isFinite(feeUsd) || feeUsd <= 0) {
+        throw new Error(`Authoritative token network fee USD unavailable for ${normAsset}/${normNet}`);
+      }
+      baseNetworkFeeCrypto = feeUsd; // USDT is treated as USD-pegged for fee accounting
     } else {
       baseNetworkFeeCrypto = gasMetric.estimated_fee_native;
     }
