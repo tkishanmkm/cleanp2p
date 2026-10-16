@@ -265,10 +265,13 @@ export async function POST(req: Request) {
       ['margin', cleanPayload.margin],
       ['minimum trade limit', cleanPayload.min_amount],
       ['maximum trade limit', cleanPayload.max_amount],
+      ['minimum order', cleanPayload.min_order],
+      ['maximum order', cleanPayload.max_order],
       ['available amount', cleanPayload.available_amount],
       ['total amount', cleanPayload.total_amount],
       ['margin percentage', cleanPayload.margin_percentage],
       ['rate percentage', cleanPayload.rate_percent],
+      ['rate adjustment', cleanPayload.rate_adjustment],
     ];
     for (const [label, rawValue] of numericFields) {
       if (rawValue === null || rawValue === undefined || rawValue === '') continue;
