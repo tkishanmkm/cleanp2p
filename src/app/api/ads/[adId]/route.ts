@@ -866,8 +866,8 @@ export async function PUT(
 
     const timestamp = new Date().toISOString();
 
-    const updatedAsset = body.asset || body.asset_symbol || body.crypto || body.crypto_symbol || body.coin;
-    const updatedFiat = body.fiat || body.fiat_symbol || body.fiat_currency || body.fiatCurrency || body.currency;
+    const updatedAsset = body.asset_symbol ?? body.asset ?? body.crypto_symbol ?? body.crypto_currency ?? body.crypto ?? body.coin ?? body.token_symbol;
+    const updatedFiat = body.fiat_symbol ?? body.fiat_currency ?? body.fiatCurrency ?? body.fiat ?? body.currency;
 
     // Validate crypto asset if updated
     if (updatedAsset) {
@@ -893,8 +893,8 @@ export async function PUT(
     }
 
     // Authoritative Server-Side ±50% Reference Market Price Validation for Edited Ads
-    const effectiveAsset = String(updatedAsset || existingAd.asset_symbol || existingAd.asset || existingAd.crypto || 'USDT').toUpperCase().trim();
-    const effectiveFiat = String(updatedFiat || existingAd.fiat_symbol || existingAd.fiat_currency || existingAd.fiat || 'USD').toUpperCase().trim();
+    const effectiveAsset = String(updatedAsset ?? existingAd.asset_symbol ?? existingAd.crypto_symbol ?? existingAd.crypto_currency ?? existingAd.crypto ?? existingAd.asset ?? existingAd.coin ?? existingAd.token_symbol ?? 'USDT').toUpperCase().trim();
+    const effectiveFiat = String(updatedFiat ?? existingAd.fiat_symbol ?? existingAd.fiat_currency ?? existingAd.fiatCurrency ?? existingAd.fiat ?? existingAd.currency ?? 'USD').toUpperCase().trim();
 
     if (isFixed) {
       const effectiveEditPrice = price !== undefined ? price : Number(existingAd.price ?? existingAd.unit_price ?? 0);
