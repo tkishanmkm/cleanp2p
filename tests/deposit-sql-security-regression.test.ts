@@ -892,6 +892,21 @@ const checks: Array<[string, string, RegExp]> = [
     /const protectedPage = \[[\s\S]*?'\/dashboard'[\s\S]*?'\/wallet'[\s\S]*?'\/withdraw'[\s\S]*?if \(protectedPage\)[\s\S]*?url\.pathname = '\/login'[\s\S]*?security_check_unavailable/i,
   ],
   [
+    'internal transfer bounds raw recipient and asset inputs',
+    'src/app/api/wallet/transfer/route.ts',
+    /typeof rawRecipient !== 'string'[\\s\\S]*?rawRecipient\\.length > 320[\\s\\S]*?typeof rawAsset !== 'string'[\\s\\S]*?rawAsset\\.length > 20/,
+  ],
+  [
+    'internal transfer uses exact email recipient lookup',
+    'src/app/api/wallet/transfer/route.ts',
+    /\\.eq\\('email', cleanTarget\\)/,
+  ],
+  [
+    'internal transfer restricts idempotency key syntax and length',
+    'src/app/api/wallet/transfer/route.ts',
+    /suppliedKey === 'string' && suppliedKey\\.length <= 128[\\s\\S]*?\\/\\^\\[A-Za-z0-9\\._:-\\]\\{8,128\\}\\$\\//,
+  ],
+  [
     'sweep reconciliation exception checks recovery-state persistence',
     'src/jobs/sweeperWorker.ts',
     /\[Reconcile Sweep Exception\][\s\S]*?const \{ data: recoveryRes, error: recoveryErr \} = await supabaseAdmin\.rpc\('update_sweep_operation_status'[\s\S]*?p_new_status: 'RECOVERY_REQUIRED'[\s\S]*?recoveryRes\.success !== true[\s\S]*?Reconcile Sweep Critical/i,
