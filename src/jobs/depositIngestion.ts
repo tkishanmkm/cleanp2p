@@ -743,9 +743,39 @@ async function scanTronDeposits(
           if ((log.topics[0] || '').toLowerCase() !== transferTopic) continue;
 
           const txHash = (log.transactionHash || '').replace(/^0x/, '');
-          const outputIndex = parseInt(log.logIndex || '0x0', 16) || 0;
+          const logIndexHex = log.logIndex;
+          if (
+            !/^[0-9a-fA-F]{64}$/.test(txHash) ||
+            typeof logIndexHex !== 'string' ||
+            !/^0x[0-9a-fA-F]+$/.test(logIndexHex)
+          ) {
+            errors.push('Rejected TRON RPC log with invalid transaction hash or log index');
+            continue;
+          }
+          const outputIndex = Number.parseInt(logIndexHex.slice(2), 16);
+          if (!Number.isSafeInteger(outputIndex) || outputIndex < 0) {
+            errors.push('Rejected TRON RPC log with invalid log index');
+            continue;
+          }
           const deduplicationKey = `${txHash}_${outputIndex}`;
           if (seenTxIndices.has(deduplicationKey)) continue;
+
+          // Validate the emitting token contract and ABI fields before decoding
+          // or reserving this event's idempotency key.
+          const logAddrHex = (log.address || '').toLowerCase().replace(/^0x/, '');
+          if (!/^[0-9a-f]{40}$/.test(logAddrHex)) continue;
+          let eventContractBase58 = '';
+          try {
+            eventContractBase58 = tronWeb.address.fromHex('41' + logAddrHex);
+          } catch (_) {
+            continue;
+          }
+          if (eventContractBase58 !== CANONICAL_USDT_CONTRACTS.TRC20) continue;
+          if (
+            !/^0x[0-9a-fA-F]{64}$/.test(log.topics[1] || '') ||
+            !/^0x[0-9a-fA-F]{64}$/.test(log.topics[2] || '') ||
+            !/^0x[0-9a-fA-F]{64}$/.test(log.data || '')
+          ) continue;
 
           let toBase58 = '';
           try {
@@ -756,7 +786,6 @@ async function scanTronDeposits(
           }
 
           if (!monitoredTronAddresses.has(toBase58)) continue;
-          seenTxIndices.add(deduplicationKey);
 
           let fromBase58: string | null = null;
           try {
@@ -774,18 +803,13 @@ async function scanTronDeposits(
             continue;
           }
 
-          const eventBlock = parseInt(log.blockNumber || '0x0', 16);
+          const blockHex = log.blockNumber;
+          if (typeof blockHex !== 'string' || !/^0x[0-9a-fA-F]+$/.test(blockHex)) continue;
+          const eventBlock = Number.parseInt(blockHex.slice(2), 16);
           if (!Number.isSafeInteger(eventBlock) || eventBlock <= 0 || eventBlock > latestBlock) continue;
           const confirmations = latestBlock - eventBlock + 1;
 
-          let eventContractBase58 = '';
-          try {
-            const logAddrHex = (log.address || '').toLowerCase().replace(/^0x/, '');
-            if (!/^[0-9a-f]{40}$/.test(logAddrHex)) continue;
-            eventContractBase58 = tronWeb.address.fromHex('41' + logAddrHex);
-          } catch (_) { continue; }
-          if (eventContractBase58 !== 'TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t') continue;
-
+          seenTxIndices.add(deduplicationKey);
           detected++;
 
           const { data: rpcData, error } = await supabaseAdmin.rpc('process_deposit_atomic', {
