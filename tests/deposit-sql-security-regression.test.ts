@@ -802,6 +802,11 @@ const checks: Array<[string, string, RegExp]> = [
     /const \{ data: past24hWithdrawals, error: past24hWithdrawalsError \}[\s\S]*?if \(past24hWithdrawalsError \|\| !past24hWithdrawals\)[\s\S]*?status: 'SECURITY_CHECK_UNAVAILABLE'[\s\S]*?statusCode: 503/i,
   ],
   [
+    'withdrawal TOTP requires digits and an available secret',
+    'src/lib/services/withdrawalService.ts',
+    /\^\\d\{4,8\}\$[\s\S]*?typeof secret !== 'string'[\s\S]*?status: 'SECURITY_CHECK_UNAVAILABLE'/,
+  ],
+  [
     'withdrawal asset and network inputs must be strings',
     'src/lib/services/withdrawalService.ts',
     /typeof input\.asset !== 'string'[\s\S]*?typeof input\.network !== 'string'[\s\S]*?typeof input\.chain !== 'string'[\s\S]*?status: 'INVALID_ASSET_OR_NETWORK'/,
