@@ -538,7 +538,18 @@ export async function fundGasForAddress(
   });
 
   if (nonceErr || allocatedNonce === null || allocatedNonce === undefined) {
-    throw new Error(`Failed to allocate hot wallet nonce: ${nonceErr?.message || 'UNKNOWN_NONCE_ERROR'}`);
+    const nonceFailure = `Failed to allocate hot wallet nonce: ${nonceErr?.message || 'UNKNOWN_NONCE_ERROR'}`;
+    if (sweepId) {
+      const { error: nonceRecoveryPersistErr } = await supabaseAdmin.from('gas_funding_operations').update({
+        status: 'RECOVERY_REQUIRED',
+        error_message: nonceFailure,
+        updated_at: new Date().toISOString(),
+      }).eq('sweep_id', sweepId);
+      if (nonceRecoveryPersistErr) {
+        throw new Error(`${nonceFailure}; RECOVERY_REQUIRED persistence failed: ${nonceRecoveryPersistErr.message}`);
+      }
+    }
+    throw new Error(nonceFailure);
   }
 
   // Step 6: Pre-broadcast ownership check
