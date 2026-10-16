@@ -70,7 +70,7 @@ async function markWithdrawalBroadcasted(withdrawalId: string, txHash: string): 
     throw new Error('Unable to persist broadcast transaction to withdrawal queue');
   }
 
-  const { error: withdrawalError } = await supabaseAdmin
+  const { data: withdrawalRow, error: withdrawalError } = await supabaseAdmin
     .from('withdrawals')
     .update({
       status: 'broadcasted',
@@ -79,9 +79,15 @@ async function markWithdrawalBroadcasted(withdrawalId: string, txHash: string): 
       broadcasted_at: now,
       updated_at: now,
     })
-    .eq('id', withdrawalId);
+    .eq('id', withdrawalId)
+    .select('id')
+    .maybeSingle();
 
-  if (withdrawalError) {
+  // Supabase UPDATE can return zero rows without an error (for example, when
+  // RLS or a mismatched identifier prevents a row from being updated). Treat
+  // that as a persistence failure; the caller must retain the reserved funds
+  // and reconcile the already-broadcast transaction.
+  if (withdrawalError || !withdrawalRow) {
     throw new Error('Unable to persist broadcast state to withdrawal record');
   }
 }
