@@ -807,6 +807,11 @@ const checks: Array<[string, string, RegExp]> = [
     /const parsedAmount = [\s\S]*?if \(!Number\.isFinite\(parsedAmount\) \|\| parsedAmount <= 0\)/,
   ],
   [
+    'withdrawal reservation RPC failures return service unavailable',
+    'src/lib/services/withdrawalService.ts',
+    /status: 'RESERVATION_FAILED',[\s\S]*?message: 'Withdrawals are temporarily unavailable\. Please try again later\.',[\s\S]*?statusCode: 503/,
+  ],
+  [
     'withdrawal RPC errors are not returned verbatim to clients',
     'src/lib/services/withdrawalService.ts',
     /if \(rpcError\)[\s\S]*?error: 'Balance reservation failed\.'[\s\S]*?Withdrawals are temporarily unavailable/i,
