@@ -6,6 +6,11 @@ const root = process.cwd();
 const read = (relativePath: string) => readFileSync(join(root, relativePath), 'utf8');
 const checks: Array<[string, string, RegExp]> = [
   [
+    'EVM token ambiguous broadcast checks RECOVERY_REQUIRED persistence',
+    'src/jobs/sweeperWorker.ts',
+    /EVM Sweeper Broadcast Exception\] Token transfer[\s\S]*?let recoveryPersistError: string \| null = null[\s\S]*?recoveryRes\.success !== true[\s\S]*?EVM Token Sweeper Recovery Persistence Failure[\s\S]*?EVM token broadcast outcome ambiguous/i,
+  ],
+  [
     'EVM native ETH ambiguous broadcast checks RECOVERY_REQUIRED persistence',
     'src/jobs/sweeperWorker.ts',
     /EVM Sweeper Broadcast Exception\] Native ETH[\s\S]*?let recoveryPersistError: string \| null = null[\s\S]*?recoveryRes\.success !== true[\s\S]*?EVM ETH Sweeper Recovery Persistence Failure[\s\S]*?EVM ETH broadcast outcome ambiguous/i,
