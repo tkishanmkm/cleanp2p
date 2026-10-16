@@ -752,6 +752,14 @@ async function scanTronDeposits(
               continue;
             }
 
+            // A mined transaction can still have failed its TRON smart-contract
+            // execution. Require an explicit successful receipt before treating a
+            // provider-listed TRC-20 event as creditable.
+            if (txInfo?.receipt?.result !== 'SUCCESS') {
+              errors.push(`Rejected TRON account transfer without a successful execution receipt: ${txId}`);
+              continue;
+            }
+
             // Confirm the account API's block assignment against the chain RPC
             // before reserving the event key or attempting a credit.
             const canonicalRes = await fetch(`${tronHost}/wallet/getblockbynum`, {
