@@ -569,7 +569,14 @@ async function scanTronDeposits(
         });
         if (nowBlockRes.ok) {
           const nbData = await nowBlockRes.json();
-          latestBlock = nbData?.block_header?.raw_data?.number || 0;
+          const candidate = nbData?.block_header?.raw_data?.number;
+          if (Number.isSafeInteger(candidate) && candidate > 0) {
+            latestBlock = candidate;
+          } else {
+            errors.push('TRON getnowblock returned an invalid block height');
+          }
+        } else {
+          errors.push(`TRON getnowblock failed with HTTP ${nowBlockRes.status}`);
         }
       } catch (_) {}
     }
