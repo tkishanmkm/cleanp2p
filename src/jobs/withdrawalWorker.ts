@@ -21,6 +21,39 @@ import {
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
 export { supabaseAdmin };
 
+/**
+ * Persist a broadcast transaction without settling the withdrawal. Settlement and
+ * liability release happen only after the confirmation worker verifies on-chain success.
+ */
+async function markWithdrawalBroadcasted(withdrawalId: string, txHash: string): Promise<void> {
+  const now = new Date().toISOString();
+  const { data: queued, error: queueError } = await supabaseAdmin
+    .from('onchain_withdrawals')
+    .update({ status: 'BROADCASTED', tx_hash: txHash, updated_at: now })
+    .eq('id', withdrawalId)
+    .select('id')
+    .maybeSingle();
+
+  if (queueError || !queued) {
+    throw new Error('Unable to persist broadcast transaction to withdrawal queue');
+  }
+
+  const { error: withdrawalError } = await supabaseAdmin
+    .from('withdrawals')
+    .update({
+      status: 'broadcasted',
+      tx_hash: txHash,
+      txid: txHash,
+      broadcasted_at: now,
+      updated_at: now,
+    })
+    .eq('id', withdrawalId);
+
+  if (withdrawalError) {
+    throw new Error('Unable to persist broadcast state to withdrawal record');
+  }
+}
+
 export interface WithdrawalProcessResult {
   processed: boolean;
   withdrawalId?: string;
@@ -126,10 +159,7 @@ export async function processWithdrawalQueue(): Promise<WithdrawalProcessResult>
       });
       const txHash = res.txHash;
 
-      await supabaseAdmin.rpc('complete_onchain_withdrawal', {
-        p_withdrawal_id: withdrawal.id,
-        p_tx_hash: txHash,
-      });
+      await markWithdrawalBroadcasted(withdrawal.id, txHash);
 
       console.log(`[Withdrawal Worker] Dispatched TRON payout ${withdrawal.id} (tx: ${txHash})`);
       return {
@@ -180,10 +210,7 @@ export async function processWithdrawalQueue(): Promise<WithdrawalProcessResult>
       });
     }
 
-    await supabaseAdmin.rpc('complete_onchain_withdrawal', {
-      p_withdrawal_id: withdrawal.id,
-      p_tx_hash: tx.hash,
-    });
+    await markWithdrawalBroadcasted(withdrawal.id, tx.hash);
 
     console.log(`[Withdrawal Worker] Broadcasted EVM payout ${withdrawal.id} on ${network} (tx: ${tx.hash}, nonce: ${nonce})`);
     return {
