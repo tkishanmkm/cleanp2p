@@ -508,8 +508,10 @@ export async function createTradeOrderWithEscrow(input: {
       };
     }
 
-    // Rule: Users cannot open trades on their own ads (unless it is a system/demo ad)
-    if (ad.user_id === user.id && ad.user_id !== 'trader_verified_1') {
+    // Reject self-trades using every supported owner field. Real ads must
+    // never receive a demo/system-account exception.
+    const resolvedAdOwnerId = ad.user_id || ad.seller_id || ad.advertiser_id || (ad.profiles && ad.profiles.id);
+    if (resolvedAdOwnerId && String(resolvedAdOwnerId) === user.id) {
       return {
         data: null,
         error: {
