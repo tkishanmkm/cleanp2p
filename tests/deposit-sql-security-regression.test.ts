@@ -235,6 +235,11 @@ const checks: Array<[string, string, RegExp]> = [
     'supabase/migrations/20261001020000_gas_funding_broadcast_durability_and_abuse_protection.sql',
     /IF p_deposit_address IS NULL OR TRIM\\(p_deposit_address\\) = '' THEN[\\s\\S]*IF v_norm_net NOT IN \\(\'ERC20\', \'BEP20\'\\) THEN[\\s\\S]*IF p_amount_allocated IS NULL OR p_amount_allocated <= 0 THEN[\\s\\S]*p_daily_max_operations IS NULL OR p_daily_max_operations <= 0/i,
   ],
+  [
+    'gas funding claims require valid inputs and a live sweep lease owned by the worker',
+    'supabase/migrations/20261001020000_gas_funding_broadcast_durability_and_abuse_protection.sql',
+    /CREATE OR REPLACE FUNCTION public\\.claim_gas_funding_operation[\\s\\S]*?IF p_sweep_id IS NULL OR p_worker_id IS NULL[\\s\\S]*?SELECT \\* INTO v_sweep[\\s\\S]*?FROM public\\.sweep_operations[\\s\\S]*?v_sweep\\.worker_id IS DISTINCT FROM p_worker_id[\\s\\S]*?v_sweep\\.lease_expires_at IS NULL OR v_sweep\\.lease_expires_at <= NOW\\(\\)/i,
+  ],
 ];
 
 let failed = 0;
