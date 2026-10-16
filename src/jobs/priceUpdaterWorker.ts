@@ -195,6 +195,10 @@ export async function runMarketPriceUpdate(): Promise<PriceUpdateResult> {
             finalPrice = Number(calculatedPrice.toFixed(8));
           }
 
+          // Rounding can underflow tiny calculated values to zero; never
+          // persist a zero or non-finite market price.
+          if (!Number.isFinite(finalPrice) || finalPrice <= 0) continue;
+
           upsertRows.push({
             asset_symbol: asset,
             fiat_symbol: fiat.toUpperCase(),
