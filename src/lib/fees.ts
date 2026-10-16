@@ -147,9 +147,13 @@ export async function resolveAuthoritativeWithdrawalFee(
   const normAsset = (asset || 'USDT').toUpperCase().trim();
   const normNet = (network || '').toUpperCase().trim();
 
-  const multiplier = explicitMultiplier !== undefined && explicitMultiplier > 0
+  const multiplier = explicitMultiplier !== undefined && Number.isFinite(explicitMultiplier) && explicitMultiplier > 0
     ? explicitMultiplier
     : await getAdminFeeMultiplier();
+
+  if (!Number.isFinite(multiplier) || multiplier <= 0) {
+    throw new Error('Withdrawal fee multiplier must be a finite positive number');
+  }
 
   // 1. Fetch live or cached gas fee metrics from the gas oracle
   const gasMetric = await getCachedGasFees(normAsset, normNet);
@@ -181,9 +185,18 @@ export async function resolveAuthoritativeWithdrawalFee(
     }
   }
 
+  // Unknown networks/assets must not silently produce a zero withdrawal fee.
+  if (!Number.isFinite(baseNetworkFeeCrypto) || baseNetworkFeeCrypto <= 0) {
+    throw new Error(`Authoritative network fee unavailable for ${normAsset}/${normNet}`);
+  }
+
   // Multiply applicable network gas fee by server multiplier (Default: 2.0X)
   const feeCrypto = Number((baseNetworkFeeCrypto * multiplier).toFixed(8));
   const feeUsd = Number((feeCrypto * assetPrice).toFixed(2));
+
+  if (!Number.isFinite(feeCrypto) || feeCrypto <= 0 || !Number.isFinite(feeUsd) || feeUsd <= 0) {
+    throw new Error('Calculated withdrawal fee is invalid');
+  }
 
   return {
     feeCrypto,
