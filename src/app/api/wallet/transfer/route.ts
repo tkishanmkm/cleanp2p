@@ -299,7 +299,7 @@ export async function POST(req: NextRequest) {
           }
         }
       } catch (authLookupErr) {
-        console.warn('Auth user search fallback notice in transfer:', authLookupErr);
+        console.warn('[Internal Transfer] Auth recipient lookup failed:', authLookupErr instanceof Error ? authLookupErr.name : 'UnknownError');
       }
     }
 
