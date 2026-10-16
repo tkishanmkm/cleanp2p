@@ -426,7 +426,8 @@ export async function POST(req: NextRequest) {
     }, { status: 200 });
 
   } catch (err: unknown) {
-    console.error('Transfer API route error:', err);
+    const errorName = err instanceof Error ? err.name : 'UnknownError';
+    console.error('Transfer API route failed:', { errorName });
     return NextResponse.json(
       { error: 'Transfer request could not be processed. Please try again later.' },
       { status: 500 }
