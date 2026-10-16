@@ -845,7 +845,7 @@ export async function fundTronGasForAddress(
   // Broadcast exact persisted transaction
   try {
     const broadcastRes = await tronWeb.trx.sendRawTransaction(signedTx);
-    if (!broadcastRes || !broadcastRes.result) {
+    if (!broadcastRes || broadcastRes.result !== true) {
       throw new Error(`TRON gas funding broadcast rejected: ${JSON.stringify(broadcastRes)}`);
     }
 
