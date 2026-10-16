@@ -717,10 +717,17 @@ async function scanTronDeposits(
                   ],
                 }),
               });
-              if (!res.ok) return null;
+              if (!res.ok) {
+                throw new Error(`TRON eth_getLogs HTTP ${res.status} for blocks ${r.from}-${clampedTo}`);
+              }
               const json = await res.json();
-              if (json.error) return null;
-              return json.result || [];
+              if (!json || json.error) {
+                throw new Error(`TRON eth_getLogs provider error for blocks ${r.from}-${clampedTo}`);
+              }
+              if (!Array.isArray(json.result)) {
+                throw new Error(`TRON eth_getLogs returned an invalid result for blocks ${r.from}-${clampedTo}`);
+              }
+              return json.result;
             })
           );
 
