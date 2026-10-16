@@ -224,20 +224,22 @@ async function scanEvmTokenDeposits(
         }
 
         const rawValue = parsed.args[2] as bigint;
+        if (rawValue <= 0n) continue;
         const formattedAmount = ethers.formatUnits(rawValue, tokenDecimals);
-        const numericAmount = parseFloat(formattedAmount);
-
-        if (numericAmount <= 0) continue;
+        if (!/^(?:0|[1-9]\d*)(?:\.\d+)?$/.test(formattedAmount)) {
+          errors.push(`Invalid token amount for tx ${log.transactionHash}`);
+          continue;
+        }
 
         detected++;
         const confirmations = Math.max(1, latestBlock - log.blockNumber + 1);
 
-        // Call canonical atomic deposit RPC
+        // Call canonical atomic deposit RPC using the exact decimal amount string.
         const { data, error } = await supabaseAdmin.rpc('process_deposit_atomic', {
           p_destination_address: toAddress,
           p_asset_symbol: 'USDT',
           p_network_code: normNet,
-          p_amount: numericAmount,
+          p_amount: formattedAmount,
           p_tx_hash: log.transactionHash,
           p_output_index: log.index,
           p_block_number: log.blockNumber,
@@ -251,7 +253,7 @@ async function scanEvmTokenDeposits(
           errors.push(`RPC error on tx ${log.transactionHash}: ${error.message}`);
         } else {
           const res = typeof data === 'string' ? JSON.parse(data) : data;
-          if (res?.status === 'credited' || (res?.success && confirmations >= chainConfig.requiredConfirmations)) {
+          if (res?.status === 'credited') {
             credited++;
           }
         }
