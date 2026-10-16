@@ -545,8 +545,17 @@ async function scanTronDeposits(
       });
       if (blockRes.ok) {
         const bData = await blockRes.json();
-        if (bData.result) {
-          latestBlock = parseInt(bData.result, 16);
+        if (
+          !bData?.error &&
+          typeof bData?.result === 'string' &&
+          /^0x[0-9a-fA-F]+$/.test(bData.result)
+        ) {
+          const parsedBlock = Number.parseInt(bData.result.slice(2), 16);
+          if (Number.isSafeInteger(parsedBlock) && parsedBlock > 0) {
+            latestBlock = parsedBlock;
+          }
+        } else if (bData?.error) {
+          errors.push('TRON JSON-RPC returned an error while fetching latest block');
         }
       }
     } catch (_) {}
