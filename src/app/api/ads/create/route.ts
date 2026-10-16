@@ -46,9 +46,18 @@ export async function POST(req: Request) {
     try {
       await assertPlatformControlAllowed('new_ad', { userId: user.id });
     } catch (guardErr: any) {
+      const statusCode = Number.isInteger(guardErr?.statusCode) &&
+        guardErr.statusCode >= 400 && guardErr.statusCode < 500
+        ? guardErr.statusCode
+        : 403;
+      const publicCode = typeof guardErr?.code === 'string' &&
+        /^[A-Z0-9_]{1,64}$/.test(guardErr.code)
+        ? guardErr.code
+        : 'PLATFORM_AD_CREATION_DISABLED';
+      console.warn('[POST /api/ads/create] Platform guard denied creation:', publicCode);
       return NextResponse.json(
-        { error: guardErr.message || 'Creating new advertisements is temporarily disabled.', code: guardErr.code || 'PLATFORM_AD_CREATION_DISABLED' },
-        { status: guardErr.statusCode || 403 }
+        { error: 'Creating new advertisements is currently unavailable for this account.', code: publicCode },
+        { status: statusCode }
       );
     }
 
