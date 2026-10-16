@@ -111,15 +111,17 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Sender profile not found.' }, { status: 404 });
     }
 
-    // Block sender if banned, restricted, or emergency frozen
+    // Normalize status casing so database capitalization cannot bypass sender restrictions.
+    const senderAccountStatus = typeof senderProfile.account_status === 'string'
+      ? senderProfile.account_status.trim().toLowerCase()
+      : '';
+
+    // Block sender if banned, restricted, or emergency frozen.
     if (
       senderProfile.is_banned ||
       senderProfile.is_restricted ||
       senderProfile.is_emergency_frozen ||
-      senderProfile.account_status === 'suspended' ||
-      senderProfile.account_status === 'banned' ||
-      senderProfile.account_status === 'restricted' ||
-      senderProfile.account_status === 'frozen'
+      ['suspended', 'banned', 'restricted', 'frozen'].includes(senderAccountStatus)
     ) {
       return NextResponse.json({
         error: senderProfile.is_emergency_frozen
