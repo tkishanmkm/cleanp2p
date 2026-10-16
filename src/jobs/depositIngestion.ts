@@ -368,7 +368,7 @@ async function scanEvmNativeDeposits(
     // the provider's current tip, and report unavailable blocks instead of silently
     // treating a partial scan as complete.
     const end = Math.min(toBlock, latestBlock);
-    const start = Math.max(fromBlock, end - 25);
+    const start = Math.max(fromBlock, end - 24);
     for (let b = start; b <= end; b++) {
       const block = await provider.getBlock(b, true);
       if (!block) {
