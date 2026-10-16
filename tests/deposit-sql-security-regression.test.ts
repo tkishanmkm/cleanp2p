@@ -340,6 +340,11 @@ const checks: Array<[string, string, RegExp]> = [
     'src/jobs/sweeperWorker.ts',
     /const \{ data: cleanupRes, error: cleanupErr \} = await supabaseAdmin\.rpc\('verify_and_lock_pre_broadcast_cleanup'[\s\S]*?if \(cleanupErr \|\| !cleanupRes \|\| cleanupRes\.can_undelegate !== true\)[\s\S]*?const undelegated = await undelegateEnergyToPool\(sweepId, workerId\)[\s\S]*?if \(!undelegated\)/i,
   ],
+  [
+    'TRON undelegation validates persisted receiver and amount before transaction construction',
+    'src/jobs/sweeperWorker.ts',
+    /const rawDelegatedAmount = String\(delegation\.delegated_amount_sun \?\? ''\)[\s\S]*?!tronWeb\.isAddress\(receiverAddress\)[\s\S]*?!Number\.isSafeInteger\(trxNeededSun\)[\s\S]*?trxNeededSun <= 0/i,
+  ],
 ];
 
 let failed = 0;
