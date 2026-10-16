@@ -58,7 +58,7 @@ const checks: Array<[string, string, RegExp]> = [
   [
     'withdrawal amount validator uses digit and decimal escapes correctly',
     'src/jobs/withdrawalWorker.ts',
-    /!\/\^\\d\+\(\?:\\\.\)\?\$\//i,
+    /if \(!\/\^\\d\+\(\?:\\\.\)\?\$\/\.test\(amountStr\)/i,
   ],
   [
     'withdrawal worker validates queued withdrawal fields before network interaction',
