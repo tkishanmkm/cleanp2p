@@ -453,6 +453,16 @@ assert.match(safeFetchJsonSource, /finally\s*\{\s*clearTimeout\(timeoutId\);/s,
 assert.match(marketPriceWorker, /ASSETS\.includes\(coin\)[\s\S]*?Number\.isFinite\(p\) && p > 0/,
   'market-price worker must only accept positive finite tickers for explicitly supported assets');
 
+const geckoFallbackStart = marketPriceWorker.indexOf('missingGeckoAssets.forEach((symbol) =>');
+const geckoFallbackEnd = marketPriceWorker.indexOf('});', geckoFallbackStart);
+assert.ok(geckoFallbackStart >= 0 && geckoFallbackEnd > geckoFallbackStart,
+  'CoinGecko fallback must iterate only assets missing from the primary provider');
+const geckoFallbackBlock = marketPriceWorker.slice(geckoFallbackStart, geckoFallbackEnd);
+assert.match(geckoFallbackBlock, /if \(!cryptoUsdPrices\[symbol\]\)/,
+  'CoinGecko fallback must not overwrite a valid primary-provider price');
+assert.match(geckoFallbackBlock, /Number\.isFinite\(p\) && p > 0/,
+  'CoinGecko fallback must reject non-finite and non-positive prices');
+
 const marketWorkerFunctionIndex = marketPriceWorker.indexOf('export async function runMarketPriceUpdate');
 const marketWorkerConfigGuardIndex = marketPriceWorker.indexOf('if (!supabaseUrl || !supabaseKey)');
 const marketWorkerClientIndex = marketPriceWorker.indexOf('createClient(supabaseUrl, supabaseKey');
