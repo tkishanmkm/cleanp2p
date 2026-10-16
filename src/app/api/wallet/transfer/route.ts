@@ -428,9 +428,11 @@ export async function POST(req: NextRequest) {
     }, { status: 200 });
 
   } catch (err: unknown) {
-    const errorMessage = err instanceof Error ? err.message : 'Internal server error during transfer';
     console.error('Transfer API route error:', err);
-    return NextResponse.json({ error: errorMessage }, { status: 500 });
+    return NextResponse.json(
+      { error: 'Transfer request could not be processed. Please try again later.' },
+      { status: 500 }
+    );
   }
 }
 
