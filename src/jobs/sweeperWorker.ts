@@ -491,11 +491,14 @@ export async function fundGasForAddress(
     const rejectMsg = eligibilityRes.message || 'Gas funding policy limit reached';
     console.warn(`[Gas Abuse Check] Address ${targetAddress} rejected: ${rejectReason} - ${rejectMsg}`);
     if (sweepId) {
-      await supabaseAdmin.from('gas_funding_operations').update({
+      const { error: rejectionPersistErr } = await supabaseAdmin.from('gas_funding_operations').update({
         status: 'FAILED',
         error_message: `${rejectReason}: ${rejectMsg}`,
         updated_at: new Date().toISOString(),
       }).eq('sweep_id', sweepId);
+      if (rejectionPersistErr) {
+        throw new Error(`Gas funding rejected: ${rejectReason} - ${rejectMsg}; FAILED status persistence also failed: ${rejectionPersistErr.message}`);
+      }
     }
     throw new Error(`Gas funding rejected: ${rejectReason} - ${rejectMsg}`);
   }
@@ -514,11 +517,14 @@ export async function fundGasForAddress(
     const insolvMsg = `Hot wallet ${hotWalletAddress} has insufficient ${nativeSymbol} balance (${ethers.formatEther(hotWalletBalance)}). Required: ${ethers.formatEther(requiredHotWalletBalance)} (fundingAmount: ${ethers.formatEther(fundingAmount)} + fundingFee: ${ethers.formatEther(fundingTxFee)} + reserve: ${ethers.formatEther(configuredReserve)}).`;
     console.error(`[Hot Wallet Insolvency] ${insolvMsg}`);
     if (sweepId) {
-      await supabaseAdmin.from('gas_funding_operations').update({
+      const { error: insolvencyPersistErr } = await supabaseAdmin.from('gas_funding_operations').update({
         status: 'RECOVERY_REQUIRED',
         error_message: insolvMsg,
         updated_at: new Date().toISOString(),
       }).eq('sweep_id', sweepId);
+      if (insolvencyPersistErr) {
+        throw new Error(`HOT_WALLET_INSOLVENT: ${insolvMsg}; RECOVERY_REQUIRED persistence failed: ${insolvencyPersistErr.message}`);
+      }
     }
     throw new Error(`HOT_WALLET_INSOLVENT: ${insolvMsg}`);
   }
