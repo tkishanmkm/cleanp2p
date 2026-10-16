@@ -71,6 +71,11 @@ const checks: Array<[string, string, RegExp]> = [
     /NULLIF\(u\.banned_until, ''\)::timestamptz > NOW\(\)/,
   ],
   [
+    'withdrawal worker bounds caller-supplied dispatch batch size',
+    'src/jobs/withdrawalWorker.ts',
+    /if \(!Number\.isInteger\(maxBatch\) \|\| maxBatch < 1 \|\| maxBatch > 100\)[\s\S]*Invalid maxBatch; refusing to dispatch withdrawals/i,
+  ],
+  [
     'withdrawal worker refuses dispatch when singleton lock cannot be acquired',
     'src/jobs/withdrawalWorker.ts',
     /if \(lockErr\)[\s\S]*refusing to dispatch withdrawals[\s\S]*if \(lockAcquired !== true\)[\s\S]*return \{ totalProcessed: 0, results: \[\], locked: true \}[\s\S]*catch \(lockRpcErr\)[\s\S]*refusing to dispatch withdrawals/i,
