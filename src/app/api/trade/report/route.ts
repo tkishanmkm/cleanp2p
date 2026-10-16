@@ -125,7 +125,8 @@ export async function POST(req: Request) {
       console.error('Trade report saved but system message failed:', messageError);
     }
 
-    return NextResponse.json({ success: true, report: data });
+    // Return only fields the submitting user needs; do not expose future/internal report columns.
+    return NextResponse.json({ success: true, report: { id: data.id, status: data.status } });
   } catch (error: any) {
     console.error('Trade report submission failed:', error);
     return NextResponse.json({ error: 'Unable to submit report right now. Please try again later.' }, { status: 500 });
