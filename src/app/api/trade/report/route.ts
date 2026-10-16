@@ -59,6 +59,9 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: 'Each evidence item must be a valid HTTP or HTTPS URL.' }, { status: 400 });
     }
 
+    const cleanCategory = category.replace(/[\u0000-\u001F\u007F]/g, ' ').replace(/\s+/g, ' ').trim();
+    const cleanDescription = description.replace(/[\u0000-\u001F\u007F]/g, ' ').replace(/\s+/g, ' ').trim();
+
     const cleanTradeId = tradeId.trim();
     const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(cleanTradeId);
     let tradeQuery = supabase.from('trades').select('id, trade_id, buyer_id, seller_id');
@@ -97,8 +100,8 @@ export async function POST(req: Request) {
         trade_public_id: cleanPublicId,
         reporter_id: user.id,
         reported_user_id: otherParticipantId,
-        category: category.trim(),
-        description: description.trim(),
+        category: cleanCategory,
+        description: cleanDescription,
         evidence_urls: Array.isArray(evidenceUrls) ? evidenceUrls.map((url: string) => url.trim()) : [],
         status: 'PENDING_REVIEW',
       })
@@ -124,8 +127,8 @@ export async function POST(req: Request) {
         tradeId: trade.id,
         type: 'ISSUE_REPORTED',
         openerUsername: reporterUsername,
-        issueCategory: category.trim(),
-        issueDetails: description.trim()
+        issueCategory: cleanCategory,
+        issueDetails: cleanDescription
       });
     } catch {
       console.warn('Trade report was saved, but its system message could not be created.');
