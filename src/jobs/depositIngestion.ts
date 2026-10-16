@@ -1011,7 +1011,11 @@ async function scanTronDeposits(
         }
 
         for (const log of allLogs) {
-          if (!log.topics || log.topics.length < 3) continue;
+          if (!log || typeof log !== 'object' || Array.isArray(log)) {
+            errors.push('Rejected malformed TRON RPC log entry');
+            continue;
+          }
+          if (!Array.isArray(log.topics) || log.topics.length !== 3) continue;
           if ((log.topics[0] || '').toLowerCase() !== transferTopic) continue;
 
           const txHash = (log.transactionHash || '').replace(/^0x/, '');
@@ -1063,9 +1067,10 @@ async function scanTronDeposits(
           try {
             const fromHex = '41' + (log.topics[1] || '').slice(-40);
             fromBase58 = tronWeb.address.fromHex(fromHex);
-          } catch (err) {
-          console.error('[Deposit Ingestion] Could not normalize TRON log sender address:', err instanceof Error ? err.message : 'unknown provider error');
-        }
+          } catch {
+            errors.push(`Rejected TRON RPC log with invalid sender address: ${txHash}`);
+            continue;
+          }
 
           let formattedAmount = '';
           try {
