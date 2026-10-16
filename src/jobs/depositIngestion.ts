@@ -694,26 +694,27 @@ async function scanTronDeposits(
             fromBase58 = tronWeb.address.fromHex(fromHex);
           } catch (_) {}
 
-          let numericAmount = 0;
+          let formattedAmount = '';
           try {
             const rawValue = BigInt(log.data || '0x0');
             if (rawValue <= 0n) continue;
-            const formattedAmount = ethers.formatUnits(rawValue, 6);
-            numericAmount = parseFloat(formattedAmount);
+            formattedAmount = ethers.formatUnits(rawValue, 6);
+            if (!/^(?:0|[1-9]\d*)(?:\.\d+)?$/.test(formattedAmount)) continue;
           } catch (_) {
             continue;
           }
 
-          if (numericAmount <= 0) continue;
+          const eventBlock = parseInt(log.blockNumber || '0x0', 16);
+          if (!Number.isSafeInteger(eventBlock) || eventBlock <= 0 || eventBlock > latestBlock) continue;
+          const confirmations = latestBlock - eventBlock + 1;
 
-          const eventBlock = parseInt(log.blockNumber || '0x0', 16) || 0;
-          const confirmations = latestBlock > eventBlock ? latestBlock - eventBlock + 1 : 1;
-
-          let eventContractBase58 = contractAddress;
+          let eventContractBase58 = '';
           try {
             const logAddrHex = (log.address || '').toLowerCase().replace(/^0x/, '');
+            if (!/^[0-9a-f]{40}$/.test(logAddrHex)) continue;
             eventContractBase58 = tronWeb.address.fromHex('41' + logAddrHex);
-          } catch (_) {}
+          } catch (_) { continue; }
+          if (eventContractBase58 !== contractAddress && eventContractBase58 !== 'TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t') continue;
 
           detected++;
 
@@ -721,7 +722,7 @@ async function scanTronDeposits(
             p_destination_address: toBase58,
             p_asset_symbol: 'USDT',
             p_network_code: 'TRC20',
-            p_amount: numericAmount,
+            p_amount: formattedAmount,
             p_tx_hash: txHash,
             p_output_index: outputIndex,
             p_block_number: eventBlock,
@@ -735,7 +736,7 @@ async function scanTronDeposits(
             errors.push(`RPC error for TRON deposit ${txHash}: ${error.message}`);
           } else {
             const res = typeof rpcData === 'string' ? JSON.parse(rpcData) : rpcData;
-            if (res?.status === 'credited' || (res?.success && confirmations >= TRON_CONFIG.requiredConfirmations)) {
+            if (res?.status === 'credited') {
               credited++;
             }
           }
