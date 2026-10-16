@@ -52,6 +52,14 @@ export async function POST(
       }
     }
 
+    const contentLength = req.headers.get('content-length');
+    if (contentLength !== null) {
+      const parsedLength = Number(contentLength);
+      if (!Number.isFinite(parsedLength) || parsedLength < 0 || parsedLength > 64 * 1024) {
+        return NextResponse.json({ error: 'Request body exceeds the 64 KB limit.' }, { status: 413 });
+      }
+    }
+
     let body: unknown;
     try {
       const rawBody = await req.text();
