@@ -451,6 +451,10 @@ export async function fundGasForAddress(
   );
   const dailyMaxOps = parseInt(process.env.GAS_FUNDING_DAILY_MAX_OPS || '5', 10);
 
+  if (!Number.isSafeInteger(cooldownSecs) || cooldownSecs < 0 || !Number.isFinite(dailyLimitNative) || dailyLimitNative <= 0 || !Number.isSafeInteger(dailyMaxOps) || dailyMaxOps <= 0) {
+    throw new Error('Invalid gas funding abuse-protection configuration; refusing to fund');
+  }
+
   const { data: eligibilityRes, error: eligErr } = await supabaseAdmin.rpc('check_gas_funding_eligibility', {
     p_deposit_address: targetAddress,
     p_network: normNet,
