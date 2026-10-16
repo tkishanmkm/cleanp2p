@@ -279,22 +279,9 @@ export async function POST(req: NextRequest) {
             if (existingProf) {
               recipientProfile = existingProf;
             } else {
-              // Auto-create/upsert basic profile so transfer succeeds seamlessly
-              const fallbackUsername = matchedAuthUser.user_metadata?.username || matchedAuthUser.email?.split('@')[0] || `user_${matchedAuthUser.id.slice(0, 6)}`;
-              const { data: newProf } = await admin
-                .from('profiles')
-                .upsert({
-                  id: matchedAuthUser.id,
-                  username: fallbackUsername,
-                  email: matchedAuthUser.email,
-                  account_status: 'ACTIVE',
-                })
-                .select('id, username, is_banned, is_restricted, is_emergency_frozen, account_status')
-                .single();
-
-              if (newProf) {
-                recipientProfile = newProf;
-              }
+              // Existing Auth users without a profile are not eligible transfer recipients.
+              // Profile creation must happen through the account-provisioning flow.
+              console.warn('[Internal Transfer] Recipient Auth user has no profile; transfer denied.');
             }
           }
         }
