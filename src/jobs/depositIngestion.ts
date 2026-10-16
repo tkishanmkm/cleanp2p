@@ -731,11 +731,21 @@ async function scanTronDeposits(
               errors.push(`TRON transaction-info request failed with HTTP ${txInfoRes.status} for ${txId}`);
               continue;
             }
-            const txInfo = await txInfoRes.json();
+            let txInfo: any;
+            try {
+              txInfo = await txInfoRes.json();
+            } catch {
+              errors.push(`Invalid TRON transaction-info JSON for ${txId}`);
+              continue;
+            }
             if (
               !txInfo ||
+              typeof txInfo !== 'object' ||
+              Array.isArray(txInfo) ||
               typeof txInfo.id !== 'string' ||
+              !/^[0-9a-fA-F]{64}$/.test(txInfo.id) ||
               txInfo.id.toLowerCase() !== txId.toLowerCase() ||
+              !Number.isSafeInteger(txInfo.blockNumber) ||
               txInfo.blockNumber !== eventBlock
             ) {
               errors.push(`Rejected TRON account transfer with unverifiable transaction inclusion: ${txId}`);
