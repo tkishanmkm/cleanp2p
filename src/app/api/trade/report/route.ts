@@ -44,7 +44,7 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: 'Reported user ID is invalid.' }, { status: 400 });
     }
     if (evidenceUrls !== undefined && (!Array.isArray(evidenceUrls) || evidenceUrls.length > 20 ||
-        evidenceUrls.some((url: unknown) => typeof url !== 'string' || url.trim().length === 0 || url.trim().length > 2048))) {
+        evidenceUrls.some((url: unknown) => typeof url !== 'string' || url.trim().length === 0 || url.length > 2048))) {
       return NextResponse.json({ error: 'Evidence must be a list of at most 20 valid URL strings.' }, { status: 400 });
     }
     if (Array.isArray(evidenceUrls) && evidenceUrls.some((url: unknown) => {
