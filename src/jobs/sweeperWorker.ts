@@ -1206,7 +1206,8 @@ export async function undelegateEnergyToPool(
     const broadcastRes = await tronWeb.trx.sendRawTransaction(signedTx);
     if (!broadcastRes || !broadcastRes.result) {
       const errStr = JSON.stringify(broadcastRes || {});
-      if (!errStr.includes('DUP') && !errStr.includes('already exist')) {
+      const normalizedErr = errStr.toLowerCase();
+      if (!normalizedErr.includes('dup') && !normalizedErr.includes('already exist')) {
         throw new Error(`TRON undelegation raw broadcast rejected: ${errStr}`);
       }
     }
