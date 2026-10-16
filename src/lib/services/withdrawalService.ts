@@ -36,6 +36,9 @@ export function validateDestinationAddress(address: string, network: string): { 
   if (!clean || clean.length < 10) {
     return { valid: false, formatted: clean, error: 'Destination address is too short' };
   }
+  if (clean.length > 128) {
+    return { valid: false, formatted: clean, error: 'Destination address is too long' };
+  }
 
   if (normNet === 'TRC20') {
     if (!isValidTronAddress(clean)) {
