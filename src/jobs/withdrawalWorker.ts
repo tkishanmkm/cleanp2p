@@ -42,7 +42,8 @@ export async function checkCircuitBreakers(): Promise<{ allowed: boolean; reason
       .maybeSingle();
 
     if (error || !settings) {
-      return { allowed: true };
+      console.error('[Withdrawal Worker] Circuit-breaker settings unavailable; refusing to broadcast withdrawals', error);
+      return { allowed: false, reason: 'Withdrawal safety settings unavailable; dispatch is paused' };
     }
     if (settings.global_kill_switch_active) {
       return { allowed: false, reason: 'Global emergency kill switch is currently active' };
@@ -52,7 +53,8 @@ export async function checkCircuitBreakers(): Promise<{ allowed: boolean; reason
     }
     return { allowed: true };
   } catch (err) {
-    return { allowed: true };
+    console.error('[Withdrawal Worker] Circuit-breaker check failed; refusing to broadcast withdrawals', err);
+    return { allowed: false, reason: 'Withdrawal safety check failed; dispatch is paused' };
   }
 }
 
