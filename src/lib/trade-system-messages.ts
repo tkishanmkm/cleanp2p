@@ -1879,12 +1879,15 @@ export async function insertPaxonesSystemMessage(
         })
       });
       if (res.ok) return;
-    } catch (e) {
-      console.warn('System message API route dispatch failed; attempting database fallback.');
+      console.warn('System message API route rejected the request; direct browser database fallback is disabled.');
+      return;
+    } catch {
+      console.warn('System message API route dispatch failed; direct browser database fallback is disabled.');
+      return;
     }
   }
 
-  // 2. Direct database insertion (server-side context or fallback)
+  // 2. Direct database insertion is reserved for trusted server-side contexts.
   try {
     const { error } = await supabase.from('trade_messages').insert([
       {
