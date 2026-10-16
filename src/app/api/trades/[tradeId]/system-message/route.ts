@@ -25,10 +25,35 @@ export async function POST(
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    const body = await req.json().catch(() => ({}));
-    const { type, metadata = {}, customText } = body;
+    const contentLength = req.headers.get('content-length');
+    if (contentLength !== null) {
+      const parsedLength = Number(contentLength);
+      if (!Number.isFinite(parsedLength) || parsedLength < 0 || parsedLength > 64 * 1024) {
+        return NextResponse.json({ error: 'Request body exceeds the 64 KB limit.' }, { status: 413 });
+      }
+    }
 
-    if (!type && !customText) {
+    let body: unknown;
+    try {
+      const rawBody = await req.text();
+      if (new TextEncoder().encode(rawBody).byteLength > 64 * 1024) {
+        return NextResponse.json({ error: 'Request body exceeds the 64 KB limit.' }, { status: 413 });
+      }
+      body = JSON.parse(rawBody);
+    } catch {
+      return NextResponse.json({ error: 'Request body must contain valid JSON.' }, { status: 400 });
+    }
+    if (!body || typeof body !== 'object' || Array.isArray(body)) {
+      return NextResponse.json({ error: 'Request body must be a JSON object.' }, { status: 400 });
+    }
+
+    const { type, metadata = {}, customText } = body as Record<string, unknown>;
+    if ((type !== undefined && type !== null && (typeof type !== 'string' || type.length > 64)) ||
+        (customText !== undefined && customText !== null && (typeof customText !== 'string' || customText.length > 2000)) ||
+        !metadata || typeof metadata !== 'object' || Array.isArray(metadata)) {
+      return NextResponse.json({ error: 'Message type, metadata, or custom text is invalid.' }, { status: 400 });
+    }
+    if (!(typeof type === 'string' && type.trim()) && !(typeof customText === 'string' && customText.trim())) {
       return NextResponse.json({ error: 'Message type or customText is required' }, { status: 400 });
     }
 
