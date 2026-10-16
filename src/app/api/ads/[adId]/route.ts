@@ -796,7 +796,9 @@ export async function PUT(
     const paymentMethods = Array.isArray(body.payment_methods) 
       ? body.payment_methods 
       : (Array.isArray(body.paymentMethods) ? body.paymentMethods : undefined);
-    const paymentWindow = body.payment_window ? Math.max(30, parseInt(String(body.payment_window), 10) || 30) : 30;
+    const paymentWindow = body.payment_window !== undefined && body.payment_window !== null && body.payment_window !== ''
+      ? Number(body.payment_window)
+      : 30;
 
     const termsText = body.terms !== undefined 
       ? String(body.terms) 
@@ -825,8 +827,8 @@ export async function PUT(
     }
     if (body.payment_window !== undefined) {
       const parsedWindow = Number(body.payment_window);
-      if (!Number.isInteger(parsedWindow) || parsedWindow < 5 || parsedWindow > 180) {
-        return NextResponse.json({ error: 'Payment window must be an integer between 5 and 180 minutes.', code: 'INVALID_PAYMENT_WINDOW' }, { status: 400 });
+      if (!Number.isInteger(parsedWindow) || parsedWindow < 30 || parsedWindow > 1440) {
+        return NextResponse.json({ error: 'Payment window must be an integer between 30 and 1440 minutes.', code: 'INVALID_PAYMENT_WINDOW' }, { status: 400 });
       }
     }
 
