@@ -184,6 +184,8 @@ export async function processWithdrawalQueue(): Promise<WithdrawalProcessResult>
   const amountStr = withdrawal.amount.toString();
   const destination = withdrawal.to_address.trim();
   let isLocalCheckStage = true;
+  // Retain the hash if broadcast succeeded but database persistence fails.
+  let submittedTxHash: string | null = null;
 
   try {
     // BRANCH A: TRON Network (TRC-20 USDT)
@@ -203,6 +205,7 @@ export async function processWithdrawalQueue(): Promise<WithdrawalProcessResult>
         amount: amountStr,
       });
       const txHash = res.txHash;
+      submittedTxHash = txHash;
 
       await markWithdrawalBroadcasted(withdrawal.id, txHash);
 
@@ -270,6 +273,7 @@ export async function processWithdrawalQueue(): Promise<WithdrawalProcessResult>
       });
     }
 
+    submittedTxHash = tx.hash;
     await markWithdrawalBroadcasted(withdrawal.id, tx.hash);
 
     console.log(`[Withdrawal Worker] Broadcasted EVM payout ${withdrawal.id} on ${network} (tx: ${tx.hash}, nonce: ${nonce})`);
@@ -324,6 +328,7 @@ export async function processWithdrawalQueue(): Promise<WithdrawalProcessResult>
           .from('onchain_withdrawals')
           .update({
             status: 'AMBIGUOUS_BROADCAST',
+            ...(submittedTxHash ? { tx_hash: submittedTxHash } : {}),
             error_message: `Ambiguous broadcast error: ${err.message}`,
             updated_at: now,
           })
@@ -339,6 +344,7 @@ export async function processWithdrawalQueue(): Promise<WithdrawalProcessResult>
           .from('withdrawals')
           .update({
             status: 'AMBIGUOUS_BROADCAST',
+            ...(submittedTxHash ? { tx_hash: submittedTxHash, txid: submittedTxHash } : {}),
             broadcast_error: `Ambiguous broadcast error: ${err.message}`,
             updated_at: now,
           })
