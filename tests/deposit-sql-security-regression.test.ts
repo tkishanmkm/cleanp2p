@@ -290,6 +290,11 @@ const checks: Array<[string, string, RegExp]> = [
     'src/jobs/sweeperWorker.ts',
     /const tronPrivKey = resolveTronHotWalletPrivateKey\(\)[\s\S]*?if \(!tronPrivKey\)[\s\S]*?status: 'RECOVERY_REQUIRED'[\s\S]*?HOT_WALLET_TRON_PRIVATE_KEY is not configured[\s\S]*?throw new Error\(message\)/i,
   ],
+  [
+    'TRON gas funding remains disabled unless durable TRC20 SQL support is explicitly enabled',
+    'src/jobs/sweeperWorker.ts',
+    /ENABLE_DURABLE_TRON_GAS_FUNDING !== 'true'[\s\S]*?TRON gas funding is disabled until a TRC20-compatible durable SQL workflow is deployed/i,
+  ],
 ];
 
 let failed = 0;
