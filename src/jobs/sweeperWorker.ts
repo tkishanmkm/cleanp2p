@@ -994,13 +994,18 @@ export async function delegateEnergyFromPool(
     throw broadcastErr;
   }
 
-  // 7. Transition status to DELEGATED
-  await supabaseAdmin.rpc('update_delegation_status', {
+  // 7. Persist the delegated state; never report success if the state transition failed.
+  const { data: delegatedStatusRes, error: delegatedStatusErr } = await supabaseAdmin.rpc('update_delegation_status', {
     p_sweep_id: sweepId,
     p_worker_id: workerId,
     p_expected_status: 'DELEGATING',
     p_new_status: 'DELEGATED',
   });
+
+  if (delegatedStatusErr || !delegatedStatusRes || delegatedStatusRes.success !== true) {
+    console.error('[Tron Resource Pool] Delegation broadcast may have succeeded, but DELEGATED state persistence failed; operation requires recovery.', delegatedStatusErr || delegatedStatusRes);
+    throw new Error('TRON delegation broadcast outcome requires recovery because DELEGATED state was not persisted');
+  }
 
   console.log(`[Tron Resource Pool] Successfully delegated ${energyNeeded} Energy to ${receiverAddress}. TxHash: ${deterministicTxHash}`);
   return { success: true, delegatedAmountSun: trxNeededSun };
