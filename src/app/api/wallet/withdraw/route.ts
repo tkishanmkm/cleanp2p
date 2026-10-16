@@ -38,9 +38,10 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       totalDebited: result.totalDebited,
       message: result.message,
     });
-  } catch (err: any) {
+  } catch (err: unknown) {
+    console.error('[POST /api/wallet/withdraw] Request failed:', err);
     return NextResponse.json(
-      { error: err.message || 'Internal server error' },
+      { error: 'Unable to process withdrawal request' },
       { status: 500 }
     );
   }
