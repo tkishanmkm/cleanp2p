@@ -53,6 +53,7 @@ export async function GET(
     );
 
     const isIdVerified = isTier2User(profile);
+    const kycStatus = profile.kyc_status || (isIdVerified ? 'VERIFIED' : 'UNVERIFIED');
 
     // 3. Feedback statistics
     let feedbacks: any[] = [];
