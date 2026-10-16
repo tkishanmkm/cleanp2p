@@ -201,7 +201,7 @@ export async function POST(req: NextRequest) {
       const { data: profByEmail, error: emailLookupError } = await admin
         .from('profiles')
         .select('id, username, is_banned, is_restricted, is_emergency_frozen, account_status')
-        .or(`email.ilike.${cleanTarget},full_name.ilike.${cleanTarget}`)
+        .ilike('email', cleanTarget)
         .maybeSingle();
       if (emailLookupError) {
         console.error('[Internal Transfer] Recipient email/name lookup failed:', emailLookupError.code);
