@@ -6,6 +6,11 @@ const root = process.cwd();
 const read = (relativePath: string) => readFileSync(join(root, relativePath), 'utf8');
 const checks: Array<[string, string, RegExp]> = [
   [
+    'BTC/LTC recovery missing signed transaction checks recovery-state persistence',
+    'src/jobs/sweeperWorker.ts',
+    /Durability invariant violation: signed_tx_hex is NULL for READY_TO_BROADCAST BTC\/LTC sweep[\s\S]*?BTC\/LTC Sweep Recovery Persistence Failure[\s\S]*?recoveryRes\.success !== true/i,
+  ],
+  [
     'EVM recovery rebroadcast exception checks recovery-state persistence',
     'src/jobs/sweeperWorker.ts',
     /EVM Sweeper Broadcast Exception during READY_TO_BROADCAST recovery[\s\S]*?EVM Sweep Recovery Persistence Failure after broadcast exception[\s\S]*?recoveryRes\.success !== true/i,
