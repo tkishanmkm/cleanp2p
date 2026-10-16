@@ -325,6 +325,11 @@ const checks: Array<[string, string, RegExp]> = [
     'src/jobs/sweeperWorker.ts',
     /!tronWeb\.isAddress\(hotWalletDestination\)[\s\S]*?TRON hot wallet destination address is missing or invalid/i,
   ],
+  [
+    'TRON USDT balance is parsed as an exact integer before transaction construction',
+    'src/jobs/sweeperWorker.ts',
+    /const rawBalance = balanceSun\?\.toString\?\.\(\) \?\? String\(balanceSun\)[\s\S]*?balanceSunInteger = BigInt\(rawBalance\)[\s\S]*?value: balanceSunInteger\.toString\(\)/i,
+  ],
 ];
 
 let failed = 0;
