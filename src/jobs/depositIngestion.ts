@@ -1105,6 +1105,10 @@ async function refreshPendingDepositConfirmations(): Promise<{
         console.error('[Deposit Ingestion] Pending TRC20 recheck requires Transfer-event verification; deposit remains pending');
         continue;
       } else if (normNet === 'BTC') {
+        if (assetSymbol !== 'BTC') {
+          console.error('[Deposit Ingestion] Pending BTC row has a mismatched or missing asset symbol; deposit remains pending');
+          continue;
+        }
         const btcApiBase = process.env.BTC_MEMPOOL_API || 'https://mempool.space/api';
         try {
           const [txResponse, statusResponse, tipResponse] = await Promise.all([
@@ -1171,6 +1175,10 @@ async function refreshPendingDepositConfirmations(): Promise<{
           console.error('[Deposit Ingestion] Pending BTC/LTC verification failed; deposit left pending:', err instanceof Error ? err.message : 'unknown provider error');
         }
       } else if (normNet === 'LTC') {
+        if (assetSymbol !== 'LTC') {
+          console.error('[Deposit Ingestion] Pending LTC row has a mismatched or missing asset symbol; deposit remains pending');
+          continue;
+        }
         const ltcApiBase = process.env.LTC_MEMPOOL_API || 'https://litecoinspace.org/api';
         try {
           const [txResponse, statusResponse, tipResponse] = await Promise.all([
