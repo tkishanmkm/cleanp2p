@@ -322,9 +322,9 @@ export async function POST(req: NextRequest) {
 
     if (!transferData || transferData.success !== true) {
       return NextResponse.json({
-        error: 'Transfer was rejected and no successful result was confirmed.',
-        code: 'TRANSFER_REJECTED',
-      }, { status: 400 });
+        error: 'Transfer result could not be confirmed. Please check transfer history before retrying.',
+        code: 'TRANSFER_RESULT_UNCONFIRMED',
+      }, { status: 503 });
     }
 
     // Verify critical financial fields are strictly present from the RPC output
