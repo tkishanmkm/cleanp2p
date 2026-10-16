@@ -1450,16 +1450,19 @@ export async function sweepTronDepositAddress(
     // Atomic pre-broadcast undelegation cleanup (Blocker #1 Fix)
     if (sweepId && workerId && delegatedEnergy) {
       try {
-        const { data: cleanupRes } = await supabaseAdmin.rpc('verify_and_lock_pre_broadcast_cleanup', {
+        const { data: cleanupRes, error: cleanupErr } = await supabaseAdmin.rpc('verify_and_lock_pre_broadcast_cleanup', {
           p_sweep_id: sweepId,
           p_worker_id: workerId,
         });
 
-        if (cleanupRes && cleanupRes.can_undelegate === true) {
-          console.log(`[Tron Resource Pool] Worker ownership & pre-broadcast state verified. Executing clean undelegation for sweep ${sweepId}`);
-          await undelegateEnergyToPool(sweepId, workerId);
+        if (cleanupErr || !cleanupRes || cleanupRes.can_undelegate !== true) {
+          console.error('[Tron Resource Pool] Pre-broadcast cleanup authorization failed; leaving allocation for recovery.', cleanupErr || cleanupRes);
         } else {
-          console.log(`[Tron Resource Pool] Pre-broadcast cleanup skipped (can_undelegate: false). Leaving allocation for recovery.`);
+          console.log(`[Tron Resource Pool] Worker ownership & pre-broadcast state verified. Executing clean undelegation for sweep ${sweepId}`);
+          const undelegated = await undelegateEnergyToPool(sweepId, workerId);
+          if (!undelegated) {
+            console.error(`[Tron Resource Pool] Undelegation did not complete for sweep ${sweepId}; allocation remains for recovery.`);
+          }
         }
       } catch (unErr) {
         console.error('[Tron Resource Pool] Failed during atomic pre-broadcast cleanup:', unErr);
