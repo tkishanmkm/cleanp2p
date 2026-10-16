@@ -802,6 +802,11 @@ const checks: Array<[string, string, RegExp]> = [
     /const \{ data: past24hWithdrawals, error: past24hWithdrawalsError \}[\s\S]*?if \(past24hWithdrawalsError \|\| !past24hWithdrawals\)[\s\S]*?status: 'SECURITY_CHECK_UNAVAILABLE'[\s\S]*?statusCode: 503/i,
   ],
   [
+    'withdrawal RPC errors are not returned verbatim to clients',
+    'src/lib/services/withdrawalService.ts',
+    /if \(rpcError\)[\s\S]*?error: 'Balance reservation failed\.'[\s\S]*?Withdrawals are temporarily unavailable/i,
+  ],
+  [
     'withdrawal rejects an unconfirmed reservation RPC result',
     'src/lib/services/withdrawalService.ts',
     /const withdrawalId = rpcResult\?\.withdrawal_id[\s\S]*?RESERVATION_UNCONFIRMED[\s\S]*?statusCode: 503/i,
