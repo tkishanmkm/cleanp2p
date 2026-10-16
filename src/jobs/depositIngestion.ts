@@ -187,6 +187,20 @@ async function scanEvmTokenDeposits(
 
     for (const log of logs) {
       try {
+        if (
+          !log.address ||
+          log.address.toLowerCase() !== tokenContractAddress.toLowerCase() ||
+          !Number.isSafeInteger(log.index) ||
+          log.index < 0 ||
+          !Number.isSafeInteger(log.blockNumber) ||
+          log.blockNumber <= 0 ||
+          !/^0x[0-9a-fA-F]{64}$/.test(log.transactionHash || '') ||
+          !/^0x[0-9a-fA-F]{64}$/.test(log.blockHash || '')
+        ) {
+          errors.push('Rejected EVM token log with invalid identifiers');
+          continue;
+        }
+
         const parsed = erc20Interface.parseLog({
           topics: log.topics as string[],
           data: log.data,
