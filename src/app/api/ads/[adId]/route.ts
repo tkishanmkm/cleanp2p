@@ -11,7 +11,7 @@ export const dynamic = 'force-dynamic';
 const VALID_SUPPORTED_ASSETS = ['USDT', 'BTC', 'ETH', 'LTC'];
 
 function formatPresence(lastActive?: string | null): string {
-  if (!lastActive) return 'Online';
+  if (!lastActive) return 'Unknown';
   const diffMs = Date.now() - new Date(lastActive).getTime();
   const diffMinutes = Math.floor(diffMs / (1000 * 60));
   if (diffMinutes < 5) return 'Online';
@@ -41,7 +41,7 @@ export async function GET(
 
     // Fetch user profile for presence and trader info using admin client
     const admin = getSupabaseAdminClient();
-    let presence = 'Online';
+    let presence = 'Unknown';
     let profileData: any = null;
     const adOwnerUserId = ad.user_id || ad.userId || ad.seller_id || ad.creator_id || ad.user?.id;
 
