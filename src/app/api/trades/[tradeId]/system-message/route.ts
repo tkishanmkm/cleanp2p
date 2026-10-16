@@ -59,8 +59,8 @@ export async function POST(
     const allowedTypes = new Set([
       'TRADE_INITIATED', 'TRADE_STARTED', 'ESCROW_LOCKED', 'MARKED_PAID',
       'TRADE_RELEASED', 'TRADE_COMPLETED', 'TRADE_CANCELLED', 'TRADE_EXPIRED',
-      'TRADE_DISPUTED', 'TRADE_REPORTED', 'USER_BLOCKED', 'FEEDBACK_LEFT',
-      'MODERATOR_JOINED', 'CUSTOM'
+      'TRADE_DISPUTED', 'POSITIVE_FEEDBACK', 'NEGATIVE_FEEDBACK', 'USER_BLOCKED',
+      'ISSUE_REPORTED', 'MESSAGE_BLOCKED', 'SECURITY_REMINDER', 'CUSTOM'
     ]);
     if (typeof type === 'string' && type.trim() && !allowedTypes.has(type)) {
       return NextResponse.json({ error: 'Unsupported system message type.' }, { status: 400 });
