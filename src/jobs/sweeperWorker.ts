@@ -266,7 +266,7 @@ async function assertPreBroadcastOwnership(
     p_expected_status: expectedStatus,
   });
 
-  if (error || !verifyRes || !verifyRes.valid) {
+  if (error || !verifyRes || verifyRes.valid !== true) {
     const reason = verifyRes?.reason || error?.message || 'OWNERSHIP_VERIFICATION_FAILED';
     console.error(`[Pre-Broadcast Stop] Worker ${workerId} failed pre-broadcast check for sweep ${sweepId}: ${reason}`);
     throw new Error(`Pre-broadcast ownership check failed: ${reason}`);
