@@ -952,6 +952,7 @@ async function scanTronDeposits(
     // 3. Strategy B: TronGrid Contract Event Ingestion (Transfer events on known USDT contracts)
     for (const cAddr of knownContracts) {
       try {
+        // Explicitly bound provider response size; cursor pagination is handled in a later scanner pass.
         const eventUrl = `${tronGridHost}/v1/contracts/${cAddr}/events?event_name=Transfer&limit=50&order_by=block_timestamp,desc`;
         const res = await fetch(eventUrl, { headers: tronGridHeaders });
         if (!res.ok) {
