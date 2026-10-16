@@ -183,8 +183,31 @@ export async function POST(req: Request) {
     if (cleanPayload.rate_percent !== undefined) cleanPayload.rate_percent = cleanPayload.rate_percent ? Number(cleanPayload.rate_percent) : 0;
     if (cleanPayload.rate_adjustment !== undefined) cleanPayload.rate_adjustment = cleanPayload.rate_adjustment ? Number(cleanPayload.rate_adjustment) : 0;
     if (cleanPayload.margin_percentage !== undefined) cleanPayload.margin_percentage = cleanPayload.margin_percentage ? Number(cleanPayload.margin_percentage) : 0;
-    if (cleanPayload.payment_window !== undefined) cleanPayload.payment_window = parseInt(String(cleanPayload.payment_window), 10) || 30;
-    if (cleanPayload.min_completed_trades !== undefined) cleanPayload.min_completed_trades = parseInt(String(cleanPayload.min_completed_trades), 10) || 0;
+    if (cleanPayload.payment_window !== undefined && cleanPayload.payment_window !== null && cleanPayload.payment_window !== '') {
+      const paymentWindow = Number(cleanPayload.payment_window);
+      if (!Number.isSafeInteger(paymentWindow) || paymentWindow < 30 || paymentWindow > 1440) {
+        return NextResponse.json(
+          { error: 'Payment window must be a whole number between 30 and 1440 minutes.' },
+          { status: 400 }
+        );
+      }
+      cleanPayload.payment_window = paymentWindow;
+    } else {
+      cleanPayload.payment_window = 30;
+    }
+
+    if (cleanPayload.min_completed_trades !== undefined && cleanPayload.min_completed_trades !== null && cleanPayload.min_completed_trades !== '') {
+      const minCompletedTrades = Number(cleanPayload.min_completed_trades);
+      if (!Number.isSafeInteger(minCompletedTrades) || minCompletedTrades < 0 || minCompletedTrades > 1000000) {
+        return NextResponse.json(
+          { error: 'Minimum completed trades must be a whole number between 0 and 1,000,000.' },
+          { status: 400 }
+        );
+      }
+      cleanPayload.min_completed_trades = minCompletedTrades;
+    } else {
+      cleanPayload.min_completed_trades = 0;
+    }
 
     // Normalize and strictly validate ad trade direction (BUY/SELL)
     const resolvedDirection = resolveTradeType(cleanPayload);
