@@ -56,6 +56,16 @@ const checks: Array<[string, string, RegExp]> = [
     /tx = await (?:signer\.sendTransaction|tokenContract\.transfer)\([\s\S]*?const receipt = await tx\.wait\(1\)[\s\S]*?if \(!receipt \|\| receipt\.status !== 1\)[\s\S]*?complete_onchain_withdrawal/i,
   ],
   [
+    'TRON withdrawal poller refunds only explicit mined failures',
+    'src/jobs/withdrawalWorker.ts',
+    /const \{ isConfirmed, success, isFailed, actualCostTrx \} = await getTronTransactionConfirmations\(w\.tx_hash\)[\s\S]*?else if \(isFailed && !success\)[\s\S]*?p_is_verified_unbroadcast: false/i,
+  ],
+  [
+    'TRON confirmation helper distinguishes pending transactions from mined failures',
+    'src/lib/blockchain/tron.ts',
+    /isFailed: boolean[\s\S]*?isFailed: false[\s\S]*?isFailed: Boolean\(txInfo\.receipt\?\.result && txInfo\.receipt\.result !== 'SUCCESS'\)/i,
+  ],
+  [
     'withdrawal worker treats completion RPC errors after broadcast as ambiguous failures',
     'src/jobs/withdrawalWorker.ts',
     /const \{ error: completionError \} = await supabaseAdmin\.rpc\('complete_onchain_withdrawal'[\s\S]*?if \(completionError\)[\s\S]*?throw new Error[\s\S]*?const \{ error: completionError \} = await supabaseAdmin\.rpc\('complete_onchain_withdrawal'[\s\S]*?if \(completionError\)[\s\S]*?throw new Error/i,
