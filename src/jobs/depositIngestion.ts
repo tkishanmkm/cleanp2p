@@ -965,6 +965,10 @@ async function scanTronDeposits(
             continue;
           }
           for (const evt of data.data) {
+            if (!evt || typeof evt !== 'object' || Array.isArray(evt)) {
+              errors.push('Rejected malformed TRON contract event');
+              continue;
+            }
             const txId = evt.transaction_id;
             const outputIndex = Number(evt.event_index);
             // A transaction can contain multiple Transfer events. Never collapse
