@@ -151,24 +151,21 @@ export async function GET(
     const requireFullName = ad.require_full_name_verified === true;
     const requireVerified = ad.require_verified_users === true;
 
-    const assetSym = (
-      ad.asset_symbol ||
-      ad.crypto_symbol ||
-      ad.crypto_currency ||
-      ad.crypto ||
-      ad.asset ||
-      ad.coin ||
-      'USDT'
-    ).toUpperCase();
+    const firstNonEmptyString = (...values: unknown[]): string | null => {
+      for (const value of values) {
+        if (typeof value === 'string' && value.trim().length > 0) {
+          return value.trim().toUpperCase();
+        }
+      }
+      return null;
+    };
+    const assetSym = firstNonEmptyString(
+      ad.asset_symbol, ad.crypto_symbol, ad.crypto_currency, ad.crypto, ad.asset, ad.coin
+    ) ?? 'USDT';
 
-    const fiatSym = (
-      ad.fiat_symbol ||
-      ad.fiat_currency ||
-      ad.fiatCurrency ||
-      ad.fiat ||
-      ad.currency ||
-      'USD'
-    ).toUpperCase();
+    const fiatSym = firstNonEmptyString(
+      ad.fiat_symbol, ad.fiat_currency, ad.fiatCurrency, ad.fiat, ad.currency
+    ) ?? 'USD';
 
     const formatted = {
       ...ad,
