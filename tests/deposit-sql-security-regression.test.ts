@@ -376,6 +376,11 @@ const checks: Array<[string, string, RegExp]> = [
     /Delegation broadcast may have succeeded, but DELEGATED state persistence failed[\s\S]*?delegatedStatusRes\.success !== true[\s\S]*?requires recovery because DELEGATED state was not persisted/i,
   ],
   [
+    'TRON delegation validates signed payload before persisting or broadcasting',
+    'src/jobs/sweeperWorker.ts',
+    /TRON signing returned a malformed delegation transaction[\s\S]*?typeof signedTx\.raw_data_hex !== 'string'[\s\S]*?signedTx\.signature\.length === 0/i,
+  ],
+  [
     'TRON failed undelegation receipt checks persistence result before returning',
     'src/jobs/sweeperWorker.ts',
     /const \{ data: failureRes, error: failureErr \} = await supabaseAdmin\.rpc\('update_delegation_status'[\s\S]*?failureRes\.success !== true[\s\S]*?leaving operation for recovery/i,
