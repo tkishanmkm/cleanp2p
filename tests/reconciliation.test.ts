@@ -1,4 +1,5 @@
 import { createClient } from '@supabase/supabase-js';
+import { randomUUID } from 'node:crypto';
 import { runFinancialReconciliation } from '../src/lib/security/reconciliation';
 
 // SAFETY: This test inserts and deletes wallet balances. Never let it target a
@@ -38,8 +39,9 @@ async function runReconciliationTests() {
   let passedTests = 0;
   const totalTests = 3;
 
-  const rogueWalletId = '77777777-7777-7777-7777-777777777777';
-  const rogueUserId = '00000000-0000-0000-0000-000000000777';
+  // Unique fixture IDs prevent collision with real or prior test records.
+  const rogueWalletId = randomUUID();
+  const rogueUserId = randomUUID();
 
   try {
     // ------------------------------------------------------------------------
@@ -133,6 +135,10 @@ async function runReconciliationTests() {
     console.log(bold(cyan('------------------------------------------------------\n')));
     if (passedTests === totalTests) {
       console.log(green(bold('ALL FINANCIAL RECONCILIATION AUDIT TESTS PASSED!')));
+    } else {
+      // Ensure CI and npm scripts fail when assertions or setup fail.
+      process.exitCode = 1;
+      console.log(red(bold('FINANCIAL RECONCILIATION AUDIT TESTS FAILED.')));
     }
   }
 }
