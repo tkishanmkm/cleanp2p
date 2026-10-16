@@ -45,7 +45,7 @@ async function hasRequiredUtxoConfirmations(
   if (!tipResponse.ok) return false;
 
   const tipText = (await tipResponse.text()).trim();
-  if (!/^\\d+$/.test(tipText)) return false;
+  if (!/^\d+$/.test(tipText)) return false;
 
   const tipHeight = Number(tipText);
   if (!Number.isSafeInteger(tipHeight) || tipHeight < blockHeight) return false;
