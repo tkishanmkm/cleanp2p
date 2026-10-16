@@ -373,7 +373,7 @@ export async function checkSubmittedWithdrawals(): Promise<{
       const normNet = normalizeNetworkCode(w.network);
 
       if (normNet === 'TRC20') {
-        const { isConfirmed, success, actualCostTrx } = await getTronTransactionConfirmations(w.tx_hash);
+        const { isConfirmed, success, isFailed, actualCostTrx } = await getTronTransactionConfirmations(w.tx_hash);
         
         if (isConfirmed && success) {
           const actualTrxStr = actualCostTrx && actualCostTrx.trim().length > 0 ? actualCostTrx.trim() : '0';
@@ -384,11 +384,11 @@ export async function checkSubmittedWithdrawals(): Promise<{
             p_gas_asset: 'TRX',
           });
           if (!confErr) confirmed++;
-        } else if (!success) {
+        } else if (isFailed && !success) {
           await supabaseAdmin.rpc('process_failed_withdrawal', {
             p_withdrawal_id: w.id,
             p_error_reason: `TRON transaction reverted on-chain`,
-            p_is_verified_unbroadcast: true,
+            p_is_verified_unbroadcast: false,
           });
         }
       } else if (SUPPORTED_EVM_CHAINS[normNet]) {
