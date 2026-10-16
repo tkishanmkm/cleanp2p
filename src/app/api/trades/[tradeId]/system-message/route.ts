@@ -178,6 +178,14 @@ export async function POST(
     if (!buyerUsername) buyerUsername = trade.buyer_username || 'Trader';
     if (!sellerUsername) sellerUsername = trade.seller_username || 'Trader';
 
+    const sanitizeParticipantLabel = (value: unknown): string => {
+      if (typeof value !== 'string') return 'Trader';
+      const normalized = value.replace(/[\u0000-\u001F\u007F]/g, ' ').replace(/\s+/g, ' ').trim();
+      return normalized ? normalized.slice(0, 80) : 'Trader';
+    };
+    buyerUsername = sanitizeParticipantLabel(buyerUsername);
+    sellerUsername = sanitizeParticipantLabel(sellerUsername);
+
     const safeMetadata = metadata as Record<string, unknown>;
     const readSafeText = (key: string, maxLength: number): string | undefined => {
       const value = safeMetadata[key];
