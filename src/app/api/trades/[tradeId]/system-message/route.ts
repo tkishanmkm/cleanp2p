@@ -98,7 +98,7 @@ export async function POST(
     }
 
     const adminOnlyTypes = new Set(['CUSTOM', 'USER_BLOCKED', 'ISSUE_REPORTED', 'MESSAGE_BLOCKED', 'SECURITY_REMINDER']);
-    if (!isAdmin && typeof type === 'string' && adminOnlyTypes.has(type)) {
+    if (!isAdmin && adminOnlyTypes.has(typeof type === 'string' ? type : 'CUSTOM')) {
       return NextResponse.json({ error: 'Administrator privileges are required for this message type.' }, { status: 403 });
     }
 
