@@ -714,7 +714,23 @@ export async function executeCanonicalWithdrawal(input: WithdrawalRequestInput):
     };
   }
 
-  const returnedStatus = rpcResult?.status || 'QUEUED';
+  const rawReturnedStatus = typeof rpcResult === 'object' && rpcResult !== null
+    ? rpcResult.status
+    : undefined;
+  if (
+    rawReturnedStatus !== undefined &&
+    (typeof rawReturnedStatus !== 'string' || rawReturnedStatus.trim().length === 0)
+  ) {
+    console.error('Withdrawal reservation RPC returned an invalid status field.');
+    return {
+      success: false,
+      status: 'RESERVATION_UNCONFIRMED',
+      error: 'Withdrawal status could not be confirmed.',
+      message: 'Withdrawals are temporarily unavailable. Please contact support if your balance changed.',
+      statusCode: 503,
+    };
+  }
+  const returnedStatus = rawReturnedStatus || 'QUEUED';
 
   // Activity Notification
   try {
