@@ -231,8 +231,8 @@ async function scanEvmTokenDeposits(
           !/^0x[0-9a-fA-F]{64}$/.test(log.blockHash || '') ||
           !Array.isArray(log.topics) ||
           log.topics.length !== 3 ||
-          log.topics.some((topic) => typeof topic !== 'string' || !/^0x[0-9a-fA-F]{64}$/.test(topic)) ||
-          log.topics[0].toLowerCase() !== transferTopic.toLowerCase() ||
+          log.topics.some((topic) => typeof topic !== 'string' || !/^(?:0x)?[0-9a-fA-F]{64}$/.test(topic)) ||
+          log.topics[0].replace(/^0x/i, '').toLowerCase() !== transferTopic.slice(2).toLowerCase().toLowerCase() ||
           typeof log.data !== 'string' ||
           !/^0x[0-9a-fA-F]{64}$/.test(log.data)
         ) {
@@ -798,12 +798,12 @@ async function scanTronDeposits(
               if (!Array.isArray(topics) || topics.length !== 3 ||
                   topics.some((topic: unknown) => typeof topic !== 'string' || !/^0x[0-9a-fA-F]{64}$/.test(topic)) ||
                   topics[0].toLowerCase() !== transferTopic) return false;
-              const topicSender = topics[1].slice(-40).toLowerCase();
-              const topicRecipient = topics[2].slice(-40).toLowerCase();
+              const topicSender = topics[1].replace(/^0x/i, '').slice(-40).toLowerCase();
+              const topicRecipient = topics[2].replace(/^0x/i, '').slice(-40).toLowerCase();
               const recipientHex20 = expectedRecipientHex.slice(-40);
               const senderHex20 = expectedSenderHex.slice(-40);
-              const data = typeof log.data === 'string' ? log.data : '';
-              if (!/^0x[0-9a-fA-F]{64}$/.test(data) || data.slice(2).toLowerCase() !== expectedRawAmount) return false;
+              const data = typeof log.data === 'string' ? log.data.replace(/^0x/i, '') : '';
+              if (!/^[0-9a-fA-F]{64}$/.test(data) || data.toLowerCase() !== expectedRawAmount) return false;
               if (topicRecipient !== recipientHex20) return false;
               if (expectedSenderHex && topicSender !== senderHex20) return false;
               return true;
