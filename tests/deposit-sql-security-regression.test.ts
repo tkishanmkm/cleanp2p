@@ -396,6 +396,11 @@ const checks: Array<[string, string, RegExp]> = [
     /Number\.isSafeInteger\(totalEnergyWeightSun\)[\s\S]*?Number\.isSafeInteger\(requiredSunNumerator\)[\s\S]*?Number\.isSafeInteger\(requiredSunNumber\)/i,
   ],
   [
+    'ambiguous withdrawal updates require both target rows to be returned',
+    'src/jobs/withdrawalWorker.ts',
+    /onchainStatusRow[\s\S]*?row not found or not updated[\s\S]*?withdrawalStatusRow[\s\S]*?row not found or not updated/i,
+  ],
+  [
     'pre-broadcast withdrawal refund requires explicit RPC success',
     'src/jobs/withdrawalWorker.ts',
     /Pre-broadcast validation failure[\s\S]*?refundData\.success !== true/i,
