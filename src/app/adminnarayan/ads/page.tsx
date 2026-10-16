@@ -116,8 +116,8 @@ export default function AdminAdsPage() {
     const lower = searchTerm.toLowerCase();
     return ads.filter(
       (ad) =>
-        ad.publicAdId.toLowerCase().includes(lower) ||
-        ad.user.username.toLowerCase().includes(lower) ||
+        (ad.publicAdId || '').toLowerCase().includes(lower) ||
+        (ad.user?.username || '').toLowerCase().includes(lower) ||
         ad.crypto.toLowerCase().includes(lower) ||
         ad.fiatCurrency.toLowerCase().includes(lower)
     );
@@ -204,11 +204,11 @@ export default function AdminAdsPage() {
                       <TableCell className="font-mono text-xs">{ad.publicAdId}</TableCell>
                       <TableCell>
                         <Link
-                          href={`/users/${ad.user.username}`}
+                          href={`/users/${ad.user?.username || 'unknown'}`}
                           className="hover:underline font-medium"
                           onClick={(e) => e.stopPropagation()}
                         >
-                          {ad.user.username}
+                          {ad.user?.username || 'Unknown user'}
                         </Link>
                       </TableCell>
                       <TableCell>
@@ -304,7 +304,7 @@ export default function AdminAdsPage() {
             <div className="space-y-4 py-4 text-sm">
               <div className="flex justify-between items-center">
                 <span className="text-muted-foreground">User</span>
-                <span className="font-medium">{selectedAd.user.username}</span>
+                <span className="font-medium">{selectedAd.user?.username || 'Unknown user'}</span>
               </div>
               {selectedAd.offerLabel && (
                 <div className="flex justify-between items-center">
