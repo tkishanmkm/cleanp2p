@@ -391,6 +391,11 @@ const checks: Array<[string, string, RegExp]> = [
     /persist_signed_delegation[\s\S]*?if \(persistErr \|\| !persistRes \|\| persistRes\.success !== true\)[\s\S]*?Failed to persist signed delegation transaction/i,
   ],
   [
+    'TRON delegation claim rejects malformed already-delegated flags',
+    'src/jobs/sweeperWorker.ts',
+    /claim_or_initialize_resource_delegation[\s\S]*?typeof initRes\.already_delegated !== 'boolean'[\s\S]*?if \(initRes\.already_delegated === true\)/i,
+  ],
+  [
     'gas funding claim only skips when already_funded is explicit true',
     'src/jobs/sweeperWorker.ts',
     /claim_gas_funding_operation[\s\S]*?if \(claimRes\.already_funded === true\)[\s\S]*?already confirmed/i,
