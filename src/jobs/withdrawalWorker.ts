@@ -442,7 +442,7 @@ export async function checkSubmittedWithdrawals(): Promise<{
             const txData = await res.json();
             if (txData && txData.status && txData.status.confirmed) {
               let actualFeeBtc = '0';
-              if (typeof txData.fee === 'number' && txData.fee >= 0) {
+              if (typeof txData.fee === 'number' && Number.isSafeInteger(txData.fee) && txData.fee >= 0) {
                 const feeSat = BigInt(txData.fee);
                 const whole = feeSat / 100000000n;
                 const fraction = (feeSat % 100000000n).toString().padStart(8, '0');
@@ -482,7 +482,7 @@ export async function checkSubmittedWithdrawals(): Promise<{
             const txData = await res.json();
             if (txData && txData.status && txData.status.confirmed) {
               let actualFeeLtc = '0';
-              if (typeof txData.fee === 'number' && txData.fee >= 0) {
+              if (typeof txData.fee === 'number' && Number.isSafeInteger(txData.fee) && txData.fee >= 0) {
                 const feeLit = BigInt(txData.fee);
                 const whole = feeLit / 100000000n;
                 const fraction = (feeLit % 100000000n).toString().padStart(8, '0');
