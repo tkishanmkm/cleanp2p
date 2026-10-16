@@ -608,14 +608,25 @@ export async function PUT(
       ? Number(body.margin) 
       : (body.rate_percent !== undefined && body.rate_percent !== null && body.rate_percent !== '' ? Number(body.rate_percent) : undefined);
 
-    if (price !== undefined && price <= 0) {
-      return NextResponse.json({ error: 'Price must be greater than 0.' }, { status: 400 });
+    // Reject NaN and Infinity explicitly; comparisons with NaN are false and
+    // would otherwise let malformed numeric strings pass validation.
+    if (price !== undefined && (!Number.isFinite(price) || price <= 0)) {
+      return NextResponse.json({ error: 'Price must be a finite number greater than 0.' }, { status: 400 });
     }
-    if (minAmount !== undefined && minAmount <= 0) {
-      return NextResponse.json({ error: 'Minimum limit must be greater than 0.' }, { status: 400 });
+    if (unitPrice !== undefined && (!Number.isFinite(unitPrice) || unitPrice <= 0)) {
+      return NextResponse.json({ error: 'Unit price must be a finite number greater than 0.' }, { status: 400 });
+    }
+    if (minAmount !== undefined && (!Number.isFinite(minAmount) || minAmount <= 0)) {
+      return NextResponse.json({ error: 'Minimum limit must be a finite number greater than 0.' }, { status: 400 });
+    }
+    if (maxAmount !== undefined && (!Number.isFinite(maxAmount) || maxAmount <= 0)) {
+      return NextResponse.json({ error: 'Maximum limit must be a finite number greater than 0.' }, { status: 400 });
     }
     if (minAmount !== undefined && maxAmount !== undefined && maxAmount < minAmount) {
       return NextResponse.json({ error: 'Maximum limit must be greater than or equal to minimum limit.' }, { status: 400 });
+    }
+    if (margin !== undefined && !Number.isFinite(margin)) {
+      return NextResponse.json({ error: 'Margin must be a finite number.' }, { status: 400 });
     }
 
     const paymentMethods = Array.isArray(body.payment_methods) 
