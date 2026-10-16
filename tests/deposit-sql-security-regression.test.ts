@@ -66,6 +66,11 @@ const checks: Array<[string, string, RegExp]> = [
     /Withdrawal amount must be a finite positive decimal[\s\S]*Withdrawal destination is missing[\s\S]*Unsupported withdrawal network/i,
   ],
   [
+    'withdrawal claim casts auth ban expiry to timestamptz',
+    'supabase/migrations/20261016000006_bound_withdrawal_claim_batch.sql',
+    /NULLIF\(u\.banned_until, ''\)::timestamptz > NOW\(\)/,
+  ],
+  [
     'withdrawal worker refuses dispatch when singleton lock cannot be acquired',
     'src/jobs/withdrawalWorker.ts',
     /if \(lockErr\)[\s\S]*refusing to dispatch withdrawals[\s\S]*if \(lockAcquired !== true\)[\s\S]*return \{ totalProcessed: 0, results: \[\], locked: true \}[\s\S]*catch \(lockRpcErr\)[\s\S]*refusing to dispatch withdrawals/i,
