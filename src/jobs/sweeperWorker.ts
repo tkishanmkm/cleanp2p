@@ -1609,7 +1609,7 @@ export async function sweepTronDepositAddress(
     let txid = deterministicTxHash;
     try {
       const broadcastRes = await tronWeb.trx.sendRawTransaction(signedTx);
-      if (!broadcastRes || !broadcastRes.result) {
+      if (!broadcastRes || broadcastRes.result !== true) {
         throw new Error(`TRON raw broadcast rejected: ${JSON.stringify(broadcastRes)}`);
       }
       if (sweepId && workerId) {
