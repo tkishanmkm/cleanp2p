@@ -1000,8 +1000,9 @@ async function scanTronDeposits(
                 fromBase58 = tronWeb.address.fromHex(fromHex);
               }
             } catch (err) {
-          console.error('[Deposit Ingestion] Could not normalize TRON sender address from log:', err instanceof Error ? err.message : 'unknown provider error');
-        }
+              errors.push(`Rejected TRON event with invalid address encoding: ${txId}`);
+              continue;
+            }
 
             if (!monitoredTronAddresses.has(toBase58)) continue;
 
