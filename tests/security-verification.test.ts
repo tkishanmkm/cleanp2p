@@ -1,9 +1,24 @@
 import { createClient } from '@supabase/supabase-js';
 import crypto from 'crypto';
 
-// Setup Supabase admin client for test assertions
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL || 'https://placeholder.supabase.co';
-const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'placeholder-key';
+// This suite writes fixed test records and sends security probes to an HTTP endpoint.
+// Require an explicitly designated disposable test project; never fall back to app credentials.
+const supabaseUrl = process.env.TEST_SUPABASE_URL;
+const supabaseKey = process.env.TEST_SUPABASE_SERVICE_ROLE_KEY;
+
+if (process.env.TEST_ALLOW_DESTRUCTIVE_SECURITY_TESTS !== 'true') {
+  throw new Error(
+    'Refusing to run destructive security tests. Set TEST_ALLOW_DESTRUCTIVE_SECURITY_TESTS=true only for a dedicated disposable test project.'
+  );
+}
+if (!supabaseUrl || !supabaseKey) {
+  throw new Error(
+    'Missing TEST_SUPABASE_URL or TEST_SUPABASE_SERVICE_ROLE_KEY. Do not use production credentials.'
+  );
+}
+if (!/^https:\/\/[a-z0-9-]+\.supabase\.co$/i.test(supabaseUrl)) {
+  throw new Error('TEST_SUPABASE_URL must be a valid Supabase project URL.');
+}
 
 const supabase = createClient(supabaseUrl, supabaseKey, {
   auth: { persistSession: false, autoRefreshToken: false },
@@ -16,7 +31,10 @@ const cyan = (s: string) => `\x1b[36m${s}\x1b[0m`;
 const bold = (s: string) => `\x1b[1m${s}\x1b[0m`;
 const yellow = (s: string) => `\x1b[33m${s}\x1b[0m`;
 
-const BASE_URL = process.env.TEST_APP_URL || 'http://localhost:3000';
+const BASE_URL = process.env.TEST_APP_URL;
+if (!BASE_URL || !/^https?:\/\//i.test(BASE_URL)) {
+  throw new Error('Set TEST_APP_URL to the explicitly selected test application URL.');
+}
 
 async function runSecurityPenetrationTestSuite() {
   console.log(bold(cyan('\n========================================================================')));
@@ -95,8 +113,8 @@ async function runSecurityPenetrationTestSuite() {
   } catch (err: any) {
     console.log(yellow(`  ⚠ HTTP endpoint test encountered network error (server may not be running): ${err.message}`));
     console.log(cyan('  -> Validating middleware policy and handler directly in isolation...'));
-    // Fallback direct check on security logic
-    passedTests++;
+    // Infrastructure failures are not evidence that the security control passed.
+    console.log(red('  ✗ Test inconclusive: endpoint unavailable; treat as a failed verification.'));
   }
 
   // ---------------------------------------------------------------------------
@@ -195,8 +213,7 @@ async function runSecurityPenetrationTestSuite() {
     }
   } catch (err: any) {
     console.log(yellow(`  ⚠ HTTP endpoint test encountered network error (server may not be running): ${err.message}`));
-    console.log(cyan('  -> Validating contract whitelisting logic...'));
-    passedTests++;
+    console.log(red('  ✗ Test inconclusive: webhook endpoint unavailable; treat as a failed verification.'));
   }
 
   // ---------------------------------------------------------------------------
@@ -262,7 +279,7 @@ async function runSecurityPenetrationTestSuite() {
     }
   } catch (err: any) {
     console.log(yellow(`  ⚠ Concurrency test encountered error: ${err.message}`));
-    passedTests++;
+    console.log(red('  ✗ Test inconclusive: concurrency test did not complete.'));
   }
 
   // ---------------------------------------------------------------------------
