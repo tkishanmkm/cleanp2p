@@ -280,6 +280,14 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'You cannot transfer funds to yourself.' }, { status: 400 });
     }
 
+    // The canonical RPC identifies the recipient by username; do not pass a missing or blank identifier.
+    if (typeof recipientProfile.username !== 'string' || recipientProfile.username.trim().length === 0) {
+      return NextResponse.json({
+        error: 'Recipient account is not eligible to receive transfers.',
+        code: 'RECIPIENT_UNAVAILABLE',
+      }, { status: 409 });
+    }
+
     // Normalize status casing so database capitalization cannot bypass recipient restrictions.
     const recipientAccountStatus = typeof recipientProfile.account_status === 'string'
       ? recipientProfile.account_status.trim().toLowerCase()
