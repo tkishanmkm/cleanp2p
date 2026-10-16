@@ -330,7 +330,7 @@ export async function runFinancialReconciliation(): Promise<ReconciliationReport
   // 5. Persist Critical Alerts in security_alerts
   for (const anomaly of discrepancies) {
     try {
-      await supabaseAdmin.from('security_alerts').insert({
+      const { error: alertInsertError } = await supabaseAdmin.from('security_alerts').insert({
         alert_type: anomaly.anomalyType,
         severity: 'CRITICAL',
         title: `Financial Anomaly: ${anomaly.anomalyType}`,
@@ -344,6 +344,9 @@ export async function runFinancialReconciliation(): Promise<ReconciliationReport
           discrepancy: anomaly.discrepancy,
         },
       });
+      if (alertInsertError) {
+        console.error('[Financial Reconciliation] Error persisting security alert:', alertInsertError);
+      }
     } catch (alertErr) {
       console.error('[Financial Reconciliation] Error persisting security alert:', alertErr);
     }
@@ -351,7 +354,7 @@ export async function runFinancialReconciliation(): Promise<ReconciliationReport
 
   // 6. Record System Reconciliation Snapshot
   try {
-    await supabaseAdmin.from('system_reconciliations').insert({
+    const { error: snapshotInsertError } = await supabaseAdmin.from('system_reconciliations').insert({
       asset_symbol: 'USDT',
       db_liability: totalLiability,
       onchain_balance: totalHotWalletUsdt,
@@ -359,6 +362,9 @@ export async function runFinancialReconciliation(): Promise<ReconciliationReport
       is_balanced: discrepancies.length === 0,
       gas_snapshot: hotWalletReserves,
     });
+    if (snapshotInsertError) {
+      console.warn('[Financial Reconciliation] Could not save system_reconciliations snapshot:', snapshotInsertError);
+    }
   } catch (snapErr) {
     console.warn('[Financial Reconciliation] Could not save system_reconciliations snapshot:', snapErr);
   }
