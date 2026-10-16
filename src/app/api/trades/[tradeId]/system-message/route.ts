@@ -393,7 +393,7 @@ export async function GET(
       console.error('System-message read failed:', error.code || 'UNKNOWN');
       return NextResponse.json({ error: 'Unable to load system messages.' }, { status: 500 });
     }
-    return NextResponse.json({ messages: messages || [] });
+    return NextResponse.json({ messages: messages || [] }, { headers: { 'Cache-Control': 'private, no-store, max-age=0' } });
   } catch (error: unknown) {
     const errorName = error instanceof Error ? error.name : 'UnknownError';
     console.error('System-message GET failed:', errorName);
