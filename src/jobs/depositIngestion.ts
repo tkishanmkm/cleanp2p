@@ -484,14 +484,16 @@ async function scanTronDeposits(
               }
             } catch (_) {}
 
-            const decimals = item.token_info?.decimals !== undefined ? Number(item.token_info.decimals) : 6;
+            // Never trust provider metadata to choose the token or its decimals:
+            // a malicious/unsupported TRC-20 token could otherwise be credited as USDT.
+            const tokenContract = item.token_info?.address || '';
+            if (tokenContract !== contractAddress && tokenContract !== 'TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t') {
+              continue;
+            }
             const rawVal = BigInt(item.value || '0');
             if (rawVal <= 0n) continue;
-            const formattedAmount = ethers.formatUnits(rawVal, decimals);
-            const amount = parseFloat(formattedAmount);
-            if (amount <= 0) continue;
-
-            const tokenContract = item.token_info?.address || contractAddress;
+            const formattedAmount = ethers.formatUnits(rawVal, 6);
+            if (!/^(?:0|[1-9]\d*)(?:\.\d+)?$/.test(formattedAmount)) continue;
 
             // Fetch block number from TRON RPC if missing from account event
             let eventBlock = item.block_number || 0;
@@ -519,7 +521,7 @@ async function scanTronDeposits(
               p_destination_address: toAddr,
               p_asset_symbol: 'USDT',
               p_network_code: 'TRC20',
-              p_amount: amount,
+              p_amount: formattedAmount,
               p_tx_hash: txId,
               p_output_index: 0,
               p_block_number: eventBlock || null,
@@ -533,7 +535,7 @@ async function scanTronDeposits(
               errors.push(`RPC error for TRON deposit ${txId}: ${error.message}`);
             } else {
               const r = typeof rpcData === 'string' ? JSON.parse(rpcData) : rpcData;
-              if (r?.status === 'credited' || (r?.success && confirmations >= TRON_CONFIG.requiredConfirmations)) {
+              if (r?.status === 'credited') {
                 credited++;
               }
             }
