@@ -48,10 +48,9 @@ export async function POST(
     }
 
     // Verify caller is buyer, seller, or admin
-    const isAdmin =
-      user.user_metadata?.role === 'admin' ||
-      user.app_metadata?.role === 'admin' ||
-      user.email?.endsWith('@paxones.com');
+    // Only trusted app metadata may grant this bypass. User-editable metadata
+    // and an email suffix are not authoritative administrator credentials.
+    const isAdmin = user.app_metadata?.role === 'admin';
 
     const isBuyer = String(trade.buyer_id) === String(user.id);
     const isSeller = String(trade.seller_id) === String(user.id);
