@@ -318,7 +318,7 @@ export async function executeCanonicalWithdrawal(input: WithdrawalRequestInput):
   }
 
   const parsedAmount = typeof rawAmount === 'number' ? rawAmount : parseFloat(String(rawAmount));
-  if (isNaN(parsedAmount) || parsedAmount <= 0) {
+  if (!Number.isFinite(parsedAmount) || parsedAmount <= 0) {
     return {
       success: false,
       status: 'INVALID_AMOUNT',
