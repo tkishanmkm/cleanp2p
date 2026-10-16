@@ -228,17 +228,22 @@ const checks: Array<[string, string, RegExp]> = [
   [
     'chain-id nonce allocator fails closed when the network hot wallet is missing',
     'supabase/migrations/20261001020000_gas_funding_broadcast_durability_and_abuse_protection.sql',
-    /IF v_hot_addr IS NULL OR TRIM\\(v_hot_addr\\) = '' THEN[\\s\\S]*RAISE EXCEPTION[\\s\\S]*RETURN public\\.allocate_hot_wallet_nonce\\(v_net, v_hot_addr, 0\\)/i,
+    /IF v_hot_addr IS NULL OR TRIM\(v_hot_addr\) = '' THEN[\s\S]*RAISE EXCEPTION[\s\S]*RETURN public\.allocate_hot_wallet_nonce\(v_net, v_hot_addr, 0\)/i,
   ],
   [
     'gas funding eligibility validates network, address, amount and abuse limits',
     'supabase/migrations/20261001020000_gas_funding_broadcast_durability_and_abuse_protection.sql',
-    /IF p_deposit_address IS NULL OR TRIM\\(p_deposit_address\\) = '' THEN[\\s\\S]*IF v_norm_net NOT IN \\(\'ERC20\', \'BEP20\'\\) THEN[\\s\\S]*IF p_amount_allocated IS NULL OR p_amount_allocated <= 0 THEN[\\s\\S]*p_daily_max_operations IS NULL OR p_daily_max_operations <= 0/i,
+    /IF p_deposit_address IS NULL OR TRIM\(p_deposit_address\) = '' THEN[\s\S]*IF v_norm_net NOT IN \(\'ERC20\', \'BEP20\'\) THEN[\s\S]*IF p_amount_allocated IS NULL OR p_amount_allocated <= 0 THEN[\s\S]*p_daily_max_operations IS NULL OR p_daily_max_operations <= 0/i,
   ],
   [
     'gas funding claims require valid inputs and a live sweep lease owned by the worker',
     'supabase/migrations/20261001020000_gas_funding_broadcast_durability_and_abuse_protection.sql',
-    /CREATE OR REPLACE FUNCTION public\\.claim_gas_funding_operation[\\s\\S]*?IF p_sweep_id IS NULL OR p_worker_id IS NULL[\\s\\S]*?SELECT \\* INTO v_sweep[\\s\\S]*?FROM public\\.sweep_operations[\\s\\S]*?v_sweep\\.worker_id IS DISTINCT FROM p_worker_id[\\s\\S]*?v_sweep\\.lease_expires_at IS NULL OR v_sweep\\.lease_expires_at <= NOW\\(\\)/i,
+    /CREATE OR REPLACE FUNCTION public\.claim_gas_funding_operation[\s\S]*?IF p_sweep_id IS NULL OR p_worker_id IS NULL[\s\S]*?SELECT \* INTO v_sweep[\s\S]*?FROM public\.sweep_operations[\s\S]*?v_sweep\.worker_id IS DISTINCT FROM p_worker_id[\s\S]*?v_sweep\.lease_expires_at IS NULL OR v_sweep\.lease_expires_at <= NOW\(\)/i,
+  ],
+  [
+    'signed gas funding persistence validates payload and refuses to overwrite non-pending operations',
+    'supabase/migrations/20261001020000_gas_funding_broadcast_durability_and_abuse_protection.sql',
+    /CREATE OR REPLACE FUNCTION public\.persist_signed_gas_funding[\s\S]*?p_signed_tx_hex IS NULL OR TRIM\(p_signed_tx_hex\) = ''[\s\S]*?v_sweep\.lease_expires_at IS NULL OR v_sweep\.lease_expires_at <= NOW\(\)[\s\S]*?IF v_gas\.status <> 'PENDING' THEN/i,
   ],
 ];
 
