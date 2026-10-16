@@ -700,7 +700,8 @@ export async function executeCanonicalWithdrawal(input: WithdrawalRequestInput):
 
   const withdrawalId = rpcResult?.withdrawal_id || (typeof rpcResult === 'string' ? rpcResult : null);
   if (
-    !withdrawalId ||
+    typeof withdrawalId !== 'string' ||
+    withdrawalId.trim().length === 0 ||
     (typeof rpcResult === 'object' && rpcResult !== null && rpcResult.success === false)
   ) {
     console.error('Withdrawal reservation RPC returned an invalid success result:', rpcResult);
