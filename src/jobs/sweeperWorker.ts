@@ -996,15 +996,19 @@ export async function delegateEnergyFromPool(
       throw new Error(`TRON delegation raw broadcast rejected: ${JSON.stringify(broadcastRes)}`);
     }
   } catch (broadcastErr: any) {
-    console.error(`[Tron Resource Pool] Delegation broadcast failed:`, broadcastErr);
-    await supabaseAdmin.rpc('update_delegation_status', {
+    const reason = `TRON delegation broadcast outcome is ambiguous for tx ${deterministicTxHash}: ${broadcastErr?.message || broadcastErr}`;
+    console.error('[Tron Resource Pool] Delegation broadcast outcome is ambiguous; preserving operation for reconciliation.', broadcastErr);
+    const { data: recoveryRes, error: recoveryErr } = await supabaseAdmin.rpc('update_delegation_status', {
       p_sweep_id: sweepId,
       p_worker_id: workerId,
       p_expected_status: 'DELEGATING',
-      p_new_status: 'FAILED',
-      p_error_message: `Delegation broadcast failed: ${broadcastErr?.message || broadcastErr}`,
+      p_new_status: 'RECOVERY_REQUIRED',
+      p_error_message: reason,
     });
-    throw broadcastErr;
+    if (recoveryErr || !recoveryRes || recoveryRes.success !== true) {
+      throw new Error(`${reason}; failed to persist RECOVERY_REQUIRED state: ${recoveryErr?.message || recoveryRes?.message || 'unknown persistence error'}`);
+    }
+    throw new Error(reason);
   }
 
   // 7. Persist the delegated state; never report success if the state transition failed.
