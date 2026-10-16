@@ -316,6 +316,16 @@ async function scanEvmNativeDeposits(
   const chainConfig = SUPPORTED_EVM_CHAINS[normNet];
   if (!chainConfig) return { detected: 0, credited: 0, errors: [] };
 
+  // The canonical deposit-credit RPC currently supports native ETH only.
+  // Do not scan BNB (or any future native asset) as if it were creditable.
+  if (chainConfig.nativeSymbol !== 'ETH' || normNet !== 'ERC20') {
+    return {
+      detected: 0,
+      credited: 0,
+      errors: [`Native deposit scanning is disabled for unsupported asset/network ${chainConfig.nativeSymbol}/${normNet}`],
+    };
+  }
+
   const provider = getEvmProvider(normNet);
 
   try {
