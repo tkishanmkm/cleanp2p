@@ -298,7 +298,17 @@ export async function POST(req: Request) {
         requiredCrypto = cleanPayload.min_amount / effectivePrice;
       }
 
-      // Query authoritative spendable balance from public.wallet_assets
+      // A SELL ad must reserve a known, positive crypto quantity; never permit an
+      // under-specified ad to bypass the balance comparison.
+      if (!Number.isFinite(requiredCrypto) || requiredCrypto <= 0) {
+        return NextResponse.json(
+          { error: 'A valid positive crypto amount is required to create a SELL advertisement.', code: 'INVALID_SELL_AMOUNT' },
+          { status: 400 }
+        );
+      }
+
+      // Query the authenticated user's canonical wallet row. Fail closed on query errors
+      // and malformed balances instead of coercing them to zero or accepting bad data.
       const { data: assetWallet, error: walletError } = await supabase
         .from('wallet_assets')
         .select('balance, in_escrow')
@@ -306,9 +316,18 @@ export async function POST(req: Request) {
         .eq('asset_symbol', rawAsset)
         .maybeSingle();
 
-      const spendableBalance = Number(assetWallet?.balance || 0);
+      const spendableBalance = Number(assetWallet?.balance);
+      const escrowBalance = Number(assetWallet?.in_escrow ?? 0);
 
-      if (walletError || spendableBalance <= 0 || (requiredCrypto > 0 && spendableBalance < requiredCrypto)) {
+      if (
+        walletError ||
+        !assetWallet ||
+        !Number.isFinite(spendableBalance) ||
+        spendableBalance < 0 ||
+        !Number.isFinite(escrowBalance) ||
+        escrowBalance < 0 ||
+        spendableBalance < requiredCrypto
+      ) {
         return NextResponse.json(
           {
             error: `Insufficient spendable balance in your ${rawAsset} wallet. You have ${spendableBalance.toFixed(8)} ${rawAsset} available, but require at least ${requiredCrypto.toFixed(8)} ${rawAsset} to post this SELL advertisement.`,
