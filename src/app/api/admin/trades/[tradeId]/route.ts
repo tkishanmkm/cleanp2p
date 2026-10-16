@@ -61,7 +61,7 @@ export async function GET(
     ]);
 
     // Merge and deduplicate messages
-    const messageList = [...(chatMsgs || [])];
+    const messageList: Array<{ id: any; trade_id: any; sender_id: any; message: any; attachment_url?: string | null; created_at: any }> = [...(chatMsgs || [])];
     const seenTexts = new Set(messageList.map((m: any) => `${m.sender_id}:${m.message}:${m.created_at}`));
     (legacyMsgs || []).forEach((lm: any) => {
       const key = `${lm.sender_id}:${lm.message}:${lm.created_at}`;
