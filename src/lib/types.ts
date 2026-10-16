@@ -12,6 +12,16 @@ export interface CurrencyConfig {
 export interface UserProfile {
   id: string;
   username: string;
+  is_verified?: boolean;
+  id_verified?: boolean;
+  is_id_verified?: boolean;
+  kyc_status?: string | null;
+  verification_tier?: string | number | null;
+  blockedUsers?: string[];
+  blocked_users?: string[];
+  tradeVolume?: number;
+  positiveFeedback?: number;
+  negativeFeedback?: number;
   country?: string;
   feedbackScore: number;
   avgReleaseTime: number; // in minutes
@@ -25,6 +35,7 @@ export interface P2PAd {
   userId: string;
   publicAdId?: string;
   user?: {
+    id?: string;
     username: string;
     country?: string;
     feedbackScore: number;
@@ -71,6 +82,7 @@ export interface InitiateTradePayload {
 
 export type SupportedCrypto = {
   name: CryptoCurrency;
+  symbol?: string;
   chains: string[];
 };
 
