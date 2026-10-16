@@ -1353,8 +1353,8 @@ export async function undelegateEnergyToPool(
     p_undelegation_tx_hash: deterministicTxHash,
   });
 
-  if (confirmErr || !confirmRes || !confirmRes.success) {
-    console.error(`[Tron Resource Pool] Failed to confirm UNDELEGATED in DB:`, confirmErr || confirmRes?.message);
+  if (confirmErr || !confirmRes || confirmRes.success !== true) {
+    console.error(`[Tron Resource Pool] Failed to confirm UNDELEGATED in DB:`, confirmErr || confirmRes);
     return false;
   }
 
