@@ -109,12 +109,8 @@ export async function POST(
     const currentStatus = String(trade?.status || '').toLowerCase();
     const escrowStatus = String(trade?.escrow_status || '').toLowerCase();
     if (
-      currentStatus === 'completed' ||
-      currentStatus === 'released' ||
-      currentStatus === 'cancelled' ||
-      currentStatus === 'canceled' ||
-      escrowStatus === 'released' ||
-      escrowStatus === 'cancelled'
+      ['completed', 'released', 'cancelled', 'canceled', 'expired'].includes(currentStatus) ||
+      ['completed', 'released', 'cancelled', 'canceled', 'expired'].includes(escrowStatus)
     ) {
       return NextResponse.json({ error: 'Dispute cannot be opened for this trade in its current state.' }, { status: 400 });
     }
