@@ -51,7 +51,9 @@ export async function POST(req: Request) {
       if (typeof url !== 'string') return true;
       try {
         const parsed = new URL(url);
-        return !['https:', 'http:'].includes(parsed.protocol) || !parsed.hostname;
+        return !['https:', 'http:'].includes(parsed.protocol) ||
+          !parsed.hostname ||
+          Boolean(parsed.username || parsed.password);
       } catch {
         return true;
       }
