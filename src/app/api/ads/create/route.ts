@@ -336,6 +336,18 @@ export async function POST(req: Request) {
     if (cleanPayload.max_order !== null && cleanPayload.max_order !== undefined && cleanPayload.max_order <= 0) {
       return NextResponse.json({ error: 'Maximum order must be greater than 0.' }, { status: 400 });
     }
+    for (const [label, value] of [
+      ['available amount', cleanPayload.available_amount],
+      ['total amount', cleanPayload.total_amount],
+    ] as Array<[string, unknown]>) {
+      if (value !== null && value !== undefined && value !== '' &&
+          (!Number.isFinite(Number(value)) || Number(value) <= 0)) {
+        return NextResponse.json(
+          { error: `${label[0].toUpperCase() + label.slice(1)} must be greater than 0 when provided.` },
+          { status: 400 }
+        );
+      }
+    }
     if (cleanPayload.min_amount !== null && cleanPayload.min_amount !== undefined &&
         cleanPayload.max_amount !== null && cleanPayload.max_amount !== undefined &&
         cleanPayload.max_amount < cleanPayload.min_amount) {
