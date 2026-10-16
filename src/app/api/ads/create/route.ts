@@ -232,7 +232,8 @@ export async function POST(req: Request) {
       currency: rawFiat,
       price: strippedFormData.price !== undefined && strippedFormData.price !== null && strippedFormData.price !== ''
         ? Number(strippedFormData.price)
-        : (strippedFormData.fixed_rate !== undefined && strippedFormData.fixed_rate !== null && strippedFormData.fixed_rate !== ''
+        : ((typeof strippedFormData.fixed_rate === 'number' || typeof strippedFormData.fixed_rate === 'string') &&
+            strippedFormData.fixed_rate !== null && strippedFormData.fixed_rate !== ''
           ? Number(strippedFormData.fixed_rate)
           : null),
       margin: strippedFormData.margin !== undefined && strippedFormData.margin !== null && strippedFormData.margin !== '' ? Number(strippedFormData.margin) : (strippedFormData.price_margin !== undefined && strippedFormData.price_margin !== null && strippedFormData.price_margin !== '' ? Number(strippedFormData.price_margin) : null),
