@@ -366,6 +366,11 @@ const checks: Array<[string, string, RegExp]> = [
     /TRON signing returned a malformed signed transaction[\s\S]*?typeof signedTx\.raw_data_hex !== 'string'[\s\S]*?signedTx\.signature\.length === 0/i,
   ],
   [
+    'TRON undelegation validates persisted signed payload structure before rebroadcast',
+    'src/jobs/sweeperWorker.ts',
+    /Persisted TRON undelegation transaction is malformed[\s\S]*?typeof signedTx\.raw_data_hex !== 'string'[\s\S]*?signedTx\.signature\.length === 0/i,
+  ],
+  [
     'TRON failed undelegation receipt checks persistence result before returning',
     'src/jobs/sweeperWorker.ts',
     /const \{ data: failureRes, error: failureErr \} = await supabaseAdmin\.rpc\('update_delegation_status'[\s\S]*?failureRes\.success !== true[\s\S]*?leaving operation for recovery/i,
