@@ -1101,6 +1101,12 @@ async function refreshPendingDepositConfirmations(): Promise<{
       if (normNet === 'TRC20') {
         const tronWeb = getTronWeb(false);
         const txInfo = await tronWeb.trx.getTransactionInfo(dep.tx_hash);
+        // A successful TRON receipt alone does not prove a canonical USDT
+        // Transfer to this exact destination and amount. The main scanner performs
+        // event-level checks; until the pending path repeats those checks, do not
+        // invoke the privileged credit RPC from this path.
+        console.error('[Deposit Ingestion] Pending TRC20 recheck requires Transfer-event verification; deposit remains pending');
+        continue;
         if (!txInfo?.id || txInfo.id.toLowerCase() !== String(dep.tx_hash).toLowerCase()) {
           console.error('[Deposit Ingestion] Pending TRON provider returned a mismatched transaction id; deposit remains pending');
           continue;
