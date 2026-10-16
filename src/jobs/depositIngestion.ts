@@ -848,6 +848,35 @@ async function scanTronDeposits(
             if (!/^(?:0|[1-9]\d*)(?:\.\d+)?$/.test(formattedAmount)) continue;
             const eventBlock = Number(evt.block_number || 0);
             if (!Number.isSafeInteger(eventBlock) || eventBlock <= 0 || !latestBlock || latestBlock < eventBlock) continue;
+
+            // Verify TronGrid's event block against the TRON node before
+            // reserving the event key or passing it to the credit RPC.
+            const canonicalRes = await fetch(`${tronHost}/wallet/getblockbynum`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ num: eventBlock }),
+            });
+            if (!canonicalRes.ok) {
+              errors.push(`TRON canonical block request failed with HTTP ${canonicalRes.status} at block ${eventBlock}`);
+              continue;
+            }
+            const canonicalJson = await canonicalRes.json();
+            const canonicalBlockNumber = canonicalJson?.block_header?.raw_data?.number;
+            const canonicalBlockId = canonicalJson?.blockID;
+            const providerBlockId = evt.block_hash ?? evt.blockHash;
+            if (
+              canonicalJson?.Error ||
+              canonicalBlockNumber !== eventBlock ||
+              typeof canonicalBlockId !== 'string' ||
+              !/^[0-9a-fA-F]{64}$/.test(canonicalBlockId) ||
+              (typeof providerBlockId === 'string' &&
+                (!/^[0-9a-fA-F]{64}$/.test(providerBlockId) ||
+                  providerBlockId.toLowerCase() !== canonicalBlockId.toLowerCase()))
+            ) {
+              errors.push(`Rejected TRON contract event with unverifiable block identity: ${txId}`);
+              continue;
+            }
+
             const confirmations = latestBlock - eventBlock + 1;
             seenTxIndices.add(deduplicationKey);
             detected++;
