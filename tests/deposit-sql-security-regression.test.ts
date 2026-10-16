@@ -406,6 +406,11 @@ const checks: Array<[string, string, RegExp]> = [
     /Pre-broadcast validation failure[\s\S]*?refundData\.success !== true/i,
   ],
   [
+    'BTC and LTC mempool fees require safe integer values before conversion',
+    'src/jobs/withdrawalWorker.ts',
+    /Number\.isSafeInteger\(txData\.fee\)[\s\S]*?p_gas_asset: 'BTC'[\s\S]*?Number\.isSafeInteger\(txData\.fee\)[\s\S]*?p_gas_asset: 'LTC'/i,
+  ],
+  [
     'BTC withdrawal completion requires explicit RPC success',
     'src/jobs/withdrawalWorker.ts',
     /p_gas_asset: 'BTC',[\s\S]*?confData\?\.success !== true/i,
