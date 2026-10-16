@@ -1862,6 +1862,10 @@ export async function insertPaxonesSystemMessage(
   supabase: SupabaseClient<any, any, any>,
   payload: SystemMessagePayload
 ): Promise<void> {
+  if (!payload || typeof payload.tradeId !== 'string' || !payload.tradeId.trim() || payload.tradeId.length > 128) {
+    console.warn('System message insertion requires a valid trade ID.');
+    return;
+  }
   const text = formatSystemMessageContent(payload);
   const now = new Date().toISOString();
   const systemUuid = '00000000-0000-0000-0000-000000000000';
