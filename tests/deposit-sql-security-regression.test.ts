@@ -772,6 +772,21 @@ const checks: Array<[string, string, RegExp]> = [
     /let pwdHold:[\s\S]*?checkPasswordChangeHold\(user\.id\)[\s\S]*?hasPendingWithdrawalApproval\(user\.id\)[\s\S]*?Withdrawal hold\/approval security checks unavailable[\s\S]*?statusCode: 503/i,
   ],
   [
+    'withdrawal asset pricing does not fall back to a fabricated USD price',
+    'src/lib/fees.ts',
+    /Never invent a USD price[\s\S]*?throw new Error\(\`Authoritative USD price unavailable/i,
+  ],
+  [
+    'withdrawal fee multiplier lookup fails closed when settings are unavailable',
+    'src/lib/fees.ts',
+    /if \(error \|\| !settings\)[\s\S]*?Withdrawal fee configuration unavailable[\s\S]*?throw err instanceof Error/i,
+  ],
+  [
+    'withdrawal returns 503 when fee or authoritative pricing cannot be resolved',
+    'src/lib/services/withdrawalService.ts',
+    /Withdrawal pricing\/configuration check unavailable[\s\S]*?status: 'PRICING_UNAVAILABLE'[\s\S]*?statusCode: 503[\s\S]*?Unable to value recent withdrawals[\s\S]*?statusCode: 503/i,
+  ],
+  [
     'withdrawal rejects when platform security settings cannot be read',
     'src/lib/services/withdrawalService.ts',
     /const \{ data: settings, error: settingsError \}[\s\S]*?if \(settingsError \|\| !settings\)[\s\S]*?statusCode: 503/i,
