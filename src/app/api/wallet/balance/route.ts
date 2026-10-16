@@ -137,12 +137,20 @@ export async function GET(request: Request) {
     };
 
     try {
-      const { data: assetsByUserId } = await supabaseAdmin
+      const { data: assetsByUserId, error: walletAssetsError } = await supabaseAdmin
         .from('wallet_assets')
         .select('*')
         .eq('user_id', effectiveUserId);
 
-      if (assetsByUserId && assetsByUserId.length > 0) {
+      if (walletAssetsError || !assetsByUserId) {
+        console.error('[Wallet Balance] Authoritative wallet asset lookup unavailable:', walletAssetsError?.code || 'NO_DATA');
+        return NextResponse.json(
+          { success: false, error: 'Wallet balance could not be verified safely.' },
+          { status: 503 }
+        );
+      }
+
+      if (assetsByUserId.length > 0) {
         for (const row of assetsByUserId) {
           rawRecords.push(row);
           const rawSymbol = String(row.asset_symbol || row.asset_code || row.symbol || '').toUpperCase();
