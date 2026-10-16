@@ -266,62 +266,30 @@ export async function DELETE(
     let adsMutated = false;
 
     if (p2pAdsRow) {
-      try {
-        await admin
-          .from('p2p_ads')
-          .update({ status: 'DELETED', active: false, updated_at: new Date().toISOString() })
-          .eq('id', p2pAdsRow.id);
-      } catch (softErr: any) {
-        console.warn('[DELETE /api/ads/[adId]] p2p_ads soft-delete warning:', softErr?.message);
-      }
-
-      const { data: p2pDel, error: p2pErr } = await admin
+      const { data: p2pUpdated, error: p2pUpdateError } = await admin
         .from('p2p_ads')
-        .delete()
+        .update({ status: 'DELETED', active: false, updated_at: new Date().toISOString() })
         .eq('id', p2pAdsRow.id)
-        .select('id');
+        .select('id, status');
 
-      if (!p2pErr && p2pDel && p2pDel.length > 0) {
+      if (!p2pUpdateError && p2pUpdated && p2pUpdated.length > 0) {
         p2pMutated = true;
       } else {
-        const { data: p2pCheck } = await admin
-          .from('p2p_ads')
-          .select('status')
-          .eq('id', p2pAdsRow.id)
-          .maybeSingle();
-        if (p2pCheck && p2pCheck.status === 'DELETED') {
-          p2pMutated = true;
-        }
+        console.error('[DELETE /api/ads/[adId]] p2p_ads soft-delete failed:', p2pUpdateError?.message);
       }
     }
 
     if (adsRow) {
-      try {
-        await admin
-          .from('ads')
-          .update({ status: 'DELETED', is_active: false, updated_at: new Date().toISOString() })
-          .eq('id', adsRow.id);
-      } catch (softErr: any) {
-        console.warn('[DELETE /api/ads/[adId]] Legacy ads soft-delete warning:', softErr?.message);
-      }
-
-      const { data: adsDel, error: adsErr } = await admin
+      const { data: adsUpdatedRows, error: adsUpdateError } = await admin
         .from('ads')
-        .delete()
+        .update({ status: 'DELETED', active: false, is_active: false, updated_at: new Date().toISOString() })
         .eq('id', adsRow.id)
-        .select('id');
+        .select('id, status');
 
-      if (!adsErr && adsDel && adsDel.length > 0) {
+      if (!adsUpdateError && adsUpdatedRows && adsUpdatedRows.length > 0) {
         adsMutated = true;
       } else {
-        const { data: adsCheck } = await admin
-          .from('ads')
-          .select('status')
-          .eq('id', adsRow.id)
-          .maybeSingle();
-        if (adsCheck && adsCheck.status === 'DELETED') {
-          adsMutated = true;
-        }
+        console.warn('[DELETE /api/ads/[adId]] Legacy ads soft-delete failed:', adsUpdateError?.message);
       }
     }
 
