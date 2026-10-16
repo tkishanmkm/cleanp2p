@@ -401,9 +401,25 @@ export async function executeCanonicalWithdrawal(input: WithdrawalRequestInput):
     };
   }
 
-  // Platform Limit Parameters
-  const hardMaxUsd = Number(settings?.max_single_withdrawal_usd || 4000.0);
-  const dailyLimitUsd = Number(settings?.daily_withdrawal_limit_usd || 10000.0);
+  // Financial limits must come from valid persisted settings; do not silently
+  // substitute permissive defaults when configuration is missing or malformed.
+  const hardMaxUsd = Number(settings.max_single_withdrawal_usd);
+  const dailyLimitUsd = Number(settings.daily_withdrawal_limit_usd);
+  if (
+    !Number.isFinite(hardMaxUsd) ||
+    hardMaxUsd <= 0 ||
+    !Number.isFinite(dailyLimitUsd) ||
+    dailyLimitUsd <= 0
+  ) {
+    console.error('Withdrawal limits are missing or invalid in platform settings.');
+    return {
+      success: false,
+      status: 'SECURITY_CHECK_UNAVAILABLE',
+      error: 'Withdrawal limits could not be verified.',
+      message: 'Withdrawals are temporarily unavailable. Please contact support.',
+      statusCode: 503,
+    };
+  }
 
   // =========================================================================
   // RULE A: $4,000 HARD MAXIMUM & AUTOMATIC ACCOUNT RESTRICTION
