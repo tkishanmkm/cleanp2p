@@ -404,7 +404,7 @@ export async function POST(req: NextRequest) {
           created_at: new Date().toISOString(),
         });
       } catch (notifErr) {
-        console.warn('Sender transfer notification insert notice:', notifErr);
+        console.warn('[Internal Transfer] Sender notification could not be recorded.');
       }
     }
 
