@@ -71,6 +71,11 @@ const checks: Array<[string, string, RegExp]> = [
     /NULLIF\(u\.banned_until, ''\)::timestamptz > NOW\(\)/,
   ],
   [
+    'withdrawal worker validates EVM asset and amount before allocating nonce',
+    'src/jobs/withdrawalWorker.ts',
+    /const tokenContractAddress = isNativeTransfer \? null : getTokenContractAddress\(network, assetSymbol\)[\s\S]*Unsupported withdrawal asset[\s\S]*const parsedAmount = ethers\.parseUnits\([\s\S]*const nonce = await allocateEvmNonce/i,
+  ],
+  [
     'withdrawal worker verifies configured EVM chain before broadcast',
     'src/jobs/withdrawalWorker.ts',
     /const connectedNetwork = await provider\.getNetwork\(\)[\s\S]*connectedNetwork\.chainId !== BigInt\(chainConfig\.chainId\)[\s\S]*RPC chain ID mismatch/i,
