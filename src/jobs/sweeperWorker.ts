@@ -661,6 +661,9 @@ export async function fundTronGasForAddress(
   if (!sweepId || !workerId) {
     throw new Error('Sweep ID and worker ID are required for durable TRON gas funding');
   }
+  if (!targetAddress || !Number.isSafeInteger(amountSun) || amountSun <= 0) {
+    throw new Error('Invalid TRON gas funding recipient or amount');
+  }
 
   if (sweepId && workerId) {
     const { data: claimRes, error: claimErr } = await supabaseAdmin.rpc('claim_gas_funding_operation', {
