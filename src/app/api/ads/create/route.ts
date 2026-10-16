@@ -34,12 +34,10 @@ export async function POST(req: Request) {
     }
 
     if (authError || !user) {
-      console.error('[Auth Error Details in /api/ads/create]:', authError?.message);
+      // Keep provider/session diagnostics in server logs; do not disclose auth internals.
+      console.warn('[POST /api/ads/create] Authentication failed:', authError?.message || 'No authenticated user');
       return NextResponse.json(
-        { 
-          error: 'No active session found! Please refresh or log in again.', 
-          details: authError?.message 
-        }, 
+        { error: 'Unauthorized. Please log in again.' },
         { status: 401 }
       );
     }
@@ -76,10 +74,18 @@ export async function POST(req: Request) {
       console.warn('Profile auto-ensure warning in /api/ads/create:', profileUpsertErr);
     }
 
-    const formData = await req.json();
+    let formData: unknown;
+    try {
+      formData = await req.json();
+    } catch {
+      return NextResponse.json({ error: 'Request body must contain valid JSON.' }, { status: 400 });
+    }
+    if (!formData || typeof formData !== 'object' || Array.isArray(formData)) {
+      return NextResponse.json({ error: 'Request body must be a JSON object.' }, { status: 400 });
+    }
 
     // 2. Strip all client-controlled identity and administrative fields to prevent spoofing
-    const strippedFormData = { ...formData };
+    const strippedFormData = { ...(formData as Record<string, any>) };
     delete strippedFormData.user_id;
     delete strippedFormData.userId;
     delete strippedFormData.owner_id;
