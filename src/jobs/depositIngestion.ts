@@ -1037,7 +1037,7 @@ async function scanLtcDeposits(
 // Returns null for malformed values or precision beyond the chain's 8 decimals.
 function parseBaseUnits8(value: unknown): bigint | null {
   const raw = typeof value === 'string' || typeof value === 'number' ? String(value) : '';
-  const match = /^(0|[1-9]\\d*)(?:\\.(\\d{1,8}))?$/.exec(raw);
+  const match = /^(0|[1-9]\d*)(?:\.(\d{1,8}))?$/.exec(raw);
   if (!match) return null;
   const whole = BigInt(match[1]);
   const fraction = BigInt((match[2] || '').padEnd(8, '0') || '0');
