@@ -43,14 +43,14 @@ export async function getAuthoritativeAssetUsdPrice(cryptoCode: string): Promise
   // 1. Try querying latest price from database
   try {
     const admin = getSupabaseAdminClient();
-    const { data } = await admin
+    const { data, error } = await admin
       .from('crypto_market_prices')
       .select('price_in_fiat')
       .eq('asset_symbol', asset)
       .eq('fiat_symbol', 'USD')
       .maybeSingle();
 
-    if (data && typeof data.price_in_fiat === 'number' && data.price_in_fiat > 0) {
+    if (!error && data && typeof data.price_in_fiat === 'number' && Number.isFinite(data.price_in_fiat) && data.price_in_fiat > 0) {
       return data.price_in_fiat;
     }
   } catch {
@@ -94,8 +94,8 @@ export async function getAuthoritativeAssetUsdPrice(cryptoCode: string): Promise
     }
   } catch {}
 
-  // Default fallback if unavailable
-  return 1.0;
+  // Never invent a USD price for a volatile asset: withdrawal limits depend on it.
+  throw new Error(`Authoritative USD price unavailable for ${asset}; withdrawal must be deferred`);
 }
 
 /**
@@ -113,22 +113,24 @@ export async function calculateWithdrawalUsdEquivalent(asset: string, amount: nu
 export async function getAdminFeeMultiplier(): Promise<number> {
   try {
     const admin = getSupabaseAdminClient();
-    const { data: settings } = await admin
+    const { data: settings, error } = await admin
       .from('platform_settings')
       .select('withdrawal_fee_multiplier')
       .eq('id', 1)
       .maybeSingle();
 
-    if (settings?.withdrawal_fee_multiplier) {
-      const multiplier = Number(settings.withdrawal_fee_multiplier);
-      if (!isNaN(multiplier) && multiplier > 0) {
-        return multiplier;
-      }
+    if (error || !settings) {
+      throw new Error(`Withdrawal fee configuration unavailable: ${error?.message || 'settings row missing'}`);
     }
-  } catch {
-    // Default fallback
+    const multiplier = Number(settings.withdrawal_fee_multiplier);
+    if (!Number.isFinite(multiplier) || multiplier <= 0) {
+      throw new Error('Withdrawal fee multiplier is missing or invalid');
+    }
+    return multiplier;
+  } catch (err) {
+    console.error('[WithdrawalFees] Unable to verify configured fee multiplier:', err);
+    throw err instanceof Error ? err : new Error('Withdrawal fee configuration unavailable');
   }
-  return 2.0;
 }
 
 /**
