@@ -1706,7 +1706,8 @@ export function formatSystemMessageContent(
   } = payload;
 
   const formattedAmount = formatCryptoAmount(coinAmount, coinSymbol);
-  const cleanCoin = (coinSymbol || 'USDT').toUpperCase();
+  const normalizedCoin = typeof coinSymbol === 'string' ? coinSymbol.toUpperCase().replace(/[^A-Z0-9.-]/g, '').slice(0, 16) : '';
+  const cleanCoin = normalizedCoin || 'USDT';
   const trimmedComment = (feedbackComment || customText || '')
     .trim()
     .slice(0, 100);
