@@ -606,8 +606,8 @@ export async function executeCanonicalWithdrawal(input: WithdrawalRequestInput):
     return {
       success: false,
       status: 'RESERVATION_FAILED',
-      error: rpcError.message || 'Balance reservation failed',
-      message: rpcError.message || 'Balance reservation failed',
+      error: 'Balance reservation failed.',
+      message: 'Withdrawals are temporarily unavailable. Please try again later.',
       statusCode: 400,
     };
   }
