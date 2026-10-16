@@ -15,17 +15,17 @@ export const dynamic = 'force-dynamic';
 export async function POST(req: NextRequest) {
   try {
     const supabase = await createClient();
-    const { data: { session } } = await supabase.auth.getSession();
+    const { data: { user }, error: authError } = await supabase.auth.getUser();
 
-    if (!session?.user) {
+    if (authError || !user) {
       return NextResponse.json(
         { success: false, error: 'Authentication required. Please sign in.' },
         { status: 401 }
       );
     }
 
-    const adminId = session.user.id;
-    const adminEmail = session.user.email || 'admin';
+    const adminId = user.id;
+    const adminEmail = user.email || 'admin';
     const adminDb = createAdminClient();
 
     // 1. Authoritative Admin Role Verification
@@ -43,7 +43,7 @@ export async function POST(req: NextRequest) {
       profile.role === 'admin' ||
       profile.is_admin === true ||
       profile.is_admin_account === true ||
-      session.user.app_metadata?.role === 'admin'
+      user.app_metadata?.role === 'admin'
     );
 
     if (!isAdmin) {
@@ -120,13 +120,21 @@ export async function POST(req: NextRequest) {
         const newHash = hashRecoveryPassword(newRecoveryPassword);
         const nowIso = new Date().toISOString();
 
-        await adminDb
+        const { error: recoveryRotationError } = await adminDb
           .from('profiles')
           .update({
             admin_2fa_recovery_hash: newHash,
             admin_2fa_recovery_updated_at: nowIso,
           })
           .eq('id', adminId);
+
+        if (recoveryRotationError) {
+          console.error('Admin recovery credential rotation failed.');
+          return NextResponse.json(
+            { success: false, error: 'Unable to rotate the recovery credential. Please retry or contact support.' },
+            { status: 500 }
+          );
+        }
 
         const clientIp = req.headers.get('x-forwarded-for') || req.headers.get('x-real-ip') || 'unknown';
         await logAdminSecurityAudit({
