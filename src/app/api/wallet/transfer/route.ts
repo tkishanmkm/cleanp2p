@@ -357,14 +357,30 @@ export async function POST(req: NextRequest) {
     const transferId = String(transferData.public_id || transferData.transfer_id);
     const dbTransferId = String(transferData.transfer_id);
     const grossAmount = Number(transferData.gross_amount);
-    const netAmount = Number(transferData.net_amount || transferData.gross_amount);
-    const feeAmount = Number(transferData.fee_amount || transferData.fee || 0);
-    const totalDeduction = transferData.total_deduction != null 
-      ? Number(transferData.total_deduction) 
+    const netAmount = Number(transferData.net_amount);
+    const feeAmount = Number(transferData.fee_amount);
+    const rawTotalDeduction = transferData.total_deduction;
+    const totalDeduction = rawTotalDeduction != null
+      ? Number(rawTotalDeduction)
       : Number((grossAmount + feeAmount).toFixed(8));
     const senderBalanceAfter = transferData.sender_balance_after != null ? Number(transferData.sender_balance_after) : undefined;
     const recipientBalanceAfter = transferData.recipient_balance_after != null ? Number(transferData.recipient_balance_after) : undefined;
     const transferStatus = String(transferData.status || 'confirmed').toLowerCase();
+
+    if (
+      !Number.isFinite(grossAmount) || grossAmount <= 0 ||
+      !Number.isFinite(netAmount) || netAmount < 0 ||
+      !Number.isFinite(feeAmount) || feeAmount < 0 ||
+      !Number.isFinite(totalDeduction) || totalDeduction < 0 ||
+      (senderBalanceAfter !== undefined && (!Number.isFinite(senderBalanceAfter) || senderBalanceAfter < 0)) ||
+      (recipientBalanceAfter !== undefined && (!Number.isFinite(recipientBalanceAfter) || recipientBalanceAfter < 0))
+    ) {
+      console.error('[Internal Transfer] RPC response contains invalid financial values.');
+      return NextResponse.json({
+        error: 'Transfer result could not be verified safely.',
+        code: 'INVALID_RPC_RESPONSE',
+      }, { status: 500 });
+    }
 
     // 5. Dispatch confirmation notification for sender only on new transfer (not replay)
     if (!isIdempotentReplay) {
