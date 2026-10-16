@@ -501,6 +501,17 @@ export async function PATCH(
       );
     }
 
+    const existingStatus = String(existingAd.status ?? '').toUpperCase();
+    const isAlreadyDeleted =
+      existingAd.is_deleted === true ||
+      existingStatus === 'DELETED';
+    if (isAlreadyDeleted && newStatus === 'ACTIVE') {
+      return NextResponse.json(
+        { error: 'Deleted advertisements cannot be reactivated. Create a new advertisement instead.' },
+        { status: 409 }
+      );
+    }
+
     // 5. Independently resolve both target rows
     const { p2pAdsRow, adsRow } = await resolveBothTargetRows(existingAd, adId, admin);
 
