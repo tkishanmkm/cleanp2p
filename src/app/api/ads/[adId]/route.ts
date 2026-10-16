@@ -242,8 +242,6 @@ export async function GET(
         avg_release_minutes: profileData.avg_release_minutes,
         avg_pay_time: profileData.avg_pay_time || 'N/A',
         avg_payment_minutes: profileData.avg_payment_minutes,
-        last_seen: profileData.last_seen || profileData.last_seen_at || profileData.last_active,
-        last_seen_at: profileData.last_seen_at || profileData.last_seen || profileData.last_active,
       } : {
         id: adOwnerUserId,
         username: ad.user_display_name || 'Trader',
