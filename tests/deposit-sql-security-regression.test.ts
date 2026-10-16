@@ -255,6 +255,11 @@ const checks: Array<[string, string, RegExp]> = [
     'src/jobs/sweeperWorker.ts',
     /Revalidate ownership immediately before network side effects[\s\S]*?assertPreBroadcastOwnership\(sweepId, workerId, 'GAS_FUNDING_RECOVERY'\)[\s\S]*?provider\.broadcastTransaction\(existingSignedTx\)/i,
   ],
+  [
+    'fresh gas funding requires live sweep ownership immediately before broadcast',
+    'src/jobs/sweeperWorker.ts',
+    /Revalidate lease ownership after signing\/persistence[\s\S]*?assertPreBroadcastOwnership\(sweepId, workerId, 'GAS_FUNDING'\)[\s\S]*?Sweep ID and worker ID are required before gas funding broadcast[\s\S]*?provider\.broadcastTransaction\(signedTxHex\)/i,
+  ],
 ];
 
 let failed = 0;
