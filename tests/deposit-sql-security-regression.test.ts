@@ -391,6 +391,11 @@ const checks: Array<[string, string, RegExp]> = [
     /persist_signed_delegation[\s\S]*?if \(persistErr \|\| !persistRes \|\| persistRes\.success !== true\)[\s\S]*?Failed to persist signed delegation transaction/i,
   ],
   [
+    'TRON gas funding signed-transaction persistence requires explicit RPC success',
+    'src/jobs/sweeperWorker.ts',
+    /persist_signed_gas_funding[\s\S]*?if \(persistErr \|\| !persistRes \|\| persistRes\.success !== true\)[\s\S]*?Failed to persist signed gas funding transaction/i,
+  ],
+  [
     'TRON gas funding broadcast requires explicit boolean success',
     'src/jobs/sweeperWorker.ts',
     /Broadcast exact persisted transaction[\s\S]*?const broadcastRes = await tronWeb\.trx\.sendRawTransaction\(signedTx\)[\s\S]*?if \(!broadcastRes \|\| broadcastRes\.result !== true\)[\s\S]*?TRON gas funding broadcast rejected/i,
