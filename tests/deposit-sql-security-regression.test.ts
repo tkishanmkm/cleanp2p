@@ -403,7 +403,7 @@ const checks: Array<[string, string, RegExp]> = [
   [
     'EVM withdrawal completion requires explicit successful RPC result',
     'src/jobs/withdrawalWorker.ts',
-    /const { data: completionData, error: completionError } = await supabaseAdmin\.rpc\('complete_onchain_withdrawal'[\s\S]*?completionData\.success !== true/i,
+    /p_tx_hash: tx\.hash,[\s\S]*?completionData\.success !== true/i,
   ],
   [
     'TRON existing delegated state validates persisted amount before reuse',
