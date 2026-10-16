@@ -442,6 +442,14 @@ assert.match(marketPriceWorker, /process\.env\.SUPABASE_SERVICE_ROLE_KEY\s*\|\|\
   'market-price worker must require the service-role credential');
 assert.match(marketPriceWorker, /if \(!supabaseUrl \|\| !supabaseKey\)[\s\S]*?SUPABASE_SERVICE_CONFIGURATION_MISSING/,
   'market-price worker must fail closed when Supabase server configuration is missing');
+const marketWorkerFunctionIndex = marketPriceWorker.indexOf('export async function runMarketPriceUpdate');
+const marketWorkerConfigGuardIndex = marketPriceWorker.indexOf('if (!supabaseUrl || !supabaseKey)');
+const marketWorkerClientIndex = marketPriceWorker.indexOf('createClient(supabaseUrl, supabaseKey');
+assert.ok(marketWorkerFunctionIndex >= 0 && marketWorkerConfigGuardIndex > marketWorkerFunctionIndex,
+  'market-price worker configuration guard must execute inside the exported worker');
+assert.ok(marketWorkerClientIndex > marketWorkerConfigGuardIndex,
+  'market-price Supabase client must only be constructed after configuration validation');
+
 assert.doesNotMatch(marketPriceWorker, /NEXT_PUBLIC_SUPABASE_ANON_KEY|placeholder\.supabase\.co|placeholder-key/,
   'market-price worker must not fall back to public anon credentials or placeholder configuration');
 
