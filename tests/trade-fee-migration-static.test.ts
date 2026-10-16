@@ -463,6 +463,11 @@ assert.match(geckoFallbackBlock, /&& !cryptoUsdPrices\[symbol\]/,
 assert.match(geckoFallbackBlock, /Number\.isFinite\(p\) && p > 0/,
   'CoinGecko fallback must reject non-finite and non-positive prices');
 
+assert.match(marketPriceWorker, /liveAssets\.filter\(\(asset\) => asset !== 'USDT'\)/,
+  'synthetic USDT peg must not count as a successful live crypto-provider response');
+assert.match(marketPriceWorker, /liveMarketAssets\.length === 0[\s\S]*?LIVE_CRYPTO_PROVIDER_UNAVAILABLE/,
+  'market-price worker must fail closed when both live crypto providers provide no supported asset prices');
+
 const marketWorkerFunctionIndex = marketPriceWorker.indexOf('export async function runMarketPriceUpdate');
 const marketWorkerConfigGuardIndex = marketPriceWorker.indexOf('if (!supabaseUrl || !supabaseKey)');
 const marketWorkerClientIndex = marketPriceWorker.indexOf('createClient(supabaseUrl, supabaseKey');
