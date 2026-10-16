@@ -592,10 +592,13 @@ export async function fundGasForAddress(
   try {
     await provider.broadcastTransaction(signedTxHex);
     if (sweepId) {
-      await supabaseAdmin.from('gas_funding_operations').update({
+      const { error: broadcastStatusErr } = await supabaseAdmin.from('gas_funding_operations').update({
         status: 'BROADCASTED',
         updated_at: new Date().toISOString(),
       }).eq('sweep_id', sweepId);
+      if (broadcastStatusErr) {
+        throw new Error(`Gas funding broadcast may have succeeded but BROADCASTED status persistence failed: ${broadcastStatusErr.message}`);
+      }
     }
   } catch (broadcastErr: any) {
     console.error(`[EVM Gas Funding Broadcast Exception] ${targetAddress}:`, broadcastErr);
@@ -608,20 +611,26 @@ export async function fundGasForAddress(
     if (minedReceipt && minedReceipt.status === 1) {
       console.log(`[Sweeper Gas] Transaction ${deterministicTxHash} already mined despite broadcast error!`);
       if (sweepId) {
-        await supabaseAdmin.from('gas_funding_operations').update({
+        const { error: minedStatusErr } = await supabaseAdmin.from('gas_funding_operations').update({
           status: 'CONFIRMED',
           updated_at: new Date().toISOString(),
         }).eq('sweep_id', sweepId);
+        if (minedStatusErr) {
+          throw new Error(`Gas funding tx ${deterministicTxHash} is mined despite broadcast error, but CONFIRMED status persistence failed: ${minedStatusErr.message}`);
+        }
       }
       return;
     }
 
     if (sweepId) {
-      await supabaseAdmin.from('gas_funding_operations').update({
+      const { error: ambiguousStatusErr } = await supabaseAdmin.from('gas_funding_operations').update({
         status: 'RECOVERY_REQUIRED',
         error_message: broadcastErr?.message || 'EVM gas broadcast ambiguous',
         updated_at: new Date().toISOString(),
       }).eq('sweep_id', sweepId);
+      if (ambiguousStatusErr) {
+        throw new Error(`EVM gas broadcast outcome is ambiguous and RECOVERY_REQUIRED persistence failed: ${ambiguousStatusErr.message}`);
+      }
     }
     throw broadcastErr;
   }
