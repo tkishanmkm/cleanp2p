@@ -15,16 +15,27 @@ export async function POST(request: Request) {
 
     const { results, pendingRecheck } = await runDepositIngestion();
 
+    // Return operational counters only. Raw provider errors and per-transaction
+    // details can expose transaction/address metadata to anyone holding the worker
+    // credential and should remain in protected server logs.
+    const summary = results.map((result) => ({
+      network: result.network,
+      depositsDetected: result.depositsDetected,
+      depositsCredited: result.depositsCredited,
+      errorCount: result.errors.length,
+      scannedBlocks: result.scannedBlocks,
+    }));
+
     return NextResponse.json({
       success: true,
-      results,
+      summary,
       pendingRecheck,
-      message: 'Deposit ingestion completed via canonical process_deposit_atomic',
+      message: 'Deposit ingestion cycle completed',
     });
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('Deposit worker error:', error);
     return NextResponse.json(
-      { error: error.message || 'Internal Server Error' },
+      { error: 'Deposit ingestion failed; check protected server logs.' },
       { status: 500 }
     );
   }
