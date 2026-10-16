@@ -56,8 +56,18 @@ export async function POST(req: NextRequest) {
       requestId,
     } = payload;
     
-    const targetIdentifier = String(recipientInput || recipientUsername || '').trim();
-    const coinSymbol = String(asset || crypto || 'USDT').toUpperCase().trim();
+    const rawRecipient = recipientInput ?? recipientUsername;
+    const rawAsset = asset ?? crypto ?? 'USDT';
+    if (
+      typeof rawRecipient !== 'string' ||
+      typeof rawAsset !== 'string' ||
+      (typeof amount !== 'string' && typeof amount !== 'number') ||
+      (typeof amount === 'string' && !/^\\d+(?:\\.\\d+)?$/.test(amount.trim()))
+    ) {
+      return NextResponse.json({ error: 'Invalid transfer payload types.' }, { status: 400 });
+    }
+    const targetIdentifier = rawRecipient.trim();
+    const coinSymbol = rawAsset.toUpperCase().trim();
     const numericAmount = Number(amount);
 
     // Extract and validate client idempotency key
