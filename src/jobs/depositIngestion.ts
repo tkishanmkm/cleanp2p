@@ -620,6 +620,12 @@ async function scanTronDeposits(
             continue;
           }
           const items = json.data;
+          // TronGrid's account endpoint is capped at 200 records here and this
+          // scanner does not yet follow pagination cursors. Surface a possible
+          // truncated history rather than reporting an apparently clean scan.
+          if (items.length >= 200) {
+            errors.push(`TRON account-transfer results reached the 200-record page limit for a monitored address; older deposits may require a paginated recovery scan`);
+          }
           for (const item of items) {
             if (item.type !== 'Transfer') continue;
 
