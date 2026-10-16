@@ -178,7 +178,8 @@ export async function POST(
     const readSafeText = (key: string, maxLength: number): string | undefined => {
       const value = safeMetadata[key];
       if (typeof value !== 'string') return undefined;
-      const normalized = value.trim();
+      // Prevent control characters and line breaks from spoofing system-message layout.
+      const normalized = value.replace(/[\u0000-\u001F\u007F]/g, ' ').replace(/\s+/g, ' ').trim();
       return normalized && normalized.length <= maxLength ? normalized : undefined;
     };
     const payload: SystemMessagePayload = {
