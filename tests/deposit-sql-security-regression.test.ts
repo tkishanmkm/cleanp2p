@@ -396,6 +396,11 @@ const checks: Array<[string, string, RegExp]> = [
     /Number\.isSafeInteger\(totalEnergyWeightSun\)[\s\S]*?Number\.isSafeInteger\(requiredSunNumerator\)[\s\S]*?Number\.isSafeInteger\(requiredSunNumber\)/i,
   ],
   [
+    'pre-broadcast withdrawal refund requires explicit RPC success',
+    'src/jobs/withdrawalWorker.ts',
+    /Pre-broadcast validation failure[\s\S]*?refundData\.success !== true/i,
+  ],
+  [
     'TRON withdrawal confirmation poll requires explicit RPC success',
     'src/jobs/withdrawalWorker.ts',
     /p_actual_gas_amount: actualTrxStr,[\s\S]*?confData\?\.success === true/i,
