@@ -334,7 +334,11 @@ export async function POST(req: NextRequest) {
 
     // Verify critical financial fields are strictly present from the RPC output
     if (
-      !transferData.transfer_id ||
+      typeof transferData.transfer_id !== 'string' ||
+      transferData.transfer_id.trim().length === 0 ||
+      (transferData.public_id !== undefined && transferData.public_id !== null && typeof transferData.public_id !== 'string') ||
+      (transferData.status !== undefined && typeof transferData.status !== 'string') ||
+      (transferData.idempotent_replay !== undefined && typeof transferData.idempotent_replay !== 'boolean') ||
       transferData.gross_amount === undefined ||
       transferData.gross_amount === null ||
       transferData.net_amount === undefined ||
