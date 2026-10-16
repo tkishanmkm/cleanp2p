@@ -128,10 +128,13 @@ export async function processWithdrawalQueue(): Promise<WithdrawalProcessResult>
       });
       const txHash = res.txHash;
 
-      await supabaseAdmin.rpc('complete_onchain_withdrawal', {
+      const { error: completionError } = await supabaseAdmin.rpc('complete_onchain_withdrawal', {
         p_withdrawal_id: withdrawal.id,
         p_tx_hash: txHash,
       });
+      if (completionError) {
+        throw new Error(`Payout was broadcast but withdrawal completion RPC failed: ${completionError.message}`);
+      }
 
       console.log(`[Withdrawal Worker] Dispatched TRON payout ${withdrawal.id} (tx: ${txHash})`);
       return {
@@ -182,10 +185,13 @@ export async function processWithdrawalQueue(): Promise<WithdrawalProcessResult>
       });
     }
 
-    await supabaseAdmin.rpc('complete_onchain_withdrawal', {
+    const { error: completionError } = await supabaseAdmin.rpc('complete_onchain_withdrawal', {
       p_withdrawal_id: withdrawal.id,
       p_tx_hash: tx.hash,
     });
+    if (completionError) {
+      throw new Error(`Payout was broadcast but withdrawal completion RPC failed: ${completionError.message}`);
+    }
 
     console.log(`[Withdrawal Worker] Broadcasted EVM payout ${withdrawal.id} on ${network} (tx: ${tx.hash}, nonce: ${nonce})`);
     return {
