@@ -1,7 +1,5 @@
-import type { Trade, Dispute } from './types';
-import { supabase as clientSupabase } from '@/lib/supabase/client';
+import type { Trade } from './types';
 import { createClient as createServerClient } from '@/lib/supabase/server';
-import { insertPaxonesSystemMessage } from '@/lib/trade-system-messages';
 
 export interface OpenDisputeParams {
   tradeId: string;
