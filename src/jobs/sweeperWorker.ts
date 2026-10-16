@@ -1098,7 +1098,7 @@ export async function delegateEnergyFromPool(
     p_delegation_tx_hash: deterministicTxHash,
   });
 
-  if (persistErr || !persistRes || !persistRes.success) {
+  if (persistErr || !persistRes || persistRes.success !== true) {
     throw new Error(`Failed to persist signed delegation transaction: ${persistErr?.message || persistRes?.message}`);
   }
 
