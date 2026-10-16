@@ -178,6 +178,21 @@ DECLARE
     v_sweep RECORD;
     v_gas RECORD;
 BEGIN
+    IF p_sweep_id IS NULL OR p_worker_id IS NULL OR TRIM(p_worker_id) = '' THEN
+        RETURN jsonb_build_object('success', false, 'code', 'INVALID_CLAIM', 'message', 'Sweep ID and worker ID are required');
+    END IF;
+    IF p_signed_tx_hex IS NULL OR TRIM(p_signed_tx_hex) = ''
+       OR p_tx_hash IS NULL OR TRIM(p_tx_hash) = '' THEN
+        RETURN jsonb_build_object('success', false, 'code', 'INVALID_SIGNED_TRANSACTION', 'message', 'Signed transaction and transaction hash are required');
+    END IF;
+    IF p_nonce IS NOT NULL AND p_nonce < 0 THEN
+        RETURN jsonb_build_object('success', false, 'code', 'INVALID_NONCE', 'message', 'Nonce cannot be negative');
+    END IF;
+    IF (p_funding_tx_fee IS NOT NULL AND p_funding_tx_fee < 0)
+       OR (p_child_sweep_fee IS NOT NULL AND p_child_sweep_fee < 0) THEN
+        RETURN jsonb_build_object('success', false, 'code', 'INVALID_FEE', 'message', 'Transaction fees cannot be negative');
+    END IF;
+
     SELECT * INTO v_sweep
     FROM public.sweep_operations
     WHERE id = p_sweep_id
@@ -191,7 +206,7 @@ BEGIN
         RETURN jsonb_build_object('success', false, 'code', 'WORKER_MISMATCH', 'message', 'Worker does not own sweep');
     END IF;
 
-    IF v_sweep.lease_expires_at < NOW() THEN
+    IF v_sweep.lease_expires_at IS NULL OR v_sweep.lease_expires_at <= NOW() THEN
         RETURN jsonb_build_object('success', false, 'code', 'LEASE_EXPIRED', 'message', 'Worker lease expired');
     END IF;
 
@@ -202,6 +217,11 @@ BEGIN
 
     IF NOT FOUND THEN
         RETURN jsonb_build_object('success', false, 'code', 'GAS_OP_NOT_FOUND', 'message', 'Gas funding operation not found');
+    END IF;
+
+    -- Never replace an already signed/broadcast transaction: retries must reconcile it.
+    IF v_gas.status <> 'PENDING' THEN
+        RETURN jsonb_build_object('success', false, 'code', 'INVALID_GAS_OPERATION_STATE', 'message', 'Gas funding operation is not pending; reconciliation is required', 'status', v_gas.status);
     END IF;
 
     -- Set status to READY_TO_BROADCAST (persisted before network broadcast)
