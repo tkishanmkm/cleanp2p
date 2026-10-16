@@ -124,7 +124,7 @@ export async function GET(
       margin_percent: Number(ad.rate_percent ?? ad.margin_percent ?? ad.margin ?? 0),
       rate_percent: Number(ad.rate_percent ?? ad.margin_percent ?? ad.margin ?? 0),
       margin: Number(ad.rate_percent ?? ad.margin_percent ?? ad.margin ?? 0),
-      status: (ad.active !== false && ad.status !== 'INACTIVE') ? 'ACTIVE' : 'INACTIVE',
+      status: (ad.active !== false && ad.is_active !== false && ad.status !== 'INACTIVE' && ad.status !== 'DELETED' && ad.is_deleted !== true) ? 'ACTIVE' : 'INACTIVE',
       min_limit: Number(ad.min_limit ?? ad.min_amount ?? 10),
       max_limit: Number(ad.max_limit ?? ad.max_amount ?? 1000),
       min_amount: Number(ad.min_amount ?? ad.min_limit ?? 10),
