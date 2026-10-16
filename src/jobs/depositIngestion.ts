@@ -438,8 +438,18 @@ async function scanEvmNativeDeposits(
           if (error) {
             errors.push(`RPC error for native transfer ${tx.hash}: ${error.message}`);
           } else {
-            const res = typeof data === 'string' ? JSON.parse(data) : data;
-            if (res?.status === 'credited') {
+            let res: any;
+            try {
+              res = typeof data === 'string' ? JSON.parse(data) : data;
+            } catch {
+              errors.push(`Invalid RPC response for native transfer ${tx.hash}`);
+              continue;
+            }
+            if (!res || typeof res !== 'object' || Array.isArray(res) || typeof res.status !== 'string') {
+              errors.push(`Malformed RPC response for native transfer ${tx.hash}`);
+              continue;
+            }
+            if (res.status === 'credited') {
               credited++;
             }
           }
