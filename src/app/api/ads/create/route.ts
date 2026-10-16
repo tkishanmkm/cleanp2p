@@ -540,14 +540,22 @@ export async function POST(req: Request) {
     if (dbError) {
       console.error('[Database Insert Error in /api/ads/create]:', dbError);
       const isRlsError = dbError.code === '42501' || dbError.message?.toLowerCase().includes('row-level security');
+      const isAdLimitError =
+        dbError.code === '23514' &&
+        (dbError.message?.includes('ads_user_limit_check') ||
+          dbError.message?.toLowerCase().includes('advertisement limit reached'));
       return NextResponse.json(
         {
-          error: isRlsError
-            ? 'Access denied: You do not have permission to create this advertisement.'
-            : 'Unable to create advertisement. Please review the submitted fields or try again later.',
-          code: isRlsError ? 'ADVERTISEMENT_ACCESS_DENIED' : 'AD_CREATION_FAILED'
+          error: isAdLimitError
+            ? 'You have reached the limit of 10 advertisements. Delete an existing advertisement before creating another.'
+            : isRlsError
+              ? 'Access denied: You do not have permission to create this advertisement.'
+              : 'Unable to create advertisement. Please review the submitted fields or try again later.',
+          code: isAdLimitError
+            ? 'ADVERTISEMENT_LIMIT_REACHED'
+            : isRlsError ? 'ADVERTISEMENT_ACCESS_DENIED' : 'AD_CREATION_FAILED'
         },
-        { status: isRlsError ? 403 : 500 }
+        { status: isAdLimitError ? 409 : isRlsError ? 403 : 500 }
       );
     }
 
