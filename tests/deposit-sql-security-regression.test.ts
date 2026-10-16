@@ -350,6 +350,11 @@ const checks: Array<[string, string, RegExp]> = [
     'src/jobs/sweeperWorker.ts',
     /Remaining delegated energy on-chain:[\s\S]*?verifiedDelegationRemoved = false[\s\S]*?Unable to verify delegated resources on-chain; keeping allocation in recovery[\s\S]*?verifiedDelegationRemoved = false/i,
   ],
+  [
+    'TRON failed undelegation receipt checks persistence result before returning',
+    'src/jobs/sweeperWorker.ts',
+    /const \{ data: failureRes, error: failureErr \} = await supabaseAdmin\.rpc\('update_delegation_status'[\s\S]*?failureRes\.success !== true[\s\S]*?leaving operation for recovery/i,
+  ],
 ];
 
 let failed = 0;
