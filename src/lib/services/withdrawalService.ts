@@ -376,12 +376,24 @@ export async function executeCanonicalWithdrawal(input: WithdrawalRequestInput):
   }
   const validDestination = addressValidation.formatted;
 
-  // 5. Server-Authoritative Fee Calculation (2x Applicable Network Gas)
-  const feeInfo = await resolveAuthoritativeWithdrawalFee(assetSymbol, networkCode);
-  const networkFee = feeInfo.feeCrypto;
-
-  // 6. Calculate Authoritative USD Equivalent
-  const usdEquivalent = await calculateWithdrawalUsdEquivalent(assetSymbol, parsedAmount);
+  // 5–6. Resolve authoritative fee and USD value. Never continue with guessed prices
+  // or defaults if configuration/oracle/database checks are unavailable.
+  let networkFee: number;
+  let usdEquivalent: number;
+  try {
+    const feeInfo = await resolveAuthoritativeWithdrawalFee(assetSymbol, networkCode);
+    networkFee = feeInfo.feeCrypto;
+    usdEquivalent = await calculateWithdrawalUsdEquivalent(assetSymbol, parsedAmount);
+  } catch (pricingError) {
+    console.error('Withdrawal pricing/configuration check unavailable:', pricingError);
+    return {
+      success: false,
+      status: 'PRICING_UNAVAILABLE',
+      error: 'Authoritative withdrawal pricing is temporarily unavailable.',
+      message: 'Withdrawals are temporarily unavailable. Please try again later.',
+      statusCode: 503,
+    };
+  }
 
   // Platform Limit Parameters
   const hardMaxUsd = Number(settings?.max_single_withdrawal_usd || 4000.0);
@@ -435,13 +447,24 @@ export async function executeCanonicalWithdrawal(input: WithdrawalRequestInput):
     .in('status', ['completed', 'processing', 'QUEUED', 'PENDING_APPROVAL', 'APPROVED', 'approved', 'pending']);
 
   let rolling24hUsd = 0;
-  if (past24hWithdrawals && past24hWithdrawals.length > 0) {
-    for (const w of past24hWithdrawals) {
-      const wAsset = w.asset_symbol || 'USDT';
-      const wAmount = Number(w.amount || 0);
-      const wUsd = await calculateWithdrawalUsdEquivalent(wAsset, wAmount);
-      rolling24hUsd += wUsd;
+  try {
+    if (past24hWithdrawals && past24hWithdrawals.length > 0) {
+      for (const w of past24hWithdrawals) {
+        const wAsset = w.asset_symbol || 'USDT';
+        const wAmount = Number(w.amount || 0);
+        const wUsd = await calculateWithdrawalUsdEquivalent(wAsset, wAmount);
+        rolling24hUsd += wUsd;
+      }
     }
+  } catch (pricingError) {
+    console.error('Unable to value recent withdrawals for daily limit enforcement:', pricingError);
+    return {
+      success: false,
+      status: 'PRICING_UNAVAILABLE',
+      error: 'Authoritative pricing for daily withdrawal-limit checks is temporarily unavailable.',
+      message: 'Withdrawals are temporarily unavailable. Please try again later.',
+      statusCode: 503,
+    };
   }
 
   if (rolling24hUsd + usdEquivalent > dailyLimitUsd) {
