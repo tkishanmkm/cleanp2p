@@ -65,20 +65,25 @@ export async function allocateEvmNonce(
   provider: ethers.JsonRpcProvider
 ): Promise<number> {
   const normNet = normalizeNetworkCode(network);
-  try {
-    const onchainPending = await provider.getTransactionCount(walletAddress, 'pending');
-    const { data: allocatedNonce, error } = await supabaseAdmin.rpc('allocate_hot_wallet_nonce', {
-      p_network: normNet,
-      p_wallet_address: walletAddress,
-      p_onchain_pending_nonce: onchainPending,
-    });
-    if (!error && allocatedNonce !== null && allocatedNonce !== undefined) {
-      return Number(allocatedNonce);
-    }
-  } catch (rpcErr) {
-    console.warn('[Nonce Manager] RPC allocate_hot_wallet_nonce failed, falling back to on-chain count:', rpcErr);
+  const onchainPending = await provider.getTransactionCount(walletAddress, 'pending');
+  const { data: allocatedNonce, error } = await supabaseAdmin.rpc('allocate_hot_wallet_nonce', {
+    p_network: normNet,
+    p_wallet_address: walletAddress,
+    p_onchain_pending_nonce: onchainPending,
+  });
+
+  // Never fall back to the RPC/provider pending nonce: concurrent workers could
+  // receive the same nonce and broadcast conflicting transactions.
+  if (error) {
+    console.error('[Nonce Manager] Atomic nonce allocation failed; refusing to broadcast.', error);
+    throw new Error('Safe withdrawal nonce allocation unavailable');
   }
-  return await provider.getTransactionCount(walletAddress, 'pending');
+  const nonce = Number(allocatedNonce);
+  if (allocatedNonce === null || allocatedNonce === undefined || !Number.isSafeInteger(nonce) || nonce < 0) {
+    console.error('[Nonce Manager] Atomic nonce allocator returned an invalid nonce; refusing to broadcast.');
+    throw new Error('Safe withdrawal nonce allocation returned an invalid result');
+  }
+  return nonce;
 }
 
 /**
@@ -146,38 +151,45 @@ export async function processWithdrawalQueue(): Promise<WithdrawalProcessResult>
       throw new Error(`EVM Hot Wallet signer not available for network ${network}. Check EVM_HOT_WALLET_PRIVATE_KEY.`);
     }
 
-    const nonce = await allocateEvmNonce(network, address, provider);
-    const feeOverrides = await getEip1559FeeOverrides(provider, 1.25);
-    let tx: ethers.TransactionResponse;
-
     const normNet = normalizeNetworkCode(network);
     const chainConfig = SUPPORTED_EVM_CHAINS[normNet];
-    const isNativeTransfer = chainConfig && assetSymbol === chainConfig.nativeSymbol;
+    const isNativeTransfer = !!chainConfig && assetSymbol === chainConfig.nativeSymbol;
 
-    if (isNativeTransfer) {
-      // Native transfer (ETH)
-      const parsedAmount = ethers.parseUnits(amountStr, chainConfig.nativeDecimals);
-      isLocalCheckStage = false;
+    // Finish all deterministic local validation before reserving a hot-wallet nonce.
+    // A validation/configuration failure after nonce allocation can leave a nonce gap.
+    let parsedAmount: bigint;
+    let tokenContract: ethers.Contract | null = null;
+    if (isNativeTransfer && chainConfig) {
+      parsedAmount = ethers.parseUnits(amountStr, chainConfig.nativeDecimals);
+    } else {
+      const decimals = getTokenDecimals(network, assetSymbol);
+      const contractAddress = getTokenContractAddress(network, assetSymbol);
+      if (!contractAddress) {
+        throw new Error(`No token contract address configured for ${assetSymbol} on ${network}`);
+      }
+      parsedAmount = ethers.parseUnits(amountStr, decimals);
+      tokenContract = new ethers.Contract(contractAddress, ERC20_ABI, signer);
+    }
+
+    const feeOverrides = await getEip1559FeeOverrides(provider, 1.25);
+    const nonce = await allocateEvmNonce(network, address, provider);
+    let tx: ethers.TransactionResponse;
+    isLocalCheckStage = false;
+
+    if (isNativeTransfer && chainConfig) {
       tx = await signer.sendTransaction({
         to: destination,
         value: parsedAmount,
         nonce,
         ...feeOverrides,
       });
-    } else {
-      // ERC-20 Token Transfer (USDT ERC20 / BEP20)
-      const decimals = getTokenDecimals(network, assetSymbol);
-      const contractAddress = getTokenContractAddress(network, assetSymbol);
-      if (!contractAddress) {
-        throw new Error(`No token contract address configured for ${assetSymbol} on ${network}`);
-      }
-      const tokenContract = new ethers.Contract(contractAddress, ERC20_ABI, signer);
-      const parsedAmount = ethers.parseUnits(amountStr, decimals);
-      isLocalCheckStage = false;
+    } else if (tokenContract) {
       tx = await tokenContract.transfer(destination, parsedAmount, {
         nonce,
         ...feeOverrides,
       });
+    } else {
+      throw new Error('Unsupported EVM withdrawal asset configuration');
     }
 
     await supabaseAdmin.rpc('complete_onchain_withdrawal', {
