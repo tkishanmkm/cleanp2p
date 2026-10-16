@@ -488,9 +488,12 @@ export async function processAllPendingWithdrawals(maxBatch: number = 20): Promi
   } finally {
     if (hasLock) {
       try {
-        await supabaseAdmin.rpc('release_withdrawal_worker_lock');
+        const { error: unlockError } = await supabaseAdmin.rpc('release_withdrawal_worker_lock');
+        if (unlockError) {
+          console.error('[Withdrawal Worker Singleton] Lock release RPC failed; operator intervention may be required', unlockError);
+        }
       } catch (unlockErr) {
-        console.warn('[Withdrawal Worker Singleton] Notice on lock release:', unlockErr);
+        console.error('[Withdrawal Worker Singleton] Lock release threw; operator intervention may be required', unlockErr);
       }
     }
   }
