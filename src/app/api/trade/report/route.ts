@@ -133,8 +133,9 @@ export async function POST(req: Request) {
 
     // Return only fields the submitting user needs; do not expose future/internal report columns.
     return NextResponse.json({ success: true, report: { id: data.id, status: data.status } });
-  } catch (error: any) {
-    console.error('Trade report submission failed:', error);
+  } catch (error: unknown) {
+    const errorName = error instanceof Error ? error.name : 'UnknownError';
+    console.error('Trade report submission failed:', errorName);
     return NextResponse.json({ error: 'Unable to submit report right now. Please try again later.' }, { status: 500 });
   }
 }
