@@ -1018,6 +1018,9 @@ export async function PUT(
         };
         if (updatedAsset) adsPayload.asset_symbol = String(updatedAsset).toUpperCase();
         if (updatedFiat) adsPayload.fiat_symbol = String(updatedFiat).toUpperCase();
+        adsPayload.pricing_type = pricingType;
+        adsPayload.rate_type = rateType;
+        adsPayload.is_fixed = isFixed;
         if (price !== undefined) {
           adsPayload.price = price;
           adsPayload.unit_price = unitPrice ?? price;
