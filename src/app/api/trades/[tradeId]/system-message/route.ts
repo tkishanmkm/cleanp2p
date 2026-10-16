@@ -134,7 +134,9 @@ export async function POST(
           } else if (authUser?.user?.email) {
             buyerUsername = authUser.user.email.split('@')[0];
           }
-        } catch {}
+        } catch (buyerAuthLookupError) {
+          console.warn('Buyer auth profile fallback failed:', buyerAuthLookupError instanceof Error ? buyerAuthLookupError.name : 'UnknownError');
+        }
       }
     }
 
@@ -162,7 +164,9 @@ export async function POST(
           } else if (authUser?.user?.email) {
             sellerUsername = authUser.user.email.split('@')[0];
           }
-        } catch {}
+        } catch (sellerAuthLookupError) {
+          console.warn('Seller auth profile fallback failed:', sellerAuthLookupError instanceof Error ? sellerAuthLookupError.name : 'UnknownError');
+        }
       }
     }
 
