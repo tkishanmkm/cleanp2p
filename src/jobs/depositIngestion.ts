@@ -1138,9 +1138,11 @@ async function refreshPendingDepositConfirmations(): Promise<{
                 !Number.isSafeInteger(tipHeight) || tipHeight < 0) {
               continue;
             }
-            const confs = statusData.confirmed && Number.isSafeInteger(statusData.block_height)
-              ? Math.max(0, tipHeight - statusData.block_height + 1)
-              : 0;
+            const confs = tipHeight - statusData.block_height + 1;
+            if (confs < 3) {
+              console.info('[Deposit Ingestion] Pending BTC deposit has not reached the required 3 confirmations; it remains pending');
+              continue;
+            }
             const { data, error: rpcErr } = await supabaseAdmin.rpc('process_deposit_atomic', {
               p_destination_address: destinationAddress,
               p_asset_symbol: 'BTC',
@@ -1202,9 +1204,11 @@ async function refreshPendingDepositConfirmations(): Promise<{
                 !Number.isSafeInteger(tipHeight) || tipHeight < 0) {
               continue;
             }
-            const confs = statusData.confirmed && Number.isSafeInteger(statusData.block_height)
-              ? Math.max(0, tipHeight - statusData.block_height + 1)
-              : 0;
+            const confs = tipHeight - statusData.block_height + 1;
+            if (confs < 12) {
+              console.info('[Deposit Ingestion] Pending LTC deposit has not reached the required 12 confirmations; it remains pending');
+              continue;
+            }
             const { data, error: rpcErr } = await supabaseAdmin.rpc('process_deposit_atomic', {
               p_destination_address: destinationAddress,
               p_asset_symbol: 'LTC',
