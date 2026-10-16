@@ -571,6 +571,11 @@ const checks: Array<[string, string, RegExp]> = [
     /Delegation broadcast outcome is ambiguous; preserving operation for reconciliation[\s\S]*?p_new_status: 'RECOVERY_REQUIRED'[\s\S]*?failed to persist RECOVERY_REQUIRED state/i,
   ],
   [
+    'TRON reverted undelegation remains unsuccessful when failure-state persistence fails',
+    'src/jobs/sweeperWorker.ts',
+    /Undelegation transaction reverted on-chain[\s\S]*?failureErr \|\| !failureRes \|\| failureRes\.success !== true[\s\S]*?leaving operation for recovery[\s\S]*?return false/i,
+  ],
+  [
     'TRON failed undelegation receipt checks persistence result before returning',
     'src/jobs/sweeperWorker.ts',
     /const \{ data: failureRes, error: failureErr \} = await supabaseAdmin\.rpc\('update_delegation_status'[\s\S]*?failureRes\.success !== true[\s\S]*?leaving operation for recovery/i,
