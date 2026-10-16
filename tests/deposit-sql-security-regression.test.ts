@@ -406,6 +406,11 @@ const checks: Array<[string, string, RegExp]> = [
     /Pre-broadcast validation failure[\s\S]*?refundData\.success !== true/i,
   ],
   [
+    'verified TRON revert processing requires explicit RPC success',
+    'src/jobs/withdrawalWorker.ts',
+    /TRON transaction reverted on-chain[\s\S]*?failedData\?\.success !== true/i,
+  ],
+  [
     'verified EVM revert processing requires explicit RPC success',
     'src/jobs/withdrawalWorker.ts',
     /EVM transaction reverted on-chain[\s\S]*?failedData\?\.success !== true/i,
