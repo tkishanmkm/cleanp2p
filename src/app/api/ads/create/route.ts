@@ -357,6 +357,9 @@ export async function POST(req: Request) {
     ];
     for (const [label, rawValue] of numericFields) {
       if (rawValue === null || rawValue === undefined || rawValue === '') continue;
+      if (typeof rawValue !== 'number' && typeof rawValue !== 'string') {
+        return NextResponse.json({ error: `Invalid ${label}; enter a finite number.` }, { status: 400 });
+      }
       const value = Number(rawValue);
       if (!Number.isFinite(value)) {
         return NextResponse.json({ error: `Invalid ${label}; enter a finite number.` }, { status: 400 });
