@@ -766,6 +766,53 @@ async function scanTronDeposits(
               continue;
             }
 
+            // Do not trust TronGrid's account endpoint alone for token amount or
+            // recipient. Bind the reported event to a successful on-chain receipt log.
+            const receiptLogs = txInfo?.log;
+            if (!Array.isArray(receiptLogs)) {
+              errors.push(`TRON transaction receipt has no verifiable logs: ${txId}`);
+              continue;
+            }
+            let expectedContractHex = '';
+            let expectedRecipientHex = '';
+            let expectedSenderHex = '';
+            try {
+              expectedContractHex = tronWeb.address.toHex(CANONICAL_USDT_CONTRACTS.TRC20).replace(/^0x/i, '').toLowerCase();
+              expectedRecipientHex = tronWeb.address.toHex(toAddr).replace(/^0x/i, '').toLowerCase();
+              if (fromAddr) expectedSenderHex = tronWeb.address.toHex(fromAddr).replace(/^0x/i, '').toLowerCase();
+            } catch {
+              errors.push(`TRON account transfer contains an invalid sender or recipient address: ${txId}`);
+              continue;
+            }
+            const expectedRawAmount = BigInt(item.value).toString(16).padStart(64, '0').toLowerCase();
+            const receiptLogMatches = receiptLogs.some((log: any) => {
+              if (!log || typeof log !== 'object' || Array.isArray(log)) return false;
+              const logAddress = typeof log.address === 'string'
+                ? log.address.replace(/^0x/i, '').toLowerCase()
+                : '';
+              const topics = log.topics;
+              if (
+                logAddress !== expectedContractHex &&
+                logAddress !== expectedContractHex.replace(/^41/, '')
+              ) return false;
+              if (!Array.isArray(topics) || topics.length !== 3 ||
+                  topics.some((topic: unknown) => typeof topic !== 'string' || !/^0x[0-9a-fA-F]{64}$/.test(topic)) ||
+                  topics[0].toLowerCase() !== transferTopic) return false;
+              const topicSender = topics[1].slice(-40).toLowerCase();
+              const topicRecipient = topics[2].slice(-40).toLowerCase();
+              const recipientHex20 = expectedRecipientHex.slice(-40);
+              const senderHex20 = expectedSenderHex.slice(-40);
+              const data = typeof log.data === 'string' ? log.data : '';
+              if (!/^0x[0-9a-fA-F]{64}$/.test(data) || data.slice(2).toLowerCase() !== expectedRawAmount) return false;
+              if (topicRecipient !== recipientHex20) return false;
+              if (expectedSenderHex && topicSender !== senderHex20) return false;
+              return true;
+            });
+            if (!receiptLogMatches) {
+              errors.push(`Rejected TRON account transfer not matched by an exact successful receipt Transfer log: ${txId}`);
+              continue;
+            }
+
             // Confirm the account API's block assignment against the chain RPC
             // before reserving the event key or attempting a credit.
             const canonicalRes = await fetch(`${tronHost}/wallet/getblockbynum`, {
