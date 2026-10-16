@@ -412,18 +412,24 @@ export async function fundGasForAddress(
       }
 
       if (isConfirmed) {
-        await supabaseAdmin.from('gas_funding_operations').update({
+        const { error: confirmedReceiptPersistErr } = await supabaseAdmin.from('gas_funding_operations').update({
           status: 'CONFIRMED',
           updated_at: new Date().toISOString(),
         }).eq('sweep_id', sweepId);
+        if (confirmedReceiptPersistErr) {
+          throw new Error(`Gas funding tx ${existingTxHash} is confirmed on-chain but CONFIRMED receipt status persistence failed: ${confirmedReceiptPersistErr.message}`);
+        }
         console.log(`[Sweeper Gas Recovery] Gas funding tx ${existingTxHash} confirmed.`);
         return;
       } else {
-        await supabaseAdmin.from('gas_funding_operations').update({
+        const { error: timeoutPersistErr } = await supabaseAdmin.from('gas_funding_operations').update({
           status: 'RECOVERY_REQUIRED',
           error_message: 'Timed out waiting for on-chain gas funding receipt',
           updated_at: new Date().toISOString(),
         }).eq('sweep_id', sweepId);
+        if (timeoutPersistErr) {
+          throw new Error(`Timed out waiting for gas funding tx ${existingTxHash} confirmation and RECOVERY_REQUIRED persistence failed: ${timeoutPersistErr.message}`);
+        }
         throw new Error(`Timed out waiting for gas funding tx ${existingTxHash} confirmation`);
       }
     }
