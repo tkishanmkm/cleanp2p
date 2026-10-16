@@ -398,7 +398,9 @@ async function scanEvmNativeDeposits(
           tx.blockNumber !== b ||
           typeof tx.blockHash !== 'string' ||
           !/^0x[0-9a-fA-F]{64}$/.test(tx.blockHash) ||
-          tx.blockHash.toLowerCase() !== block.hash.toLowerCase()
+          tx.blockHash.toLowerCase() !== block.hash.toLowerCase() ||
+          typeof tx.value !== 'bigint' ||
+          tx.value < 0n
         ) {
           continue;
         }
