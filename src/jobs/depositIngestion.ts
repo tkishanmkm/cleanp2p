@@ -719,10 +719,35 @@ async function scanTronDeposits(
               errors.push(`Rejected TRON deposit with unavailable or invalid block height: ${txId}`);
               continue;
             }
-            if (!Number.isSafeInteger(eventBlock) || eventBlock <= 0 || eventBlock > latestBlock) {
-              errors.push(`Rejected TRON account transfer with invalid block height: ${txId}`);
+
+            // Confirm the account API's block assignment against the chain RPC
+            // before reserving the event key or attempting a credit.
+            const canonicalRes = await fetch(`${tronHost}/wallet/getblockbynum`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ num: eventBlock }),
+            });
+            if (!canonicalRes.ok) {
+              errors.push(`TRON canonical block request failed with HTTP ${canonicalRes.status} at block ${eventBlock}`);
               continue;
             }
+            const canonicalJson = await canonicalRes.json();
+            const canonicalBlockNumber = canonicalJson?.block_header?.raw_data?.number;
+            const canonicalBlockId = canonicalJson?.blockID;
+            const providerBlockId = item.block_hash ?? item.blockHash;
+            if (
+              canonicalJson?.Error ||
+              canonicalBlockNumber !== eventBlock ||
+              typeof canonicalBlockId !== 'string' ||
+              !/^[0-9a-fA-F]{64}$/.test(canonicalBlockId) ||
+              (typeof providerBlockId === 'string' &&
+                (!/^[0-9a-fA-F]{64}$/.test(providerBlockId) ||
+                  providerBlockId.toLowerCase() !== canonicalBlockId.toLowerCase()))
+            ) {
+              errors.push(`Rejected TRON account transfer with unverifiable block identity: ${txId}`);
+              continue;
+            }
+
             const confirmations = latestBlock - eventBlock + 1;
             seenTxIndices.add(deduplicationKey);
 
