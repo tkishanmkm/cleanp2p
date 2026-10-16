@@ -48,6 +48,17 @@ export async function POST(req: Request) {
       );
     }
 
+    // Block ad creation for accounts under an emergency security freeze.
+    try {
+      const { assertUserNotEmergencyFrozen } = await import('@/lib/user-freeze');
+      await assertUserNotEmergencyFrozen(user.id);
+    } catch (freezeErr: any) {
+      return NextResponse.json(
+        { error: freezeErr.message || 'Your account is under an emergency security freeze.', code: 'USER_EMERGENCY_FROZEN' },
+        { status: 403 }
+      );
+    }
+
     // Platform Guard Check
     try {
       await assertPlatformControlAllowed('new_ad', { userId: user.id });
