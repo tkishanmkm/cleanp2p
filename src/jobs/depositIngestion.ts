@@ -763,7 +763,17 @@ async function scanTronDeposits(
               errors.push(`TRON canonical block request failed with HTTP ${canonicalRes.status} at block ${eventBlock}`);
               continue;
             }
-            const canonicalJson = await canonicalRes.json();
+            let canonicalJson: any;
+            try {
+              canonicalJson = await canonicalRes.json();
+            } catch {
+              errors.push(`Invalid TRON canonical-block JSON at block ${eventBlock}`);
+              continue;
+            }
+            if (!canonicalJson || typeof canonicalJson !== 'object' || Array.isArray(canonicalJson)) {
+              errors.push(`Invalid TRON canonical-block response shape at block ${eventBlock}`);
+              continue;
+            }
             const canonicalBlockNumber = canonicalJson?.block_header?.raw_data?.number;
             const canonicalBlockId = canonicalJson?.blockID;
             const providerBlockId = item.block_hash ?? item.blockHash;
