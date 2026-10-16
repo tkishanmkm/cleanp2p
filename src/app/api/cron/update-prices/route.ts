@@ -24,9 +24,15 @@ export async function GET(request: Request) {
     const result = await runMarketPriceUpdate();
 
     if (!result.success) {
+      const unavailable =
+        result.error?.includes('UNAVAILABLE') ||
+        result.error === 'SUPABASE_SERVICE_CONFIGURATION_MISSING';
       return NextResponse.json(
-        { success: false, error: result.error },
-        { status: result.error?.includes('UNAVAILABLE') || result.error === 'SUPABASE_SERVICE_CONFIGURATION_MISSING' ? 503 : 500 }
+        {
+          success: false,
+          error: unavailable ? 'Market price service unavailable' : 'Market price update failed',
+        },
+        { status: unavailable ? 503 : 500 }
       );
     }
 
