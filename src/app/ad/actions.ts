@@ -32,128 +32,48 @@ function isValidUUID(str: any): boolean {
  */
 async function fetchUserCryptoBalance(userId: string, assetSymbol: string) {
   const adminClient = getSupabaseAdminClient();
-  const normalizedSym = (assetSymbol || 'BTC').toUpperCase();
-  let available = 0;
-  let lockedEscrow = 0;
-  let walletId: string | null = null;
-  let matchedAssetRow: any = null;
+  const normalizedSym = String(assetSymbol || '').trim().toUpperCase();
 
-  if (!userId) {
+  if (!userId || !normalizedSym) {
     return { available: 0, lockedEscrow: 0, walletId: null, matchedAssetRow: null, normalizedSym };
   }
 
-  // 1. Check wallets -> wallet_assets relation
-  try {
-    const { data: wallet } = await adminClient
-      .from('wallets')
-      .select('id, user_id')
-      .eq('user_id', userId)
-      .maybeSingle();
+  // wallet_assets is the canonical ledger-backed balance source used by the
+  // escrow RPC. Never take the maximum of mirrored wallet/profile values:
+  // stale mirrors could incorrectly make an underfunded seller appear funded.
+  const { data: assetRows, error } = await adminClient
+    .from('wallet_assets')
+    .select('*')
+    .eq('user_id', userId)
+    .eq('asset_symbol', normalizedSym)
+    .limit(2);
 
-    if (wallet?.id) {
-      walletId = wallet.id;
-      const { data: assets } = await adminClient
-        .from('wallet_assets')
-        .select('*')
-        .eq('wallet_id', wallet.id);
-
-      if (assets && assets.length > 0) {
-        const match = assets.find((a: any) => {
-          const sym = String(a.asset_code || a.asset_symbol || a.symbol || a.crypto || '').toUpperCase();
-          return sym === normalizedSym;
-        });
-        if (match) {
-          matchedAssetRow = match;
-          const avail = Number(match.available ?? match.balance ?? match.amount ?? 0);
-          const locked = Number(match.locked_escrow ?? match.locked ?? match.locked_balance ?? 0);
-          if (!isNaN(avail) && avail > available) available = avail;
-          if (!isNaN(locked) && locked > lockedEscrow) lockedEscrow = locked;
-        }
-      }
-    }
-  } catch (err) {
-    console.warn('[WalletBalance] wallets query error:', err);
+  if (error) {
+    console.error('[WalletBalance] canonical wallet_assets query failed:', error);
+    throw new Error('Unable to verify the seller wallet balance. Please try again.');
   }
 
-  // 2. Check wallet_assets directly by user_id
-  try {
-    const { data: directAssets } = await adminClient
-      .from('wallet_assets')
-      .select('*')
-      .eq('user_id', userId);
-
-    if (directAssets && directAssets.length > 0) {
-      const match = directAssets.find((a: any) => {
-        const sym = String(a.asset_symbol || a.asset_code || a.symbol || a.crypto || '').toUpperCase();
-        return sym === normalizedSym;
-      });
-      if (match) {
-        if (!matchedAssetRow) matchedAssetRow = match;
-        const avail = Number(match.available ?? match.balance ?? match.amount ?? 0);
-        const locked = Number(match.locked_escrow ?? match.locked ?? match.locked_balance ?? 0);
-        if (!isNaN(avail) && avail > available) available = avail;
-        if (!isNaN(locked) && locked > lockedEscrow) lockedEscrow = locked;
-      }
+  if (!assetRows || assetRows.length !== 1) {
+    if (assetRows && assetRows.length > 1) {
+      console.error('[WalletBalance] Duplicate canonical wallet asset rows detected:', { userId, normalizedSym });
+      throw new Error('Wallet balance records require reconciliation before trading.');
     }
-  } catch (err) {
-    console.warn('[WalletBalance] direct wallet_assets query error:', err);
+    return { available: 0, lockedEscrow: 0, walletId: null, matchedAssetRow: null, normalizedSym };
   }
 
-  // 3. Check user_wallets table / view
-  try {
-    const { data: userWallets } = await adminClient
-      .from('user_wallets')
-      .select('*')
-      .eq('user_id', userId);
+  const matchedAssetRow: any = assetRows[0];
+  const available = Number(matchedAssetRow.balance);
+  const lockedEscrow = Number(matchedAssetRow.in_escrow ?? matchedAssetRow.locked_balance ?? 0);
 
-    if (userWallets && userWallets.length > 0) {
-      const match = userWallets.find((w: any) => {
-        const sym = String(w.asset_symbol || w.asset_code || w.symbol || w.crypto || '').toUpperCase();
-        return sym === normalizedSym;
-      });
-      if (match) {
-        const avail = Number(match.available_balance ?? match.available ?? match.balance ?? 0);
-        const locked = Number(match.locked_balance ?? match.locked ?? 0);
-        if (!isNaN(avail) && avail > available) available = avail;
-        if (!isNaN(locked) && locked > lockedEscrow) lockedEscrow = locked;
-      }
-    }
-  } catch (err) {
-    console.warn('[WalletBalance] user_wallets query error:', err);
-  }
-
-  // 4. Check profiles table columns
-  try {
-    const { data: profile } = await adminClient
-      .from('profiles')
-      .select('*')
-      .or(`id.eq.${userId},user_id.eq.${userId}`)
-      .maybeSingle();
-
-    if (profile) {
-      let profBalance = 0;
-      if (normalizedSym === 'BTC') {
-        profBalance = Number(profile.btc_balance ?? profile.btcBalance ?? profile.wallets?.BTC?.balance ?? 0);
-      } else if (normalizedSym === 'ETH') {
-        profBalance = Number(profile.eth_balance ?? profile.ethBalance ?? profile.wallets?.ETH?.balance ?? 0);
-      } else if (normalizedSym === 'LTC') {
-        profBalance = Number(profile.ltc_balance ?? profile.ltcBalance ?? profile.wallets?.LTC?.balance ?? 0);
-      } else if (normalizedSym === 'USDT') {
-        profBalance = Number(profile.usdt_balance ?? profile.usdtBalance ?? profile.wallets?.USDT?.balance ?? 0);
-      }
-
-      if (!isNaN(profBalance) && profBalance > available) {
-        available = profBalance;
-      }
-    }
-  } catch (err) {
-    console.warn('[WalletBalance] profiles balance query error:', err);
+  if (!Number.isFinite(available) || available < 0 || !Number.isFinite(lockedEscrow) || lockedEscrow < 0) {
+    console.error('[WalletBalance] Invalid canonical wallet balance values:', { userId, normalizedSym });
+    throw new Error('Wallet balance records are invalid and require reconciliation.');
   }
 
   return {
     available,
     lockedEscrow,
-    walletId,
+    walletId: matchedAssetRow.wallet_id ?? null,
     matchedAssetRow,
     normalizedSym,
   };
