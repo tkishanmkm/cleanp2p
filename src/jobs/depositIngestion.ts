@@ -599,16 +599,25 @@ async function scanTronDeposits(
         const res = await fetch(eventUrl, { headers: tronGridHeaders });
         if (res.ok) {
           const data = await res.json();
-          for (const evt of data.data || []) {
+          if (!data || !Array.isArray(data.data)) {
+            errors.push('TronGrid contract-event response had an invalid data shape');
+            continue;
+          }
+          for (const evt of data.data) {
             const txId = evt.transaction_id;
-            const outputIndex = evt.event_index !== undefined && evt.event_index !== null ? Number(evt.event_index) : 0;
-            const deduplicationKey = `${txId}_${outputIndex}`;
-            if (seenTxIndices.has(deduplicationKey)) continue;
+            const outputIndex = Number(evt.event_index);
+            // A transaction can contain multiple Transfer events. Never collapse
+            // missing/invalid event indices to zero, or different events can collide.
+            if (!/^[0-9a-fA-F]{64}$/.test(txId || '') ||
+                !Number.isSafeInteger(outputIndex) || outputIndex < 0) {
+              errors.push('Rejected TRON contract event with invalid transaction/event index');
+              continue;
+            }
 
             const fromHex = evt.result?.from;
             const toHex = evt.result?.to;
             const rawValue = evt.result?.value;
-            if (!toHex || !rawValue) continue;
+            if (!toHex || typeof rawValue !== 'string' || !/^\\d+$/.test(rawValue)) continue;
 
             let toBase58 = toHex;
             let fromBase58: string | null = fromHex || null;
@@ -622,12 +631,14 @@ async function scanTronDeposits(
             } catch (_) {}
 
             if (!monitoredTronAddresses.has(toBase58)) continue;
-            seenTxIndices.add(deduplicationKey);
 
-            const actualContract = evt.contract_address || evt.contractAddress || cAddr;
-            if (actualContract !== 'TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t') continue;
+            const actualContract = evt.contract_address || evt.contractAddress;
+            if (actualContract !== CANONICAL_USDT_CONTRACTS.TRC20) continue;
             const rawValBig = BigInt(rawValue);
             if (rawValBig <= 0n) continue;
+            const deduplicationKey = `${txId}_${outputIndex}`;
+            if (seenTxIndices.has(deduplicationKey)) continue;
+            seenTxIndices.add(deduplicationKey);
             const formattedAmount = ethers.formatUnits(rawValBig, 6);
             if (!/^(?:0|[1-9]\d*)(?:\.\d+)?$/.test(formattedAmount)) continue;
             const eventBlock = Number(evt.block_number || 0);
