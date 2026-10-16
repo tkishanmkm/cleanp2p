@@ -297,8 +297,18 @@ async function scanEvmTokenDeposits(
         if (error) {
           errors.push(`RPC error on tx ${log.transactionHash}: ${error.message}`);
         } else {
-          const res = typeof data === 'string' ? JSON.parse(data) : data;
-          if (res?.status === 'credited') {
+          let res: any;
+          try {
+            res = typeof data === 'string' ? JSON.parse(data) : data;
+          } catch {
+            errors.push(`Invalid RPC result for token transfer ${log.transactionHash}`);
+            continue;
+          }
+          if (!res || typeof res !== 'object' || Array.isArray(res) || typeof res.status !== 'string') {
+            errors.push(`Malformed RPC result for token transfer ${log.transactionHash}`);
+            continue;
+          }
+          if (res.status === 'credited') {
             credited++;
           }
         }
