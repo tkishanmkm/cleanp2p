@@ -84,6 +84,12 @@ export async function POST(
       return NextResponse.json({ error: 'Forbidden: You are not a participant in this trade' }, { status: 403 });
     }
 
+    // Free-form system announcements can impersonate trusted lifecycle events.
+    // Permit them only for accounts with trusted server-managed admin metadata.
+    if (typeof customText === 'string' && customText.trim() && !isAdmin) {
+      return NextResponse.json({ error: 'Only administrators may create custom system messages.' }, { status: 403 });
+    }
+
     const actualTradeId = trade.id || tradeId;
 
     // Fetch profiles for accurate usernames in system message
