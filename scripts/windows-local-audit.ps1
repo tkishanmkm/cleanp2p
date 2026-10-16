@@ -53,13 +53,27 @@ $Disk = Get-PSDrive -Name $DriveName -ErrorAction SilentlyContinue
 if ($Disk -and $Disk.Free -lt 5GB) { throw "Less than 5 GB free on the repository drive. Free space before installing dependencies." }
 $Package = Get-Content (Join-Path $RepoRoot "package.json") -Raw | ConvertFrom-Json
 if (!$Package.scripts.typecheck) { throw "package.json has no typecheck script; refusing to guess a command." }
-if (!$SkipInstall -and !(Test-Path (Join-Path $RepoRoot "node_modules"))) {
+$RequiredBins = @(
+  (Join-Path $RepoRoot "node_modules\.bin\tsc.cmd"),
+  (Join-Path $RepoRoot "node_modules\.bin\next.cmd"),
+  (Join-Path $RepoRoot "node_modules\.bin\eslint.cmd")
+)
+$MissingBins = @($RequiredBins | Where-Object { !(Test-Path $_) })
+if (!$SkipInstall -and (!(Test-Path (Join-Path $RepoRoot "node_modules")) -or $MissingBins.Count -gt 0)) {
   if (!(Test-Path (Join-Path $RepoRoot "package-lock.json"))) { throw "package-lock.json missing; cannot perform reproducible npm ci." }
+  if ($MissingBins.Count -gt 0) {
+    Write-Host "Dependency folder exists but required local tools are missing; repairing with npm ci."
+    $MissingBins | ForEach-Object { Write-Host ("Missing: {0}" -f $_) }
+  }
   Run-Check "Install locked dependencies" "npm" @("ci","--no-audit","--no-fund")
+  $MissingAfterInstall = @($RequiredBins | Where-Object { !(Test-Path $_) })
+  if ($MissingAfterInstall.Count -gt 0) {
+    throw ("npm ci completed but required tools are still missing: " + ($MissingAfterInstall -join ", "))
+  }
 } elseif ($SkipInstall) {
   Write-Host "Dependency install skipped by user flag."
 } else {
-  Write-Host "node_modules already exists; install skipped."
+  Write-Host "Required local tools exist; locked install skipped."
 }
 $NodeModulesSize = Get-DirectorySizeBytes (Join-Path $RepoRoot "node_modules")
 Write-Host ("node_modules size: {0:N2} GB" -f ($NodeModulesSize / 1GB))
