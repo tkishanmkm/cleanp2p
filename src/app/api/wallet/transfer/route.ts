@@ -380,8 +380,8 @@ export async function POST(req: NextRequest) {
       (transferData.asset !== undefined && (typeof transferData.asset !== 'string' || transferData.asset.toUpperCase() !== coinSymbol)) ||
       transferData.gross_amount === undefined ||
       transferData.gross_amount === null ||
-      transferData.net_amount === undefined ||
-      transferData.net_amount === null ||
+      (transferData.net_amount === undefined || transferData.net_amount === null) &&
+        transferData.message !== 'Transfer already processed (idempotent replay)' ||
       transferData.fee_amount === undefined ||
       transferData.fee_amount === null ||
       (transferData.total_deduction !== undefined && transferData.total_deduction !== null &&
@@ -395,12 +395,21 @@ export async function POST(req: NextRequest) {
       }, { status: 503 });
     }
 
-    const isIdempotentReplay = Boolean(transferData.idempotent_replay);
+    const isIdempotentReplay =
+      transferData.idempotent_replay === true ||
+      transferData.message === 'Transfer already processed (idempotent replay)';
     const transferId = String(transferData.public_id || transferData.transfer_id);
     const dbTransferId = String(transferData.transfer_id);
     const grossAmount = Number(transferData.gross_amount);
-    const netAmount = Number(transferData.net_amount);
     const feeAmount = Number(transferData.fee_amount);
+    // Older deployed RPC versions omit net_amount and idempotent_replay on
+    // successful replays. Recover net from the stored gross deduction and fee
+    // only for the exact canonical replay response; never guess for new transfers.
+    const netAmount = transferData.net_amount != null
+      ? Number(transferData.net_amount)
+      : isIdempotentReplay
+        ? Number((grossAmount - feeAmount).toFixed(8))
+        : Number.NaN;
     const rawTotalDeduction = transferData.total_deduction;
     const totalDeduction = rawTotalDeduction != null
       ? Number(rawTotalDeduction)
