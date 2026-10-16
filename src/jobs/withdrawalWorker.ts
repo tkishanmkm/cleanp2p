@@ -424,14 +424,14 @@ export async function checkSubmittedWithdrawals(): Promise<{
             console.error(`[Withdrawal Worker] EVM confirmation RPC did not confirm completion for ${w.id}; retaining unresolved state.`, confErr || confData);
           }
         } else if (status === 0) {
-          const { error: failedErr } = await supabaseAdmin.rpc('process_failed_withdrawal', {
+          const { data: failedData, error: failedErr } = await supabaseAdmin.rpc('process_failed_withdrawal', {
             p_withdrawal_id: w.id,
             p_error_reason: `EVM transaction reverted on-chain on network ${w.network}`,
             p_is_verified_unbroadcast: true,
           });
-          if (failedErr) {
-            // Keep the withdrawal reserved; a failed refund RPC must never be treated as resolved.
-            console.error(`[Withdrawal Worker] Failed to process verified EVM revert for ${w.id}; funds remain reserved:`, failedErr);
+          if (failedErr || failedData?.success !== true) {
+            // Keep the withdrawal reserved; a failed or unconfirmed refund RPC must never be treated as resolved.
+            console.error(`[Withdrawal Worker] Failed to process verified EVM revert for ${w.id}; funds remain reserved:`, failedErr || failedData);
           }
         }
       } else if (normNet === 'BTC') {
