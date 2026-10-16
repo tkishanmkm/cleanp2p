@@ -34,6 +34,14 @@ export async function POST(req: NextRequest) {
     }
 
     const admin = getSupabaseAdminClient();
+    const contentLength = req.headers.get('content-length');
+    if (contentLength !== null) {
+      const declaredLength = Number(contentLength);
+      if (!Number.isSafeInteger(declaredLength) || declaredLength < 0 || declaredLength > 16_384) {
+        return NextResponse.json({ error: 'Request body is too large or invalid.' }, { status: 413 });
+      }
+    }
+
     let body: unknown;
     try {
       body = await req.json();
