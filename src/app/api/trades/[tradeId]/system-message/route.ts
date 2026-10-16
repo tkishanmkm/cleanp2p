@@ -145,8 +145,7 @@ export async function POST(
       issueDetails: metadata.issueDetails || '',
       issueCategory: metadata.issueCategory || '',
       feedbackComment: metadata.feedbackComment || '',
-      customText: customText || metadata.customText,
-      ...metadata
+      customText: typeof customText === 'string' ? customText : undefined,
     };
 
     const text = formatSystemMessageContent(payload);
