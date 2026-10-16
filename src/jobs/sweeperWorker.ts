@@ -2555,13 +2555,16 @@ export async function reconcileAmbiguousSweep(sweepId: string, workerId: string)
     try {
       parsedTx = ethers.Transaction.from(signed_tx_hex);
     } catch (parseErr: any) {
-      await supabaseAdmin.rpc('update_sweep_operation_status', {
+      const { data: recoveryRes, error: recoveryErr } = await supabaseAdmin.rpc('update_sweep_operation_status', {
         p_sweep_id: sweepId,
         p_worker_id: workerId,
         p_expected_status: 'READY_TO_BROADCAST',
         p_new_status: 'RECOVERY_REQUIRED',
         p_error_message: `Failed to parse signed transaction on recovery: ${parseErr?.message || 'invalid format'}`,
       });
+      if (recoveryErr || !recoveryRes || recoveryRes.success !== true) {
+        console.error(`[EVM Sweep Recovery Persistence Failure] ${sweepId}: ${recoveryErr?.message || recoveryRes?.message || 'invalid RPC response'}`);
+      }
       return false;
     }
 
