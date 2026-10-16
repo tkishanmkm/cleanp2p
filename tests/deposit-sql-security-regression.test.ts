@@ -396,6 +396,16 @@ const checks: Array<[string, string, RegExp]> = [
     /Number\.isSafeInteger\(totalEnergyWeightSun\)[\s\S]*?Number\.isSafeInteger\(requiredSunNumerator\)[\s\S]*?Number\.isSafeInteger\(requiredSunNumber\)/i,
   ],
   [
+    'TRON withdrawal completion requires explicit successful RPC result',
+    'src/jobs/withdrawalWorker.ts',
+    /const { data: completionData, error: completionError } = await supabaseAdmin\.rpc\('complete_onchain_withdrawal'[\s\S]*?completionData\.success !== true/i,
+  ],
+  [
+    'EVM withdrawal completion requires explicit successful RPC result',
+    'src/jobs/withdrawalWorker.ts',
+    /const { data: completionData, error: completionError } = await supabaseAdmin\.rpc\('complete_onchain_withdrawal'[\s\S]*?completionData\.success !== true/i,
+  ],
+  [
     'TRON existing delegated state validates persisted amount before reuse',
     'src/jobs/sweeperWorker.ts',
     /Persisted TRON delegation amount is malformed; refusing to reuse existing delegation[\s\S]*?BigInt\(String\(persistedAmountSun\)\) <= 0n/i,
