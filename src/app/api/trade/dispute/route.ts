@@ -37,6 +37,11 @@ export async function POST(req: Request) {
         (typeof explanation !== 'string' || explanation.length > 10000)) {
       return NextResponse.json({ error: 'Explanation must be text of 10,000 characters or fewer.' }, { status: 400 });
     }
+    const combinedReasonLength = reason.trim().length +
+      (typeof explanation === 'string' && explanation.trim().length > 0 ? explanation.trim().length + 2 : 0);
+    if (combinedReasonLength > 2000) {
+      return NextResponse.json({ error: 'Combined dispute reason and explanation must be 2,000 characters or fewer.' }, { status: 400 });
+    }
 
     await openDispute({
       tradeId: tradeId.trim(),
