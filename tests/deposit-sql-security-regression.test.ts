@@ -391,6 +391,11 @@ const checks: Array<[string, string, RegExp]> = [
     /persist_signed_delegation[\s\S]*?if \(persistErr \|\| !persistRes \|\| persistRes\.success !== true\)[\s\S]*?Failed to persist signed delegation transaction/i,
   ],
   [
+    'gas funding claim only skips when already_funded is explicit true',
+    'src/jobs/sweeperWorker.ts',
+    /claim_gas_funding_operation[\s\S]*?if \(claimRes\.already_funded === true\)[\s\S]*?already confirmed/i,
+  ],
+  [
     'pre-broadcast sweep ownership requires explicit valid true',
     'src/jobs/sweeperWorker.ts',
     /verify_sweep_ownership[\s\S]*?if \(error \|\| !verifyRes \|\| verifyRes\.valid !== true\)[\s\S]*?Pre-broadcast ownership check failed/i,
