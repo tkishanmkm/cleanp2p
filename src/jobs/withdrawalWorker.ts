@@ -231,7 +231,7 @@ export async function processWithdrawalQueue(): Promise<WithdrawalProcessResult>
     } else {
       console.warn(`[Withdrawal Worker] Ambiguous broadcast result for withdrawal ${withdrawal.id}. Transitioning to AMBIGUOUS_BROADCAST and preserving funds reservation.`);
       try {
-        await supabaseAdmin
+        const { error: onchainStatusError } = await supabaseAdmin
           .from('onchain_withdrawals')
           .update({
             status: 'AMBIGUOUS_BROADCAST',
@@ -239,8 +239,11 @@ export async function processWithdrawalQueue(): Promise<WithdrawalProcessResult>
             updated_at: new Date().toISOString(),
           })
           .eq('id', withdrawal.id);
+        if (onchainStatusError) {
+          throw new Error(`Failed to persist on-chain ambiguous status: ${onchainStatusError.message}`);
+        }
 
-        await supabaseAdmin
+        const { error: withdrawalStatusError } = await supabaseAdmin
           .from('withdrawals')
           .update({
             status: 'AMBIGUOUS_BROADCAST',
@@ -248,6 +251,9 @@ export async function processWithdrawalQueue(): Promise<WithdrawalProcessResult>
             updated_at: new Date().toISOString(),
           })
           .eq('id', withdrawal.id);
+        if (withdrawalStatusError) {
+          throw new Error(`Failed to persist withdrawal ambiguous status: ${withdrawalStatusError.message}`);
+        }
       } catch (statusErr) {
         console.error(`[Withdrawal Worker] Failed setting AMBIGUOUS_BROADCAST status for ${withdrawal.id}:`, statusErr);
       }
