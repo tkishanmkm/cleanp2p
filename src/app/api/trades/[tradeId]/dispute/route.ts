@@ -165,7 +165,7 @@ export async function POST(
       const participantIds = [trade?.buyer_id, trade?.seller_id].filter(Boolean);
       for (const pid of participantIds) {
         try {
-          await adminClient.from('notifications').insert({
+          const { error: notificationError } = await adminClient.from('notifications').insert({
             user_id: pid,
             title: 'Trade Disputed',
             message: `Dispute opened for Trade. Moderator review requested: ${disputeReason}`,
@@ -174,8 +174,11 @@ export async function POST(
             metadata: { link: `/trade/${actualTradeId}` },
             created_at: now,
           });
+          if (notificationError) {
+            console.warn('Dispute notification could not be saved:', notificationError.code || 'UNKNOWN');
+          }
         } catch (nErr) {
-          console.warn('Dispute notification insert error:', nErr);
+          console.warn('Dispute notification insert threw an exception.');
         }
       }
   
