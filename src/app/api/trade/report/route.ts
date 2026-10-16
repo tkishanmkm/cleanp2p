@@ -56,18 +56,10 @@ export async function POST(req: Request) {
       .select()
       .maybeSingle();
 
-    if (error) {
-      console.warn('Trade report table insert note:', error);
-      // Create admin notification fallback
-      await supabase.from('notifications').insert({
-        user_id: user.id,
-        title: 'Report Received',
-        message: `Your report for trade ${cleanPublicId} has been received and queued for investigation.`,
-        type: 'report',
-        is_read: false,
-        metadata: { link: `/trade/${tradeId}` },
-      });
-      return NextResponse.json({ success: true, message: 'Report queued for review' });
+    if (error || !data) {
+      // Do not claim the report was queued when the authoritative record was not saved.
+      console.error('Trade report insert failed:', error?.code || 'NO_ROW_RETURNED');
+      return NextResponse.json({ error: 'Unable to submit report right now. Please try again later.' }, { status: 500 });
     }
 
     let reporterUsername = user.user_metadata?.username || user.email?.split('@')[0] || 'Trader';
@@ -87,6 +79,7 @@ export async function POST(req: Request) {
 
     return NextResponse.json({ success: true, report: data });
   } catch (error: any) {
-    return NextResponse.json({ error: error.message || 'Server error' }, { status: 500 });
+    console.error('Trade report submission failed:', error);
+    return NextResponse.json({ error: 'Unable to submit report right now. Please try again later.' }, { status: 500 });
   }
 }
