@@ -695,9 +695,11 @@ export async function PUT(
       return NextResponse.json({ error: 'Margin must be a finite number.' }, { status: 400 });
     }
 
-    const paymentMethods = Array.isArray(body.payment_methods) 
-      ? body.payment_methods 
-      : (Array.isArray(body.paymentMethods) ? body.paymentMethods : undefined);
+    const rawPaymentMethods = body.payment_methods ?? body.paymentMethods;
+    if (rawPaymentMethods !== undefined && !Array.isArray(rawPaymentMethods)) {
+      return NextResponse.json({ error: 'Payment methods must be provided as a list.' }, { status: 400 });
+    }
+    const paymentMethods = Array.isArray(rawPaymentMethods) ? rawPaymentMethods : undefined;
     const rawPaymentWindow = body.payment_window ?? body.payment_window_minutes ?? body.paymentWindow;
     const parsedPaymentWindow = rawPaymentWindow !== undefined && rawPaymentWindow !== null && rawPaymentWindow !== ''
       ? Number(rawPaymentWindow)
@@ -713,9 +715,11 @@ export async function PUT(
     const offerLabel = body.offer_label !== undefined
       ? body.offer_label
       : (body.offerLabel !== undefined ? body.offerLabel : undefined);
-    const rawTags = Array.isArray(body.tags) 
-      ? body.tags 
-      : (Array.isArray(body.offer_tags) ? body.offer_tags : (Array.isArray(body.ad_tags) ? body.ad_tags : undefined));
+    const rawTagsValue = body.tags ?? body.offer_tags ?? body.ad_tags;
+    if (rawTagsValue !== undefined && !Array.isArray(rawTagsValue)) {
+      return NextResponse.json({ error: 'Advertisement tags must be provided as a list.' }, { status: 400 });
+    }
+    const rawTags = Array.isArray(rawTagsValue) ? rawTagsValue : undefined;
 
     // Bound user-controlled ad metadata before writing it to the database.
     if (paymentMethods !== undefined && (paymentMethods.length > 20 || paymentMethods.some((method: unknown) => typeof method !== 'string' || method.trim().length === 0 || method.length > 80))) {
