@@ -269,8 +269,10 @@ export async function executeCanonicalWithdrawal(input: WithdrawalRequestInput):
     };
   }
 
-  const parsedAmount = typeof rawAmount === 'number' ? rawAmount : parseFloat(String(rawAmount));
-  if (isNaN(parsedAmount) || parsedAmount <= 0) {
+  const amountText = typeof rawAmount === 'string' ? rawAmount.trim() : String(rawAmount);
+  // Reject partial numeric strings (e.g. "1abc"), Infinity, NaN, zero, and negatives.
+  const parsedAmount = amountText !== '' ? Number(amountText) : NaN;
+  if (!Number.isFinite(parsedAmount) || parsedAmount <= 0) {
     return {
       success: false,
       status: 'INVALID_AMOUNT',
