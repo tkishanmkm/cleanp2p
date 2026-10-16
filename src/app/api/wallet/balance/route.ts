@@ -86,7 +86,10 @@ export async function GET(request: Request) {
               throw new Error('Unsupported asset in active escrow records');
             }
             const sym = rawCoin as CryptoCurrency;
-            const cryptoAmt = Number(t.crypto_amount ?? t.amount ?? 0);
+            if (t.crypto_amount == null && t.amount == null) {
+              throw new Error('Missing crypto amount in active escrow records');
+            }
+            const cryptoAmt = Number(t.crypto_amount ?? t.amount);
             const feeAmt = Number(t.escrow_fee ?? t.platform_fee ?? (cryptoAmt * 0.015));
             const totalTradeLock = cryptoAmt + feeAmt;
             if (!Number.isFinite(cryptoAmt) || cryptoAmt < 0 || !Number.isFinite(feeAmt) || feeAmt < 0 || !Number.isFinite(totalTradeLock)) {
@@ -123,7 +126,10 @@ export async function GET(request: Request) {
               throw new Error('Unsupported asset in active escrow records');
             }
             const sym = rawCoin as CryptoCurrency;
-            const cryptoAmt = Number(t.crypto_amount ?? t.amount ?? 0);
+            if (t.crypto_amount == null && t.amount == null) {
+              throw new Error('Missing crypto amount in active escrow records');
+            }
+            const cryptoAmt = Number(t.crypto_amount ?? t.amount);
             const feeAmt = Number(t.escrow_fee ?? t.platform_fee ?? (cryptoAmt * 0.015));
             const totalTradeLock = cryptoAmt + feeAmt;
             if (!Number.isFinite(cryptoAmt) || cryptoAmt < 0 || !Number.isFinite(feeAmt) || feeAmt < 0 || !Number.isFinite(totalTradeLock)) {
