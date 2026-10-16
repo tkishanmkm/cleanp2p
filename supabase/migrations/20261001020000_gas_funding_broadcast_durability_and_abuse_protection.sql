@@ -303,7 +303,13 @@ BEGIN
     FROM public.hot_wallet_nonces
     WHERE network_code = v_net;
 
-    RETURN public.allocate_hot_wallet_nonce(v_net, COALESCE(v_hot_addr, '0x0000000000000000000000000000000000000000'), 0);
+    -- Never allocate against a fabricated zero address: require the configured
+    -- network hot wallet so the nonce counter is bound to the real signer.
+    IF v_hot_addr IS NULL OR TRIM(v_hot_addr) = '' THEN
+        RAISE EXCEPTION 'Hot wallet is not configured for network %; refusing nonce allocation', v_net;
+    END IF;
+
+    RETURN public.allocate_hot_wallet_nonce(v_net, v_hot_addr, 0);
 END;
 $$;
 
