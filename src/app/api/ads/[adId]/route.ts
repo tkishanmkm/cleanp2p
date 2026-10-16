@@ -671,7 +671,12 @@ export async function PUT(
     }
 
     // 4. Parse & Sanitize Edit Payload
-    const body = await request.json();
+    let body: any;
+    try {
+      body = await request.json();
+    } catch {
+      return NextResponse.json({ error: 'Request body must contain valid JSON.' }, { status: 400 });
+    }
     if (!body || typeof body !== 'object' || Array.isArray(body)) {
       return NextResponse.json({ error: 'Request body must be a JSON object.' }, { status: 400 });
     }
