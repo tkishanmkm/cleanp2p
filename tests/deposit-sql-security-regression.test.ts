@@ -250,6 +250,11 @@ const checks: Array<[string, string, RegExp]> = [
     'src/jobs/sweeperWorker.ts',
     /Gas funding eligibility check failed; refusing to fund[\s\S]*?if \(!eligibilityRes \|\| typeof eligibilityRes\.eligible !== 'boolean'\)[\s\S]*?Gas funding eligibility returned an invalid response; refusing to fund[\s\S]*?if \(!eligibilityRes\.eligible\)/i,
   ],
+  [
+    'gas recovery revalidates sweep ownership immediately before rebroadcast',
+    'src/jobs/sweeperWorker.ts',
+    /Revalidate ownership immediately before network side effects[\s\S]*?assertPreBroadcastOwnership\(sweepId, workerId, 'GAS_FUNDING_RECOVERY'\)[\s\S]*?provider\.broadcastTransaction\(existingSignedTx\)/i,
+  ],
 ];
 
 let failed = 0;
