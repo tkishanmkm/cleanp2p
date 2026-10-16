@@ -1096,7 +1096,9 @@ async function refreshPendingDepositConfirmations(): Promise<{
       if (normNet === 'TRC20') {
         const tronWeb = getTronWeb(false);
         const txInfo = await tronWeb.trx.getTransactionInfo(dep.tx_hash);
-        if (txInfo && txInfo.blockNumber) {
+        // A mined TRON transaction can still have failed execution. Do not
+        // re-credit pending deposits unless the chain receipt reports SUCCESS.
+        if (txInfo && txInfo.receipt?.result === 'SUCCESS' && txInfo.blockNumber) {
           const currentBlock = await tronWeb.trx.getCurrentBlock();
           const currentHeight = currentBlock.block_header?.raw_data?.number || 0;
           if (!Number.isSafeInteger(txInfo.blockNumber) || txInfo.blockNumber <= 0 ||
