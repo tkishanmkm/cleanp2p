@@ -21,15 +21,11 @@ export async function POST(req: Request) {
     if (!body || typeof body !== 'object' || Array.isArray(body)) {
       return NextResponse.json({ error: 'Request body must be a JSON object.' }, { status: 400 });
     }
-    const { tradeId, tradePublicId, reportedUserId, category, description, evidenceUrls } = body as Record<string, unknown>;
+    const { tradeId, reportedUserId, category, description, evidenceUrls } = body as Record<string, unknown>;
     if (typeof tradeId !== 'string' || tradeId.trim().length === 0 || tradeId.length > 128 ||
         typeof category !== 'string' || category.trim().length === 0 || category.length > 100 ||
         typeof description !== 'string' || description.trim().length === 0 || description.length > 10000) {
       return NextResponse.json({ error: 'Trade ID, category, or description is invalid or too long.' }, { status: 400 });
-    }
-    if (tradePublicId !== undefined && tradePublicId !== null &&
-        (typeof tradePublicId !== 'string' || tradePublicId.trim().length === 0 || tradePublicId.length > 128)) {
-      return NextResponse.json({ error: 'Trade public ID is invalid.' }, { status: 400 });
     }
     if (reportedUserId !== undefined && reportedUserId !== null &&
         (typeof reportedUserId !== 'string' || reportedUserId.trim().length === 0 || reportedUserId.length > 128)) {
