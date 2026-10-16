@@ -136,8 +136,16 @@ export async function GET(
         : [];
     const targetedCountries = normalizeCountryList(ad.targeted_countries);
     const blockedCountries = normalizeCountryList(ad.blocked_countries);
-    const paymentWindow = Number(ad.payment_window ?? ad.payment_window_minutes ?? 30);
-    const minTrades = Number(ad.min_completed_trades ?? 0);
+    const rawPaymentWindow = Number(ad.payment_window ?? ad.payment_window_minutes ?? 30);
+    const paymentWindow =
+      Number.isSafeInteger(rawPaymentWindow) && rawPaymentWindow >= 30 && rawPaymentWindow <= 1440
+        ? rawPaymentWindow
+        : 30;
+    const rawMinTrades = Number(ad.min_completed_trades ?? 0);
+    const minTrades =
+      Number.isSafeInteger(rawMinTrades) && rawMinTrades >= 0 && rawMinTrades <= 1000000
+        ? rawMinTrades
+        : 0;
     const requireFullName = Boolean(ad.require_full_name_verified);
     const requireVerified = Boolean(ad.require_verified_users);
 
