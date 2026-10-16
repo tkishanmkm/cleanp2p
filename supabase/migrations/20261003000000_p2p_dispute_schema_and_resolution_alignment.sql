@@ -55,6 +55,11 @@ BEGIN
         v_caller_id := p_user_id;
     END IF;
 
+    -- Bound and normalize RPC input independently of API-route validation.
+    IF p_reason IS NOT NULL AND char_length(p_reason) > 2000 THEN
+        RAISE EXCEPTION 'Dispute reason exceeds the 2000 character limit.';
+    END IF;
+
     -- 2. Lock Trade Row FOR UPDATE
     SELECT * INTO v_trade
     FROM public.trades
@@ -117,7 +122,13 @@ BEGIN
         );
     END IF;
 
-    v_dispute_reason := COALESCE(NULLIF(TRIM(p_reason), ''), 'Dispute raised by participant');
+    v_dispute_reason := COALESCE(
+        NULLIF(
+            TRIM(REGEXP_REPLACE(REGEXP_REPLACE(COALESCE(p_reason, ''), '[[:cntrl:]]', ' ', 'g'), '[[:space:]]+', ' ', 'g')),
+            ''
+        ),
+        'Dispute raised by participant'
+    );
 
     -- 6. Atomic Mutation: Set Trade to Disputed
     UPDATE public.trades
