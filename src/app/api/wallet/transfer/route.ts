@@ -26,10 +26,20 @@ export async function POST(req: NextRequest) {
     // Platform Guard Check
     try {
       await assertPlatformControlAllowed('transfer', { userId: user.id });
-    } catch (guardErr: any) {
+    } catch (guardErr: unknown) {
+      const guard = guardErr && typeof guardErr === 'object'
+        ? guardErr as { code?: unknown; statusCode?: unknown }
+        : {};
+      const guardCode = typeof guard.code === 'string' && /^[A-Z0-9_]{1,64}$/.test(guard.code)
+        ? guard.code
+        : 'PLATFORM_TRANSFERS_DISABLED';
+      const guardStatus = typeof guard.statusCode === 'number' &&
+        Number.isInteger(guard.statusCode) && guard.statusCode >= 400 && guard.statusCode <= 599
+        ? guard.statusCode
+        : 403;
       return NextResponse.json(
-        { error: 'Internal transfers are temporarily unavailable.', code: guardErr.code || 'PLATFORM_TRANSFERS_DISABLED' },
-        { status: guardErr.statusCode || 403 }
+        { error: 'Internal transfers are temporarily unavailable.', code: guardCode },
+        { status: guardStatus }
       );
     }
 
