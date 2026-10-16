@@ -71,6 +71,11 @@ const checks: Array<[string, string, RegExp]> = [
     /NULLIF\(u\.banned_until, ''\)::timestamptz > NOW\(\)/,
   ],
   [
+    'withdrawal worker refuses unsafe EVM nonce allocation fallback',
+    'src/jobs/withdrawalWorker.ts',
+    /Atomic hot-wallet nonce allocation unavailable; refusing withdrawal broadcast[\s\S]*allocated nonce returned an invalid or stale nonce|Atomic nonce allocation returned an invalid or stale nonce; refusing withdrawal broadcast/i,
+  ],
+  [
     'withdrawal worker handles returned refund RPC errors',
     'src/jobs/withdrawalWorker.ts',
     /const \{ error: refundError \} = await supabaseAdmin\.rpc\('process_failed_withdrawal'[\s\S]*if \(refundError\)[\s\S]*Refund RPC returned an error/i,
