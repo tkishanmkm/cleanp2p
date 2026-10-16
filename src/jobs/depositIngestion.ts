@@ -615,7 +615,9 @@ async function scanTronDeposits(
               p_output_index: outputIndex,
               p_block_number: eventBlock || null,
               p_from_address: fromBase58,
-              p_token_contract: cAddr,
+              // Pass the contract that was actually validated, never an
+              // environment- or provider-selected alias.
+              p_token_contract: actualContract,
               p_confirmations: confirmations,
               p_provider: 'deposit_ingestion',
             });
