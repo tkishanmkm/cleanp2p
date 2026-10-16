@@ -27,10 +27,12 @@ export const supabaseAdmin = createClient(supabaseUrl, supabaseKey, {
   },
 });
 
-export const CANONICAL_USDT_CONTRACTS: Record<string, string> = {
-  ERC20: process.env.USDT_CONTRACT_ERC20 || '0xdAC17F958D2ee523a2206206994597C13D831ec7',
-  BEP20: process.env.USDT_CONTRACT_BEP20 || '0x55d398326f99059fF775485246999027B3197955',
-  TRC20: process.env.USDT_CONTRACT_TRC20 || 'TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t',
+export // Canonical mainnet USDT contracts only. Environment overrides could cause
+// an arbitrary token to be treated as USDT and credited to customer balances.
+const CANONICAL_USDT_CONTRACTS: Record<string, string> = {
+  ERC20: '0xdAC17F958D2ee523a2206206994597C13D831ec7',
+  BEP20: '0x55d398326f99059fF775485246999027B3197955',
+  TRC20: 'TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t',
 };
 
 export function getBtcMempoolApi(): string {
