@@ -416,15 +416,16 @@ export async function processAllPendingWithdrawals(maxBatch: number = 20): Promi
   let hasLock = false;
   try {
     const { data: lockAcquired, error: lockErr } = await supabaseAdmin.rpc('acquire_withdrawal_worker_lock');
-    if (!lockErr && lockAcquired === true) {
-      hasLock = true;
-    } else if (!lockErr && lockAcquired === false) {
-      console.warn('[Withdrawal Worker Singleton] Another worker instance is currently holding the dispatch lease. Exiting batch run.');
+    if (lockErr || lockAcquired !== true) {
+      console.error('[Withdrawal Worker Singleton] Could not acquire the distributed dispatch lock; refusing to process withdrawals.', lockErr);
       return { totalProcessed: 0, results: [], locked: true };
     }
+    hasLock = true;
   } catch (lockRpcErr) {
-    // If RPC is unavailable, proceed defensively
-    hasLock = false;
+    // Never dispatch if singleton coordination is unavailable: multiple workers
+    // could race on hot-wallet operations and transaction state.
+    console.error('[Withdrawal Worker Singleton] Lock RPC failed; refusing to process withdrawals.', lockRpcErr);
+    return { totalProcessed: 0, results: [], locked: true };
   }
 
   const results: WithdrawalProcessResult[] = [];
