@@ -665,12 +665,10 @@ export async function fundTronGasForAddress(
     throw new Error('Invalid TRON gas funding recipient or amount');
   }
 
-  // The durable SQL RPCs currently accept ERC20/BEP20 only, and their signed
-  // transaction persistence contract is EVM-specific. Keep TRON funding disabled
-  // unless an explicitly reviewed TRC20-compatible SQL workflow is deployed.
-  if (process.env.ENABLE_DURABLE_TRON_GAS_FUNDING !== 'true') {
-    throw new Error('TRON gas funding is disabled until a TRC20-compatible durable SQL workflow is deployed');
-  }
+  // The deployed durable gas-funding SQL contract supports ERC20/BEP20 only.
+  // Disable this path unconditionally until a reviewed TRC20-specific claim,
+  // signed-transaction persistence, recovery, and confirmation workflow exists.
+  throw new Error('TRON gas funding is disabled until a TRC20-compatible durable SQL workflow is deployed');
 
   if (sweepId && workerId) {
     const { data: claimRes, error: claimErr } = await supabaseAdmin.rpc('claim_gas_funding_operation', {
