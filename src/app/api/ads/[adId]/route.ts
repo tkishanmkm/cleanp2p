@@ -662,6 +662,18 @@ export async function PUT(
     delete body.verification_status;
     delete body.is_verified;
 
+    const numericEditFields = [
+      'price', 'unit_price', 'min_amount', 'min_limit',
+      'max_amount', 'max_limit', 'margin', 'rate_percent',
+    ];
+    for (const field of numericEditFields) {
+      const value = body[field];
+      if (value !== undefined && value !== null && value !== '' &&
+          typeof value !== 'number' && typeof value !== 'string') {
+        return NextResponse.json({ error: `${field} must be a number.` }, { status: 400 });
+      }
+    }
+
     const price = body.price !== undefined && body.price !== null && body.price !== '' ? Number(body.price) : undefined;
     const unitPrice = body.unit_price !== undefined && body.unit_price !== null && body.unit_price !== '' ? Number(body.unit_price) : price;
     const minAmount = body.min_amount !== undefined && body.min_amount !== null && body.min_amount !== '' 
