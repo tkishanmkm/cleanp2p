@@ -990,7 +990,7 @@ export async function delegateEnergyFromPool(
     p_delegated_energy: energyNeeded,
   });
 
-  if (initErr || !initRes || !initRes.success) {
+  if (initErr || !initRes || initRes.success !== true) {
     throw new Error(`Failed to initialize resource delegation record: ${initErr?.message || initRes?.message || 'UNKNOWN'}`);
   }
 
