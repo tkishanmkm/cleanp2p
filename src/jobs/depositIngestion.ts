@@ -1272,6 +1272,10 @@ async function refreshPendingDepositConfirmations(): Promise<{
         if (chain) {
           const provider = getEvmProvider(normNet);
           const receipt = await provider.getTransactionReceipt(dep.tx_hash);
+          if (receipt && (!receipt.hash || receipt.hash.toLowerCase() !== String(dep.tx_hash).toLowerCase())) {
+            console.error('[Deposit Ingestion] Pending EVM provider returned a mismatched receipt transaction hash; deposit remains pending');
+            continue;
+          }
           // A mined receipt is not proof of a successful transaction. Never
           // advance a pending deposit from a reverted EVM transaction.
           if (receipt && receipt.status === 1 && receipt.blockNumber) {
