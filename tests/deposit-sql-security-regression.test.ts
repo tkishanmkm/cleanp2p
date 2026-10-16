@@ -376,6 +376,11 @@ const checks: Array<[string, string, RegExp]> = [
     /export async function fundTronGasForAddress[\s\S]*?const insolvMsg = `TRON hot wallet[\s\S]*?insolvencyPersistErr[\s\S]*?status: 'RECOVERY_REQUIRED'[\s\S]*?RECOVERY_REQUIRED persistence failed/i,
   ],
   [
+    'TRON gas broadcast persists transaction hash and checks both broadcast and recovery status writes',
+    'src/jobs/sweeperWorker.ts',
+    /Broadcast exact persisted transaction[\s\S]*?status: 'BROADCASTED', tx_hash: deterministicTxHash[\s\S]*?broadcastPersistErr[\s\S]*?status: 'RECOVERY_REQUIRED', tx_hash: deterministicTxHash[\s\S]*?recoveryPersistErr/i,
+  ],
+  [
     'disabled TRON gas funding moves the sweep from GAS_FUNDING to RECOVERY_REQUIRED',
     'src/jobs/sweeperWorker.ts',
     /p_expected_status: 'GAS_FUNDING'[\s\S]*?p_new_status: 'RECOVERY_REQUIRED'[\s\S]*?failed to persist sweep recovery status[\s\S]*?throw new Error\(disabledReason\)/i,
