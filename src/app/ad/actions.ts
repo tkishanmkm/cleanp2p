@@ -575,35 +575,16 @@ export async function createTradeOrderWithEscrow(input: {
       }
     }
 
-    // C. If still not found, construct fallback active advertisement object so trade creation can succeed seamlessly
+    // Fail closed: never create an escrow trade from a fabricated/demo ad.
+    // The ad must resolve to a real database record before any balance or escrow
+    // processing can continue.
     if (!ad) {
-      ad = {
-        id: cleanAdId,
-        public_id: cleanAdId,
-        public_ad_id: cleanAdId,
-        user_id: 'trader_verified_1',
-        type: 'SELL',
-        ad_type: 'SELL',
-        crypto: 'BTC',
-        asset_symbol: 'BTC',
-        fiat: 'USD',
-        fiat_currency: 'USD',
-        fiat_symbol: 'USD',
-        price: 64250,
-        unit_price: 64250,
-        fixed_rate: 64250,
-        pricing_type: 'FLOAT',
-        margin_percent: 1.5,
-        status: 'ACTIVE',
-        active: true,
-        is_active: true,
-        min_limit: 10,
-        max_limit: 10000,
-        min_amount: 10,
-        max_amount: 10000,
-        total_amount: 1.0,
-        available_amount: 1.0,
-        payment_methods: ['Bank Transfer', 'Revolut', 'Wise'],
+      return {
+        data: null,
+        error: {
+          message: 'Advertisement not found or no longer available.',
+          code: 'AD_NOT_FOUND',
+        },
       };
     }
 
