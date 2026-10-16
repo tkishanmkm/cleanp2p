@@ -492,7 +492,10 @@ export async function PATCH(
       isActive = body.active;
       newStatus = isActive ? 'ACTIVE' : 'INACTIVE';
     } else if (body.status !== undefined) {
-      const requestedStatus = String(body.status).toUpperCase().trim();
+      if (typeof body.status !== 'string') {
+        return NextResponse.json({ error: 'status must be a string.' }, { status: 400 });
+      }
+      const requestedStatus = body.status.toUpperCase().trim();
       if (!['ACTIVE', 'INACTIVE', 'DELETED'].includes(requestedStatus)) {
         return NextResponse.json({ error: 'Unsupported advertisement status.' }, { status: 400 });
       }
