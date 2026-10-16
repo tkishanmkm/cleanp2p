@@ -107,6 +107,16 @@ export type Deposit = {
   walletIndex?: number;
 };
 
+export type UserWallet = {
+  id?: string;
+  userId?: string;
+  crypto: CryptoCurrency;
+  chain: string;
+  address?: string;
+  balance: number;
+  lockedBalance: number;
+};
+
 export type Withdrawal = {
   id: string;
   userId: string;

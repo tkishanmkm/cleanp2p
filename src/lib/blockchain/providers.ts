@@ -247,7 +247,8 @@ export async function getTransactionConfirmations(
     // Compute actual on-chain gas cost (gasUsed * effectiveGasPrice)
     let actualGasCost: string | undefined;
     try {
-      const gasPrice = receipt.effectiveGasPrice ?? receipt.gasPrice ?? 0n;
+      const transaction = await provider.getTransaction(txHash);
+      const gasPrice = transaction?.gasPrice ?? 0n;
       const gasCostWei = receipt.gasUsed * gasPrice;
       actualGasCost = ethers.formatEther(gasCostWei);
     } catch {

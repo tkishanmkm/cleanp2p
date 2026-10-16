@@ -51,14 +51,16 @@ export async function pauseAllAds(adminId: string, adminEmail: string): Promise<
     }
 
     // Also update advertisements table if any active
-    await supabase
+    const { error: advertisementsUpdateError } = await supabase
       .from("advertisements")
       .update({
         status: "GLOBAL_PAUSED",
         is_active: false,
       })
-      .eq("is_active", true)
-      .catch(() => {});
+      .eq("is_active", true);
+    if (advertisementsUpdateError) {
+      console.warn("[pauseAllAds] advertisements table update failed:", advertisementsUpdateError.message);
+    }
 
     // Save timestamp in system_settings
     await supabase

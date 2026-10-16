@@ -8,7 +8,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { Button } from "@/components/ui/button";
 import { Input } from '@/components/ui/input';
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from '@/components/ui/form';
-import { User, CryptoCurrency } from "@/lib/types";
+import { User, CryptoCurrency, UserWallet } from "@/lib/types";
 import { useToast } from '@/hooks/use-toast';
 import { Loader2, Fuel, AlertCircle, ShieldCheck } from 'lucide-react';
 import { usePrices } from '@/context/price-context';
@@ -33,10 +33,11 @@ interface WithdrawDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   asset: CryptoCurrency | null;
+  wallet?: UserWallet | null;
   userWallets?: User['wallets'] | undefined;
 }
 
-export function WithdrawDialog({ open, onOpenChange, asset, userWallets }: WithdrawDialogProps) {
+export function WithdrawDialog({ open, onOpenChange, asset, wallet, userWallets }: WithdrawDialogProps) {
   const { user, profile } = useAuth();
   const { toast } = useToast();
   const { requestWithdrawal, refreshBalances, balances } = useWallet();
@@ -161,6 +162,9 @@ export function WithdrawDialog({ open, onOpenChange, asset, userWallets }: Withd
 
   const availableBalance = useMemo(() => {
     if (!asset) return 0;
+    if (wallet && wallet.crypto === asset) {
+      return wallet.balance || 0;
+    }
     if (balances && balances[asset]) {
       return balances[asset].available || 0;
     }
@@ -168,7 +172,7 @@ export function WithdrawDialog({ open, onOpenChange, asset, userWallets }: Withd
       return userWallets[asset]?.balance || 0;
     }
     return 0;
-  }, [asset, balances, userWallets]);
+  }, [asset, balances, userWallets, wallet]);
 
   // Compute estimated network gas fee
   const { feeInCrypto, feeInUsd } = useMemo(() => {
@@ -396,8 +400,8 @@ export function WithdrawDialog({ open, onOpenChange, asset, userWallets }: Withd
                   </div>
                   <div className="flex justify-between items-center text-xs text-muted-foreground pt-1">
                     <span>Available: {Number(availableBalance || 0) === 0 ? '0' : Number(availableBalance || 0).toFixed(8)} {asset}</span>
-                    {prices[asset || ''] ? (
-                      <span>≈ ${(Number(availableBalance || 0) * (prices[asset || ''] || 0)).toFixed(2)} USD</span>
+                    {asset && prices[asset] ? (
+                      <span>≈ ${(Number(availableBalance || 0) * (asset ? prices[asset] || 0 : 0)).toFixed(2)} USD</span>
                     ) : null}
                   </div>
                   <FormMessage />

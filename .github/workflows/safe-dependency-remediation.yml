@@ -1,0 +1,76 @@
+name: Safe Dependency Remediation
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "41 5 * * 1"
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: safe-dependency-remediation
+  cancel-in-progress: true
+
+jobs:
+  remediate:
+    name: Prepare non-breaking dependency fixes
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout default branch
+        uses: actions/checkout@v4
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - name: Install locked dependencies
+        run: npm ci
+      - name: Apply compatible dependency fixes only
+        shell: bash
+        run: |
+          set +e
+          npm audit fix --omit=dev
+          fix_status=$?
+          echo "npm audit fix exit code: ${fix_status}"
+          # Keep reviewing compatible updates even if some advisories need major upgrades.
+          exit 0
+      - name: Verify test harness guards
+        run: npm run test:guards
+      - name: Verify TypeScript
+        run: npm run typecheck
+      - name: Capture remaining production vulnerabilities
+        if: always()
+        shell: bash
+        run: |
+          set +e
+          npm audit --omit=dev --json > npm-audit-after-fix.json
+          audit_status=$?
+          echo "Remaining npm audit exit code: ${audit_status}"
+          node -e "const r=require('./npm-audit-after-fix.json'); console.log('Remaining production vulnerabilities:', JSON.stringify(r.metadata?.vulnerabilities ?? {}))"
+          exit 0
+      - name: Upload remaining vulnerability report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: remaining-production-vulnerabilities
+          path: npm-audit-after-fix.json
+          if-no-files-found: warn
+          retention-days: 14
+      - name: Open dependency update pull request
+        uses: peter-evans/create-pull-request@v7
+        with:
+          branch: automation/safe-production-dependency-fixes
+          delete-branch: true
+          commit-message: "fix: update vulnerable production dependencies"
+          title: "Security: apply compatible production dependency fixes"
+          body: |
+            Automated, non-forced production dependency remediation.
+
+            - Uses `npm audit fix --omit=dev` without `--force`.
+            - Does not intentionally perform major-version upgrades.
+            - Runs the test-harness guards and TypeScript check before opening this PR.
+            - Attaches a CI artifact with remaining production dependency advisories.
+            - Review the dependency diff and full CI results before merging.

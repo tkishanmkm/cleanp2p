@@ -339,7 +339,7 @@ export async function checkSubmittedWithdrawals(): Promise<{
                 const inputSumSat = txData.vin.reduce((acc: bigint, v: any) => acc + BigInt(v.prevout?.value || 0), 0n);
                 const outputSumSat = txData.vout.reduce((acc: bigint, v: any) => acc + BigInt(v.value || 0), 0n);
                 if (inputSumSat >= outputSumSat) {
-                  const feeSat = inputSumSat - outputSumSat;
+                  const feeSat = BigInt(inputSumSat) - BigInt(outputSumSat);
                   const whole = feeSat / 100000000n;
                   const fraction = (feeSat % 100000000n).toString().padStart(8, '0');
                   actualFeeBtc = `${whole}.${fraction}`;
@@ -375,7 +375,7 @@ export async function checkSubmittedWithdrawals(): Promise<{
                 const inputSumLit = txData.vin.reduce((acc: bigint, v: any) => acc + BigInt(v.prevout?.value || 0), 0n);
                 const outputSumLit = txData.vout.reduce((acc: bigint, v: any) => acc + BigInt(v.value || 0), 0n);
                 if (inputSumLit >= outputSumLit) {
-                  const feeLit = inputSumLit - outputSumLit;
+                  const feeLit = BigInt(inputSumLit) - BigInt(outputSumLit);
                   const whole = feeLit / 100000000n;
                   const fraction = (feeLit % 100000000n).toString().padStart(8, '0');
                   actualFeeLtc = `${whole}.${fraction}`;

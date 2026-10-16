@@ -1,0 +1,112 @@
+name: Static CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: static-ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  static-checks:
+    strategy:
+      fail-fast: false
+      matrix:
+        node-version: [20, 22]
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: npm
+      - name: Install dependencies
+        run: npm ci
+      - name: Test harness security guards
+        run: npm run test:guards
+      - name: TypeScript check
+        run: npm run typecheck
+      - name: Lint
+        run: npm run lint
+      - name: Production build
+        run: npm run build
+
+  dependency-audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - name: Install dependencies
+        run: npm ci
+      - name: Preview non-breaking dependency remediation
+        shell: bash
+        run: |
+          set +e
+          npm audit fix --omit=dev --dry-run --json > npm-audit-remediation-plan.json
+          plan_status=$?
+          echo "Non-breaking remediation preview exit code: ${plan_status}"
+          exit 0
+      - name: Upload dependency remediation preview
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: production-dependency-remediation-preview
+          path: npm-audit-remediation-plan.json
+          if-no-files-found: warn
+          retention-days: 14
+      - name: Audit production dependencies
+        shell: bash
+        run: |
+          set +e
+          npm audit --omit=dev --json > npm-audit-report.json
+          audit_status=$?
+          echo "npm audit exit code: ${audit_status}"
+          exit "${audit_status}"
+      - name: Summarize production dependency vulnerabilities
+        if: always()
+        shell: bash
+        run: |
+          node <<'NODE'
+          const fs = require('node:fs');
+          const file = 'npm-audit-report.json';
+          if (!fs.existsSync(file)) {
+            console.error('npm audit report was not generated.');
+            process.exit(0);
+          }
+          try {
+            const report = JSON.parse(fs.readFileSync(file, 'utf8'));
+            const counts = report.metadata?.vulnerabilities || {};
+            console.log('Production dependency vulnerability counts:');
+            for (const severity of ['critical', 'high', 'moderate', 'low', 'info']) {
+              console.log(`- ${severity}: ${counts[severity] ?? 0}`);
+            }
+            for (const [name, item] of Object.entries(report.vulnerabilities || {})) {
+              console.log(`- ${name}: ${item.severity}; direct=${item.isDirect}; fixAvailable=${JSON.stringify(item.fixAvailable)}`);
+            }
+          } catch (error) {
+            console.error('Could not parse npm audit report:', error.message);
+          }
+          NODE
+      - name: Upload dependency audit report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: production-dependency-audit
+          path: npm-audit-report.json
+          if-no-files-found: warn
+          retention-days: 14
