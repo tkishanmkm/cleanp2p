@@ -51,9 +51,12 @@ async function runBlockchainWorkerTests() {
     // ------------------------------------------------------------------------
     console.log(cyan('[Setup] Registering test wallet & deposit address mapping...'));
 
-    await supabase.from('wallets').upsert({ id: testWalletId, user_id: testUserId }, { onConflict: 'id' });
+    const { error: walletSetupError } = await supabase
+      .from('wallets')
+      .upsert({ id: testWalletId, user_id: testUserId }, { onConflict: 'id' });
+    if (walletSetupError) throw new Error(`Unable to create test wallet: ${walletSetupError.message}`);
 
-    await supabase.from('wallet_assets').upsert(
+    const { error: assetSetupError } = await supabase.from('wallet_assets').upsert(
       {
         wallet_id: testWalletId,
         asset_code: 'USDT',
@@ -63,9 +66,10 @@ async function runBlockchainWorkerTests() {
       },
       { onConflict: 'wallet_id,asset_code' }
     );
+    if (assetSetupError) throw new Error(`Unable to create test wallet asset: ${assetSetupError.message}`);
 
     // Register deposit address
-    await supabase.from('deposit_addresses').upsert(
+    const { error: addressSetupError } = await supabase.from('deposit_addresses').upsert(
       {
         user_id: testUserId,
         wallet_id: testWalletId,
@@ -75,6 +79,7 @@ async function runBlockchainWorkerTests() {
       },
       { onConflict: 'address' }
     );
+    if (addressSetupError) throw new Error(`Unable to register test deposit address: ${addressSetupError.message}`);
 
     console.log(green('  ✓ Registered BEP20 deposit address\n'));
 
@@ -171,6 +176,24 @@ async function runBlockchainWorkerTests() {
   } catch (err: any) {
     console.error(red(`\nFatal error in blockchain worker tests: ${err.message}`));
   } finally {
+    // Remove only records created for this run; preserve FK deletion order.
+    const { error: addressCleanupError } = await supabase
+      .from('deposit_addresses')
+      .delete()
+      .eq('address', testDepositAddress);
+    const { error: assetCleanupError } = await supabase
+      .from('wallet_assets')
+      .delete()
+      .eq('wallet_id', testWalletId);
+    const { error: walletCleanupError } = await supabase
+      .from('wallets')
+      .delete()
+      .eq('id', testWalletId);
+    const cleanupError = addressCleanupError || assetCleanupError || walletCleanupError;
+    if (cleanupError) {
+      process.exitCode = 1;
+      console.error(red(`Test fixture cleanup failed: ${cleanupError.message}`));
+    }
     console.log(bold(cyan('\n------------------------------------------------------')));
     console.log(bold(`Results: ${passedTests}/${totalTests} tests passed.`));
     console.log(bold(cyan('------------------------------------------------------\n')));
