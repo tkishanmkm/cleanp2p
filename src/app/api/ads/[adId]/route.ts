@@ -493,9 +493,9 @@ export async function PATCH(
       );
     }
 
-    if (body.status !== undefined && (typeof body.status !== 'string' || body.status.trim().length === 0 || body.status.trim().length > 40)) {
+    if (body.status !== undefined && (typeof body.status !== 'string' || !['ACTIVE', 'INACTIVE'].includes(body.status.toUpperCase().trim()))) {
       return NextResponse.json(
-        { error: 'The status field must be a non-empty string of at most 40 characters.', code: 'INVALID_AD_STATUS' },
+        { error: 'Status must be ACTIVE or INACTIVE. Use the delete endpoint to remove an advertisement.', code: 'INVALID_AD_STATUS' },
         { status: 400 }
       );
     }
