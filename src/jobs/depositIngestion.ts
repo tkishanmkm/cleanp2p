@@ -506,10 +506,6 @@ async function scanTronDeposits(
               continue;
             }
 
-            const deduplicationKey = `${txId}_0`;
-            if (seenTxIndices.has(deduplicationKey)) continue;
-            seenTxIndices.add(deduplicationKey);
-
             let fromAddr: string | null = item.from || null;
             try {
               if (fromAddr && (fromAddr.startsWith('41') || fromAddr.startsWith('0x'))) {
@@ -523,6 +519,12 @@ async function scanTronDeposits(
             if (tokenContract !== 'TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t') {
               continue;
             }
+
+            // Only canonical-token transfers may reserve a transaction/output key;
+            // an unrelated token event must not suppress a real USDT event.
+            const deduplicationKey = `${txId}_0`;
+            if (seenTxIndices.has(deduplicationKey)) continue;
+            seenTxIndices.add(deduplicationKey);
             const rawVal = BigInt(item.value || '0');
             if (rawVal <= 0n) continue;
             const formattedAmount = ethers.formatUnits(rawVal, 6);
