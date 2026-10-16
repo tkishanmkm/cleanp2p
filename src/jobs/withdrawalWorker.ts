@@ -259,12 +259,12 @@ export async function processWithdrawalQueue(): Promise<WithdrawalProcessResult>
       throw new Error('EVM withdrawal has no successful mined receipt; keep funds reserved for reconciliation');
     }
 
-    const { error: completionError } = await supabaseAdmin.rpc('complete_onchain_withdrawal', {
+    const { data: completionData, error: completionError } = await supabaseAdmin.rpc('complete_onchain_withdrawal', {
       p_withdrawal_id: withdrawal.id,
       p_tx_hash: tx.hash,
     });
-    if (completionError) {
-      throw new Error(`Payout was broadcast but withdrawal completion RPC failed: ${completionError.message}`);
+    if (completionError || !completionData || completionData.success !== true) {
+      throw new Error(`Payout was broadcast but withdrawal completion RPC failed or was not confirmed: ${completionError?.message || JSON.stringify(completionData)}`);
     }
 
     console.log(`[Withdrawal Worker] Broadcasted EVM payout ${withdrawal.id} on ${network} (tx: ${tx.hash}, nonce: ${nonce})`);
