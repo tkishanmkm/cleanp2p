@@ -505,10 +505,19 @@ export async function executeCanonicalWithdrawal(input: WithdrawalRequestInput):
   try {
     if (past24hWithdrawals && past24hWithdrawals.length > 0) {
       for (const w of past24hWithdrawals) {
-        const wAsset = w.asset_symbol || 'USDT';
-        const wAmount = Number(w.amount || 0);
+        const wAsset = typeof w.asset_symbol === 'string' ? w.asset_symbol.trim() : '';
+        const wAmount = Number(w.amount);
+        if (!wAsset || !Number.isFinite(wAmount) || wAmount <= 0) {
+          throw new Error('Recent withdrawal history contains invalid amount or asset data.');
+        }
         const wUsd = await calculateWithdrawalUsdEquivalent(wAsset, wAmount);
+        if (!Number.isFinite(wUsd) || wUsd <= 0) {
+          throw new Error('Recent withdrawal history could not be valued safely.');
+        }
         rolling24hUsd += wUsd;
+        if (!Number.isFinite(rolling24hUsd)) {
+          throw new Error('Recent withdrawal total is not finite.');
+        }
       }
     }
   } catch (pricingError) {
