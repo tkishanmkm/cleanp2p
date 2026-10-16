@@ -592,7 +592,16 @@ export async function fundGasForAddress(
     });
 
     if (persistErr || !persistRes || persistRes.success !== true) {
-      throw new Error(`Failed to persist signed gas funding transaction: ${persistErr?.message || persistRes?.message || 'UNKNOWN'}`);
+      const signedTxPersistFailure = `Failed to persist signed gas funding transaction: ${persistErr?.message || persistRes?.message || 'UNKNOWN'}`;
+      const { error: signedTxRecoveryPersistErr } = await supabaseAdmin.from('gas_funding_operations').update({
+        status: 'RECOVERY_REQUIRED',
+        error_message: signedTxPersistFailure,
+        updated_at: new Date().toISOString(),
+      }).eq('sweep_id', sweepId);
+      if (signedTxRecoveryPersistErr) {
+        throw new Error(`${signedTxPersistFailure}; RECOVERY_REQUIRED persistence failed: ${signedTxRecoveryPersistErr.message}`);
+      }
+      throw new Error(signedTxPersistFailure);
     }
   }
 
