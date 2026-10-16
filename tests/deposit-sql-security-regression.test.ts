@@ -6,6 +6,11 @@ const root = process.cwd();
 const read = (relativePath: string) => readFileSync(join(root, relativePath), 'utf8');
 const checks: Array<[string, string, RegExp]> = [
   [
+    'LTC ambiguous broadcast checks RECOVERY_REQUIRED persistence',
+    'src/jobs/sweeperWorker.ts',
+    /LTC Sweeper Broadcast Exception[\s\S]*?let recoveryPersistError: string \| null = null[\s\S]*?recoveryRes\.success !== true[\s\S]*?LTC Sweeper Recovery Persistence Failure[\s\S]*?LTC broadcast outcome ambiguous/i,
+  ],
+  [
     'BTC ambiguous broadcast checks RECOVERY_REQUIRED persistence',
     'src/jobs/sweeperWorker.ts',
     /BTC Sweeper Broadcast Exception[\s\S]*?let recoveryPersistError: string \| null = null[\s\S]*?recoveryRes\.success !== true[\s\S]*?BTC Sweeper Recovery Persistence Failure[\s\S]*?BTC broadcast outcome ambiguous/i,
