@@ -1283,7 +1283,9 @@ async function refreshPendingDepositConfirmations(): Promise<{
               console.error('[Deposit Ingestion] Could not revalidate the canonical EVM block for a pending deposit; deposit remains pending');
               continue;
             }
-            if (!canonicalBlock?.hash || canonicalBlock.hash.toLowerCase() !== receipt.blockHash.toLowerCase()) {
+            if (typeof canonicalBlock?.hash !== 'string' ||
+                !/^0x[0-9a-fA-F]{64}$/.test(canonicalBlock.hash) ||
+                canonicalBlock.hash.toLowerCase() !== receipt.blockHash.toLowerCase()) {
               console.error('[Deposit Ingestion] Pending EVM receipt block is not canonical at recheck time; deposit remains pending');
               continue;
             }
