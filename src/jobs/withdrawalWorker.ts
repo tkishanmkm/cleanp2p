@@ -365,6 +365,7 @@ export async function checkSubmittedWithdrawals(): Promise<{
       .select('*')
       .in('status', ['BROADCASTED', 'PROCESSING', 'AMBIGUOUS_BROADCAST'])
       .not('tx_hash', 'is', null)
+      .order('updated_at', { ascending: true })
       .limit(30);
 
     if (error || !pendingTxs || pendingTxs.length === 0) {
