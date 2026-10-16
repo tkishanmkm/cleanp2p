@@ -12,7 +12,8 @@ export async function GET(req: NextRequest) {
         process.env.DEPOSIT_WORKER_SECRET,
       ],
       customHeaderNames: ['x-worker-secret', 'x-service-key'],
-      checkQueryParam: true,
+      // Credentials must be sent in headers, never query parameters (URLs are logged).
+      checkQueryParam: false,
     });
 
     if (!auth.authorized) {
@@ -24,7 +25,7 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ success: true, mode: 'automated_queue', timestamp: new Date().toISOString(), result });
   } catch (err: any) {
     console.error('Deposit sweep GET error:', err);
-    return NextResponse.json({ error: err.message || 'Internal server error' }, { status: 500 });
+    return NextResponse.json({ error: 'Deposit sweep worker failed' }, { status: 500 });
   }
 }
 
