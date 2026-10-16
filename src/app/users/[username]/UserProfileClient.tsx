@@ -40,6 +40,8 @@ interface UserProfileClientProps {
     created_at?: string | null;
     last_seen_at?: string | null;
     last_seen?: string | null;
+    last_active?: string | null;
+    is_online?: boolean | null;
     merchant_tier?: string | null;
     bio?: string | null;
   };
