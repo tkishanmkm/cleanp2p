@@ -666,9 +666,19 @@ export async function fundTronGasForAddress(
   }
 
   // The deployed durable gas-funding SQL contract supports ERC20/BEP20 only.
-  // Disable this path unconditionally until a reviewed TRC20-specific claim,
-  // signed-transaction persistence, recovery, and confirmation workflow exists.
-  throw new Error('TRON gas funding is disabled until a TRC20-compatible durable SQL workflow is deployed');
+  // Move the claimed sweep to recovery before refusing the unsupported TRON path.
+  const disabledReason = 'TRON gas funding is disabled until a TRC20-compatible durable SQL workflow is deployed';
+  const { data: recoveryRes, error: recoveryErr } = await supabaseAdmin.rpc('update_sweep_operation_status', {
+    p_sweep_id: sweepId,
+    p_worker_id: workerId,
+    p_expected_status: 'GAS_FUNDING',
+    p_new_status: 'RECOVERY_REQUIRED',
+    p_error_message: disabledReason,
+  });
+  if (recoveryErr || !recoveryRes || recoveryRes.success !== true) {
+    throw new Error(`${disabledReason}; failed to persist sweep recovery status: ${recoveryErr?.message || recoveryRes?.message || 'unknown RPC response'}`);
+  }
+  throw new Error(disabledReason);
 
   if (sweepId && workerId) {
     const { data: claimRes, error: claimErr } = await supabaseAdmin.rpc('claim_gas_funding_operation', {
