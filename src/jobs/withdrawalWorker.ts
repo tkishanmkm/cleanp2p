@@ -504,10 +504,10 @@ export async function checkSubmittedWithdrawals(): Promise<{
                 p_actual_gas_amount: actualFeeLtc,
                 p_gas_asset: 'LTC',
               });
-              if (!confErr && confData?.success === true) {
-                confirmed++;
+              if (confErr || confData?.success !== true) {
+                console.error(`[Withdrawal Worker] LTC completion RPC did not confirm success for ${w.id}; leaving unresolved.`, confErr || confData);
               } else {
-                console.error(`[Withdrawal Worker] LTC confirmation RPC did not confirm completion for ${w.id}; retaining unresolved state.`, confErr || confData);
+                confirmed++;
               }
             }
           }
