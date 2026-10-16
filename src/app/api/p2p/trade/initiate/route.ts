@@ -4,6 +4,7 @@ import { generateTradeId } from '@/lib/id-generator';
 import { sendNewTradeNotificationEmail } from '@/lib/email/tradeEmailService';
 import { assertPlatformControlAllowed } from '@/lib/platform-guard';
 import { hasPendingWithdrawalApproval } from '@/lib/withdrawal-security';
+import { checkTradeEligibility } from '@/lib/trading-eligibility';
 
 export const dynamic = 'force-dynamic';
 
@@ -26,6 +27,14 @@ export async function POST(request: NextRequest) {
       return NextResponse.json(
         { success: false, error: 'Unauthorized request' },
         { status: 401 }
+      );
+    }
+
+    const eligibility = await checkTradeEligibility(user.id);
+    if (!eligibility.allowed) {
+      return NextResponse.json(
+        { success: false, error: eligibility.message, code: eligibility.code },
+        { status: eligibility.statusCode }
       );
     }
 

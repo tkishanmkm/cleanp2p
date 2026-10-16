@@ -95,7 +95,7 @@ export async function GET(req: NextRequest) {
     try {
       const ip = req.headers.get('x-forwarded-for')?.split(',')[0] || '127.0.0.1';
       await supabaseAdmin.from('admin_audit_logs').insert({
-        admin_id: user.id,
+        admin_id: auth.adminId,
         action: 'VIEW_METRICS',
         details: { path: '/api/admin/metrics' },
         ip_address: ip,

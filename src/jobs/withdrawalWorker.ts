@@ -41,8 +41,10 @@ export async function checkCircuitBreakers(): Promise<{ allowed: boolean; reason
       .eq('id', 1)
       .maybeSingle();
 
+    // Fail closed: if the settings row cannot be read, do not broadcast funds.
     if (error || !settings) {
-      return { allowed: true };
+      console.error('[Withdrawal Worker] Could not verify withdrawal settings; dispatch is blocked.', error);
+      return { allowed: false, reason: 'Withdrawal settings could not be verified' };
     }
     if (settings.global_kill_switch_active) {
       return { allowed: false, reason: 'Global emergency kill switch is currently active' };
@@ -52,7 +54,8 @@ export async function checkCircuitBreakers(): Promise<{ allowed: boolean; reason
     }
     return { allowed: true };
   } catch (err) {
-    return { allowed: true };
+    console.error('[Withdrawal Worker] Failed to verify withdrawal circuit breakers; dispatch is blocked.', err);
+    return { allowed: false, reason: 'Withdrawal safety settings could not be verified' };
   }
 }
 
@@ -126,10 +129,18 @@ export async function processWithdrawalQueue(): Promise<WithdrawalProcessResult>
       });
       const txHash = res.txHash;
 
-      await supabaseAdmin.rpc('complete_onchain_withdrawal', {
+      const { data: settlementData, error: settlementError } = await supabaseAdmin.rpc('complete_onchain_withdrawal', {
         p_withdrawal_id: withdrawal.id,
         p_tx_hash: txHash,
       });
+      if (
+        settlementError ||
+        (settlementData && typeof settlementData === 'object' && 'success' in settlementData && settlementData.success === false)
+      ) {
+        // A chain transaction was submitted, so preserve the reservation and route
+        // through the existing ambiguous-broadcast reconciliation path.
+        throw new Error('TRON transaction broadcast succeeded but withdrawal settlement was not confirmed');
+      }
 
       console.log(`[Withdrawal Worker] Dispatched TRON payout ${withdrawal.id} (tx: ${txHash})`);
       return {
@@ -180,10 +191,18 @@ export async function processWithdrawalQueue(): Promise<WithdrawalProcessResult>
       });
     }
 
-    await supabaseAdmin.rpc('complete_onchain_withdrawal', {
+    const { data: settlementData, error: settlementError } = await supabaseAdmin.rpc('complete_onchain_withdrawal', {
       p_withdrawal_id: withdrawal.id,
       p_tx_hash: tx.hash,
     });
+    if (
+      settlementError ||
+      (settlementData && typeof settlementData === 'object' && 'success' in settlementData && settlementData.success === false)
+    ) {
+      // Do not report success when the payout has been broadcast but the
+      // authoritative database settlement is unresolved.
+      throw new Error('EVM transaction broadcast succeeded but withdrawal settlement was not confirmed');
+    }
 
     console.log(`[Withdrawal Worker] Broadcasted EVM payout ${withdrawal.id} on ${network} (tx: ${tx.hash}, nonce: ${nonce})`);
     return {
@@ -200,16 +219,32 @@ export async function processWithdrawalQueue(): Promise<WithdrawalProcessResult>
     if (isLocalCheckStage) {
       console.warn(`[Withdrawal Worker] Pre-broadcast validation failure: refunding withdrawal ${withdrawal.id}`);
       try {
-        await supabaseAdmin.rpc('process_failed_withdrawal', {
+        const { error: refundError, data: refundData } = await supabaseAdmin.rpc('process_failed_withdrawal', {
           p_withdrawal_id: withdrawal.id,
           p_error_reason: err.message || 'Transaction pre-broadcast validation failure',
           p_is_verified_unbroadcast: true,
         });
+
+        if (refundError || (
+          refundData &&
+          typeof refundData === 'object' &&
+          'success' in refundData &&
+          refundData.success === false
+        )) {
+          console.error(`[Withdrawal Worker] Refund RPC did not confirm success for ${withdrawal.id}:`, refundError || refundData);
+          return {
+            processed: true,
+            withdrawalId: withdrawal.id,
+            status: 'FAILED',
+            error: `Pre-broadcast failure; refund was not confirmed. Manual reconciliation required: ${err.message}`,
+          };
+        }
+
         return {
           processed: true,
           withdrawalId: withdrawal.id,
           status: 'FAILED',
-          error: `Pre-broadcast failure. Refund successful: ${err.message}`,
+          error: `Pre-broadcast failure. Refund confirmed: ${err.message}`,
         };
       } catch (refundErr: any) {
         console.error(`[Withdrawal Worker] Refund RPC failed for ${withdrawal.id}:`, refundErr);
@@ -336,8 +371,8 @@ export async function checkSubmittedWithdrawals(): Promise<{
                 const fraction = (feeSat % 100000000n).toString().padStart(8, '0');
                 actualFeeBtc = `${whole}.${fraction}`;
               } else if (Array.isArray(txData.vin) && Array.isArray(txData.vout)) {
-                const inputSumSat = txData.vin.reduce((acc: bigint, v: any) => acc + BigInt(v.prevout?.value || 0), 0n);
-                const outputSumSat = txData.vout.reduce((acc: bigint, v: any) => acc + BigInt(v.value || 0), 0n);
+                const inputSumSat = (txData.vin as Array<{ prevout?: { value?: number | string | null } }>).reduce((acc: bigint, v) => acc + BigInt(v.prevout?.value ?? 0), 0n);
+                const outputSumSat = (txData.vout as Array<{ value?: number | string | null }>).reduce((acc: bigint, v) => acc + BigInt(v.value ?? 0), 0n);
                 if (inputSumSat >= outputSumSat) {
                   const feeSat = inputSumSat - outputSumSat;
                   const whole = feeSat / 100000000n;
@@ -372,8 +407,8 @@ export async function checkSubmittedWithdrawals(): Promise<{
                 const fraction = (feeLit % 100000000n).toString().padStart(8, '0');
                 actualFeeLtc = `${whole}.${fraction}`;
               } else if (Array.isArray(txData.vin) && Array.isArray(txData.vout)) {
-                const inputSumLit = txData.vin.reduce((acc: bigint, v: any) => acc + BigInt(v.prevout?.value || 0), 0n);
-                const outputSumLit = txData.vout.reduce((acc: bigint, v: any) => acc + BigInt(v.value || 0), 0n);
+                const inputSumLit = (txData.vin as Array<{ prevout?: { value?: number | string | null } }>).reduce((acc: bigint, v) => acc + BigInt(v.prevout?.value ?? 0), 0n);
+                const outputSumLit = (txData.vout as Array<{ value?: number | string | null }>).reduce((acc: bigint, v) => acc + BigInt(v.value ?? 0), 0n);
                 if (inputSumLit >= outputSumLit) {
                   const feeLit = inputSumLit - outputSumLit;
                   const whole = feeLit / 100000000n;
@@ -412,19 +447,22 @@ export async function processAllPendingWithdrawals(maxBatch: number = 20): Promi
   results: WithdrawalProcessResult[];
   locked?: boolean;
 }> {
-  // Acquire distributed singleton advisory lock
+  // Fail closed: never dispatch withdrawals unless the singleton lock is confirmed.
   let hasLock = false;
   try {
     const { data: lockAcquired, error: lockErr } = await supabaseAdmin.rpc('acquire_withdrawal_worker_lock');
-    if (!lockErr && lockAcquired === true) {
-      hasLock = true;
-    } else if (!lockErr && lockAcquired === false) {
-      console.warn('[Withdrawal Worker Singleton] Another worker instance is currently holding the dispatch lease. Exiting batch run.');
+    if (lockErr) {
+      console.error('[Withdrawal Worker Singleton] Could not verify dispatch lock; refusing to process withdrawals.', lockErr);
       return { totalProcessed: 0, results: [], locked: true };
     }
+    if (lockAcquired !== true) {
+      console.warn('[Withdrawal Worker Singleton] Dispatch lock was not acquired; refusing to process withdrawals.');
+      return { totalProcessed: 0, results: [], locked: true };
+    }
+    hasLock = true;
   } catch (lockRpcErr) {
-    // If RPC is unavailable, proceed defensively
-    hasLock = false;
+    console.error('[Withdrawal Worker Singleton] Lock RPC failed; refusing to process withdrawals.', lockRpcErr);
+    return { totalProcessed: 0, results: [], locked: true };
   }
 
   const results: WithdrawalProcessResult[] = [];

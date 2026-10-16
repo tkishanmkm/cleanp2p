@@ -9,7 +9,7 @@ import { Copy, Loader2, ShieldCheck, CheckCircle2, AlertCircle, RefreshCw } from
 import { Alert, AlertDescription, AlertTitle } from "../ui/alert";
 import { useAuth } from '@/components/providers/auth-provider';
 import { supabase } from '@/lib/supabase/client';
-import type { CryptoCurrency, UserWallet } from '@/lib/types';
+import type { CryptoCurrency, WalletDisplayItem } from '@/lib/types';
 import { getActiveDepositAddress } from '@/lib/supabase/db';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select';
 import { SUPPORTED_CRYPTOS } from '@/lib/constants';
@@ -20,7 +20,7 @@ interface DepositDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   asset?: CryptoCurrency | null;
-  wallet?: UserWallet | null;
+  wallet?: WalletDisplayItem | null;
   walletIndex?: number;
   initialDeposit?: unknown;
 }

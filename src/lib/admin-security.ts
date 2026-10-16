@@ -1,4 +1,4 @@
-import { createAdminClient } from '@/lib/supabase/server';
+import { getSupabaseAdminClient } from '@/lib/supabase/server';
 import speakeasy from 'speakeasy';
 import {
   encryptAdminTOTPSecret,
@@ -69,7 +69,7 @@ export async function logAdminSecurityAudit(params: {
   ipAddress?: string;
 }) {
   try {
-    const supabase = createAdminClient();
+    const supabase = getSupabaseAdminClient();
     await supabase.from('admin_audit_logs').insert({
       admin_id: params.adminId,
       admin_email: params.adminEmail || null,
@@ -86,7 +86,7 @@ export async function logAdminSecurityAudit(params: {
 }
 
 export async function getAdminSecurityState(adminId: string): Promise<AdminSecurityState | null> {
-  const supabase = createAdminClient();
+  const supabase = getSupabaseAdminClient();
   const { data: profile, error } = await supabase
     .from('profiles')
     .select('id, email, admin_theme_preference, admin_2fa_enabled, is_2fa_enabled, admin_2fa_secret, two_factor_secret, admin_2fa_recovery_hash, admin_2fa_recovery_updated_at')

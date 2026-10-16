@@ -48,7 +48,7 @@ export async function POST(req: NextRequest) {
       }
 
       // Record Admin Rejection in Audit Log
-      await supabaseAdmin.from('admin_audit_logs').insert({
+      const { error: auditLogError } = await supabaseAdmin.from('admin_audit_logs').insert({
         admin_id: adminId,
         admin_email: auth.adminEmail || 'admin@paxones.com',
         action: 'ADMIN_REJECTED_WITHDRAWAL',
@@ -57,7 +57,13 @@ export async function POST(req: NextRequest) {
           rejection_reason: rejectionReason || 'Rejected by administrator during security review.',
         },
         created_at: new Date().toISOString(),
-      }).catch(() => null);
+      });
+
+      // The refund RPC has already completed; record audit-log failures without
+      // masking the authoritative refund result or using unsupported builder.catch().
+      if (auditLogError) {
+        console.error('[Withdrawal Review] Failed to write admin audit log:', auditLogError);
+      }
 
       return NextResponse.json({
         success: true,

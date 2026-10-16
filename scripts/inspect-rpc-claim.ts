@@ -2,11 +2,11 @@ const fs = require('fs');
 const { Client } = require('pg');
 
 async function run() {
-  const envPath = '/app/applet/.env.local';
-  console.log('Reading env from absolute path:', envPath);
-  const content = fs.readFileSync(envPath, 'utf8');
-  const env = {};
-  content.split('\n').forEach(line => {
+  const envPath = process.env.ENV_FILE_PATH || '.env.local';
+  console.log('Reading environment file from:', envPath);
+  const content: string = fs.readFileSync(envPath, 'utf8');
+  const env: Record<string, string> = {};
+  content.split('\n').forEach((line: string) => {
     const parts = line.split('=');
     if (parts.length >= 2) {
       const key = parts[0].trim();

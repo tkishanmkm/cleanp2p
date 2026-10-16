@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createClient, createAdminClient } from '@/lib/supabase/server';
+import { createClient, getSupabaseAdminClient } from '@/lib/supabase/server';
 import {
   verifyAdminTOTPToken,
   verifyRecoveryPasswordHash,
@@ -25,7 +25,7 @@ export async function POST(req: NextRequest) {
 
     const adminId = session.user.id;
     const adminEmail = session.user.email || 'admin';
-    const adminDb = createAdminClient();
+    const adminDb = getSupabaseAdminClient();
 
     const { data: profile } = await adminDb
       .from('profiles')

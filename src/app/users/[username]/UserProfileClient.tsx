@@ -40,6 +40,10 @@ interface UserProfileClientProps {
     created_at?: string | null;
     last_seen_at?: string | null;
     last_seen?: string | null;
+    last_active?: string | null;
+    is_online?: boolean | null;
+    photo_url?: string | null;
+    verification_tier?: number;
     merchant_tier?: string | null;
     bio?: string | null;
   };
@@ -209,7 +213,7 @@ export default function UserProfileClient({
     // 1. Fetch latest profile immediately on mount to prevent stale SSR cache
     const fetchLatestProfile = async () => {
       try {
-        const PUBLIC_PROFILE_COLUMNS = 'id, username, display_name, avatar_url, photo_url, country, is_verified, id_verified, kyc_status, is_online, last_seen_at, created_at, avg_payment_time_mins, avg_payment_minutes, avg_pay_time, avg_release_time_mins, avg_release_minutes, avg_release_time, total_completed_trades, completed_trades, trade_volume, positive_feedback, negative_feedback, feedback_score';
+        const PUBLIC_PROFILE_COLUMNS = 'id, username, display_name, avatar_url, photo_url, country, is_verified, id_verified, kyc_status, is_online, last_seen_at, created_at, total_completed_trades, completed_trades, trade_volume, positive_feedback, negative_feedback, feedback_score';
         const { data: latest } = await supabase
           .from('profiles')
           .select(PUBLIC_PROFILE_COLUMNS)
@@ -224,9 +228,9 @@ export default function UserProfileClient({
             is_id_verified: verification.isVerified,
             kyc_status: verification.isVerified ? 'VERIFIED' : verification.isPending ? 'PENDING' : 'UNVERIFIED',
             verification_tier: verification.tier,
-            last_seen: latest.last_seen || latest.last_seen_at || latest.last_active || prev.last_seen,
-            last_seen_at: latest.last_seen_at || latest.last_seen || prev.last_seen_at,
-            last_active: latest.last_active || latest.last_seen || prev.last_active,
+            last_seen: latest.last_seen_at || prev.last_seen,
+            last_seen_at: latest.last_seen_at || prev.last_seen_at,
+            last_active: latest.last_seen_at || prev.last_active,
             is_online: latest.is_online ?? prev.is_online,
           }));
         }
@@ -257,9 +261,9 @@ export default function UserProfileClient({
             setProfile((prev) => ({
               ...prev,
               ...updated,
-              last_seen: updated.last_seen || updated.last_seen_at || updated.last_active || prev.last_seen,
-              last_seen_at: updated.last_seen_at || updated.last_seen || prev.last_seen_at,
-              last_active: updated.last_active || updated.last_seen || prev.last_active,
+              last_seen: updated.last_seen_at || prev.last_seen,
+              last_seen_at: updated.last_seen_at || prev.last_seen_at,
+              last_active: updated.last_seen_at || prev.last_active,
               is_online: updated.is_online ?? prev.is_online,
             }));
           }

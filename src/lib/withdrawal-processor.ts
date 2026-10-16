@@ -450,7 +450,8 @@ export async function processEvmWithdrawalOnChain(
 
   // Settle via authoritative complete_onchain_withdrawal RPC
   try {
-    const gasAsset = (withdrawal.network_code || '').toUpperCase().includes('BEP') || (withdrawal.network_code || '').toUpperCase().includes('BSC') ? 'BNB' : 'ETH';
+    const normalizedNetwork = (withdrawal.network || '').toUpperCase();
+    const gasAsset = normalizedNetwork.includes('BEP') || normalizedNetwork.includes('BSC') ? 'BNB' : 'ETH';
     await supabase.rpc('complete_onchain_withdrawal', {
       p_withdrawal_id: withdrawal.id,
       p_tx_hash: txResponse.hash,

@@ -27,7 +27,7 @@ const getCryptoPricesFlow = ai.defineFlow(
     inputSchema: CryptoPricesFlowInputSchema,
     outputSchema: CryptoPricesFlowOutputSchema,
   },
-  async (input) => {
+  async (input: CryptoPricesFlowInput) => {
     const {output} = await cryptoPricePrompt(input);
     return output!;
   }

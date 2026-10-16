@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createClient, createAdminClient } from '@/lib/supabase/server';
+import { createClient, getSupabaseAdminClient } from '@/lib/supabase/server';
 import {
   verifyAdminTOTPToken,
   verifyRecoveryPasswordHash,
@@ -26,7 +26,7 @@ export async function POST(req: NextRequest) {
 
     const adminId = session.user.id;
     const adminEmail = session.user.email || 'admin';
-    const adminDb = createAdminClient();
+    const adminDb = getSupabaseAdminClient();
 
     // 1. Authoritative Admin Role Verification
     const { data: profile, error: profError } = await adminDb

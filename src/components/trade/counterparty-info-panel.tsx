@@ -108,7 +108,7 @@ export function CounterpartyInfoPanel({
 
         let targetProfileId = targetId;
 
-        const COUNTERPARTY_PROFILE_FIELDS = 'id, username, display_name, avatar_url, photo_url, is_online, last_seen_at, created_at, total_completed_trades, completed_trades, positive_feedback, negative_feedback, feedback_score';
+        const COUNTERPARTY_PROFILE_FIELDS = 'id, username, display_name, avatar_url, photo_url, is_online, last_seen_at, created_at, total_completed_trades, completed_trades, positive_feedback, negative_feedback, feedback_score, blocked_users';
         let query = supabase.from('profiles').select(COUNTERPARTY_PROFILE_FIELDS);
         if (targetId && targetId.includes('-')) {
           query = query.eq('id', targetId);
@@ -124,10 +124,13 @@ export function CounterpartyInfoPanel({
           // Check if target user blocked currentUser
           if (currentUser) {
             const targetBlocked: string[] = Array.isArray(prof.blocked_users) ? prof.blocked_users : [];
+            const currentUserIdentifiers = [
+              currentUser.id,
+              currentUser.user_metadata?.username,
+              currentUser.email?.split('@')[0],
+            ].filter((value): value is string => typeof value === 'string' && value.length > 0);
             setIsBlockedByThem(
-              targetBlocked.includes(currentUser.id) ||
-              targetBlocked.includes(currentUser.user_metadata?.username) ||
-              targetBlocked.includes(currentUser.email?.split('@')[0])
+              currentUserIdentifiers.some((identifier) => targetBlocked.includes(identifier))
             );
           }
         }
@@ -349,7 +352,7 @@ export function CounterpartyInfoPanel({
                     current.is_email_verified === true ||
                     current.emailVerified === true ||
                     current.email_confirmed_at != null ||
-                    current.is_email_verified ?? true
+                    (current.is_email_verified ?? true)
                   ) ? (
                     <span className="inline-flex items-center gap-1 text-xs font-bold px-2 py-0.5 rounded-md bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">
                       <CheckCircle className="h-3 w-3" /> Verified

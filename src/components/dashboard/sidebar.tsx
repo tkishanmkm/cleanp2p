@@ -170,8 +170,9 @@ export function AdminSidebar() {
         </div>
         <SidebarMenu>
           <SidebarMenuItem>
-            <SidebarMenuButton icon={<LogOut />} tooltip="Logout" onClick={handleLogout}>
-              Logout
+            <SidebarMenuButton tooltip="Logout" onClick={handleLogout}>
+              <LogOut className="h-4 w-4" />
+              <span>Logout</span>
             </SidebarMenuButton>
           </SidebarMenuItem>
         </SidebarMenu>

@@ -109,10 +109,9 @@ export function getEvmProvider(network: string): ethers.JsonRpcProvider {
   }
 
   const primaryRpc = config.rpcUrls[0];
-  const provider = new ethers.JsonRpcProvider(primaryRpc, {
-    chainId: config.chainId,
-    name: config.name,
-  });
+  // Do not pin a static network here: ethers must discover the RPC's actual
+  // chain ID so deposit verifiers can reject a misconfigured cross-chain endpoint.
+  const provider = new ethers.JsonRpcProvider(primaryRpc);
 
   providerCache.set(normalized, provider);
   return provider;
@@ -247,7 +246,7 @@ export async function getTransactionConfirmations(
     // Compute actual on-chain gas cost (gasUsed * effectiveGasPrice)
     let actualGasCost: string | undefined;
     try {
-      const gasPrice = receipt.effectiveGasPrice ?? receipt.gasPrice ?? 0n;
+      const gasPrice = receipt.gasPrice ?? 0n;
       const gasCostWei = receipt.gasUsed * gasPrice;
       actualGasCost = ethers.formatEther(gasCostWei);
     } catch {

@@ -6,6 +6,17 @@ import { verifyWorkerAuth } from '@/lib/security/worker-auth';
 export const maxDuration = 10;
 export const dynamic = 'force-dynamic';
 
+interface ClaimedWithdrawal {
+  id?: string | null;
+  withdrawal_id?: string | null;
+  asset_symbol?: string | null;
+  asset?: string | null;
+  to_address?: string | null;
+  destination_address?: string | null;
+  destination?: string | null;
+  amount?: number | string | null;
+}
+
 export async function POST(req: NextRequest) {
   try {
     const auth = verifyWorkerAuth(req, {
@@ -24,12 +35,47 @@ export async function POST(req: NextRequest) {
     const supabaseAdmin = getSupabaseAdminClient();
 
     // Atomically claim the next pending withdrawal via PostgreSQL SKIP LOCKED
-    const { data: withdrawal, error: claimErr } = await supabaseAdmin
+    const { data: rawWithdrawal, error: claimErr } = await supabaseAdmin
       .rpc('claim_next_pending_withdrawal')
-      .single();
+      .maybeSingle();
+    const withdrawal = rawWithdrawal as unknown as ClaimedWithdrawal | null;
 
-    if (claimErr || !withdrawal) {
+    if (claimErr) {
+      console.error('[Withdrawal Dispatch] Failed to claim pending withdrawal:', claimErr);
+      return NextResponse.json(
+        { error: 'Unable to claim a pending withdrawal safely' },
+        { status: 500 }
+      );
+    }
+
+    if (!withdrawal) {
       return NextResponse.json({ message: 'No pending withdrawals to process' }, { status: 200 });
+    }
+
+    const assetUpper = (withdrawal.asset_symbol || withdrawal.asset || '').toUpperCase().trim();
+    const targetWithdrawalId = withdrawal.id || withdrawal.withdrawal_id;
+    const destination = withdrawal.to_address || withdrawal.destination_address || withdrawal.destination;
+    const amountText = withdrawal.amount == null ? '' : String(withdrawal.amount).trim();
+
+    // Validate the claimed row completely before accessing a hot-wallet key or broadcasting.
+    if (!targetWithdrawalId || typeof targetWithdrawalId !== 'string') {
+      throw new Error('Claimed withdrawal has no valid ID');
+    }
+    if (!destination || !ethers.isAddress(destination)) {
+      throw new Error('Claimed withdrawal has no valid EVM destination address');
+    }
+    if (!amountText || !/^(?:0|[1-9]\d*)(?:\.\d+)?$/.test(amountText)) {
+      throw new Error('Claimed withdrawal has an invalid amount');
+    }
+    if (assetUpper !== 'ETH' && assetUpper !== 'USDT') {
+      throw new Error(`Unsupported EVM asset: ${assetUpper}`);
+    }
+
+    const payoutUnits = assetUpper === 'ETH'
+      ? ethers.parseEther(amountText)
+      : ethers.parseUnits(amountText, 6);
+    if (payoutUnits <= 0n) {
+      throw new Error('Claimed withdrawal amount must be greater than zero');
     }
 
     const rawPrivateKey = process.env.EVM_HOT_WALLET_PRIVATE_KEY || process.env.HOT_WALLET_PRIVATE_KEY;
@@ -42,35 +88,60 @@ export async function POST(req: NextRequest) {
     const formattedKey = rawPrivateKey.startsWith('0x') ? rawPrivateKey : `0x${rawPrivateKey}`;
     const wallet = new ethers.Wallet(formattedKey, provider);
 
-    const assetUpper = (withdrawal.asset_symbol || withdrawal.asset || '').toUpperCase();
-    const targetWithdrawalId = withdrawal.id || withdrawal.withdrawal_id;
-    const destination = withdrawal.to_address || withdrawal.destination_address || withdrawal.destination;
-
     let txHash = '';
 
     if (assetUpper === 'ETH') {
-      const payoutUnits = ethers.parseEther(String(withdrawal.amount));
       const tx = await wallet.sendTransaction({
         to: destination,
         value: payoutUnits,
       });
       txHash = tx.hash;
-    } else if (assetUpper === 'USDT') {
+    } else {
       const tokenAddress = process.env.USDT_CONTRACT_ERC20 || '0xdAC17F958D2ee523a2206206994597C13D831ec7';
       const erc20Abi = ['function transfer(address to, uint256 amount) returns (bool)'];
       const contract = new ethers.Contract(tokenAddress, erc20Abi, wallet);
-      const payoutUnits = ethers.parseUnits(String(withdrawal.amount), 6);
       const tx = await contract.transfer(destination, payoutUnits);
       txHash = tx.hash;
-    } else {
-      throw new Error(`Unsupported EVM asset: ${assetUpper}`);
     }
 
-    // Settle via authoritative complete_onchain_withdrawal RPC
-    await supabaseAdmin.rpc('complete_onchain_withdrawal', {
+    // Persist settlement via the authoritative RPC. A broadcast transaction cannot
+    // be safely treated as settled if this database operation fails; return the
+    // hash for reconciliation instead of reporting success.
+    const { error: settlementError, data: settlementData } = await supabaseAdmin.rpc('complete_onchain_withdrawal', {
       p_withdrawal_id: targetWithdrawalId,
       p_tx_hash: txHash,
     });
+
+    if (settlementError) {
+      console.error('[Withdrawal Dispatch] Broadcast submitted but settlement RPC failed:', {
+        withdrawalId: targetWithdrawalId,
+        txHash,
+        error: settlementError,
+      });
+      return NextResponse.json({
+        success: false,
+        broadcastSubmitted: true,
+        reconciliationRequired: true,
+        withdrawalId: targetWithdrawalId,
+        txHash,
+        error: 'Transaction was submitted, but withdrawal settlement could not be confirmed. Reconcile this transaction before retrying.',
+      }, { status: 502 });
+    }
+
+    if (settlementData && typeof settlementData === 'object' && 'success' in settlementData && settlementData.success === false) {
+      console.error('[Withdrawal Dispatch] Settlement RPC returned an unsuccessful result:', {
+        withdrawalId: targetWithdrawalId,
+        txHash,
+      });
+      return NextResponse.json({
+        success: false,
+        broadcastSubmitted: true,
+        reconciliationRequired: true,
+        withdrawalId: targetWithdrawalId,
+        txHash,
+        error: 'Transaction was submitted, but withdrawal settlement was not confirmed. Reconcile this transaction before retrying.',
+      }, { status: 502 });
+    }
 
     return NextResponse.json({
       success: true,
@@ -83,6 +154,11 @@ export async function POST(req: NextRequest) {
   }
 }
 
-export async function GET(req: NextRequest) {
-  return POST(req);
+export async function GET() {
+  // Dispatching a withdrawal broadcasts an on-chain transaction and must never
+  // be triggered by a read-only HTTP method such as GET.
+  return NextResponse.json(
+    { error: 'Method not allowed. Use the authenticated POST endpoint.' },
+    { status: 405, headers: { Allow: 'POST' } }
+  );
 }

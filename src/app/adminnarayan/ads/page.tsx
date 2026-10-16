@@ -72,30 +72,46 @@ export default function AdminAdsPage() {
         if (error) throw error;
 
         const formattedAds: P2PAd[] = (data || []).map((ad: any) => ({
-          id: ad.id,
-          publicAdId: ad.public_ad_id || ad.publicAdId || ad.id,
-          userId: ad.user_id || ad.userId,
-          user: ad.user || {
-            username: ad.user_display_name || 'User',
-            feedbackScore: 100,
-            positiveFeedback: 0,
-            negativeFeedback: 0,
-            completedTrades: 0,
+          id: String(ad.id ?? ''),
+          publicAdId: String(ad.public_ad_id || ad.publicAdId || ad.id || ''),
+          userId: String(ad.user_id ?? ad.userId ?? ''),
+          user: {
+            ...(ad.user || {}),
+            username:
+              typeof ad.user?.username === 'string' && ad.user.username.trim()
+                ? ad.user.username
+                : typeof ad.user_display_name === 'string' && ad.user_display_name.trim()
+                  ? ad.user_display_name
+                  : 'User',
+            feedbackScore: ad.user?.feedbackScore ?? 100,
+            positiveFeedback: ad.user?.positiveFeedback ?? 0,
+            negativeFeedback: ad.user?.negativeFeedback ?? 0,
+            completedTrades: ad.user?.completedTrades ?? 0,
           },
-          adType: ad.ad_type || ad.adType || 'buy',
+          adType: String(ad.ad_type || ad.adType || 'buy').toLowerCase() === 'sell' ? 'sell' : 'buy',
           crypto: ad.crypto || 'USDT',
           fiatCurrency: ad.fiat_currency || ad.fiatCurrency || 'USD',
           rateType: ad.rate_type || ad.rateType || 'fixed',
-          fixedRate: ad.fixed_rate || ad.fixedRate || 0,
-          ratePercent: ad.rate_percent || ad.ratePercent || 0,
-          minAmount: ad.min_amount || ad.minAmount || 0,
-          maxAmount: ad.max_amount || ad.maxAmount || 0,
-          paymentMethods: ad.payment_methods || ad.paymentMethods || [],
+          fixedRate: ad.fixed_rate ?? ad.fixedRate ?? 0,
+          ratePercent: ad.rate_percent ?? ad.ratePercent ?? 0,
+          minAmount: ad.min_amount ?? ad.minAmount ?? 0,
+          maxAmount: ad.max_amount ?? ad.maxAmount ?? 0,
+          paymentMethods: (() => {
+            const value = ad.payment_methods ?? ad.paymentMethods;
+            if (Array.isArray(value)) return value.map(String);
+            if (typeof value === 'string') return value.split(',').map((item: string) => item.trim()).filter(Boolean);
+            return [];
+          })(),
           terms: ad.terms || '',
-          active: ad.active ?? true,
+          active: ad.active === true || ad.active === 1 || (typeof ad.active === 'string' && ['true', 't', '1', 'active'].includes(ad.active.trim().toLowerCase())),
           offerLabel: ad.offer_label || ad.offerLabel,
-          tags: ad.tags || [],
-          createdAt: ad.created_at || ad.createdAt || new Date().toISOString(),
+          tags: (() => {
+            const value = ad.tags;
+            if (Array.isArray(value)) return value.map(String);
+            if (typeof value === 'string') return value.split(',').map((item: string) => item.trim()).filter(Boolean);
+            return [];
+          })(),
+          createdAt: String(ad.created_at || ad.createdAt || ''),
         }));
 
         setAds(formattedAds);
@@ -114,13 +130,18 @@ export default function AdminAdsPage() {
     if (!ads) return null;
     if (!searchTerm.trim()) return ads;
     const lower = searchTerm.toLowerCase();
-    return ads.filter(
-      (ad) =>
-        ad.publicAdId.toLowerCase().includes(lower) ||
-        ad.user.username.toLowerCase().includes(lower) ||
-        ad.crypto.toLowerCase().includes(lower) ||
-        ad.fiatCurrency.toLowerCase().includes(lower)
-    );
+    return ads.filter((ad) => {
+      const publicAdId = String(ad.publicAdId ?? '');
+      const username = String(ad.user?.username ?? '');
+      const crypto = String(ad.crypto ?? '');
+      const fiatCurrency = String(ad.fiatCurrency ?? '');
+      return (
+        publicAdId.toLowerCase().includes(lower) ||
+        username.toLowerCase().includes(lower) ||
+        crypto.toLowerCase().includes(lower) ||
+        fiatCurrency.toLowerCase().includes(lower)
+      );
+    });
   }, [ads, searchTerm]);
 
   const fetchAdStats = async (adId: string) => {
@@ -204,7 +225,7 @@ export default function AdminAdsPage() {
                       <TableCell className="font-mono text-xs">{ad.publicAdId}</TableCell>
                       <TableCell>
                         <Link
-                          href={`/users/${ad.user.username}`}
+                          href={`/users/${encodeURIComponent(ad.user.username)}`}
                           className="hover:underline font-medium"
                           onClick={(e) => e.stopPropagation()}
                         >

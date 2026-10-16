@@ -1,4 +1,4 @@
-import { createServerClient } from '@supabase/ssr';
+import { createServerClient, type CookieOptions } from '@supabase/ssr';
 import { createClient } from '@supabase/supabase-js';
 import { cookies } from 'next/headers';
 import { NextResponse, type NextRequest } from 'next/server';
@@ -136,7 +136,7 @@ export async function PATCH(
           getAll() {
             return cookieStore.getAll();
           },
-          setAll(cookiesToSet) {
+          setAll(cookiesToSet: { name: string; value: string; options: CookieOptions }[]) {
             try {
               cookiesToSet.forEach(({ name, value, options }) =>
                 cookieStore.set(name, value, options)
@@ -189,7 +189,8 @@ export async function PATCH(
     }
 
     const adOwnerId = existingAd.user_id || existingAd.userId;
-    if (adOwnerId && String(adOwnerId) !== String(user.id)) {
+    if (typeof adOwnerId !== 'string' || !adOwnerId.trim() || String(adOwnerId) !== String(user.id)) {
+      // Fail closed when the resolved record has no trustworthy owner identifier.
       return NextResponse.json({ error: 'Forbidden. You do not own this advertisement.' }, { status: 403 });
     }
 
@@ -240,53 +241,37 @@ export async function PATCH(
     }
 
     if (p2pAdsRow) {
-      // Explicit allowlisted update payload for canonical public.p2p_ads
-      const p2pPayload: Record<string, any> = {
-        updated_at: new Date().toISOString(),
-      };
+      // Only write columns that exist in the live canonical public.p2p_ads schema.
+      // Fiat limits must never be copied into crypto inventory fields.
+      const p2pPayload: Record<string, any> = {};
 
       if (newStatus !== undefined && isActive !== undefined) {
         p2pPayload.status = newStatus;
         p2pPayload.active = isActive;
+        p2pPayload.is_active = isActive;
       }
 
-      if (body.price !== undefined) {
-        p2pPayload.price = body.price;
-        p2pPayload.unit_price = body.price;
-      }
+      if (body.price !== undefined) p2pPayload.price = body.price;
       if (body.min_limit !== undefined || body.min_amount !== undefined) {
-        const minL = body.min_limit ?? body.min_amount;
-        p2pPayload.min_limit = minL;
-        p2pPayload.min_amount = minL;
+        p2pPayload.min_limit = body.min_limit ?? body.min_amount;
       }
       if (body.max_limit !== undefined || body.max_amount !== undefined) {
-        const maxL = body.max_limit ?? body.max_amount;
-        p2pPayload.max_limit = maxL;
-        p2pPayload.max_amount = maxL;
-        p2pPayload.available_amount = maxL;
+        p2pPayload.max_limit = body.max_limit ?? body.max_amount;
       }
-      if (body.rate_percent !== undefined) {
-        p2pPayload.rate_percent = body.rate_percent;
-        p2pPayload.price_margin = body.rate_percent;
-      }
+      if (body.rate_percent !== undefined) p2pPayload.margin = body.rate_percent;
       if (body.pricing_type !== undefined) p2pPayload.pricing_type = body.pricing_type;
-      if (body.rate_type !== undefined) p2pPayload.rate_type = body.rate_type;
-      if (body.payment_methods !== undefined) p2pPayload.payment_methods = body.payment_methods;
-      if (body.terms_conditions !== undefined || body.terms !== undefined) p2pPayload.terms_conditions = body.terms_conditions || body.terms;
-      if (body.offer_label !== undefined || body.label !== undefined) p2pPayload.offer_label = body.offer_label || body.label;
-      if (body.offer_tags !== undefined || body.tags !== undefined) p2pPayload.offer_tags = body.offer_tags || body.tags;
-      if (body.payment_window !== undefined || body.payment_window_minutes !== undefined) {
-        const pw = Number(body.payment_window ?? body.payment_window_minutes);
-        p2pPayload.payment_window = pw;
-        p2pPayload.payment_window_minutes = pw;
-        p2pPayload.payment_time_limit = pw;
+      if (body.payment_methods !== undefined) {
+        p2pPayload.payment_methods = body.payment_methods;
+        p2pPayload.payment_method = Array.isArray(body.payment_methods)
+          ? body.payment_methods.join(", ")
+          : String(body.payment_methods);
       }
-      if (body.require_full_name_verified !== undefined) p2pPayload.require_full_name_verified = Boolean(body.require_full_name_verified);
-      if (body.require_verified_users !== undefined) p2pPayload.require_verified_users = Boolean(body.require_verified_users);
-      if (body.min_completed_trades !== undefined) p2pPayload.min_completed_trades = parseInt(String(body.min_completed_trades), 10) || 0;
-
-      // Ensure is_active NEVER reaches p2p_ads
-      delete p2pPayload.is_active;
+      if (body.terms_conditions !== undefined || body.terms !== undefined) {
+        p2pPayload.terms = body.terms_conditions ?? body.terms;
+      }
+      if (body.min_completed_trades !== undefined) {
+        p2pPayload.min_completed_trades_req = parseInt(String(body.min_completed_trades), 10) || 0;
+      }
 
       const { data: p2pRes, error: p2pErr } = await supabaseAdmin
         .from('p2p_ads')
@@ -380,7 +365,7 @@ export async function DELETE(
           getAll() {
             return cookieStore.getAll();
           },
-          setAll(cookiesToSet) {
+          setAll(cookiesToSet: { name: string; value: string; options: CookieOptions }[]) {
             try {
               cookiesToSet.forEach(({ name, value, options }) =>
                 cookieStore.set(name, value, options)
@@ -423,7 +408,8 @@ export async function DELETE(
     }
 
     const adOwnerId = existingAd.user_id || existingAd.userId;
-    if (adOwnerId && String(adOwnerId) !== String(user.id)) {
+    if (typeof adOwnerId !== 'string' || !adOwnerId.trim() || String(adOwnerId) !== String(user.id)) {
+      // Fail closed when the resolved record has no trustworthy owner identifier.
       return NextResponse.json({ error: 'Forbidden. You do not own this advertisement.' }, { status: 403 });
     }
 

@@ -254,12 +254,12 @@ export function AdCard({ ad, marketPriceUsd: propMarketPriceUsd, fiatExchangeRat
           )}
           
           <div className="flex flex-wrap gap-1">
-            {(ad.paymentMethods || []).map(pm => <Badge key={pm} variant="outline" className="text-xs">{pm}</Badge>)}
+            {(ad.paymentMethods || []).map((pm: string) => <Badge key={pm} variant="outline" className="text-xs">{pm}</Badge>)}
           </div>
           
           {ad.tags && ad.tags.length > 0 && (
             <div className="flex flex-wrap gap-1">
-              {ad.tags.map(tag => <Badge key={tag} variant="secondary">{tag}</Badge>)}
+              {ad.tags.map((tag: string) => <Badge key={tag} variant="secondary">{tag}</Badge>)}
             </div>
           )}
         </div>
@@ -351,7 +351,7 @@ export function AdCard({ ad, marketPriceUsd: propMarketPriceUsd, fiatExchangeRat
                         <DetailRow label="Price" value={<div className="flex items-center gap-2">{adPrice.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}<span className="text-muted-foreground">{adFiat} / {adCrypto}</span></div>} />
                         <DetailRow label="Limits" value={`${minLimit.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} - ${effectiveMaxLimit.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ${adFiat}`} />
                         <DetailRow label="Payment Window" value={`${configuredPaymentWindow} minutes`} />
-                        <DetailRow label="Payment Methods" value={<div className="flex flex-wrap gap-1 justify-end">{(ad.paymentMethods || []).map(pm => <Badge key={pm} variant="outline">{pm}</Badge>)}</div>} />
+                        <DetailRow label="Payment Methods" value={<div className="flex flex-wrap gap-1 justify-end">{(ad.paymentMethods || []).map((pm: string) => <Badge key={pm} variant="outline">{pm}</Badge>)}</div>} />
                       </div>
                       <div className="space-y-2 text-sm p-3 border rounded-md bg-secondary/50 mt-2">
                         <p className="font-medium">Terms & Conditions</p>
@@ -360,7 +360,7 @@ export function AdCard({ ad, marketPriceUsd: propMarketPriceUsd, fiatExchangeRat
                       {ad.tags && ad.tags.length > 0 && (
                         <div className="space-y-2 text-sm p-3 border rounded-md bg-secondary/50 mt-2">
                           <p className="font-medium">Tags</p>
-                          <div className="flex flex-wrap gap-1">{ad.tags.map(tag => <Badge key={tag} variant="secondary">{tag}</Badge>)}</div>
+                          <div className="flex flex-wrap gap-1">{ad.tags.map((tag: string) => <Badge key={tag} variant="secondary">{tag}</Badge>)}</div>
                         </div>
                       )}
                     </div>

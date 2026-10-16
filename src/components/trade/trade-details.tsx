@@ -1050,7 +1050,7 @@ const ActionButtons = ({
           </AlertDialog>
         )}
 
-        {tradeStatus === 'paid' && currentUserId && !activeDispute && tradeStatus !== 'disputed' && (
+        {tradeStatus === 'paid' && currentUserId && !activeDispute && (
           <div className="space-y-2">
             {!isDisputeEligible && (
               <p className="text-[11px] text-muted-foreground text-center">

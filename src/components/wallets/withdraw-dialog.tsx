@@ -8,7 +8,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { Button } from "@/components/ui/button";
 import { Input } from '@/components/ui/input';
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from '@/components/ui/form';
-import { User, CryptoCurrency } from "@/lib/types";
+import type { User, CryptoCurrency } from "@/lib/types";
 import { useToast } from '@/hooks/use-toast';
 import { Loader2, Fuel, AlertCircle, ShieldCheck } from 'lucide-react';
 import { usePrices } from '@/context/price-context';
@@ -34,9 +34,10 @@ interface WithdrawDialogProps {
   onOpenChange: (open: boolean) => void;
   asset: CryptoCurrency | null;
   userWallets?: User['wallets'] | undefined;
+  initialChain?: string;
 }
 
-export function WithdrawDialog({ open, onOpenChange, asset, userWallets }: WithdrawDialogProps) {
+export function WithdrawDialog({ open, onOpenChange, asset, userWallets, initialChain }: WithdrawDialogProps) {
   const { user, profile } = useAuth();
   const { toast } = useToast();
   const { requestWithdrawal, refreshBalances, balances } = useWallet();
@@ -140,7 +141,9 @@ export function WithdrawDialog({ open, onOpenChange, asset, userWallets }: Withd
 
   useEffect(() => {
     if (open) {
-      const defaultChain = availableChains.length === 1 ? availableChains[0] : "";
+      const defaultChain = initialChain && availableChains.includes(initialChain)
+        ? initialChain
+        : availableChains.length === 1 ? availableChains[0] : "";
       form.reset({
         address: '',
         amount: '' as any,
@@ -151,7 +154,7 @@ export function WithdrawDialog({ open, onOpenChange, asset, userWallets }: Withd
         fetchGasEstimate(asset, defaultChain);
       }
     }
-  }, [open, availableChains, asset, form, fetchGasEstimate]);
+  }, [open, availableChains, asset, initialChain, form, fetchGasEstimate]);
 
   useEffect(() => {
     if (asset && watchedChain) {
@@ -396,8 +399,8 @@ export function WithdrawDialog({ open, onOpenChange, asset, userWallets }: Withd
                   </div>
                   <div className="flex justify-between items-center text-xs text-muted-foreground pt-1">
                     <span>Available: {Number(availableBalance || 0) === 0 ? '0' : Number(availableBalance || 0).toFixed(8)} {asset}</span>
-                    {prices[asset || ''] ? (
-                      <span>≈ ${(Number(availableBalance || 0) * (prices[asset || ''] || 0)).toFixed(2)} USD</span>
+                    {asset && prices[asset] != null ? (
+                      <span>≈ ${(Number(availableBalance || 0) * Number(prices[asset] || 0)).toFixed(2)} USD</span>
                     ) : null}
                   </div>
                   <FormMessage />

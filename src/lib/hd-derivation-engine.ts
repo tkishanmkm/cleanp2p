@@ -177,14 +177,23 @@ export const BIP_PATHS = {
 
 export function getAdminClient(): SupabaseClient {
   const supabaseUrl =
-    process.env.NEXT_PUBLIC_SUPABASE_URL ||
-    process.env.SUPABASE_URL ||
-    'https://eaiwgfxoiwxepinvcykg.supabase.co';
+    process.env.SUPABASE_URL?.trim() ||
+    process.env.NEXT_PUBLIC_SUPABASE_URL?.trim();
+  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY?.trim();
 
-  const serviceRoleKey =
-    process.env.SUPABASE_SERVICE_ROLE_KEY ||
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ||
-    'placeholder-key';
+  // This client is used for privileged wallet provisioning. Never fall back to
+  // the public anon key or a placeholder, which can mask a misconfigured server.
+  if (!supabaseUrl || !/^https:\/\//i.test(supabaseUrl)) {
+    throw new Error('SUPABASE_URL or NEXT_PUBLIC_SUPABASE_URL must be configured for wallet provisioning');
+  }
+  if (
+    !serviceRoleKey ||
+    serviceRoleKey === 'placeholder-key' ||
+    serviceRoleKey === 'placeholder-anon-key' ||
+    serviceRoleKey === process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
+  ) {
+    throw new Error('SUPABASE_SERVICE_ROLE_KEY is required for privileged wallet provisioning');
+  }
 
   return createClient(supabaseUrl, serviceRoleKey, {
     auth: {

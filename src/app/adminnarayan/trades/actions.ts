@@ -64,16 +64,23 @@ export async function resolveTradeAction(tradeId: string, decision: "release" | 
 
   if (error) return { success: false, error: error.message };
 
-  // Update associated dispute if any
-  await adminSupabase
+  // Update the associated dispute if any. Supabase query builders return
+  // database errors in the result instead of rejecting the promise.
+  const { error: disputeUpdateError } = await adminSupabase
     .from("disputes")
     .update({
       status: "resolved",
       resolved_by: adminId,
       resolved_at: new Date().toISOString(),
     })
-    .eq("trade_id", tradeId)
-    .catch(() => null);
+    .eq("trade_id", tradeId);
+
+  if (disputeUpdateError) {
+    console.error("Trade resolved but associated dispute update failed:", {
+      tradeId,
+      error: disputeUpdateError.message,
+    });
+  }
 
   // 3. Record Audit Event with verified admin identity
   await logAdminAction({

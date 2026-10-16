@@ -4,6 +4,7 @@ import { generateTradeId } from '@/lib/id-generator';
 import { sendNewTradeNotificationEmail } from '@/lib/email/tradeEmailService';
 import { assertPlatformControlAllowed } from '@/lib/platform-guard';
 import { hasPendingWithdrawalApproval } from '@/lib/withdrawal-security';
+import { checkTradeEligibility } from '@/lib/trading-eligibility';
 
 export const dynamic = 'force-dynamic';
 
@@ -67,6 +68,14 @@ export async function POST(req: NextRequest) {
 
     if (authError || !user) {
       return NextResponse.json({ error: 'Unauthorized. Please sign in.' }, { status: 401 });
+    }
+
+    const callerEligibility = await checkTradeEligibility(user.id);
+    if (!callerEligibility.allowed) {
+      return NextResponse.json(
+        { error: callerEligibility.message, code: callerEligibility.code },
+        { status: callerEligibility.statusCode }
+      );
     }
 
     // Pending Withdrawal Approval Lockout Check
@@ -149,6 +158,14 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    const advertiserEligibility = await checkTradeEligibility(String(ad.user_id || ''));
+    if (!advertiserEligibility.allowed) {
+      return NextResponse.json(
+        { error: 'This advertisement owner is not currently eligible to trade.', code: advertiserEligibility.code },
+        { status: advertiserEligibility.statusCode }
+      );
+    }
+
     // 2. Resolve unit price & amounts
     const rawPrice = customRate ?? ad.fixed_rate ?? ad.price;
     const unitPrice = Number(rawPrice);
@@ -175,12 +192,35 @@ export async function POST(req: NextRequest) {
     numericFiat = Number((calculatedCrypto * unitPrice).toFixed(2));
 
     // 3. Resolve Payment Method & Currency
-    const paymentMethods = Array.isArray(ad.payment_methods)
-      ? ad.payment_methods
-      : typeof ad.payment_methods === 'string'
-      ? JSON.parse(ad.payment_methods)
+    let rawPaymentMethods: unknown = ad.payment_methods;
+    if (typeof rawPaymentMethods === 'string') {
+      try {
+        rawPaymentMethods = JSON.parse(rawPaymentMethods);
+      } catch {
+        console.error('[POST /api/trades] Advertisement has invalid payment_methods JSON.');
+        return NextResponse.json({ error: 'Advertisement payment methods are misconfigured.' }, { status: 500 });
+      }
+    }
+
+    const paymentMethods = Array.isArray(rawPaymentMethods)
+      ? rawPaymentMethods.filter((method: unknown): method is string => typeof method === 'string' && method.trim().length > 0)
+        .map((method: string) => method.trim())
       : ['Bank Transfer'];
-    const resolvedPaymentMethod = customPaymentMethod || paymentMethods[0] || 'Bank Transfer';
+    if (paymentMethods.length === 0) {
+      return NextResponse.json({ error: 'Advertisement has no valid payment methods.' }, { status: 400 });
+    }
+
+    if (customPaymentMethod !== undefined && customPaymentMethod !== null && typeof customPaymentMethod !== 'string') {
+      return NextResponse.json({ error: 'Invalid payment method.' }, { status: 400 });
+    }
+    const requestedPaymentMethod = typeof customPaymentMethod === 'string' ? customPaymentMethod.trim() : '';
+    const resolvedPaymentMethod = requestedPaymentMethod
+      ? paymentMethods.find((method: string) => method.toLowerCase() === requestedPaymentMethod.toLowerCase())
+      : paymentMethods[0];
+    if (!resolvedPaymentMethod) {
+      return NextResponse.json({ error: 'Selected payment method is not supported by this advertisement.' }, { status: 400 });
+    }
+
     const resolvedFiatCurrency = customFiat || ad.fiat_currency || ad.fiat || 'USD';
     const adIdentifier = String(ad.id || ad.public_ad_id || adId);
 
@@ -194,6 +234,7 @@ export async function POST(req: NextRequest) {
       p_payment_method: resolvedPaymentMethod,
       p_trade_ref: tradeRef,
       p_idempotency_key: idempotencyKey,
+      p_caller_id: user.id,
     });
 
     if (rpcError) {

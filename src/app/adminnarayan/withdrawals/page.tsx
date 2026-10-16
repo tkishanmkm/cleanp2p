@@ -279,13 +279,17 @@ export default function AdminWithdrawalsPage() {
 
   const pendingWithdrawals = useMemo(() => {
     return (
-      filteredWithdrawals?.filter(
-        (w) =>
-          w.status === 'pending' ||
-          w.status === 'pending_approval' ||
-          w.status === 'PENDING_APPROVAL' ||
-          w.status === 'queued'
-      ) || null
+      filteredWithdrawals?.filter((w) => {
+        // Database rows can contain additional workflow states beyond the
+        // narrower UI Withdrawal union; normalize to string before comparing.
+        const status = String(w.status);
+        return (
+          status === 'pending' ||
+          status === 'pending_approval' ||
+          status === 'PENDING_APPROVAL' ||
+          status === 'queued'
+        );
+      }) || null
     );
   }, [filteredWithdrawals]);
 

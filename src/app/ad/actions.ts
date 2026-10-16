@@ -32,129 +32,76 @@ function isValidUUID(str: any): boolean {
  */
 async function fetchUserCryptoBalance(userId: string, assetSymbol: string) {
   const adminClient = getSupabaseAdminClient();
-  const normalizedSym = (assetSymbol || 'BTC').toUpperCase();
-  let available = 0;
-  let lockedEscrow = 0;
-  let walletId: string | null = null;
-  let matchedAssetRow: any = null;
+  const normalizedSym = (assetSymbol || '').trim().toUpperCase();
 
-  if (!userId) {
-    return { available: 0, lockedEscrow: 0, walletId: null, matchedAssetRow: null, normalizedSym };
+  // wallet_assets is the canonical asset ledger used by escrow. Never merge balances
+  // from wallets, user_wallets, or profiles: those are separate/legacy stores and
+  // taking the maximum can turn stale or duplicate values into spendable funds.
+  if (!userId || !normalizedSym) {
+    return {
+      available: 0,
+      lockedEscrow: 0,
+      walletId: null as string | null,
+      matchedAssetRow: null as any,
+      normalizedSym,
+    };
   }
 
-  // 1. Check wallets -> wallet_assets relation
-  try {
-    const { data: wallet } = await adminClient
-      .from('wallets')
-      .select('id, user_id')
-      .eq('user_id', userId)
-      .maybeSingle();
+  const { data: assets, error } = await adminClient
+    .from('wallet_assets')
+    .select('id, user_id, asset_symbol, balance, locked_balance, reserved_balance, in_escrow, in_withdrawal')
+    .eq('user_id', userId)
+    .ilike('asset_symbol', normalizedSym);
 
-    if (wallet?.id) {
-      walletId = wallet.id;
-      const { data: assets } = await adminClient
-        .from('wallet_assets')
-        .select('*')
-        .eq('wallet_id', wallet.id);
-
-      if (assets && assets.length > 0) {
-        const match = assets.find((a: any) => {
-          const sym = String(a.asset_code || a.asset_symbol || a.symbol || a.crypto || '').toUpperCase();
-          return sym === normalizedSym;
-        });
-        if (match) {
-          matchedAssetRow = match;
-          const avail = Number(match.available ?? match.balance ?? match.amount ?? 0);
-          const locked = Number(match.locked_escrow ?? match.locked ?? match.locked_balance ?? 0);
-          if (!isNaN(avail) && avail > available) available = avail;
-          if (!isNaN(locked) && locked > lockedEscrow) lockedEscrow = locked;
-        }
-      }
-    }
-  } catch (err) {
-    console.warn('[WalletBalance] wallets query error:', err);
+  // A failed balance read must never fall back to ad inventory or a profile cache.
+  if (error || !assets) {
+    console.error('[WalletBalance] canonical wallet_assets query failed:', error?.message || 'No data returned');
+    return {
+      available: 0,
+      lockedEscrow: 0,
+      walletId: null as string | null,
+      matchedAssetRow: null as any,
+      normalizedSym,
+    };
   }
 
-  // 2. Check wallet_assets directly by user_id
-  try {
-    const { data: directAssets } = await adminClient
-      .from('wallet_assets')
-      .select('*')
-      .eq('user_id', userId);
+  const rows = assets.filter((row: any) =>
+    String(row.asset_symbol || '').trim().toUpperCase() === normalizedSym
+  );
 
-    if (directAssets && directAssets.length > 0) {
-      const match = directAssets.find((a: any) => {
-        const sym = String(a.asset_symbol || a.asset_code || a.symbol || a.crypto || '').toUpperCase();
-        return sym === normalizedSym;
-      });
-      if (match) {
-        if (!matchedAssetRow) matchedAssetRow = match;
-        const avail = Number(match.available ?? match.balance ?? match.amount ?? 0);
-        const locked = Number(match.locked_escrow ?? match.locked ?? match.locked_balance ?? 0);
-        if (!isNaN(avail) && avail > available) available = avail;
-        if (!isNaN(locked) && locked > lockedEscrow) lockedEscrow = locked;
-      }
-    }
-  } catch (err) {
-    console.warn('[WalletBalance] direct wallet_assets query error:', err);
+  // The escrow RPC must lock one unambiguous canonical asset row. Aggregating
+  // duplicate user/asset rows here could overstate funds relative to the row
+  // that the database RPC actually locks, so fail closed until duplicates are reconciled.
+  if (rows.length > 1) {
+    console.error('[WalletBalance] multiple canonical wallet_assets rows found for user/asset; refusing preflight balance');
+    return {
+      available: 0,
+      lockedEscrow: 0,
+      walletId: null as string | null,
+      matchedAssetRow: null as any,
+      normalizedSym,
+    };
   }
 
-  // 3. Check user_wallets table / view
-  try {
-    const { data: userWallets } = await adminClient
-      .from('user_wallets')
-      .select('*')
-      .eq('user_id', userId);
-
-    if (userWallets && userWallets.length > 0) {
-      const match = userWallets.find((w: any) => {
-        const sym = String(w.asset_symbol || w.asset_code || w.symbol || w.crypto || '').toUpperCase();
-        return sym === normalizedSym;
-      });
-      if (match) {
-        const avail = Number(match.available_balance ?? match.available ?? match.balance ?? 0);
-        const locked = Number(match.locked_balance ?? match.locked ?? 0);
-        if (!isNaN(avail) && avail > available) available = avail;
-        if (!isNaN(locked) && locked > lockedEscrow) lockedEscrow = locked;
-      }
-    }
-  } catch (err) {
-    console.warn('[WalletBalance] user_wallets query error:', err);
-  }
-
-  // 4. Check profiles table columns
-  try {
-    const { data: profile } = await adminClient
-      .from('profiles')
-      .select('*')
-      .or(`id.eq.${userId},user_id.eq.${userId}`)
-      .maybeSingle();
-
-    if (profile) {
-      let profBalance = 0;
-      if (normalizedSym === 'BTC') {
-        profBalance = Number(profile.btc_balance ?? profile.btcBalance ?? profile.wallets?.BTC?.balance ?? 0);
-      } else if (normalizedSym === 'ETH') {
-        profBalance = Number(profile.eth_balance ?? profile.ethBalance ?? profile.wallets?.ETH?.balance ?? 0);
-      } else if (normalizedSym === 'LTC') {
-        profBalance = Number(profile.ltc_balance ?? profile.ltcBalance ?? profile.wallets?.LTC?.balance ?? 0);
-      } else if (normalizedSym === 'USDT') {
-        profBalance = Number(profile.usdt_balance ?? profile.usdtBalance ?? profile.wallets?.USDT?.balance ?? 0);
-      }
-
-      if (!isNaN(profBalance) && profBalance > available) {
-        available = profBalance;
-      }
-    }
-  } catch (err) {
-    console.warn('[WalletBalance] profiles balance query error:', err);
-  }
+  const available = rows.reduce((sum: number, row: any) => {
+    const balance = Number(row.balance ?? 0);
+    const reserved = Number(row.reserved_balance ?? 0);
+    const inEscrow = Number(row.in_escrow ?? 0);
+    const inWithdrawal = Number(row.in_withdrawal ?? 0);
+    if (![balance, reserved, inEscrow, inWithdrawal].every(Number.isFinite)) return sum;
+    // Conservatively exclude all explicit reservations from the spendable amount.
+    return sum + Math.max(0, balance - Math.max(0, reserved) - Math.max(0, inEscrow) - Math.max(0, inWithdrawal));
+  }, 0);
+  const lockedEscrow = rows.reduce((sum: number, row: any) => {
+    const locked = Number(row.in_escrow ?? row.locked_balance ?? 0);
+    return Number.isFinite(locked) && locked > 0 ? sum + locked : sum;
+  }, 0);
 
   return {
     available,
     lockedEscrow,
-    walletId,
-    matchedAssetRow,
+    walletId: null as string | null,
+    matchedAssetRow: rows.length === 1 ? rows[0] : null,
     normalizedSym,
   };
 }
@@ -347,17 +294,14 @@ export async function getAdDetails(adId: string): Promise<ActionResponse<any>> {
     const sellerId = ad.user_id;
     const assetSymbol = (ad.asset_symbol || ad.crypto || ad.asset || 'BTC').toUpperCase();
 
-    // 6. Fetch trader's current wallet balance for the ad asset
-    let creatorCryptoBalance = Number(ad.total_amount ?? ad.available_amount ?? 0.5);
+    // 6. Show the verified wallet balance for real sellers. Ad inventory and
+    // demo defaults are not evidence of funds held by a real user.
+    let creatorCryptoBalance = 0;
     if (sellerId && sellerId !== 'trader_verified_1') {
-      try {
-        const balanceInfo = await fetchUserCryptoBalance(sellerId, assetSymbol);
-        if (balanceInfo.available > 0) {
-          creatorCryptoBalance = balanceInfo.available;
-        }
-      } catch (err) {
-        console.warn('Failed to fetch creator wallet balance:', err);
-      }
+      const balanceInfo = await fetchUserCryptoBalance(sellerId, assetSymbol);
+      creatorCryptoBalance = balanceInfo.available;
+    } else if (sellerId === 'trader_verified_1') {
+      creatorCryptoBalance = Number(ad.total_amount ?? ad.available_amount ?? 0);
     }
 
     // 7. Fetch trade statistics for the ad creator
@@ -433,6 +377,7 @@ export async function getAdDetails(adId: string): Promise<ActionResponse<any>> {
 export async function createAd(formData: any): Promise<ActionResponse<any>> {
   try {
     const supabase = await createClient();
+    const adminClient = getSupabaseAdminClient();
 
     const { data: { user }, error: authError } = await supabase.auth.getUser();
 
@@ -574,35 +519,15 @@ export async function createTradeOrderWithEscrow(input: {
       }
     }
 
-    // C. If still not found, construct fallback active advertisement object so trade creation can succeed seamlessly
+    // Never synthesize a fallback advertisement for trade creation. A missing or invalid ad
+    // must fail closed; otherwise a fabricated seller/ad could reach the escrow RPC.
     if (!ad) {
-      ad = {
-        id: cleanAdId,
-        public_id: cleanAdId,
-        public_ad_id: cleanAdId,
-        user_id: 'trader_verified_1',
-        type: 'SELL',
-        ad_type: 'SELL',
-        crypto: 'BTC',
-        asset_symbol: 'BTC',
-        fiat: 'USD',
-        fiat_currency: 'USD',
-        fiat_symbol: 'USD',
-        price: 64250,
-        unit_price: 64250,
-        fixed_rate: 64250,
-        pricing_type: 'FLOAT',
-        margin_percent: 1.5,
-        status: 'ACTIVE',
-        active: true,
-        is_active: true,
-        min_limit: 10,
-        max_limit: 10000,
-        min_amount: 10,
-        max_amount: 10000,
-        total_amount: 1.0,
-        available_amount: 1.0,
-        payment_methods: ['Bank Transfer', 'Revolut', 'Wise'],
+      return {
+        data: null,
+        error: {
+          message: 'Advertisement not found or no longer available.',
+          code: 'AD_NOT_FOUND',
+        },
       };
     }
 
@@ -617,50 +542,69 @@ export async function createTradeOrderWithEscrow(input: {
       };
     }
 
-    if (ad.is_active === false || ad.active === false || ad.status === 'INACTIVE') {
+    // Match the canonical RPC's activation rule and fail closed for missing/unknown
+    // statuses. The database requires status ACTIVE; a truthy active flag alone is not enough.
+    if (
+      String(ad.status || '').trim().toUpperCase() !== 'ACTIVE' ||
+      ad.is_active === false ||
+      ad.active === false
+    ) {
       return {
         data: null,
         error: {
-          message: 'This advertisement is currently inactive.',
-          code: '400',
+          message: 'This advertisement is currently inactive or not available for trading.',
+          code: 'AD_INACTIVE',
         },
       };
     }
 
-    // 3. Get Dynamic Escrow Fee from settings (Fallback to 1.5%)
-    let escrowFeePercent = 1.5;
-    try {
-      const { data: feeSetting } = await adminClient
-        .from('system_settings')
-        .select('value')
-        .eq('key', 'escrow_fee_percent')
-        .maybeSingle();
+    // Never interpret an unknown/missing advertisement side as SELL. The canonical
+    // RPC currently defaults unknown types to SELL, so reject them before calling it.
+    const declaredAdSide = [ad.trade_type, ad.ad_type, ad.side, ad.adType, ad.type]
+      .filter((value: unknown) => typeof value === 'string' && value.trim().length > 0)
+      .map((value: string) => value.trim().toUpperCase())
+      .find((value: string) => value === 'BUY' || value === 'SELL');
 
-      if (feeSetting?.value) {
-        escrowFeePercent = Number(feeSetting.value) || 1.5;
-      }
-    } catch {
-      escrowFeePercent = 1.5;
+    if (!declaredAdSide) {
+      return {
+        data: null,
+        error: {
+          message: 'This advertisement has an invalid trade type and cannot be traded.',
+          code: 'AD_INVALID_TYPE',
+        },
+      };
     }
 
-    // 4. Calculate Base Amounts & Limits
-    const price = Number(ad.price || ad.fixed_rate || ad.fixedRate || ad.unit_price) || 80116.02;
+    // 3. The canonical database RPC currently calculates escrow fees at 1.5%
+    // (v_crypto_amount * 0.015). Keep the preflight estimate aligned with that
+    // authoritative behavior. Do not read a separate setting that the RPC ignores.
+    const escrowFeePercent = 1.5;
+
+    // 4. Validate the ad's actual price and fiat limits. Never substitute a
+    // hard-coded market price or default limits for missing advertisement data.
+    const price = Number(ad.price ?? ad.fixed_rate ?? ad.fixedRate ?? ad.unit_price);
     const fiatAmount = Number(input.fiatAmount);
-    const minLimit = Number(ad.min_limit ?? ad.min_amount ?? 100) || 100;
-    const maxLimit = Number(ad.max_limit ?? ad.max_amount ?? 5000) || 5000;
-    const assetSymbol = (ad.asset_symbol || ad.crypto || ad.asset_code || 'BTC').toUpperCase();
-    const fiatSymbol = (ad.fiat_symbol || ad.fiat || ad.fiat_currency || 'USD').toUpperCase();
+    const minLimit = Number(ad.min_limit ?? ad.min_amount);
+    const maxLimit = Number(ad.max_limit ?? ad.max_amount);
+    const assetSymbol = String(ad.asset_symbol || ad.crypto || ad.asset_code || '').trim().toUpperCase();
+    const fiatSymbol = String(ad.fiat_symbol || ad.fiat || ad.fiat_currency || '').trim().toUpperCase();
+
+    if (!Number.isFinite(price) || price <= 0 ||
+        !Number.isFinite(fiatAmount) || fiatAmount <= 0 ||
+        !Number.isFinite(minLimit) || minLimit <= 0 ||
+        !Number.isFinite(maxLimit) || maxLimit < minLimit ||
+        !assetSymbol || !fiatSymbol) {
+      return {
+        data: null,
+        error: {
+          message: 'Advertisement price, asset, currency, or trade limits are invalid.',
+          code: 'INVALID_AD_FINANCIAL_TERMS',
+        },
+      };
+    }
 
     // 5. Determine who is providing crypto for escrow:
-    const typeCandidates = [
-      ad.trade_type,
-      ad.ad_type,
-      ad.side,
-      ad.adType,
-      ad.type,
-    ].filter(Boolean).map((s: any) => String(s).toUpperCase());
-
-    const isBuyAd = typeCandidates.some((t: string) => t === 'BUY' || t === 'ONLINE_BUY' || t.includes('BUY'));
+    const isBuyAd = declaredAdSide === 'BUY';
     const isInitiatorSelling = isBuyAd;
     const isAdSell = !isBuyAd;
 
@@ -722,12 +666,19 @@ export async function createTradeOrderWithEscrow(input: {
       }
     }
 
-    // Check Seller available balance comprehensively
+    // Check the seller's wallet balance. Advertisement inventory is a listing limit,
+    // not proof that the seller currently owns or has unlocked the advertised crypto.
     const sellerBalanceInfo = await fetchUserCryptoBalance(sellerId, assetSymbol);
-    let currentSellerAvail = sellerBalanceInfo.available;
+    const currentSellerAvail = Number(sellerBalanceInfo.available);
 
-    if (isAdSell && Number(ad.total_amount || 0) > currentSellerAvail) {
-      currentSellerAvail = Number(ad.total_amount);
+    if (!Number.isFinite(currentSellerAvail) || currentSellerAvail < 0) {
+      return {
+        data: null,
+        error: {
+          message: 'Unable to verify the seller wallet balance. Please try again later.',
+          code: 'WALLET_BALANCE_UNAVAILABLE',
+        },
+      };
     }
 
     // Effective max limit check
@@ -841,11 +792,16 @@ export async function createTradeOrderWithEscrow(input: {
 
     if (rpcError) {
       console.error('[createTradeOrderWithEscrow] RPC initiate_trade_with_escrow error:', rpcError);
+      const rpcErrorMessage = String(rpcError.message || 'Failed to initiate trade and lock escrow.');
+      const normalizedRpcErrorMessage = rpcErrorMessage.toLowerCase();
+      const isInsufficientFundsError =
+        rpcError.code === 'P0001' &&
+        /(insufficient funds|insufficient balance|not enough available balance|insufficient available balance)/i.test(normalizedRpcErrorMessage);
       return {
         data: null,
         error: {
-          message: rpcError.message || 'Failed to initiate trade and lock escrow.',
-          code: rpcError.code === 'P0001' ? 'INSUFFICIENT_FUNDS' : 'ESCROW_ERROR',
+          message: rpcErrorMessage,
+          code: isInsufficientFundsError ? 'INSUFFICIENT_FUNDS' : 'ESCROW_ERROR',
         },
       };
     }
@@ -871,12 +827,12 @@ export async function createTradeOrderWithEscrow(input: {
       };
     }
 
-    if (resolvedPaymentMethod) {
-      await adminClient
-        .from('trades')
-        .update({ payment_method: resolvedPaymentMethod })
-        .eq('id', tradeId);
-    }
+    // Derive notification/email identities from the validated ad and escrow RPC result.
+    const resolvedPublicId = String(
+      rpcResult.public_id || rpcResult.public_trade_id || rpcResult.trade_ref || shortTradeId || tradeId
+    );
+    const resolvedSellerId = sellerId;
+    const resolvedBuyerId = buyerId;
 
     // 9. Insert Activity Center In-App Notifications for counterparties
     try {

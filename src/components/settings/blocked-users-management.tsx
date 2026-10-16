@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useMemo, useEffect } from 'react';
+import { useState, useMemo, useEffect, useCallback } from 'react';
 import type { User } from '@/lib/types';
 import { useToast } from '@/hooks/use-toast';
 import { blockUser, unblockUser } from '@/lib/users';
@@ -91,6 +91,7 @@ export function BlockedUsersManagement({ user: currentUserData }: { user: User }
   }, [fetchBlockedUsers]);
 
   const authUserId = authUser?.uid;
+  const blockedUserIds = currentUserData?.blockedUsers || [];
 
   useEffect(() => {
     if (!usernameToBlock || usernameToBlock.length < 2) {

@@ -7,6 +7,7 @@ import { useWallet } from '@/context/wallet-context';
 import { usePrices } from '@/context/price-context';
 import { calculateMinimumFiatAmount, BASE_PLATFORM_USD_MINIMUM } from '@/lib/currency';
 import { CryptoCurrency } from '@/lib/types';
+import { isTier2User } from '@/lib/kyc';
 import { toast } from 'sonner';
 import { 
   Check, 
@@ -390,6 +391,7 @@ export default function CreateP2PAdPage() {
   const [fixedPrice, setFixedPrice] = useState('');
   const [minAmount, setMinAmount] = useState('10');
   const [maxAmount, setMaxAmount] = useState('1000');
+  const [cryptoAmount, setCryptoAmount] = useState('');
   const [paymentWindow, setPaymentWindow] = useState('30');
 
   // Dynamic $10 USD equivalent minimum limit for selected fiat
@@ -626,14 +628,30 @@ export default function CreateP2PAdPage() {
       : Number(fixedPrice || 1);
 
     if (adType === 'sell') {
-      const isTier2 = Boolean(
-        profile?.is_verified === true ||
-        profile?.id_verified === true ||
-        ['approved', 'verified'].includes(String(profile?.kyc_status || '').toLowerCase().trim()) ||
-        ['2', 'tier_2', 'tier2'].includes(String(profile?.verification_tier || '').toLowerCase().trim())
-      );
+      // Read KYC from the authenticated user's profile; never trust client-supplied verification flags.
+      const {
+        data: { user: authenticatedUser },
+        error: authError,
+      } = await supabase.auth.getUser();
 
-      if (!isTier2) {
+      if (authError || !authenticatedUser) {
+        toast.error('Please log in again to verify your account before selling.');
+        return;
+      }
+
+      const { data: sellerProfile, error: profileError } = await supabase
+        .from('profiles')
+        .select('kyc_status')
+        .eq('id', authenticatedUser.id)
+        .maybeSingle();
+
+      if (profileError) {
+        console.error('Unable to verify seller KYC status:', profileError);
+        toast.error('Unable to verify your KYC status right now. Please try again.');
+        return;
+      }
+
+      if (!isTier2User(sellerProfile)) {
         toast.error('KYC verification is required to sell.');
         return;
       }
@@ -754,8 +772,9 @@ export default function CreateP2PAdPage() {
         max_amount: Number(maxAmount),
         min_limit: Number(minAmount),
         max_limit: Number(maxAmount),
-        total_amount: Number(maxAmount),
-        available_amount: Number(maxAmount),
+        crypto_amount: Number(cryptoAmount),
+        total_amount: Number(cryptoAmount),
+        available_amount: Number(cryptoAmount),
         status: 'active',
         user_display_name: displayName,
         ad_type: adType.toLowerCase(),
@@ -1282,6 +1301,30 @@ export default function CreateP2PAdPage() {
                   Maximum limit per individual trade order.
                 </span>
               </div>
+            </div>
+
+            <div className="pt-2">
+              <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">
+                Total Crypto Quantity to Offer
+              </label>
+              <div className="relative">
+                <input
+                  type="number"
+                  min="0"
+                  step="any"
+                  inputMode="decimal"
+                  required
+                  value={cryptoAmount}
+                  onChange={(e) => setCryptoAmount(e.target.value)}
+                  aria-label="Total crypto quantity to offer"
+                  className="w-full pl-3 pr-16 py-2.5 border border-gray-200 dark:border-gray-700 bg-white dark:bg-[#202026] text-gray-900 dark:text-white rounded-lg text-sm focus:outline-none focus:ring-1 focus:ring-[#9273fc]"
+                  placeholder={`Quantity in ${crypto}`}
+                />
+                <span className="absolute right-3 top-3 text-xs text-gray-400 font-semibold">{crypto}</span>
+              </div>
+              <span className="text-[11px] text-gray-400 mt-1 block">
+                Total crypto available for this ad. This is separate from the minimum and maximum fiat amount per order.
+              </span>
             </div>
 
             {/* Sell Ad Balance Requirement Check */}

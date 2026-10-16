@@ -2,6 +2,14 @@
 
 export type CryptoCurrency = 'BTC' | 'ETH' | 'LTC' | 'USDT' | 'BNB' | 'TRX';
 
+/** UI-facing wallet/network row used by the wallet cards and dialogs. */
+export interface WalletDisplayItem {
+  crypto: CryptoCurrency;
+  chain: string;
+  balance: number;
+  lockedBalance: number;
+}
+
 export interface CurrencyConfig {
   code: string;
   name: string;
@@ -14,10 +22,15 @@ export interface UserProfile {
   username: string;
   country?: string;
   feedbackScore: number;
+  positiveFeedback?: number;
+  negativeFeedback?: number;
+  tradeVolume?: number;
+  photoURL?: string;
   avgReleaseTime: number; // in minutes
   completedTrades: number;
   lastActive: string | Date;
   badges?: string[];
+  verification_tier?: number | string;
 }
 
 export interface P2PAd {
@@ -25,6 +38,7 @@ export interface P2PAd {
   userId: string;
   publicAdId?: string;
   user?: {
+    id?: string;
     username: string;
     country?: string;
     feedbackScore: number;
@@ -34,6 +48,7 @@ export interface P2PAd {
     photoURL?: string;
     badges?: string[];
     lastActive?: string;
+    last_seen?: string;
     isVerified?: boolean;
     is_verified?: boolean;
   };
@@ -116,7 +131,7 @@ export type Withdrawal = {
   address: string;
   amount: number;
   fee?: number;
-  status: 'pending' | 'approved' | 'declined' | 'cancelled';
+  status: 'pending' | 'pending_approval' | 'PENDING_APPROVAL' | 'queued' | 'processing' | 'approved' | 'declined' | 'cancelled' | 'completed' | 'failed';
   txHash?: string;
   adminId?: string;
   createdAt: string;
@@ -127,6 +142,8 @@ export type User = {
   userId: string;
   oldUserId?: string;
   fullName: string;
+  displayName?: string;
+  username?: string;
   dob: string;
   country?: string;
   ipBasedCountry?: string;

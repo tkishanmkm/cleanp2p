@@ -229,11 +229,12 @@ export function CreateAdForm({ ad }: CreateAdFormProps) {
   const adCreatorId = ad?.userId || user?.uid;
 
   useEffect(() => {
-    if (!adCreatorId) return;
+    const creatorId = adCreatorId;
+    if (!creatorId) return;
     let isMounted = true;
     async function loadBalances() {
       try {
-        const balances = await getUserWalletBalances(adCreatorId);
+        const balances = await getUserWalletBalances(creatorId);
         if (isMounted && balances) {
           setUserBalances(balances);
         }
@@ -439,14 +440,14 @@ export function CreateAdForm({ ad }: CreateAdFormProps) {
         await createP2PAd(null, adData, {
           id: user.uid,
           username: profile.username || 'User',
-          country: profile.country,
+          country: profile.country || undefined,
           feedbackScore: profile.feedbackScore ?? 100,
           positiveFeedback: profile.positiveFeedback ?? 0,
           negativeFeedback: profile.negativeFeedback ?? 0,
           completedTrades: profile.completedTrades ?? 0,
           photoURL: profile.photoURL,
           badges: profile.badges,
-          lastActive: profile.lastActive,
+          lastActive: profile.lastActive instanceof Date ? profile.lastActive.toISOString() : profile.lastActive,
         });
         toast({ title: "Ad Created", description: "Your ad has been successfully posted." });
         router.push(data.adType === 'sell' ? '/buy' : '/sell');
