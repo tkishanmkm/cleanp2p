@@ -1016,7 +1016,13 @@ export async function PUT(
         const adsPayload: Record<string, any> = {
           updated_at: timestamp,
         };
-        if (price !== undefined) adsPayload.price = price;
+        if (updatedAsset) adsPayload.asset_symbol = String(updatedAsset).toUpperCase();
+        if (updatedFiat) adsPayload.fiat_symbol = String(updatedFiat).toUpperCase();
+        if (price !== undefined) {
+          adsPayload.price = price;
+          adsPayload.unit_price = unitPrice ?? price;
+          if (isFixed) adsPayload.fixed_rate = price;
+        }
         if (minAmount !== undefined) adsPayload.min_limit = minAmount;
         if (maxAmount !== undefined) adsPayload.max_limit = maxAmount;
         if (paymentMethods !== undefined) adsPayload.payment_methods = paymentMethods;
