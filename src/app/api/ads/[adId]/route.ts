@@ -175,8 +175,16 @@ export async function GET(
     const terms = rawTerms.trim().slice(0, 5000);
     const termsConditions = (rawTermsConditions || rawTerms).trim().slice(0, 5000);
     const offerLabel = typeof ad.offer_label === 'string' ? ad.offer_label.trim().slice(0, 120) : '';
+    const safeAd = { ...ad };
+    for (const sensitiveKey of [
+      'private_key', 'secret_key', 'mnemonic', 'seed_phrase', 'api_key',
+      'access_token', 'refresh_token', 'password', 'service_role_key',
+    ]) {
+      delete safeAd[sensitiveKey];
+    }
+
     const formatted = {
-      ...ad,
+      ...safeAd,
       id: ad.id,
       userId: adOwnerUserId,
       type: adType,
