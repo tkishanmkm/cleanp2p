@@ -404,7 +404,8 @@ export async function GET(
       .select('id, trade_id, sender_id, message, created_at')
       .eq('trade_id', trade.id)
       .eq('sender_id', '00000000-0000-0000-0000-000000000000')
-      .order('created_at', { ascending: true });
+      .order('created_at', { ascending: true })
+      .limit(500);
 
     if (error) {
       console.error('System-message read failed:', error.code || 'UNKNOWN');
