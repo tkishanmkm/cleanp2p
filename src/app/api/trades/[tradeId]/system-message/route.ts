@@ -341,7 +341,7 @@ export async function GET(
 
     const { data: messages, error } = await supabaseAdmin
       .from('trade_messages')
-      .select('id, trade_id, sender_id, sender_username, message, created_at, visibility')
+      .select('id, trade_id, sender_id, message, created_at')
       .eq('trade_id', trade.id)
       .eq('sender_id', '00000000-0000-0000-0000-000000000000')
       .order('created_at', { ascending: true });
