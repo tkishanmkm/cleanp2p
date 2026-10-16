@@ -1001,7 +1001,7 @@ async function scanTronDeposits(
             if (!monitoredTronAddresses.has(toBase58)) continue;
 
             const actualContract = evt.contract_address || evt.contractAddress;
-            if (actualContract !== CANONICAL_USDT_CONTRACTS.TRC20) continue;
+            if (typeof actualContract !== 'string' || actualContract !== CANONICAL_USDT_CONTRACTS.TRC20) continue;
             const rawValBig = BigInt(rawValue);
             if (rawValBig <= 0n) continue;
             const deduplicationKey = `${txId}_${outputIndex}`;
