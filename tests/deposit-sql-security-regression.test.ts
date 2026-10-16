@@ -38,12 +38,12 @@ const checks: Array<[string, string, RegExp]> = [
   [
     'withdrawal claim RPC revokes authenticated execution in bounded migration',
     'supabase/migrations/20261016000006_bound_withdrawal_claim_batch.sql',
-    /REVOKE ALL ON FUNCTION public\\.claim_pending_withdrawals\\(INTEGER\\) FROM authenticated/i,
+    /REVOKE ALL ON FUNCTION public\.claim_pending_withdrawals\(INTEGER\) FROM authenticated/i,
   ],
   [
     'withdrawal claim RPC grants only service role in bounded migration',
     'supabase/migrations/20261016000006_bound_withdrawal_claim_batch.sql',
-    /GRANT EXECUTE ON FUNCTION public\\.claim_pending_withdrawals\\(INTEGER\\) TO service_role/i,
+    /GRANT EXECUTE ON FUNCTION public\.claim_pending_withdrawals\(INTEGER\) TO service_role/i,
   ],
   [
     'withdrawal claim batch is bounded and browser roles remain revoked',
