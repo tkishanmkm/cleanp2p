@@ -28,7 +28,7 @@ export async function POST(req: NextRequest) {
       await assertPlatformControlAllowed('transfer', { userId: user.id });
     } catch (guardErr: any) {
       return NextResponse.json(
-        { error: guardErr.message || 'Internal transfers are temporarily disabled.', code: guardErr.code || 'PLATFORM_TRANSFERS_DISABLED' },
+        { error: 'Internal transfers are temporarily unavailable.', code: guardErr.code || 'PLATFORM_TRANSFERS_DISABLED' },
         { status: guardErr.statusCode || 403 }
       );
     }
