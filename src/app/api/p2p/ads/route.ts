@@ -14,8 +14,13 @@ export async function POST(request: NextRequest) {
     const cookieHeader = cookies();
     const cookieStore = typeof (cookieHeader as any)?.then === 'function' ? await cookieHeader : cookieHeader;
 
-    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL || 'https://placeholder.supabase.co';
-    const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'placeholder-anon-key';
+    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL;
+    const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+
+    if (!supabaseUrl || !supabaseAnonKey) {
+      console.error('Supabase public configuration is missing for ad creation.');
+      return NextResponse.json({ error: 'Service temporarily unavailable.' }, { status: 503 });
+    }
 
     const supabase = createServerClient(
       supabaseUrl,
@@ -37,6 +42,9 @@ export async function POST(request: NextRequest) {
     );
 
     const body = await request.json();
+    if (!body || typeof body !== 'object' || Array.isArray(body)) {
+      return NextResponse.json({ error: 'Request body must be a JSON object.' }, { status: 400 });
+    }
 
     // Support Bearer token header if provided by frontend
     const authHeader = request.headers.get('Authorization') || request.headers.get('authorization');
@@ -113,6 +121,9 @@ export async function POST(request: NextRequest) {
 
     const requestedMax = Number(body.max_amount ?? body.max_limit ?? body.maxAmount ?? 5000);
     const requestedMin = Number(body.min_amount ?? body.min_limit ?? body.minAmount ?? 100);
+    if (!Number.isFinite(requestedMin) || !Number.isFinite(requestedMax) || requestedMin <= 0 || requestedMax <= 0 || requestedMin > requestedMax) {
+      return NextResponse.json({ error: 'Minimum and maximum trade limits must be finite positive numbers, and minimum cannot exceed maximum.' }, { status: 400 });
+    }
 
     // Enforce dynamic minimum limit equivalent to at least $10.00 USD
     const dynamicMinThreshold = calculateMinimumFiatAmount(10.00, fiatType);
@@ -126,7 +137,17 @@ export async function POST(request: NextRequest) {
     const priceVal = body.price !== undefined && body.price !== null && body.price !== '' ? Number(body.price) : null;
     const marginVal = Number(body.margin ?? body.rate_percent ?? body.margin_percentage ?? body.price_margin ?? 0);
     const pricingType = body.pricing_type || (body.rate_type === 'fixed' || body.is_fixed ? 'FIXED' : 'FLOAT');
-    const paymentWindow = Math.max(30, parseInt(String(body.payment_window || body.payment_window_minutes || 30), 10) || 30);
+    const rawPaymentWindow = body.payment_window ?? body.payment_window_minutes ?? 30;
+    const paymentWindow = Number(rawPaymentWindow);
+    if (!Number.isFinite(marginVal) || marginVal < -50 || marginVal > 50) {
+      return NextResponse.json({ error: 'Margin percentage must be a finite number between -50 and +50.' }, { status: 400 });
+    }
+    if (!Number.isInteger(paymentWindow) || paymentWindow < 30 || paymentWindow > 1440) {
+      return NextResponse.json({ error: 'Payment window must be an integer between 30 and 1440 minutes.' }, { status: 400 });
+    }
+    if (body.price !== undefined && body.price !== null && body.price !== '' && (!Number.isFinite(priceVal) || Number(priceVal) <= 0)) {
+      return NextResponse.json({ error: 'Price must be a finite positive number.' }, { status: 400 });
+    }
     const paymentMethods = Array.isArray(body.payment_methods) && body.payment_methods.length > 0
       ? body.payment_methods
       : (Array.isArray(body.paymentMethods) ? body.paymentMethods : ['Bank Transfer']);
@@ -176,81 +197,56 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // BALANCE VALIDATION: If user is creating a SELL ad (offering to sell coin), check that minimum limit in coin is present in their account
+    // SELL ads must use the wallet balance endpoint's documented authoritative source.
+    // Do not take the maximum across legacy tables: those may be mirrors of the same funds.
     if (adSide === 'SELL') {
       const adminClient = getSupabaseAdminClient();
-      let availableBalance = 0;
-
-      try {
-        // 1. Check wallet_assets directly by user_id
-        const { data: directAssets } = await adminClient
-          .from('wallet_assets')
-          .select('*')
-          .eq('user_id', user.id);
-
-        if (directAssets && directAssets.length > 0) {
-          const match = directAssets.find((a: any) => {
-            const sym = String(a.asset_symbol || a.asset_code || a.symbol || a.crypto || '').toUpperCase();
-            return sym === coinType.toUpperCase();
-          });
-          if (match) {
-            const avail = Number(match.available ?? match.balance ?? match.amount ?? 0);
-            const locked = Number(match.locked_escrow ?? match.locked ?? match.locked_balance ?? 0);
-            const net = Math.max(0, avail - locked);
-            if (net > availableBalance) availableBalance = net;
-          }
-        }
-
-        // 2. Check user_wallets table
-        const { data: walletData } = await adminClient
-          .from('user_wallets')
-          .select('available_balance, balance, locked_balance')
-          .eq('user_id', user.id)
-          .ilike('asset_symbol', coinType)
-          .maybeSingle();
-
-        if (walletData) {
-          const net = Number(walletData.available_balance ?? (Number(walletData.balance || 0) - Number(walletData.locked_balance || 0)));
-          if (net > availableBalance) availableBalance = net;
-        }
-
-        // 3. Check wallets table
-        const { data: chainWallets } = await adminClient
-          .from('wallets')
-          .select('balance, available_balance, currency, chain')
-          .eq('user_id', user.id);
-
-        if (chainWallets && chainWallets.length > 0) {
-          const matchingWallets = chainWallets.filter((w: any) => 
-            String(w.currency || w.chain || '').toUpperCase() === coinType.toUpperCase()
-          );
-          matchingWallets.forEach((w: any) => {
-            const val = Number(w.available_balance ?? w.balance ?? 0);
-            if (val > availableBalance) availableBalance = val;
-          });
-        }
-
-        // 4. Check profiles table fallback
-        const { data: prof } = await adminClient
-          .from('profiles')
-          .select('*')
-          .eq('id', user.id)
-          .maybeSingle();
-
-        if (prof) {
-          const col = `${coinType.toLowerCase()}_balance`;
-          if (prof[col] !== undefined) {
-            const val = Number(prof[col] || 0);
-            if (val > availableBalance) availableBalance = val;
-          }
-        }
-      } catch (balErr) {
-        console.warn('Balance check error during ad creation:', balErr);
-      }
-
       const effectiveUnitPrice = priceVal && priceVal > 0 ? priceVal : 1;
       const minCoinRequired = requestedMin / effectiveUnitPrice;
 
+      const { data: walletAssetRows, error: walletAssetError } = await adminClient
+        .from('wallet_assets')
+        .select('asset_symbol, asset_code, balance, locked_balance, reserved_balance, in_escrow, in_withdrawal')
+        .eq('user_id', user.id);
+
+      if (walletAssetError) {
+        console.error('Authoritative wallet_assets balance lookup failed during sell-ad creation:', walletAssetError.message);
+        return NextResponse.json({ error: 'Unable to verify wallet balance right now. Please retry.' }, { status: 503 });
+      }
+
+      const matchingAssets = (walletAssetRows || []).filter((row: any) =>
+        String(row.asset_symbol || row.asset_code || '').trim().toUpperCase() === coinType
+      );
+
+      // Multiple rows for the same asset make the spendable amount ambiguous.
+      if (matchingAssets.length > 1) {
+        console.error('Multiple authoritative wallet_assets rows found for sell-ad creation', { userId: user.id, coinType });
+        return NextResponse.json({ error: 'Wallet balance records need reconciliation before a sell offer can be created.' }, { status: 409 });
+      }
+
+      if (matchingAssets.length === 0) {
+        return NextResponse.json({
+          error: `Insufficient ${coinType} balance. No authoritative wallet balance record was found.`,
+          code: 'INSUFFICIENT_BALANCE',
+        }, { status: 400 });
+      }
+
+      const walletAsset = matchingAssets[0];
+      const balance = Number(walletAsset.balance ?? 0);
+      const locked = Number(walletAsset.locked_balance ?? 0);
+      const reserved = Number(walletAsset.reserved_balance ?? 0);
+      const escrow = Number(walletAsset.in_escrow ?? 0);
+      const withdrawal = Number(walletAsset.in_withdrawal ?? 0);
+
+      if (![balance, locked, reserved, escrow, withdrawal].every(Number.isFinite) ||
+          balance < 0 || locked < 0 || reserved < 0 || escrow < 0 || withdrawal < 0) {
+        console.error('Invalid authoritative wallet balance values; blocking sell-ad creation', { userId: user.id, coinType });
+        return NextResponse.json({ error: 'Wallet balance data is invalid; sell ad creation is blocked.' }, { status: 503 });
+      }
+
+      // locked_balance and in_escrow can describe the same escrowed funds; subtract the larger,
+      // then subtract separately tracked reservations and withdrawals.
+      const availableBalance = Math.max(0, balance - Math.max(locked, escrow) - reserved - withdrawal);
       if (availableBalance < minCoinRequired) {
         return NextResponse.json({
           error: `Insufficient ${coinType} balance. You must have at least ${minCoinRequired.toFixed(6)} ${coinType} in your wallet to create a sell offer with a minimum limit of ${requestedMin} ${fiatType}. Current available: ${availableBalance.toFixed(6)} ${coinType}.`,
@@ -357,87 +353,71 @@ export async function POST(request: NextRequest) {
         }
       }
 
-      // If RLS blocked the user or table not accessible via client, try service role admin client
-      if (dbError && (dbError.code === '42501' || dbError.message?.toLowerCase().includes('row-level security') || dbError.code === '42P01')) {
-        try {
-          const admin = getSupabaseAdminClient();
-          const { data: adminResult, error: adminError } = await admin
-            .from('ads')
-            .insert([basePayload])
-            .select()
-            .single();
-
-          if (!adminError) {
-            data = adminResult;
-            dbError = null;
-          } else {
-            // Try minimal payload with admin
-            const minAdminPayload: Record<string, any> = {
-              user_id: user.id,
-              type: adSide,
-              asset_symbol: coinType,
-              fiat_symbol: fiatType,
-              price: priceVal,
-              min_limit: requestedMin,
-              max_limit: requestedMax,
-              payment_methods: paymentMethods,
-              is_active: true,
-              terms: resolvedTerms,
-              offer_label: resolvedLabel,
-              label: resolvedLabel,
-              ad_tags: resolvedTags,
-              tags: resolvedTags,
-            };
-            const { data: minAdminRes, error: minAdminErr } = await admin
-              .from('ads')
-              .insert([minAdminPayload])
-              .select()
-              .single();
-
-            if (!minAdminErr) {
-              data = minAdminRes;
-              dbError = null;
-            } else {
-              dbError = minAdminErr;
-            }
-          }
-        } catch (adminEx: any) {
-          console.error('Admin insertion exception:', adminEx);
-        }
+      // Never bypass authenticated-user RLS with a service-role insert. Configure
+      // the appropriate owner-scoped INSERT policy if this write is denied.
       }
     }
 
     if (dbError) {
-      console.error('[P2P Ad Creation Error]:', dbError);
+      console.error('[P2P Ad Creation Error]:', { code: dbError.code, message: dbError.message });
       return NextResponse.json(
-        { 
-          error: dbError.message || 'Database error creating ad', 
-          realError: `${dbError.message} (Code: ${dbError.code || 'UNKNOWN'}${dbError.details ? ` - ${dbError.details}` : ''})`,
-          code: dbError.code,
-          details: dbError.details,
-          hint: dbError.hint
-        }, 
-        { status: 400 }
+        { error: 'Unable to create advertisement. Please verify your details or try again later.' },
+        { status: dbError.code === '42501' ? 403 : 500 }
       );
     }
 
     if (data) {
-      try {
-        const admin = getSupabaseAdminClient();
-        const p2pRow = {
-          ...basePayload,
-          id: data.id || basePayload.id,
-          public_ad_id: uniqueAdId,
-          crypto: coinType,
-          fiat_currency: fiatType,
-          ad_type: adSide.toLowerCase(),
-          trade_type: adSide,
-          unit_price: priceVal,
-          status: 'ACTIVE',
-        };
-        await admin.from('p2p_ads').upsert(p2pRow, { onConflict: 'id', ignoreDuplicates: true });
-      } catch (p2pSyncErr) {
-        // Silently continue if p2p_ads is a view or non-updatable
+      const admin = getSupabaseAdminClient();
+      const p2pRow = {
+        public_ad_id: uniqueAdId,
+        user_id: user.id,
+        ad_type: String(adSide).toLowerCase(),
+        crypto_currency: coinType,
+        fiat_currency: fiatType,
+        price: priceVal,
+        min_limit: requestedMin,
+        max_limit: requestedMax,
+        payment_method: paymentMethods[0],
+        payment_methods: paymentMethods,
+        terms: resolvedTerms,
+        active: true,
+        is_active: true,
+        is_deleted: false,
+        coin: coinType,
+        pricing_type: String(pricingType).toLowerCase(),
+        margin: marginVal,
+        asset_symbol: coinType,
+        fiat_symbol: fiatType,
+        type: adSide,
+        status: 'ACTIVE',
+      };
+
+      const { error: p2pSyncError } = await admin.from('p2p_ads').insert(p2pRow);
+      if (p2pSyncError) {
+        console.error('P2P ad synchronization failed:', {
+          code: p2pSyncError.code,
+          message: p2pSyncError.message,
+        });
+
+        // Fail closed: don't leave an ad discoverable if the canonical P2P row
+        // was not created. Keep the row for diagnostics, but deactivate it.
+        const { error: deactivateError } = await admin
+          .from('ads')
+          .update({ active: false, is_active: false, status: 'inactive' })
+          .eq('id', data.id)
+          .eq('user_id', user.id);
+
+        if (deactivateError) {
+          console.error('Failed to deactivate unsynchronized ad:', {
+            code: deactivateError.code,
+            message: deactivateError.message,
+          });
+        }
+
+        return NextResponse.json(
+          { error: 'Unable to publish advertisement right now. Please try again later.' },
+          { status: 500 }
+        );
       }
     }
 
@@ -445,10 +425,7 @@ export async function POST(request: NextRequest) {
   } catch (err: any) {
     console.error('Unhandled ad creation error:', err);
     return NextResponse.json(
-      { 
-        error: err.message || 'Internal Server Error',
-        realError: String(err)
-      }, 
+      { error: 'Internal server error.' },
       { status: 500 }
     );
   }

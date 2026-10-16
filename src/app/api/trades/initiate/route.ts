@@ -29,13 +29,12 @@ export async function POST(req: Request) {
       data: { user },
       error: authError,
     } = await supabase.auth.getUser();
-    console.log('[DEBUG] Auth getUser result:', { user: user?.id, error: authError });
 
     if (authError || !user) {
-      return NextResponse.json({ 
-        error: 'Unauthorized. Please sign in.',
-        debug: { authError, userId: user?.id }
-      }, { status: 401 });
+      return NextResponse.json(
+        { error: 'Unauthorized. Please sign in.' },
+        { status: 401 }
+      );
     }
 
     // Pending Withdrawal Approval Lockout Check
@@ -62,8 +61,6 @@ export async function POST(req: Request) {
     const rawFiat = body.fiatAmount ?? body.fiat_amount;
     const rawCrypto = body.cryptoAmount ?? body.crypto_amount;
     const customPaymentMethod = body.paymentMethod || body.payment_method;
-    const customPrice = body.price || body.rate;
-    const customFiatCurrency = body.fiatCurrency || body.fiat_currency;
     const tradeRef = body.tradeRef || body.trade_ref || generateTradeId();
     const idempotencyKey =
       (body.idempotencyKey ||
@@ -83,12 +80,104 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: 'Advertisement ID is required' }, { status: 400 });
     }
 
+    // Replay an existing idempotent request before looking up the ad. This lets a
+    // legitimate retry succeed if the advertisement was later paused or deleted.
+    // The stored trade is authoritative; the key alone never authorizes access.
+    const replayAdmin = getSupabaseAdminClient();
+    const { data: existingTrade, error: replayLookupError } = await replayAdmin
+      .from('trades')
+      .select('id, public_id, buyer_id, seller_id, ad_id, public_ad_id, crypto_amount, fiat_amount, fiat_currency, price, unit_price, rate, payment_method, crypto, asset_code, status, escrow_status, idempotency_key')
+      .eq('idempotency_key', idempotencyKey)
+      .maybeSingle();
+
+    if (replayLookupError) {
+      console.error('[trades/initiate] Idempotency lookup failed:', replayLookupError);
+      return NextResponse.json(
+        { success: false, code: 'IDEMPOTENCY_LOOKUP_FAILED', error: 'Unable to verify this retry safely.' },
+        { status: 503 }
+      );
+    }
+
+    if (existingTrade) {
+      const callerIsParticipant =
+        String(existingTrade.buyer_id) === user.id ||
+        String(existingTrade.seller_id) === user.id;
+      const requestedAd = String(adId).trim();
+      const adMatches =
+        String(existingTrade.ad_id ?? '') === requestedAd ||
+        String(existingTrade.public_ad_id ?? '') === requestedAd;
+
+      const retryCryptoRaw = rawCrypto == null || rawCrypto === '' ? NaN : Number(rawCrypto);
+      const retryFiatRaw = rawFiat == null || rawFiat === '' ? NaN : Number(rawFiat);
+      const storedPrice = Number(existingTrade.price ?? existingTrade.unit_price ?? existingTrade.rate);
+      const storedCrypto = Number(existingTrade.crypto_amount);
+      const storedFiat = Number(existingTrade.fiat_amount);
+      const requestedCrypto = Number.isFinite(retryCryptoRaw) && retryCryptoRaw > 0
+        ? Number(retryCryptoRaw.toFixed(8))
+        : (Number.isFinite(retryFiatRaw) && retryFiatRaw > 0 && storedPrice > 0
+          ? Number((retryFiatRaw / storedPrice).toFixed(8))
+          : NaN);
+      const requestedPayment = typeof customPaymentMethod === 'string' ? customPaymentMethod.trim().toLowerCase() : '';
+      const storedPayment = String(existingTrade.payment_method ?? '').trim().toLowerCase();
+      const requestedCurrencyRaw = body.fiatCurrency ?? body.fiat_currency;
+      const requestedCurrency = typeof requestedCurrencyRaw === 'string' ? requestedCurrencyRaw.trim().toUpperCase() : '';
+      const storedCurrency = String(existingTrade.fiat_currency ?? '').trim().toUpperCase();
+      const retryCurrencyValid = !requestedCurrency || requestedCurrency === storedCurrency;
+      const retryAmountsValid =
+        Number.isFinite(requestedCrypto) &&
+        Number.isFinite(storedPrice) && storedPrice > 0 &&
+        requestedCrypto === storedCrypto &&
+        Number((requestedCrypto * storedPrice).toFixed(2)) === storedFiat &&
+        (!Number.isFinite(retryFiatRaw) || retryFiatRaw <= 0 || Number(retryFiatRaw.toFixed(2)) === storedFiat);
+
+      if (!callerIsParticipant || !adMatches || !retryAmountsValid || !retryCurrencyValid ||
+          (requestedPayment !== '' && requestedPayment !== storedPayment)) {
+        return NextResponse.json(
+          { success: false, code: 'IDEMPOTENCY_KEY_REUSE_CONFLICT', error: 'This idempotency key was already used for a different or unauthorized trade request.' },
+          { status: 409 }
+        );
+      }
+
+      return NextResponse.json({
+        success: true,
+        tradeId: existingTrade.id,
+        id: existingTrade.id,
+        publicId: existingTrade.public_id,
+        message: 'Trade already initiated (idempotent replay)',
+        data: {
+          success: true,
+          trade_id: existingTrade.id,
+          public_id: existingTrade.public_id,
+          buyer_id: existingTrade.buyer_id,
+          seller_id: existingTrade.seller_id,
+          crypto_amount: existingTrade.crypto_amount,
+          fiat_amount: existingTrade.fiat_amount,
+          fiat_currency: existingTrade.fiat_currency,
+          asset: existingTrade.crypto || existingTrade.asset_code,
+          status: existingTrade.status,
+          escrow_status: existingTrade.escrow_status,
+          message: 'Trade already initiated (idempotent replay)',
+        },
+        trade: {
+          trade_id: existingTrade.id,
+          public_id: existingTrade.public_id,
+          buyer_id: existingTrade.buyer_id,
+          seller_id: existingTrade.seller_id,
+          crypto_amount: existingTrade.crypto_amount,
+          fiat_amount: existingTrade.fiat_amount,
+          fiat_currency: existingTrade.fiat_currency,
+          asset: existingTrade.crypto || existingTrade.asset_code,
+          status: existingTrade.status,
+          escrow_status: existingTrade.escrow_status,
+          message: 'Trade already initiated (idempotent replay)',
+        },
+      });
+    }
+
     const isIdUUID = isValidUUID(adId);
 
     // 1. Fetch Ad safely to read metadata
     let ad: any = null;
-    console.log('[DEBUG] Auth User ID:', user?.id);
-    
     let p2pQuery = supabase.from('p2p_ads').select('*');
     if (isIdUUID) {
       p2pQuery = p2pQuery.or(`id.eq.${adId},public_ad_id.eq.${adId}`);
@@ -122,7 +211,8 @@ export async function POST(req: Request) {
     }
 
     // 3. Resolve numerical amounts with exact precision
-    const rawPrice = customPrice ?? ad.fixed_rate ?? ad.price;
+    // Use the ad's stored price only; client-supplied price/rate is untrusted.
+    const rawPrice = ad.price ?? ad.unit_price ?? ad.fixed_rate;
     const unitPrice = Number(rawPrice);
     if (!rawPrice || isNaN(unitPrice) || unitPrice <= 0) {
       return NextResponse.json(
@@ -191,11 +281,11 @@ export async function POST(req: Request) {
       resolvedPaymentMethod = trimmedCustom || 'Bank Transfer';
     }
 
-    const resolvedFiatCurrency = customFiatCurrency || ad.fiat_currency || ad.fiat || 'USD';
+    // Use the ad's stored fiat currency only; client-supplied currency is untrusted.
+    const resolvedFiatCurrency = ad.fiat_symbol || ad.fiat_currency || ad.fiat || 'USD';
     const adIdentifier = String(ad.id || ad.public_ad_id || adId);
 
     // 5. Call Canonical Atomic Database RPC
-    console.log('[DEBUG] Calling initiate_trade_with_escrow RPC with user ID:', user?.id);
     const { data: rpcResult, error: rpcError } = await supabase.rpc('initiate_trade_with_escrow', {
       p_ad_id: adIdentifier,
       p_crypto_amount: calculatedCrypto,
@@ -236,14 +326,9 @@ export async function POST(req: Request) {
     const sellerId = rpcResult.seller_id || ad.user_id;
     const buyerId = rpcResult.buyer_id || user.id;
 
-    if (tradeId && resolvedPaymentMethod) {
-      const adminClient = getSupabaseAdminClient();
-      await adminClient
-        .from('trades')
-        .update({ payment_method: resolvedPaymentMethod })
-        .eq('id', tradeId);
-    }
-
+    // The canonical RPC inserts payment_method atomically with the trade and escrow lock.
+    // Do not perform a second service-role write after the financial transaction.
+    
     // Send Email Notification to Seller (Non-blocking & Duplicate-Protected)
     if (!rpcResult.message?.includes('idempotent replay') && sellerId) {
       try {

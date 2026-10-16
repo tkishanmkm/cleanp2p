@@ -3,6 +3,7 @@ import { createClient } from '@supabase/supabase-js';
 import { cookies } from 'next/headers';
 import { NextResponse, type NextRequest } from 'next/server';
 import { findAdById, resolveBothTargetRows } from '@/lib/ad-lookup';
+import { isAdOwner } from '@/lib/ad-authorization';
 
 export const dynamic = 'force-dynamic';
 
@@ -15,10 +16,18 @@ export async function GET(
     const resolvedParams = await Promise.resolve(params);
     const id = (resolvedParams.id || '').trim();
 
-    const supabaseAdmin = createClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL || 'https://placeholder.supabase.co',
-      process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'placeholder-anon-key'
-    );
+    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL;
+    const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+
+    // This public GET handler only needs public profile fields; never use a service-role key here.
+    if (!supabaseUrl || !supabaseAnonKey) {
+      console.error('Supabase public configuration is missing for ad details.');
+      return NextResponse.json({ error: 'Service temporarily unavailable.' }, { status: 503 });
+    }
+
+    const supabasePublic = createClient(supabaseUrl, supabaseAnonKey, {
+      auth: { persistSession: false, autoRefreshToken: false },
+    });
 
     // 1. Fetch ad by id, public_ad_id, public_id, or ad_id using universal resolver
     const resolved = await findAdById(id);
@@ -32,9 +41,9 @@ export async function GET(
     let creatorProfile: any = null;
 
     if (creatorId) {
-      const { data: prof } = await supabaseAdmin
+      const { data: prof } = await supabasePublic
         .from('profiles')
-        .select('*')
+        .select('id, username, avatar_url, photo_url, created_at, updated_at')
         .eq('id', creatorId)
         .maybeSingle();
       if (prof) {
@@ -42,44 +51,11 @@ export async function GET(
       }
     }
 
-    // Fallback: If not found by id, try matching by username/display name
-    if (!creatorProfile && ad.user_display_name) {
-      const { data: prof } = await supabaseAdmin
-        .from('profiles')
-        .select('*')
-        .ilike('username', ad.user_display_name)
-        .maybeSingle();
-      if (prof) {
-        creatorProfile = prof;
-      }
-    }
+    // Do not fall back to a username-based profile lookup. Public profile details are
+    // optional; an unreadable owner profile must not trigger a privileged-client lookup.
 
-    // Fetch creator's wallet balance for the ad coin
-    let creatorBalance: number | null = null;
-    const coin = (ad.crypto || ad.coin || ad.asset || 'USDT').toUpperCase();
-
-    if (creatorId) {
-      try {
-        const { data: wallet } = await supabaseAdmin
-          .from('user_wallets')
-          .select('available_balance, balance, locked_balance')
-          .eq('user_id', creatorId)
-          .ilike('asset_symbol', coin)
-          .maybeSingle();
-
-        if (wallet) {
-          const avail = Number(wallet.available_balance ?? (Number(wallet.balance || 0) - Number(wallet.locked_balance || 0)));
-          creatorBalance = Math.max(0, avail);
-        } else if (creatorProfile) {
-          const colKey = `${coin.toLowerCase()}_balance`;
-          if (creatorProfile[colKey] !== undefined) {
-            creatorBalance = Number(creatorProfile[colKey] || 0);
-          }
-        }
-      } catch (wErr) {
-        console.warn('Wallet balance fetch error in /api/p2p/ads/[id]:', wErr);
-      }
-    }
+    // Do not expose a seller's wallet balance from this public endpoint.
+    const creatorBalance: number | null = null;
 
     // STRICT USERNAME ENFORCEMENT: lowercase letters, numbers, dot, underscore only
     const username = creatorProfile?.username || ad.user_display_name || 'trader';
@@ -109,7 +85,7 @@ export async function GET(
     });
   } catch (err: any) {
     console.error('Error in GET /api/p2p/ads/[id]:', err);
-    return NextResponse.json({ error: err.message || 'Internal server error' }, { status: 500 });
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }
 
@@ -120,13 +96,21 @@ export async function PATCH(
 ) {
   try {
     const resolvedParams = await Promise.resolve(params);
-    const { id } = resolvedParams;
+    const id = (resolvedParams.id || '').trim();
+    if (!id) {
+      return NextResponse.json({ error: 'Advertisement ID is required.' }, { status: 400 });
+    }
 
     const cookieHeader = cookies();
     const cookieStore = typeof (cookieHeader as any)?.then === 'function' ? await cookieHeader : cookieHeader;
 
-    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL || 'https://placeholder.supabase.co';
-    const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'placeholder-anon-key';
+    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL;
+    const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+
+    if (!supabaseUrl || !supabaseAnonKey) {
+      console.error('Supabase public configuration is missing for ad updates.');
+      return NextResponse.json({ error: 'Service temporarily unavailable.' }, { status: 503 });
+    }
 
     const supabase = createServerClient(
       supabaseUrl,
@@ -188,12 +172,94 @@ export async function PATCH(
       return NextResponse.json({ error: 'Advertisement not found.' }, { status: 404 });
     }
 
-    const adOwnerId = existingAd.user_id || existingAd.userId;
-    if (adOwnerId && String(adOwnerId) !== String(user.id)) {
+    const adOwnerId = existingAd.user_id ?? existingAd.userId;
+    // Fail closed: privileged database writes must never proceed without a verifiable owner.
+    if (!isAdOwner(adOwnerId, user.id)) {
       return NextResponse.json({ error: 'Forbidden. You do not own this advertisement.' }, { status: 403 });
     }
 
     const rawBody = await request.json();
+    if (!rawBody || typeof rawBody !== 'object' || Array.isArray(rawBody)) {
+      return NextResponse.json({ error: 'Request body must be a JSON object.' }, { status: 400 });
+    }
+
+    // Status flags must be actual booleans. In JavaScript Boolean("false") is true,
+    // so accepting string values here could unintentionally activate/deactivate an ad.
+    for (const flag of ['active', 'is_active'] as const) {
+      if (rawBody[flag] !== undefined && typeof rawBody[flag] !== 'boolean') {
+        return NextResponse.json({ error: `${flag} must be a boolean.`, field: flag }, { status: 400 });
+      }
+    }
+    if (rawBody.status !== undefined) {
+      if (typeof rawBody.status !== 'string' || !['ACTIVE', 'INACTIVE'].includes(rawBody.status.trim().toUpperCase())) {
+        return NextResponse.json({ error: 'Status must be ACTIVE or INACTIVE.', field: 'status' }, { status: 400 });
+      }
+    }
+
+    // Validate numeric input before coercion; Number('abc') and Infinity must never reach privileged writes.
+    const numericAliases: Array<[string[], string, (value: number) => boolean, string]> = [
+      [['price'], 'price', value => value > 0, 'Price must be a finite number greater than zero.'],
+      [['margin', 'rate_percent', 'price_margin'], 'margin', value => value >= -50 && value <= 50, 'Margin must be between -50 and 50.'],
+      [['min_amount', 'min_limit'], 'minimum trade limit', value => value > 0, 'Minimum trade limit must be greater than zero.'],
+      [['max_amount', 'max_limit'], 'maximum trade limit', value => value > 0, 'Maximum trade limit must be greater than zero.'],
+      [['payment_window', 'payment_window_minutes'], 'payment window', value => Number.isInteger(value) && value >= 30 && value <= 1440, 'Payment window must be an integer between 30 and 1440 minutes.'],
+      [['min_completed_trades'], 'minimum completed trades', value => Number.isInteger(value) && value >= 0, 'Minimum completed trades must be a non-negative integer.'],
+    ];
+    const validatedNumbers: Record<string, number> = {};
+    for (const [aliases, label, predicate, message] of numericAliases) {
+      const key = aliases.find(alias => rawBody[alias] !== undefined && rawBody[alias] !== null && rawBody[alias] !== '');
+      if (!key) continue;
+      const value = Number(rawBody[key]);
+      if (!Number.isFinite(value) || !predicate(value)) {
+        return NextResponse.json({ error: message, field: label }, { status: 400 });
+      }
+      validatedNumbers[label] = value;
+    }
+
+    const minLimit = validatedNumbers['minimum trade limit'];
+    const maxLimit = validatedNumbers['maximum trade limit'];
+    const existingMin = Number(existingAd.min_limit ?? existingAd.min_amount ?? 0);
+    const existingMax = Number(existingAd.max_limit ?? existingAd.max_amount ?? existingAd.max_amount_fiat ?? 0);
+    const effectiveMin = minLimit ?? (Number.isFinite(existingMin) && existingMin > 0 ? existingMin : undefined);
+    const effectiveMax = maxLimit ?? (Number.isFinite(existingMax) && existingMax > 0 ? existingMax : undefined);
+    if (effectiveMin !== undefined && effectiveMax !== undefined && effectiveMin > effectiveMax) {
+      return NextResponse.json({ error: 'Minimum trade limit cannot exceed maximum trade limit.' }, { status: 400 });
+    }
+
+    // Revalidate fixed prices on edits against the current server-side market reference.
+    const requestedPricingType = String(rawBody.pricing_type ?? existingAd.pricing_type ?? existingAd.rate_type ?? '').toUpperCase();
+    const fixedPricing = requestedPricingType === 'FIXED' || String(rawBody.rate_type ?? existingAd.rate_type ?? '').toUpperCase() === 'FIXED' || rawBody.is_fixed === true || existingAd.is_fixed === true;
+    const suppliedPrice = rawBody.price !== undefined && rawBody.price !== null && rawBody.price !== '';
+    if (fixedPricing && (suppliedPrice || rawBody.pricing_type !== undefined || rawBody.rate_type !== undefined || rawBody.is_fixed !== undefined)) {
+      const effectivePrice = suppliedPrice ? Number(rawBody.price) : Number(existingAd.price);
+      if (!Number.isFinite(effectivePrice) || effectivePrice <= 0) {
+        return NextResponse.json({ error: 'A valid positive fixed price is required.' }, { status: 400 });
+      }
+      const coin = String(rawBody.coin ?? rawBody.crypto ?? rawBody.asset_symbol ?? existingAd.crypto ?? existingAd.coin ?? existingAd.asset ?? 'USDT').toUpperCase();
+      const fiat = String(rawBody.fiat ?? rawBody.fiat_currency ?? rawBody.fiat_symbol ?? existingAd.fiat ?? existingAd.fiat_currency ?? 'USD').toUpperCase();
+      const marketSupabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL;
+      const marketServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+      if (!marketSupabaseUrl || !marketServiceRoleKey) {
+        console.error('Supabase configuration is missing for fixed-price market validation.');
+        return NextResponse.json({ error: 'Service temporarily unavailable.' }, { status: 503 });
+      }
+      const marketClient = createClient(marketSupabaseUrl, marketServiceRoleKey, {
+        auth: { persistSession: false, autoRefreshToken: false },
+      });
+      const { data: marketRow, error: marketError } = await marketClient
+        .from('crypto_market_prices')
+        .select('price_in_fiat, updated_at')
+        .eq('asset_symbol', coin)
+        .eq('fiat_symbol', fiat)
+        .maybeSingle();
+      const referencePrice = Number(marketRow?.price_in_fiat);
+      if (marketError || !Number.isFinite(referencePrice) || referencePrice <= 0) {
+        return NextResponse.json({ error: 'Market reference price is unavailable; fixed-price edit rejected.' }, { status: 400 });
+      }
+      if (effectivePrice < referencePrice * 0.5 || effectivePrice > referencePrice * 1.5) {
+        return NextResponse.json({ error: 'Fixed price must remain within ±50% of the current reference market price.' }, { status: 400 });
+      }
+    }
 
     // Sanitize payload data types
     const body: Record<string, any> = { ...rawBody };
@@ -211,10 +277,17 @@ export async function PATCH(
     if (body.min_limit !== undefined && body.min_limit !== null && body.min_limit !== '') body.min_limit = Number(body.min_limit);
     if (body.max_limit !== undefined && body.max_limit !== null && body.max_limit !== '') body.max_limit = Number(body.max_limit);
 
-    const supabaseAdmin = createClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL || 'https://placeholder.supabase.co',
-      process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'placeholder-anon-key'
-    );
+    const supabaseServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+
+    // Writes below require a true server-only service-role credential; never fall back to anon.
+    if (!supabaseUrl || !supabaseServiceRoleKey) {
+      console.error('Supabase service-role configuration is missing for ad updates.');
+      return NextResponse.json({ error: 'Service temporarily unavailable.' }, { status: 503 });
+    }
+
+    const supabaseAdmin = createClient(supabaseUrl, supabaseServiceRoleKey, {
+      auth: { persistSession: false, autoRefreshToken: false },
+    });
 
     const { p2pAdsRow, adsRow } = await resolveBothTargetRows(existingAd, id, supabaseAdmin);
 
@@ -353,7 +426,7 @@ export async function PATCH(
     return NextResponse.json({ success: true, data: updatedResult || existingAd });
   } catch (err: any) {
     console.error('Error updating ad:', err);
-    return NextResponse.json({ error: err.message || 'Internal Server Error' }, { status: 500 });
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }
 
@@ -364,13 +437,21 @@ export async function DELETE(
 ) {
   try {
     const resolvedParams = await Promise.resolve(params);
-    const { id } = resolvedParams;
+    const id = (resolvedParams.id || '').trim();
+    if (!id) {
+      return NextResponse.json({ error: 'Advertisement ID is required.' }, { status: 400 });
+    }
 
     const cookieHeader = cookies();
     const cookieStore = typeof (cookieHeader as any)?.then === 'function' ? await cookieHeader : cookieHeader;
 
-    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL || 'https://placeholder.supabase.co';
-    const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'placeholder-anon-key';
+    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL;
+    const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+
+    if (!supabaseUrl || !supabaseAnonKey) {
+      console.error('Supabase public configuration is missing for ad deletion.');
+      return NextResponse.json({ error: 'Service temporarily unavailable.' }, { status: 503 });
+    }
 
     const supabase = createServerClient(
       supabaseUrl,
@@ -414,6 +495,16 @@ export async function DELETE(
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
+    try {
+      const { assertUserNotEmergencyFrozen } = await import('@/lib/user-freeze');
+      await assertUserNotEmergencyFrozen(user.id);
+    } catch (freezeErr: any) {
+      return NextResponse.json(
+        { error: freezeErr.message || 'Your account is under an emergency security freeze.', code: 'USER_EMERGENCY_FROZEN' },
+        { status: 403 }
+      );
+    }
+
     // Resolve ad across ads / p2p_ads using universal resolver
     const resolved = await findAdById(id);
     const existingAd = resolved?.ad || null;
@@ -422,15 +513,23 @@ export async function DELETE(
       return NextResponse.json({ error: 'Advertisement not found.' }, { status: 404 });
     }
 
-    const adOwnerId = existingAd.user_id || existingAd.userId;
-    if (adOwnerId && String(adOwnerId) !== String(user.id)) {
+    const adOwnerId = existingAd.user_id ?? existingAd.userId;
+    // Fail closed: privileged database writes must never proceed without a verifiable owner.
+    if (!isAdOwner(adOwnerId, user.id)) {
       return NextResponse.json({ error: 'Forbidden. You do not own this advertisement.' }, { status: 403 });
     }
 
-    const supabaseAdmin = createClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL || 'https://placeholder.supabase.co',
-      process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'placeholder-anon-key'
-    );
+    const supabaseServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+
+    // Deletion uses privileged database writes; never fall back to the anonymous key.
+    if (!supabaseServiceRoleKey) {
+      console.error('Supabase service-role configuration is missing for ad deletion.');
+      return NextResponse.json({ error: 'Service temporarily unavailable.' }, { status: 503 });
+    }
+
+    const supabaseAdmin = createClient(supabaseUrl, supabaseServiceRoleKey, {
+      auth: { persistSession: false, autoRefreshToken: false },
+    });
 
     const { p2pAdsRow, adsRow } = await resolveBothTargetRows(existingAd, id, supabaseAdmin);
 
@@ -511,6 +610,6 @@ export async function DELETE(
     return NextResponse.json({ success: true, message: 'Ad deleted successfully.' });
   } catch (err: any) {
     console.error('Error deleting ad:', err);
-    return NextResponse.json({ error: err.message || 'Internal Server Error' }, { status: 500 });
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }
