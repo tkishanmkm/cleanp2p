@@ -885,7 +885,22 @@ async function scanBtcDeposits(
         if (!Array.isArray(txs)) { errors.push('Invalid BTC transaction list response'); continue; }
 
         for (const tx of txs) {
-          if (typeof tx?.txid !== 'string' || !Array.isArray(tx.vout)) continue;
+          if (
+            typeof tx?.txid !== 'string' ||
+            !/^[0-9a-fA-F]{64}$/.test(tx.txid) ||
+            !Array.isArray(tx.vout)
+          ) {
+            errors.push('Rejected BTC transaction with invalid identifier or outputs');
+            continue;
+          }
+          const confirmedHeight = tx.status?.confirmed === true ? tx.status?.block_height : null;
+          if (
+            confirmedHeight !== null &&
+            (!Number.isSafeInteger(confirmedHeight) || confirmedHeight <= 0 || confirmedHeight > tipHeight)
+          ) {
+            errors.push(`Rejected BTC transaction with invalid confirmation height: ${tx.txid}`);
+            continue;
+          }
           for (let index = 0; index < tx.vout.length; index++) {
             const output = tx.vout[index];
             if (output?.scriptpubkey_address !== address || !Number.isSafeInteger(output.value) || output.value <= 0) continue;
@@ -936,7 +951,22 @@ async function scanLtcDeposits(
         if (!Array.isArray(txs)) { errors.push('Invalid LTC transaction list response'); continue; }
 
         for (const tx of txs) {
-          if (typeof tx?.txid !== 'string' || !Array.isArray(tx.vout)) continue;
+          if (
+            typeof tx?.txid !== 'string' ||
+            !/^[0-9a-fA-F]{64}$/.test(tx.txid) ||
+            !Array.isArray(tx.vout)
+          ) {
+            errors.push('Rejected LTC transaction with invalid identifier or outputs');
+            continue;
+          }
+          const confirmedHeight = tx.status?.confirmed === true ? tx.status?.block_height : null;
+          if (
+            confirmedHeight !== null &&
+            (!Number.isSafeInteger(confirmedHeight) || confirmedHeight <= 0 || confirmedHeight > tipHeight)
+          ) {
+            errors.push(`Rejected LTC transaction with invalid confirmation height: ${tx.txid}`);
+            continue;
+          }
           for (let index = 0; index < tx.vout.length; index++) {
             const output = tx.vout[index];
             if (output?.scriptpubkey_address !== address || !Number.isSafeInteger(output.value) || output.value <= 0) continue;
