@@ -25,14 +25,18 @@ async function safeFetchJson(url: string, timeoutMs: number = 8000) {
   try {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
-    const res = await fetch(url, {
-      headers: COMMON_HEADERS,
-      cache: 'no-store',
-      signal: controller.signal,
-    });
-    clearTimeout(timeoutId);
-    if (!res.ok) return null;
-    return await res.json();
+    try {
+      const res = await fetch(url, {
+        headers: COMMON_HEADERS,
+        cache: 'no-store',
+        signal: controller.signal,
+      });
+      if (!res.ok) return null;
+      // Keep the timeout active while consuming the response body as well.
+      return await res.json();
+    } finally {
+      clearTimeout(timeoutId);
+    }
   } catch {
     return null;
   }
