@@ -43,6 +43,7 @@ export async function POST(req: NextRequest) {
     if (typeof body !== 'object' || body === null || Array.isArray(body)) {
       return NextResponse.json({ error: 'Request body must be a JSON object.' }, { status: 400 });
     }
+    const payload = body as Record<string, unknown>;
     const {
       recipientInput,
       recipientUsername,
@@ -53,7 +54,7 @@ export async function POST(req: NextRequest) {
       idempotencyKey: bodyIdempotencyKey,
       idempotency_key,
       requestId,
-    } = body;
+    } = payload;
     
     const targetIdentifier = String(recipientInput || recipientUsername || '').trim();
     const coinSymbol = String(asset || crypto || 'USDT').toUpperCase().trim();
