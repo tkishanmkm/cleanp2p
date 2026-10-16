@@ -65,20 +65,25 @@ export async function allocateEvmNonce(
   provider: ethers.JsonRpcProvider
 ): Promise<number> {
   const normNet = normalizeNetworkCode(network);
-  try {
-    const onchainPending = await provider.getTransactionCount(walletAddress, 'pending');
-    const { data: allocatedNonce, error } = await supabaseAdmin.rpc('allocate_hot_wallet_nonce', {
-      p_network: normNet,
-      p_wallet_address: walletAddress,
-      p_onchain_pending_nonce: onchainPending,
-    });
-    if (!error && allocatedNonce !== null && allocatedNonce !== undefined) {
-      return Number(allocatedNonce);
-    }
-  } catch (rpcErr) {
-    console.warn('[Nonce Manager] RPC allocate_hot_wallet_nonce failed, falling back to on-chain count:', rpcErr);
+  const onchainPending = await provider.getTransactionCount(walletAddress, 'pending');
+  const { data: allocatedNonce, error } = await supabaseAdmin.rpc('allocate_hot_wallet_nonce', {
+    p_network: normNet,
+    p_wallet_address: walletAddress,
+    p_onchain_pending_nonce: onchainPending,
+  });
+
+  // Never fall back to the RPC/provider pending nonce: concurrent workers could
+  // receive the same nonce and broadcast conflicting transactions.
+  if (error) {
+    console.error('[Nonce Manager] Atomic nonce allocation failed; refusing to broadcast.', error);
+    throw new Error('Safe withdrawal nonce allocation unavailable');
   }
-  return await provider.getTransactionCount(walletAddress, 'pending');
+  const nonce = Number(allocatedNonce);
+  if (allocatedNonce === null || allocatedNonce === undefined || !Number.isSafeInteger(nonce) || nonce < 0) {
+    console.error('[Nonce Manager] Atomic nonce allocator returned an invalid nonce; refusing to broadcast.');
+    throw new Error('Safe withdrawal nonce allocation returned an invalid result');
+  }
+  return nonce;
 }
 
 /**
