@@ -2707,7 +2707,7 @@ export async function reconcileAmbiguousSweep(sweepId: string, workerId: string)
       }
 
       if (isConfirmed) {
-        await supabaseAdmin.rpc('update_sweep_operation_status', {
+        const { data: confirmedRes, error: confirmedErr } = await supabaseAdmin.rpc('update_sweep_operation_status', {
           p_sweep_id: sweepId,
           p_worker_id: workerId,
           p_expected_status: status,
@@ -2715,6 +2715,9 @@ export async function reconcileAmbiguousSweep(sweepId: string, workerId: string)
           p_tx_hash: sweep_tx_hash,
           p_amount_swept: amount_swept,
         });
+        if (confirmedErr || !confirmedRes || typeof confirmedRes !== 'object' || Array.isArray(confirmedRes) || confirmedRes.success !== true) {
+          throw new Error(`Failed to persist confirmed sweep status for ${sweepId}: ${confirmedErr?.message || confirmedRes?.message || 'invalid RPC response'}`);
+        }
         if (net === 'TRC20' || net === 'TRON') {
           try {
             await undelegateEnergyToPool(sweepId, workerId);
