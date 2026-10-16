@@ -1270,10 +1270,27 @@ async function refreshPendingDepositConfirmations(): Promise<{
           // A mined receipt is not proof of a successful transaction. Never
           // advance a pending deposit from a reverted EVM transaction.
           if (receipt && receipt.status === 1 && receipt.blockNumber) {
+            if (!Number.isSafeInteger(receipt.blockNumber) || receipt.blockNumber <= 0 ||
+                typeof receipt.blockHash !== 'string' ||
+                !/^0x[0-9a-fA-F]{64}$/.test(receipt.blockHash)) {
+              console.error('[Deposit Ingestion] Pending EVM receipt has an invalid mined block identity; deposit remains pending');
+              continue;
+            }
+            let canonicalBlock;
+            try {
+              canonicalBlock = await provider.getBlock(receipt.blockNumber);
+            } catch {
+              console.error('[Deposit Ingestion] Could not revalidate the canonical EVM block for a pending deposit; deposit remains pending');
+              continue;
+            }
+            if (!canonicalBlock?.hash || canonicalBlock.hash.toLowerCase() !== receipt.blockHash.toLowerCase()) {
+              console.error('[Deposit Ingestion] Pending EVM receipt block is not canonical at recheck time; deposit remains pending');
+              continue;
+            }
             if (evmTransaction.blockNumber === null || evmTransaction.blockNumber !== receipt.blockNumber) {
-            console.error('[Deposit Ingestion] Pending EVM transaction is not mined in the receipt block; deposit remains pending');
-            continue;
-          }
+              console.error('[Deposit Ingestion] Pending EVM transaction is not mined in the receipt block; deposit remains pending');
+              continue;
+            }
           // ERC-20 pending rows must match the canonical contract, exact receipt
           // log index, recipient and raw token amount before privileged credit.
           if (assetSymbol === 'USDT') {
