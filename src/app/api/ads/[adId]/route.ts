@@ -307,10 +307,18 @@ export async function DELETE(
 
     if (adsRow) {
       try {
-        await admin
+        const { error: softDeleteError } = await admin
           .from('ads')
-          .update({ status: 'DELETED', is_active: false, updated_at: new Date().toISOString() })
+          .update({
+            status: 'DELETED',
+            is_active: false,
+            is_deleted: true,
+            updated_at: new Date().toISOString(),
+          })
           .eq('id', adsRow.id);
+        if (softDeleteError) {
+          console.warn('[DELETE /api/ads/[adId]] Legacy ads soft-delete warning:', softDeleteError.message);
+        }
       } catch (softErr: any) {
         console.warn('[DELETE /api/ads/[adId]] Legacy ads soft-delete warning:', softErr?.message);
       }
@@ -326,10 +334,10 @@ export async function DELETE(
       } else {
         const { data: adsCheck } = await admin
           .from('ads')
-          .select('status')
+          .select('status, is_deleted')
           .eq('id', adsRow.id)
           .maybeSingle();
-        if (adsCheck && adsCheck.status === 'DELETED') {
+        if (adsCheck && (adsCheck.status === 'DELETED' || adsCheck.is_deleted === true)) {
           adsMutated = true;
         }
       }
