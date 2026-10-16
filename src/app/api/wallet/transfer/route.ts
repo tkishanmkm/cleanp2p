@@ -263,7 +263,7 @@ export async function POST(req: NextRequest) {
     // Transfers require an existing profile resolved by username, UUID, exact email, or deposit address.
 
     if (!recipientProfile) {
-      return NextResponse.json({ error: `Recipient "${targetIdentifier}" not found on Paxones.` }, { status: 404 });
+      return NextResponse.json({ error: 'Recipient account was not found.' }, { status: 404 });
     }
 
     if (recipientProfile.id === user.id) {
