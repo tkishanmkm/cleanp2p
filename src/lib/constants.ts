@@ -42,9 +42,8 @@ export const LANGUAGES: Language[] = [
   { code: 'hi', name: 'Hindi', nativeName: 'हिन्दी' },
 ];
 
-// In a real app, these would be in environment variables
-export const ADMIN_ID = 'Narayanharihari';
-export const ADMIN_PASS = 'XGY6ukm@5498';
+// Admin identity and authentication credentials must be managed server-side via Supabase Auth.
+// Never place administrator passwords or trusted identity checks in client-bundled constants.
 
 export const SECURITY_QUESTIONS = [
     "What was your first pet's name?",
