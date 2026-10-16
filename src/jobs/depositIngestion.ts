@@ -1051,6 +1051,16 @@ async function refreshPendingDepositConfirmations(): Promise<{
 
     for (const dep of pendingDeposits) {
       const normNet = normalizeDepositNetwork(dep.network);
+      // Validate persisted transaction identifiers before querying providers or
+      // passing them back to the privileged credit RPC.
+      const txHash = typeof dep.tx_hash === 'string' ? dep.tx_hash : '';
+      const validTxHash = normNet === 'TRC20' || normNet === 'BTC' || normNet === 'LTC'
+        ? /^[0-9a-fA-F]{64}$/.test(txHash)
+        : /^0x[0-9a-fA-F]{64}$/.test(txHash);
+      if (!validTxHash) {
+        console.error('[Deposit Ingestion] Skipping pending deposit with malformed transaction hash');
+        continue;
+      }
       const destinationAddress = dep.to_address || dep.address;
       const outputIndex = dep.output_index ?? dep.log_index ?? 0;
       const assetSymbol = (dep.asset_symbol || 'USDT').toUpperCase().trim();
