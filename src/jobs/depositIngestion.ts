@@ -295,7 +295,14 @@ async function scanEvmNativeDeposits(
       if (!block || !block.prefetchedTransactions) continue;
 
       for (const tx of block.prefetchedTransactions) {
-        if (!tx.to) continue;
+        if (
+          !tx.to ||
+          !/^0x[0-9a-fA-F]{40}$/.test(tx.to) ||
+          !/^0x[0-9a-fA-F]{64}$/.test(tx.hash || '') ||
+          (tx.blockNumber !== null && tx.blockNumber !== undefined && tx.blockNumber !== b)
+        ) {
+          continue;
+        }
         const toClean = tx.to.toLowerCase();
 
         if (monitoredEvmAddresses.has(toClean) && tx.value > BigInt(0)) {
