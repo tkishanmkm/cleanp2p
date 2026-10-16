@@ -745,11 +745,11 @@ export async function fundTronGasForAddress(
       p_worker_id: workerId,
     });
 
-    if (claimErr || !claimRes) {
+    if (claimErr || !claimRes || typeof claimRes !== 'object' || Array.isArray(claimRes)) {
       throw new Error(`Tron gas funding claim RPC failed: ${claimErr?.message || 'UNKNOWN'}`);
     }
 
-    if (claimRes.already_funded) {
+    if (claimRes.already_funded === true) {
       console.log(`[Tron Gas] Address ${targetAddress} TRX gas funding already processed. Skipping.`);
       return;
     }
