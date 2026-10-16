@@ -787,6 +787,11 @@ const checks: Array<[string, string, RegExp]> = [
     /Withdrawal pricing\/configuration check unavailable[\s\S]*?status: 'PRICING_UNAVAILABLE'[\s\S]*?statusCode: 503[\s\S]*?Unable to value recent withdrawals[\s\S]*?statusCode: 503/i,
   ],
   [
+    'withdrawal rejects when daily withdrawal history cannot be loaded',
+    'src/lib/services/withdrawalService.ts',
+    /const \{ data: past24hWithdrawals, error: past24hWithdrawalsError \}[\s\S]*?if \(past24hWithdrawalsError \|\| !past24hWithdrawals\)[\s\S]*?status: 'SECURITY_CHECK_UNAVAILABLE'[\s\S]*?statusCode: 503/i,
+  ],
+  [
     'withdrawal rejects when platform security settings cannot be read',
     'src/lib/services/withdrawalService.ts',
     /const \{ data: settings, error: settingsError \}[\s\S]*?if \(settingsError \|\| !settings\)[\s\S]*?statusCode: 503/i,
