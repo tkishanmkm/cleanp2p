@@ -167,7 +167,9 @@ async function scanEvmTokenDeposits(
 
   const normNet = normalizeDepositNetwork(network);
   const chainConfig = SUPPORTED_EVM_CHAINS[normNet];
-  const tokenContractAddress = CANONICAL_USDT_CONTRACTS[normNet] || chainConfig?.usdtContractAddress;
+  // Only explicitly pinned canonical USDT contracts may trigger USDT credits.
+  // Do not fall back to per-chain configuration or environment-derived addresses.
+  const tokenContractAddress = CANONICAL_USDT_CONTRACTS[normNet];
 
   if (!chainConfig || !tokenContractAddress) {
     return { detected: 0, credited: 0, errors: [] };
