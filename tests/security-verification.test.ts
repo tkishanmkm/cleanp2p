@@ -203,7 +203,7 @@ async function runSecurityPenetrationTestSuite() {
       }
     }
 
-    if (invalidSigStatus === 401 && victimBalance < 50000.0) {
+    if (invalidSigStatus === 401 && [400, 401, 403].includes(spoofStatus) && victimBalance < 50000.0) {
       console.log(green(`  ✓ Missing signature rejected with HTTP ${invalidSigStatus}`));
       console.log(green(`  ✓ Spoofed contract rejected by token whitelist (Legit: ${legitUsdtContract}, Fake: ${fakeTokenContract})`));
       console.log(green(`  ✓ Balance verification: Account balance was NOT inflated (Available: ${victimBalance} USDT)`));
