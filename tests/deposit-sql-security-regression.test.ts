@@ -406,6 +406,11 @@ const checks: Array<[string, string, RegExp]> = [
     /Pre-broadcast validation failure[\s\S]*?refundData\.success !== true/i,
   ],
   [
+    'EVM withdrawal completion requires receipt status exactly successful',
+    'src/jobs/withdrawalWorker.ts',
+    /confirmations >= chain\.requiredConfirmations && status === 1/i,
+  ],
+  [
     'TRON withdrawal confirmation poll requires explicit RPC success',
     'src/jobs/withdrawalWorker.ts',
     /p_actual_gas_amount: actualTrxStr,[\s\S]*?confData\?\.success === true/i,
