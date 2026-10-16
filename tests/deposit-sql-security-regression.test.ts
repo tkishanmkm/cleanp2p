@@ -376,6 +376,11 @@ const checks: Array<[string, string, RegExp]> = [
     /export async function fundTronGasForAddress[\s\S]*?const insolvMsg = `TRON hot wallet[\s\S]*?insolvencyPersistErr[\s\S]*?status: 'RECOVERY_REQUIRED'[\s\S]*?RECOVERY_REQUIRED persistence failed/i,
   ],
   [
+    'TRON delegation signed-transaction persistence requires explicit RPC success',
+    'src/jobs/sweeperWorker.ts',
+    /persist_signed_delegation[\s\S]*?if \(persistErr \|\| !persistRes \|\| persistRes\.success !== true\)[\s\S]*?Failed to persist signed delegation transaction/i,
+  ],
+  [
     'TRON resource delegation broadcast requires explicit boolean success',
     'src/jobs/sweeperWorker.ts',
     /\/\/ 6\. Broadcast delegation transaction[\s\S]*?const broadcastRes = await tronWeb\.trx\.sendRawTransaction\(signedTx\)[\s\S]*?if \(!broadcastRes \|\| broadcastRes\.result !== true\)[\s\S]*?TRON delegation raw broadcast rejected/i,
