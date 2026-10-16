@@ -80,11 +80,6 @@ BEGIN
                      AND ((raw_app_meta_data->>'role') = 'admin')
                )
                OR EXISTS (
-                   SELECT 1 FROM public.profiles
-                   WHERE id = v_caller_id
-                     AND (role = 'admin' OR is_admin = true)
-               )
-               OR EXISTS (
                    SELECT 1 FROM public.app_admins
                    WHERE user_id = v_caller_id
                );
@@ -217,11 +212,6 @@ BEGIN
                    SELECT 1 FROM auth.users
                    WHERE id = v_effective_caller
                      AND ((raw_app_meta_data->>'role') = 'admin')
-               )
-               OR EXISTS (
-                   SELECT 1 FROM public.profiles
-                   WHERE id = v_effective_caller
-                     AND (role = 'admin' OR is_admin = true)
                )
                OR EXISTS (
                    SELECT 1 FROM public.app_admins
