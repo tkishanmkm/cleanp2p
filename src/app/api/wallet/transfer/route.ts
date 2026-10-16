@@ -340,7 +340,7 @@ export async function POST(req: NextRequest) {
       transferData.fee_amount === undefined ||
       transferData.fee_amount === null
     ) {
-      console.error('[Internal Transfer] Malformed RPC response missing financial fields:', transferData);
+      console.error('[Internal Transfer] Malformed RPC response: required fields missing or invalid.');
       return NextResponse.json({
         error: 'Transfer failed: Incomplete financial response received from database.',
         code: 'INVALID_RPC_RESPONSE',
