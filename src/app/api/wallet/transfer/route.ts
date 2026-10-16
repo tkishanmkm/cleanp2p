@@ -310,6 +310,7 @@ export async function POST(req: NextRequest) {
       gross_amount?: number | string;
       net_amount?: number | string;
       fee_amount?: number | string;
+      total_deduction?: number | string;
       sender_balance_after?: number | string;
       recipient_balance_after?: number | string;
       status?: string;
