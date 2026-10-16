@@ -35,7 +35,7 @@ export async function hasPendingWithdrawalApproval(userId: string): Promise<bool
     if (error) {
       console.warn('[WithdrawalSecurity] Error checking pending withdrawal approval:', error.message);
       // Fail-safe: query onchain_withdrawals
-      const { data: onchainData } = await supabaseAdmin
+      const { data: onchainData, error: onchainError } = await supabaseAdmin
         .from('onchain_withdrawals')
         .select('id')
         .eq('user_id', userId)
@@ -43,13 +43,16 @@ export async function hasPendingWithdrawalApproval(userId: string): Promise<bool
         .limit(1)
         .maybeSingle();
 
+      if (onchainError) {
+        throw new Error(`Unable to verify pending withdrawal approval state: ${onchainError.message}`);
+      }
       return Boolean(onchainData?.id);
     }
 
     return Boolean(data?.id);
   } catch (err) {
-    console.error('[WithdrawalSecurity] Unexpected error in hasPendingWithdrawalApproval:', err);
-    return false;
+    console.error('[WithdrawalSecurity] Unable to verify pending withdrawal approval state:', err);
+    throw err instanceof Error ? err : new Error('Unable to verify pending withdrawal approval state');
   }
 }
 
@@ -78,8 +81,13 @@ export async function checkPasswordChangeHold(userId: string): Promise<PasswordH
         .maybeSingle(),
     ]);
 
+    if (profileRes.error) throw new Error(`Unable to read password-change timestamp: ${profileRes.error.message}`);
+    if (settingsRes.error || !settingsRes.data) {
+      throw new Error(`Unable to read password-change hold settings: ${settingsRes.error?.message || 'settings row missing'}`);
+    }
+
     const passwordChangedAt = profileRes.data?.password_changed_at;
-    const holdHours = Number(settingsRes.data?.password_change_withdrawal_hold_hours || defaultHoldHours);
+    const holdHours = Number(settingsRes.data.password_change_withdrawal_hold_hours || defaultHoldHours);
 
     if (!passwordChangedAt) {
       return { isHeld: false, holdHours };
@@ -87,7 +95,7 @@ export async function checkPasswordChangeHold(userId: string): Promise<PasswordH
 
     const changedTime = new Date(passwordChangedAt).getTime();
     if (isNaN(changedTime)) {
-      return { isHeld: false, holdHours };
+      throw new Error('Invalid password_changed_at timestamp; cannot safely verify withdrawal hold');
     }
 
     const holdDurationMs = holdHours * 60 * 60 * 1000;
@@ -106,8 +114,8 @@ export async function checkPasswordChangeHold(userId: string): Promise<PasswordH
 
     return { isHeld: false, holdHours };
   } catch (err) {
-    console.error('[WithdrawalSecurity] Error in checkPasswordChangeHold:', err);
-    return { isHeld: false, holdHours: defaultHoldHours };
+    console.error('[WithdrawalSecurity] Unable to verify password-change withdrawal hold:', err);
+    throw err instanceof Error ? err : new Error('Unable to verify password-change withdrawal hold');
   }
 }
 
