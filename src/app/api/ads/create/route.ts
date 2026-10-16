@@ -388,22 +388,9 @@ export async function POST(req: Request) {
       .select()
       .single();
 
-    // Fallback between 'p2p_ads' and 'ads' if table does not exist
-    if (dbError && (dbError.code === '42P01' || dbError.message?.includes('does not exist'))) {
-      const altTable = targetTable === 'ads' ? 'p2p_ads' : 'ads';
-      const altResult = await supabase
-        .from(altTable)
-        .insert([cleanPayload])
-        .select()
-        .single();
-
-      if (!altResult.error) {
-        data = altResult.data;
-        dbError = null;
-      } else {
-        dbError = altResult.error;
-      }
-    }
+    // Do not silently redirect writes to a different table when the requested
+    // schema is unavailable; the two ad tables may have different constraints
+    // and lifecycle semantics. Surface a generic failure instead.
 
     // If RLS or authorization denies operation, fail-closed without service role bypass
     if (dbError) {
