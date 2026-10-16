@@ -450,6 +450,9 @@ assert.ok(safeFetchJsonSource.indexOf('return await res.json()') < safeFetchJson
 assert.match(safeFetchJsonSource, /finally\s*\{\s*clearTimeout\(timeoutId\);/s,
   'provider timeout must always be cleared after request/body completion');
 
+assert.match(marketPriceWorker, /ASSETS\.includes\(coin\)[\s\S]*?Number\.isFinite\(p\) && p > 0/,
+  'market-price worker must only accept positive finite tickers for explicitly supported assets');
+
 const marketWorkerFunctionIndex = marketPriceWorker.indexOf('export async function runMarketPriceUpdate');
 const marketWorkerConfigGuardIndex = marketPriceWorker.indexOf('if (!supabaseUrl || !supabaseKey)');
 const marketWorkerClientIndex = marketPriceWorker.indexOf('createClient(supabaseUrl, supabaseKey');
