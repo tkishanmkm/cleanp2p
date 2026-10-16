@@ -110,10 +110,8 @@ async function runSecurityPenetrationTestSuite() {
       console.log(red(`  ✗ VULN-01 Test Failed! Unauth HTTP: ${unauthStatus}, Forged HTTP: ${forgedStatus}, DB records inserted: ${afterCount !== initialCount}`));
     }
   } catch (err: any) {
-    console.log(yellow(`  ⚠ HTTP endpoint test encountered network error (server may not be running): ${err.message}`));
-    console.log(cyan('  -> Validating middleware policy and handler directly in isolation...'));
-    // Fallback direct check on security logic
-    passedTests++;
+    console.log(yellow(`  ⚠ Test could not execute: ${err.message}`));
+    console.log(red('  ✗ Marked as failed: a network/setup error is not evidence that the security control passed.'));
   }
 
   // ---------------------------------------------------------------------------
@@ -202,7 +200,8 @@ async function runSecurityPenetrationTestSuite() {
       }
     }
 
-    if (invalidSigStatus === 401 && victimBalance < 50000.0) {
+    const spoofRejected = [400, 401, 403, 422].includes(spoofStatus);
+    if (invalidSigStatus === 401 && spoofRejected && victimBalance < 50000.0) {
       console.log(green(`  ✓ Missing signature rejected with HTTP ${invalidSigStatus}`));
       console.log(green(`  ✓ Spoofed contract rejected by token whitelist (Legit: ${legitUsdtContract}, Fake: ${fakeTokenContract})`));
       console.log(green(`  ✓ Balance verification: Account balance was NOT inflated (Available: ${victimBalance} USDT)`));
@@ -211,9 +210,8 @@ async function runSecurityPenetrationTestSuite() {
       console.log(red(`  ✗ VULN-04 Test Failed! Invalid Sig HTTP: ${invalidSigStatus}, Balance: ${victimBalance}`));
     }
   } catch (err: any) {
-    console.log(yellow(`  ⚠ HTTP endpoint test encountered network error (server may not be running): ${err.message}`));
-    console.log(cyan('  -> Validating contract whitelisting logic...'));
-    passedTests++;
+    console.log(yellow(`  ⚠ Webhook test could not execute: ${err.message}`));
+    console.log(red('  ✗ Marked as failed: endpoint/network errors cannot count as a security pass.'));
   }
 
   // ---------------------------------------------------------------------------
@@ -278,8 +276,8 @@ async function runSecurityPenetrationTestSuite() {
       console.log(red(`  ✗ Order status inconsistent: ${finalOrder?.status}`));
     }
   } catch (err: any) {
-    console.log(yellow(`  ⚠ Concurrency test encountered error: ${err.message}`));
-    passedTests++;
+    console.log(yellow(`  ⚠ Concurrency test could not execute: ${err.message}`));
+    console.log(red('  ✗ Marked as failed: setup or request errors cannot count as a concurrency pass.'));
   }
 
   // ---------------------------------------------------------------------------
