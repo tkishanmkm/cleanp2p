@@ -1158,7 +1158,10 @@ export async function undelegateEnergyToPool(
     .eq('sweep_id', sweepId)
     .maybeSingle();
 
-  if (fetchErr || !delegation) {
+  if (fetchErr) {
+    throw new Error(`Failed to load TRON delegation record for sweep ${sweepId}: ${fetchErr.message}`);
+  }
+  if (!delegation) {
     console.warn(`[Tron Resource Pool] No delegation record found to undelegate for sweep ${sweepId}`);
     return false;
   }
