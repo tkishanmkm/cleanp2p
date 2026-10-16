@@ -58,9 +58,16 @@ export async function POST(
     } else {
       tradeQuery = tradeQuery.eq('trade_id', cleanTradeId);
     }
-    const { data: trade } = await tradeQuery.maybeSingle();
+    const { data: trade, error: tradeLookupError } = await tradeQuery.maybeSingle();
+    if (tradeLookupError) {
+      console.error('Dispute trade lookup failed:', tradeLookupError.code || 'UNKNOWN');
+      return NextResponse.json({ error: 'Unable to verify trade access right now. Please try again.' }, { status: 500 });
+    }
+    if (!trade) {
+      return NextResponse.json({ error: 'Trade not found.' }, { status: 404 });
+    }
 
-    const actualTradeId = trade?.id || tradeId;
+    const actualTradeId = trade.id;
 
     // Verify caller is a trade participant
     const isBuyer = trade?.buyer_id === user.id;
