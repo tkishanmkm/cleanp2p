@@ -718,6 +718,10 @@ async function scanTronDeposits(
               errors.push(`Rejected TRON deposit with unavailable or invalid block height: ${txId}`);
               continue;
             }
+            if (!Number.isSafeInteger(eventBlock) || eventBlock <= 0 || eventBlock > latestBlock) {
+              errors.push(`Rejected TRON account transfer with invalid block height: ${txId}`);
+              continue;
+            }
             const confirmations = latestBlock - eventBlock + 1;
 
             detected++;
