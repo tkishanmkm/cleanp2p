@@ -112,8 +112,11 @@ export async function POST(
     }
 
     const now = new Date().toISOString();
-    const disputeReason = typeof reason === 'string' && reason.trim()
-      ? reason.trim()
+    const normalizedReason = typeof reason === 'string'
+      ? reason.replace(/[\u0000-\u001F\u007F]/g, ' ').replace(/\s+/g, ' ').trim()
+      : '';
+    const disputeReason = normalizedReason
+      ? normalizedReason.slice(0, 2000)
       : 'Non-responsive counterparty or payment issue';
 
     // Execute Atomic Dispute Opening via Canonical Database RPC
