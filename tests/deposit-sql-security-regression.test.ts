@@ -86,6 +86,11 @@ const checks: Array<[string, string, RegExp]> = [
     /allocatedNonce === null[\s\S]*allocatedNonce === undefined[\s\S]*!\\/\\^\\d\\+\\$\\/\.test\\(allocatedNonce\\)/i,
   ],
   [
+    'nonce allocator rejects unsupported networks and invalid pending nonces',
+    'supabase/migrations/20261016000007_bind_nonce_allocation_to_hot_wallet.sql',
+    /v_norm_network NOT IN \('ERC20', 'BEP20', 'POLYGON'\)[\s\S]*p_onchain_pending_nonce IS NULL[\s\S]*p_onchain_pending_nonce < 0/i,
+  ],
+  [
     'nonce allocation binds seeded zero-address placeholder without allowing wallet switching',
     'supabase/migrations/20261016000007_bind_nonce_allocation_to_hot_wallet.sql',
     /Existing migrations seed placeholder zero addresses[\s\S]*LOWER\(TRIM\(COALESCE\(v_hot_wallet_address, ''\)\)\) = '0x0{40}'[\s\S]*RAISE EXCEPTION 'Configured hot-wallet address mismatch/i,
