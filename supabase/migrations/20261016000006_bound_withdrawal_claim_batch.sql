@@ -33,14 +33,12 @@ BEGIN
                 AND wal.status = 'active'
                 AND wal.provisioning_status = 'completed'
           )
-          AND NOT EXISTS (
+          AND EXISTS (
               SELECT 1
               FROM auth.users u
               WHERE u.id = w.user_id
-                AND (
-                    COALESCE(u.banned_until > NOW(), FALSE)
-                    OR lower(COALESCE(u.raw_app_meta_data ->> 'restricted', 'false')) = 'true'
-                )
+                AND NOT COALESCE(u.banned_until > NOW(), FALSE)
+                AND lower(COALESCE(u.raw_app_meta_data ->> 'restricted', 'false')) <> 'true'
           )
         ORDER BY w.created_at ASC
         LIMIT p_limit
