@@ -1327,14 +1327,19 @@ export async function sweepTronDepositAddress(
       }
     } catch (estErr: any) {
       console.error('[Tron Sweeper] Dynamic energy estimation failed. Refusing sweep without exact estimate:', estErr);
+      const estimationFailure = `Dynamic energy estimation failed: ${estErr?.message || estErr}`;
       if (sweepId && workerId) {
-        await supabaseAdmin.rpc('update_sweep_operation_status', {
+        const { data: recoveryRes, error: recoveryErr } = await supabaseAdmin.rpc('update_sweep_operation_status', {
           p_sweep_id: sweepId,
           p_worker_id: workerId,
           p_expected_status: currentStatus,
           p_new_status: 'RECOVERY_REQUIRED',
-          p_error_message: `Dynamic energy estimation failed: ${estErr?.message || estErr}`,
+          p_error_message: estimationFailure,
         });
+        if (recoveryErr || !recoveryRes || recoveryRes.success !== true) {
+          stopHeartbeat();
+          throw new Error(`${estimationFailure}; failed to persist sweep recovery status: ${recoveryErr?.message || recoveryRes?.message || 'unknown RPC response'}`);
+        }
       }
       stopHeartbeat();
       return {
@@ -1343,7 +1348,7 @@ export async function sweepTronDepositAddress(
         amountSwept: '0',
         txHash: '',
         status: 'FAILED',
-        error: `Dynamic energy estimation failed: ${estErr?.message || estErr}`,
+        error: estimationFailure,
       };
     }
 
