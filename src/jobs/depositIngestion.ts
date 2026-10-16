@@ -798,7 +798,17 @@ async function scanTronDeposits(
               continue;
             }
 
+            // Do not pass a negative/zero confirmation count to the privileged
+            // credit RPC if the provider's event is ahead of the observed chain tip.
+            if (eventBlock > latestBlock) {
+              errors.push(`Rejected TRON account transfer above observed chain tip: ${txId}`);
+              continue;
+            }
             const confirmations = latestBlock - eventBlock + 1;
+            if (!Number.isSafeInteger(confirmations) || confirmations <= 0) {
+              errors.push(`Rejected TRON account transfer with invalid confirmation count: ${txId}`);
+              continue;
+            }
             seenTxIndices.add(deduplicationKey);
 
             detected++;
