@@ -442,6 +442,14 @@ assert.match(marketPriceWorker, /process\.env\.SUPABASE_SERVICE_ROLE_KEY\s*\|\|\
   'market-price worker must require the service-role credential');
 assert.match(marketPriceWorker, /if \(!supabaseUrl \|\| !supabaseKey\)[\s\S]*?SUPABASE_SERVICE_CONFIGURATION_MISSING/,
   'market-price worker must fail closed when Supabase server configuration is missing');
+const safeFetchJsonStart = marketPriceWorker.indexOf('async function safeFetchJson');
+const safeFetchJsonEnd = marketPriceWorker.indexOf('\n}', safeFetchJsonStart);
+const safeFetchJsonSource = marketPriceWorker.slice(safeFetchJsonStart, safeFetchJsonEnd);
+assert.ok(safeFetchJsonSource.indexOf('return await res.json()') < safeFetchJsonSource.indexOf('clearTimeout(timeoutId)'),
+  'provider timeout must remain active while the response body is parsed');
+assert.match(safeFetchJsonSource, /finally\s*\{\s*clearTimeout\(timeoutId\);/s,
+  'provider timeout must always be cleared after request/body completion');
+
 const marketWorkerFunctionIndex = marketPriceWorker.indexOf('export async function runMarketPriceUpdate');
 const marketWorkerConfigGuardIndex = marketPriceWorker.indexOf('if (!supabaseUrl || !supabaseKey)');
 const marketWorkerClientIndex = marketPriceWorker.indexOf('createClient(supabaseUrl, supabaseKey');
