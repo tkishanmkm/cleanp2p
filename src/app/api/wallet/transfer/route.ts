@@ -411,9 +411,11 @@ export async function POST(req: NextRequest) {
         ? Number((grossAmount - feeAmount).toFixed(8))
         : Number.NaN;
     const rawTotalDeduction = transferData.total_deduction;
+    // The RPC's gross_amount is the sender's total debit; the fee is
+    // deducted from that gross amount to calculate the recipient's net amount.
     const totalDeduction = rawTotalDeduction != null
       ? Number(rawTotalDeduction)
-      : Number((grossAmount + feeAmount).toFixed(8));
+      : grossAmount;
     const senderBalanceAfter = transferData.sender_balance_after != null ? Number(transferData.sender_balance_after) : undefined;
     const recipientBalanceAfter = transferData.recipient_balance_after != null ? Number(transferData.recipient_balance_after) : undefined;
     const transferStatus = transferData.status.trim().toLowerCase();
