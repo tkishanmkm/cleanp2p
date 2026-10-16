@@ -608,7 +608,7 @@ export async function executeCanonicalWithdrawal(input: WithdrawalRequestInput):
       status: 'RESERVATION_FAILED',
       error: 'Balance reservation failed.',
       message: 'Withdrawals are temporarily unavailable. Please try again later.',
-      statusCode: 400,
+      statusCode: 503,
     };
   }
 
