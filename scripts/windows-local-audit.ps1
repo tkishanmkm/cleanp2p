@@ -19,13 +19,21 @@ function Run-Check([string]$Name, [string]$Command, [string[]]$Arguments) {
   $Log = Join-Path $LogDir ("{0}-{1}.log" -f $Stamp, ($Name -replace '[^a-zA-Z0-9_-]','-'))
   Write-Host ("=== {0} ===" -f $Name)
   Push-Location $RepoRoot
+  $PreviousErrorActionPreference = $ErrorActionPreference
   try {
+    # Windows PowerShell 5.1 can turn native stderr (for example npm warnings)
+    # into terminating NativeCommandError records when ErrorActionPreference=Stop.
+    # Temporarily allow stderr through so the real process exit code is captured.
+    $ErrorActionPreference = "Continue"
     & $Command @Arguments 2>&1 | Tee-Object -FilePath $Log
     $Code = $LASTEXITCODE
   } catch {
     $_ | Out-File -FilePath $Log -Append
     $Code = 1
-  } finally { Pop-Location }
+  } finally {
+    $ErrorActionPreference = $PreviousErrorActionPreference
+    Pop-Location
+  }
   if ($Code -eq 0) { Add-Result $Name "PASS" $Code $Log } else { Add-Result $Name "FAIL" $Code $Log }
 }
 function Get-DirectorySizeBytes([string]$Path) {
