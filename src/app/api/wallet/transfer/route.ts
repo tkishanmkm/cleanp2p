@@ -394,7 +394,7 @@ export async function POST(req: NextRequest) {
       : Number((grossAmount + feeAmount).toFixed(8));
     const senderBalanceAfter = transferData.sender_balance_after != null ? Number(transferData.sender_balance_after) : undefined;
     const recipientBalanceAfter = transferData.recipient_balance_after != null ? Number(transferData.recipient_balance_after) : undefined;
-    const transferStatus = transferData.status.toLowerCase();
+    const transferStatus = transferData.status.trim().toLowerCase();
 
     if (
       !Number.isFinite(grossAmount) || grossAmount <= 0 ||
