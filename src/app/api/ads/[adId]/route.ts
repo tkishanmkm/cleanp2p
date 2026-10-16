@@ -651,7 +651,21 @@ export async function PUT(
       ? body.tags 
       : (Array.isArray(body.offer_tags) ? body.offer_tags : (Array.isArray(body.ad_tags) ? body.ad_tags : undefined));
 
-    const isFixed = body.rate_type === 'fixed' || body.pricing_type === 'FIXED' || Boolean(body.is_fixed);
+    // Bound user-controlled ad metadata before writing it to the database.
+    if (paymentMethods !== undefined && (paymentMethods.length > 20 || paymentMethods.some((method: unknown) => typeof method !== 'string' || method.trim().length === 0 || method.length > 80))) {
+      return NextResponse.json({ error: 'Provide at most 20 valid payment methods, each no longer than 80 characters.' }, { status: 400 });
+    }
+    if (termsText !== undefined && termsText.length > 10000) {
+      return NextResponse.json({ error: 'Advertisement terms must be 10,000 characters or fewer.' }, { status: 400 });
+    }
+    if (offerLabel !== undefined && offerLabel.length > 120) {
+      return NextResponse.json({ error: 'Advertisement label must be 120 characters or fewer.' }, { status: 400 });
+    }
+    if (rawTags !== undefined && (rawTags.length > 30 || rawTags.some((tag: unknown) => typeof tag !== 'string' || tag.trim().length === 0 || tag.length > 50))) {
+      return NextResponse.json({ error: 'Provide at most 30 valid tags, each no longer than 50 characters.' }, { status: 400 });
+    }
+
+    const isFixed = body.rate_type === 'fixed' || body.pricing_type === 'FIXED' || body.is_fixed === true;
     const pricingType = isFixed ? 'FIXED' : 'FLOAT';
     const rateType = isFixed ? 'fixed' : 'market';
 
