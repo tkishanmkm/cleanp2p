@@ -1,11 +1,28 @@
 import { createClient } from '@supabase/supabase-js';
 import crypto from 'crypto';
 
-// Setup Supabase admin client for test assertions
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL || 'https://placeholder.supabase.co';
-const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'placeholder-key';
+// SAFETY: This suite sends attack-shaped requests and queries financial tables.
+// Require explicit opt-in and local-only targets; never fall back to a hosted URL.
+const supabaseUrl = process.env.TEST_SUPABASE_URL;
+const supabaseKey = process.env.TEST_SUPABASE_SERVICE_ROLE_KEY;
+const baseUrl = process.env.TEST_APP_URL;
+const isLocalUrl = (value?: string) =>
+  !!value && /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?(?:\/|$)/i.test(value);
 
-const supabase = createClient(supabaseUrl, supabaseKey, {
+if (
+  process.env.NODE_ENV !== 'test' ||
+  process.env.ALLOW_SECURITY_INTEGRATION_TESTS !== 'true' ||
+  !isLocalUrl(supabaseUrl) ||
+  !isLocalUrl(baseUrl) ||
+  !supabaseKey
+) {
+  throw new Error(
+    'Blocked unsafe security integration tests. Use NODE_ENV=test, local TEST_SUPABASE_URL and ' +
+    'TEST_APP_URL, TEST_SUPABASE_SERVICE_ROLE_KEY, and ALLOW_SECURITY_INTEGRATION_TESTS=true.'
+  );
+}
+
+const supabase = createClient(supabaseUrl!, supabaseKey, {
   auth: { persistSession: false, autoRefreshToken: false },
 });
 
@@ -16,7 +33,7 @@ const cyan = (s: string) => `\x1b[36m${s}\x1b[0m`;
 const bold = (s: string) => `\x1b[1m${s}\x1b[0m`;
 const yellow = (s: string) => `\x1b[33m${s}\x1b[0m`;
 
-const BASE_URL = process.env.TEST_APP_URL || 'http://localhost:3000';
+const BASE_URL = baseUrl!;
 
 async function runSecurityPenetrationTestSuite() {
   console.log(bold(cyan('\n========================================================================')));
