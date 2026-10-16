@@ -495,7 +495,16 @@ async function scanTronDeposits(
             }
 
             const txId = item.transaction_id;
-            if (!txId) continue;
+            // Reject malformed provider identifiers and raw token values before
+            // deduplication or numeric conversion.
+            if (!/^[0-9a-fA-F]{64}$/.test(txId || '')) {
+              errors.push('Rejected TRON transfer with invalid transaction identifier');
+              continue;
+            }
+            if (typeof item.value !== 'string' || !/^\d+$/.test(item.value)) {
+              errors.push(`Rejected TRON transfer with invalid raw amount: ${txId}`);
+              continue;
+            }
 
             const deduplicationKey = `${txId}_0`;
             if (seenTxIndices.has(deduplicationKey)) continue;
