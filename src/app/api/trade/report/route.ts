@@ -38,6 +38,17 @@ export async function POST(req: Request) {
         evidenceUrls.some((url: unknown) => typeof url !== 'string' || url.length > 2048))) {
       return NextResponse.json({ error: 'Evidence must be a list of at most 20 valid URL strings.' }, { status: 400 });
     }
+    if (Array.isArray(evidenceUrls) && evidenceUrls.some((url: unknown) => {
+      if (typeof url !== 'string') return true;
+      try {
+        const parsed = new URL(url);
+        return !['https:', 'http:'].includes(parsed.protocol) || !parsed.hostname;
+      } catch {
+        return true;
+      }
+    })) {
+      return NextResponse.json({ error: 'Each evidence item must be a valid HTTP or HTTPS URL.' }, { status: 400 });
+    }
 
     const cleanPublicId = typeof tradePublicId === 'string' ? tradePublicId.trim() : tradeId.trim();
 
