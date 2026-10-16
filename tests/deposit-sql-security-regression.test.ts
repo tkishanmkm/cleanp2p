@@ -245,6 +245,11 @@ const checks: Array<[string, string, RegExp]> = [
     'supabase/migrations/20261001020000_gas_funding_broadcast_durability_and_abuse_protection.sql',
     /CREATE OR REPLACE FUNCTION public\.persist_signed_gas_funding[\s\S]*?p_signed_tx_hex IS NULL OR TRIM\(p_signed_tx_hex\) = ''[\s\S]*?v_sweep\.lease_expires_at IS NULL OR v_sweep\.lease_expires_at <= NOW\(\)[\s\S]*?IF v_gas\.status <> 'PENDING' THEN/i,
   ],
+  [
+    'gas funding eligibility RPC errors and malformed responses fail closed',
+    'src/jobs/sweeperWorker.ts',
+    /Gas funding eligibility check failed; refusing to fund[\s\S]*?if \(!eligibilityRes \|\| typeof eligibilityRes\.eligible !== 'boolean'\)[\s\S]*?Gas funding eligibility returned an invalid response; refusing to fund[\s\S]*?if \(!eligibilityRes\.eligible\)/i,
+  ],
 ];
 
 let failed = 0;
