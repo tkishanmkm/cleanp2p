@@ -69,6 +69,9 @@ export async function POST(req: NextRequest) {
     const targetIdentifier = rawRecipient.trim();
     const coinSymbol = rawAsset.toUpperCase().trim();
     const numericAmount = Number(amount);
+    if (!targetIdentifier || targetIdentifier.length > 320 || !coinSymbol || coinSymbol.length > 20 || !Number.isFinite(numericAmount) || numericAmount <= 0) {
+      return NextResponse.json({ error: 'Invalid transfer payload. Recipient and positive finite amount required.' }, { status: 400 });
+    }
 
     // Extract and validate client idempotency key
     const headerIdempotencyKey = req.headers.get('x-idempotency-key') || req.headers.get('idempotency-key');
