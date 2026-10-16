@@ -597,7 +597,11 @@ async function scanTronDeposits(
       try {
         const eventUrl = `${tronGridHost}/v1/contracts/${cAddr}/events?event_name=Transfer&limit=50&order_by=block_timestamp,desc`;
         const res = await fetch(eventUrl, { headers: tronGridHeaders });
-        if (res.ok) {
+        if (!res.ok) {
+          errors.push(`TronGrid contract-event request failed with HTTP ${res.status}`);
+          continue;
+        }
+        {
           const data = await res.json();
           if (!data || !Array.isArray(data.data)) {
             errors.push('TronGrid contract-event response had an invalid data shape');
@@ -617,7 +621,7 @@ async function scanTronDeposits(
             const fromHex = evt.result?.from;
             const toHex = evt.result?.to;
             const rawValue = evt.result?.value;
-            if (!toHex || typeof rawValue !== 'string' || !/^\\d+$/.test(rawValue)) continue;
+            if (!toHex || typeof rawValue !== 'string' || !/^\d+$/.test(rawValue)) continue;
 
             let toBase58 = toHex;
             let fromBase58: string | null = fromHex || null;
