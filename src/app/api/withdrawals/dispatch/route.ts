@@ -45,11 +45,20 @@ export async function POST(req: NextRequest) {
     const assetUpper = (withdrawal.asset_symbol || withdrawal.asset || '').toUpperCase();
     const targetWithdrawalId = withdrawal.id || withdrawal.withdrawal_id;
     const destination = withdrawal.to_address || withdrawal.destination_address || withdrawal.destination;
+    const payoutAmount = Number(withdrawal.amount);
+
+    // Fail closed before broadcasting any irreversible on-chain transaction.
+    if (!targetWithdrawalId || typeof destination !== 'string' || !ethers.isAddress(destination)) {
+      throw new Error('Claimed withdrawal is missing a valid ID or EVM destination address');
+    }
+    if (!Number.isFinite(payoutAmount) || payoutAmount <= 0) {
+      throw new Error('Claimed withdrawal amount must be a finite positive number');
+    }
 
     let txHash = '';
 
     if (assetUpper === 'ETH') {
-      const payoutUnits = ethers.parseEther(String(withdrawal.amount));
+      const payoutUnits = ethers.parseEther(String(payoutAmount));
       const tx = await wallet.sendTransaction({
         to: destination,
         value: payoutUnits,
@@ -59,7 +68,7 @@ export async function POST(req: NextRequest) {
       const tokenAddress = process.env.USDT_CONTRACT_ERC20 || '0xdAC17F958D2ee523a2206206994597C13D831ec7';
       const erc20Abi = ['function transfer(address to, uint256 amount) returns (bool)'];
       const contract = new ethers.Contract(tokenAddress, erc20Abi, wallet);
-      const payoutUnits = ethers.parseUnits(String(withdrawal.amount), 6);
+      const payoutUnits = ethers.parseUnits(String(payoutAmount), 6);
       const tx = await contract.transfer(destination, payoutUnits);
       txHash = tx.hash;
     } else {
@@ -67,10 +76,25 @@ export async function POST(req: NextRequest) {
     }
 
     // Settle via authoritative complete_onchain_withdrawal RPC
-    await supabaseAdmin.rpc('complete_onchain_withdrawal', {
+    const { error: settlementError } = await supabaseAdmin.rpc('complete_onchain_withdrawal', {
       p_withdrawal_id: targetWithdrawalId,
       p_tx_hash: txHash,
     });
+    if (settlementError) {
+      // Do not attempt a second payout here. The transaction has already been broadcast;
+      // reconcile this withdrawal using its tx hash before any retry.
+      console.error('[Withdrawal Dispatch CRITICAL] On-chain payout broadcast but database settlement failed', {
+        withdrawalId: targetWithdrawalId,
+        txHash,
+        settlementError,
+      });
+      return NextResponse.json({
+        error: 'Payout was broadcast but database settlement failed; manual reconciliation is required.',
+        withdrawalId: targetWithdrawalId,
+        txHash,
+        reconciliationRequired: true,
+      }, { status: 500 });
+    }
 
     return NextResponse.json({
       success: true,
