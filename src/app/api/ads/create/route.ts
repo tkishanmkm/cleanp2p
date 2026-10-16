@@ -423,9 +423,9 @@ export async function POST(req: Request) {
     return NextResponse.json({ success: true, data });
 
   } catch (err: any) {
-    console.error('[Unhandled Server Error in /api/ads/create]:', err);
+    console.error('[POST /api/ads/create] Unhandled server error:', err);
     return NextResponse.json(
-      { error: err.message || 'Internal Server Error' }, 
+      { error: 'An unexpected error occurred while creating the advertisement.' },
       { status: 500 }
     );
   }
