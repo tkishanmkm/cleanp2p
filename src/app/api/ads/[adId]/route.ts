@@ -601,22 +601,33 @@ export async function PUT(
 
     // 1. Authenticate Requesting User
     const authHeader = request.headers.get('authorization');
-    const bearerMatch = authHeader?.match(/^Bearer\s+(.+)$/i);
-    const bearerToken = bearerMatch?.[1]?.trim() || null;
+    const bearerMatch = authHeader?.match(/^Bearer\\s+(.+)$/i);
+    const bearerToken = bearerMatch?.[1]?.trim();
 
     let user: any = null;
     let authError: any = null;
 
-    if (bearerToken) {
+    if (authHeader !== null) {
+      if (!bearerToken) {
+        return NextResponse.json(
+          { error: 'Invalid authorization header.', code: 'INVALID_AUTHORIZATION' },
+          { status: 401 }
+        );
+      }
       const tokenAuth = await supabase.auth.getUser(bearerToken);
       user = tokenAuth.data?.user;
       authError = tokenAuth.error;
-    }
-
-    if (!user && !authHeader) {
+    } else {
       const cookieAuth = await supabase.auth.getUser();
       user = cookieAuth.data?.user;
       authError = cookieAuth.error;
+    }
+
+    if (authError && !user) {
+      return NextResponse.json(
+        { error: 'Unauthorized. Please log in to manage your advertisement.' },
+        { status: 401 }
+      );
     }
 
     // 2. Resolve the Ad Record across tables (ads, p2p_ads, offers)
