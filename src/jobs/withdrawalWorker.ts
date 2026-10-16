@@ -397,6 +397,23 @@ export async function checkSubmittedWithdrawals(): Promise<{
     checked = pendingTxs.length;
 
     for (const w of pendingTxs) {
+      // Rotate this row out of the oldest-first batch before checking it, so
+      // unconfirmed or temporarily unavailable transactions do not starve
+      // every later row when the batch limit is reached.
+      const { data: checkClaim, error: checkClaimError } = await supabaseAdmin
+        .from('onchain_withdrawals')
+        .update({ updated_at: new Date().toISOString() })
+        .eq('id', w.id)
+        .in('status', ['BROADCASTED', 'PROCESSING', 'AMBIGUOUS_BROADCAST'])
+        .not('tx_hash', 'is', null)
+        .select('id')
+        .maybeSingle();
+
+      if (checkClaimError || !checkClaim) {
+        console.warn(`[Withdrawal Worker] Could not rotate reconciliation row ${w.id}; skipping this pass.`, checkClaimError);
+        continue;
+      }
+
       const normNet = normalizeNetworkCode(w.network);
 
       if (normNet === 'TRC20') {
