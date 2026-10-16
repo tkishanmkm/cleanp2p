@@ -294,10 +294,14 @@ export async function POST(req: NextRequest) {
     });
 
     if (rpcError) {
-      console.error('[Internal Transfer] RPC execute_internal_transfer error:', rpcError);
+      console.error('[Internal Transfer] RPC execute_internal_transfer failed:', {
+        code: rpcError.code,
+        details: rpcError.details,
+        hint: rpcError.hint,
+      });
       return NextResponse.json({
-        error: rpcError.message || 'Failed to execute internal transfer.',
-        code: rpcError.code || 'TRANSFER_RPC_ERROR',
+        error: 'Transfer could not be completed. Please verify your details and try again.',
+        code: 'TRANSFER_RPC_ERROR',
       }, { status: 400 });
     }
 
