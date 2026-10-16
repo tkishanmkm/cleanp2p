@@ -92,7 +92,7 @@ export async function GET(
     }
 
     const priceVal = Number(ad.price ?? ad.unit_price ?? ad.fixed_rate ?? 0);
-    let paymentMethods: unknown[] = ['Bank Transfer'];
+    let paymentMethods: unknown[] = [];
     if (Array.isArray(ad.payment_methods)) {
       paymentMethods = ad.payment_methods;
     } else if (typeof ad.payment_methods === 'string') {
