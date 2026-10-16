@@ -802,6 +802,14 @@ async function scanBtcDeposits(
   }
 
   const btcApiBase = getBtcMempoolApi();
+  const tipResponse = await fetch(`${btcApiBase}/blocks/tip/height`);
+  if (!tipResponse.ok) {
+    return { detected: 0, credited: 0, errors: [`Unable to retrieve BTC tip height (HTTP ${tipResponse.status})`] };
+  }
+  const tipHeight = Number((await tipResponse.text()).trim());
+  if (!Number.isSafeInteger(tipHeight) || tipHeight < 0) {
+    return { detected: 0, credited: 0, errors: ['Invalid BTC tip height response'] };
+  }
 
   for (const btcAddr of Array.from(monitoredBtcAddresses)) {
     try {
@@ -828,7 +836,9 @@ async function scanBtcDeposits(
           const btcAmount = outputAmountSat / 100_000_000;
           const isConfirmed = tx.status?.confirmed === true;
           const blockHeight = tx.status?.block_height;
-          let confirmations = isConfirmed ? 2 : 0;
+          const confirmations = isConfirmed && Number.isSafeInteger(blockHeight)
+            ? Math.max(0, tipHeight - Number(blockHeight) + 1)
+            : 0;
 
           const { data, error } = await supabaseAdmin.rpc('process_deposit_atomic', {
             p_destination_address: btcAddr,
@@ -848,7 +858,7 @@ async function scanBtcDeposits(
             errors.push(`RPC error for BTC deposit ${tx.txid}: ${error.message}`);
           } else {
             const res = typeof data === 'string' ? JSON.parse(data) : data;
-            if (res?.status === 'credited' || (res?.success && confirmations >= 2)) {
+            if (res?.status === 'credited') {
               credited++;
             }
           }
@@ -877,6 +887,14 @@ async function scanLtcDeposits(
   }
 
   const ltcApiBase = process.env.LTC_MEMPOOL_API || 'https://litecoinspace.org/api';
+  const tipResponse = await fetch(`${ltcApiBase}/blocks/tip/height`);
+  if (!tipResponse.ok) {
+    return { detected: 0, credited: 0, errors: [`Unable to retrieve LTC tip height (HTTP ${tipResponse.status})`] };
+  }
+  const tipHeight = Number((await tipResponse.text()).trim());
+  if (!Number.isSafeInteger(tipHeight) || tipHeight < 0) {
+    return { detected: 0, credited: 0, errors: ['Invalid LTC tip height response'] };
+  }
 
   for (const ltcAddr of Array.from(monitoredLtcAddresses)) {
     try {
@@ -903,7 +921,9 @@ async function scanLtcDeposits(
           const ltcAmount = outputAmountLit / 100_000_000;
           const isConfirmed = tx.status?.confirmed === true;
           const blockHeight = tx.status?.block_height;
-          let confirmations = isConfirmed ? 6 : 0;
+          const confirmations = isConfirmed && Number.isSafeInteger(blockHeight)
+            ? Math.max(0, tipHeight - Number(blockHeight) + 1)
+            : 0;
 
           const { data, error } = await supabaseAdmin.rpc('process_deposit_atomic', {
             p_destination_address: ltcAddr,
@@ -923,7 +943,7 @@ async function scanLtcDeposits(
             errors.push(`RPC error for LTC deposit ${tx.txid}: ${error.message}`);
           } else {
             const res = typeof data === 'string' ? JSON.parse(data) : data;
-            if (res?.status === 'credited' || (res?.success && confirmations >= 6)) {
+            if (res?.status === 'credited') {
               credited++;
             }
           }
