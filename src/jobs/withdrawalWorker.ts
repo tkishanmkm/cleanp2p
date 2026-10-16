@@ -458,13 +458,17 @@ export async function checkSubmittedWithdrawals(): Promise<{
                 }
               }
 
-              const { error: confErr } = await supabaseAdmin.rpc('complete_onchain_withdrawal', {
+              const { data: confData, error: confErr } = await supabaseAdmin.rpc('complete_onchain_withdrawal', {
                 p_withdrawal_id: w.id,
                 p_tx_hash: w.tx_hash,
                 p_actual_gas_amount: actualFeeBtc,
                 p_gas_asset: 'BTC',
               });
-              if (!confErr) confirmed++;
+              if (confErr || confData?.success !== true) {
+                console.error(`[Withdrawal Worker] BTC completion RPC did not confirm success for ${w.id}; leaving unresolved.`, confErr || confData);
+              } else {
+                confirmed++;
+              }
             }
           }
         } catch (btcErr) {
