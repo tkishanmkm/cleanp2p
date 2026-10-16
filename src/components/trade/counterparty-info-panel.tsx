@@ -127,7 +127,7 @@ export function CounterpartyInfoPanel({
             setIsBlockedByThem(
               targetBlocked.includes(currentUser.id) ||
               targetBlocked.includes(currentUser.user_metadata?.username) ||
-              targetBlocked.includes(currentUser.email?.split('@')[0])
+              Boolean(currentUser.email && targetBlocked.includes(currentUser.email.split('@')[0]))
             );
           }
         }
@@ -349,7 +349,7 @@ export function CounterpartyInfoPanel({
                     current.is_email_verified === true ||
                     current.emailVerified === true ||
                     current.email_confirmed_at != null ||
-                    current.is_email_verified ?? true
+                    (current.is_email_verified ?? true)
                   ) ? (
                     <span className="inline-flex items-center gap-1 text-xs font-bold px-2 py-0.5 rounded-md bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">
                       <CheckCircle className="h-3 w-3" /> Verified
