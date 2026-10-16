@@ -396,6 +396,16 @@ const checks: Array<[string, string, RegExp]> = [
     /Number\.isSafeInteger\(totalEnergyWeightSun\)[\s\S]*?Number\.isSafeInteger\(requiredSunNumerator\)[\s\S]*?Number\.isSafeInteger\(requiredSunNumber\)/i,
   ],
   [
+    'TRON withdrawal confirmation poll requires explicit RPC success',
+    'src/jobs/withdrawalWorker.ts',
+    /p_actual_gas_amount: actualTrxStr,[\s\S]*?confData\?\.success === true/i,
+  ],
+  [
+    'EVM withdrawal confirmation poll requires explicit RPC success',
+    'src/jobs/withdrawalWorker.ts',
+    /p_actual_gas_amount: actualGasStr,[\s\S]*?confData\?\.success === true/i,
+  ],
+  [
     'TRON withdrawal completion requires explicit successful RPC result',
     'src/jobs/withdrawalWorker.ts',
     /const { data: completionData, error: completionError } = await supabaseAdmin\.rpc\('complete_onchain_withdrawal'[\s\S]*?completionData\.success !== true/i,
