@@ -467,9 +467,17 @@ async function scanTronDeposits(
       try {
         const accountUrl = `${tronGridHost}/v1/accounts/${monitoredAddr}/transactions/trc20?limit=20`;
         const res = await fetch(accountUrl, { headers: tronGridHeaders });
-        if (res.ok) {
+        if (!res.ok) {
+          errors.push(`TronGrid account-transfer request failed with HTTP ${res.status}`);
+          continue;
+        }
+        {
           const json = await res.json();
-          const items = Array.isArray(json?.data) ? json.data : [];
+          if (!json || !Array.isArray(json.data)) {
+            errors.push('TronGrid account-transfer response had an invalid data shape');
+            continue;
+          }
+          const items = json.data;
           for (const item of items) {
             if (item.type !== 'Transfer') continue;
 
