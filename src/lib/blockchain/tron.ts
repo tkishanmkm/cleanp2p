@@ -166,13 +166,17 @@ export async function getTronTransactionConfirmations(txHash: string): Promise<{
     }
 
     const confirmations = Math.max(0, currentHeight - txInfo.blockNumber + 1);
-    const success = !txInfo.receipt?.result || txInfo.receipt.result === 'SUCCESS';
+    const receiptResult = txInfo.receipt?.result;
+    // Fail closed if the explorer has not supplied an execution result. A
+    // missing result is not evidence of success and must not trigger a refund.
+    const hasTerminalResult = typeof receiptResult === 'string' && receiptResult.length > 0;
+    const success = receiptResult === 'SUCCESS';
 
     return {
       confirmations,
-      // Confirmation depth and execution success are separate facts. The caller
-      // must be able to refund a transaction only after a confirmed on-chain failure.
-      isConfirmed: confirmations >= TRON_CONFIG.requiredConfirmations,
+      // Only treat a transaction as final for settlement/refund when both the
+      // required depth and an explicit terminal receipt result are available.
+      isConfirmed: confirmations >= TRON_CONFIG.requiredConfirmations && hasTerminalResult,
       success,
       blockNumber: txInfo.blockNumber,
       actualCostTrx,
