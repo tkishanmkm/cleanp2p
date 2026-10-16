@@ -66,8 +66,8 @@ export async function POST(
       return NextResponse.json({ error: 'Request body must be a JSON object.' }, { status: 400 });
     }
     const { reason } = body as Record<string, unknown>;
-    if (reason !== undefined && (typeof reason !== 'string' || reason.length > 2000)) {
-      return NextResponse.json({ error: 'Dispute reason must be text of 2,000 characters or fewer.' }, { status: 400 });
+    if (typeof reason !== 'string' || !reason.trim() || reason.length > 2000) {
+      return NextResponse.json({ error: 'A non-empty dispute reason of 2,000 characters or fewer is required.' }, { status: 400 });
     }
 
     const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(cleanTradeId);
@@ -111,9 +111,10 @@ export async function POST(
     const normalizedReason = typeof reason === 'string'
       ? reason.replace(/[\u0000-\u001F\u007F]/g, ' ').replace(/\s+/g, ' ').trim()
       : '';
-    const disputeReason = normalizedReason
-      ? normalizedReason.slice(0, 2000)
-      : 'Non-responsive counterparty or payment issue';
+    if (!normalizedReason) {
+      return NextResponse.json({ error: 'Dispute reason must contain readable text.' }, { status: 400 });
+    }
+    const disputeReason = normalizedReason.slice(0, 2000);
 
     // Execute Atomic Dispute Opening via Canonical Database RPC
     const { data: rpcData, error: rpcError } = await supabase.rpc('raise_trade_dispute', {
