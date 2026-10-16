@@ -270,15 +270,17 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'You cannot transfer funds to yourself.' }, { status: 400 });
     }
 
-    // Block recipient if banned, restricted, or emergency frozen
+    // Normalize status casing so database capitalization cannot bypass recipient restrictions.
+    const recipientAccountStatus = typeof recipientProfile.account_status === 'string'
+      ? recipientProfile.account_status.trim().toLowerCase()
+      : '';
+
+    // Block recipient if banned, restricted, or emergency frozen.
     if (
       recipientProfile.is_banned ||
       recipientProfile.is_restricted ||
       recipientProfile.is_emergency_frozen ||
-      recipientProfile.account_status === 'suspended' ||
-      recipientProfile.account_status === 'banned' ||
-      recipientProfile.account_status === 'restricted' ||
-      recipientProfile.account_status === 'frozen'
+      ['suspended', 'banned', 'restricted', 'frozen'].includes(recipientAccountStatus)
     ) {
       return NextResponse.json({
         error: `Cannot transfer: Recipient @${recipientProfile.username} is restricted or frozen on the platform.`,
