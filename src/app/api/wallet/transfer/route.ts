@@ -339,7 +339,10 @@ export async function POST(req: NextRequest) {
       transferData.net_amount === undefined ||
       transferData.net_amount === null ||
       transferData.fee_amount === undefined ||
-      transferData.fee_amount === null
+      transferData.fee_amount === null ||
+      (transferData.total_deduction !== undefined && transferData.total_deduction !== null &&
+        ((typeof transferData.total_deduction !== 'number' && typeof transferData.total_deduction !== 'string') ||
+          (typeof transferData.total_deduction === 'string' && transferData.total_deduction.trim().length === 0)))
     ) {
       console.error('[Internal Transfer] Malformed RPC response: required fields missing or invalid.');
       return NextResponse.json({
