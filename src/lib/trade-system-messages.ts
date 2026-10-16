@@ -1866,6 +1866,16 @@ export async function insertPaxonesSystemMessage(
     console.warn('System message insertion requires a valid trade ID.');
     return;
   }
+  const allowedTypes = new Set<SystemMessagePayload['type']>([
+    'TRADE_INITIATED', 'TRADE_STARTED', 'ESCROW_LOCKED', 'TRADE_COMPLETED',
+    'TRADE_RELEASED', 'TRADE_CANCELLED', 'TRADE_EXPIRED', 'TRADE_DISPUTED',
+    'POSITIVE_FEEDBACK', 'NEGATIVE_FEEDBACK', 'USER_BLOCKED', 'ISSUE_REPORTED',
+    'MARKED_PAID', 'MESSAGE_BLOCKED', 'SECURITY_REMINDER', 'CUSTOM',
+  ]);
+  if (typeof payload.type !== 'string' || !allowedTypes.has(payload.type)) {
+    console.warn('System message insertion rejected an unsupported message type.');
+    return;
+  }
   const text = formatSystemMessageContent(payload);
   const now = new Date().toISOString();
   const systemUuid = '00000000-0000-0000-0000-000000000000';
