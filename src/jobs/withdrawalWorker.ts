@@ -385,11 +385,15 @@ export async function checkSubmittedWithdrawals(): Promise<{
           });
           if (!confErr) confirmed++;
         } else if (isFailed && !success) {
-          await supabaseAdmin.rpc('process_failed_withdrawal', {
+          const { error: failedErr } = await supabaseAdmin.rpc('process_failed_withdrawal', {
             p_withdrawal_id: w.id,
             p_error_reason: `TRON transaction reverted on-chain`,
-            p_is_verified_unbroadcast: false,
+            p_is_verified_unbroadcast: true,
           });
+          if (failedErr) {
+            // Keep the withdrawal reserved; a failed refund RPC must never be treated as resolved.
+            console.error(`[Withdrawal Worker] Failed to process verified TRON revert for ${w.id}; funds remain reserved:`, failedErr);
+          }
         }
       } else if (SUPPORTED_EVM_CHAINS[normNet]) {
         const chain = SUPPORTED_EVM_CHAINS[normNet];
@@ -407,11 +411,15 @@ export async function checkSubmittedWithdrawals(): Promise<{
           });
           if (!confErr) confirmed++;
         } else if (status === 0) {
-          await supabaseAdmin.rpc('process_failed_withdrawal', {
+          const { error: failedErr } = await supabaseAdmin.rpc('process_failed_withdrawal', {
             p_withdrawal_id: w.id,
             p_error_reason: `EVM transaction reverted on-chain on network ${w.network}`,
             p_is_verified_unbroadcast: true,
           });
+          if (failedErr) {
+            // Keep the withdrawal reserved; a failed refund RPC must never be treated as resolved.
+            console.error(`[Withdrawal Worker] Failed to process verified EVM revert for ${w.id}; funds remain reserved:`, failedErr);
+          }
         }
       } else if (normNet === 'BTC') {
         try {
