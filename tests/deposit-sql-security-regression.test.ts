@@ -66,6 +66,16 @@ const checks: Array<[string, string, RegExp]> = [
     /isFailed: boolean[\s\S]*?isFailed: false[\s\S]*?isFailed: Boolean\(txInfo\.receipt\?\.result && txInfo\.receipt\.result !== 'SUCCESS'\)/i,
   ],
   [
+    'withdrawal poller checks EVM refund RPC errors after verified reverts',
+    'src/jobs/withdrawalWorker.ts',
+    /status === 0\)[\s\S]*?const \{ error: failedErr \} = await supabaseAdmin\.rpc\('process_failed_withdrawal'[\s\S]*?if \(failedErr\)[\s\S]*?funds remain reserved/i,
+  ],
+  [
+    'withdrawal poller checks TRON refund RPC errors after verified reverts',
+    'src/jobs/withdrawalWorker.ts',
+    /isFailed && !success\)[\s\S]*?const \{ error: failedErr \} = await supabaseAdmin\.rpc\('process_failed_withdrawal'[\s\S]*?p_is_verified_unbroadcast: true[\s\S]*?if \(failedErr\)[\s\S]*?funds remain reserved/i,
+  ],
+  [
     'withdrawal worker treats completion RPC errors after broadcast as ambiguous failures',
     'src/jobs/withdrawalWorker.ts',
     /const \{ error: completionError \} = await supabaseAdmin\.rpc\('complete_onchain_withdrawal'[\s\S]*?if \(completionError\)[\s\S]*?throw new Error[\s\S]*?const \{ error: completionError \} = await supabaseAdmin\.rpc\('complete_onchain_withdrawal'[\s\S]*?if \(completionError\)[\s\S]*?throw new Error/i,
