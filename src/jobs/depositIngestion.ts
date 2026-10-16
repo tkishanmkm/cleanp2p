@@ -982,7 +982,8 @@ async function scanTronDeposits(
             const fromHex = evt.result?.from;
             const toHex = evt.result?.to;
             const rawValue = evt.result?.value;
-            if (!toHex || typeof rawValue !== 'string' || !/^\d+$/.test(rawValue)) continue;
+            // ERC-20/TRC-20 uint256 values are at most 78 decimal digits; cap input before BigInt parsing.
+            if (!toHex || typeof rawValue !== 'string' || rawValue.length > 78 || !/^\d+$/.test(rawValue)) continue;
 
             let toBase58 = toHex;
             let fromBase58: string | null = fromHex || null;
