@@ -802,6 +802,11 @@ const checks: Array<[string, string, RegExp]> = [
     /const \{ data: past24hWithdrawals, error: past24hWithdrawalsError \}[\s\S]*?if \(past24hWithdrawalsError \|\| !past24hWithdrawals\)[\s\S]*?status: 'SECURITY_CHECK_UNAVAILABLE'[\s\S]*?statusCode: 503/i,
   ],
   [
+    'withdrawal asset and network inputs must be strings',
+    'src/lib/services/withdrawalService.ts',
+    /typeof input\.asset !== 'string'[\s\S]*?typeof input\.network !== 'string'[\s\S]*?typeof input\.chain !== 'string'[\s\S]*?status: 'INVALID_ASSET_OR_NETWORK'/,
+  ],
+  [
     'projected rolling withdrawal total is checked for finite value',
     'src/lib/services/withdrawalService.ts',
     /const projected24hUsd = rolling24hUsd \+ usdEquivalent[\s\S]*?!Number\.isFinite\(projected24hUsd\)[\s\S]*?statusCode: 503[\s\S]*?if \(projected24hUsd > dailyLimitUsd\)/,
