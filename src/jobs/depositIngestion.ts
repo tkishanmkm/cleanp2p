@@ -1040,7 +1040,10 @@ async function refreshPendingDepositConfirmations(): Promise<{
       .order('created_at', { ascending: true })
       .limit(50);
 
-    if (error || !pendingDeposits || pendingDeposits.length === 0) {
+    if (error) {
+      throw new Error(`Failed to load pending deposits: ${error.message}`);
+    }
+    if (!pendingDeposits || pendingDeposits.length === 0) {
       return { checked: 0, newlyCredited: 0 };
     }
 
