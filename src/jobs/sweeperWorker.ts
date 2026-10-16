@@ -1870,8 +1870,9 @@ export async function sweepBtcDepositAddress(
       }
     } catch (broadcastErr: any) {
       console.error(`[BTC Sweeper Broadcast Exception] ${depositAddress}:`, broadcastErr);
+      let recoveryPersistError: string | null = null;
       if (sweepId && workerId) {
-        await supabaseAdmin.rpc('update_sweep_operation_status', {
+        const { data: recoveryRes, error: recoveryErr } = await supabaseAdmin.rpc('update_sweep_operation_status', {
           p_sweep_id: sweepId,
           p_worker_id: workerId,
           p_expected_status: 'READY_TO_BROADCAST',
@@ -1879,8 +1880,15 @@ export async function sweepBtcDepositAddress(
           p_tx_hash: deterministicTxHash,
           p_error_message: broadcastErr?.message || 'BTC broadcast ambiguous',
         });
+        if (recoveryErr || !recoveryRes || recoveryRes.success !== true) {
+          recoveryPersistError = recoveryErr?.message || recoveryRes?.message || 'invalid RPC response';
+          console.error(`[BTC Sweeper Recovery Persistence Failure] ${depositAddress}: ${recoveryPersistError}`);
+        }
       }
       stopHeartbeat();
+      if (recoveryPersistError) {
+        throw new Error(`BTC broadcast outcome ambiguous (${broadcastErr?.message || broadcastErr}); RECOVERY_REQUIRED persistence failed: ${recoveryPersistError}`);
+      }
       throw broadcastErr;
     }
 
