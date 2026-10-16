@@ -75,7 +75,8 @@ export async function checkCircuitBreakers(): Promise<{ allowed: boolean; reason
       .maybeSingle();
 
     if (error || !settings) {
-      return { allowed: true };
+      console.error('[Withdrawal Worker] Circuit-breaker settings unavailable; blocking withdrawal dispatch.', error);
+      return { allowed: false, reason: 'Withdrawal safety settings unavailable' };
     }
     if (settings.global_kill_switch_active) {
       return { allowed: false, reason: 'Global emergency kill switch is currently active' };
@@ -85,7 +86,8 @@ export async function checkCircuitBreakers(): Promise<{ allowed: boolean; reason
     }
     return { allowed: true };
   } catch (err) {
-    return { allowed: true };
+    console.error('[Withdrawal Worker] Circuit-breaker check failed; blocking withdrawal dispatch.', err);
+    return { allowed: false, reason: 'Withdrawal safety check failed' };
   }
 }
 
@@ -105,13 +107,18 @@ export async function allocateEvmNonce(
       p_wallet_address: walletAddress,
       p_onchain_pending_nonce: onchainPending,
     });
-    if (!error && allocatedNonce !== null && allocatedNonce !== undefined) {
-      return Number(allocatedNonce);
+    if (error || allocatedNonce === null || allocatedNonce === undefined) {
+      throw new Error('Atomic hot-wallet nonce allocation failed; refusing unsafe fallback');
     }
+    const nonce = Number(allocatedNonce);
+    if (!Number.isSafeInteger(nonce) || nonce < 0) {
+      throw new Error('Atomic hot-wallet nonce allocation returned an invalid nonce');
+    }
+    return nonce;
   } catch (rpcErr) {
-    console.warn('[Nonce Manager] RPC allocate_hot_wallet_nonce failed, falling back to on-chain count:', rpcErr);
+    console.error('[Nonce Manager] Atomic nonce allocation failed; blocking withdrawal dispatch.', rpcErr);
+    throw new Error('Safe withdrawal nonce allocation unavailable');
   }
-  return await provider.getTransactionCount(walletAddress, 'pending');
 }
 
 /**
