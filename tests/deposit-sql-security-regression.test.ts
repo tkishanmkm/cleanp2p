@@ -772,6 +772,11 @@ const checks: Array<[string, string, RegExp]> = [
     /let pwdHold:[\s\S]*?checkPasswordChangeHold\(user\.id\)[\s\S]*?hasPendingWithdrawalApproval\(user\.id\)[\s\S]*?Withdrawal hold\/approval security checks unavailable[\s\S]*?statusCode: 503/i,
   ],
   [
+    'token withdrawal fee rejects missing USD gas valuation instead of using a fixed fallback',
+    'src/lib/fees.ts',
+    /Authoritative token network fee USD unavailable[\s\S]*?baseNetworkFeeCrypto = feeUsd/i,
+  ],
+  [
     'authoritative withdrawal fee rejects unknown networks and zero fees',
     'src/lib/fees.ts',
     /Authoritative network fee unavailable[\s\S]*?Calculated withdrawal fee is invalid/i,
