@@ -889,10 +889,13 @@ export async function PUT(
       return NextResponse.json({ error: 'Advertisement not found.' }, { status: 404 });
     }
 
-    // Authoritative Success Check:
-    // If canonical p2p_ads row exists, canonical update MUST succeed.
-    // If only legacy ads row exists, legacy update MUST succeed.
-    const overallSuccess = p2pAdsRow ? p2pUpdated : adsUpdated;
+    // If both representations exist, require both writes to succeed. A partial
+    // update leaves divergent ad records and must be surfaced for reconciliation.
+    const existingRowCount = Number(Boolean(p2pAdsRow)) + Number(Boolean(adsRow));
+    const successfulUpdateCount = Number(p2pUpdated) + Number(adsUpdated);
+    const overallSuccess = successfulUpdateCount > 0 && (
+      existingRowCount === 1 || successfulUpdateCount === existingRowCount
+    );
 
     if (!overallSuccess) {
       console.error('[PUT /api/ads/[adId]] Canonical advertisement record update failed:', {
