@@ -1232,7 +1232,9 @@ async function refreshPendingDepositConfirmations(): Promise<{
               p_confirmations: confs,
               p_provider: 'confirmations_worker',
             });
-            if (!rpcErr) {
+            if (rpcErr) {
+              console.error('[Deposit Ingestion] Pending LTC deposit credit RPC failed; row remains pending:', rpcErr.message);
+            } else {
               const r = typeof data === 'string' ? JSON.parse(data) : data;
               if (r?.status === 'credited') newlyCredited++;
             }
