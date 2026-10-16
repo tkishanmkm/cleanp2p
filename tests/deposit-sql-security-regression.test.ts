@@ -411,9 +411,9 @@ const checks: Array<[string, string, RegExp]> = [
     /p_gas_asset: 'BTC',[\s\S]*?confData\?\.success !== true/i,
   ],
   [
-    'LTC withdrawal confirmation requires explicit RPC success',
+    'LTC withdrawal completion fails closed without explicit RPC success',
     'src/jobs/withdrawalWorker.ts',
-    /p_gas_asset: 'LTC',[\s\S]*?confData\?\.success === true/i,
+    /p_gas_asset: 'LTC',[\s\S]*?confData\?\.success !== true/i,
   ],
   [
     'verified TRON revert processing requires explicit RPC success',
