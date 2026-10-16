@@ -738,6 +738,28 @@ export async function PUT(
       ? body.tags 
       : (Array.isArray(body.offer_tags) ? body.offer_tags : (Array.isArray(body.ad_tags) ? body.ad_tags : undefined));
 
+    // Bound user-editable text and list fields before they reach database writes.
+    if (paymentMethods && (paymentMethods.length > 20 ||
+        paymentMethods.some((item: unknown) => typeof item !== 'string' || item.trim().length === 0 || item.length > 80))) {
+      return NextResponse.json({ error: 'Payment methods must contain at most 20 non-empty strings of 80 characters or fewer.', code: 'INVALID_PAYMENT_METHODS' }, { status: 400 });
+    }
+    if (rawTags && (rawTags.length > 20 ||
+        rawTags.some((item: unknown) => typeof item !== 'string' || item.trim().length === 0 || item.length > 40))) {
+      return NextResponse.json({ error: 'Tags must contain at most 20 non-empty strings of 40 characters or fewer.', code: 'INVALID_TAGS' }, { status: 400 });
+    }
+    if (termsText !== undefined && termsText.length > 5000) {
+      return NextResponse.json({ error: 'Terms must be 5,000 characters or fewer.', code: 'TERMS_TOO_LONG' }, { status: 400 });
+    }
+    if (offerLabel !== undefined && offerLabel.length > 120) {
+      return NextResponse.json({ error: 'Offer label must be 120 characters or fewer.', code: 'OFFER_LABEL_TOO_LONG' }, { status: 400 });
+    }
+    if (body.payment_window !== undefined) {
+      const parsedWindow = Number(body.payment_window);
+      if (!Number.isInteger(parsedWindow) || parsedWindow < 5 || parsedWindow > 180) {
+        return NextResponse.json({ error: 'Payment window must be an integer between 5 and 180 minutes.', code: 'INVALID_PAYMENT_WINDOW' }, { status: 400 });
+      }
+    }
+
     const isFixed = body.rate_type === 'fixed' || body.pricing_type === 'FIXED' || Boolean(body.is_fixed);
     const pricingType = isFixed ? 'FIXED' : 'FLOAT';
     const rateType = isFixed ? 'fixed' : 'market';
