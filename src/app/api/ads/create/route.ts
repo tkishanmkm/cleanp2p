@@ -247,11 +247,31 @@ export async function POST(req: Request) {
 
     if (cleanPayload.min_order !== undefined) cleanPayload.min_order = cleanPayload.min_order !== null && cleanPayload.min_order !== '' ? Number(cleanPayload.min_order) : null;
     if (cleanPayload.max_order !== undefined) cleanPayload.max_order = cleanPayload.max_order !== null && cleanPayload.max_order !== '' ? Number(cleanPayload.max_order) : null;
-    if (cleanPayload.total_amount !== undefined) cleanPayload.total_amount = cleanPayload.total_amount ? Number(cleanPayload.total_amount) : null;
-    if (cleanPayload.available_amount !== undefined) cleanPayload.available_amount = cleanPayload.available_amount ? Number(cleanPayload.available_amount) : null;
-    if (cleanPayload.rate_percent !== undefined) cleanPayload.rate_percent = cleanPayload.rate_percent ? Number(cleanPayload.rate_percent) : 0;
-    if (cleanPayload.rate_adjustment !== undefined) cleanPayload.rate_adjustment = cleanPayload.rate_adjustment ? Number(cleanPayload.rate_adjustment) : 0;
-    if (cleanPayload.margin_percentage !== undefined) cleanPayload.margin_percentage = cleanPayload.margin_percentage ? Number(cleanPayload.margin_percentage) : 0;
+    if (cleanPayload.total_amount !== undefined) {
+      cleanPayload.total_amount = cleanPayload.total_amount !== null && cleanPayload.total_amount !== ''
+        ? Number(cleanPayload.total_amount)
+        : null;
+    }
+    if (cleanPayload.available_amount !== undefined) {
+      cleanPayload.available_amount = cleanPayload.available_amount !== null && cleanPayload.available_amount !== ''
+        ? Number(cleanPayload.available_amount)
+        : null;
+    }
+    if (cleanPayload.rate_percent !== undefined) {
+      cleanPayload.rate_percent = cleanPayload.rate_percent !== null && cleanPayload.rate_percent !== ''
+        ? Number(cleanPayload.rate_percent)
+        : 0;
+    }
+    if (cleanPayload.rate_adjustment !== undefined) {
+      cleanPayload.rate_adjustment = cleanPayload.rate_adjustment !== null && cleanPayload.rate_adjustment !== ''
+        ? Number(cleanPayload.rate_adjustment)
+        : 0;
+    }
+    if (cleanPayload.margin_percentage !== undefined) {
+      cleanPayload.margin_percentage = cleanPayload.margin_percentage !== null && cleanPayload.margin_percentage !== ''
+        ? Number(cleanPayload.margin_percentage)
+        : 0;
+    }
     if (cleanPayload.payment_window !== undefined && cleanPayload.payment_window !== null && cleanPayload.payment_window !== '') {
       const paymentWindow = Number(cleanPayload.payment_window);
       if (!Number.isSafeInteger(paymentWindow) || paymentWindow < 30 || paymentWindow > 1440) {
