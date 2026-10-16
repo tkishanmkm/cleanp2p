@@ -1066,9 +1066,14 @@ export async function undelegateEnergyToPool(
       typeof signedTx.txID !== 'string' ||
       !/^[0-9a-fA-F]{64}$/.test(signedTx.txID) ||
       typeof deterministicTxHash !== 'string' ||
-      signedTx.txID.toLowerCase() !== deterministicTxHash.toLowerCase()
+      signedTx.txID.toLowerCase() !== deterministicTxHash.toLowerCase() ||
+      typeof signedTx.raw_data_hex !== 'string' ||
+      !/^[0-9a-fA-F]+$/.test(signedTx.raw_data_hex) ||
+      !Array.isArray(signedTx.signature) ||
+      signedTx.signature.length === 0 ||
+      signedTx.signature.some((signature: unknown) => typeof signature !== 'string' || !/^[0-9a-fA-F]{130}$/.test(signature))
     ) {
-      throw new Error('Persisted TRON undelegation transaction hash is missing or mismatched; refusing to broadcast');
+      throw new Error('Persisted TRON undelegation transaction is malformed or its hash is missing/mismatched; refusing to broadcast');
     }
   }
 
