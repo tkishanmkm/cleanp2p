@@ -358,7 +358,11 @@ export async function fundGasForAddress(
         return;
       }
 
-      // 2. If not mined, rebroadcast the EXACT SAME signed raw transaction
+      // 2. If not mined, rebroadcast the EXACT SAME signed raw transaction.
+      // Revalidate ownership immediately before network side effects; the original lease may have expired during reconciliation.
+      if (sweepId && workerId) {
+        await assertPreBroadcastOwnership(sweepId, workerId, 'GAS_FUNDING_RECOVERY');
+      }
       console.log(`[Sweeper Gas Recovery] Rebroadcasting exact persisted signed tx ${existingTxHash}...`);
       try {
         await provider.broadcastTransaction(existingSignedTx);
