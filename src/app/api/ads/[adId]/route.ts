@@ -301,7 +301,14 @@ export async function DELETE(
       return NextResponse.json({ error: 'Advertisement record not found.' }, { status: 404 });
     }
 
-    const overallDeleteSuccess = p2pAdsRow ? p2pMutated : adsMutated;
+    // At least one existing row must be successfully soft-deleted. If both
+    // canonical and legacy rows exist, a partial mutation is reported as failure
+    // so operators can reconcile the two records rather than claiming full success.
+    const existingRowCount = Number(Boolean(p2pAdsRow)) + Number(Boolean(adsRow));
+    const successfulMutationCount = Number(p2pMutated) + Number(adsMutated);
+    const overallDeleteSuccess = successfulMutationCount > 0 && (
+      existingRowCount === 1 || successfulMutationCount === existingRowCount
+    );
 
     if (!overallDeleteSuccess) {
       console.error('[DELETE /api/ads/[adId]] Failed row mutation:', { p2pRowId: p2pAdsRow?.id, p2pMutated, adsRowId: adsRow?.id, adsMutated });
