@@ -516,7 +516,9 @@ async function scanTronDeposits(
               if (toAddr.startsWith('41') || toAddr.startsWith('0x')) {
                 toAddr = tronWeb.address.fromHex(toAddr);
               }
-            } catch (_) {}
+            } catch (err) {
+          console.error('[Deposit Ingestion] Pending BTC/LTC verification failed; deposit left pending:', err instanceof Error ? err.message : 'unknown provider error');
+        }
 
             if (toAddr !== monitoredAddr && !monitoredTronAddresses.has(toAddr)) {
               continue;
@@ -539,7 +541,9 @@ async function scanTronDeposits(
               if (fromAddr && (fromAddr.startsWith('41') || fromAddr.startsWith('0x'))) {
                 fromAddr = tronWeb.address.fromHex(fromAddr);
               }
-            } catch (_) {}
+            } catch (err) {
+          console.error('[Deposit Ingestion] Pending BTC/LTC verification failed; deposit left pending:', err instanceof Error ? err.message : 'unknown provider error');
+        }
 
             // Never trust provider metadata to choose the token or its decimals:
             // a malicious/unsupported TRC-20 token could otherwise be credited as USDT.
@@ -585,7 +589,9 @@ async function scanTronDeposits(
                   const txInfo = await txInfoRes.json();
                   eventBlock = txInfo.blockNumber || 0;
                 }
-              } catch (_) {}
+              } catch (err) {
+          console.error('[Deposit Ingestion] Pending BTC/LTC verification failed; deposit left pending:', err instanceof Error ? err.message : 'unknown provider error');
+        }
             }
 
             // Never treat missing/unverified chain height as one confirmation.
@@ -673,7 +679,9 @@ async function scanTronDeposits(
               if (fromHex && (fromHex.startsWith('41') || fromHex.startsWith('0x'))) {
                 fromBase58 = tronWeb.address.fromHex(fromHex);
               }
-            } catch (_) {}
+            } catch (err) {
+          console.error('[Deposit Ingestion] Pending BTC/LTC verification failed; deposit left pending:', err instanceof Error ? err.message : 'unknown provider error');
+        }
 
             if (!monitoredTronAddresses.has(toBase58)) continue;
 
@@ -832,7 +840,9 @@ async function scanTronDeposits(
           try {
             const fromHex = '41' + (log.topics[1] || '').slice(-40);
             fromBase58 = tronWeb.address.fromHex(fromHex);
-          } catch (_) {}
+          } catch (err) {
+          console.error('[Deposit Ingestion] Pending BTC/LTC verification failed; deposit left pending:', err instanceof Error ? err.message : 'unknown provider error');
+        }
 
           let formattedAmount = '';
           try {
@@ -1023,6 +1033,17 @@ async function scanLtcDeposits(
 }
 
 /**
+// Parse BTC/LTC decimal amounts exactly into integer base units (satoshis).
+// Returns null for malformed values or precision beyond the chain's 8 decimals.
+function parseBaseUnits8(value: unknown): bigint | null {
+  const raw = typeof value === 'string' || typeof value === 'number' ? String(value) : '';
+  const match = /^(0|[1-9]\\d*)(?:\\.(\\d{1,8}))?$/.exec(raw);
+  if (!match) return null;
+  const whole = BigInt(match[1]);
+  const fraction = BigInt((match[2] || '').padEnd(8, '0') || '0');
+  return whole * 100_000_000n + fraction;
+}
+
 async function refreshPendingDepositConfirmations(): Promise<{
   checked: number;
   newlyCredited: number;
@@ -1112,13 +1133,14 @@ async function refreshPendingDepositConfirmations(): Promise<{
             const statusData = await statusResponse.json();
             const tipHeight = Number((await tipResponse.text()).trim());
             const output = Array.isArray(tx.vout) ? tx.vout[outputIndex] : null;
-            const storedAmount = Number(dep.amount);
-            const observedAmount = Number(output?.value) / 100_000_000;
+            const storedBaseUnits = parseBaseUnits8(dep.amount);
+            const observedBaseUnits = Number.isSafeInteger(output?.value) && output.value >= 0
+              ? BigInt(output.value)
+              : null;
             if (!output || output.scriptpubkey_address !== destinationAddress ||
-                !Number.isFinite(storedAmount) || storedAmount <= 0 ||
-                !Number.isSafeInteger(tipHeight) || tipHeight < 0 ||
-                !Number.isFinite(observedAmount) ||
-                Math.abs(observedAmount - storedAmount) > Math.max(1e-8, storedAmount * 1e-10)) {
+                storedBaseUnits === null || storedBaseUnits <= 0n ||
+                observedBaseUnits === null || observedBaseUnits !== storedBaseUnits ||
+                !Number.isSafeInteger(tipHeight) || tipHeight < 0) {
               continue;
             }
             const confs = statusData.confirmed && Number.isSafeInteger(statusData.block_height)
@@ -1128,7 +1150,7 @@ async function refreshPendingDepositConfirmations(): Promise<{
               p_destination_address: destinationAddress,
               p_asset_symbol: 'BTC',
               p_network_code: 'BTC',
-              p_amount: storedAmount,
+              p_amount: dep.amount,
               p_tx_hash: dep.tx_hash,
               p_output_index: outputIndex,
               p_block_number: statusData.block_height || null,
@@ -1142,7 +1164,9 @@ async function refreshPendingDepositConfirmations(): Promise<{
               if (r?.status === 'credited') newlyCredited++;
             }
           }
-        } catch (_) {}
+        } catch (err) {
+          console.error('[Deposit Ingestion] Pending BTC/LTC verification failed; deposit left pending:', err instanceof Error ? err.message : 'unknown provider error');
+        }
       } else if (normNet === 'LTC') {
         const ltcApiBase = process.env.LTC_MEMPOOL_API || 'https://litecoinspace.org/api';
         try {
@@ -1156,13 +1180,14 @@ async function refreshPendingDepositConfirmations(): Promise<{
             const statusData = await statusResponse.json();
             const tipHeight = Number((await tipResponse.text()).trim());
             const output = Array.isArray(tx.vout) ? tx.vout[outputIndex] : null;
-            const storedAmount = Number(dep.amount);
-            const observedAmount = Number(output?.value) / 100_000_000;
+            const storedBaseUnits = parseBaseUnits8(dep.amount);
+            const observedBaseUnits = Number.isSafeInteger(output?.value) && output.value >= 0
+              ? BigInt(output.value)
+              : null;
             if (!output || output.scriptpubkey_address !== destinationAddress ||
-                !Number.isFinite(storedAmount) || storedAmount <= 0 ||
-                !Number.isSafeInteger(tipHeight) || tipHeight < 0 ||
-                !Number.isFinite(observedAmount) ||
-                Math.abs(observedAmount - storedAmount) > Math.max(1e-8, storedAmount * 1e-10)) {
+                storedBaseUnits === null || storedBaseUnits <= 0n ||
+                observedBaseUnits === null || observedBaseUnits !== storedBaseUnits ||
+                !Number.isSafeInteger(tipHeight) || tipHeight < 0) {
               continue;
             }
             const confs = statusData.confirmed && Number.isSafeInteger(statusData.block_height)
@@ -1172,7 +1197,7 @@ async function refreshPendingDepositConfirmations(): Promise<{
               p_destination_address: destinationAddress,
               p_asset_symbol: 'LTC',
               p_network_code: 'LTC',
-              p_amount: storedAmount,
+              p_amount: dep.amount,
               p_tx_hash: dep.tx_hash,
               p_output_index: outputIndex,
               p_block_number: statusData.block_height || null,
@@ -1186,7 +1211,9 @@ async function refreshPendingDepositConfirmations(): Promise<{
               if (r?.status === 'credited') newlyCredited++;
             }
           }
-        } catch (_) {}
+        } catch (err) {
+          console.error('[Deposit Ingestion] Pending BTC/LTC verification failed; deposit left pending:', err instanceof Error ? err.message : 'unknown provider error');
+        }
       } else {
         const chain = SUPPORTED_EVM_CHAINS[normNet];
         if (chain) {
