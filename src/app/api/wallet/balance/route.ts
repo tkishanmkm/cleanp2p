@@ -207,8 +207,12 @@ export async function GET(request: Request) {
           };
         }
       }
-    } catch (err) {
-      console.warn('wallet_assets primary query notice:', err);
+    } catch {
+      console.error('[Wallet Balance] Authoritative wallet asset processing failed.');
+      return NextResponse.json(
+        { success: false, error: 'Wallet balance could not be verified safely.' },
+        { status: 503 }
+      );
     }
 
     // 3. Fallback for coins not yet in wallet_assets: Check balances table
