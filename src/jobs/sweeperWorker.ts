@@ -1319,12 +1319,12 @@ export async function sweepTronDepositAddress(
         ],
         childTronAddress
       );
-      if (estimateRes && estimateRes.energy_used && Number(estimateRes.energy_used) > 0) {
-        energyNeeded = Number(estimateRes.energy_used);
-        console.log(`[Tron Sweeper] Dynamic Energy Estimation Success: ${energyNeeded} Energy`);
-      } else {
-        throw new Error('triggerConstantContract returned zero or missing energy_used');
+      const estimatedEnergy = Number(estimateRes?.energy_used);
+      if (!Number.isSafeInteger(estimatedEnergy) || estimatedEnergy <= 0) {
+        throw new Error('triggerConstantContract returned invalid energy_used; expected a positive safe integer');
       }
+      energyNeeded = estimatedEnergy;
+      console.log(`[Tron Sweeper] Dynamic Energy Estimation Success: ${energyNeeded} Energy`);
     } catch (estErr: any) {
       console.error('[Tron Sweeper] Dynamic energy estimation failed. Refusing sweep without exact estimate:', estErr);
       const estimationFailure = `Dynamic energy estimation failed: ${estErr?.message || estErr}`;
