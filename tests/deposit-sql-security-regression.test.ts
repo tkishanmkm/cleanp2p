@@ -71,6 +71,11 @@ const checks: Array<[string, string, RegExp]> = [
     /NULLIF\(u\.banned_until, ''\)::timestamptz > NOW\(\)/,
   ],
   [
+    'withdrawal worker detects returned lock-release RPC errors',
+    'src/jobs/withdrawalWorker.ts',
+    /const \{ error: unlockError \} = await supabaseAdmin\.rpc\('release_withdrawal_worker_lock'\)[\s\S]*if \(unlockError\)[\s\S]*Lock release RPC failed; operator intervention may be required/i,
+  ],
+  [
     'withdrawal worker bounds caller-supplied dispatch batch size',
     'src/jobs/withdrawalWorker.ts',
     /if \(!Number\.isInteger\(maxBatch\) \|\| maxBatch < 1 \|\| maxBatch > 100\)[\s\S]*Invalid maxBatch; refusing to dispatch withdrawals/i,
