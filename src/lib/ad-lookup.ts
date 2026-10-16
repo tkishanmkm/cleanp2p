@@ -109,41 +109,30 @@ export async function findAdById(rawId: string): Promise<ResolvedAdResult | null
     if (data && !error) return { ad: data, tableName: 'p2p_ads' };
   } catch {}
 
-  // 7. Broad fallback: Fetch all active / recent ads and check in-memory match across any ID field
+  // 7. Targeted identifier lookups only. Never scan an arbitrary first page
+  // of ads: pagination order is not deterministic and may miss the requested
+  // record or return an unrelated record in future refactors.
+  const identifierColumns = ['ad_id', 'public_ad_id', 'public_id', 'offer_id'];
+  const identifierValues = Array.from(new Set([cleanId, upperId, lowerId]));
+
   for (const table of candidateTables) {
-    try {
-      const { data } = await adminClient
-        .from(table)
-        .select('*')
-        .limit(100);
+    for (const column of identifierColumns) {
+      for (const value of identifierValues) {
+        try {
+          const { data, error } = await adminClient
+            .from(table)
+            .select('*')
+            .eq(column, value)
+            .maybeSingle();
 
-      if (data && Array.isArray(data)) {
-        const found = data.find((row: any) => {
-          const rowId = String(row.id || '').trim();
-          const rowAdId = String(row.ad_id || '').trim();
-          const rowPublicAdId = String(row.public_ad_id || '').trim();
-          const rowPublicId = String(row.public_id || '').trim();
-          const rowOfferId = String(row.offer_id || '').trim();
-
-          return (
-            rowId === cleanId ||
-            rowAdId === cleanId ||
-            rowPublicAdId === cleanId ||
-            rowPublicId === cleanId ||
-            rowOfferId === cleanId ||
-            rowId.toLowerCase() === lowerId ||
-            rowAdId.toLowerCase() === lowerId ||
-            rowPublicAdId.toLowerCase() === lowerId ||
-            rowPublicId.toLowerCase() === lowerId ||
-            rowOfferId.toLowerCase() === lowerId
-          );
-        });
-
-        if (found) {
-          return { ad: found, tableName: table };
+          if (data && !error) {
+            return { ad: data, tableName: table };
+          }
+        } catch {
+          // Candidate tables do not necessarily share every identifier column.
         }
       }
-    } catch {}
+    }
   }
 
   return null;
