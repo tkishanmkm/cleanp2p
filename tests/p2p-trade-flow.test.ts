@@ -257,13 +257,13 @@ async function runP2PTradeFlowTests() {
         if (resolveErr) {
           console.log(red(`  ✗ admin_resolve_trade failed: ${resolveErr.message}`));
         } else {
-          const { data: resolvedTrade } = await supabase
+          const { data: resolvedTrade, error: resolvedTradeErr } = await supabase
             .from('trades')
             .select('status')
             .eq('id', disputeTradeId)
             .single();
 
-          if (resolvedTrade?.status === 'RESOLVED' || resolvedTrade?.status === 'CANCELLED') {
+          if (!resolvedTradeErr && (resolvedTrade?.status === 'RESOLVED' || resolvedTrade?.status === 'CANCELLED')) {
             console.log(green(`  ✓ Dispute resolved by admin, trade marked: ${resolvedTrade.status}`));
             passedTests++;
           } else {
