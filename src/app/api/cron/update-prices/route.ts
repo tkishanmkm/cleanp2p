@@ -16,7 +16,8 @@ export async function GET(request: Request) {
         process.env.CRON_SECRET,
       ],
       customHeaderNames: ['x-service-key', 'x-worker-secret'],
-      checkQueryParam: true,
+      // Never put worker secrets in URLs, which can leak into access logs and history.
+      checkQueryParam: false,
     });
 
     if (!auth.authorized) {
