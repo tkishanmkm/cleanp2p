@@ -72,7 +72,7 @@ BEGIN
                OR EXISTS (
                    SELECT 1 FROM auth.users
                    WHERE id = v_caller_id
-                     AND ((raw_user_meta_data->>'role') = 'admin' OR (raw_app_meta_data->>'role') = 'admin')
+                     AND ((raw_app_meta_data->>'role') = 'admin')
                )
                OR EXISTS (
                    SELECT 1 FROM public.profiles
@@ -205,7 +205,7 @@ BEGIN
                OR EXISTS (
                    SELECT 1 FROM auth.users
                    WHERE id = v_effective_caller
-                     AND ((raw_user_meta_data->>'role') = 'admin' OR (raw_app_meta_data->>'role') = 'admin')
+                     AND ((raw_app_meta_data->>'role') = 'admin')
                )
                OR EXISTS (
                    SELECT 1 FROM public.profiles
