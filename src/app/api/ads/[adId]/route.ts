@@ -688,7 +688,11 @@ export async function PUT(
     if (maxAmount !== undefined && (!Number.isFinite(maxAmount) || maxAmount <= 0)) {
       return NextResponse.json({ error: 'Maximum limit must be a finite number greater than 0.' }, { status: 400 });
     }
-    if (minAmount !== undefined && maxAmount !== undefined && maxAmount < minAmount) {
+    const existingMinAmount = Number(existingAd.min_amount ?? existingAd.min_limit);
+    const existingMaxAmount = Number(existingAd.max_amount ?? existingAd.max_limit ?? existingAd.available_amount);
+    const effectiveMinAmount = minAmount ?? (Number.isFinite(existingMinAmount) && existingMinAmount > 0 ? existingMinAmount : undefined);
+    const effectiveMaxAmount = maxAmount ?? (Number.isFinite(existingMaxAmount) && existingMaxAmount > 0 ? existingMaxAmount : undefined);
+    if (effectiveMinAmount !== undefined && effectiveMaxAmount !== undefined && effectiveMaxAmount < effectiveMinAmount) {
       return NextResponse.json({ error: 'Maximum limit must be greater than or equal to minimum limit.' }, { status: 400 });
     }
     if (margin !== undefined && !Number.isFinite(margin)) {
