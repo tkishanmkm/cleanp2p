@@ -303,6 +303,13 @@ BEGIN
         v_res := public.cancel_p2p_trade(v_trade.id, v_effective_caller, p_resolution);
     END IF;
 
+    -- Never mark a dispute resolved unless the canonical settlement explicitly succeeds.
+    IF v_res IS NULL
+       OR jsonb_typeof(v_res) <> 'object'
+       OR COALESCE((v_res->>'success')::BOOLEAN, FALSE) IS NOT TRUE THEN
+        RAISE EXCEPTION 'Canonical escrow settlement failed; dispute remains unresolved.';
+    END IF;
+
     -- 10. Update Dispute Record
     UPDATE public.disputes
     SET status = 'resolved',
