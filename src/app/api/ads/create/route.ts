@@ -169,6 +169,29 @@ export async function POST(req: Request) {
       }
     }
 
+    // Bound user-supplied advertisement metadata before it reaches storage.
+    if (strippedFormData.payment_methods !== undefined && strippedFormData.payment_methods !== null) {
+      const methods = strippedFormData.payment_methods;
+      if (!Array.isArray(methods) || methods.length > 20 ||
+          methods.some((method: unknown) => typeof method !== 'string' || method.trim().length === 0 || method.trim().length > 80)) {
+        return NextResponse.json(
+          { error: 'Payment methods must be a list of up to 20 non-empty names, each 80 characters or fewer.' },
+          { status: 400 }
+        );
+      }
+      strippedFormData.payment_methods = [...new Set(methods.map((method: string) => method.trim()))];
+    }
+    for (const key of ['terms', 'terms_conditions', 'offer_label']) {
+      const value = strippedFormData[key];
+      if (value !== undefined && value !== null &&
+          (typeof value !== 'string' || value.length > (key === 'offer_label' ? 120 : 5000))) {
+        return NextResponse.json(
+          { error: key === 'offer_label' ? 'Offer label must be 120 characters or fewer.' : 'Advertisement terms must be text of 5000 characters or fewer.' },
+          { status: 400 }
+        );
+      }
+    }
+
     // Sanitize and cast numeric payload fields before database operations.
     const cleanPayload: Record<string, any> = {
       ...strippedFormData,
