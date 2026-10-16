@@ -1059,13 +1059,17 @@ async function refreshPendingDepositConfirmations(): Promise<{
         if (txInfo && txInfo.blockNumber) {
           const currentBlock = await tronWeb.trx.getCurrentBlock();
           const currentHeight = currentBlock.block_header?.raw_data?.number || 0;
-          const confs = Math.max(1, currentHeight - txInfo.blockNumber + 1);
+          if (!Number.isSafeInteger(txInfo.blockNumber) || txInfo.blockNumber <= 0 ||
+              !Number.isSafeInteger(currentHeight) || currentHeight < txInfo.blockNumber) {
+            continue;
+          }
+          const confs = currentHeight - txInfo.blockNumber + 1;
 
           const { data, error: rpcErr } = await supabaseAdmin.rpc('process_deposit_atomic', {
             p_destination_address: destinationAddress,
             p_asset_symbol: assetSymbol,
             p_network_code: 'TRC20',
-            p_amount: Number(dep.amount),
+            p_amount: dep.amount,
             p_tx_hash: dep.tx_hash,
             p_output_index: outputIndex,
             p_block_number: txInfo.blockNumber,
@@ -1177,13 +1181,17 @@ async function refreshPendingDepositConfirmations(): Promise<{
           const receipt = await provider.getTransactionReceipt(dep.tx_hash);
           if (receipt && receipt.blockNumber) {
             const currentBlock = await provider.getBlockNumber();
-            const confs = Math.max(1, currentBlock - receipt.blockNumber + 1);
+            if (!Number.isSafeInteger(receipt.blockNumber) || receipt.blockNumber <= 0 ||
+                !Number.isSafeInteger(currentBlock) || currentBlock < receipt.blockNumber) {
+              continue;
+            }
+            const confs = currentBlock - receipt.blockNumber + 1;
 
             const { data, error: rpcErr } = await supabaseAdmin.rpc('process_deposit_atomic', {
               p_destination_address: destinationAddress,
               p_asset_symbol: assetSymbol,
               p_network_code: normNet,
-              p_amount: Number(dep.amount),
+              p_amount: dep.amount,
               p_tx_hash: dep.tx_hash,
               p_output_index: outputIndex,
               p_block_number: receipt.blockNumber,
