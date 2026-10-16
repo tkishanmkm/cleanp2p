@@ -756,6 +756,11 @@ const checks: Array<[string, string, RegExp]> = [
     /const \{ data: failureRes, error: failureErr \} = await supabaseAdmin\.rpc\('update_delegation_status'[\s\S]*?failureRes\.success !== true[\s\S]*?leaving operation for recovery/i,
   ],
 
+  [
+    'sweep reconciliation exception checks recovery-state persistence',
+    'src/jobs/sweeperWorker.ts',
+    /\[Reconcile Sweep Exception\][\s\S]*?const \{ data: recoveryRes, error: recoveryErr \} = await supabaseAdmin\.rpc\('update_sweep_operation_status'[\s\S]*?p_new_status: 'RECOVERY_REQUIRED'[\s\S]*?recoveryRes\.success !== true[\s\S]*?Reconcile Sweep Critical/i,
+  ],
 ];
 
 let failed = 0;
