@@ -834,7 +834,12 @@ export async function PUT(
     }
     let minCompletedTrades: number | undefined;
     if (body.min_completed_trades !== undefined) {
-      minCompletedTrades = Number(body.min_completed_trades);
+      const rawMinCompletedTrades = body.min_completed_trades;
+      if ((typeof rawMinCompletedTrades !== 'number' && typeof rawMinCompletedTrades !== 'string') ||
+          (typeof rawMinCompletedTrades === 'string' && rawMinCompletedTrades.trim() === '')) {
+        return NextResponse.json({ error: 'min_completed_trades must be a whole number between 0 and 1,000,000.' }, { status: 400 });
+      }
+      minCompletedTrades = Number(rawMinCompletedTrades);
       if (!Number.isSafeInteger(minCompletedTrades) || minCompletedTrades < 0 || minCompletedTrades > 1000000) {
         return NextResponse.json({ error: 'min_completed_trades must be a whole number between 0 and 1,000,000.' }, { status: 400 });
       }
