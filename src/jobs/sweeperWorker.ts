@@ -1089,6 +1089,19 @@ export async function undelegateEnergyToPool(
 
     try {
       signedTx = await tronWeb.trx.sign(undelegationTxObj, poolPrivateKey);
+      if (
+        !signedTx ||
+        typeof signedTx !== 'object' ||
+        typeof signedTx.txID !== 'string' ||
+        !/^[0-9a-fA-F]{64}$/.test(signedTx.txID) ||
+        typeof signedTx.raw_data_hex !== 'string' ||
+        !/^[0-9a-fA-F]+$/.test(signedTx.raw_data_hex) ||
+        !Array.isArray(signedTx.signature) ||
+        signedTx.signature.length === 0 ||
+        signedTx.signature.some((signature: unknown) => typeof signature !== 'string' || !/^[0-9a-fA-F]{130}$/.test(signature))
+      ) {
+        throw new Error('TRON signing returned a malformed signed transaction; refusing to persist or broadcast');
+      }
       deterministicTxHash = signedTx.txID;
     } catch (signErr: any) {
       console.error(`[Tron Resource Pool] Failed to sign undelegation transaction for ${receiverAddress}:`, signErr);
