@@ -79,7 +79,7 @@ export async function openDispute(
 
   if (!isServer) {
     // 1. Client context: dispatch through secure canonical API route
-    const res = await fetch(`/api/trades/${tradeId}/dispute`, {
+    const res = await fetch(`/api/trades/${encodeURIComponent(tradeId)}/dispute`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ reason: fullReason }),
