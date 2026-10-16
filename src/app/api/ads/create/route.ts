@@ -191,6 +191,20 @@ export async function POST(req: Request) {
         );
       }
     }
+    for (const key of ['tags', 'offer_tags', 'ad_tags', 'targeted_countries', 'blocked_countries']) {
+      const value = strippedFormData[key];
+      if (value !== undefined && value !== null &&
+          (!Array.isArray(value) || value.length > 50 ||
+           value.some((item: unknown) => typeof item !== 'string' || item.trim().length === 0 || item.trim().length > 80))) {
+        return NextResponse.json(
+          { error: 'Advertisement tags and country lists must contain up to 50 non-empty text values, each 80 characters or fewer.' },
+          { status: 400 }
+        );
+      }
+      if (Array.isArray(value)) {
+        strippedFormData[key] = [...new Set(value.map((item: string) => item.trim()))];
+      }
+    }
 
     // Sanitize and cast numeric payload fields before database operations.
     const cleanPayload: Record<string, any> = {
