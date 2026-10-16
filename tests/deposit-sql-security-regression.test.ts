@@ -345,6 +345,11 @@ const checks: Array<[string, string, RegExp]> = [
     'src/jobs/sweeperWorker.ts',
     /const rawDelegatedAmount = String\(delegation\.delegated_amount_sun \?\? ''\)[\s\S]*?!tronWeb\.isAddress\(receiverAddress\)[\s\S]*?!Number\.isSafeInteger\(trxNeededSun\)[\s\S]*?trxNeededSun <= 0/i,
   ],
+  [
+    'TRON undelegation remains in recovery unless on-chain resource removal is verified',
+    'src/jobs/sweeperWorker.ts',
+    /Remaining delegated energy on-chain:[\s\S]*?verifiedDelegationRemoved = false[\s\S]*?Unable to verify delegated resources on-chain; keeping allocation in recovery[\s\S]*?verifiedDelegationRemoved = false/i,
+  ],
 ];
 
 let failed = 0;
