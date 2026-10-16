@@ -56,6 +56,15 @@ export async function POST(
     if (!(typeof type === 'string' && type.trim()) && !(typeof customText === 'string' && customText.trim())) {
       return NextResponse.json({ error: 'Message type or customText is required' }, { status: 400 });
     }
+    const allowedTypes = new Set([
+      'TRADE_INITIATED', 'TRADE_STARTED', 'ESCROW_LOCKED', 'MARKED_PAID',
+      'TRADE_RELEASED', 'TRADE_COMPLETED', 'TRADE_CANCELLED', 'TRADE_EXPIRED',
+      'TRADE_DISPUTED', 'TRADE_REPORTED', 'USER_BLOCKED', 'FEEDBACK_LEFT',
+      'MODERATOR_JOINED', 'CUSTOM'
+    ]);
+    if (typeof type === 'string' && type.trim() && !allowedTypes.has(type)) {
+      return NextResponse.json({ error: 'Unsupported system message type.' }, { status: 400 });
+    }
 
     const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(tradeId);
 
