@@ -525,9 +525,22 @@ async function scanTronDeposits(
             const formattedAmount = ethers.formatUnits(rawVal, 6);
             if (!/^(?:0|[1-9]\d*)(?:\.\d+)?$/.test(formattedAmount)) continue;
 
-            // Reserve the idempotency key only after the event passes validation.
-            // This avoids malformed/zero-value records suppressing a valid retry.
-            const deduplicationKey = `${txId}_0`;
+            // The account-transfer endpoint may return multiple TRC-20 Transfer
+            // events for one transaction. Never collapse them to output index 0:
+            // that can suppress a legitimate deposit or collide with another event.
+            const rawEventIndex = item.event_index ?? item.eventIndex ?? item.log_index ?? item.logIndex;
+            const eventIndex = typeof rawEventIndex === 'number'
+              ? rawEventIndex
+              : typeof rawEventIndex === 'string' && /^\d+$/.test(rawEventIndex)
+                ? Number(rawEventIndex)
+                : Number.NaN;
+            if (!Number.isSafeInteger(eventIndex) || eventIndex < 0) {
+              errors.push(`Rejected TRON account transfer without a reliable event index: ${txId}`);
+              continue;
+            }
+
+            // Reserve the idempotency key only after all identifying fields validate.
+            const deduplicationKey = `${txId}_${eventIndex}`;
             if (seenTxIndices.has(deduplicationKey)) continue;
             seenTxIndices.add(deduplicationKey);
 
@@ -569,7 +582,7 @@ async function scanTronDeposits(
               p_network_code: 'TRC20',
               p_amount: formattedAmount,
               p_tx_hash: txId,
-              p_output_index: 0,
+              p_output_index: eventIndex,
               p_block_number: eventBlock || null,
               p_from_address: fromAddr,
               p_token_contract: tokenContract,
