@@ -31,6 +31,11 @@ const checks: Array<[string, string, RegExp]> = [
     /const \{ error: recoveryPersistErr \}[\s\S]*?status: 'RECOVERY_REQUIRED'[\s\S]*?if \(recoveryPersistErr\)[\s\S]*?RECOVERY_REQUIRED status persistence also failed/i,
   ],
   [
+    'signed gas funding transaction persistence failure preserves recovery state',
+    'src/jobs/sweeperWorker.ts',
+    /const signedTxPersistFailure = `Failed to persist signed gas funding transaction:[\s\S]*?signedTxRecoveryPersistErr[\s\S]*?status: 'RECOVERY_REQUIRED'[\s\S]*?RECOVERY_REQUIRED persistence failed/i,
+  ],
+  [
     'gas funding nonce allocation failure persists RECOVERY_REQUIRED',
     'src/jobs/sweeperWorker.ts',
     /const nonceFailure = `Failed to allocate hot wallet nonce:[\s\S]*?nonceRecoveryPersistErr[\s\S]*?status: 'RECOVERY_REQUIRED'[\s\S]*?RECOVERY_REQUIRED persistence failed/i,
