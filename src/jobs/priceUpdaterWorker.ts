@@ -119,9 +119,13 @@ export async function runMarketPriceUpdate(): Promise<PriceUpdateResult> {
 
     if (Array.isArray(binanceData)) {
       binanceData.forEach((item: { symbol: string; price: string }) => {
-        const coin = item.symbol.replace('USDT', '');
-        const p = parseFloat(item.price);
-        if (!isNaN(p) && isFinite(p) && p > 0) {
+        if (!item || typeof item.symbol !== 'string' || typeof item.price !== 'string') return;
+        const coin = item.symbol.endsWith('USDT')
+          ? item.symbol.slice(0, -'USDT'.length)
+          : '';
+        if (!ASSETS.includes(coin) || item.symbol !== `${coin}USDT`) return;
+        const p = Number(item.price);
+        if (Number.isFinite(p) && p > 0) {
           cryptoUsdPrices[coin] = p;
         }
       });
