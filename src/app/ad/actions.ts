@@ -742,9 +742,11 @@ export async function createTradeOrderWithEscrow(input: {
       };
     }
 
-    const baseCryptoAmount = price > 0 ? Number((fiatAmount / price).toFixed(6)) : 0;
-    const escrowFeeCrypto = Number(((baseCryptoAmount * escrowFeePercent) / 100).toFixed(6));
-    const totalCryptoRequiredForSeller = Number((baseCryptoAmount + escrowFeeCrypto).toFixed(6));
+    // Match the canonical SQL escrow RPC's 8-decimal crypto rounding.
+    // The RPC remains authoritative; these values are only preflight estimates.
+    const baseCryptoAmount = price > 0 ? Number((fiatAmount / price).toFixed(8)) : 0;
+    const escrowFeeCrypto = Number(((baseCryptoAmount * escrowFeePercent) / 100).toFixed(8));
+    const totalCryptoRequiredForSeller = Number((baseCryptoAmount + escrowFeeCrypto).toFixed(8));
 
     // 6. REAL-TIME FUNDING & BALANCE VERIFICATION
     if (currentSellerAvail < totalCryptoRequiredForSeller) {
