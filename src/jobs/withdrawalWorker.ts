@@ -194,15 +194,22 @@ export async function processWithdrawalQueue(): Promise<WithdrawalProcessResult>
       throw new Error(`RPC chain ID mismatch for ${normNet}: expected ${chainConfig.chainId}, received ${connectedNetwork.chainId.toString()}`);
     }
 
+    const isNativeTransfer = assetSymbol === chainConfig.nativeSymbol;
+    const tokenContractAddress = isNativeTransfer ? null : getTokenContractAddress(network, assetSymbol);
+    if (!isNativeTransfer && !tokenContractAddress) {
+      throw new Error(`Unsupported withdrawal asset ${assetSymbol} on ${network}`);
+    }
+    const tokenDecimals = isNativeTransfer ? null : getTokenDecimals(network, assetSymbol);
+    const parsedAmount = ethers.parseUnits(
+      amountStr,
+      isNativeTransfer ? chainConfig.nativeDecimals : tokenDecimals!
+    );
     const nonce = await allocateEvmNonce(network, address, provider);
     const feeOverrides = await getEip1559FeeOverrides(provider, 1.25);
     let tx: ethers.TransactionResponse;
 
-    const isNativeTransfer = assetSymbol === chainConfig.nativeSymbol;
-
     if (isNativeTransfer) {
       // Native transfer (ETH)
-      const parsedAmount = ethers.parseUnits(amountStr, chainConfig.nativeDecimals);
       isLocalCheckStage = false;
       tx = await signer.sendTransaction({
         to: destination,
@@ -212,13 +219,7 @@ export async function processWithdrawalQueue(): Promise<WithdrawalProcessResult>
       });
     } else {
       // ERC-20 Token Transfer (USDT ERC20 / BEP20)
-      const decimals = getTokenDecimals(network, assetSymbol);
-      const contractAddress = getTokenContractAddress(network, assetSymbol);
-      if (!contractAddress) {
-        throw new Error(`No token contract address configured for ${assetSymbol} on ${network}`);
-      }
-      const tokenContract = new ethers.Contract(contractAddress, ERC20_ABI, signer);
-      const parsedAmount = ethers.parseUnits(amountStr, decimals);
+      const tokenContract = new ethers.Contract(tokenContractAddress!, ERC20_ABI, signer);
       isLocalCheckStage = false;
       tx = await tokenContract.transfer(destination, parsedAmount, {
         nonce,
