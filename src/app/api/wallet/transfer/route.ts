@@ -162,7 +162,7 @@ export async function POST(req: NextRequest) {
     const { data: profByUsername, error: usernameLookupError } = await admin
       .from('profiles')
       .select('id, username, is_banned, is_restricted, is_emergency_frozen, account_status')
-      .ilike('username', cleanTarget)
+      .eq('username', cleanTarget)
       .maybeSingle();
 
     if (usernameLookupError) {
