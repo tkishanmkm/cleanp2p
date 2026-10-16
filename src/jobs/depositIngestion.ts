@@ -607,25 +607,70 @@ async function scanTronDeposits(
     // Queries each monitored TRON address for incoming TRC-20 transfers (works reliably regardless of block depth)
     for (const monitoredAddr of monitoredTronAddresses) {
       try {
-        const accountUrl = `${tronGridHost}/v1/accounts/${monitoredAddr}/transactions/trc20?limit=200&only_confirmed=true&contract_address=${CANONICAL_USDT_CONTRACTS.TRC20}`;
-        const res = await fetch(accountUrl, { headers: tronGridHeaders });
-        if (!res.ok) {
-          errors.push(`TronGrid account-transfer request failed with HTTP ${res.status}`);
-          continue;
-        }
-        {
-          const json = await res.json();
+        const accountUrl = `${tronGridHost}/v1/accounts/`${monitoredAddr}/transactions/trc20?limit=200&only_confirmed=true&contract_address=`${CANONICAL_USDT_CONTRACTS.TRC20}`;
+        // Collect a bounded set of TronGrid pages. If the provider cannot supply
+        // a progressing cursor, report an incomplete scan rather than implying
+        // the address history was fully checked.
+        const items: any[] = [];
+        const seenFingerprints = new Set<string>();
+        let fingerprint: string | null = null;
+        let paginationIncomplete = false;
+        const maxPages = 20;
+        for (let page = 0; page < maxPages; page++) {
+          const pageUrl = new URL(accountUrl);
+          if (fingerprint) pageUrl.searchParams.set('fingerprint', fingerprint);
+          let res: Response;
+          try {
+            res = await fetch(pageUrl.toString(), { headers: tronGridHeaders });
+          } catch (pageErr) {
+            errors.push(`TronGrid account-transfer request failed for a monitored address: ${pageErr instanceof Error ? pageErr.message : 'network error'}`);
+            paginationIncomplete = true;
+            break;
+          }
+          if (!res.ok) {
+            errors.push(`TronGrid account-transfer request failed with HTTP ${res.status}`);
+            paginationIncomplete = true;
+            break;
+          }
+          let json: any;
+          try {
+            json = await res.json();
+          } catch {
+            errors.push('TronGrid account-transfer response was not valid JSON');
+            paginationIncomplete = true;
+            break;
+          }
           if (!json || !Array.isArray(json.data)) {
             errors.push('TronGrid account-transfer response had an invalid data shape');
-            continue;
+            paginationIncomplete = true;
+            break;
           }
-          const items = json.data;
-          // TronGrid's account endpoint is capped at 200 records here and this
-          // scanner does not yet follow pagination cursors. Surface a possible
-          // truncated history rather than reporting an apparently clean scan.
-          if (items.length >= 200) {
-            errors.push(`TRON account-transfer results reached the 200-record page limit for a monitored address; older deposits may require a paginated recovery scan`);
+          items.push(...json.data);
+          const nextFingerprint = json.meta?.fingerprint;
+          if (json.data.length < 200) {
+            fingerprint = null;
+            break;
           }
+          if (typeof nextFingerprint !== 'string' || nextFingerprint.length === 0) {
+            errors.push('TRON account-transfer page limit reached without a usable pagination cursor; scan is incomplete');
+            paginationIncomplete = true;
+            break;
+          }
+          if (seenFingerprints.has(nextFingerprint) || nextFingerprint === fingerprint) {
+            errors.push('TRON account-transfer pagination cursor repeated; scan is incomplete');
+            paginationIncomplete = true;
+            break;
+          }
+          seenFingerprints.add(nextFingerprint);
+          fingerprint = nextFingerprint;
+          if (page === maxPages - 1) {
+            errors.push('TRON account-transfer pagination safety limit reached; scan is incomplete');
+            paginationIncomplete = true;
+          }
+        }
+        if (paginationIncomplete) {
+          errors.push(`TRON deposit scan may be incomplete for monitored address ${monitoredAddr}`);
+        }
           for (const item of items) {
             if (item.type !== 'Transfer') continue;
 
