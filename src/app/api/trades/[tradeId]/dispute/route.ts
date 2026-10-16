@@ -34,7 +34,19 @@ export async function POST(
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    const { reason } = await req.json();
+    let body: unknown;
+    try {
+      body = await req.json();
+    } catch {
+      return NextResponse.json({ error: 'Request body must contain valid JSON.' }, { status: 400 });
+    }
+    if (!body || typeof body !== 'object' || Array.isArray(body)) {
+      return NextResponse.json({ error: 'Request body must be a JSON object.' }, { status: 400 });
+    }
+    const { reason } = body as Record<string, unknown>;
+    if (reason !== undefined && (typeof reason !== 'string' || reason.trim().length > 2000)) {
+      return NextResponse.json({ error: 'Dispute reason must be text of 2,000 characters or fewer.' }, { status: 400 });
+    }
 
     const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(tradeId);
 
@@ -72,7 +84,9 @@ export async function POST(
     }
 
     const now = new Date().toISOString();
-    const disputeReason = reason || 'Non-responsive counterparty or payment issue';
+    const disputeReason = typeof reason === 'string' && reason.trim()
+      ? reason.trim()
+      : 'Non-responsive counterparty or payment issue';
 
     // Execute Atomic Dispute Opening via Canonical Database RPC
     const { data: rpcData, error: rpcError } = await supabase.rpc('raise_trade_dispute', {
