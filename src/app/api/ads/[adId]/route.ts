@@ -252,7 +252,10 @@ export async function GET(
       // Legacy compatibility
       adType: adType.toLowerCase(),
       rateType: (String(ad.rate_type ?? '').toUpperCase() === 'FIXED' || String(ad.pricing_type ?? '').toUpperCase() === 'FIXED' || ad.is_fixed === true) ? 'fixed' : 'market',
-      fixedRate: ad.fixed_rate ?? ad.price,
+      fixedRate: Number.isFinite(Number(ad.fixed_rate ?? ad.price)) &&
+        Number(ad.fixed_rate ?? ad.price) > 0
+          ? Number(ad.fixed_rate ?? ad.price)
+          : null,
       ratePercent: marginPercent,
       minAmount: Number.isFinite(Number(ad.min_amount ?? ad.min_limit)) && Number(ad.min_amount ?? ad.min_limit) > 0 ? Number(ad.min_amount ?? ad.min_limit) : null,
       maxAmount: Number.isFinite(Number(ad.max_amount ?? ad.max_limit)) && Number(ad.max_amount ?? ad.max_limit) > 0 ? Number(ad.max_amount ?? ad.max_limit) : null,
