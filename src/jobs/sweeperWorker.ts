@@ -1091,6 +1091,9 @@ export async function undelegateEnergyToPool(
   const tronHost = process.env.TRON_RPC_URL || 'https://api.trongrid.io';
   const tronWeb = getTronWebInstance(tronHost, poolPrivateKey);
   const poolAddress = tronWeb.defaultAddress.base58;
+  if (!poolAddress || !tronWeb.isAddress(poolAddress)) {
+    throw new Error('Failed to resolve a valid TRON pool address from private key');
+  }
 
   // 1. Retrieve the existing delegation record
   const { data: delegation, error: fetchErr } = await supabaseAdmin
