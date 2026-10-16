@@ -250,45 +250,7 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // 3e. If still not found, check Supabase Auth admin to see if user exists in auth.users by email or username
-    if (!recipientProfile) {
-      try {
-        const { data: authData } = await admin.auth.admin.listUsers();
-        if (authData?.users) {
-          const matchedAuthUser = authData.users.find((u) => {
-            const email = u.email?.toLowerCase() || '';
-            const emailPrefix = email.split('@')[0];
-            const metaUsername = (u.user_metadata?.username || '').toLowerCase();
-            const targetLower = cleanTarget.toLowerCase();
-            return (
-              email === targetLower ||
-              emailPrefix === targetLower ||
-              metaUsername === targetLower ||
-              u.id === cleanTarget
-            );
-          });
-
-          if (matchedAuthUser) {
-            // Find or insert profile for this user
-            const { data: existingProf } = await admin
-              .from('profiles')
-              .select('id, username, is_banned, is_restricted, is_emergency_frozen, account_status')
-              .eq('id', matchedAuthUser.id)
-              .maybeSingle();
-
-            if (existingProf) {
-              recipientProfile = existingProf;
-            } else {
-              // Existing Auth users without a profile are not eligible transfer recipients.
-              // Profile creation must happen through the account-provisioning flow.
-              console.warn('[Internal Transfer] Recipient Auth user has no profile; transfer denied.');
-            }
-          }
-        }
-      } catch (authLookupErr) {
-        console.warn('[Internal Transfer] Auth recipient lookup failed:', authLookupErr instanceof Error ? authLookupErr.name : 'UnknownError');
-      }
-    }
+    // Transfers require an existing profile resolved by username, UUID, exact email, or deposit address.
 
     if (!recipientProfile) {
       return NextResponse.json({ error: `Recipient "${targetIdentifier}" not found on Paxones.` }, { status: 404 });
