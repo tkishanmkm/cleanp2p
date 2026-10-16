@@ -1331,8 +1331,18 @@ async function refreshPendingDepositConfirmations(): Promise<{
             if (rpcErr) {
               console.error('[Deposit Ingestion] Pending BTC deposit credit RPC failed; row remains pending:', rpcErr.message);
             } else {
-              const r = typeof data === 'string' ? JSON.parse(data) : data;
-              if (r?.status === 'credited') newlyCredited++;
+              let r: any;
+              try {
+                r = typeof data === 'string' ? JSON.parse(data) : data;
+              } catch {
+                console.error('[Deposit Ingestion] Invalid pending BTC credit RPC result; row remains pending');
+                continue;
+              }
+              if (!r || typeof r !== 'object' || Array.isArray(r) || typeof r.status !== 'string') {
+                console.error('[Deposit Ingestion] Malformed pending BTC credit RPC result; row remains pending');
+                continue;
+              }
+              if (r.status === 'credited') newlyCredited++;
             }
           } else {
             console.error('[Deposit Ingestion] Pending BTC provider returned a non-success HTTP status; deposit remains pending', {
@@ -1401,8 +1411,18 @@ async function refreshPendingDepositConfirmations(): Promise<{
             if (rpcErr) {
               console.error('[Deposit Ingestion] Pending LTC deposit credit RPC failed; row remains pending:', rpcErr.message);
             } else {
-              const r = typeof data === 'string' ? JSON.parse(data) : data;
-              if (r?.status === 'credited') newlyCredited++;
+              let r: any;
+              try {
+                r = typeof data === 'string' ? JSON.parse(data) : data;
+              } catch {
+                console.error('[Deposit Ingestion] Invalid pending LTC credit RPC result; row remains pending');
+                continue;
+              }
+              if (!r || typeof r !== 'object' || Array.isArray(r) || typeof r.status !== 'string') {
+                console.error('[Deposit Ingestion] Malformed pending LTC credit RPC result; row remains pending');
+                continue;
+              }
+              if (r.status === 'credited') newlyCredited++;
             }
           } else {
             console.error('[Deposit Ingestion] Pending LTC provider returned a non-success HTTP status; deposit remains pending', {
@@ -1589,8 +1609,18 @@ async function refreshPendingDepositConfirmations(): Promise<{
             if (rpcErr) {
               console.error('[Deposit Ingestion] Pending EVM deposit credit RPC failed; row remains pending:', rpcErr.message);
             } else {
-              const res = typeof data === 'string' ? JSON.parse(data) : data;
-              if (res?.status === 'credited') {
+              let res: any;
+              try {
+                res = typeof data === 'string' ? JSON.parse(data) : data;
+              } catch {
+                console.error('[Deposit Ingestion] Invalid pending EVM credit RPC result; row remains pending');
+                continue;
+              }
+              if (!res || typeof res !== 'object' || Array.isArray(res) || typeof res.status !== 'string') {
+                console.error('[Deposit Ingestion] Malformed pending EVM credit RPC result; row remains pending');
+                continue;
+              }
+              if (res.status === 'credited') {
                 newlyCredited++;
               }
             }
