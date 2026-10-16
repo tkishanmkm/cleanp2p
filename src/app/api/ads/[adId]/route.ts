@@ -808,6 +808,21 @@ export async function PUT(
     }
 
     const pricingModeWasProvided = body.rate_type !== undefined || body.pricing_type !== undefined || body.is_fixed !== undefined;
+    if (body.rate_type !== undefined && body.pricing_type !== undefined) {
+      const rateTypeSaysFixed = String(body.rate_type).toLowerCase() === 'fixed';
+      const pricingTypeSaysFixed = String(body.pricing_type).toUpperCase() === 'FIXED';
+      if (rateTypeSaysFixed !== pricingTypeSaysFixed) {
+        return NextResponse.json({ error: 'rate_type and pricing_type must specify the same pricing mode.' }, { status: 400 });
+      }
+    }
+    if (body.is_fixed !== undefined && (body.rate_type !== undefined || body.pricing_type !== undefined)) {
+      const otherModeSaysFixed = body.rate_type !== undefined
+        ? String(body.rate_type).toLowerCase() === 'fixed'
+        : String(body.pricing_type).toUpperCase() === 'FIXED';
+      if (body.is_fixed !== otherModeSaysFixed) {
+        return NextResponse.json({ error: 'is_fixed must agree with rate_type and pricing_type.' }, { status: 400 });
+      }
+    }
     const existingIsFixed = String(existingAd.rate_type || '').toLowerCase() === 'fixed'
       || String(existingAd.pricing_type || '').toUpperCase() === 'FIXED'
       || existingAd.is_fixed === true;
