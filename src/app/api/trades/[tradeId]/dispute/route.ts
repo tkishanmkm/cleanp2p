@@ -111,7 +111,7 @@ export async function POST(
       p_reason: disputeReason,
     });
 
-    if (rpcError || (rpcData && !rpcData.success)) {
+    if (rpcError || !rpcData || rpcData.success !== true) {
       // Keep database internals out of public API responses.
       console.error('raise_trade_dispute failed:', rpcError?.code || 'RPC_REJECTED');
       return NextResponse.json({ error: 'Unable to open a dispute for this trade. Check the trade status and try again.' }, { status: 400 });
