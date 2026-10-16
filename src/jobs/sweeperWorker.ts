@@ -1272,7 +1272,7 @@ export async function undelegateEnergyToPool(
   // 4. Broadcast exact persisted signed transaction bytes
   try {
     const broadcastRes = await tronWeb.trx.sendRawTransaction(signedTx);
-    if (!broadcastRes || !broadcastRes.result) {
+    if (!broadcastRes || broadcastRes.result !== true) {
       const errStr = JSON.stringify(broadcastRes || {});
       const normalizedErr = errStr.toLowerCase();
       if (!normalizedErr.includes('dup') && !normalizedErr.includes('already exist')) {
