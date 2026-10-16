@@ -11,13 +11,35 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    const { tradeId, tradePublicId, reportedUserId, category, description, evidenceUrls } = await req.json();
-
-    if (!tradeId || !category || !description) {
-      return NextResponse.json({ error: 'Missing required report fields' }, { status: 400 });
+    let body: unknown;
+    try {
+      body = await req.json();
+    } catch {
+      return NextResponse.json({ error: 'Request body must contain valid JSON.' }, { status: 400 });
+    }
+    if (!body || typeof body !== 'object' || Array.isArray(body)) {
+      return NextResponse.json({ error: 'Request body must be a JSON object.' }, { status: 400 });
+    }
+    const { tradeId, tradePublicId, reportedUserId, category, description, evidenceUrls } = body as Record<string, unknown>;
+    if (typeof tradeId !== 'string' || tradeId.trim().length === 0 || tradeId.length > 128 ||
+        typeof category !== 'string' || category.trim().length === 0 || category.length > 100 ||
+        typeof description !== 'string' || description.trim().length === 0 || description.length > 10000) {
+      return NextResponse.json({ error: 'Trade ID, category, or description is invalid or too long.' }, { status: 400 });
+    }
+    if (tradePublicId !== undefined && tradePublicId !== null &&
+        (typeof tradePublicId !== 'string' || tradePublicId.trim().length === 0 || tradePublicId.length > 128)) {
+      return NextResponse.json({ error: 'Trade public ID is invalid.' }, { status: 400 });
+    }
+    if (reportedUserId !== undefined && reportedUserId !== null &&
+        (typeof reportedUserId !== 'string' || reportedUserId.trim().length === 0 || reportedUserId.length > 128)) {
+      return NextResponse.json({ error: 'Reported user ID is invalid.' }, { status: 400 });
+    }
+    if (evidenceUrls !== undefined && (!Array.isArray(evidenceUrls) || evidenceUrls.length > 20 ||
+        evidenceUrls.some((url: unknown) => typeof url !== 'string' || url.length > 2048))) {
+      return NextResponse.json({ error: 'Evidence must be a list of at most 20 valid URL strings.' }, { status: 400 });
     }
 
-    const cleanPublicId = tradePublicId || tradeId;
+    const cleanPublicId = typeof tradePublicId === 'string' ? tradePublicId.trim() : tradeId.trim();
 
     const { data, error } = await supabase
       .from('trade_reports')
