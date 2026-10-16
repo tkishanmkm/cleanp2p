@@ -81,6 +81,11 @@ const checks: Array<[string, string, RegExp]> = [
     /const connectedNetwork = await provider\.getNetwork\(\)[\s\S]*connectedNetwork\.chainId !== BigInt\(chainConfig\.chainId\)[\s\S]*RPC chain ID mismatch/i,
   ],
   [
+    'withdrawal worker rejects null and malformed nonce allocation results',
+    'src/jobs/withdrawalWorker.ts',
+    /allocatedNonce === null[\s\S]*allocatedNonce === undefined[\s\S]*typeof allocatedNonce === 'string' && !\/\^\\\\d\+\$\//i,
+  ],
+  [
     'withdrawal worker refuses unsafe EVM nonce allocation fallback',
     'src/jobs/withdrawalWorker.ts',
     /Atomic hot-wallet nonce allocation unavailable; refusing withdrawal broadcast[\s\S]*allocated nonce returned an invalid or stale nonce|Atomic nonce allocation returned an invalid or stale nonce; refusing withdrawal broadcast/i,
