@@ -127,8 +127,8 @@ export async function POST(req: Request) {
         issueCategory: category.trim(),
         issueDetails: description.trim()
       });
-    } catch (messageError) {
-      console.error('Trade report saved but system message failed:', messageError);
+    } catch {
+      console.warn('Trade report was saved, but its system message could not be created.');
     }
 
     // Return only fields the submitting user needs; do not expose future/internal report columns.
