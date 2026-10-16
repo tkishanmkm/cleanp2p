@@ -304,14 +304,19 @@ async function scanEvmNativeDeposits(
         if (monitoredEvmAddresses.has(toClean) && tx.value > BigInt(0)) {
           detected++;
           const formattedAmount = ethers.formatUnits(tx.value, chainConfig.nativeDecimals);
-          const numericAmount = parseFloat(formattedAmount);
+          // Keep the exact decimal string from bigint formatting; converting native
+          // coin amounts to Number can silently round financially meaningful digits.
+          if (!/^(?:0|[1-9]\d*)(?:\.\d+)?$/.test(formattedAmount) || tx.value <= 0n) {
+            errors.push(`Invalid native transfer amount for ${tx.hash}`);
+            continue;
+          }
           const confirmations = Math.max(1, latestBlock - b + 1);
 
           const { data, error } = await supabaseAdmin.rpc('process_deposit_atomic', {
             p_destination_address: toClean,
-            p_asset_symbol: chainConfig.nativeSymbol === 'ETH' ? 'ETH' : chainConfig.nativeSymbol,
+            p_asset_symbol: chainConfig.nativeSymbol,
             p_network_code: normNet === 'ERC20' ? 'ETH' : normNet,
-            p_amount: numericAmount,
+            p_amount: formattedAmount,
             p_tx_hash: tx.hash,
             p_output_index: 0,
             p_block_number: b,
@@ -325,7 +330,7 @@ async function scanEvmNativeDeposits(
             errors.push(`RPC error for native transfer ${tx.hash}: ${error.message}`);
           } else {
             const res = typeof data === 'string' ? JSON.parse(data) : data;
-            if (res?.status === 'credited' || (res?.success && confirmations >= chainConfig.requiredConfirmations)) {
+            if (res?.status === 'credited') {
               credited++;
             }
           }
