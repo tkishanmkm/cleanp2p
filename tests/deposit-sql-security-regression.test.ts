@@ -315,6 +315,11 @@ const checks: Array<[string, string, RegExp]> = [
     'src/jobs/sweeperWorker.ts',
     /recoveryReason = broadcastErr[\s\S]*?p_new_status: 'RECOVERY_REQUIRED'[\s\S]*?recoveryRes\.success !== true[\s\S]*?deterministicTxHash/i,
   ],
+  [
+    'TRON energy estimate must be a positive safe integer',
+    'src/jobs/sweeperWorker.ts',
+    /const estimatedEnergy = Number\(estimateRes\?\.energy_used\)[\s\S]*?Number\.isSafeInteger\(estimatedEnergy\)[\s\S]*?estimatedEnergy <= 0/i,
+  ],
 ];
 
 let failed = 0;
