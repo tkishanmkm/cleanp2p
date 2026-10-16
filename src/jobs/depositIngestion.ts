@@ -683,10 +683,11 @@ async function scanTronDeposits(
               continue;
             }
 
-            // Reserve the idempotency key only after all identifying fields validate.
+            // Check duplicates now, but reserve the key only after the event's
+            // block height is validated so malformed provider data cannot suppress
+            // a valid observation from another scanner strategy.
             const deduplicationKey = `${txId}_${eventIndex}`;
             if (seenTxIndices.has(deduplicationKey)) continue;
-            seenTxIndices.add(deduplicationKey);
 
             // Fetch block number from TRON RPC if missing from account event
             let eventBlock = item.block_number || 0;
@@ -723,6 +724,7 @@ async function scanTronDeposits(
               continue;
             }
             const confirmations = latestBlock - eventBlock + 1;
+            seenTxIndices.add(deduplicationKey);
 
             detected++;
 
