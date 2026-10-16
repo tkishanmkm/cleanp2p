@@ -1393,14 +1393,19 @@ export async function sweepTronDepositAddress(
       console.error(`[Tron Sweeper Broadcast Exception] ${depositAddress}:`, broadcastErr);
       if (sweepId && workerId) {
         // DO NOT undelegate here; state of broadcast is ambiguous.
-        await supabaseAdmin.rpc('update_sweep_operation_status', {
+        const recoveryReason = broadcastErr?.message || 'TRON broadcast ambiguous';
+        const { data: recoveryRes, error: recoveryErr } = await supabaseAdmin.rpc('update_sweep_operation_status', {
           p_sweep_id: sweepId,
           p_worker_id: workerId,
           p_expected_status: 'READY_TO_BROADCAST',
           p_new_status: 'RECOVERY_REQUIRED',
           p_tx_hash: deterministicTxHash,
-          p_error_message: broadcastErr?.message || 'TRON broadcast ambiguous',
+          p_error_message: recoveryReason,
         });
+        if (recoveryErr || !recoveryRes || recoveryRes.success !== true) {
+          console.error('[Tron Sweeper] CRITICAL: failed to persist ambiguous broadcast recovery state', recoveryErr || recoveryRes);
+          throw new Error(`${recoveryReason}; failed to persist sweep recovery status: ${recoveryErr?.message || recoveryRes?.message || 'unknown RPC response'}; transaction hash: ${deterministicTxHash}`);
+        }
       }
       stopHeartbeat();
       throw broadcastErr;
