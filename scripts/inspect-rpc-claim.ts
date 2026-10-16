@@ -5,8 +5,8 @@ async function run() {
   const envPath = '/app/applet/.env.local';
   console.log('Reading env from absolute path:', envPath);
   const content = fs.readFileSync(envPath, 'utf8');
-  const env = {};
-  content.split('\n').forEach(line => {
+  const env: Record<string, string> = {};
+  content.split('\n').forEach((line: string) => {
     const parts = line.split('=');
     if (parts.length >= 2) {
       const key = parts[0].trim();
