@@ -260,6 +260,11 @@ const checks: Array<[string, string, RegExp]> = [
     'src/jobs/sweeperWorker.ts',
     /Revalidate lease ownership after signing\/persistence[\s\S]*?assertPreBroadcastOwnership\(sweepId, workerId, 'GAS_FUNDING'\)[\s\S]*?Sweep ID and worker ID are required before gas funding broadcast[\s\S]*?provider\.broadcastTransaction\(signedTxHex\)/i,
   ],
+  [
+    'invalid gas funding abuse-protection configuration fails closed',
+    'src/jobs/sweeperWorker.ts',
+    /!Number\.isSafeInteger\(cooldownSecs\) \|\| cooldownSecs < 0[\s\S]*?!Number\.isFinite\(dailyLimitNative\) \|\| dailyLimitNative <= 0[\s\S]*?!Number\.isSafeInteger\(dailyMaxOps\) \|\| dailyMaxOps <= 0[\s\S]*?Invalid gas funding abuse-protection configuration; refusing to fund/i,
+  ],
 ];
 
 let failed = 0;
