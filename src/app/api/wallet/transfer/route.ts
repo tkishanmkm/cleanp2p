@@ -386,7 +386,7 @@ export async function POST(req: NextRequest) {
         await admin.from('notifications').insert({
           user_id: user.id,
           title: 'Transfer Sent',
-          message: `Successfully transferred ${grossAmount} ${coinSymbol} to @${recipientName} (1.5% Fee: ${feeAmount} ${coinSymbol}, Total Deducted: ${totalDeduction} ${coinSymbol}).`,
+          message: `Successfully transferred ${grossAmount} ${coinSymbol} to @${recipientName} (Fee: ${feeAmount} ${coinSymbol}, Total Deducted: ${totalDeduction} ${coinSymbol}).`,
           type: 'transfer',
           is_read: false,
           metadata: { link: '/wallet' },
@@ -399,7 +399,7 @@ export async function POST(req: NextRequest) {
 
     const message = isIdempotentReplay
       ? `Transfer was already completed previously (ID: ${transferId}).`
-      : `Successfully transferred ${grossAmount} ${coinSymbol} to @${recipientName} (1.5% Fee: ${feeAmount} ${coinSymbol}, Total Deducted: ${totalDeduction} ${coinSymbol}).`;
+      : `Successfully transferred ${grossAmount} ${coinSymbol} to @${recipientName} (Fee: ${feeAmount} ${coinSymbol}, Total Deducted: ${totalDeduction} ${coinSymbol}).`;
 
     return NextResponse.json({
       success: true,
