@@ -396,6 +396,11 @@ const checks: Array<[string, string, RegExp]> = [
     /Number\.isSafeInteger\(totalEnergyWeightSun\)[\s\S]*?Number\.isSafeInteger\(requiredSunNumerator\)[\s\S]*?Number\.isSafeInteger\(requiredSunNumber\)/i,
   ],
   [
+    'TRON existing delegated state validates persisted amount before reuse',
+    'src/jobs/sweeperWorker.ts',
+    /Persisted TRON delegation amount is malformed; refusing to reuse existing delegation[\s\S]*?BigInt\(String\(persistedAmountSun\)\) <= 0n/i,
+  ],
+  [
     'TRON ambiguous delegation broadcast remains in recovery rather than being marked failed',
     'src/jobs/sweeperWorker.ts',
     /Delegation broadcast outcome is ambiguous; preserving operation for reconciliation[\s\S]*?p_new_status: 'RECOVERY_REQUIRED'[\s\S]*?failed to persist RECOVERY_REQUIRED state/i,
