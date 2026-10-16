@@ -466,11 +466,16 @@ export async function executeCanonicalWithdrawal(input: WithdrawalRequestInput):
   });
 
   if (rpcError) {
+    console.error('[withdrawalService] Withdrawal reservation RPC failed:', {
+      code: rpcError.code,
+      details: rpcError.details,
+      hint: rpcError.hint,
+    });
     return {
       success: false,
       status: 'RESERVATION_FAILED',
-      error: rpcError.message || 'Balance reservation failed',
-      message: rpcError.message || 'Balance reservation failed',
+      error: 'Unable to reserve funds for this withdrawal. Please try again or contact support.',
+      message: 'Withdrawal reservation failed.',
       statusCode: 400,
     };
   }
