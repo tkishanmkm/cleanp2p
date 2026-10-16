@@ -490,6 +490,13 @@ assert.ok(marketWorkerClientIndex > marketWorkerConfigGuardIndex,
 assert.doesNotMatch(marketPriceWorker, /NEXT_PUBLIC_SUPABASE_ANON_KEY|placeholder\.supabase\.co|placeholder-key/,
   'market-price worker must not fall back to public anon credentials or placeholder configuration');
 
+const expireTradesRoutePath = join(process.cwd(), 'src/app/api/cron/expire-trades/route.ts');
+const expireTradesRoute = readFileSync(expireTradesRoutePath, 'utf8');
+assert.equal((expireTradesRoute.match(/error: 'Expired trade processing failed'/g) ?? []).length, 2,
+  'expire-trades endpoint must return generic errors for RPC and unexpected failures');
+assert.doesNotMatch(expireTradesRoute, /error: error\.message|error: err\.message/,
+  'expire-trades endpoint must not disclose internal database or exception details');
+
 const marketPriceCronRoutePath = join(process.cwd(), 'src/app/api/cron/update-prices/route.ts');
 const marketPriceCronRoute = readFileSync(marketPriceCronRoutePath, 'utf8');
 assert.match(marketPriceCronRoute, /result\.error === 'SUPABASE_SERVICE_CONFIGURATION_MISSING'[\s\S]*?unavailable \? 503 : 500/,
