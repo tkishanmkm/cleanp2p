@@ -293,7 +293,7 @@ const checks: Array<[string, string, RegExp]> = [
   [
     'TRON gas funding remains disabled unless durable TRC20 SQL support is explicitly enabled',
     'src/jobs/sweeperWorker.ts',
-    /ENABLE_DURABLE_TRON_GAS_FUNDING !== 'true'[\s\S]*?TRON gas funding is disabled until a TRC20-compatible durable SQL workflow is deployed/i,
+    /The deployed durable gas-funding SQL contract supports ERC20\/BEP20 only[\s\S]*?throw new Error\('TRON gas funding is disabled until a TRC20-compatible durable SQL workflow is deployed'\)/i,
   ],
 ];
 
