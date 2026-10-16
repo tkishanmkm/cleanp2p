@@ -77,7 +77,7 @@ export async function POST(req: NextRequest) {
     const headerIdempotencyKey = req.headers.get('x-idempotency-key') || req.headers.get('idempotency-key');
     const suppliedKey = bodyIdempotencyKey ?? idempotency_key ?? requestId ?? headerIdempotencyKey;
     const rawKey = typeof suppliedKey === 'string' ? suppliedKey.trim() : '';
-    const idempotencyKey = rawKey.length >= 8 && rawKey.length <= 128 ? rawKey : null;
+    const idempotencyKey = /^[A-Za-z0-9._:-]{8,128}$/.test(rawKey) ? rawKey : null;
 
     if (!idempotencyKey) {
       return NextResponse.json({
