@@ -246,11 +246,12 @@ export async function DELETE(
       return NextResponse.json({ error: 'Advertisement not found.' }, { status: 404 });
     }
 
-    // 3. Authorization Check: Ensure authenticated user is the ad owner or an authorized administrator
-    const adOwnerId = existingAd.user_id || existingAd.userId;
-    const isOwner = adOwnerId && String(adOwnerId) === String(user.id);
+    // 3. Authorization Check: Ensure authenticated user is the ad owner or an authorized administrator.
+    // Resolve admin status before checking ownership; never trust request body or ad metadata for admin privileges.
     const adminAuth = await verifyServerAdmin(request);
     const isAdmin = adminAuth.authorized;
+    const adOwnerId = existingAd.user_id || existingAd.userId || existingAd.seller_id || existingAd.creator_id;
+    const isOwner = Boolean(adOwnerId && String(adOwnerId) === String(user.id));
 
     if (!isOwner && !isAdmin) {
       return NextResponse.json(
