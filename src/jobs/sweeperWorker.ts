@@ -1105,7 +1105,7 @@ export async function delegateEnergyFromPool(
   // 6. Broadcast delegation transaction
   try {
     const broadcastRes = await tronWeb.trx.sendRawTransaction(signedTx);
-    if (!broadcastRes || !broadcastRes.result) {
+    if (!broadcastRes || broadcastRes.result !== true) {
       throw new Error(`TRON delegation raw broadcast rejected: ${JSON.stringify(broadcastRes)}`);
     }
   } catch (broadcastErr: any) {
