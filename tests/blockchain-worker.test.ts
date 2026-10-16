@@ -2,10 +2,9 @@ import { createClient } from '@supabase/supabase-js';
 import { randomUUID, randomBytes } from 'node:crypto';
 import { CANONICAL_USDT_CONTRACTS } from '../src/jobs/depositIngestion';
 
-// SAFETY: This integration test writes directly to wallet tables and invokes the
-// withdrawal worker. Never allow it to target a hosted Supabase project by accident.
-// It can also broadcast a real transaction if live chain credentials are configured;
-// run only in a disposable local test environment with mocked chain providers.
+// SAFETY: This deposit integration test writes directly to wallet tables.
+// It is restricted to a local disposable Supabase instance. Withdrawal broadcasting
+// is intentionally excluded until the worker supports injected mock chain providers.
 const supabaseUrl = process.env.TEST_SUPABASE_URL;
 const supabaseKey = process.env.TEST_SUPABASE_SERVICE_ROLE_KEY;
 const isLocalTestUrl = !!supabaseUrl && /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?(?:\/|$)/i.test(supabaseUrl);
@@ -18,7 +17,7 @@ if (
   process.env.BLOCKCHAIN_TEST_MODE !== 'mock'
 ) {
   throw new Error(
-    'Blocked unsafe blockchain integration test. Use NODE_ENV=test, a local TEST_SUPABASE_URL, ' +
+    'Blocked unsafe blockchain deposit integration test. Use NODE_ENV=test, a local TEST_SUPABASE_URL, ' +
     'TEST_SUPABASE_SERVICE_ROLE_KEY, ALLOW_BLOCKCHAIN_INTEGRATION_TESTS=true, and ' +
     'BLOCKCHAIN_TEST_MODE=mock. Do not use production credentials or live chain providers.'
   );
