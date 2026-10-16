@@ -129,7 +129,7 @@ export async function POST(req: Request) {
       if (profileError) {
         console.warn('Trade report profile lookup failed:', profileError.code || 'UNKNOWN');
       } else if (typeof prof?.username === 'string' && prof.username.trim()) {
-        reporterUsername = prof.username.trim().slice(0, 80);
+        reporterUsername = prof.username.trim().replace(/[\u0000-\u001F\u007F]/g, ' ').replace(/\s+/g, ' ').slice(0, 80);
       }
     } catch (profileError) {
       console.warn('Trade report profile lookup threw:', profileError instanceof Error ? profileError.name : 'UnknownError');
