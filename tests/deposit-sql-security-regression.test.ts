@@ -802,6 +802,11 @@ const checks: Array<[string, string, RegExp]> = [
     /const \{ data: past24hWithdrawals, error: past24hWithdrawalsError \}[\s\S]*?if \(past24hWithdrawalsError \|\| !past24hWithdrawals\)[\s\S]*?status: 'SECURITY_CHECK_UNAVAILABLE'[\s\S]*?statusCode: 503/i,
   ],
   [
+    'withdrawal idempotent replay validates stored ID and fee',
+    'src/lib/services/withdrawalService.ts',
+    /const existingFee = Number\(existing\.network_fee\)[\s\S]*?existing\.id\.trim\(\)\.length === 0[\s\S]*?!Number\.isFinite\(existingFee\)[\s\S]*?totalDebited: parsedAmount \+ existingFee/,
+  ],
+  [
     'withdrawal limits fail closed when persisted settings are invalid',
     'src/lib/services/withdrawalService.ts',
     /const hardMaxUsd = Number\(settings\.max_single_withdrawal_usd\)[\s\S]*?!Number\.isFinite\(hardMaxUsd\)[\s\S]*?status: 'SECURITY_CHECK_UNAVAILABLE'/,
