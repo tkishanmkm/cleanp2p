@@ -1099,52 +1099,11 @@ async function refreshPendingDepositConfirmations(): Promise<{
       const tokenContract = CANONICAL_USDT_CONTRACTS[normNet] || null;
 
       if (normNet === 'TRC20') {
-        const tronWeb = getTronWeb(false);
-        const txInfo = await tronWeb.trx.getTransactionInfo(dep.tx_hash);
-        // A successful TRON receipt alone does not prove a canonical USDT
-        // Transfer to this exact destination and amount. The main scanner performs
-        // event-level checks; until the pending path repeats those checks, do not
-        // invoke the privileged credit RPC from this path.
+        // Do not credit pending TRC20 rows from transaction receipt metadata alone.
+        // This recovery path must verify the canonical USDT Transfer event, exact
+        // destination, raw amount and event index before calling the credit RPC.
         console.error('[Deposit Ingestion] Pending TRC20 recheck requires Transfer-event verification; deposit remains pending');
         continue;
-        if (!txInfo?.id || txInfo.id.toLowerCase() !== String(dep.tx_hash).toLowerCase()) {
-          console.error('[Deposit Ingestion] Pending TRON provider returned a mismatched transaction id; deposit remains pending');
-          continue;
-        }
-        // A mined TRON transaction can still have failed execution. Do not
-        // re-credit pending deposits unless the chain receipt reports SUCCESS.
-        if (txInfo && txInfo.receipt?.result === 'SUCCESS' && txInfo.blockNumber) {
-          const currentBlock = await tronWeb.trx.getCurrentBlock();
-          const currentHeight = currentBlock.block_header?.raw_data?.number || 0;
-          if (!Number.isSafeInteger(txInfo.blockNumber) || txInfo.blockNumber <= 0 ||
-              !Number.isSafeInteger(currentHeight) || currentHeight < txInfo.blockNumber) {
-            continue;
-          }
-          const confs = currentHeight - txInfo.blockNumber + 1;
-
-          const { data, error: rpcErr } = await supabaseAdmin.rpc('process_deposit_atomic', {
-            p_destination_address: destinationAddress,
-            p_asset_symbol: assetSymbol,
-            p_network_code: 'TRC20',
-            p_amount: dep.amount,
-            p_tx_hash: dep.tx_hash,
-            p_output_index: outputIndex,
-            p_block_number: txInfo.blockNumber,
-            p_from_address: dep.from_address || null,
-            p_token_contract: tokenContract,
-            p_confirmations: confs,
-            p_provider: 'confirmations_worker',
-          });
-
-          if (rpcErr) {
-            console.error('[Deposit Ingestion] Pending TRON deposit credit RPC failed; row remains pending:', rpcErr.message);
-          } else {
-            const res = typeof data === 'string' ? JSON.parse(data) : data;
-            if (res?.status === 'credited') {
-              newlyCredited++;
-            }
-          }
-        }
       } else if (normNet === 'BTC') {
         const btcApiBase = process.env.BTC_MEMPOOL_API || 'https://mempool.space/api';
         try {
