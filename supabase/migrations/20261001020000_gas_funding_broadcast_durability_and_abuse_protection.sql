@@ -56,8 +56,37 @@ SET search_path = public, pg_temp
 AS $$
 DECLARE
     v_existing RECORD;
+    v_sweep RECORD;
     v_norm_network TEXT := UPPER(TRIM(p_network));
 BEGIN
+    IF p_sweep_id IS NULL OR p_worker_id IS NULL OR TRIM(p_worker_id) = '' THEN
+        RAISE EXCEPTION 'Sweep ID and worker ID are required for gas funding claim';
+    END IF;
+    IF p_deposit_address IS NULL OR TRIM(p_deposit_address) = '' THEN
+        RAISE EXCEPTION 'Deposit address is required for gas funding claim';
+    END IF;
+    IF v_norm_network NOT IN ('ERC20', 'BEP20') THEN
+        RAISE EXCEPTION 'Unsupported gas funding network: %', p_network;
+    END IF;
+    IF p_amount_allocated IS NULL OR p_amount_allocated <= 0 THEN
+        RAISE EXCEPTION 'Gas funding amount must be positive';
+    END IF;
+
+    -- A gas-funding claim is valid only for the worker holding the live sweep lease.
+    SELECT * INTO v_sweep
+    FROM public.sweep_operations
+    WHERE id = p_sweep_id
+    FOR UPDATE;
+    IF NOT FOUND THEN
+        RAISE EXCEPTION 'Sweep operation % does not exist', p_sweep_id;
+    END IF;
+    IF v_sweep.worker_id IS DISTINCT FROM p_worker_id THEN
+        RAISE EXCEPTION 'Worker does not own sweep %', p_sweep_id;
+    END IF;
+    IF v_sweep.lease_expires_at IS NULL OR v_sweep.lease_expires_at <= NOW() THEN
+        RAISE EXCEPTION 'Sweep lease expired for %', p_sweep_id;
+    END IF;
+
     SELECT * INTO v_existing
     FROM public.gas_funding_operations
     WHERE sweep_id = p_sweep_id
