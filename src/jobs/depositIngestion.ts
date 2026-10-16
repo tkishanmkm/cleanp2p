@@ -647,13 +647,11 @@ async function scanTronDeposits(
           }
           items.push(...json.data);
           const nextFingerprint = json.meta?.fingerprint;
-          if (json.data.length < 200) {
-            fingerprint = null;
-            break;
-          }
           if (typeof nextFingerprint !== 'string' || nextFingerprint.length === 0) {
-            errors.push('TRON account-transfer page limit reached without a usable pagination cursor; scan is incomplete');
-            paginationIncomplete = true;
+            if (json.data.length >= 200) {
+              errors.push('TRON account-transfer page limit reached without a usable pagination cursor; scan is incomplete');
+              paginationIncomplete = true;
+            }
             break;
           }
           if (seenFingerprints.has(nextFingerprint) || nextFingerprint === fingerprint) {
