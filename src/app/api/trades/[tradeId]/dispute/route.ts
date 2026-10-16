@@ -117,51 +117,58 @@ export async function POST(
       return NextResponse.json({ error: 'Unable to open a dispute for this trade. Check the trade status and try again.' }, { status: 400 });
     }
 
-    // Service-role admin client for official system message and notification insertion
-    const adminClient = getSupabaseAdminClient();
-
-    // Fetch opener username & trade payment method
-    let openerName = 'Trader';
+    // The dispute RPC is authoritative. Secondary notifications must not turn a
+    // successfully opened dispute into an apparent API failure.
     try {
-      const { data: opProfile } = await adminClient
-        .from('profiles')
-        .select('username')
-        .eq('id', user.id)
-        .maybeSingle();
-      if (opProfile?.username) openerName = opProfile.username;
-    } catch {}
-
-    const tradePaymentMethod = trade?.payment_method || 'Bank Transfer';
-
-    // Insert official system notification in trade_messages using admin client to bypass user RLS
-    try {
-      await insertPaxonesSystemMessage(adminClient, {
-        tradeId: actualTradeId,
-        type: 'TRADE_DISPUTED',
-        openerUsername: openerName,
-        disputeReason: disputeReason,
-        paymentMethod: tradePaymentMethod,
-      });
-    } catch (mErr) {
-      console.warn('System message insert error:', mErr);
-    }
-
-    // Insert notifications for both participants in Activity Center (storing link in metadata)
-    const participantIds = [trade?.buyer_id, trade?.seller_id].filter(Boolean);
-    for (const pid of participantIds) {
+      // Service-role admin client for official system message and notification insertion
+      const adminClient = getSupabaseAdminClient();
+  
+      // Fetch opener username & trade payment method
+      let openerName = 'Trader';
       try {
-        await adminClient.from('notifications').insert({
-          user_id: pid,
-          title: 'Trade Disputed',
-          message: `Dispute opened for Trade. Moderator review requested: ${disputeReason}`,
-          type: 'dispute',
-          is_read: false,
-          metadata: { link: `/trade/${actualTradeId}` },
-          created_at: now,
+        const { data: opProfile } = await adminClient
+          .from('profiles')
+          .select('username')
+          .eq('id', user.id)
+          .maybeSingle();
+        if (opProfile?.username) openerName = opProfile.username;
+      } catch {}
+  
+      const tradePaymentMethod = trade?.payment_method || 'Bank Transfer';
+  
+      // Insert official system notification in trade_messages using admin client to bypass user RLS
+      try {
+        await insertPaxonesSystemMessage(adminClient, {
+          tradeId: actualTradeId,
+          type: 'TRADE_DISPUTED',
+          openerUsername: openerName,
+          disputeReason: disputeReason,
+          paymentMethod: tradePaymentMethod,
         });
-      } catch (nErr) {
-        console.warn('Dispute notification insert error:', nErr);
+      } catch (mErr) {
+        console.warn('System message insert error:', mErr);
       }
+  
+      // Insert notifications for both participants in Activity Center (storing link in metadata)
+      const participantIds = [trade?.buyer_id, trade?.seller_id].filter(Boolean);
+      for (const pid of participantIds) {
+        try {
+          await adminClient.from('notifications').insert({
+            user_id: pid,
+            title: 'Trade Disputed',
+            message: `Dispute opened for Trade. Moderator review requested: ${disputeReason}`,
+            type: 'dispute',
+            is_read: false,
+            metadata: { link: `/trade/${actualTradeId}` },
+            created_at: now,
+          });
+        } catch (nErr) {
+          console.warn('Dispute notification insert error:', nErr);
+        }
+      }
+  
+    } catch {
+      console.warn('Dispute opened, but follow-up notifications could not be initialized.');
     }
 
     return NextResponse.json({
