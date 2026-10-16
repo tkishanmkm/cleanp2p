@@ -74,7 +74,7 @@ export async function POST(
       return NextResponse.json({ error: 'Request body must be a JSON object.' }, { status: 400 });
     }
     const { reason } = body as Record<string, unknown>;
-    if (reason !== undefined && (typeof reason !== 'string' || reason.trim().length > 2000)) {
+    if (reason !== undefined && (typeof reason !== 'string' || reason.length > 2000)) {
       return NextResponse.json({ error: 'Dispute reason must be text of 2,000 characters or fewer.' }, { status: 400 });
     }
 
