@@ -78,9 +78,10 @@ export async function runMarketPriceUpdate(): Promise<PriceUpdateResult> {
     const fiatData = await safeFetchJson('https://open.er-api.com/v6/latest/USD');
     if (fiatData?.result === 'success' && fiatData.rates && typeof fiatData.rates === 'object') {
       for (const [code, rate] of Object.entries(fiatData.rates)) {
+        const fiatCode = code.toUpperCase();
         const numRate = Number(rate);
-        if (!isNaN(numRate) && isFinite(numRate) && numRate > 0) {
-          usdToFiat[code.toUpperCase()] = numRate;
+        if (/^[A-Z]{3}$/.test(fiatCode) && Number.isFinite(numRate) && numRate > 0) {
+          usdToFiat[fiatCode] = numRate;
         }
       }
     }
@@ -91,9 +92,10 @@ export async function runMarketPriceUpdate(): Promise<PriceUpdateResult> {
       if (frankfurterData?.rates && typeof frankfurterData.rates === 'object') {
         usdToFiat.USD = 1.0;
         for (const [code, rate] of Object.entries(frankfurterData.rates)) {
+          const fiatCode = code.toUpperCase();
           const numRate = Number(rate);
-          if (!isNaN(numRate) && isFinite(numRate) && numRate > 0) {
-            usdToFiat[code.toUpperCase()] = numRate;
+          if (/^[A-Z]{3}$/.test(fiatCode) && Number.isFinite(numRate) && numRate > 0) {
+            usdToFiat[fiatCode] = numRate;
           }
         }
       }
