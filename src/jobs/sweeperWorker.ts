@@ -1302,8 +1302,12 @@ export async function sweepTronDepositAddress(
     }
 
     const hotWalletDestination = resolveTronHotWalletAddress();
-    if (!hotWalletDestination || hotWalletDestination === 'T00000000000000000000000000000000' || hotWalletDestination.length < 30) {
-      throw new Error('TRON hot wallet destination address is not configured (checked HOT_WALLET_TRON_ADDRESS and TRON_HOT_WALLET_ADDRESS)');
+    if (
+      !hotWalletDestination ||
+      hotWalletDestination === 'T00000000000000000000000000000000' ||
+      !tronWeb.isAddress(hotWalletDestination)
+    ) {
+      throw new Error('TRON hot wallet destination address is missing or invalid (checked HOT_WALLET_TRON_ADDRESS and TRON_HOT_WALLET_ADDRESS)');
     }
 
     // 2. Dynamically estimate Energy requirements without fixed fallback (Blocker #3)
