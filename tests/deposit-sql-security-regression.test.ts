@@ -46,6 +46,11 @@ const checks: Array<[string, string, RegExp]> = [
     /GRANT EXECUTE ON FUNCTION public\.claim_pending_withdrawals\(INTEGER\) TO service_role/i,
   ],
   [
+    'withdrawal worker checks both ambiguous status persistence operations',
+    'src/jobs/withdrawalWorker.ts',
+    /const \{ error: onchainStatusError \}[\s\S]*if \(onchainStatusError\)[\s\S]*const \{ error: withdrawalStatusError \}[\s\S]*if \(withdrawalStatusError\)/i,
+  ],
+  [
     'withdrawal worker treats completion RPC errors after broadcast as ambiguous failures',
     'src/jobs/withdrawalWorker.ts',
     /const \{ error: completionError \} = await supabaseAdmin\.rpc\('complete_onchain_withdrawal'[\s\S]*?if \(completionError\)[\s\S]*?throw new Error[\s\S]*?const \{ error: completionError \} = await supabaseAdmin\.rpc\('complete_onchain_withdrawal'[\s\S]*?if \(completionError\)[\s\S]*?throw new Error/i,
