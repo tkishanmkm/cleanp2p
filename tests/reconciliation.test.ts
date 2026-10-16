@@ -1,10 +1,26 @@
 import { createClient } from '@supabase/supabase-js';
 import { runFinancialReconciliation } from '../src/lib/security/reconciliation';
 
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL || 'https://placeholder.supabase.co';
-const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'placeholder-key';
+// SAFETY: This test inserts and deletes wallet balances. Never let it target a
+// hosted Supabase instance or use an anonymous placeholder credential.
+const supabaseUrl = process.env.TEST_SUPABASE_URL;
+const supabaseKey = process.env.TEST_SUPABASE_SERVICE_ROLE_KEY;
+const isLocalTestUrl = !!supabaseUrl && /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?(?:\/|$)/i.test(supabaseUrl);
 
-const supabase = createClient(supabaseUrl, supabaseKey, {
+if (
+  process.env.NODE_ENV !== 'test' ||
+  process.env.ALLOW_RECONCILIATION_INTEGRATION_TESTS !== 'true' ||
+  !isLocalTestUrl ||
+  !supabaseKey
+) {
+  throw new Error(
+    'Blocked unsafe reconciliation integration test. Use NODE_ENV=test, a local TEST_SUPABASE_URL, ' +
+    'TEST_SUPABASE_SERVICE_ROLE_KEY, and ALLOW_RECONCILIATION_INTEGRATION_TESTS=true. ' +
+    'Never use production credentials.'
+  );
+}
+
+const supabase = createClient(supabaseUrl!, supabaseKey, {
   auth: { persistSession: false, autoRefreshToken: false },
 });
 
