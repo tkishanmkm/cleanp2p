@@ -762,6 +762,24 @@ export async function PUT(
       return NextResponse.json({ error: 'Maximum limit must be greater than or equal to minimum limit.' }, { status: 400 });
     }
 
+    for (const flag of ['require_full_name_verified', 'require_verified_users']) {
+      if (body[flag] !== undefined && typeof body[flag] !== 'boolean') {
+        return NextResponse.json(
+          { error: `${flag} must be a boolean.`, code: 'INVALID_BOOLEAN_FIELD' },
+          { status: 400 }
+        );
+      }
+    }
+    if (body.min_completed_trades !== undefined) {
+      const completedTrades = Number(body.min_completed_trades);
+      if (!Number.isInteger(completedTrades) || completedTrades < 0 || completedTrades > 1000000) {
+        return NextResponse.json(
+          { error: 'Minimum completed trades must be an integer between 0 and 1,000,000.', code: 'INVALID_MIN_COMPLETED_TRADES' },
+          { status: 400 }
+        );
+      }
+    }
+
     const paymentMethods = Array.isArray(body.payment_methods) 
       ? body.payment_methods 
       : (Array.isArray(body.paymentMethods) ? body.paymentMethods : undefined);
@@ -931,7 +949,7 @@ export async function PUT(
       }
       if (body.require_full_name_verified !== undefined) p2pPayload.require_full_name_verified = Boolean(body.require_full_name_verified);
       if (body.require_verified_users !== undefined) p2pPayload.require_verified_users = Boolean(body.require_verified_users);
-      if (body.min_completed_trades !== undefined) p2pPayload.min_completed_trades = parseInt(String(body.min_completed_trades), 10) || 0;
+      if (body.min_completed_trades !== undefined) p2pPayload.min_completed_trades = Number(body.min_completed_trades);
       p2pPayload.payment_window = paymentWindow;
       p2pPayload.payment_window_minutes = paymentWindow;
       p2pPayload.payment_time_limit = paymentWindow;
