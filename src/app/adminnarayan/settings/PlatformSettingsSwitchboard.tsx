@@ -771,7 +771,7 @@ export default function PlatformSettingsSwitchboard({
           </CardDescription>
         </CardHeader>
         <CardContent className="p-4 sm:p-6">
-          <form action={updateAppSettingsAction} className="space-y-4">
+          <form action={async (formData) => { await updateAppSettingsAction(formData); }} className="space-y-4">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div className="space-y-2">
                 <label className="text-xs font-semibold text-slate-300 uppercase flex items-center gap-1.5">
@@ -827,7 +827,7 @@ export default function PlatformSettingsSwitchboard({
           </CardDescription>
         </CardHeader>
         <CardContent className="p-4 sm:p-6">
-          <form action={updateWithdrawalGovernanceAction} className="space-y-4">
+          <form action={async (formData) => { await updateWithdrawalGovernanceAction(formData); }} className="space-y-4">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div className="space-y-2">
                 <label className="text-xs font-semibold text-slate-300 uppercase flex items-center gap-1.5">
