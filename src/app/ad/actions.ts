@@ -609,21 +609,10 @@ export async function createTradeOrderWithEscrow(input: {
       };
     }
 
-    // 3. Get Dynamic Escrow Fee from settings (Fallback to 1.5%)
-    let escrowFeePercent = 1.5;
-    try {
-      const { data: feeSetting } = await adminClient
-        .from('system_settings')
-        .select('value')
-        .eq('key', 'escrow_fee_percent')
-        .maybeSingle();
-
-      if (feeSetting?.value) {
-        escrowFeePercent = Number(feeSetting.value) || 1.5;
-      }
-    } catch {
-      escrowFeePercent = 1.5;
-    }
+    // The canonical initiate_trade_with_escrow RPC currently applies a fixed
+    // 1.5% fee. Keep the UI pre-check aligned with that authoritative value;
+    // changing the fee requires updating the RPC and this check together.
+    const escrowFeePercent = 1.5;
 
     // 4. Calculate Base Amounts & Limits. Never substitute demo prices or limits
     // for missing/invalid values from a real advertisement.
@@ -662,7 +651,16 @@ export async function createTradeOrderWithEscrow(input: {
     const isInitiatorSelling = isBuyAd;
     const isAdSell = !isBuyAd;
 
-    const adOwnerId = ad.user_id || ad.seller_id || ad.advertiser_id || (ad.profiles && ad.profiles.id) || 'trader_verified_1';
+    const adOwnerId = ad.user_id || ad.seller_id || ad.advertiser_id || (ad.profiles && ad.profiles.id);
+    if (!isValidUUID(adOwnerId)) {
+      return {
+        data: null,
+        error: {
+          message: 'Advertisement owner is invalid.',
+          code: 'INVALID_AD_OWNER',
+        },
+      };
+    }
     const sellerId = isInitiatorSelling ? user.id : adOwnerId;
     const buyerId = isInitiatorSelling ? adOwnerId : user.id;
 
