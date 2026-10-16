@@ -2831,7 +2831,7 @@ export async function reconcileAmbiguousSweep(sweepId: string, workerId: string)
     } catch (err: any) {
       console.error(`[Reconcile Sweep Exception] ${sweepId}:`, err);
       if (status !== 'RECOVERY_REQUIRED') {
-        await supabaseAdmin.rpc('update_sweep_operation_status', {
+        const { data: recoveryRes, error: recoveryErr } = await supabaseAdmin.rpc('update_sweep_operation_status', {
           p_sweep_id: sweepId,
           p_worker_id: workerId,
           p_expected_status: status,
@@ -2839,6 +2839,11 @@ export async function reconcileAmbiguousSweep(sweepId: string, workerId: string)
           p_tx_hash: sweep_tx_hash,
           p_error_message: err?.message || 'Reconciliation query exception',
         });
+        if (recoveryErr || !recoveryRes || typeof recoveryRes !== 'object' || Array.isArray(recoveryRes) || recoveryRes.success !== true) {
+          console.error(
+            `[Reconcile Sweep Critical] Failed to persist RECOVERY_REQUIRED for ${sweepId}: ${recoveryErr?.message || recoveryRes?.message || 'invalid RPC response'}`
+          );
+        }
       }
     }
   }
