@@ -271,6 +271,10 @@ async function runP2PTradeFlowTests() {
     console.log(bold(cyan('------------------------------------------------------\n')));
     if (passedTests === totalTests) {
       console.log(green(bold('ALL P2P ESCROW STATE MACHINE TESTS PASSED SUCCESSFULLY!')));
+    } else {
+      // Ensure CI and npm scripts fail when any assertion or setup step fails.
+      process.exitCode = 1;
+      console.log(red(bold('P2P ESCROW STATE MACHINE TESTS FAILED.')));
     }
   }
 }
