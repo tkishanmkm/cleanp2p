@@ -658,6 +658,10 @@ export async function fundTronGasForAddress(
   sweepId?: string,
   workerId?: string
 ) {
+  if (!sweepId || !workerId) {
+    throw new Error('Sweep ID and worker ID are required for durable TRON gas funding');
+  }
+
   if (sweepId && workerId) {
     const { data: claimRes, error: claimErr } = await supabaseAdmin.rpc('claim_gas_funding_operation', {
       p_sweep_id: sweepId,
