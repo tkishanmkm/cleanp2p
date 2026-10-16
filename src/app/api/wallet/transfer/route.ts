@@ -378,6 +378,7 @@ export async function POST(req: NextRequest) {
 
     if (
       !Number.isFinite(grossAmount) || grossAmount <= 0 ||
+      Math.abs(grossAmount - numericAmount) > 1e-8 ||
       !Number.isFinite(netAmount) || netAmount < 0 ||
       !Number.isFinite(feeAmount) || feeAmount < 0 ||
       !Number.isFinite(totalDeduction) || totalDeduction < 0 ||
