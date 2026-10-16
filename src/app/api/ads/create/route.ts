@@ -264,14 +264,15 @@ export async function POST(req: Request) {
         .eq('fiat_symbol', rawFiat)
         .maybeSingle();
 
-      if (marketError || !marketRow || !marketRow.price_in_fiat || Number(marketRow.price_in_fiat) <= 0) {
+      const marketReferencePrice = Number(marketRow?.price_in_fiat);
+      if (marketError || !marketRow || !Number.isFinite(marketReferencePrice) || marketReferencePrice <= 0) {
         return NextResponse.json(
           { error: `Market reference price is currently unavailable for ${rawAsset}/${rawFiat}. Please try again later.` },
           { status: 400 }
         );
       }
 
-      const refPrice = Number(marketRow.price_in_fiat);
+      const refPrice = marketReferencePrice;
       const minAllowedPrice = refPrice * 0.50;
       const maxAllowedPrice = refPrice * 1.50;
 
@@ -400,11 +401,12 @@ export async function POST(req: Request) {
       console.error('[Database Insert Error in /api/ads/create]:', dbError);
       const isRlsError = dbError.code === '42501' || dbError.message?.toLowerCase().includes('row-level security');
       return NextResponse.json(
-        { 
-          error: isRlsError ? 'Access denied: You do not have permission to create this advertisement.' : 'Failed to create ad in database.', 
-          code: dbError.code,
-          details: dbError.message 
-        }, 
+        {
+          error: isRlsError
+            ? 'Access denied: You do not have permission to create this advertisement.'
+            : 'Failed to create advertisement. Please review the submitted fields and try again.',
+          code: isRlsError ? 'AD_CREATE_FORBIDDEN' : 'AD_CREATE_FAILED',
+        },
         { status: isRlsError ? 403 : 400 }
       );
     }
