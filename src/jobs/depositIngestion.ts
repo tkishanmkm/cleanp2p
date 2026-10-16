@@ -27,7 +27,7 @@ export const supabaseAdmin = createClient(supabaseUrl, supabaseKey, {
   },
 });
 
-export // Canonical mainnet USDT contracts only. Environment overrides could cause
+// Canonical mainnet USDT contracts only. Environment overrides could cause
 // an arbitrary token to be treated as USDT and credited to customer balances.
 const CANONICAL_USDT_CONTRACTS: Record<string, string> = {
   ERC20: '0xdAC17F958D2ee523a2206206994597C13D831ec7',
