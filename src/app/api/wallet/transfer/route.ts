@@ -291,9 +291,7 @@ export async function POST(req: NextRequest) {
 
     if (rpcError) {
       console.error('[Internal Transfer] RPC execute_internal_transfer failed:', {
-        code: rpcError.code,
-        details: rpcError.details,
-        hint: rpcError.hint,
+        code: rpcError.code || 'UNKNOWN',
       });
       return NextResponse.json({
         error: 'Transfer could not be completed. Please verify your details and try again.',
