@@ -22,6 +22,38 @@ import { supabaseAdmin } from '@/lib/supabaseAdmin';
 export { supabaseAdmin };
 
 /**
+ * Require a configurable confirmation depth for UTXO-chain withdrawals.
+ * If the explorer cannot provide a valid tip/block height, settlement must wait.
+ */
+async function hasRequiredUtxoConfirmations(
+  apiBase: string,
+  txData: any,
+  configuredDepth: string | undefined
+): Promise<boolean> {
+  const parsedDepth = configuredDepth ? Number(configuredDepth) : 6;
+  if (!Number.isSafeInteger(parsedDepth) || parsedDepth < 1) {
+    console.error('[Withdrawal Worker] Invalid UTXO confirmation-depth configuration.');
+    return false;
+  }
+
+  const blockHeight = Number(txData?.status?.block_height);
+  if (txData?.status?.confirmed !== true || !Number.isSafeInteger(blockHeight) || blockHeight < 0) {
+    return false;
+  }
+
+  const tipResponse = await fetch(`${apiBase}/blocks/tip/height`);
+  if (!tipResponse.ok) return false;
+
+  const tipText = (await tipResponse.text()).trim();
+  if (!/^\\d+$/.test(tipText)) return false;
+
+  const tipHeight = Number(tipText);
+  if (!Number.isSafeInteger(tipHeight) || tipHeight < blockHeight) return false;
+
+  return tipHeight - blockHeight + 1 >= parsedDepth;
+}
+
+/**
  * Persist a broadcast transaction without settling the withdrawal. Settlement and
  * liability release happen only after the confirmation worker verifies on-chain success.
  */
@@ -390,7 +422,11 @@ export async function checkSubmittedWithdrawals(): Promise<{
           const res = await fetch(`${btcApiBase}/tx/${w.tx_hash}`);
           if (res.ok) {
             const txData = await res.json();
-            if (txData && txData.status && txData.status.confirmed) {
+            if (await hasRequiredUtxoConfirmations(
+              btcApiBase,
+              txData,
+              process.env.BTC_REQUIRED_CONFIRMATIONS
+            )) {
               let actualFeeBtc = '0';
               if (typeof txData.fee === 'number' && txData.fee >= 0) {
                 const feeSat = BigInt(txData.fee);
@@ -426,7 +462,11 @@ export async function checkSubmittedWithdrawals(): Promise<{
           const res = await fetch(`${ltcApiBase}/tx/${w.tx_hash}`);
           if (res.ok) {
             const txData = await res.json();
-            if (txData && txData.status && txData.status.confirmed) {
+            if (await hasRequiredUtxoConfirmations(
+              ltcApiBase,
+              txData,
+              process.env.LTC_REQUIRED_CONFIRMATIONS
+            )) {
               let actualFeeLtc = '0';
               if (typeof txData.fee === 'number' && txData.fee >= 0) {
                 const feeLit = BigInt(txData.fee);
