@@ -61,11 +61,18 @@ export async function GET(
     }
 
     const priceVal = Number(ad.price ?? ad.unit_price ?? ad.fixed_rate ?? 0);
-    const paymentMethods = Array.isArray(ad.payment_methods)
-      ? ad.payment_methods
-      : typeof ad.payment_methods === 'string'
-      ? JSON.parse(ad.payment_methods)
-      : ['Bank Transfer'];
+    let paymentMethods: unknown[] = ['Bank Transfer'];
+    if (Array.isArray(ad.payment_methods)) {
+      paymentMethods = ad.payment_methods;
+    } else if (typeof ad.payment_methods === 'string') {
+      try {
+        const parsedPaymentMethods = JSON.parse(ad.payment_methods);
+        if (Array.isArray(parsedPaymentMethods)) paymentMethods = parsedPaymentMethods;
+      } catch {
+        // Ignore malformed legacy metadata instead of failing the public ad read.
+        paymentMethods = [];
+      }
+    }
 
     const tags = Array.isArray(ad.tags)
       ? ad.tags
