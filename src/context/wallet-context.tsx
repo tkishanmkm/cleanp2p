@@ -60,6 +60,8 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
     ETH: { available: 0, inEscrow: 0, inWithdrawal: 0 },
     LTC: { available: 0, inEscrow: 0, inWithdrawal: 0 },
     USDT: { available: 0, inEscrow: 0, inWithdrawal: 0 },
+    BNB: { available: 0, inEscrow: 0, inWithdrawal: 0 },
+    TRX: { available: 0, inEscrow: 0, inWithdrawal: 0 },
   });
 
   const [isLoading, setIsLoading] = useState<boolean>(true);
@@ -133,7 +135,7 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
           if (!directError && directAssets && directAssets.length > 0) {
             directAssets.forEach((row: any) => {
               const rawSym = String(row.asset_symbol || row.asset_code || row.symbol || '').toUpperCase();
-              const sym = (['BTC', 'ETH', 'LTC', 'USDT'].includes(rawSym) ? rawSym : null) as CryptoCurrency | null;
+              const sym = (['BTC', 'ETH', 'LTC', 'USDT', 'BNB', 'TRX'].includes(rawSym) ? rawSym : null) as CryptoCurrency | null;
               if (sym && nextMap[sym]) {
                 const avail = Number(row.available ?? row.balance ?? row.amount ?? 0);
                 const escrow = Number(row.locked_escrow ?? row.locked ?? row.locked_balance ?? 0);
@@ -168,7 +170,7 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
             if (walletAssets && walletAssets.length > 0) {
               walletAssets.forEach((row: any) => {
                 const rawSym = String(row.asset_symbol || row.asset_code || row.symbol || '').toUpperCase();
-                const sym = (['BTC', 'ETH', 'LTC', 'USDT'].includes(rawSym) ? rawSym : null) as CryptoCurrency | null;
+                const sym = (['BTC', 'ETH', 'LTC', 'USDT', 'BNB', 'TRX'].includes(rawSym) ? rawSym : null) as CryptoCurrency | null;
                 if (sym && nextMap[sym]) {
                   const avail = Number(row.available ?? row.balance ?? row.amount ?? 0);
                   const escrow = Number(row.locked_escrow ?? row.locked ?? row.locked_balance ?? 0);
@@ -197,7 +199,7 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
           if (userWallets && userWallets.length > 0) {
             userWallets.forEach((row: any) => {
               const rawSym = String(row.asset_symbol || row.asset_code || row.symbol || '').toUpperCase();
-              const sym = (['BTC', 'ETH', 'LTC', 'USDT'].includes(rawSym) ? rawSym : null) as CryptoCurrency | null;
+              const sym = (['BTC', 'ETH', 'LTC', 'USDT', 'BNB', 'TRX'].includes(rawSym) ? rawSym : null) as CryptoCurrency | null;
               if (sym && nextMap[sym]) {
                 const avail = Number(row.available_balance ?? row.available ?? row.balance ?? 0);
                 const escrow = Number(row.locked_balance ?? row.locked ?? 0);
