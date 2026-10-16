@@ -308,28 +308,32 @@ export async function processWithdrawalQueue(): Promise<WithdrawalProcessResult>
     } else {
       console.warn(`[Withdrawal Worker] Ambiguous broadcast result for withdrawal ${withdrawal.id}. Transitioning to AMBIGUOUS_BROADCAST and preserving funds reservation.`);
       try {
-        const { error: onchainStatusError } = await supabaseAdmin
+        const { data: onchainStatusRow, error: onchainStatusError } = await supabaseAdmin
           .from('onchain_withdrawals')
           .update({
             status: 'AMBIGUOUS_BROADCAST',
             error_message: `Ambiguous broadcast error: ${err.message}`,
             updated_at: new Date().toISOString(),
           })
-          .eq('id', withdrawal.id);
-        if (onchainStatusError) {
-          throw new Error(`Failed to persist on-chain ambiguous status: ${onchainStatusError.message}`);
+          .eq('id', withdrawal.id)
+          .select('id')
+          .maybeSingle();
+        if (onchainStatusError || !onchainStatusRow) {
+          throw new Error(`Failed to persist on-chain ambiguous status: ${onchainStatusError?.message || 'row not found or not updated'}`);
         }
 
-        const { error: withdrawalStatusError } = await supabaseAdmin
+        const { data: withdrawalStatusRow, error: withdrawalStatusError } = await supabaseAdmin
           .from('withdrawals')
           .update({
             status: 'AMBIGUOUS_BROADCAST',
             broadcast_error: `Ambiguous broadcast error: ${err.message}`,
             updated_at: new Date().toISOString(),
           })
-          .eq('id', withdrawal.id);
-        if (withdrawalStatusError) {
-          throw new Error(`Failed to persist withdrawal ambiguous status: ${withdrawalStatusError.message}`);
+          .eq('id', withdrawal.id)
+          .select('id')
+          .maybeSingle();
+        if (withdrawalStatusError || !withdrawalStatusRow) {
+          throw new Error(`Failed to persist withdrawal ambiguous status: ${withdrawalStatusError?.message || 'row not found or not updated'}`);
         }
       } catch (statusErr) {
         console.error(`[Withdrawal Worker] Failed setting AMBIGUOUS_BROADCAST status for ${withdrawal.id}:`, statusErr);
