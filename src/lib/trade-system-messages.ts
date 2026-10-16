@@ -1725,12 +1725,12 @@ export function formatSystemMessageContent(
   const cleanCoin = normalizedCoin || 'USDT';
   const rawComment = typeof feedbackComment === 'string' ? feedbackComment : typeof customText === 'string' ? customText : '';
   const trimmedComment = rawComment
-    .replace(/[\\u0000-\\u001F\\u007F]/g, ' ')
-    .replace(/\\s+/g, ' ')
+    .replace(/[\u0000-\u001F\u007F]/g, ' ')
+    .replace(/\s+/g, ' ')
     .trim()
     .slice(0, 100);
   const safeCustomText = typeof customText === 'string'
-    ? customText.replace(/[\\u0000-\\u001F\\u007F]/g, ' ').replace(/\\s+/g, ' ').trim().slice(0, 2000)
+    ? customText.replace(/[\u0000-\u001F\u007F]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 2000)
     : '';
 
   switch (type) {
