@@ -6,6 +6,11 @@ const root = process.cwd();
 const read = (relativePath: string) => readFileSync(join(root, relativePath), 'utf8');
 const checks: Array<[string, string, RegExp]> = [
   [
+    'confirmed sweep recovery requires explicit successful status persistence',
+    'src/jobs/sweeperWorker.ts',
+    /if \(isConfirmed\)[\s\S]*?const \{ data: confirmedRes, error: confirmedErr \} = await supabaseAdmin\.rpc\('update_sweep_operation_status'[\s\S]*?confirmedRes\.success !== true[\s\S]*?Failed to persist confirmed sweep status/i,
+  ],
+  [
     'P2P escrow integration tests reject hosted Supabase endpoints',
     'tests/p2p-trade-flow.test.ts',
     /isLocalTestUrl[\s\S]*localhost\|127\.0\.0\.1[\s\S]*ALLOW_P2P_INTEGRATION_TESTS[\s\S]*Blocked unsafe P2P integration tests/i,
