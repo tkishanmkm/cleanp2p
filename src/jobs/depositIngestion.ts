@@ -220,7 +220,8 @@ async function scanEvmTokenDeposits(
           !Number.isSafeInteger(log.index) ||
           log.index < 0 ||
           !Number.isSafeInteger(log.blockNumber) ||
-          log.blockNumber <= 0 ||
+          log.blockNumber < scanFromBlock ||
+          log.blockNumber > scanToBlock ||
           !/^0x[0-9a-fA-F]{64}$/.test(log.transactionHash || '') ||
           !/^0x[0-9a-fA-F]{64}$/.test(log.blockHash || '') ||
           !Array.isArray(log.topics) ||
