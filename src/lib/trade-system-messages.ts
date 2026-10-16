@@ -1879,7 +1879,7 @@ export async function insertPaxonesSystemMessage(
       });
       if (res.ok) return;
     } catch (e) {
-      console.warn('System message API route dispatch failed, falling back to direct client attempt:', e);
+      console.warn('System message API route dispatch failed; attempting database fallback.');
     }
   }
 
@@ -1908,11 +1908,11 @@ export async function insertPaxonesSystemMessage(
         }
       ]);
       if (baseFallback.error) {
-        console.warn('Error inserting into trade_messages:', baseFallback.error);
+        console.warn('Core trade_messages fallback insert failed:', baseFallback.error.code || 'UNKNOWN');
       }
     }
   } catch (err) {
-    console.warn('Error inserting into trade_messages:', err);
+    console.warn('Trade system message insert threw an exception.');
   }
 
   try {
@@ -1929,7 +1929,7 @@ export async function insertPaxonesSystemMessage(
       ]);
 
     if (error) {
-      console.warn('Optional trade_chat_messages insert failed:', error);
+      console.warn('Optional trade_chat_messages insert failed:', error.code || 'UNKNOWN');
     }
   } catch {
     // Optional fallback; keep the primary system message path non-fatal.
