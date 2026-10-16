@@ -76,10 +76,16 @@ BEGIN
         RETURNING id INTO v_wallet_id;
     END IF;
 
-    -- 2. Ensure asset exists in assets table
-    INSERT INTO public.assets (code, name, decimals, is_enabled)
-    VALUES (v_asset_code, v_asset_code, 18, true)
-    ON CONFLICT (code) DO NOTHING;
+    -- 2. Require a preconfigured, enabled asset. Never create/enable an
+    -- arbitrary asset as a side effect of processing a deposit.
+    PERFORM 1
+    FROM public.assets
+    WHERE code = v_asset_code
+      AND is_enabled IS TRUE;
+
+    IF NOT FOUND THEN
+        RAISE EXCEPTION 'Deposit asset % is not configured and enabled', v_asset_code;
+    END IF;
 
     -- 3. Lock & Fetch or Initialize wallet_assets
     SELECT available, locked_escrow, locked_withdrawal
