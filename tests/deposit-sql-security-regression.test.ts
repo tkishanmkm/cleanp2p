@@ -86,6 +86,11 @@ const checks: Array<[string, string, RegExp]> = [
     /allocatedNonce === null[\s\S]*allocatedNonce === undefined[\s\S]*!\\/\\^\\d\\+\\$\\/\.test\\(allocatedNonce\\)/i,
   ],
   [
+    'withdrawal worker rejects invalid numeric nonce and guards parsing errors',
+    'src/jobs/withdrawalWorker.ts',
+    /!Number\.isSafeInteger\(allocatedNonce\)[\s\S]*BigInt\(allocatedNonce\)[\s\S]*catch \{[\s\S]*unparsable nonce/i,
+  ],
+  [
     'withdrawal worker parses nonce without unsafe numeric rounding',
     'src/jobs/withdrawalWorker.ts',
     /BigInt\(allocatedNonce\)[\s\S]*BigInt\(Number\.MAX_SAFE_INTEGER\)[\s\S]*Number\.isSafeInteger\(nonce\)/i,
