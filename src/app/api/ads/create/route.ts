@@ -424,18 +424,37 @@ export async function POST(req: Request) {
         .eq('asset_symbol', rawAsset)
         .maybeSingle();
 
-      const spendableBalance = Number(assetWallet?.balance);
-      const escrowBalance = Number(assetWallet?.in_escrow ?? 0);
+      if (walletError) {
+        console.error('[POST /api/ads/create] Wallet balance lookup failed:', walletError);
+        return NextResponse.json(
+          { error: 'Unable to verify your wallet balance right now. Please try again later.', code: 'WALLET_BALANCE_UNAVAILABLE' },
+          { status: 500 }
+        );
+      }
 
+      if (!assetWallet) {
+        return NextResponse.json(
+          { error: `A ${rawAsset} wallet balance is required before creating a SELL advertisement.`, code: 'WALLET_BALANCE_UNAVAILABLE' },
+          { status: 400 }
+        );
+      }
+
+      const spendableBalance = Number(assetWallet.balance);
+      const escrowBalance = Number(assetWallet.in_escrow ?? 0);
       if (
-        walletError ||
-        !assetWallet ||
         !Number.isFinite(spendableBalance) ||
         spendableBalance < 0 ||
         !Number.isFinite(escrowBalance) ||
-        escrowBalance < 0 ||
-        spendableBalance < requiredCrypto
+        escrowBalance < 0
       ) {
+        console.error('[POST /api/ads/create] Wallet balance row contains invalid numeric values.');
+        return NextResponse.json(
+          { error: 'Unable to verify your wallet balance right now. Please try again later.', code: 'WALLET_BALANCE_UNAVAILABLE' },
+          { status: 500 }
+        );
+      }
+
+      if (spendableBalance < requiredCrypto) {
         return NextResponse.json(
           {
             error: `Insufficient spendable balance in your ${rawAsset} wallet. You have ${spendableBalance.toFixed(8)} ${rawAsset} available, but require at least ${requiredCrypto.toFixed(8)} ${rawAsset} to post this SELL advertisement.`,
