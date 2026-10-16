@@ -297,11 +297,21 @@ async function scanEvmNativeDeposits(
     // Scan only canonical recent blocks. Do not ingest provider-supplied historical
     // asset-transfer summaries: they can be incomplete, use ambiguous output indexes,
     // and may replay old transactions outside the intended scan window.
-    // Iterate through blocks in range (constrained to max 25 blocks for native scan)
-    const start = Math.max(fromBlock, toBlock - 25);
-    for (let b = start; b <= toBlock; b++) {
+    // Iterate through a bounded, canonical range. Never request blocks above
+    // the provider's current tip, and report unavailable blocks instead of silently
+    // treating a partial scan as complete.
+    const end = Math.min(toBlock, latestBlock);
+    const start = Math.max(fromBlock, end - 25);
+    for (let b = start; b <= end; b++) {
       const block = await provider.getBlock(b, true);
-      if (!block || !block.prefetchedTransactions) continue;
+      if (!block) {
+        errors.push(`Provider returned no block for native deposit scan at height ${b}`);
+        continue;
+      }
+      if (!Array.isArray(block.prefetchedTransactions)) {
+        errors.push(`Provider returned an invalid transaction list for block ${b}`);
+        continue;
+      }
 
       for (const tx of block.prefetchedTransactions) {
         if (
