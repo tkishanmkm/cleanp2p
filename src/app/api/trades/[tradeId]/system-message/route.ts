@@ -195,7 +195,7 @@ export async function POST(
       issueDetails: readSafeText('issueDetails', 2000),
       issueCategory: readSafeText('issueCategory', 100),
       feedbackComment: readSafeText('feedbackComment', 1000),
-      customText: typeof customText === 'string' ? customText.trim() : undefined,
+      customText: typeof customText === 'string' ? customText.replace(/[\u0000-\u001F\u007F]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 2000) : undefined,
     };
 
     const text = formatSystemMessageContent(payload);
