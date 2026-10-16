@@ -632,7 +632,14 @@ export async function PUT(
     const paymentMethods = Array.isArray(body.payment_methods) 
       ? body.payment_methods 
       : (Array.isArray(body.paymentMethods) ? body.paymentMethods : undefined);
-    const paymentWindow = body.payment_window ? Math.max(30, parseInt(String(body.payment_window), 10) || 30) : 30;
+    const rawPaymentWindow = body.payment_window ?? body.payment_window_minutes ?? body.paymentWindow;
+    const parsedPaymentWindow = rawPaymentWindow !== undefined && rawPaymentWindow !== null && rawPaymentWindow !== ''
+      ? Number(rawPaymentWindow)
+      : undefined;
+    if (parsedPaymentWindow !== undefined && (!Number.isFinite(parsedPaymentWindow) || !Number.isInteger(parsedPaymentWindow) || parsedPaymentWindow < 30 || parsedPaymentWindow > 1440)) {
+      return NextResponse.json({ error: 'Payment window must be a whole number between 30 and 1440 minutes.' }, { status: 400 });
+    }
+    const paymentWindow = parsedPaymentWindow;
 
     const termsText = body.terms !== undefined 
       ? String(body.terms) 
@@ -777,9 +784,11 @@ export async function PUT(
       if (body.require_full_name_verified !== undefined) p2pPayload.require_full_name_verified = Boolean(body.require_full_name_verified);
       if (body.require_verified_users !== undefined) p2pPayload.require_verified_users = Boolean(body.require_verified_users);
       if (body.min_completed_trades !== undefined) p2pPayload.min_completed_trades = parseInt(String(body.min_completed_trades), 10) || 0;
-      p2pPayload.payment_window = paymentWindow;
-      p2pPayload.payment_window_minutes = paymentWindow;
-      p2pPayload.payment_time_limit = paymentWindow;
+      if (paymentWindow !== undefined) {
+        p2pPayload.payment_window = paymentWindow;
+        p2pPayload.payment_window_minutes = paymentWindow;
+        p2pPayload.payment_time_limit = paymentWindow;
+      }
 
       const { data, error } = await admin
         .from('p2p_ads')
@@ -807,7 +816,7 @@ export async function PUT(
         if (paymentMethods !== undefined) adsPayload.payment_methods = paymentMethods;
         if (termsText !== undefined) adsPayload.terms = termsText;
         if (directionFromPayload) adsPayload.type = directionFromPayload;
-        adsPayload.payment_window = paymentWindow;
+        if (paymentWindow !== undefined) adsPayload.payment_window = paymentWindow;
 
         const { data, error } = await admin
           .from('ads')
@@ -870,7 +879,7 @@ export async function PUT(
       data: updatedRow,
       updatedFields: {
         terms: termsText,
-        payment_window: paymentWindow,
+        ...(paymentWindow !== undefined ? { payment_window: paymentWindow } : {}),
         offer_label: offerLabel,
         tags: rawTags,
         price: price,
