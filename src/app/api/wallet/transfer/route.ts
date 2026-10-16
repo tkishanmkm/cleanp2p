@@ -301,7 +301,7 @@ export async function POST(req: NextRequest) {
       ['suspended', 'banned', 'restricted', 'frozen'].includes(recipientAccountStatus)
     ) {
       return NextResponse.json({
-        error: `Cannot transfer: Recipient @${recipientProfile.username} is restricted or frozen on the platform.`,
+        error: 'This recipient is not eligible to receive transfers.',
       }, { status: 403 });
     }
 
