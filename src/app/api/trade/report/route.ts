@@ -40,7 +40,7 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: 'Trade ID, category, or description is invalid or too long.' }, { status: 400 });
     }
     if (reportedUserId !== undefined && reportedUserId !== null &&
-        (typeof reportedUserId !== 'string' || reportedUserId.trim().length === 0 || reportedUserId.trim().length > 128)) {
+        (typeof reportedUserId !== 'string' || reportedUserId.trim().length === 0 || reportedUserId.length > 128)) {
       return NextResponse.json({ error: 'Reported user ID is invalid.' }, { status: 400 });
     }
     if (evidenceUrls !== undefined && (!Array.isArray(evidenceUrls) || evidenceUrls.length > 20 ||
