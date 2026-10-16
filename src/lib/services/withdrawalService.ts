@@ -608,7 +608,7 @@ export async function executeCanonicalWithdrawal(input: WithdrawalRequestInput):
       };
     }
 
-    if (existing && (existing.status === 'completed' || existing.status === 'processing' || existing.status === 'QUEUED' || existing.status === 'PENDING_APPROVAL')) {
+    if (existing && (existing.status === 'completed' || existing.status === 'processing' || existing.status === 'QUEUED' || existing.status === 'PENDING_APPROVAL' || existing.status === 'APPROVED' || existing.status === 'approved' || existing.status === 'pending')) {
       const existingFee = Number(existing.network_fee);
       if (
         typeof existing.id !== 'string' ||
