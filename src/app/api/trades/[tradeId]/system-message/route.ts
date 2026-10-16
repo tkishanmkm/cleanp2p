@@ -13,8 +13,8 @@ export async function POST(
     const resolvedParams = typeof (params as any)?.then === 'function' ? await params : params;
     const tradeId = resolvedParams?.tradeId;
 
-    if (!tradeId) {
-      return NextResponse.json({ error: 'Trade ID is required' }, { status: 400 });
+    if (!tradeId || tradeId.length > 128) {
+      return NextResponse.json({ error: 'Valid trade ID is required' }, { status: 400 });
     }
 
     const supabase = await createClient();
@@ -102,7 +102,7 @@ export async function POST(
         else if (bp?.display_name && !buyerUsername) buyerUsername = bp.display_name;
         else if (bp?.email && !buyerUsername) buyerUsername = bp.email.split('@')[0];
       } catch (bpErr) {
-        console.warn('Buyer profile fetch warning in system message:', bpErr);
+        console.warn('Buyer profile lookup failed in system message:', bpErr instanceof Error ? bpErr.name : 'UnknownError');
       }
 
       if (!buyerUsername) {
@@ -130,7 +130,7 @@ export async function POST(
         else if (sp?.display_name && !sellerUsername) sellerUsername = sp.display_name;
         else if (sp?.email && !sellerUsername) sellerUsername = sp.email.split('@')[0];
       } catch (spErr) {
-        console.warn('Seller profile fetch warning in system message:', spErr);
+        console.warn('Seller profile lookup failed in system message:', spErr instanceof Error ? spErr.name : 'UnknownError');
       }
 
       if (!sellerUsername) {
@@ -274,7 +274,7 @@ export async function POST(
 
     // Also mirror to trade_chat_messages
     try {
-      await supabaseAdmin.from('trade_chat_messages').insert([
+      const mirrorResult = await supabaseAdmin.from('trade_chat_messages').insert([
         {
           trade_id: actualTradeId,
           sender_id: systemUuid,
@@ -283,8 +283,12 @@ export async function POST(
           created_at: now
         }
       ]);
-    } catch {
-      // Optional fallback
+      if (mirrorResult.error) {
+        // The canonical trade_messages insert succeeded; the mirror is best-effort.
+        console.warn('System-message mirror insert failed:', mirrorResult.error.code || 'UNKNOWN');
+      }
+    } catch (mirrorError) {
+      console.warn('System-message mirror insert threw:', mirrorError instanceof Error ? mirrorError.name : 'UnknownError');
     }
 
     return NextResponse.json({
