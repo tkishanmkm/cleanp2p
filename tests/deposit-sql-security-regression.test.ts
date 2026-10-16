@@ -802,6 +802,11 @@ const checks: Array<[string, string, RegExp]> = [
     /const \{ data: past24hWithdrawals, error: past24hWithdrawalsError \}[\s\S]*?if \(past24hWithdrawalsError \|\| !past24hWithdrawals\)[\s\S]*?status: 'SECURITY_CHECK_UNAVAILABLE'[\s\S]*?statusCode: 503/i,
   ],
   [
+    'withdrawal amount strings are parsed strictly instead of with parseFloat',
+    'src/lib/services/withdrawalService.ts',
+    /const amountText = typeof rawAmount === 'string' \? rawAmount\.trim\(\) : ''[\s\S]*?\^\(\?:\\d\+/,
+  ],
+  [
     'withdrawal amount validation rejects Infinity and NaN',
     'src/lib/services/withdrawalService.ts',
     /const parsedAmount = [\s\S]*?if \(!Number\.isFinite\(parsedAmount\) \|\| parsedAmount <= 0\)/,
