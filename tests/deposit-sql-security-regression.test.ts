@@ -406,6 +406,11 @@ const checks: Array<[string, string, RegExp]> = [
     /export async function undelegateEnergyToPool[\s\S]*?Failed to resolve a valid TRON pool address from private key[\s\S]*?Retrieve the existing delegation record/i,
   ],
   [
+    'TRON undelegation rejects a receiver equal to the pool address',
+    'src/jobs/sweeperWorker.ts',
+    /export async function undelegateEnergyToPool[\s\S]*?receiverAddress === poolAddress/i,
+  ],
+  [
     'TRON ambiguous delegation broadcast remains in recovery rather than being marked failed',
     'src/jobs/sweeperWorker.ts',
     /Delegation broadcast outcome is ambiguous; preserving operation for reconciliation[\s\S]*?p_new_status: 'RECOVERY_REQUIRED'[\s\S]*?failed to persist RECOVERY_REQUIRED state/i,
