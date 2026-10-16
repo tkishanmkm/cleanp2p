@@ -6,6 +6,11 @@ const root = process.cwd();
 const read = (relativePath: string) => readFileSync(join(root, relativePath), 'utf8');
 const checks: Array<[string, string, RegExp]> = [
   [
+    'sweep missing transaction hash checks recovery-state persistence',
+    'src/jobs/sweeperWorker.ts',
+    /Ambiguous sweep in \$\{status\} without transaction hash[\s\S]*?Sweep Recovery Persistence Failure: missing transaction hash[\s\S]*?recoveryRes\.success !== true/i,
+  ],
+  [
     'BTC/LTC recovery rebroadcast exception checks recovery-state persistence',
     'src/jobs/sweeperWorker.ts',
     /BTC\/LTC Sweeper Broadcast Exception during READY_TO_BROADCAST recovery[\s\S]*?BTC\/LTC Sweep Recovery Persistence Failure after broadcast exception[\s\S]*?recoveryRes\.success !== true/i,
