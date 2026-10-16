@@ -349,12 +349,15 @@ export async function checkSubmittedWithdrawals(): Promise<{
             p_gas_asset: 'TRX',
           });
           if (!confErr) confirmed++;
-        } else if (!success) {
-          await supabaseAdmin.rpc('process_failed_withdrawal', {
+        } else if (isConfirmed && success === false) {
+          const { error: failureError } = await supabaseAdmin.rpc('process_failed_withdrawal', {
             p_withdrawal_id: w.id,
             p_error_reason: `TRON transaction reverted on-chain`,
             p_is_verified_unbroadcast: true,
           });
+          if (failureError) {
+            console.error(`[Withdrawal Worker] Could not persist verified TRON failure for ${w.id}:`, failureError);
+          }
         }
       } else if (SUPPORTED_EVM_CHAINS[normNet]) {
         const chain = SUPPORTED_EVM_CHAINS[normNet];
@@ -371,12 +374,15 @@ export async function checkSubmittedWithdrawals(): Promise<{
             p_gas_asset: gasAsset,
           });
           if (!confErr) confirmed++;
-        } else if (status === 0) {
-          await supabaseAdmin.rpc('process_failed_withdrawal', {
+        } else if (confirmations >= chain.requiredConfirmations && status === 0) {
+          const { error: failureError } = await supabaseAdmin.rpc('process_failed_withdrawal', {
             p_withdrawal_id: w.id,
             p_error_reason: `EVM transaction reverted on-chain on network ${w.network}`,
             p_is_verified_unbroadcast: true,
           });
+          if (failureError) {
+            console.error(`[Withdrawal Worker] Could not persist verified EVM failure for ${w.id}:`, failureError);
+          }
         }
       } else if (normNet === 'BTC') {
         try {
