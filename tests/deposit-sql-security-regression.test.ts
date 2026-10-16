@@ -6,6 +6,11 @@ const root = process.cwd();
 const read = (relativePath: string) => readFileSync(join(root, relativePath), 'utf8');
 const checks: Array<[string, string, RegExp]> = [
   [
+    'EVM recovery parse failure checks recovery-state persistence',
+    'src/jobs/sweeperWorker.ts',
+    /Failed to parse signed transaction on recovery[\s\S]*?recoveryRes\.success !== true[\s\S]*?EVM Sweep Recovery Persistence Failure/i,
+  ],
+  [
     'EVM recovered signed transaction hash mismatch checks recovery-state persistence',
     'src/jobs/sweeperWorker.ts',
     /if \(derivedHash !== sweep_tx_hash\)[\s\S]*?Hash consistency check failed on recovery[\s\S]*?recoveryRes\.success !== true[\s\S]*?EVM Sweep Recovery Persistence Failure/i,
