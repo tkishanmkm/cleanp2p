@@ -576,6 +576,11 @@ const checks: Array<[string, string, RegExp]> = [
     /Undelegation transaction reverted on-chain[\s\S]*?failureErr \|\| !failureRes \|\| failureRes\.success !== true[\s\S]*?leaving operation for recovery[\s\S]*?return false/i,
   ],
   [
+    'TRON undelegation confirmation requires explicit RPC success',
+    'src/jobs/sweeperWorker.ts',
+    /confirm_resource_undelegated[\s\S]*?confirmRes\.success !== true/i,
+  ],
+  [
     'TRON failed undelegation receipt checks persistence result before returning',
     'src/jobs/sweeperWorker.ts',
     /const \{ data: failureRes, error: failureErr \} = await supabaseAdmin\.rpc\('update_delegation_status'[\s\S]*?failureRes\.success !== true[\s\S]*?leaving operation for recovery/i,
