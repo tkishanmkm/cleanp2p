@@ -510,7 +510,7 @@ export async function PATCH(
     return NextResponse.json({ success: true, status: newStatus, active: isActive });
   } catch (err: any) {
     console.error('Error in PATCH /api/ads/[adId]:', err);
-    return NextResponse.json({ error: err.message || 'Failed to update ad' }, { status: 500 });
+    return NextResponse.json({ error: 'An unexpected error occurred while updating advertisement status.' }, { status: 500 });
   }
 }
 
