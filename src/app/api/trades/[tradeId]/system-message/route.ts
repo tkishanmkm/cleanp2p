@@ -93,6 +93,11 @@ export async function POST(
       return NextResponse.json({ error: 'Forbidden: You are not a participant in this trade' }, { status: 403 });
     }
 
+    const adminOnlyTypes = new Set(['CUSTOM', 'USER_BLOCKED', 'ISSUE_REPORTED', 'MESSAGE_BLOCKED', 'SECURITY_REMINDER']);
+    if (!isAdmin && typeof type === 'string' && adminOnlyTypes.has(type)) {
+      return NextResponse.json({ error: 'Administrator privileges are required for this message type.' }, { status: 403 });
+    }
+
     // Free-form system announcements can impersonate trusted lifecycle events.
     // Permit them only for accounts with trusted server-managed admin metadata.
     if (typeof customText === 'string' && customText.trim() && !isAdmin) {
