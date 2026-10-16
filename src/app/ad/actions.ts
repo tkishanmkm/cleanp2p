@@ -489,6 +489,18 @@ export async function createTradeOrderWithEscrow(input: {
 
     const resolved = await findAdById(cleanAdId);
     if (resolved?.ad) {
+      // The canonical initiate_trade_with_escrow RPC resolves ads from
+      // public.ads only. Do not preflight a p2p_ads/offers record and then pass
+      // its identifier to a different source of truth.
+      if (resolved.tableName !== 'ads') {
+        return {
+          data: null,
+          error: {
+            message: 'This advertisement source is not currently supported for escrow trades.',
+            code: 'UNSUPPORTED_AD_SOURCE',
+          },
+        };
+      }
       ad = resolved.ad;
       if (isValidUUID(ad.id)) {
         validAdUuid = ad.id;
