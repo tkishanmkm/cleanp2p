@@ -47,11 +47,19 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: 'Combined dispute reason and explanation must be 2,000 characters or fewer.' }, { status: 400 });
     }
 
+    const cleanReason = reason.replace(/[\u0000-\u001F\u007F]/g, ' ').replace(/\s+/g, ' ').trim();
+    const cleanExplanation = typeof explanation === 'string'
+      ? explanation.replace(/[\u0000-\u001F\u007F]/g, ' ').replace(/\s+/g, ' ').trim()
+      : undefined;
+    if (!cleanReason || (typeof explanation === 'string' && explanation.trim() && !cleanExplanation)) {
+      return NextResponse.json({ error: 'Dispute reason and explanation must contain readable text.' }, { status: 400 });
+    }
+
     await openDispute({
       tradeId: tradeId.trim(),
       disputedByUserId: user.id,
-      reason: reason.trim(),
-      explanation: typeof explanation === 'string' ? explanation.trim() : undefined,
+      reason: cleanReason,
+      explanation: cleanExplanation || undefined,
     });
 
     return NextResponse.json({ success: true, message: 'Dispute opened successfully.' });
