@@ -1303,13 +1303,51 @@ async function refreshPendingDepositConfirmations(): Promise<{
             console.error('[Deposit Ingestion] Pending EVM transaction is not mined in the receipt block; deposit remains pending');
             continue;
           }
-          // ERC-20 pending rows require matching Transfer-log contract, recipient,
-          // raw amount, and log index verification before the privileged credit RPC.
-          // Until that verification is implemented here, fail closed rather than
-          // treating a successful receipt alone as proof of an ERC-20 deposit.
+          // ERC-20 pending rows must match the canonical contract, exact receipt
+          // log index, recipient and raw token amount before privileged credit.
           if (assetSymbol === 'USDT') {
-            console.error('[Deposit Ingestion] Pending EVM USDT recheck requires Transfer-log verification; deposit remains pending');
-            continue;
+            const canonicalContract = CANONICAL_USDT_CONTRACTS[normNet];
+            const tokenDecimals = chain.usdtDecimals;
+            const erc20Interface = new ethers.Interface(ERC20_ABI);
+            const transferTopic = erc20Interface.getEvent('Transfer')?.topicHash;
+            if (!canonicalContract || !Number.isSafeInteger(tokenDecimals) ||
+                tokenDecimals < 0 || tokenDecimals > 36 || !transferTopic ||
+                typeof dep.amount !== 'string' && typeof dep.amount !== 'number') {
+              console.error('[Deposit Ingestion] Pending EVM USDT verification configuration or amount is invalid; deposit remains pending');
+              continue;
+            }
+            const matchingLogs = receipt.logs.filter((log) => log.index === outputIndex);
+            if (matchingLogs.length !== 1) {
+              console.error('[Deposit Ingestion] Pending EVM USDT receipt does not contain exactly one log at the stored index; deposit remains pending');
+              continue;
+            }
+            const transferLog = matchingLogs[0];
+            if (transferLog.address.toLowerCase() !== canonicalContract.toLowerCase() ||
+                transferLog.transactionHash.toLowerCase() !== String(dep.tx_hash).toLowerCase() ||
+                transferLog.blockNumber !== receipt.blockNumber ||
+                transferLog.blockHash.toLowerCase() !== receipt.blockHash.toLowerCase() ||
+                transferLog.topics[0]?.toLowerCase() !== transferTopic.toLowerCase()) {
+              console.error('[Deposit Ingestion] Pending EVM USDT receipt log identity or contract mismatch; deposit remains pending');
+              continue;
+            }
+            try {
+              const parsedTransfer = erc20Interface.parseLog({
+                topics: transferLog.topics as string[],
+                data: transferLog.data,
+              });
+              const amountText = String(dep.amount);
+              if (!parsedTransfer || parsedTransfer.name !== 'Transfer' ||
+                  (parsedTransfer.args[1] as string).toLowerCase() !== destinationAddress.toLowerCase() ||
+                  !/^(0|[1-9]\\d*)(?:\\.\\d{1,36})?$/.test(amountText) ||
+                  ethers.parseUnits(amountText, tokenDecimals) <= 0n ||
+                  ethers.parseUnits(amountText, tokenDecimals) !== parsedTransfer.args[2]) {
+                console.error('[Deposit Ingestion] Pending EVM USDT recipient or raw amount mismatch; deposit remains pending');
+                continue;
+              }
+            } catch {
+              console.error('[Deposit Ingestion] Pending EVM USDT Transfer log could not be decoded safely; deposit remains pending');
+              continue;
+            }
           }
           // Native-asset pending rows must match the actual transaction recipient
           // and exact wei value; receipt success alone is insufficient evidence.
