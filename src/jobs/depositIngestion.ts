@@ -635,7 +635,7 @@ async function scanTronDeposits(
                 toAddr = tronWeb.address.fromHex(toAddr);
               }
             } catch (err) {
-          console.error('[Deposit Ingestion] Pending BTC/LTC verification failed; deposit left pending:', err instanceof Error ? err.message : 'unknown provider error');
+          console.error('[Deposit Ingestion] Invalid TRON recipient address from provider event; event skipped:', err instanceof Error ? err.message : 'unknown provider error');
         }
 
             if (toAddr !== monitoredAddr && !monitoredTronAddresses.has(toAddr)) {
@@ -660,7 +660,7 @@ async function scanTronDeposits(
                 fromAddr = tronWeb.address.fromHex(fromAddr);
               }
             } catch (err) {
-          console.error('[Deposit Ingestion] Pending BTC/LTC verification failed; deposit left pending:', err instanceof Error ? err.message : 'unknown provider error');
+          console.error('[Deposit Ingestion] Invalid TRON sender address from provider event; sender omitted:', err instanceof Error ? err.message : 'unknown provider error');
         }
 
             // Never trust provider metadata to choose the token or its decimals:
@@ -709,7 +709,7 @@ async function scanTronDeposits(
                   eventBlock = txInfo.blockNumber || 0;
                 }
               } catch (err) {
-          console.error('[Deposit Ingestion] Pending BTC/LTC verification failed; deposit left pending:', err instanceof Error ? err.message : 'unknown provider error');
+          console.error('[Deposit Ingestion] Could not fetch TRON transaction info for event block fallback:', err instanceof Error ? err.message : 'unknown provider error');
         }
             }
 
@@ -899,7 +899,7 @@ async function scanTronDeposits(
                 fromBase58 = tronWeb.address.fromHex(fromHex);
               }
             } catch (err) {
-          console.error('[Deposit Ingestion] Pending BTC/LTC verification failed; deposit left pending:', err instanceof Error ? err.message : 'unknown provider error');
+          console.error('[Deposit Ingestion] Could not normalize TRON sender address from log:', err instanceof Error ? err.message : 'unknown provider error');
         }
 
             if (!monitoredTronAddresses.has(toBase58)) continue;
@@ -1099,7 +1099,7 @@ async function scanTronDeposits(
             const fromHex = '41' + (log.topics[1] || '').slice(-40);
             fromBase58 = tronWeb.address.fromHex(fromHex);
           } catch (err) {
-          console.error('[Deposit Ingestion] Pending BTC/LTC verification failed; deposit left pending:', err instanceof Error ? err.message : 'unknown provider error');
+          console.error('[Deposit Ingestion] Could not normalize TRON log sender address:', err instanceof Error ? err.message : 'unknown provider error');
         }
 
           let formattedAmount = '';
