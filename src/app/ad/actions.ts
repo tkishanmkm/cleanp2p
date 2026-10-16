@@ -625,13 +625,29 @@ export async function createTradeOrderWithEscrow(input: {
       escrowFeePercent = 1.5;
     }
 
-    // 4. Calculate Base Amounts & Limits
-    const price = Number(ad.price || ad.fixed_rate || ad.fixedRate || ad.unit_price) || 80116.02;
+    // 4. Calculate Base Amounts & Limits. Never substitute demo prices or limits
+    // for missing/invalid values from a real advertisement.
+    const price = Number(ad.price ?? ad.fixed_rate ?? ad.fixedRate ?? ad.unit_price);
     const fiatAmount = Number(input.fiatAmount);
-    const minLimit = Number(ad.min_limit ?? ad.min_amount ?? 100) || 100;
-    const maxLimit = Number(ad.max_limit ?? ad.max_amount ?? 5000) || 5000;
-    const assetSymbol = (ad.asset_symbol || ad.crypto || ad.asset_code || 'BTC').toUpperCase();
-    const fiatSymbol = (ad.fiat_symbol || ad.fiat || ad.fiat_currency || 'USD').toUpperCase();
+    const minLimit = Number(ad.min_limit ?? ad.min_amount);
+    const maxLimit = Number(ad.max_limit ?? ad.max_amount);
+    const assetSymbol = String(ad.asset_symbol || ad.crypto || ad.asset_code || '').toUpperCase();
+    const fiatSymbol = String(ad.fiat_symbol || ad.fiat || ad.fiat_currency || '').toUpperCase();
+
+    if (!Number.isFinite(fiatAmount) || fiatAmount <= 0 ||
+        !Number.isFinite(price) || price <= 0 ||
+        !Number.isFinite(minLimit) || minLimit <= 0 ||
+        !Number.isFinite(maxLimit) || maxLimit < minLimit ||
+        !/^[A-Z0-9]{2,12}$/.test(assetSymbol) ||
+        !/^[A-Z]{3,8}$/.test(fiatSymbol)) {
+      return {
+        data: null,
+        error: {
+          message: 'Advertisement pricing, limits, or trade amount is invalid.',
+          code: 'INVALID_AD_CONFIGURATION',
+        },
+      };
+    }
 
     // 5. Determine who is providing crypto for escrow:
     const typeCandidates = [
@@ -708,10 +724,8 @@ export async function createTradeOrderWithEscrow(input: {
     const sellerBalanceInfo = await fetchUserCryptoBalance(sellerId, assetSymbol);
     let currentSellerAvail = sellerBalanceInfo.available;
 
-    if (isAdSell && Number(ad.total_amount || 0) > currentSellerAvail) {
-      currentSellerAvail = Number(ad.total_amount);
-    }
-
+    // Do not trust an ad's advertised total_amount as wallet funds. Escrow
+    // must be funded by the seller's actual available wallet balance.
     // Effective max limit check
     let effectiveMaxLimit = maxLimit;
     if (isAdSell && currentSellerAvail > 0 && price > 0) {
