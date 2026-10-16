@@ -90,7 +90,7 @@ export async function GET(request: Request) {
               throw new Error('Missing crypto amount in active escrow records');
             }
             const cryptoAmt = Number(t.crypto_amount ?? t.amount);
-            const feeAmt = Number(t.escrow_fee ?? t.platform_fee ?? (cryptoAmt * 0.015));
+            const feeAmt = Number(t.escrow_fee ?? t.platform_fee);
             const totalTradeLock = cryptoAmt + feeAmt;
             if (!Number.isFinite(cryptoAmt) || cryptoAmt < 0 || !Number.isFinite(feeAmt) || feeAmt < 0 || !Number.isFinite(totalTradeLock)) {
               throw new Error('Invalid financial values in active escrow records');
@@ -130,7 +130,7 @@ export async function GET(request: Request) {
               throw new Error('Missing crypto amount in active escrow records');
             }
             const cryptoAmt = Number(t.crypto_amount ?? t.amount);
-            const feeAmt = Number(t.escrow_fee ?? t.platform_fee ?? (cryptoAmt * 0.015));
+            const feeAmt = Number(t.escrow_fee ?? t.platform_fee);
             const totalTradeLock = cryptoAmt + feeAmt;
             if (!Number.isFinite(cryptoAmt) || cryptoAmt < 0 || !Number.isFinite(feeAmt) || feeAmt < 0 || !Number.isFinite(totalTradeLock)) {
               throw new Error('Invalid financial values in active escrow records');
