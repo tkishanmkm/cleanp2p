@@ -153,7 +153,7 @@ export async function POST(req: NextRequest) {
         }, { status: 503 });
       }
 
-      if (typeof totpCode !== 'string' || !/^\d{4,8}$/.test(totpCode.trim())) {
+      if (typeof totpCode !== 'string' || totpCode.length > 16 || !/^\d{4,8}$/.test(totpCode.trim())) {
         return NextResponse.json({ error: 'A valid numeric authenticator code is required' }, { status: 403 });
       }
 
