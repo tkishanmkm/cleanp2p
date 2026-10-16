@@ -390,8 +390,9 @@ async function scanTronDeposits(
         knownContracts.push(addr);
       }
     };
-    addKnownContract(contractAddress);
-    addKnownContract('TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t'); // Mainnet TRC-20 USDT
+    // Only the independently verified TRON mainnet USDT contract is trusted.
+    // Environment overrides must not silently authorize an arbitrary token as USDT.
+    addKnownContract('TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t');
 
     // Build contract addresses hex filter for eth_getLogs
     const contractAddressesHex: string[] = [];
@@ -487,7 +488,7 @@ async function scanTronDeposits(
             // Never trust provider metadata to choose the token or its decimals:
             // a malicious/unsupported TRC-20 token could otherwise be credited as USDT.
             const tokenContract = item.token_info?.address || '';
-            if (tokenContract !== contractAddress && tokenContract !== 'TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t') {
+            if (tokenContract !== 'TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t') {
               continue;
             }
             const rawVal = BigInt(item.value || '0');
@@ -579,7 +580,7 @@ async function scanTronDeposits(
             seenTxIndices.add(deduplicationKey);
 
             const actualContract = evt.contract_address || evt.contractAddress || cAddr;
-            if (actualContract !== contractAddress && actualContract !== 'TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t') continue;
+            if (actualContract !== 'TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t') continue;
             const rawValBig = BigInt(rawValue);
             if (rawValBig <= 0n) continue;
             const formattedAmount = ethers.formatUnits(rawValBig, 6);
@@ -714,7 +715,7 @@ async function scanTronDeposits(
             if (!/^[0-9a-f]{40}$/.test(logAddrHex)) continue;
             eventContractBase58 = tronWeb.address.fromHex('41' + logAddrHex);
           } catch (_) { continue; }
-          if (eventContractBase58 !== contractAddress && eventContractBase58 !== 'TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t') continue;
+          if (eventContractBase58 !== 'TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t') continue;
 
           detected++;
 
