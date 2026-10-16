@@ -1,4 +1,4 @@
-import { createAdminClient } from '@/lib/supabase/server';
+import { getSupabaseAdminClient } from '@/lib/supabase/server';
 import {
   verifyAdminTOTPToken,
   hashRecoveryPassword,
@@ -17,7 +17,7 @@ export async function assertAdmin2FAEnforced(
   recoveryPassword?: string,
   actionName = 'SENSITIVE_ADMIN_ACTION'
 ): Promise<Admin2FAVerificationResult> {
-  const supabase = createAdminClient();
+  const supabase = getSupabaseAdminClient();
   const { data: profile } = await supabase
     .from('profiles')
     .select('id, email, admin_2fa_enabled, is_2fa_enabled, admin_2fa_secret, two_factor_secret, admin_2fa_recovery_hash')
