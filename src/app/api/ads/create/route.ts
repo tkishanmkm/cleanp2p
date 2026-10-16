@@ -135,7 +135,16 @@ export async function POST(req: Request) {
       );
     }
 
-    // 5. Sanitize and cast boolean/numeric payload fields before database operations
+    // 5. Validate boolean fields before normalization. Boolean("false") is true in
+    // JavaScript, so coercing arbitrary client values would silently enable flags.
+    for (const key of ['is_fixed', 'require_full_name_verified', 'require_verified_users']) {
+      if (strippedFormData[key] !== undefined && strippedFormData[key] !== null &&
+          typeof strippedFormData[key] !== 'boolean') {
+        return NextResponse.json({ error: `${key} must be a boolean.` }, { status: 400 });
+      }
+    }
+
+    // Sanitize and cast numeric payload fields before database operations.
     const cleanPayload: Record<string, any> = {
       ...strippedFormData,
       asset: rawAsset,
