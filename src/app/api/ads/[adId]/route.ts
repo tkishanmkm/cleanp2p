@@ -169,6 +169,11 @@ export async function GET(
 
     const rawAdType = firstNonEmptyString(ad.type, ad.ad_type);
     const adType = rawAdType === 'BUY' || rawAdType === 'SELL' ? rawAdType : 'SELL';
+    const rawTerms = typeof ad.terms === 'string' ? ad.terms : '';
+    const rawTermsConditions = typeof ad.terms_conditions === 'string' ? ad.terms_conditions : '';
+    const terms = rawTerms.trim().slice(0, 5000);
+    const termsConditions = (rawTermsConditions || rawTerms).trim().slice(0, 5000);
+    const offerLabel = typeof ad.offer_label === 'string' ? ad.offer_label.trim().slice(0, 120) : '';
     const formatted = {
       ...ad,
       id: ad.id,
@@ -201,9 +206,9 @@ export async function GET(
       payment_methods: paymentMethods,
       offer_tags: tags,
       tags: tags,
-      terms_conditions: ad.terms_conditions || ad.terms || '',
-      terms: ad.terms || ad.terms_conditions || '',
-      offer_label: ad.offer_label || '',
+      terms_conditions: termsConditions,
+      terms: terms || termsConditions,
+      offer_label: offerLabel,
       payment_window: paymentWindow,
       payment_window_minutes: paymentWindow,
       targeted_countries: targetedCountries,
@@ -242,7 +247,7 @@ export async function GET(
       minAmount: Number.isFinite(Number(ad.min_amount ?? ad.min_limit)) && Number(ad.min_amount ?? ad.min_limit) > 0 ? Number(ad.min_amount ?? ad.min_limit) : null,
       maxAmount: Number.isFinite(Number(ad.max_amount ?? ad.max_limit)) && Number(ad.max_amount ?? ad.max_limit) > 0 ? Number(ad.max_amount ?? ad.max_limit) : null,
       paymentMethods: paymentMethods,
-      offerLabel: ad.offer_label || '',
+      offerLabel,
     };
 
     return NextResponse.json({
