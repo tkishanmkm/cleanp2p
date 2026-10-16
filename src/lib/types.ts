@@ -128,6 +128,9 @@ export type User = {
   oldUserId?: string;
   fullName: string;
   dob: string;
+  username?: string;
+  email?: string;
+  isSuspended?: boolean;
   country?: string;
   ipBasedCountry?: string;
   photoURL?: string;
