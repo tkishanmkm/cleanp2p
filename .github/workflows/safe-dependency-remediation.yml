@@ -1,0 +1,51 @@
+name: Safe Dependency Remediation
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "41 5 * * 1"
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: safe-dependency-remediation
+  cancel-in-progress: true
+
+jobs:
+  remediate:
+    name: Prepare non-breaking dependency fixes
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout default branch
+        uses: actions/checkout@v4
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - name: Install locked dependencies
+        run: npm ci
+      - name: Apply compatible dependency fixes only
+        run: npm audit fix --omit=dev
+      - name: Verify test harness guards
+        run: npm run test:guards
+      - name: Verify TypeScript
+        run: npm run typecheck
+      - name: Open dependency update pull request
+        uses: peter-evans/create-pull-request@v7
+        with:
+          branch: automation/safe-production-dependency-fixes
+          delete-branch: true
+          commit-message: "fix: update vulnerable production dependencies"
+          title: "Security: apply compatible production dependency fixes"
+          body: |
+            Automated, non-forced production dependency remediation.
+
+            - Uses `npm audit fix --omit=dev` without `--force`.
+            - Does not intentionally perform major-version upgrades.
+            - Runs the test-harness guards and TypeScript check before opening this PR.
+            - Review the dependency diff and CI results before merging.
+          labels: security,dependencies
