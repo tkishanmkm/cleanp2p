@@ -199,7 +199,7 @@ export async function POST(
 
     // Prevent duplicate automated system messages for all trade lifecycle events
     if (type === 'TRADE_INITIATED' || type === 'TRADE_STARTED' || type === 'ESCROW_LOCKED') {
-      const { data: existingInit } = await supabaseAdmin
+      const { data: existingInit, error: existingInitError } = await supabaseAdmin
         .from('trade_messages')
         .select('id')
         .eq('trade_id', actualTradeId)
@@ -207,6 +207,10 @@ export async function POST(
         .limit(1)
         .maybeSingle();
 
+      if (existingInitError) {
+        console.error('System-message duplicate check failed:', existingInitError.code || 'UNKNOWN');
+        return NextResponse.json({ error: 'Unable to verify existing system messages.' }, { status: 500 });
+      }
       if (existingInit) {
         return NextResponse.json({ success: true, message: 'Initiation message already present', id: existingInit.id });
       }
@@ -222,7 +226,7 @@ export async function POST(
         return NextResponse.json({ success: true, message: 'Trade is paid or completed. Expiration message suppressed.' });
       }
 
-      const { data: existingExp } = await supabaseAdmin
+      const { data: existingExp, error: existingExpError } = await supabaseAdmin
         .from('trade_messages')
         .select('id')
         .eq('trade_id', actualTradeId)
@@ -230,11 +234,15 @@ export async function POST(
         .limit(1)
         .maybeSingle();
 
+      if (existingExpError) {
+        console.error('System-message duplicate check failed:', existingExpError.code || 'UNKNOWN');
+        return NextResponse.json({ error: 'Unable to verify existing system messages.' }, { status: 500 });
+      }
       if (existingExp) {
         return NextResponse.json({ success: true, message: 'Expiration message already present', id: existingExp.id });
       }
     } else if (type === 'TRADE_CANCELLED') {
-      const { data: existingCancel } = await supabaseAdmin
+      const { data: existingCancel, error: existingCancelError } = await supabaseAdmin
         .from('trade_messages')
         .select('id')
         .eq('trade_id', actualTradeId)
@@ -242,11 +250,15 @@ export async function POST(
         .limit(1)
         .maybeSingle();
 
+      if (existingCancelError) {
+        console.error('System-message duplicate check failed:', existingCancelError.code || 'UNKNOWN');
+        return NextResponse.json({ error: 'Unable to verify existing system messages.' }, { status: 500 });
+      }
       if (existingCancel) {
         return NextResponse.json({ success: true, message: 'Cancellation message already present', id: existingCancel.id });
       }
     } else if (type === 'TRADE_RELEASED' || type === 'TRADE_COMPLETED') {
-      const { data: existingRelease } = await supabaseAdmin
+      const { data: existingRelease, error: existingReleaseError } = await supabaseAdmin
         .from('trade_messages')
         .select('id')
         .eq('trade_id', actualTradeId)
@@ -254,6 +266,10 @@ export async function POST(
         .limit(1)
         .maybeSingle();
 
+      if (existingReleaseError) {
+        console.error('System-message duplicate check failed:', existingReleaseError.code || 'UNKNOWN');
+        return NextResponse.json({ error: 'Unable to verify existing system messages.' }, { status: 500 });
+      }
       if (existingRelease) {
         return NextResponse.json({ success: true, message: 'Release message already present', id: existingRelease.id });
       }
