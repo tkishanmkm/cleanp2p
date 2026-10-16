@@ -191,10 +191,12 @@ BEGIN
         NOW(),
         v_idempotency_key
     )
-    ON CONFLICT (idempotency_key) DO UPDATE
-    SET status = 'credited',
-        credited_at = NOW(),
-        updated_at = NOW();
+    ON CONFLICT (idempotency_key) DO NOTHING;
+
+    GET DIAGNOSTICS v_ledger_rows = ROW_COUNT;
+    IF v_ledger_rows <> 1 THEN
+        RAISE EXCEPTION 'Deposit record idempotency conflict for %', v_idempotency_key;
+    END IF;
 
     RETURN jsonb_build_object(
         'success', true,
