@@ -77,7 +77,11 @@ export async function POST(
     }
     const { data: trade, error: tradeErr } = await tradeQuery.maybeSingle();
 
-    if (tradeErr || !trade) {
+    if (tradeErr) {
+      console.error('System message trade authorization lookup failed:', tradeErr.code || 'UNKNOWN');
+      return NextResponse.json({ error: 'Unable to verify trade access right now.' }, { status: 500 });
+    }
+    if (!trade) {
       return NextResponse.json({ error: 'Trade not found' }, { status: 404 });
     }
 
