@@ -71,9 +71,19 @@ export async function openDispute(
     explanation = arg6 || '';
   }
 
-  // Determine server or client context
+  // Normalize and bound dispute text at the shared helper boundary so legacy
+  // callers cannot bypass the API route's input constraints.
   const isServer = typeof window === 'undefined';
-  const fullReason = explanation ? `${reason}: ${explanation}` : reason;
+  if (typeof tradeId !== 'string' || !tradeId.trim() || tradeId.length > 128) {
+    throw new Error('A valid trade ID is required to open a dispute.');
+  }
+  const rawReason = explanation ? `${reason}: ${explanation}` : reason;
+  const fullReason = typeof rawReason === 'string'
+    ? rawReason.replace(/[\u0000-\u001F\u007F]/g, ' ').replace(/\s+/g, ' ').trim()
+    : '';
+  if (!fullReason || fullReason.length > 2000) {
+    throw new Error('Dispute reason must contain readable text and be 2,000 characters or fewer.');
+  }
 
   if (!isServer) {
     // 1. Client context: dispatch through secure canonical API route
