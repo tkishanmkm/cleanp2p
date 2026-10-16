@@ -16,7 +16,8 @@ function isAuthorized(req: NextRequest): boolean {
       process.env.DEPOSIT_WORKER_SECRET,
     ],
     customHeaderNames: ['x-service-key', 'x-worker-secret'],
-    checkQueryParam: true,
+    // Keep worker credentials out of URLs, access logs, and browser history.
+    checkQueryParam: false,
   });
 
   return result.authorized;
@@ -52,7 +53,7 @@ export async function GET(request: NextRequest) {
   } catch (error: any) {
     console.error('[CRON INDEXER ERROR]:', error);
     return NextResponse.json(
-      { success: false, error: error.message || 'Internal Server Error' },
+      { success: false, error: 'Deposit indexing failed' },
       { status: 500 }
     );
   }
