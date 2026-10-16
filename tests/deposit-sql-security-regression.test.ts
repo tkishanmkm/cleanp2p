@@ -310,6 +310,11 @@ const checks: Array<[string, string, RegExp]> = [
     'src/jobs/sweeperWorker.ts',
     /Dynamic energy estimation failed:[\s\S]*?const \{ data: recoveryRes, error: recoveryErr \}[\s\S]*?recoveryRes\.success !== true[\s\S]*?failed to persist sweep recovery status/i,
   ],
+  [
+    'TRON ambiguous broadcast checks recovery RPC outcome',
+    'src/jobs/sweeperWorker.ts',
+    /recoveryReason = broadcastErr[\s\S]*?p_new_status: 'RECOVERY_REQUIRED'[\s\S]*?recoveryRes\.success !== true[\s\S]*?deterministicTxHash/i,
+  ],
 ];
 
 let failed = 0;
