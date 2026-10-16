@@ -92,6 +92,8 @@ export async function GET(
     }
 
     const priceVal = Number(ad.price ?? ad.unit_price ?? ad.fixed_rate ?? 0);
+    const rawMarginPercent = Number(ad.rate_percent ?? ad.margin_percent ?? ad.margin ?? 0);
+    const marginPercent = Number.isFinite(rawMarginPercent) ? rawMarginPercent : 0;
     let paymentMethods: unknown[] = [];
     if (Array.isArray(ad.payment_methods)) {
       paymentMethods = ad.payment_methods;
@@ -188,9 +190,9 @@ export async function GET(
       pricing_type: (String(ad.rate_type ?? '').toUpperCase() === 'FIXED' || String(ad.pricing_type ?? '').toUpperCase() === 'FIXED' || ad.is_fixed === true) ? 'FIXED' : 'FLOAT',
       rate_type: (String(ad.rate_type ?? '').toUpperCase() === 'FIXED' || String(ad.pricing_type ?? '').toUpperCase() === 'FIXED' || ad.is_fixed === true) ? 'fixed' : 'market',
       is_fixed: Boolean(String(ad.rate_type ?? '').toUpperCase() === 'FIXED' || String(ad.pricing_type ?? '').toUpperCase() === 'FIXED' || ad.is_fixed === true),
-      margin_percent: Number(ad.rate_percent ?? ad.margin_percent ?? ad.margin ?? 0),
-      rate_percent: Number(ad.rate_percent ?? ad.margin_percent ?? ad.margin ?? 0),
-      margin: Number(ad.rate_percent ?? ad.margin_percent ?? ad.margin ?? 0),
+      margin_percent: marginPercent,
+      rate_percent: marginPercent,
+      margin: marginPercent,
       status: (ad.active !== false && ad.is_active !== false && !['INACTIVE', 'DELETED'].includes(String(ad.status || '').toUpperCase()) && ad.is_deleted !== true) ? 'ACTIVE' : 'INACTIVE',
       min_limit: Number.isFinite(Number(ad.min_limit ?? ad.min_amount)) && Number(ad.min_limit ?? ad.min_amount) > 0 ? Number(ad.min_limit ?? ad.min_amount) : null,
       max_limit: Number.isFinite(Number(ad.max_limit ?? ad.max_amount)) && Number(ad.max_limit ?? ad.max_amount) > 0 ? Number(ad.max_limit ?? ad.max_amount) : null,
@@ -237,7 +239,7 @@ export async function GET(
       adType: (ad.ad_type || ad.type || 'sell').toLowerCase(),
       rateType: (String(ad.rate_type ?? '').toUpperCase() === 'FIXED' || String(ad.pricing_type ?? '').toUpperCase() === 'FIXED' || ad.is_fixed === true) ? 'fixed' : 'market',
       fixedRate: ad.fixed_rate ?? ad.price,
-      ratePercent: Number(ad.rate_percent || ad.margin || 0),
+      ratePercent: marginPercent,
       minAmount: Number.isFinite(Number(ad.min_amount ?? ad.min_limit)) && Number(ad.min_amount ?? ad.min_limit) > 0 ? Number(ad.min_amount ?? ad.min_limit) : null,
       maxAmount: Number.isFinite(Number(ad.max_amount ?? ad.max_limit)) && Number(ad.max_amount ?? ad.max_limit) > 0 ? Number(ad.max_amount ?? ad.max_limit) : null,
       paymentMethods: paymentMethods,
