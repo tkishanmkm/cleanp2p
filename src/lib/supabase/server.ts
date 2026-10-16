@@ -7,8 +7,11 @@ export async function createClient() {
   const { cookies } = await import("next/headers");
   const cookieStore = await cookies();
 
-  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://eaiwgfxoiwxepinvcykg.supabase.co';
-  const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'placeholder-anon-key';
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL?.trim();
+  const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY?.trim();
+  if (!supabaseUrl || !supabaseAnonKey || supabaseUrl.includes('placeholder') || supabaseAnonKey.includes('placeholder')) {
+    throw new Error('NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY must be configured.');
+  }
 
   return createServerClient(
     supabaseUrl,
@@ -56,8 +59,10 @@ export function getSupabaseAdminClient(): SupabaseClient {
   if (!serverAdminClient) {
     const supabaseUrl =
       process.env.NEXT_PUBLIC_SUPABASE_URL?.trim() ||
-      process.env.SUPABASE_URL?.trim() ||
-      'https://eaiwgfxoiwxepinvcykg.supabase.co';
+      process.env.SUPABASE_URL?.trim();
+    if (!supabaseUrl || supabaseUrl.includes('placeholder')) {
+      throw new Error('NEXT_PUBLIC_SUPABASE_URL or SUPABASE_URL must be configured for privileged operations.');
+    }
 
     serverAdminClient = createSupabaseClient(supabaseUrl, serviceKey, {
       auth: {
