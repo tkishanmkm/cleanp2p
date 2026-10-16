@@ -1254,8 +1254,8 @@ export async function undelegateEnergyToPool(
       p_undelegation_tx_hash: deterministicTxHash,
     });
 
-    if (persistErr || !persistRes || !persistRes.success) {
-      console.error(`[Tron Resource Pool] Failed to persist signed undelegation:`, persistErr);
+    if (persistErr || !persistRes || persistRes.success !== true) {
+      console.error(`[Tron Resource Pool] Failed to persist signed undelegation:`, persistErr || persistRes);
       return false;
     }
   }
