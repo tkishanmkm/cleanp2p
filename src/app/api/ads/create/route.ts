@@ -84,18 +84,17 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: 'Request body must be a JSON object.' }, { status: 400 });
     }
 
-    // 2. Strip all client-controlled identity and administrative fields to prevent spoofing
+    // Strip client-controlled identity, lifecycle, and administrative fields.
+    // The authenticated identity and initial visibility state are set server-side below.
     const strippedFormData = { ...(formData as Record<string, any>) };
-    delete strippedFormData.user_id;
-    delete strippedFormData.userId;
-    delete strippedFormData.owner_id;
-    delete strippedFormData.seller_id;
-    delete strippedFormData.creator_id;
-    delete strippedFormData.is_admin;
-    delete strippedFormData.admin;
-    delete strippedFormData.role;
-    delete strippedFormData.verification_status;
-    delete strippedFormData.is_verified;
+    for (const key of [
+      'id', 'user_id', 'userId', 'owner_id', 'seller_id', 'creator_id',
+      'is_admin', 'admin', 'role', 'verification_status', 'is_verified',
+      'status', 'active', 'is_active', 'is_deleted', 'deleted_at',
+      'created_at', 'updated_at', 'public_id',
+    ]) {
+      delete strippedFormData[key];
+    }
 
     // 3. Validate Supported Crypto Asset (USDT, BTC, ETH, LTC)
     const rawAsset = (
@@ -323,7 +322,7 @@ export async function POST(req: Request) {
       }
     }
 
-    // 7. Attach strictly authenticated server user_id
+    // 7. Attach authenticated ownership and force a newly-created ad into active state.
     cleanPayload.user_id = user.id;
 
     // Only allow the two explicitly supported ad tables; never let request data select
@@ -336,6 +335,13 @@ export async function POST(req: Request) {
     const targetTable: 'ads' | 'p2p_ads' = requestedTable
       ? requestedTable as 'ads' | 'p2p_ads'
       : 'ads';
+    if (targetTable === 'ads') {
+      cleanPayload.is_active = true;
+    } else {
+      cleanPayload.active = true;
+      cleanPayload.is_deleted = false;
+      cleanPayload.status = 'ACTIVE';
+    }
 
     // 8. Execute Authorized Database Insert without service-role escape hatch
     let { data, error: dbError } = await supabase
