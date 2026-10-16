@@ -62,7 +62,7 @@ export async function POST(req: NextRequest) {
       typeof rawRecipient !== 'string' ||
       typeof rawAsset !== 'string' ||
       (typeof amount !== 'string' && typeof amount !== 'number') ||
-      (typeof amount === 'string' && !/^\\d+(?:\\.\\d+)?$/.test(amount.trim()))
+      (typeof amount === 'string' && !/^\d+(?:\.\d+)?$/.test(amount.trim()))
     ) {
       return NextResponse.json({ error: 'Invalid transfer payload types.' }, { status: 400 });
     }
