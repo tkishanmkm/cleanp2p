@@ -216,7 +216,7 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // 3c. Check by email or full_name in profiles if still not found
+    // 3c. Check by exact email in profiles if still not found
     if (!recipientProfile) {
       const { data: profByEmail, error: emailLookupError } = await admin
         .from('profiles')
