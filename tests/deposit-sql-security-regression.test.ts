@@ -46,6 +46,16 @@ const checks: Array<[string, string, RegExp]> = [
     /GRANT EXECUTE ON FUNCTION public\.claim_pending_withdrawals\(INTEGER\) TO service_role/i,
   ],
   [
+    'withdrawal claims require active provisioned wallets',
+    'supabase/migrations/20261016000006_bound_withdrawal_claim_batch.sql',
+    /EXISTS \([\s\S]*FROM public\.wallets wal[\s\S]*wal\.status = 'active'[\s\S]*wal\.provisioning_status = 'completed'/i,
+  ],
+  [
+    'withdrawal claims exclude banned or restricted owners',
+    'supabase/migrations/20261016000006_bound_withdrawal_claim_batch.sql',
+    /FROM auth\.users u[\s\S]*u\.banned_until > NOW\(\)[\s\S]*raw_app_meta_data ->> 'restricted'/i,
+  ],
+  [
     'withdrawal claim batch is bounded and browser roles remain revoked',
     'supabase/migrations/20261016000006_bound_withdrawal_claim_batch.sql',
     /p_limit IS NULL OR p_limit < 1 OR p_limit > 100/i,
