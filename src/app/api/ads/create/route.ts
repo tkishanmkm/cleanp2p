@@ -230,7 +230,11 @@ export async function POST(req: Request) {
       fiat_currency: rawFiat,
       fiat_symbol: rawFiat,
       currency: rawFiat,
-      price: strippedFormData.price !== undefined && strippedFormData.price !== null && strippedFormData.price !== '' ? Number(strippedFormData.price) : null,
+      price: strippedFormData.price !== undefined && strippedFormData.price !== null && strippedFormData.price !== ''
+        ? Number(strippedFormData.price)
+        : (strippedFormData.fixed_rate !== undefined && strippedFormData.fixed_rate !== null && strippedFormData.fixed_rate !== ''
+          ? Number(strippedFormData.fixed_rate)
+          : null),
       margin: strippedFormData.margin !== undefined && strippedFormData.margin !== null && strippedFormData.margin !== '' ? Number(strippedFormData.margin) : (strippedFormData.price_margin !== undefined && strippedFormData.price_margin !== null && strippedFormData.price_margin !== '' ? Number(strippedFormData.price_margin) : null),
       min_amount: strippedFormData.min_amount !== undefined && strippedFormData.min_amount !== null && strippedFormData.min_amount !== '' ? Number(strippedFormData.min_amount) : (strippedFormData.min_order !== undefined && strippedFormData.min_order !== null && strippedFormData.min_order !== '' ? Number(strippedFormData.min_order) : null),
       max_amount: strippedFormData.max_amount !== undefined && strippedFormData.max_amount !== null && strippedFormData.max_amount !== '' ? Number(strippedFormData.max_amount) : (strippedFormData.max_order !== undefined && strippedFormData.max_order !== null && strippedFormData.max_order !== '' ? Number(strippedFormData.max_order) : null),
