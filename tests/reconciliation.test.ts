@@ -109,9 +109,7 @@ async function runReconciliationTests() {
       .limit(5);
     if (alertsErr) throw new Error(`Unable to query security alerts: ${alertsErr.message}`);
 
-    const alertLogged = alerts?.some
-      (a) => a.details?.wallet_id === rogueWalletId
-    );
+    const alertLogged = alerts?.some((a) => a.details?.wallet_id === rogueWalletId);
 
     if (alertLogged) {
       console.log(green('  ✓ Critical security alert successfully recorded in security_alerts table'));
@@ -119,9 +117,11 @@ async function runReconciliationTests() {
       console.log(cyan('  ℹ Security alert record verified via reconciliation report'));
     }
 
-    // Clean up rogue entity
-    await supabase.from('wallet_assets').delete().eq('wallet_id', rogueWalletId);
-    await supabase.from('wallets').delete().eq('id', rogueWalletId);
+    // Clean up only this run's randomly identified fixture; fail on cleanup errors.
+    const { error: deleteAssetsErr } = await supabase.from('wallet_assets').delete().eq('wallet_id', rogueWalletId);
+    if (deleteAssetsErr) throw new Error(`Unable to remove rogue test assets: ${deleteAssetsErr.message}`);
+    const { error: deleteWalletErr } = await supabase.from('wallets').delete().eq('id', rogueWalletId);
+    if (deleteWalletErr) throw new Error(`Unable to remove rogue test wallet: ${deleteWalletErr.message}`);
 
     // Re-run to verify recovery
     const recoveryReport = await runFinancialReconciliation();
