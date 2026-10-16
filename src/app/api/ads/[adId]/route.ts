@@ -206,7 +206,7 @@ export async function DELETE(
 
     // 1. Authenticate Requesting User
     const authHeader = request.headers.get('authorization');
-    const bearerMatch = authHeader?.match(/^Bearer\\s+(.+)$/i);
+    const bearerMatch = authHeader?.match(/^Bearer\s+(.+)$/i);
     const bearerToken = bearerMatch?.[1]?.trim();
 
     let user: any = null;
@@ -391,7 +391,7 @@ export async function PATCH(
 
     // 1. Authenticate Requesting User
     const authHeader = request.headers.get('authorization');
-    const bearerMatch = authHeader?.match(/^Bearer\\s+(.+)$/i);
+    const bearerMatch = authHeader?.match(/^Bearer\s+(.+)$/i);
     const bearerToken = bearerMatch?.[1]?.trim();
 
     let user: any = null;
@@ -629,7 +629,7 @@ export async function PUT(
 
     // 1. Authenticate Requesting User
     const authHeader = request.headers.get('authorization');
-    const bearerMatch = authHeader?.match(/^Bearer\\s+(.+)$/i);
+    const bearerMatch = authHeader?.match(/^Bearer\s+(.+)$/i);
     const bearerToken = bearerMatch?.[1]?.trim();
 
     let user: any = null;
