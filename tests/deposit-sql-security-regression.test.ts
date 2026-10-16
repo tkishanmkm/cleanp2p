@@ -330,6 +330,11 @@ const checks: Array<[string, string, RegExp]> = [
     'src/jobs/sweeperWorker.ts',
     /const rawBalance = balanceSun\?\.toString\?\.\(\) \?\? String\(balanceSun\)[\s\S]*?balanceSunInteger = BigInt\(rawBalance\)[\s\S]*?value: balanceSunInteger\.toString\(\)/i,
   ],
+  [
+    'TRON sweep requires an explicit valid token contract for the configured network',
+    'src/jobs/sweeperWorker.ts',
+    /const usdtContractAddress = process\.env\.USDT_CONTRACT_TRC20\?\.trim\(\)[\s\S]*?!tronWeb\.isAddress\(usdtContractAddress\)[\s\S]*?USDT_CONTRACT_TRC20 is missing or invalid/i,
+  ],
 ];
 
 let failed = 0;
