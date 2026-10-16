@@ -932,8 +932,16 @@ export async function delegateEnergyFromPool(
   // If already active or delegated on DB, handle safely without duplicate delegation
   if (initRes.already_delegated) {
     if (initRes.status === 'DELEGATED') {
+      const persistedAmountSun = initRes.delegated_amount_sun;
+      if (
+        (typeof persistedAmountSun !== 'string' && typeof persistedAmountSun !== 'number' && typeof persistedAmountSun !== 'bigint') ||
+        !/^[0-9]+$/.test(String(persistedAmountSun)) ||
+        BigInt(String(persistedAmountSun)) <= 0n
+      ) {
+        throw new Error('Persisted TRON delegation amount is malformed; refusing to reuse existing delegation');
+      }
       console.log(`[Tron Resource Pool] Sweep ${sweepId} already has active delegation. Reusing existing.`);
-      return { success: true, delegatedAmountSun: BigInt(initRes.delegated_amount_sun) };
+      return { success: true, delegatedAmountSun: BigInt(String(persistedAmountSun)) };
     }
 
     if (initRes.status === 'DELEGATING' && initRes.signed_delegation_hex) {
