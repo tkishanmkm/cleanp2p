@@ -830,7 +830,7 @@ export async function fundTronGasForAddress(
       p_tx_hash: deterministicTxHash,
     });
 
-    if (persistErr || !persistRes || !persistRes.success) {
+    if (persistErr || !persistRes || persistRes.success !== true) {
       throw new Error(`Failed to persist signed gas funding transaction: ${persistErr?.message || persistRes?.message}`);
     }
   }
