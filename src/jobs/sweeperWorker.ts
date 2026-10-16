@@ -2505,13 +2505,16 @@ export async function reconcileAmbiguousSweep(sweepId: string, workerId: string)
   if (status === 'READY_TO_BROADCAST' && isEvmNetwork) {
     if (!signed_tx_hex) {
       // Step 6: Durability invariant violation. Do NOT reconstruct/re-sign. Transition to RECOVERY_REQUIRED.
-      await supabaseAdmin.rpc('update_sweep_operation_status', {
+      const { data: recoveryRes, error: recoveryErr } = await supabaseAdmin.rpc('update_sweep_operation_status', {
         p_sweep_id: sweepId,
         p_worker_id: workerId,
         p_expected_status: 'READY_TO_BROADCAST',
         p_new_status: 'RECOVERY_REQUIRED',
         p_error_message: 'Durability invariant violation: signed_tx_hex is NULL for READY_TO_BROADCAST EVM sweep',
       });
+      if (recoveryErr || !recoveryRes || recoveryRes.success !== true) {
+        console.error(`[EVM Sweep Recovery Persistence Failure] ${sweepId}: ${recoveryErr?.message || recoveryRes?.message || 'invalid RPC response'}`);
+      }
       return false;
     }
 
