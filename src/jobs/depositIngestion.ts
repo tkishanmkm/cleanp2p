@@ -796,8 +796,9 @@ async function scanTronDeposits(
               canonicalBlockNumber !== eventBlock ||
               typeof canonicalBlockId !== 'string' ||
               !/^[0-9a-fA-F]{64}$/.test(canonicalBlockId) ||
-              (typeof providerBlockId === 'string' &&
-                (!/^[0-9a-fA-F]{64}$/.test(providerBlockId) ||
+              (providerBlockId != null &&
+                (typeof providerBlockId !== 'string' ||
+                  !/^[0-9a-fA-F]{64}$/.test(providerBlockId) ||
                   providerBlockId.toLowerCase() !== canonicalBlockId.toLowerCase()))
             ) {
               errors.push(`Rejected TRON account transfer with unverifiable block identity: ${txId}`);
