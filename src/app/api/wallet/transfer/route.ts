@@ -179,11 +179,18 @@ export async function POST(req: NextRequest) {
 
     // 3b. Check if cleanTarget is a valid UUID and matches id
     if (!recipientProfile && isUuid) {
-      const { data: profById } = await admin
+      const { data: profById, error: idLookupError } = await admin
         .from('profiles')
         .select('id, username, is_banned, is_restricted, is_emergency_frozen, account_status')
         .eq('id', cleanTarget)
         .maybeSingle();
+      if (idLookupError) {
+        console.error('[Internal Transfer] Recipient ID lookup failed:', idLookupError.code);
+        return NextResponse.json({
+          error: 'Recipient security status could not be verified. Please try again later.',
+          code: 'RECIPIENT_LOOKUP_UNAVAILABLE',
+        }, { status: 503 });
+      }
       if (profById) {
         recipientProfile = profById;
       }
