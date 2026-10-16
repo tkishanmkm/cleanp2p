@@ -316,10 +316,21 @@ export async function POST(req: Request) {
     if (cleanPayload.max_amount !== null && cleanPayload.max_amount !== undefined && cleanPayload.max_amount <= 0) {
       return NextResponse.json({ error: 'Maximum trade limit must be greater than 0.' }, { status: 400 });
     }
+    if (cleanPayload.min_order !== null && cleanPayload.min_order !== undefined && cleanPayload.min_order <= 0) {
+      return NextResponse.json({ error: 'Minimum order must be greater than 0.' }, { status: 400 });
+    }
+    if (cleanPayload.max_order !== null && cleanPayload.max_order !== undefined && cleanPayload.max_order <= 0) {
+      return NextResponse.json({ error: 'Maximum order must be greater than 0.' }, { status: 400 });
+    }
     if (cleanPayload.min_amount !== null && cleanPayload.min_amount !== undefined &&
         cleanPayload.max_amount !== null && cleanPayload.max_amount !== undefined &&
         cleanPayload.max_amount < cleanPayload.min_amount) {
       return NextResponse.json({ error: 'Maximum trade limit must be greater than or equal to minimum limit.' }, { status: 400 });
+    }
+    if (cleanPayload.min_order !== null && cleanPayload.min_order !== undefined &&
+        cleanPayload.max_order !== null && cleanPayload.max_order !== undefined &&
+        cleanPayload.max_order < cleanPayload.min_order) {
+      return NextResponse.json({ error: 'Maximum order must be greater than or equal to minimum order.' }, { status: 400 });
     }
 
     // Authoritative Server-Side ±50% Reference Market Price Validation
