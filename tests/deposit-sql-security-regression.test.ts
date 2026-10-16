@@ -391,6 +391,11 @@ const checks: Array<[string, string, RegExp]> = [
     /persist_signed_delegation[\s\S]*?if \(persistErr \|\| !persistRes \|\| persistRes\.success !== true\)[\s\S]*?Failed to persist signed delegation transaction/i,
   ],
   [
+    'gas funding claim rejects malformed RPC response payloads',
+    'src/jobs/sweeperWorker.ts',
+    /claim_gas_funding_operation[\s\S]*?if \(claimErr \|\| !claimRes \|\| typeof claimRes !== 'object' \|\| Array\.isArray\(claimRes\)\)[\s\S]*?Gas funding claim RPC failed/i,
+  ],
+  [
     'TRON gas funding signed-transaction persistence requires explicit RPC success',
     'src/jobs/sweeperWorker.ts',
     /persist_signed_gas_funding[\s\S]*?if \(persistErr \|\| !persistRes \|\| persistRes\.success !== true\)[\s\S]*?Failed to persist signed gas funding transaction/i,
