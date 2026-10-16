@@ -219,17 +219,17 @@ export async function POST(req: Request) {
       fiat_symbol: rawFiat,
       currency: rawFiat,
       price: strippedFormData.price !== undefined && strippedFormData.price !== null && strippedFormData.price !== '' ? Number(strippedFormData.price) : null,
-      margin: strippedFormData.margin !== undefined && strippedFormData.margin !== null && strippedFormData.margin !== '' ? Number(strippedFormData.margin) : (strippedFormData.price_margin ? Number(strippedFormData.price_margin) : null),
-      min_amount: strippedFormData.min_amount !== undefined && strippedFormData.min_amount !== null && strippedFormData.min_amount !== '' ? Number(strippedFormData.min_amount) : (strippedFormData.min_order ? Number(strippedFormData.min_order) : null),
-      max_amount: strippedFormData.max_amount !== undefined && strippedFormData.max_amount !== null && strippedFormData.max_amount !== '' ? Number(strippedFormData.max_amount) : (strippedFormData.max_order ? Number(strippedFormData.max_order) : null),
+      margin: strippedFormData.margin !== undefined && strippedFormData.margin !== null && strippedFormData.margin !== '' ? Number(strippedFormData.margin) : (strippedFormData.price_margin !== undefined && strippedFormData.price_margin !== null && strippedFormData.price_margin !== '' ? Number(strippedFormData.price_margin) : null),
+      min_amount: strippedFormData.min_amount !== undefined && strippedFormData.min_amount !== null && strippedFormData.min_amount !== '' ? Number(strippedFormData.min_amount) : (strippedFormData.min_order !== undefined && strippedFormData.min_order !== null && strippedFormData.min_order !== '' ? Number(strippedFormData.min_order) : null),
+      max_amount: strippedFormData.max_amount !== undefined && strippedFormData.max_amount !== null && strippedFormData.max_amount !== '' ? Number(strippedFormData.max_amount) : (strippedFormData.max_order !== undefined && strippedFormData.max_order !== null && strippedFormData.max_order !== '' ? Number(strippedFormData.max_order) : null),
       is_fixed: Boolean(strippedFormData.is_fixed ?? (typeof strippedFormData.fixed_rate === 'boolean' ? strippedFormData.fixed_rate : false)),
     };
 
     // fixed_rate is a legacy input alias; persist only the canonical is_fixed field.
     delete cleanPayload.fixed_rate;
 
-    if (cleanPayload.min_order !== undefined) cleanPayload.min_order = cleanPayload.min_order ? Number(cleanPayload.min_order) : null;
-    if (cleanPayload.max_order !== undefined) cleanPayload.max_order = cleanPayload.max_order ? Number(cleanPayload.max_order) : null;
+    if (cleanPayload.min_order !== undefined) cleanPayload.min_order = cleanPayload.min_order !== null && cleanPayload.min_order !== '' ? Number(cleanPayload.min_order) : null;
+    if (cleanPayload.max_order !== undefined) cleanPayload.max_order = cleanPayload.max_order !== null && cleanPayload.max_order !== '' ? Number(cleanPayload.max_order) : null;
     if (cleanPayload.total_amount !== undefined) cleanPayload.total_amount = cleanPayload.total_amount ? Number(cleanPayload.total_amount) : null;
     if (cleanPayload.available_amount !== undefined) cleanPayload.available_amount = cleanPayload.available_amount ? Number(cleanPayload.available_amount) : null;
     if (cleanPayload.rate_percent !== undefined) cleanPayload.rate_percent = cleanPayload.rate_percent ? Number(cleanPayload.rate_percent) : 0;
