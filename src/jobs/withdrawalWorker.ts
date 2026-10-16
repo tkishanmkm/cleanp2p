@@ -447,6 +447,13 @@ export async function processAllPendingWithdrawals(maxBatch: number = 20): Promi
   results: WithdrawalProcessResult[];
   locked?: boolean;
 }> {
+  // Bound caller-supplied batch sizes. An invalid value must never turn into an
+  // effectively unbounded withdrawal dispatch loop.
+  if (!Number.isInteger(maxBatch) || maxBatch < 1 || maxBatch > 100) {
+    console.error('[Withdrawal Worker] Invalid maxBatch; refusing to dispatch withdrawals');
+    return { totalProcessed: 0, results: [], locked: true };
+  }
+
   // Acquire the distributed singleton lock. Never dispatch if lock status
   // cannot be positively established; a lock outage must not enable concurrent payouts.
   let hasLock = false;
