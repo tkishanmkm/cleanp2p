@@ -233,11 +233,13 @@ export async function POST(
       }
     } else if (type === 'TRADE_EXPIRED') {
       // Guard: Do not generate an Expired system message if trade is already paid, completed, or disputed
+      const normalizedEscrowStatus = String(trade.escrow_status || '').trim().toLowerCase();
+      const normalizedTradeStatus = String(trade.status || '').trim().toLowerCase();
       const isPaidOrCompleted = Boolean(
         trade.paid_at ||
         trade.marked_paid_at ||
-        trade.escrow_status === 'PAID' ||
-        ['paid', 'buyer_marked_paid', 'payment_sent', 'released', 'completed', 'disputed'].includes((trade.status || '').toLowerCase())
+        ['paid', 'released', 'completed', 'disputed'].includes(normalizedEscrowStatus) ||
+        ['paid', 'buyer_marked_paid', 'payment_sent', 'released', 'completed', 'disputed'].includes(normalizedTradeStatus)
       );
       if (isPaidOrCompleted) {
         return NextResponse.json({ success: true, message: 'Trade is paid or completed. Expiration message suppressed.' });
