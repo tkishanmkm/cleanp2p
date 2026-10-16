@@ -898,9 +898,20 @@ export async function delegateEnergyFromPool(
 
   const isWeightInSun = totalEnergyWeight > 1000000000000;
   const totalEnergyWeightSun = isWeightInSun ? totalEnergyWeight : totalEnergyWeight * 1000000;
+  if (!Number.isSafeInteger(totalEnergyWeightSun) || totalEnergyWeightSun <= 0) {
+    throw new Error('TRON energy-weight conversion exceeds safe integer precision; refusing delegation');
+  }
 
-  // Calculate needed TRX (in SUN)
-  const trxNeededSun = BigInt(Math.ceil((energyNeeded * totalEnergyWeightSun) / totalEnergyLimit));
+  // Calculate needed TRX (in SUN) only when intermediate arithmetic remains exact.
+  const requiredSunNumerator = energyNeeded * totalEnergyWeightSun;
+  if (!Number.isSafeInteger(requiredSunNumerator) || requiredSunNumerator <= 0) {
+    throw new Error('TRON delegation calculation exceeds safe integer precision; refusing delegation');
+  }
+  const requiredSunNumber = Math.ceil(requiredSunNumerator / totalEnergyLimit);
+  if (!Number.isSafeInteger(requiredSunNumber) || requiredSunNumber <= 0) {
+    throw new Error('TRON calculated delegation amount is invalid; refusing delegation');
+  }
+  const trxNeededSun = BigInt(requiredSunNumber);
 
   console.log(`[Tron Resource Pool] Energy needed: ${energyNeeded}. Calculated TRX weight: ${Number(trxNeededSun) / 1000000} TRX (${trxNeededSun} SUN)`);
 
