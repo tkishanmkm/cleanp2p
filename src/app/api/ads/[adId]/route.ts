@@ -194,7 +194,7 @@ export async function GET(
   } catch (err: any) {
     console.error('Error in /api/ads/[adId] GET:', err);
     return NextResponse.json(
-      { error: err.message || 'Failed to fetch ad' },
+      { error: 'An unexpected error occurred while retrieving the advertisement.' },
       { status: 500 }
     );
   }
