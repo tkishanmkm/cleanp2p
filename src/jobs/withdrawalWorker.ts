@@ -252,6 +252,13 @@ export async function processWithdrawalQueue(): Promise<WithdrawalProcessResult>
       });
     }
 
+    // A node accepting the broadcast is not proof of settlement. Keep the
+    // withdrawal reserve until a successful mined receipt is observed.
+    const receipt = await tx.wait(1);
+    if (!receipt || receipt.status !== 1) {
+      throw new Error('EVM withdrawal has no successful mined receipt; keep funds reserved for reconciliation');
+    }
+
     const { error: completionError } = await supabaseAdmin.rpc('complete_onchain_withdrawal', {
       p_withdrawal_id: withdrawal.id,
       p_tx_hash: tx.hash,
