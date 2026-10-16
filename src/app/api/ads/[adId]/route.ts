@@ -12,8 +12,9 @@ const VALID_SUPPORTED_ASSETS = ['USDT', 'BTC', 'ETH', 'LTC'];
 
 function formatPresence(lastActive?: string | null): string {
   if (!lastActive) return 'Unknown';
-  const diffMs = Date.now() - new Date(lastActive).getTime();
-  const diffMinutes = Math.floor(diffMs / (1000 * 60));
+  const lastActiveMs = Date.parse(lastActive);
+  if (!Number.isFinite(lastActiveMs) || lastActiveMs > Date.now()) return 'Unknown';
+  const diffMinutes = Math.floor((Date.now() - lastActiveMs) / (1000 * 60));
   if (diffMinutes < 5) return 'Online';
   if (diffMinutes < 60) return `${diffMinutes}m ago`;
   const diffHours = Math.floor(diffMinutes / 60);
