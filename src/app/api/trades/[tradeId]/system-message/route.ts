@@ -293,9 +293,10 @@ export async function POST(
       message: text,
       record: insertResult
     });
-  } catch (error: any) {
-    console.error('System message route error:', error);
-    return NextResponse.json({ error: error.message || 'Internal server error' }, { status: 500 });
+  } catch (error: unknown) {
+    const errorName = error instanceof Error ? error.name : 'UnknownError';
+    console.error('System message POST failed:', errorName);
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }
 
