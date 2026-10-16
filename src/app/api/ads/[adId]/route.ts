@@ -45,7 +45,7 @@ export async function GET(
       try {
         const { data: profile } = await admin
           .from('profiles')
-          .select('*')
+          .select('id, username, avatar_url, photo_url, created_at, completed_trades, positive_feedback, negative_feedback, avg_release_time, avg_release_minutes, avg_pay_time, avg_payment_minutes, last_seen, last_seen_at')
           .eq('id', adOwnerUserId)
           .maybeSingle();
         if (profile) {
