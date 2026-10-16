@@ -439,12 +439,23 @@ export async function executeCanonicalWithdrawal(input: WithdrawalRequestInput):
   // RULE B: ROLLING 24-HOUR DAILY WITHDRAWAL LIMIT
   // =========================================================================
   const oneDayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
-  const { data: past24hWithdrawals } = await supabaseAdmin
+  const { data: past24hWithdrawals, error: past24hWithdrawalsError } = await supabaseAdmin
     .from('withdrawals')
     .select('amount, asset_symbol, created_at')
     .eq('user_id', user.id)
     .gte('created_at', oneDayAgo)
     .in('status', ['completed', 'processing', 'QUEUED', 'PENDING_APPROVAL', 'APPROVED', 'approved', 'pending']);
+
+  if (past24hWithdrawalsError || !past24hWithdrawals) {
+    console.error('Unable to load recent withdrawals for daily limit enforcement:', past24hWithdrawalsError);
+    return {
+      success: false,
+      status: 'SECURITY_CHECK_UNAVAILABLE',
+      error: 'Daily withdrawal-limit verification is temporarily unavailable.',
+      message: 'Withdrawals are temporarily unavailable. Please try again later.',
+      statusCode: 503,
+    };
+  }
 
   let rolling24hUsd = 0;
   try {
