@@ -996,6 +996,40 @@ async function scanTronDeposits(
           if (typeof blockHex !== 'string' || !/^0x[0-9a-fA-F]+$/.test(blockHex)) continue;
           const eventBlock = Number.parseInt(blockHex.slice(2), 16);
           if (!Number.isSafeInteger(eventBlock) || eventBlock <= 0 || eventBlock > latestBlock) continue;
+
+          // Do not credit an event whose block is missing or no longer canonical.
+          const logBlockHash = log.blockHash;
+          if (typeof logBlockHash !== 'string' || !/^0x[0-9a-fA-F]{64}$/.test(logBlockHash)) {
+            errors.push(`Rejected TRON RPC log with invalid block hash: ${txHash}`);
+            continue;
+          }
+          const canonicalRes = await fetch(tronHost, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              jsonrpc: '2.0',
+              id: 1,
+              method: 'eth_getBlockByNumber',
+              params: [blockHex, false],
+            }),
+          });
+          if (!canonicalRes.ok) {
+            errors.push(`TRON canonical block request failed with HTTP ${canonicalRes.status} at block ${eventBlock}`);
+            continue;
+          }
+          const canonicalJson = await canonicalRes.json();
+          const canonicalBlock = canonicalJson?.result;
+          if (
+            canonicalJson?.error ||
+            !canonicalBlock ||
+            canonicalBlock.number !== blockHex ||
+            typeof canonicalBlock.hash !== 'string' ||
+            !/^0x[0-9a-fA-F]{64}$/.test(canonicalBlock.hash) ||
+            canonicalBlock.hash.toLowerCase() !== logBlockHash.toLowerCase()
+          ) {
+            errors.push(`Rejected TRON RPC log from a non-canonical or unverifiable block: ${txHash}`);
+            continue;
+          }
           const confirmations = latestBlock - eventBlock + 1;
 
           seenTxIndices.add(deduplicationKey);
