@@ -13,9 +13,10 @@ export async function POST(
     const resolvedParams = typeof (params as any)?.then === 'function' ? await params : params;
     const tradeId = resolvedParams.tradeId;
 
-    if (!tradeId) {
-      return NextResponse.json({ error: 'Trade ID is required' }, { status: 400 });
+    if (typeof tradeId !== 'string' || tradeId.trim().length === 0 || tradeId.length > 128) {
+      return NextResponse.json({ error: 'Trade ID is required and must be 128 characters or fewer.' }, { status: 400 });
     }
+    const cleanTradeId = tradeId.trim();
 
     let supabase = await createClient();
     const authHeader = req.headers.get('Authorization') || req.headers.get('authorization');
@@ -48,14 +49,14 @@ export async function POST(
       return NextResponse.json({ error: 'Dispute reason must be text of 2,000 characters or fewer.' }, { status: 400 });
     }
 
-    const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(tradeId);
+    const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(cleanTradeId);
 
     // Fetch trade (by UUID or trade_id)
     let tradeQuery = supabase.from('trades').select('*');
     if (isUuid) {
-      tradeQuery = tradeQuery.or(`id.eq.${tradeId},trade_id.eq.${tradeId}`);
+      tradeQuery = tradeQuery.or(`id.eq.${cleanTradeId},trade_id.eq.${cleanTradeId}`);
     } else {
-      tradeQuery = tradeQuery.eq('trade_id', tradeId);
+      tradeQuery = tradeQuery.eq('trade_id', cleanTradeId);
     }
     const { data: trade } = await tradeQuery.maybeSingle();
 
