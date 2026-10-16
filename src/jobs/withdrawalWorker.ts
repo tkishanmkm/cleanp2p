@@ -92,7 +92,7 @@ export async function allocateEvmNonce(
     allocatedNonce === null ||
     allocatedNonce === undefined ||
     (typeof allocatedNonce !== 'number' && typeof allocatedNonce !== 'string') ||
-    (typeof allocatedNonce === 'string' && !/^\\d+$/.test(allocatedNonce))
+    (typeof allocatedNonce === 'string' && !/^\d+$/.test(allocatedNonce))
   ) {
     throw new Error('Atomic nonce allocation returned no valid nonce; refusing withdrawal broadcast');
   }
