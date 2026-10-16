@@ -28,6 +28,9 @@ export async function GET(
   try {
     const rawParams = await Promise.resolve(context.params);
     const adId = (rawParams.adId || '').trim();
+    if (!adId) {
+      return NextResponse.json({ error: 'Advertisement ID is required.' }, { status: 400 });
+    }
 
     const resolved = await findAdById(adId);
     let ad = resolved?.ad || null;
