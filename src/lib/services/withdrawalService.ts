@@ -227,8 +227,24 @@ export async function executeCanonicalWithdrawal(input: WithdrawalRequestInput):
     };
   }
 
-  // Enforce Authoritative Password-Change Security Hold
-  const pwdHold = await checkPasswordChangeHold(user.id);
+  // Enforce authoritative password-change hold and pending-approval lockout.
+  // If either security query fails, do not treat the account as unrestricted.
+  let pwdHold: Awaited<ReturnType<typeof checkPasswordChangeHold>>;
+  let isPendingApproval: boolean;
+  try {
+    pwdHold = await checkPasswordChangeHold(user.id);
+    isPendingApproval = await hasPendingWithdrawalApproval(user.id);
+  } catch (securityCheckError) {
+    console.error('Withdrawal hold/approval security checks unavailable:', securityCheckError);
+    return {
+      success: false,
+      status: 'SECURITY_CHECK_UNAVAILABLE',
+      error: 'Withdrawal security checks are temporarily unavailable.',
+      message: 'Withdrawals are temporarily unavailable. Please try again later.',
+      statusCode: 503,
+    };
+  }
+
   if (pwdHold.isHeld) {
     return {
       success: false,
@@ -240,7 +256,6 @@ export async function executeCanonicalWithdrawal(input: WithdrawalRequestInput):
   }
 
   // Enforce Active Pending Approval Lockout (Single In-Flight Pending Approval Withdrawal)
-  const isPendingApproval = await hasPendingWithdrawalApproval(user.id);
   if (isPendingApproval) {
     return {
       success: false,
