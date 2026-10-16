@@ -44,8 +44,15 @@ BEGIN
         RETURN v_current_nonce;
     END IF;
 
-    IF NULLIF(TRIM(v_hot_wallet_address), '') IS NOT NULL
-       AND LOWER(TRIM(v_hot_wallet_address)) <> LOWER(TRIM(p_wallet_address)) THEN
+    -- Existing migrations seed placeholder zero addresses; bind those once to the
+    -- trusted server-configured wallet, but never silently switch a real wallet.
+    IF LOWER(TRIM(COALESCE(v_hot_wallet_address, ''))) = '0x0000000000000000000000000000000000000000' THEN
+        UPDATE public.hot_wallet_nonces
+           SET hot_wallet_address = TRIM(p_wallet_address),
+               updated_at = NOW()
+         WHERE network_code = v_norm_network;
+    ELSIF NULLIF(TRIM(v_hot_wallet_address), '') IS NULL
+       OR LOWER(TRIM(v_hot_wallet_address)) <> LOWER(TRIM(p_wallet_address)) THEN
         RAISE EXCEPTION 'Configured hot-wallet address mismatch for network %', v_norm_network;
     END IF;
 
