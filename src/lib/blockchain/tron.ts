@@ -170,7 +170,9 @@ export async function getTronTransactionConfirmations(txHash: string): Promise<{
 
     return {
       confirmations,
-      isConfirmed: confirmations >= TRON_CONFIG.requiredConfirmations && success,
+      // Confirmation depth and execution success are separate facts. The caller
+      // must be able to refund a transaction only after a confirmed on-chain failure.
+      isConfirmed: confirmations >= TRON_CONFIG.requiredConfirmations,
       success,
       blockNumber: txInfo.blockNumber,
       actualCostTrx,
