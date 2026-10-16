@@ -217,18 +217,33 @@ export async function POST(req: NextRequest) {
 
     // 3d. Check if targetIdentifier is a deposit address of another platform user
     if (!recipientProfile) {
-      const { data: depAddr } = await admin
+      const { data: depAddr, error: depositAddressLookupError } = await admin
         .from('deposit_addresses')
         .select('user_id')
         .eq('address', targetIdentifier)
         .maybeSingle();
 
+      if (depositAddressLookupError) {
+        console.error('[Internal Transfer] Deposit-address recipient lookup failed:', depositAddressLookupError.code);
+        return NextResponse.json({
+          error: 'Recipient security status could not be verified. Please try again later.',
+          code: 'RECIPIENT_LOOKUP_UNAVAILABLE',
+        }, { status: 503 });
+      }
+
       if (depAddr?.user_id) {
-        const { data: profByAddr } = await admin
+        const { data: profByAddr, error: addressProfileLookupError } = await admin
           .from('profiles')
           .select('id, username, is_banned, is_restricted, is_emergency_frozen, account_status')
           .eq('id', depAddr.user_id)
           .maybeSingle();
+        if (addressProfileLookupError) {
+          console.error('[Internal Transfer] Deposit-address profile lookup failed:', addressProfileLookupError.code);
+          return NextResponse.json({
+            error: 'Recipient security status could not be verified. Please try again later.',
+            code: 'RECIPIENT_LOOKUP_UNAVAILABLE',
+          }, { status: 503 });
+        }
         if (profByAddr) {
           recipientProfile = profByAddr;
         }
