@@ -199,7 +199,7 @@ export default function SettingsPage() {
   const [backDocPreview, setBackDocPreview] = useState<string | null>(null);
 
   const [isKycSubmitted, setIsKycSubmitted] = useState(false);
-  const [kycStatus, setKycStatus] = useState<'NOT_SUBMITTED' | 'PENDING' | 'VERIFIED' | 'REJECTED'>('NOT_SUBMITTED');
+  const [kycStatus, setKycStatus] = useState<'NOT_SUBMITTED' | 'NOT_STARTED' | 'PENDING' | 'VERIFIED' | 'REJECTED'>('NOT_SUBMITTED');
   const [kycRetryCount, setKycRetryCount] = useState<number>(0);
   const [kycCooldownHours, setKycCooldownHours] = useState<number>(0);
   const [kycIsPermanentlyRejected, setKycIsPermanentlyRejected] = useState(false);
