@@ -86,6 +86,11 @@ const checks: Array<[string, string, RegExp]> = [
     /allocatedNonce === null[\s\S]*allocatedNonce === undefined[\s\S]*!\\/\\^\\d\\+\\$\\/\.test\\(allocatedNonce\\)/i,
   ],
   [
+    'withdrawal worker parses nonce without unsafe numeric rounding',
+    'src/jobs/withdrawalWorker.ts',
+    /BigInt\(allocatedNonce\)[\s\S]*BigInt\(Number\.MAX_SAFE_INTEGER\)[\s\S]*Number\.isSafeInteger\(nonce\)/i,
+  ],
+  [
     'withdrawal worker refuses unsafe EVM nonce allocation fallback',
     'src/jobs/withdrawalWorker.ts',
     /Atomic hot-wallet nonce allocation unavailable; refusing withdrawal broadcast[\s\S]*allocated nonce returned an invalid or stale nonce|Atomic nonce allocation returned an invalid or stale nonce; refusing withdrawal broadcast/i,
