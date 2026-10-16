@@ -994,8 +994,13 @@ export async function delegateEnergyFromPool(
     throw new Error(`Failed to initialize resource delegation record: ${initErr?.message || initRes?.message || 'UNKNOWN'}`);
   }
 
+  // The claim RPC must explicitly identify whether a delegation already exists; fail closed on malformed payloads.
+  if (typeof initRes.already_delegated !== 'boolean') {
+    throw new Error('Resource delegation initialization returned an invalid already_delegated flag; refusing delegation');
+  }
+
   // If already active or delegated on DB, handle safely without duplicate delegation
-  if (initRes.already_delegated) {
+  if (initRes.already_delegated === true) {
     if (initRes.status === 'DELEGATED') {
       const persistedAmountSun = initRes.delegated_amount_sun;
       if (
