@@ -13,14 +13,23 @@ export async function GET(request: Request) {
     // 1. Authenticate User Session
     let effectiveUserId: string | null = null;
     try {
-      const {
-        data: { user },
-      } = await supabase.auth.getUser();
+      const { data: { user }, error: authError } = await supabase.auth.getUser();
+      if (authError) {
+        console.error('[Wallet Balance] Session verification unavailable.');
+        return NextResponse.json(
+          { success: false, error: 'Wallet balance could not be verified safely.' },
+          { status: 503 }
+        );
+      }
       if (user?.id) {
         effectiveUserId = user.id;
       }
     } catch {
-      // Session fetch failed or not present
+      // Authentication service failure is not equivalent to an unauthenticated session.
+      return NextResponse.json(
+        { success: false, error: 'Wallet balance could not be verified safely.' },
+        { status: 503 }
+      );
     }
 
     // Balance data must be scoped to the authenticated session; never trust a caller-supplied user ID.
