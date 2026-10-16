@@ -59,8 +59,12 @@ async function runReconciliationTests() {
     console.log(bold('\nTest 2: Injecting Financial Anomaly & Discrepancy Detection'));
 
     // Provision rogue wallet without corresponding ledger entries
-    await supabase.from('wallets').upsert({ id: rogueWalletId, user_id: rogueUserId }, { onConflict: 'id' });
-    await supabase.from('wallet_assets').upsert(
+    const { error: rogueWalletErr } = await supabase
+      .from('wallets')
+      .upsert({ id: rogueWalletId, user_id: rogueUserId }, { onConflict: 'id' });
+    if (rogueWalletErr) throw new Error(`Unable to create rogue test wallet: ${rogueWalletErr.message}`);
+
+    const { error: rogueAssetErr } = await supabase.from('wallet_assets').upsert(
       {
         wallet_id: rogueWalletId,
         asset_code: 'USDT',
@@ -70,6 +74,7 @@ async function runReconciliationTests() {
       },
       { onConflict: 'wallet_id,asset_code' }
     );
+    if (rogueAssetErr) throw new Error(`Unable to seed rogue test balance: ${rogueAssetErr.message}`);
 
     console.log(cyan('  -> Injected rogue balance of 75,000 USDT without ledger entry'));
 
@@ -96,14 +101,15 @@ async function runReconciliationTests() {
     console.log(bold('\nTest 3: Verify Critical Security Alert & Clean Recovery'));
 
     // Query security_alerts table
-    const { data: alerts } = await supabase
+    const { data: alerts, error: alertsErr } = await supabase
       .from('security_alerts')
       .select('*')
       .eq('severity', 'CRITICAL')
       .order('created_at', { ascending: false })
       .limit(5);
+    if (alertsErr) throw new Error(`Unable to query security alerts: ${alertsErr.message}`);
 
-    const alertLogged = alerts?.some(
+    const alertLogged = alerts?.some
       (a) => a.details?.wallet_id === rogueWalletId
     );
 
