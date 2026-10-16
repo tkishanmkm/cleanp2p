@@ -1121,13 +1121,16 @@ export async function undelegateEnergyToPool(
         break;
       } else if (txInfo && txInfo.ret && txInfo.ret[0]?.contractRet && txInfo.ret[0]?.contractRet !== 'SUCCESS') {
         console.error(`[Tron Resource Pool] Undelegation transaction reverted on-chain: ${txInfo.ret[0]?.contractRet}`);
-        await supabaseAdmin.rpc('update_delegation_status', {
+        const { data: failureRes, error: failureErr } = await supabaseAdmin.rpc('update_delegation_status', {
           p_sweep_id: sweepId,
           p_worker_id: workerId,
           p_expected_status: 'UNDELEGATING',
           p_new_status: 'FAILED',
           p_error_message: `Undelegation reverted on-chain: ${txInfo.ret[0]?.contractRet}`,
         });
+        if (failureErr || !failureRes || failureRes.success !== true) {
+          console.error('[Tron Resource Pool] CRITICAL: on-chain undelegation failure could not be persisted; leaving operation for recovery.', failureErr || failureRes);
+        }
         return false;
       }
     } catch {
