@@ -366,6 +366,11 @@ const checks: Array<[string, string, RegExp]> = [
     /The deployed durable gas-funding SQL contract supports ERC20\/BEP20 only[\s\S]*?throw new Error\('TRON gas funding is disabled until a TRC20-compatible durable SQL workflow is deployed'\)/i,
   ],
   [
+    'disabled TRON gas funding requires explicit success from recovery-state RPC',
+    'src/jobs/sweeperWorker.ts',
+    /const disabledReason = 'TRON gas funding is disabled[\s\S]*?update_sweep_operation_status[\s\S]*?p_new_status: 'RECOVERY_REQUIRED'[\s\S]*?recoveryRes\.success !== true[\s\S]*?throw new Error\(disabledReason\)/i,
+  ],
+  [
     'disabled TRON gas funding moves the sweep from GAS_FUNDING to RECOVERY_REQUIRED',
     'src/jobs/sweeperWorker.ts',
     /p_expected_status: 'GAS_FUNDING'[\s\S]*?p_new_status: 'RECOVERY_REQUIRED'[\s\S]*?failed to persist sweep recovery status[\s\S]*?throw new Error\(disabledReason\)/i,
