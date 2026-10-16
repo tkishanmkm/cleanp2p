@@ -572,6 +572,13 @@ async function scanTronDeposits(
       } catch (_) {}
     }
 
+    // Never ingest TRON deposits without a validated current chain height;
+    // otherwise confirmation calculations could be based on a fabricated zero.
+    if (!Number.isSafeInteger(latestBlock) || latestBlock <= 0) {
+      errors.push('Unable to determine a valid TRON latest block; scan aborted');
+      return { detected, credited, errors };
+    }
+
     const transferTopic = '0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef';
     const seenTxIndices = new Set<string>();
 
