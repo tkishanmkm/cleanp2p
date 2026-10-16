@@ -328,7 +328,7 @@ export async function fundGasForAddress(
       throw new Error(`Gas funding claim RPC failed: ${claimErr?.message || 'UNKNOWN'}`);
     }
 
-    if (claimRes.already_funded) {
+    if (claimRes.already_funded === true) {
       console.log(`[Sweeper Gas] Address ${targetAddress} gas funding already confirmed (tx: ${claimRes.tx_hash}). Skipping.`);
       return;
     }
