@@ -6,6 +6,11 @@ const root = process.cwd();
 const read = (relativePath: string) => readFileSync(join(root, relativePath), 'utf8');
 const checks: Array<[string, string, RegExp]> = [
   [
+    'BTC ambiguous broadcast checks RECOVERY_REQUIRED persistence',
+    'src/jobs/sweeperWorker.ts',
+    /BTC Sweeper Broadcast Exception[\s\S]*?let recoveryPersistError: string \| null = null[\s\S]*?recoveryRes\.success !== true[\s\S]*?BTC Sweeper Recovery Persistence Failure[\s\S]*?BTC broadcast outcome ambiguous/i,
+  ],
+  [
     'confirmed sweep recovery requires explicit successful status persistence',
     'src/jobs/sweeperWorker.ts',
     /if \(isConfirmed\)[\s\S]*?const \{ data: confirmedRes, error: confirmedErr \} = await supabaseAdmin\.rpc\('update_sweep_operation_status'[\s\S]*?confirmedRes\.success !== true[\s\S]*?Failed to persist confirmed sweep status/i,
