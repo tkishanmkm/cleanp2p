@@ -184,15 +184,31 @@ async function scanEvmTokenDeposits(
       return { detected: 0, credited: 0, errors: ['Failed to compute Transfer topic'] };
     }
 
-    // Query event logs in configured block window
+    const latestBlock = await provider.getBlockNumber();
+    if (
+      !Number.isSafeInteger(fromBlock) ||
+      !Number.isSafeInteger(toBlock) ||
+      fromBlock < 0 ||
+      toBlock < fromBlock ||
+      !Number.isSafeInteger(latestBlock) ||
+      latestBlock < 0
+    ) {
+      return { detected, credited, errors: ['Invalid EVM token scan block range or provider tip'] };
+    }
+    if (fromBlock > latestBlock) {
+      return { detected, credited, errors: ['EVM token scan start is above the provider tip'] };
+    }
+
+    // Clamp to the current chain tip and keep each provider request bounded.
+    // A caller must advance its scan window separately to catch up older blocks.
+    const scanToBlock = Math.min(toBlock, latestBlock);
+    const scanFromBlock = Math.max(fromBlock, scanToBlock - 99);
     const logs = await provider.getLogs({
-      fromBlock,
-      toBlock,
+      fromBlock: scanFromBlock,
+      toBlock: scanToBlock,
       address: tokenContractAddress,
       topics: [transferTopic],
     });
-
-    const latestBlock = await provider.getBlockNumber();
 
     for (const log of logs) {
       try {
