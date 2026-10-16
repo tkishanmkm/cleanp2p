@@ -2794,13 +2794,16 @@ export async function reconcileAmbiguousSweep(sweepId: string, workerId: string)
       }
 
       if (isFailed) {
-        await supabaseAdmin.rpc('update_sweep_operation_status', {
+        const { data: failedRes, error: failedErr } = await supabaseAdmin.rpc('update_sweep_operation_status', {
           p_sweep_id: sweepId,
           p_worker_id: workerId,
           p_expected_status: status,
           p_new_status: 'FAILED',
           p_error_message: 'On-chain transaction execution failed',
         });
+        if (failedErr || !failedRes || typeof failedRes !== 'object' || Array.isArray(failedRes) || failedRes.success !== true) {
+          throw new Error(`Failed to persist failed sweep status for ${sweepId}: ${failedErr?.message || failedRes?.message || 'invalid RPC response'}`);
+        }
         if (net === 'TRC20' || net === 'TRON') {
           try {
             await undelegateEnergyToPool(sweepId, workerId);
