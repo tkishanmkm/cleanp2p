@@ -158,7 +158,7 @@ export async function POST(req: Request) {
 
     // 5. Validate boolean fields before normalization. Boolean("false") is true in
     // JavaScript, so coercing arbitrary client values would silently enable flags.
-    for (const key of ['is_fixed', 'require_full_name_verified', 'require_verified_users']) {
+    for (const key of ['is_fixed', 'fixed_rate', 'require_full_name_verified', 'require_verified_users']) {
       if (strippedFormData[key] !== undefined && strippedFormData[key] !== null &&
           typeof strippedFormData[key] !== 'boolean') {
         return NextResponse.json({ error: `${key} must be a boolean.` }, { status: 400 });
@@ -184,9 +184,8 @@ export async function POST(req: Request) {
       is_fixed: Boolean(strippedFormData.is_fixed ?? (typeof strippedFormData.fixed_rate === 'boolean' ? strippedFormData.fixed_rate : false)),
     };
 
-    if (typeof cleanPayload.fixed_rate === 'boolean') {
-      delete cleanPayload.fixed_rate;
-    }
+    // fixed_rate is a legacy input alias; persist only the canonical is_fixed field.
+    delete cleanPayload.fixed_rate;
 
     if (cleanPayload.min_order !== undefined) cleanPayload.min_order = cleanPayload.min_order ? Number(cleanPayload.min_order) : null;
     if (cleanPayload.max_order !== undefined) cleanPayload.max_order = cleanPayload.max_order ? Number(cleanPayload.max_order) : null;
