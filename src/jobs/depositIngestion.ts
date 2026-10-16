@@ -819,12 +819,12 @@ async function scanTronDeposits(
             if (rawValBig <= 0n) continue;
             const deduplicationKey = `${txId}_${outputIndex}`;
             if (seenTxIndices.has(deduplicationKey)) continue;
-            seenTxIndices.add(deduplicationKey);
             const formattedAmount = ethers.formatUnits(rawValBig, 6);
             if (!/^(?:0|[1-9]\d*)(?:\.\d+)?$/.test(formattedAmount)) continue;
             const eventBlock = Number(evt.block_number || 0);
             if (!Number.isSafeInteger(eventBlock) || eventBlock <= 0 || !latestBlock || latestBlock < eventBlock) continue;
             const confirmations = latestBlock - eventBlock + 1;
+            seenTxIndices.add(deduplicationKey);
             detected++;
 
             const { data: rpcData, error } = await supabaseAdmin.rpc('process_deposit_atomic', {
@@ -846,8 +846,18 @@ async function scanTronDeposits(
             if (error) {
               errors.push(`RPC error for TRON deposit ${txId}: ${error.message}`);
             } else {
-              const r = typeof rpcData === 'string' ? JSON.parse(rpcData) : rpcData;
-              if (r?.status === 'credited') {
+              let r: any;
+              try {
+                r = typeof rpcData === 'string' ? JSON.parse(rpcData) : rpcData;
+              } catch {
+                errors.push(`Invalid RPC result for TRON contract event ${txId}`);
+                continue;
+              }
+              if (!r || typeof r !== 'object' || Array.isArray(r) || typeof r.status !== 'string') {
+                errors.push(`Malformed RPC result for TRON contract event ${txId}`);
+                continue;
+              }
+              if (r.status === 'credited') {
                 credited++;
               }
             }
