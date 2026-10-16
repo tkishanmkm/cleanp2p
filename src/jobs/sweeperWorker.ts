@@ -1211,7 +1211,23 @@ export async function sweepTronDepositAddress(
 
     // Check TRC20 USDT balance
     const balanceSun = await contract.balanceOf(childTronAddress).call();
-    const balanceUsdt = Number(balanceSun) / 1_000_000;
+    let balanceSunInteger: bigint;
+    try {
+      const rawBalance = balanceSun?.toString?.() ?? String(balanceSun);
+      if (!/^\d+$/.test(rawBalance)) {
+        throw new Error('TRC20 balance response is not a non-negative integer');
+      }
+      balanceSunInteger = BigInt(rawBalance);
+    } catch (balanceErr: any) {
+      throw new Error(`Unable to safely parse TRC20 USDT balance: ${balanceErr?.message || balanceErr}`);
+    }
+    if (balanceSunInteger < 0n) {
+      throw new Error('TRC20 USDT balance cannot be negative');
+    }
+    const balanceUsdt = Number(balanceSunInteger) / 1_000_000;
+    if (!Number.isFinite(balanceUsdt)) {
+      throw new Error('TRC20 USDT balance is outside the supported numeric range');
+    }
 
     if (balanceUsdt < MIN_SWEEP_THRESHOLD_USDT) {
       stopHeartbeat();
@@ -1370,7 +1386,7 @@ export async function sweepTronDepositAddress(
       { feeLimit: 30_000_000 },
       [
         { type: 'address', value: hotWalletDestination },
-        { type: 'uint256', value: balanceSun },
+        { type: 'uint256', value: balanceSunInteger.toString() },
       ],
       childTronAddress
     );
