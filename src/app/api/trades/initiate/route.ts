@@ -206,7 +206,7 @@ export async function POST(req: Request) {
         {
           success: false,
           code: rpcError.code === 'P0001' ? 'ESCROW_ERROR' : 'RPC_ERROR',
-          error: rpcError.message || 'Failed to initiate trade with escrow.',
+          error: 'Failed to initiate trade with escrow.',
         },
         { status: 400 }
       );
@@ -217,7 +217,7 @@ export async function POST(req: Request) {
         {
           success: false,
           code: 'ESCROW_FAILED',
-          error: rpcResult?.message || 'Failed to initiate trade with escrow.',
+          error: 'Failed to initiate trade with escrow.',
         },
         { status: 400 }
       );
@@ -272,7 +272,7 @@ export async function POST(req: Request) {
   } catch (err: any) {
     console.error('Error initiating trade:', err);
     return NextResponse.json(
-      { success: false, error: err.message || 'Internal Server Error' },
+      { success: false, error: 'Failed to initiate trade. Please try again.' },
       { status: 500 }
     );
   }
