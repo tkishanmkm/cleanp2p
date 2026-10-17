@@ -235,14 +235,6 @@ export async function POST(req: Request) {
     const sellerId = rpcResult.seller_id || ad.user_id;
     const buyerId = rpcResult.buyer_id || user.id;
 
-    if (tradeId && resolvedPaymentMethod) {
-      const adminClient = getSupabaseAdminClient();
-      await adminClient
-        .from('trades')
-        .update({ payment_method: resolvedPaymentMethod })
-        .eq('id', tradeId);
-    }
-
     // Send Email Notification to Seller (Non-blocking & Duplicate-Protected)
     if (!rpcResult.message?.includes('idempotent replay') && sellerId) {
       try {
