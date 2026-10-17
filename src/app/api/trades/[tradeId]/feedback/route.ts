@@ -16,7 +16,7 @@ export async function POST(
     let supabase = await createClient();
     const authHeader = req.headers.get('authorization');
     if (authHeader !== null) {
-      const bearerMatch = /^Bearer\\s+(.+)$/i.exec(authHeader.trim());
+      const bearerMatch = /^Bearer\s+(.+)$/i.exec(authHeader.trim());
       if (!bearerMatch) {
         return NextResponse.json({ error: 'Authorization header is invalid.' }, { status: 401 });
       }
@@ -66,7 +66,7 @@ export async function POST(
       return NextResponse.json({ error: 'Feedback comment must be 1,000 characters or fewer.' }, { status: 400 });
     }
     const normalizedComment = typeof comment === 'string'
-      ? comment.replace(/[\\u0000-\\u001F\\u007F]/g, ' ').replace(/\\s+/g, ' ').trim()
+      ? comment.replace(/[\u0000-\u001F\u007F]/g, ' ').replace(/\s+/g, ' ').trim()
       : '';
 
     // 1. Fetch trade and authorize
