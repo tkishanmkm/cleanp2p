@@ -6,8 +6,20 @@ import { USER_2FA_COOKIE_NAME, verifyUser2FASessionToken } from '@/lib/user-2fa-
 export async function middleware(request: NextRequest) {
   let supabaseResponse = NextResponse.next({ request });
 
-  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://placeholder.supabase.co';
-  const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'placeholder-anon-key';
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL?.trim();
+  const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY?.trim();
+
+  // Do not initialize auth with a fake project URL or placeholder key. Missing
+  // public Supabase configuration must stop the request instead of failing open.
+  if (
+    !supabaseUrl ||
+    !supabaseKey ||
+    supabaseUrl.includes('placeholder.supabase.co') ||
+    ['placeholder-anon-key', 'placeholder-key'].includes(supabaseKey)
+  ) {
+    console.error('Middleware blocked request: Supabase public environment configuration is missing or invalid.');
+    return new NextResponse('Service temporarily unavailable', { status: 503 });
+  }
 
   try {
     const authHeader = request.headers.get('Authorization') || request.headers.get('authorization');
