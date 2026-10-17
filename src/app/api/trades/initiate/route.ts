@@ -117,7 +117,7 @@ export async function POST(req: Request) {
     // 3. Resolve numerical amounts with exact precision
     const rawPrice = customPrice ?? ad.fixed_rate ?? ad.price;
     const unitPrice = Number(rawPrice);
-    if (!rawPrice || isNaN(unitPrice) || unitPrice <= 0) {
+    if (!rawPrice || !Number.isFinite(unitPrice) || unitPrice <= 0) {
       return NextResponse.json(
         { error: 'Advertisement unit price is invalid or market price is unavailable.' },
         { status: 400 }
@@ -126,18 +126,22 @@ export async function POST(req: Request) {
     let calculatedCrypto = parseFloat(rawCrypto);
     let numericFiat = parseFloat(rawFiat);
 
-    if (isNaN(calculatedCrypto) || calculatedCrypto <= 0) {
-      if (!isNaN(numericFiat) && numericFiat > 0 && unitPrice > 0) {
+    if (!Number.isFinite(calculatedCrypto) || calculatedCrypto <= 0) {
+      if (Number.isFinite(numericFiat) && numericFiat > 0) {
         calculatedCrypto = numericFiat / unitPrice;
       }
     }
 
-    if (isNaN(calculatedCrypto) || calculatedCrypto <= 0) {
+    if (!Number.isFinite(calculatedCrypto) || calculatedCrypto <= 0) {
       return NextResponse.json({ error: 'Invalid crypto amount.' }, { status: 400 });
     }
 
     calculatedCrypto = Number(calculatedCrypto.toFixed(8));
     numericFiat = Number((calculatedCrypto * unitPrice).toFixed(2));
+    if (!Number.isFinite(calculatedCrypto) || calculatedCrypto <= 0 ||
+        !Number.isFinite(numericFiat) || numericFiat <= 0) {
+      return NextResponse.json({ error: 'Trade amounts are outside the supported range.' }, { status: 400 });
+    }
 
     // 4. Resolve Payment Method & Currency
     let rawPaymentMethods: any[] = [];
