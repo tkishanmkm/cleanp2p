@@ -52,7 +52,25 @@ export async function POST(req: Request) {
       );
     }
 
-    const body = await req.json();
+    const contentLength = Number(req.headers.get('content-length') || 0);
+    const MAX_BODY_BYTES = 64 * 1024;
+    if (Number.isFinite(contentLength) && contentLength > MAX_BODY_BYTES) {
+      return NextResponse.json({ error: 'Request body is too large.' }, { status: 413 });
+    }
+
+    let body: any;
+    try {
+      const rawBody = await req.text();
+      if (new TextEncoder().encode(rawBody).byteLength > MAX_BODY_BYTES) {
+        return NextResponse.json({ error: 'Request body is too large.' }, { status: 413 });
+      }
+      body = JSON.parse(rawBody);
+    } catch {
+      return NextResponse.json({ error: 'Invalid JSON request body.' }, { status: 400 });
+    }
+    if (!body || typeof body !== 'object' || Array.isArray(body)) {
+      return NextResponse.json({ error: 'Request body must be a JSON object.' }, { status: 400 });
+    }
     const adId = body.adId || body.ad_id;
     const rawFiat = body.fiatAmount ?? body.fiat_amount;
     const rawCrypto = body.cryptoAmount ?? body.crypto_amount;
