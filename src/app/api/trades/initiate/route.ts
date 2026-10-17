@@ -29,13 +29,8 @@ export async function POST(req: Request) {
       data: { user },
       error: authError,
     } = await supabase.auth.getUser();
-    console.log('[DEBUG] Auth getUser result:', { user: user?.id, error: authError });
-
     if (authError || !user) {
-      return NextResponse.json({ 
-        error: 'Unauthorized. Please sign in.',
-        debug: { authError, userId: user?.id }
-      }, { status: 401 });
+      return NextResponse.json({ error: 'Unauthorized. Please sign in.' }, { status: 401 });
     }
 
     // Pending Withdrawal Approval Lockout Check
@@ -87,8 +82,6 @@ export async function POST(req: Request) {
 
     // 1. Fetch Ad safely to read metadata
     let ad: any = null;
-    console.log('[DEBUG] Auth User ID:', user?.id);
-    
     let p2pQuery = supabase.from('p2p_ads').select('*');
     if (isIdUUID) {
       p2pQuery = p2pQuery.or(`id.eq.${adId},public_ad_id.eq.${adId}`);
@@ -195,7 +188,6 @@ export async function POST(req: Request) {
     const adIdentifier = String(ad.id || ad.public_ad_id || adId);
 
     // 5. Call Canonical Atomic Database RPC
-    console.log('[DEBUG] Calling initiate_trade_with_escrow RPC with user ID:', user?.id);
     const { data: rpcResult, error: rpcError } = await supabase.rpc('initiate_trade_with_escrow', {
       p_ad_id: adIdentifier,
       p_crypto_amount: calculatedCrypto,
