@@ -152,7 +152,7 @@ export async function POST(req: NextRequest) {
     // 2. Resolve unit price & amounts
     const rawPrice = customRate ?? ad.fixed_rate ?? ad.price;
     const unitPrice = Number(rawPrice);
-    if (!rawPrice || isNaN(unitPrice) || unitPrice <= 0) {
+    if (rawPrice == null || rawPrice === '' || !Number.isFinite(unitPrice) || unitPrice <= 0) {
       return NextResponse.json(
         { error: 'Advertisement unit price is invalid or market price is unavailable.' },
         { status: 400 }
@@ -161,26 +161,50 @@ export async function POST(req: NextRequest) {
     let calculatedCrypto = parseFloat(rawCrypto);
     let numericFiat = parseFloat(rawFiat);
 
-    if (isNaN(calculatedCrypto) || calculatedCrypto <= 0) {
-      if (!isNaN(numericFiat) && numericFiat > 0 && unitPrice > 0) {
+    if (!Number.isFinite(calculatedCrypto) || calculatedCrypto <= 0) {
+      if (Number.isFinite(numericFiat) && numericFiat > 0 && unitPrice > 0) {
         calculatedCrypto = numericFiat / unitPrice;
       }
     }
 
-    if (isNaN(calculatedCrypto) || calculatedCrypto <= 0) {
+    if (!Number.isFinite(calculatedCrypto) || calculatedCrypto <= 0) {
       return NextResponse.json({ error: 'Invalid crypto amount.' }, { status: 400 });
     }
 
     calculatedCrypto = Number(calculatedCrypto.toFixed(8));
     numericFiat = Number((calculatedCrypto * unitPrice).toFixed(2));
+    if (!Number.isFinite(calculatedCrypto) || calculatedCrypto <= 0 || !Number.isFinite(numericFiat) || numericFiat <= 0) {
+      return NextResponse.json({ error: 'Trade amounts are outside the supported range.' }, { status: 400 });
+    }
 
-    // 3. Resolve Payment Method & Currency
-    const paymentMethods = Array.isArray(ad.payment_methods)
-      ? ad.payment_methods
-      : typeof ad.payment_methods === 'string'
-      ? JSON.parse(ad.payment_methods)
-      : ['Bank Transfer'];
-    const resolvedPaymentMethod = customPaymentMethod || paymentMethods[0] || 'Bank Transfer';
+    // 3. Resolve and validate the selected payment method against the advertisement.
+    let rawPaymentMethods: unknown[] = [];
+    if (Array.isArray(ad.payment_methods)) {
+      rawPaymentMethods = ad.payment_methods;
+    } else if (typeof ad.payment_methods === 'string') {
+      try {
+        const parsed = JSON.parse(ad.payment_methods);
+        rawPaymentMethods = Array.isArray(parsed) ? parsed : [ad.payment_methods];
+      } catch {
+        rawPaymentMethods = [ad.payment_methods];
+      }
+    } else if (typeof ad.payment_method === 'string' && ad.payment_method.trim()) {
+      rawPaymentMethods = [ad.payment_method];
+    } else {
+      rawPaymentMethods = ['Bank Transfer'];
+    }
+    const paymentMethods = rawPaymentMethods.filter((method): method is string => typeof method === 'string' && method.trim().length > 0);
+    if (paymentMethods.length === 0) {
+      return NextResponse.json({ error: 'This advertisement has no valid payment methods configured.' }, { status: 400 });
+    }
+    const requestedPaymentMethod = typeof customPaymentMethod === 'string' ? customPaymentMethod.trim() : '';
+    const matchedPaymentMethod = requestedPaymentMethod
+      ? paymentMethods.find((method) => method.trim().toLowerCase() === requestedPaymentMethod.toLowerCase())
+      : paymentMethods.length === 1 ? paymentMethods[0] : undefined;
+    if (!matchedPaymentMethod) {
+      return NextResponse.json({ error: requestedPaymentMethod ? 'Selected payment method is not supported by this advertisement.' : 'Please select a payment method for this advertisement.' }, { status: 400 });
+    }
+    const resolvedPaymentMethod = matchedPaymentMethod;
     const resolvedFiatCurrency = customFiat || ad.fiat_currency || ad.fiat || 'USD';
     const adIdentifier = String(ad.id || ad.public_ad_id || adId);
 
