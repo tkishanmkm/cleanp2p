@@ -97,7 +97,12 @@ export async function POST(
     }
 
     // Messages asserting that escrow funds were released/completed must not be participant-forgeable.
-    const adminOnlyTypes = new Set(['CUSTOM', 'USER_BLOCKED', 'ISSUE_REPORTED', 'MESSAGE_BLOCKED', 'SECURITY_REMINDER', 'TRADE_RELEASED', 'TRADE_COMPLETED']);
+    const adminOnlyTypes = new Set([
+      'CUSTOM', 'USER_BLOCKED', 'ISSUE_REPORTED', 'MESSAGE_BLOCKED', 'SECURITY_REMINDER',
+      // Lifecycle assertions must not be forgeable by either trade participant.
+      'TRADE_INITIATED', 'TRADE_STARTED', 'ESCROW_LOCKED', 'MARKED_PAID',
+      'TRADE_RELEASED', 'TRADE_COMPLETED', 'TRADE_CANCELLED', 'TRADE_EXPIRED', 'TRADE_DISPUTED'
+    ]);
     if (!isAdmin && adminOnlyTypes.has(typeof type === 'string' ? type : 'CUSTOM')) {
       return NextResponse.json({ error: 'Administrator privileges are required for this message type.' }, { status: 403 });
     }
