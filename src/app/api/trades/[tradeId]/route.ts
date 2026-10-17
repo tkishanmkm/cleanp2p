@@ -211,10 +211,10 @@ export async function GET(
       chat: sanitizedMessages,
       userRole: isAdmin ? 'moderator' : isBuyer ? 'buyer' : 'seller',
     });
-  } catch (err: any) {
-    console.error('[API/TRADES/TRADE_ID] Error:', err);
+  } catch (err: unknown) {
+    console.error('[API/TRADES/TRADE_ID] Request failed:', err instanceof Error ? err.name : 'UnknownError');
     return NextResponse.json(
-      { error: err?.message || 'Internal server error' },
+      { error: 'Unable to load this trade right now.' },
       { status: 500 }
     );
   }
