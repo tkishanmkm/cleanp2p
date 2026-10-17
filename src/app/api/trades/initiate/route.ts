@@ -185,7 +185,10 @@ export async function POST(req: Request) {
         resolvedPaymentMethod = paymentMethods[0];
       }
     } else {
-      resolvedPaymentMethod = trimmedCustom || 'Bank Transfer';
+      return NextResponse.json(
+        { error: 'This advertisement has no valid payment methods configured.' },
+        { status: 400 }
+      );
     }
 
     const resolvedFiatCurrency = customFiatCurrency || ad.fiat_currency || ad.fiat || 'USD';
