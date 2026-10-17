@@ -47,13 +47,13 @@ export async function GET(req: NextRequest) {
 
     if (error) {
       console.error('Error fetching trades in GET /api/trades:', error);
-      return NextResponse.json({ error: error.message }, { status: 500 });
+      return NextResponse.json({ error: 'Unable to fetch trades right now.' }, { status: 500 });
     }
 
     return NextResponse.json({ trades: trades || [] });
   } catch (err: any) {
     console.error('Error in GET /api/trades:', err);
-    return NextResponse.json({ error: err.message || 'Internal server error' }, { status: 500 });
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }
 
@@ -223,7 +223,7 @@ export async function POST(req: NextRequest) {
     if (rpcError) {
       console.error('[POST /api/trades] RPC initiate_trade_with_escrow error:', rpcError);
       return NextResponse.json(
-        { error: rpcError.message || 'Failed to initiate trade with escrow.' },
+        { error: 'Failed to initiate trade with escrow.' },
         { status: 400 }
       );
     }
