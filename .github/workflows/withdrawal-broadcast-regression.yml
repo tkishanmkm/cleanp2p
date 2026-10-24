@@ -9,7 +9,6 @@ on:
       - 'src/lib/withdrawal-processor.ts'
       - 'src/lib/services/withdrawalService.ts'
       - 'src/lib/withdrawalAmount.ts'
-      - 'tests/withdrawal-amount-parser.test.ts'
       - 'supabase/migrations/20261024000002_withdrawal_request_idempotency.sql'
       - 'supabase/migrations/20261024000003_withdrawal_daily_limit_usd_atomic.sql'
       - 'supabase/migrations/20261024000004_admin_rpc_authorization_hardening.sql'
@@ -21,7 +20,6 @@ on:
       - 'src/lib/blockchain/tron.ts'
       - 'src/lib/blockchain/tronReceiptStatus.ts'
       - 'tests/withdrawal-broadcast-stage.test.ts'
-      - 'tests/withdrawal-amount-parser.test.ts'
       - 'tests/admin-rpc-authorization-migration.test.ts'
       - 'tests/withdrawal-refund-wallet-row-migration.test.ts'
       - 'supabase/migrations/20261024000001_withdrawal_refund_wallet_row_fail_closed.sql'
@@ -102,6 +100,14 @@ jobs:
               echo "npm-ci.log was not created; install step may not have started."
             fi
           } >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload npm install diagnostics on failure
+        if: failure() && hashFiles('npm-ci.log') != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: withdrawal-regression-npm-diagnostics
+          path: npm-ci.log
+          if-no-files-found: ignore
+          retention-days: 3
       - name: Test strict withdrawal amount parsing
         run: npm run test:withdrawal-amount
       - name: Test admin RPC authorization migration
