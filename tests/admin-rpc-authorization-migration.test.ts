@@ -16,7 +16,7 @@ assert.ok(migration.includes('Could not safely remove user-editable admin metada
 assert.ok(migration.includes('p_caller_id\\\\s+IS\\\\s+NULL'), 'paid-trade caller fallback must be matched explicitly');
 assert.ok(migration.includes('p_user_id\\\\s+IS\\\\s+NULL'), 'dispute caller fallback must be matched explicitly');
 assert.equal(
-  (migration.match(/Trusted service caller ID is required\./g) ?? []).length,
+  (migration.match(/RAISE EXCEPTION 'Trusted service caller ID is required\.';/g) ?? []).length,
   2,
   'both trade RPCs must restrict null-session identity fallback to a trusted service role',
 );
