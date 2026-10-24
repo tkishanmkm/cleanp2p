@@ -428,34 +428,23 @@ export async function executeCanonicalWithdrawal(input: WithdrawalRequestInput):
     };
   }
 
-  // 7. Idempotency Check
-  if (input.idempotencyKey) {
-    const { data: existing } = await supabaseAdmin
-      .from('withdrawals')
-      .select('*')
-      .eq('user_id', user.id)
-      .eq('destination_address', validDestination)
-      .eq('amount', parsedAmount)
-      .order('created_at', { ascending: false })
-      .limit(1)
-      .maybeSingle();
-
-    if (existing && (existing.status === 'completed' || existing.status === 'processing' || existing.status === 'QUEUED' || existing.status === 'PENDING_APPROVAL')) {
-      return {
-        success: true,
-        status: existing.status,
-        withdrawalId: existing.id,
-        amountRequested: parsedAmount,
-        networkFee: Number(existing.network_fee || networkFee),
-        totalDebited: parsedAmount + Number(existing.network_fee || networkFee),
-        message: 'Withdrawal already submitted (idempotent replay).',
-        statusCode: 200,
-      };
-    }
+  // 7. Validate the optional idempotency key. Actual replay protection is
+  // enforced atomically by the database, not by guessing from amount/address.
+  const idempotencyKey = input.idempotencyKey?.trim();
+  if (idempotencyKey && (idempotencyKey.length < 8 || idempotencyKey.length > 200)) {
+    return {
+      success: false,
+      status: 'INVALID_IDEMPOTENCY_KEY',
+      error: 'Idempotency key must contain between 8 and 200 characters.',
+      message: 'Invalid idempotency key.',
+      statusCode: 400,
+    };
   }
 
-  // 8. Execute Atomic Balance Reservation via Authoritative RPC
-  const { data: rpcResult, error: rpcError } = await supabaseAdmin.rpc('request_withdrawal', {
+  // 8. Execute atomic balance reservation, using a per-user idempotency lock
+  // whenever the caller supplies a key. Never replay an unrelated withdrawal
+  // just because its amount and destination happen to match.
+  const withdrawalParams = {
     p_user_id: user.id,
     p_network: networkCode,
     p_to_address: validDestination,
@@ -463,7 +452,22 @@ export async function executeCanonicalWithdrawal(input: WithdrawalRequestInput):
     p_fee: networkFee,
     p_asset: assetSymbol,
     p_usd_equivalent: usdEquivalent,
-  });
+  };
+
+  let rpcResult: any;
+  let rpcError: any;
+  if (idempotencyKey) {
+    const response = await supabaseAdmin.rpc('request_withdrawal_idempotent', {
+      ...withdrawalParams,
+      p_idempotency_key: idempotencyKey,
+    });
+    rpcResult = response.data;
+    rpcError = response.error;
+  } else {
+    const response = await supabaseAdmin.rpc('request_withdrawal', withdrawalParams);
+    rpcResult = response.data;
+    rpcError = response.error;
+  }
 
   if (rpcError) {
     return {
