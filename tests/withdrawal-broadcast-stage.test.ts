@@ -76,6 +76,9 @@ assert.ok(cronDispatchRoute.includes("import { processWithdrawalQueue } from '@/
 assert.ok(cronDispatchRoute.includes('await processWithdrawalQueue()'), 'cron dispatch must invoke the canonical queue worker');
 assert.ok(!cronDispatchRoute.includes('processPendingWithdrawals'), 'cron dispatch must not call a missing legacy worker export');
 assert.ok(withdrawalService.includes("rpc('request_withdrawal_idempotent'"), 'withdrawal retries must use the atomic idempotency RPC when a key is supplied');
+assert.ok(withdrawalService.includes('const validRpcContract = validWithdrawalId'), 'withdrawal service must validate the reservation RPC response contract before reporting success');
+assert.ok(withdrawalService.includes("status: 'RESERVATION_UNCONFIRMED'"), 'invalid reservation responses must fail closed and request reconciliation rather than reporting success');
+assert.ok(withdrawalService.includes('Do not submit a new withdrawal request'), 'ambiguous reservation responses must warn callers against unsafe duplicate retries');
 assert.ok(withdrawalService.includes('p_idempotency_key: idempotencyKey'), 'withdrawal service must forward the caller idempotency key');
 assert.ok(withdrawalService.includes('if (rpcResult?.replayed !== true)'), 'idempotent replays must not create duplicate withdrawal notifications');
 assert.ok(withdrawalService.includes('const { error: notificationError } = await supabaseAdmin.from(\'notifications\').insert'), 'withdrawal notification insert errors returned by Supabase must be logged');
