@@ -36,6 +36,8 @@ on:
       - 'src/lib/services/withdrawalService.ts'
       - 'supabase/migrations/20261024000002_withdrawal_request_idempotency.sql'
       - 'supabase/migrations/20261024000003_withdrawal_daily_limit_usd_atomic.sql'
+      - 'supabase/migrations/20261024000004_admin_rpc_authorization_hardening.sql'
+      - 'tests/admin-rpc-authorization-migration.test.ts'
       - 'tests/withdrawal-daily-limit-migration.test.ts'
       - 'src/app/api/internal/withdrawals/process/route.ts'
       - 'src/app/api/workers/withdraw/route.ts'
