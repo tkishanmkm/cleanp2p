@@ -10,6 +10,7 @@ const sql = readFileSync(migrationPath, 'utf8');
 
 assert.ok(sql.startsWith('-- Patch the deployed request_withdrawal definition'), 'migration explains that it patches the deployed function');
 assert.ok(sql.includes('BEGIN;') && sql.trim().endsWith('COMMIT;'), 'migration is transaction-wrapped');
+assert.ok(sql.includes('ALTER TABLE public.onchain_withdrawals') && sql.includes('ADD COLUMN IF NOT EXISTS metadata JSONB NOT NULL DEFAULT'), 'migration restores the metadata column required by the deployed reservation RPC and daily-limit calculation');
 assert.ok(sql.includes('pg_get_functiondef('), 'migration starts from the actual deployed function definition');
 assert.ok(sql.includes("to_regprocedure('public.request_withdrawal(uuid,text,text,numeric,numeric,text,numeric)' )") || sql.includes("to_regprocedure('public.request_withdrawal(uuid,text,text,numeric,numeric,text,numeric)')"), 'migration targets the exact existing RPC signature');
 assert.ok(sql.includes('refusing to create a replacement from a stale definition'), 'missing deployed RPC fails safely');
