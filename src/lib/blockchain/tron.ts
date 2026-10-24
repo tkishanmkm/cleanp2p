@@ -1,4 +1,5 @@
 import { TronWeb } from 'tronweb';
+import { classifyTronReceiptResult } from './tronReceiptStatus';
 
 export interface TronConfig {
   fullHost: string;
@@ -66,9 +67,25 @@ export function isValidTronAddress(address: string): boolean {
  * Converts human readable token amount to base atomic units with specified decimals
  */
 export function parseUnitsTron(amount: string | number, decimals: number = 6): bigint {
-  const [whole, fraction = ''] = amount.toString().trim().split('.');
-  const paddedFraction = fraction.padEnd(decimals, '0').slice(0, decimals);
-  const combined = `${whole || '0'}${paddedFraction}`.replace(/^0+(?=\d)/, '');
+  if (!Number.isSafeInteger(decimals) || decimals < 0 || decimals > 30) {
+    throw new Error('Invalid token decimal precision');
+  }
+
+  const normalized = String(amount).trim();
+  // Reject signs, exponents, separators, and non-decimal input rather than
+  // silently truncating or coercing a withdrawal amount.
+  const match = /^(\d+)(?:\.(\d+))?$/.exec(normalized);
+  if (!match) {
+    throw new Error('Invalid token amount');
+  }
+
+  const whole = match[1];
+  const fraction = match[2] ?? '';
+  if (fraction.length > decimals) {
+    throw new Error(`Token amount supports at most ${decimals} decimal places`);
+  }
+
+  const combined = `${whole}${fraction.padEnd(decimals, '0')}`.replace(/^0+(?=\d)/, '');
   return BigInt(combined || '0');
 }
 
@@ -91,10 +108,18 @@ export async function sendTrc20Transfer(params: {
     throw new Error('TRON hot wallet private key is not configured');
   }
 
-  const rawAmount = parseUnitsTron(amount, TRON_CONFIG.usdtDecimals).toString();
+  if (typeof contractAddress !== 'string' || !tronWeb.isAddress(contractAddress.trim())) {
+    throw new Error('Invalid TRON token contract address');
+  }
+
+  const rawAmountValue = parseUnitsTron(amount, TRON_CONFIG.usdtDecimals);
+  if (rawAmountValue <= 0n) {
+    throw new Error('TRON token transfer amount must be greater than zero');
+  }
+  const rawAmount = rawAmountValue.toString();
 
   // Load contract and call transfer method
-  const contract = await tronWeb.contract().at(contractAddress);
+  const contract = await tronWeb.contract().at(contractAddress.trim());
   const txHash = await contract.methods.transfer(toAddress, rawAmount).send();
 
   if (!txHash || typeof txHash !== 'string') {
@@ -147,7 +172,7 @@ export async function getTronTransactionConfirmations(txHash: string): Promise<{
 
     // Get transaction info
     const txInfo = await tronWeb.trx.getTransactionInfo(txHash);
-    if (!txInfo || !txInfo.blockNumber) {
+    if (!txInfo || !Number.isSafeInteger(txInfo.blockNumber) || txInfo.blockNumber < 0) {
       return { confirmations: 0, isConfirmed: false, success: false };
     }
 
@@ -161,16 +186,27 @@ export async function getTronTransactionConfirmations(txHash: string): Promise<{
     const fractionSun = (feeSun % 1000000n).toString().padStart(6, '0');
     const actualCostTrx = `${wholeTrx}.${fractionSun}`;
 
-    if (!currentHeight) {
-      return { confirmations: 1, isConfirmed: false, success: !txInfo.receipt?.result, actualCostTrx };
+    const outcome = classifyTronReceiptResult(txInfo.receipt?.result);
+    const success = outcome === 'success';
+    const hasTerminalResult = outcome !== 'pending';
+
+    if (!Number.isSafeInteger(currentHeight) || currentHeight < txInfo.blockNumber) {
+      return {
+        confirmations: 0,
+        isConfirmed: false,
+        success,
+        blockNumber: txInfo.blockNumber,
+        actualCostTrx,
+      };
     }
 
     const confirmations = Math.max(0, currentHeight - txInfo.blockNumber + 1);
-    const success = !txInfo.receipt?.result || txInfo.receipt.result === 'SUCCESS';
 
     return {
       confirmations,
-      isConfirmed: confirmations >= TRON_CONFIG.requiredConfirmations && success,
+      // Unknown receipt results remain pending; only explicit terminal receipts
+      // with sufficient block depth may trigger settlement or a verified failure.
+      isConfirmed: confirmations >= TRON_CONFIG.requiredConfirmations && hasTerminalResult,
       success,
       blockNumber: txInfo.blockNumber,
       actualCostTrx,

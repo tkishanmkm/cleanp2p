@@ -12,6 +12,7 @@ import {
 } from '@/lib/blockchain/providers';
 import {
   sendTrc20Transfer,
+  parseUnitsTron,
   getTronTransactionConfirmations,
   TRON_CONFIG,
   isValidTronAddress,
@@ -20,6 +21,77 @@ import {
 
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
 export { supabaseAdmin };
+
+/**
+ * Require a configurable confirmation depth for UTXO-chain withdrawals.
+ * If the explorer cannot provide a valid tip/block height, settlement must wait.
+ */
+async function hasRequiredUtxoConfirmations(
+  apiBase: string,
+  txData: any,
+  configuredDepth: string | undefined
+): Promise<boolean> {
+  const parsedDepth = configuredDepth ? Number(configuredDepth) : 6;
+  if (!Number.isSafeInteger(parsedDepth) || parsedDepth < 1) {
+    console.error('[Withdrawal Worker] Invalid UTXO confirmation-depth configuration.');
+    return false;
+  }
+
+  const blockHeight = Number(txData?.status?.block_height);
+  if (txData?.status?.confirmed !== true || !Number.isSafeInteger(blockHeight) || blockHeight < 0) {
+    return false;
+  }
+
+  const tipResponse = await fetch(`${apiBase}/blocks/tip/height`);
+  if (!tipResponse.ok) return false;
+
+  const tipText = (await tipResponse.text()).trim();
+  if (!/^\d+$/.test(tipText)) return false;
+
+  const tipHeight = Number(tipText);
+  if (!Number.isSafeInteger(tipHeight) || tipHeight < blockHeight) return false;
+
+  return tipHeight - blockHeight + 1 >= parsedDepth;
+}
+
+/**
+ * Persist a broadcast transaction without settling the withdrawal. Settlement and
+ * liability release happen only after the confirmation worker verifies on-chain success.
+ */
+async function markWithdrawalBroadcasted(withdrawalId: string, txHash: string): Promise<void> {
+  const now = new Date().toISOString();
+  const { data: queued, error: queueError } = await supabaseAdmin
+    .from('onchain_withdrawals')
+    .update({ status: 'BROADCASTED', tx_hash: txHash, updated_at: now })
+    .eq('id', withdrawalId)
+    .select('id')
+    .maybeSingle();
+
+  if (queueError || !queued) {
+    throw new Error('Unable to persist broadcast transaction to withdrawal queue');
+  }
+
+  const { data: withdrawalRow, error: withdrawalError } = await supabaseAdmin
+    .from('withdrawals')
+    .update({
+      status: 'broadcasted',
+      tx_hash: txHash,
+      txid: txHash,
+      broadcasted_at: now,
+      updated_at: now,
+    })
+    .eq('id', withdrawalId)
+    .select('id')
+    .maybeSingle();
+
+  // Supabase UPDATE can return zero rows without an error (for example, when
+  // RLS or a mismatched identifier prevents a row from being updated). Treat
+  // that as a persistence failure; the caller must retain the reserved funds
+  // and reconcile the already-broadcast transaction.
+  if (withdrawalError || !withdrawalRow) {
+    throw new Error('Unable to persist broadcast state to withdrawal record');
+  }
+}
 
 export interface WithdrawalProcessResult {
   processed: boolean;
@@ -42,7 +114,8 @@ export async function checkCircuitBreakers(): Promise<{ allowed: boolean; reason
       .maybeSingle();
 
     if (error || !settings) {
-      return { allowed: true };
+      console.error('[Withdrawal Worker] Circuit-breaker settings unavailable; blocking withdrawal dispatch.', error);
+      return { allowed: false, reason: 'Withdrawal safety settings unavailable' };
     }
     if (settings.global_kill_switch_active) {
       return { allowed: false, reason: 'Global emergency kill switch is currently active' };
@@ -52,7 +125,8 @@ export async function checkCircuitBreakers(): Promise<{ allowed: boolean; reason
     }
     return { allowed: true };
   } catch (err) {
-    return { allowed: true };
+    console.error('[Withdrawal Worker] Circuit-breaker check failed; blocking withdrawal dispatch.', err);
+    return { allowed: false, reason: 'Withdrawal safety check failed' };
   }
 }
 
@@ -72,13 +146,18 @@ export async function allocateEvmNonce(
       p_wallet_address: walletAddress,
       p_onchain_pending_nonce: onchainPending,
     });
-    if (!error && allocatedNonce !== null && allocatedNonce !== undefined) {
-      return Number(allocatedNonce);
+    if (error || allocatedNonce === null || allocatedNonce === undefined) {
+      throw new Error('Atomic hot-wallet nonce allocation failed; refusing unsafe fallback');
     }
+    const nonce = Number(allocatedNonce);
+    if (!Number.isSafeInteger(nonce) || nonce < 0) {
+      throw new Error('Atomic hot-wallet nonce allocation returned an invalid nonce');
+    }
+    return nonce;
   } catch (rpcErr) {
-    console.warn('[Nonce Manager] RPC allocate_hot_wallet_nonce failed, falling back to on-chain count:', rpcErr);
+    console.error('[Nonce Manager] Atomic nonce allocation failed; blocking withdrawal dispatch.', rpcErr);
+    throw new Error('Safe withdrawal nonce allocation unavailable');
   }
-  return await provider.getTransactionCount(walletAddress, 'pending');
 }
 
 /**
@@ -106,6 +185,8 @@ export async function processWithdrawalQueue(): Promise<WithdrawalProcessResult>
   const amountStr = withdrawal.amount.toString();
   const destination = withdrawal.to_address.trim();
   let isLocalCheckStage = true;
+  // Retain the hash if broadcast succeeded but database persistence fails.
+  let submittedTxHash: string | null = null;
 
   try {
     // BRANCH A: TRON Network (TRC-20 USDT)
@@ -118,6 +199,16 @@ export async function processWithdrawalQueue(): Promise<WithdrawalProcessResult>
         throw new Error('TRON hot wallet private key is not configured');
       }
 
+      // Complete deterministic amount/contract validation before classifying
+      // any later transfer error as an ambiguous broadcast.
+      const rawAmount = parseUnitsTron(amountStr, TRON_CONFIG.usdtDecimals);
+      if (rawAmount <= 0n) {
+        throw new Error('TRON token transfer amount must be greater than zero');
+      }
+      if (!tronWeb.isAddress(TRON_CONFIG.usdtContract.trim())) {
+        throw new Error('Invalid configured TRON token contract address');
+      }
+
       isLocalCheckStage = false;
 
       const res = await sendTrc20Transfer({
@@ -125,38 +216,59 @@ export async function processWithdrawalQueue(): Promise<WithdrawalProcessResult>
         amount: amountStr,
       });
       const txHash = res.txHash;
+      submittedTxHash = txHash;
 
-      await supabaseAdmin.rpc('complete_onchain_withdrawal', {
-        p_withdrawal_id: withdrawal.id,
-        p_tx_hash: txHash,
-      });
+      await markWithdrawalBroadcasted(withdrawal.id, txHash);
 
       console.log(`[Withdrawal Worker] Dispatched TRON payout ${withdrawal.id} (tx: ${txHash})`);
       return {
         processed: true,
         withdrawalId: withdrawal.id,
         txHash,
-        status: 'COMPLETED',
+        status: 'BROADCASTED',
       };
     }
 
     // BRANCH B: EVM Networks (ERC20, BEP20)
+    const normNet = normalizeNetworkCode(network);
+    const chainConfig = SUPPORTED_EVM_CHAINS[normNet];
+    if (!chainConfig) {
+      throw new Error(`Unsupported EVM withdrawal network: ${network}`);
+    }
+    if (!ethers.isAddress(destination)) {
+      throw new Error('Invalid EVM destination address');
+    }
+
     const { provider, signer, address } = getEvmHotWalletSigner(network);
     if (!signer || !address) {
       throw new Error(`EVM Hot Wallet signer not available for network ${network}. Check EVM_HOT_WALLET_PRIVATE_KEY.`);
+    }
+
+    // Complete deterministic validation before reserving a nonce.
+    const isNativeTransfer = assetSymbol === chainConfig.nativeSymbol;
+    let parsedAmount: bigint;
+    let tokenContract: ethers.Contract | null = null;
+
+    if (isNativeTransfer) {
+      parsedAmount = ethers.parseUnits(amountStr, chainConfig.nativeDecimals);
+    } else {
+      const decimals = getTokenDecimals(network, assetSymbol);
+      const contractAddress = getTokenContractAddress(network, assetSymbol);
+      if (!contractAddress || !ethers.isAddress(contractAddress)) {
+        throw new Error(`No valid token contract address configured for ${assetSymbol} on ${network}`);
+      }
+      parsedAmount = ethers.parseUnits(amountStr, decimals);
+      tokenContract = new ethers.Contract(contractAddress, ERC20_ABI, signer);
+    }
+    if (parsedAmount <= 0n) {
+      throw new Error('Withdrawal amount must be greater than zero');
     }
 
     const nonce = await allocateEvmNonce(network, address, provider);
     const feeOverrides = await getEip1559FeeOverrides(provider, 1.25);
     let tx: ethers.TransactionResponse;
 
-    const normNet = normalizeNetworkCode(network);
-    const chainConfig = SUPPORTED_EVM_CHAINS[normNet];
-    const isNativeTransfer = chainConfig && assetSymbol === chainConfig.nativeSymbol;
-
     if (isNativeTransfer) {
-      // Native transfer (ETH)
-      const parsedAmount = ethers.parseUnits(amountStr, chainConfig.nativeDecimals);
       isLocalCheckStage = false;
       tx = await signer.sendTransaction({
         to: destination,
@@ -165,25 +277,15 @@ export async function processWithdrawalQueue(): Promise<WithdrawalProcessResult>
         ...feeOverrides,
       });
     } else {
-      // ERC-20 Token Transfer (USDT ERC20 / BEP20)
-      const decimals = getTokenDecimals(network, assetSymbol);
-      const contractAddress = getTokenContractAddress(network, assetSymbol);
-      if (!contractAddress) {
-        throw new Error(`No token contract address configured for ${assetSymbol} on ${network}`);
-      }
-      const tokenContract = new ethers.Contract(contractAddress, ERC20_ABI, signer);
-      const parsedAmount = ethers.parseUnits(amountStr, decimals);
       isLocalCheckStage = false;
-      tx = await tokenContract.transfer(destination, parsedAmount, {
+      tx = await tokenContract!.transfer(destination, parsedAmount, {
         nonce,
         ...feeOverrides,
       });
     }
 
-    await supabaseAdmin.rpc('complete_onchain_withdrawal', {
-      p_withdrawal_id: withdrawal.id,
-      p_tx_hash: tx.hash,
-    });
+    submittedTxHash = tx.hash;
+    await markWithdrawalBroadcasted(withdrawal.id, tx.hash);
 
     console.log(`[Withdrawal Worker] Broadcasted EVM payout ${withdrawal.id} on ${network} (tx: ${tx.hash}, nonce: ${nonce})`);
     return {
@@ -191,7 +293,7 @@ export async function processWithdrawalQueue(): Promise<WithdrawalProcessResult>
       withdrawalId: withdrawal.id,
       txHash: tx.hash,
       nonce,
-      status: 'COMPLETED',
+      status: 'BROADCASTED',
     };
 
   } catch (err: any) {
@@ -200,11 +302,20 @@ export async function processWithdrawalQueue(): Promise<WithdrawalProcessResult>
     if (isLocalCheckStage) {
       console.warn(`[Withdrawal Worker] Pre-broadcast validation failure: refunding withdrawal ${withdrawal.id}`);
       try {
-        await supabaseAdmin.rpc('process_failed_withdrawal', {
+        const { data: refundResult, error: refundError } = await supabaseAdmin.rpc('process_failed_withdrawal', {
           p_withdrawal_id: withdrawal.id,
           p_error_reason: err.message || 'Transaction pre-broadcast validation failure',
           p_is_verified_unbroadcast: true,
         });
+        if (refundError || refundResult?.success !== true) {
+          console.error(`[Withdrawal Worker] Refund was not confirmed for ${withdrawal.id}:`, refundError || refundResult);
+          return {
+            processed: true,
+            withdrawalId: withdrawal.id,
+            status: 'FAILED',
+            error: 'Pre-broadcast failure; refund was not confirmed. Manual reconciliation required.',
+          };
+        }
         return {
           processed: true,
           withdrawalId: withdrawal.id,
@@ -223,23 +334,38 @@ export async function processWithdrawalQueue(): Promise<WithdrawalProcessResult>
     } else {
       console.warn(`[Withdrawal Worker] Ambiguous broadcast result for withdrawal ${withdrawal.id}. Transitioning to AMBIGUOUS_BROADCAST and preserving funds reservation.`);
       try {
-        await supabaseAdmin
+        const now = new Date().toISOString();
+        const { data: onchainUpdated, error: onchainStatusError } = await supabaseAdmin
           .from('onchain_withdrawals')
           .update({
             status: 'AMBIGUOUS_BROADCAST',
+            ...(submittedTxHash ? { tx_hash: submittedTxHash } : {}),
             error_message: `Ambiguous broadcast error: ${err.message}`,
-            updated_at: new Date().toISOString(),
+            updated_at: now,
           })
-          .eq('id', withdrawal.id);
+          .eq('id', withdrawal.id)
+          .select('id')
+          .maybeSingle();
 
-        await supabaseAdmin
+        if (onchainStatusError || !onchainUpdated) {
+          throw new Error('Could not persist ambiguous status to on-chain withdrawal record');
+        }
+
+        const { data: withdrawalUpdated, error: withdrawalStatusError } = await supabaseAdmin
           .from('withdrawals')
           .update({
             status: 'AMBIGUOUS_BROADCAST',
+            ...(submittedTxHash ? { tx_hash: submittedTxHash, txid: submittedTxHash } : {}),
             broadcast_error: `Ambiguous broadcast error: ${err.message}`,
-            updated_at: new Date().toISOString(),
+            updated_at: now,
           })
-          .eq('id', withdrawal.id);
+          .eq('id', withdrawal.id)
+          .select('id')
+          .maybeSingle();
+
+        if (withdrawalStatusError || !withdrawalUpdated) {
+          throw new Error('Could not persist ambiguous status to withdrawal record');
+        }
       } catch (statusErr) {
         console.error(`[Withdrawal Worker] Failed setting AMBIGUOUS_BROADCAST status for ${withdrawal.id}:`, statusErr);
       }
@@ -270,6 +396,9 @@ export async function checkSubmittedWithdrawals(): Promise<{
       .select('*')
       .in('status', ['BROADCASTED', 'PROCESSING', 'AMBIGUOUS_BROADCAST'])
       .not('tx_hash', 'is', null)
+      // Process least-recently-updated rows first so a fixed batch limit cannot
+      // permanently starve older pending withdrawals.
+      .order('updated_at', { ascending: true, nullsFirst: true })
       .limit(30);
 
     if (error || !pendingTxs || pendingTxs.length === 0) {
@@ -279,6 +408,23 @@ export async function checkSubmittedWithdrawals(): Promise<{
     checked = pendingTxs.length;
 
     for (const w of pendingTxs) {
+      // Rotate this row out of the oldest-first batch before checking it, so
+      // unconfirmed or temporarily unavailable transactions do not starve
+      // every later row when the batch limit is reached.
+      const { data: checkClaim, error: checkClaimError } = await supabaseAdmin
+        .from('onchain_withdrawals')
+        .update({ updated_at: new Date().toISOString() })
+        .eq('id', w.id)
+        .in('status', ['BROADCASTED', 'PROCESSING', 'AMBIGUOUS_BROADCAST'])
+        .not('tx_hash', 'is', null)
+        .select('id')
+        .maybeSingle();
+
+      if (checkClaimError || !checkClaim) {
+        console.warn(`[Withdrawal Worker] Could not rotate reconciliation row ${w.id}; skipping this pass.`, checkClaimError);
+        continue;
+      }
+
       const normNet = normalizeNetworkCode(w.network);
 
       if (normNet === 'TRC20') {
@@ -286,19 +432,26 @@ export async function checkSubmittedWithdrawals(): Promise<{
         
         if (isConfirmed && success) {
           const actualTrxStr = actualCostTrx && actualCostTrx.trim().length > 0 ? actualCostTrx.trim() : '0';
-          const { error: confErr } = await supabaseAdmin.rpc('complete_onchain_withdrawal', {
+          const { data: completionResult, error: confErr } = await supabaseAdmin.rpc('complete_onchain_withdrawal', {
             p_withdrawal_id: w.id,
             p_tx_hash: w.tx_hash,
             p_actual_gas_amount: actualTrxStr,
             p_gas_asset: 'TRX',
           });
-          if (!confErr) confirmed++;
-        } else if (!success) {
-          await supabaseAdmin.rpc('process_failed_withdrawal', {
+          if (confErr || completionResult?.success !== true) {
+            console.error(`[Withdrawal Worker] TRON completion was not confirmed for ${w.id}:`, confErr || completionResult);
+          } else {
+            confirmed++;
+          }
+        } else if (isConfirmed && success === false) {
+          const { data: failureResult, error: failureError } = await supabaseAdmin.rpc('process_failed_withdrawal', {
             p_withdrawal_id: w.id,
             p_error_reason: `TRON transaction reverted on-chain`,
             p_is_verified_unbroadcast: true,
           });
+          if (failureError || failureResult?.success !== true) {
+            console.error(`[Withdrawal Worker] Could not confirm verified TRON failure for ${w.id}:`, failureError || failureResult);
+          }
         }
       } else if (SUPPORTED_EVM_CHAINS[normNet]) {
         const chain = SUPPORTED_EVM_CHAINS[normNet];
@@ -306,21 +459,28 @@ export async function checkSubmittedWithdrawals(): Promise<{
         const { confirmations, status, actualGasCost } = await getTransactionConfirmations(provider, w.tx_hash);
         const gasAsset = normNet === 'BEP20' ? 'BNB' : 'ETH';
 
-        if (confirmations >= chain.requiredConfirmations && status !== 0) {
+        if (confirmations >= chain.requiredConfirmations && status === 1) {
           const actualGasStr = actualGasCost && actualGasCost.trim().length > 0 ? actualGasCost.trim() : '0';
-          const { error: confErr } = await supabaseAdmin.rpc('complete_onchain_withdrawal', {
+          const { data: completionResult, error: confErr } = await supabaseAdmin.rpc('complete_onchain_withdrawal', {
             p_withdrawal_id: w.id,
             p_tx_hash: w.tx_hash,
             p_actual_gas_amount: actualGasStr,
             p_gas_asset: gasAsset,
           });
-          if (!confErr) confirmed++;
-        } else if (status === 0) {
-          await supabaseAdmin.rpc('process_failed_withdrawal', {
+          if (confErr || completionResult?.success !== true) {
+            console.error(`[Withdrawal Worker] EVM completion was not confirmed for ${w.id}:`, confErr || completionResult);
+          } else {
+            confirmed++;
+          }
+        } else if (confirmations >= chain.requiredConfirmations && status === 0) {
+          const { data: failureResult, error: failureError } = await supabaseAdmin.rpc('process_failed_withdrawal', {
             p_withdrawal_id: w.id,
             p_error_reason: `EVM transaction reverted on-chain on network ${w.network}`,
             p_is_verified_unbroadcast: true,
           });
+          if (failureError || failureResult?.success !== true) {
+            console.error(`[Withdrawal Worker] Could not confirm verified EVM failure for ${w.id}:`, failureError || failureResult);
+          }
         }
       } else if (normNet === 'BTC') {
         try {
@@ -328,7 +488,11 @@ export async function checkSubmittedWithdrawals(): Promise<{
           const res = await fetch(`${btcApiBase}/tx/${w.tx_hash}`);
           if (res.ok) {
             const txData = await res.json();
-            if (txData && txData.status && txData.status.confirmed) {
+            if (await hasRequiredUtxoConfirmations(
+              btcApiBase,
+              txData,
+              process.env.BTC_REQUIRED_CONFIRMATIONS
+            )) {
               let actualFeeBtc = '0';
               if (typeof txData.fee === 'number' && txData.fee >= 0) {
                 const feeSat = BigInt(txData.fee);
@@ -346,13 +510,17 @@ export async function checkSubmittedWithdrawals(): Promise<{
                 }
               }
 
-              const { error: confErr } = await supabaseAdmin.rpc('complete_onchain_withdrawal', {
+              const { data: completionResult, error: confErr } = await supabaseAdmin.rpc('complete_onchain_withdrawal', {
                 p_withdrawal_id: w.id,
                 p_tx_hash: w.tx_hash,
                 p_actual_gas_amount: actualFeeBtc,
                 p_gas_asset: 'BTC',
               });
-              if (!confErr) confirmed++;
+              if (confErr || completionResult?.success !== true) {
+                console.error(`[Withdrawal Worker] BTC completion was not confirmed for ${w.id}:`, confErr || completionResult);
+              } else {
+                confirmed++;
+              }
             }
           }
         } catch (btcErr) {
@@ -364,7 +532,11 @@ export async function checkSubmittedWithdrawals(): Promise<{
           const res = await fetch(`${ltcApiBase}/tx/${w.tx_hash}`);
           if (res.ok) {
             const txData = await res.json();
-            if (txData && txData.status && txData.status.confirmed) {
+            if (await hasRequiredUtxoConfirmations(
+              ltcApiBase,
+              txData,
+              process.env.LTC_REQUIRED_CONFIRMATIONS
+            )) {
               let actualFeeLtc = '0';
               if (typeof txData.fee === 'number' && txData.fee >= 0) {
                 const feeLit = BigInt(txData.fee);
@@ -382,13 +554,17 @@ export async function checkSubmittedWithdrawals(): Promise<{
                 }
               }
 
-              const { error: confErr } = await supabaseAdmin.rpc('complete_onchain_withdrawal', {
+              const { data: completionResult, error: confErr } = await supabaseAdmin.rpc('complete_onchain_withdrawal', {
                 p_withdrawal_id: w.id,
                 p_tx_hash: w.tx_hash,
                 p_actual_gas_amount: actualFeeLtc,
                 p_gas_asset: 'LTC',
               });
-              if (!confErr) confirmed++;
+              if (confErr || completionResult?.success !== true) {
+                console.error(`[Withdrawal Worker] LTC completion was not confirmed for ${w.id}:`, confErr || completionResult);
+              } else {
+                confirmed++;
+              }
             }
           }
         } catch (ltcErr) {
@@ -423,8 +599,21 @@ export async function processAllPendingWithdrawals(maxBatch: number = 20): Promi
       return { totalProcessed: 0, results: [], locked: true };
     }
   } catch (lockRpcErr) {
-    // If RPC is unavailable, proceed defensively
-    hasLock = false;
+    console.error('[Withdrawal Worker Singleton] Lock RPC failed; refusing to dispatch withdrawals.', lockRpcErr);
+    return {
+      totalProcessed: 0,
+      results: [],
+      locked: true,
+    };
+  }
+
+  if (!hasLock) {
+    console.error('[Withdrawal Worker Singleton] Lock was not acquired; refusing to dispatch withdrawals.');
+    return {
+      totalProcessed: 0,
+      results: [],
+      locked: true,
+    };
   }
 
   const results: WithdrawalProcessResult[] = [];

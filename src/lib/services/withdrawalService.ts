@@ -10,6 +10,7 @@ import {
 } from '@/lib/fees';
 import { isValidTronAddress } from '@/lib/blockchain/tron';
 import { isTier2User } from '@/lib/kyc';
+import { parseWithdrawalAmount } from '@/lib/withdrawalAmount';
 
 export const SUPPORTED_ASSETS = ['USDT', 'BTC', 'ETH', 'LTC'] as const;
 export const SUPPORTED_NETWORKS: Record<string, string[]> = {
@@ -123,13 +124,26 @@ export async function executeCanonicalWithdrawal(input: WithdrawalRequestInput):
   const supabaseAdmin = getSupabaseAdminClient();
 
   // 1. Check Global Emergency Pause
-  const { data: settings } = await supabaseAdmin
+  const { data: settings, error: settingsError } = await supabaseAdmin
     .from('platform_settings')
     .select('global_kill_switch_active, withdrawals_enabled, max_single_withdrawal_usd, withdrawal_approval_threshold_usd, daily_withdrawal_limit_usd')
     .eq('id', 1)
     .maybeSingle();
 
-  if (settings && (settings.global_kill_switch_active || !settings.withdrawals_enabled)) {
+  // Missing or unreadable platform controls must never silently fall back to
+  // default limits and allow a financial operation.
+  if (settingsError || !settings) {
+    console.error('[WithdrawalService] Unable to verify platform withdrawal controls:', settingsError);
+    return {
+      success: false,
+      status: 'PLATFORM_CONTROLS_UNAVAILABLE',
+      error: 'Withdrawal controls could not be verified. Please try again later.',
+      message: 'Withdrawals are temporarily unavailable while system controls are verified.',
+      statusCode: 503,
+    };
+  }
+
+  if (settings.global_kill_switch_active || !settings.withdrawals_enabled) {
     return {
       success: false,
       status: 'REJECTED',
@@ -171,11 +185,22 @@ export async function executeCanonicalWithdrawal(input: WithdrawalRequestInput):
   }
 
   // 3. User Profile Verification & Security Checks
-  const { data: userProfile } = await supabaseAdmin
+  const { data: userProfile, error: profileError } = await supabaseAdmin
     .from('profiles')
     .select('id, is_verified, kyc_status, id_verified, is_2fa_enabled, is_mfa_enabled, two_factor_enabled, totp_secret, two_factor_secret, is_banned, is_on_hold, is_withdrawal_locked, account_status')
     .eq('id', user.id)
     .maybeSingle();
+
+  if (profileError || !userProfile) {
+    console.error('[WithdrawalService] Unable to verify withdrawal profile:', profileError);
+    return {
+      success: false,
+      status: 'PROFILE_VERIFICATION_UNAVAILABLE',
+      error: 'Your account security status could not be verified. Please try again later.',
+      message: 'Withdrawals are temporarily unavailable while account security is verified.',
+      statusCode: 503,
+    };
+  }
 
   if (
     userProfile?.is_banned ||
@@ -269,8 +294,8 @@ export async function executeCanonicalWithdrawal(input: WithdrawalRequestInput):
     };
   }
 
-  const parsedAmount = typeof rawAmount === 'number' ? rawAmount : parseFloat(String(rawAmount));
-  if (isNaN(parsedAmount) || parsedAmount <= 0) {
+  const parsedAmount = parseWithdrawalAmount(rawAmount);
+  if (!Number.isFinite(parsedAmount) || parsedAmount <= 0) {
     return {
       success: false,
       status: 'INVALID_AMOUNT',
@@ -302,6 +327,20 @@ export async function executeCanonicalWithdrawal(input: WithdrawalRequestInput):
       error: `Unsupported network ${networkCode} for ${assetSymbol}. Supported: ${allowedNetworks.join(', ')}`,
       message: 'Unsupported network',
       statusCode: 400,
+    };
+  }
+
+  // The canonical queue worker currently broadcasts TRON and EVM transactions,
+  // but has no Bitcoin/Litecoin UTXO transaction-construction/broadcast path.
+  // Reject these networks before fees or balance reservation so funds cannot
+  // be reserved for a withdrawal that this worker cannot dispatch.
+  if (networkCode === 'BTC' || networkCode === 'LTC') {
+    return {
+      success: false,
+      status: 'NETWORK_PROCESSOR_UNAVAILABLE',
+      error: `Withdrawals on ${networkCode} are temporarily unavailable until the UTXO dispatch and confirmation path is enabled.`,
+      message: `Withdrawals on ${networkCode} are temporarily unavailable. No funds have been reserved.`,
+      statusCode: 503,
     };
   }
 
@@ -379,12 +418,23 @@ export async function executeCanonicalWithdrawal(input: WithdrawalRequestInput):
   // RULE B: ROLLING 24-HOUR DAILY WITHDRAWAL LIMIT
   // =========================================================================
   const oneDayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
-  const { data: past24hWithdrawals } = await supabaseAdmin
+  const { data: past24hWithdrawals, error: dailyHistoryError } = await supabaseAdmin
     .from('withdrawals')
     .select('amount, asset_symbol, created_at')
     .eq('user_id', user.id)
     .gte('created_at', oneDayAgo)
-    .in('status', ['completed', 'processing', 'QUEUED', 'PENDING_APPROVAL', 'APPROVED', 'approved', 'pending']);
+    .in('status', ['completed', 'COMPLETED', 'processing', 'PROCESSING', 'broadcasted', 'BROADCASTED', 'ambiguous_broadcast', 'AMBIGUOUS_BROADCAST', 'queued', 'QUEUED', 'pending_approval', 'PENDING_APPROVAL', 'approved', 'APPROVED', 'pending', 'PENDING']);
+
+  if (dailyHistoryError || !past24hWithdrawals) {
+    console.error('[WithdrawalService] Unable to verify rolling 24-hour withdrawal history:', dailyHistoryError);
+    return {
+      success: false,
+      status: 'DAILY_LIMIT_CHECK_UNAVAILABLE',
+      error: 'The daily withdrawal limit could not be verified. Please try again later.',
+      message: 'Withdrawals are temporarily unavailable while the daily limit is verified.',
+      statusCode: 503,
+    };
+  }
 
   let rolling24hUsd = 0;
   if (past24hWithdrawals && past24hWithdrawals.length > 0) {
@@ -428,34 +478,23 @@ export async function executeCanonicalWithdrawal(input: WithdrawalRequestInput):
     };
   }
 
-  // 7. Idempotency Check
-  if (input.idempotencyKey) {
-    const { data: existing } = await supabaseAdmin
-      .from('withdrawals')
-      .select('*')
-      .eq('user_id', user.id)
-      .eq('destination_address', validDestination)
-      .eq('amount', parsedAmount)
-      .order('created_at', { ascending: false })
-      .limit(1)
-      .maybeSingle();
-
-    if (existing && (existing.status === 'completed' || existing.status === 'processing' || existing.status === 'QUEUED' || existing.status === 'PENDING_APPROVAL')) {
-      return {
-        success: true,
-        status: existing.status,
-        withdrawalId: existing.id,
-        amountRequested: parsedAmount,
-        networkFee: Number(existing.network_fee || networkFee),
-        totalDebited: parsedAmount + Number(existing.network_fee || networkFee),
-        message: 'Withdrawal already submitted (idempotent replay).',
-        statusCode: 200,
-      };
-    }
+  // 7. Validate the optional idempotency key. Actual replay protection is
+  // enforced atomically by the database, not by guessing from amount/address.
+  const idempotencyKey = input.idempotencyKey?.trim();
+  if (idempotencyKey && (idempotencyKey.length < 8 || idempotencyKey.length > 200)) {
+    return {
+      success: false,
+      status: 'INVALID_IDEMPOTENCY_KEY',
+      error: 'Idempotency key must contain between 8 and 200 characters.',
+      message: 'Invalid idempotency key.',
+      statusCode: 400,
+    };
   }
 
-  // 8. Execute Atomic Balance Reservation via Authoritative RPC
-  const { data: rpcResult, error: rpcError } = await supabaseAdmin.rpc('request_withdrawal', {
+  // 8. Execute atomic balance reservation, using a per-user idempotency lock
+  // whenever the caller supplies a key. Never replay an unrelated withdrawal
+  // just because its amount and destination happen to match.
+  const withdrawalParams = {
     p_user_id: user.id,
     p_network: networkCode,
     p_to_address: validDestination,
@@ -463,9 +502,40 @@ export async function executeCanonicalWithdrawal(input: WithdrawalRequestInput):
     p_fee: networkFee,
     p_asset: assetSymbol,
     p_usd_equivalent: usdEquivalent,
-  });
+  };
+
+  let rpcResult: any;
+  let rpcError: any;
+  if (idempotencyKey) {
+    const response = await supabaseAdmin.rpc('request_withdrawal_idempotent', {
+      ...withdrawalParams,
+      p_idempotency_key: idempotencyKey,
+    });
+    rpcResult = response.data;
+    rpcError = response.error;
+  } else {
+    const response = await supabaseAdmin.rpc('request_withdrawal', withdrawalParams);
+    rpcResult = response.data;
+    rpcError = response.error;
+  }
 
   if (rpcError) {
+    // The idempotency RPC is installed by a database migration. If the API
+    // schema cache cannot resolve it, do not fall back to a non-idempotent
+    // reservation: that could make client retries unsafe during a partial rollout.
+    if (idempotencyKey && rpcError.code === 'PGRST202') {
+      console.error('[WithdrawalService] Idempotent withdrawal RPC is unavailable; deployment migration is required.', {
+        code: rpcError.code,
+      });
+      return {
+        success: false,
+        status: 'IDEMPOTENCY_UNAVAILABLE',
+        error: 'Secure withdrawal retry protection is temporarily unavailable. Please try again later.',
+        message: 'Withdrawals are temporarily unavailable while retry protection is verified.',
+        statusCode: 503,
+      };
+    }
+
     return {
       success: false,
       status: 'RESERVATION_FAILED',
@@ -475,21 +545,54 @@ export async function executeCanonicalWithdrawal(input: WithdrawalRequestInput):
     };
   }
 
-  const withdrawalId = rpcResult?.withdrawal_id || rpcResult;
-  const returnedStatus = rpcResult?.status || 'QUEUED';
+  // Treat the database response as an untrusted boundary. A successful RPC
+  // transport is not proof that a withdrawal was reserved: require a valid
+  // UUID and explicit status before reporting success to the caller.
+  const withdrawalId = rpcResult && typeof rpcResult === 'object' && !Array.isArray(rpcResult)
+    ? rpcResult.withdrawal_id
+    : undefined;
+  const returnedStatus = typeof rpcResult?.status === 'string' ? rpcResult.status.trim() : '';
+  const validWithdrawalId = typeof withdrawalId === 'string'
+    && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(withdrawalId);
+  const validRpcContract = validWithdrawalId
+    && returnedStatus.length > 0
+    && (rpcResult?.success === undefined || rpcResult.success === true);
 
-  // Activity Notification
-  try {
-    await supabaseAdmin.from('notifications').insert({
-      user_id: user.id,
-      title: 'Withdrawal Pending',
-      message: `Withdrawal of ${parsedAmount} ${assetSymbol} has been received and is pending processing.`,
-      type: 'withdrawal',
-      is_read: false,
-      metadata: { link: '/wallets' },
-      created_at: new Date().toISOString(),
+  if (!validRpcContract) {
+    console.error('[WithdrawalService] Withdrawal RPC returned an invalid reservation response; manual reconciliation is required.', {
+      hasWithdrawalId: typeof withdrawalId === 'string',
+      hasStatus: returnedStatus.length > 0,
+      successFlag: rpcResult?.success,
     });
-  } catch {}
+    return {
+      success: false,
+      status: 'RESERVATION_UNCONFIRMED',
+      error: 'The reservation result could not be verified. Do not submit a new withdrawal request; contact support for reconciliation.',
+      message: 'Withdrawal reservation could not be verified. Please contact support before retrying.',
+      statusCode: 503,
+    };
+  }
+
+  // Only notify for a newly reserved withdrawal. Idempotent replays must
+  // not create duplicate notifications for the same withdrawal.
+  if (rpcResult?.replayed !== true) {
+    try {
+      const { error: notificationError } = await supabaseAdmin.from('notifications').insert({
+        user_id: user.id,
+        title: 'Withdrawal Pending',
+        message: `Withdrawal of ${parsedAmount} ${assetSymbol} has been received and is pending processing.`,
+        type: 'withdrawal',
+        is_read: false,
+        metadata: { link: '/wallets' },
+        created_at: new Date().toISOString(),
+      });
+      if (notificationError) {
+        console.error('[WithdrawalService] Failed to create withdrawal notification:', notificationError);
+      }
+    } catch (notificationError) {
+      console.error('[WithdrawalService] Failed to create withdrawal notification:', notificationError);
+    }
+  }
 
   return {
     success: true,
@@ -500,8 +603,8 @@ export async function executeCanonicalWithdrawal(input: WithdrawalRequestInput):
     destinationAddress: validDestination,
     amountRequested: parsedAmount,
     networkFee: networkFee,
-    totalDebited: parsedAmount + networkFee,
-    message: 'Withdrawal Pending',
+    totalDebited: Number(rpcResult?.total_debited ?? (parsedAmount + networkFee)),
+    message: String(rpcResult?.message || (rpcResult?.replayed ? 'Withdrawal already submitted (idempotent replay).' : 'Withdrawal Pending')),
     statusCode: 200,
   };
 }
