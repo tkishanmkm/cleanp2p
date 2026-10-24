@@ -486,7 +486,7 @@ export async function executeCanonicalWithdrawal(input: WithdrawalRequestInput):
   // not create duplicate notifications for the same withdrawal.
   if (rpcResult?.replayed !== true) {
     try {
-      await supabaseAdmin.from('notifications').insert({
+      const { error: notificationError } = await supabaseAdmin.from('notifications').insert({
         user_id: user.id,
         title: 'Withdrawal Pending',
         message: `Withdrawal of ${parsedAmount} ${assetSymbol} has been received and is pending processing.`,
@@ -495,6 +495,9 @@ export async function executeCanonicalWithdrawal(input: WithdrawalRequestInput):
         metadata: { link: '/wallets' },
         created_at: new Date().toISOString(),
       });
+      if (notificationError) {
+        console.error('[WithdrawalService] Failed to create withdrawal notification:', notificationError);
+      }
     } catch (notificationError) {
       console.error('[WithdrawalService] Failed to create withdrawal notification:', notificationError);
     }
