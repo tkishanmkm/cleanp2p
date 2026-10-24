@@ -524,14 +524,19 @@ async function scanTronDeposits(
               }
             } catch (_) {}
 
-            const decimals = item.token_info?.decimals !== undefined ? Number(item.token_info.decimals) : 6;
-            const rawVal = BigInt(item.value || '0');
-            if (rawVal <= 0n) continue;
-            const formattedAmount = ethers.formatUnits(rawVal, decimals);
-            const amount = parseFloat(formattedAmount);
-            if (amount <= 0) continue;
-
+            // This scanner credits USDT on TRC-20 only. Use the known USDT
+            // decimal scale (6), never provider-supplied token metadata.
             const tokenContract = item.token_info?.address || contractAddress;
+            if (!knownContracts.includes(tokenContract)) continue;
+
+            let rawVal: bigint;
+            try {
+              rawVal = BigInt(item.value || '0');
+            } catch {
+              continue;
+            }
+            if (rawVal <= 0n) continue;
+            const amount = ethers.formatUnits(rawVal, 6);
 
             // Fetch block number from TRON RPC if missing from account event
             let eventBlock = item.block_number || 0;
@@ -617,9 +622,15 @@ async function scanTronDeposits(
             seenTxIndices.add(deduplicationKey);
 
             detected++;
-            const rawValBig = BigInt(rawValue);
-            const formattedAmount = ethers.formatUnits(rawValBig, 6);
-            const amount = parseFloat(formattedAmount);
+            let rawValBig: bigint;
+            try {
+              rawValBig = BigInt(rawValue);
+            } catch {
+              continue;
+            }
+            if (rawValBig <= 0n) continue;
+            // TRON USDT uses 6 decimals; preserve the exact decimal string for SQL.
+            const amount = ethers.formatUnits(rawValBig, 6);
             const eventBlock = evt.block_number || 0;
             const confirmations = (latestBlock && eventBlock && latestBlock >= eventBlock)
               ? latestBlock - eventBlock + 1
@@ -1198,12 +1209,3 @@ export function startDepositIngestionWorker(intervalMs: number = 30000): void {
   runDepositIngestion().catch((e) => console.error('[Deposit Ingestion] Cycle failed:', e));
   ingestionInterval = setInterval(() => {
     runDepositIngestion().catch((e) => console.error('[Deposit Ingestion] Cycle failed:', e));
-  }, intervalMs);
-}
-
-export function stopDepositIngestionWorker(): void {
-  if (ingestionInterval) {
-    clearInterval(ingestionInterval);
-    ingestionInterval = null;
-  }
-}
