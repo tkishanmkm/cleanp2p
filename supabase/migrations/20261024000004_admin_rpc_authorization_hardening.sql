@@ -123,6 +123,46 @@ BEGIN
             RAISE EXCEPTION 'Could not safely remove user-editable admin metadata clause from %.', v_signature;
         END IF;
 
+        -- A caller-supplied UUID is not authentication. If auth.uid() is NULL,
+        -- permit the fallback only for a trusted service-role request.
+        IF v_signature = to_regprocedure('public.mark_p2p_trade_paid(uuid,uuid,text)') THEN
+            v_patched := regexp_replace(
+                v_patched,
+                E'ELSE\\s+IF\\s+p_caller_id\\s+IS\\s+NULL\\s+THEN\\s+RAISE\\s+EXCEPTION\\s+''Authentication required\\.'';\\s+END IF;\\s+v_effective_caller\\s*:=\\s*p_caller_id;\\s+END IF;',
+                $replacement$ELSE
+        IF auth.role() IS DISTINCT FROM 'service_role'
+           AND current_setting('role', true) IS DISTINCT FROM 'service_role' THEN
+            RAISE EXCEPTION 'Authentication required.';
+        END IF;
+        IF p_caller_id IS NULL THEN
+            RAISE EXCEPTION 'Trusted service caller ID is required.';
+        END IF;
+        v_effective_caller := p_caller_id;
+    END IF;$replacement$,
+                'g'
+            );
+        ELSE
+            v_patched := regexp_replace(
+                v_patched,
+                E'ELSE\\s+IF\\s+p_user_id\\s+IS\\s+NULL\\s+THEN\\s+RAISE\\s+EXCEPTION\\s+''Authentication required\\.'';\\s+END IF;\\s+v_caller_id\\s*:=\\s*p_user_id;\\s+END IF;',
+                $replacement$ELSE
+        IF auth.role() IS DISTINCT FROM 'service_role'
+           AND current_setting('role', true) IS DISTINCT FROM 'service_role' THEN
+            RAISE EXCEPTION 'Authentication required.';
+        END IF;
+        IF p_user_id IS NULL THEN
+            RAISE EXCEPTION 'Trusted service caller ID is required.';
+        END IF;
+        v_caller_id := p_user_id;
+    END IF;$replacement$,
+                'g'
+            );
+        END IF;
+
+        IF position('Trusted service caller ID is required.' IN v_patched) = 0 THEN
+            RAISE EXCEPTION 'Could not safely harden null-session identity fallback in %.', v_signature;
+        END IF;
+
         EXECUTE v_patched;
     END LOOP;
 END;
