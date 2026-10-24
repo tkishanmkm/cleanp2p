@@ -9,6 +9,7 @@ CREATE TABLE IF NOT EXISTS public.withdrawal_idempotency_requests (
     destination_address TEXT NOT NULL,
     amount NUMERIC(36, 18) NOT NULL,
     network_fee NUMERIC(36, 18) NOT NULL,
+    usd_equivalent NUMERIC(18, 2),
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     PRIMARY KEY (user_id, idempotency_key),
     UNIQUE (withdrawal_id),
@@ -70,7 +71,8 @@ BEGIN
            OR v_existing.network_code IS DISTINCT FROM v_network
            OR v_existing.destination_address IS DISTINCT FROM v_address
            OR v_existing.amount IS DISTINCT FROM p_amount
-           OR v_existing.network_fee IS DISTINCT FROM p_fee THEN
+           OR v_existing.network_fee IS DISTINCT FROM p_fee
+           OR v_existing.usd_equivalent IS DISTINCT FROM p_usd_equivalent THEN
             RAISE EXCEPTION 'Idempotency key was already used for a different withdrawal request';
         END IF;
 
@@ -118,10 +120,10 @@ BEGIN
 
     INSERT INTO public.withdrawal_idempotency_requests (
         user_id, idempotency_key, withdrawal_id, asset_symbol,
-        network_code, destination_address, amount, network_fee
+        network_code, destination_address, amount, network_fee, usd_equivalent
     ) VALUES (
         p_user_id, v_key, v_withdrawal_id, v_asset,
-        v_network, v_address, p_amount, p_fee
+        v_network, v_address, p_amount, p_fee, p_usd_equivalent
     );
 
     RETURN jsonb_build_object(
