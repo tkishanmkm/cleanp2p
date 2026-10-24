@@ -148,7 +148,7 @@ export async function getTronTransactionConfirmations(txHash: string): Promise<{
 
     // Get transaction info
     const txInfo = await tronWeb.trx.getTransactionInfo(txHash);
-    if (!txInfo || !txInfo.blockNumber) {
+    if (!txInfo || !Number.isSafeInteger(txInfo.blockNumber) || txInfo.blockNumber < 0) {
       return { confirmations: 0, isConfirmed: false, success: false };
     }
 
@@ -162,19 +162,26 @@ export async function getTronTransactionConfirmations(txHash: string): Promise<{
     const fractionSun = (feeSun % 1000000n).toString().padStart(6, '0');
     const actualCostTrx = `${wholeTrx}.${fractionSun}`;
 
-    if (!currentHeight) {
-      return { confirmations: 1, isConfirmed: false, success: !txInfo.receipt?.result, actualCostTrx };
-    }
-
-    const conf    const outcome = classifyTronReceiptResult(txInfo.receipt?.result);
+    const outcome = classifyTronReceiptResult(txInfo.receipt?.result);
     const success = outcome === 'success';
     const hasTerminalResult = outcome !== 'pending';
 
-lResult = success || terminalFailureResults.has(receiptResult);
+    if (!Number.isSafeInteger(currentHeight) || currentHeight < txInfo.blockNumber) {
+      return {
+        confirmations: 0,
+        isConfirmed: false,
+        success,
+        blockNumber: txInfo.blockNumber,
+        actualCostTrx,
+      };
+    }
+
+    const confirmations = Math.max(0, currentHeight - txInfo.blockNumber + 1);
 
     return {
       confirmations,
-      // Unknown receipt results must never be interpreted as a failed transfer.
+      // Unknown receipt results remain pending; only explicit terminal receipts
+      // with sufficient block depth may trigger settlement or a verified failure.
       isConfirmed: confirmations >= TRON_CONFIG.requiredConfirmations && hasTerminalResult,
       success,
       blockNumber: txInfo.blockNumber,
