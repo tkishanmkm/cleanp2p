@@ -5,6 +5,7 @@ on:
     branches: ['security/withdrawal-broadcast-await-confirmations']
     paths:
       - 'src/jobs/withdrawalWorker.ts'
+      - 'src/jobs/scheduler.ts'
       - 'src/lib/withdrawal-processor.ts'
       - 'src/app/api/internal/withdrawals/process/route.ts'
       - 'src/app/api/workers/withdraw/route.ts'
@@ -22,6 +23,7 @@ on:
     branches: [main]
     paths:
       - 'src/jobs/withdrawalWorker.ts'
+      - 'src/jobs/scheduler.ts'
       - 'src/lib/withdrawal-processor.ts'
       - 'src/app/api/internal/withdrawals/process/route.ts'
       - 'src/app/api/workers/withdraw/route.ts'
