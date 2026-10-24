@@ -38,11 +38,8 @@ yarn-error.log*
 next-env.d.ts
 
 .genkit/*
-.env
-.env.local
-.env.*.local
-,env*
-,env-1.local
+# Environment files: keep all local/deployment secrets out of Git.
+.env*
 !.env.example
 
 # firebase
