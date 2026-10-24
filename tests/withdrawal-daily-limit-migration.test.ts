@@ -30,4 +30,4 @@ assert.ok(sql.includes('EXECUTE v_definition;'), 'only the verified patched depl
 assert.ok(sql.includes('REVOKE EXECUTE ON FUNCTION public.request_withdrawal(UUID, TEXT, TEXT, NUMERIC, NUMERIC, TEXT, NUMERIC) FROM PUBLIC, anon, authenticated;'), 'untrusted roles are revoked');
 assert.ok(sql.includes('GRANT EXECUTE ON FUNCTION public.request_withdrawal(UUID, TEXT, TEXT, NUMERIC, NUMERIC, TEXT, NUMERIC) TO service_role, postgres;'), 'trusted roles retain execute access');
 
-console.log('Withdrawal daily-limit migration source checks passed (20 assertions).');
+console.log('Withdrawal daily-limit migration source checks passed (21 assertions).');
