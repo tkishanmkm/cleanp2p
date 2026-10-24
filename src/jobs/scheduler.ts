@@ -27,7 +27,7 @@ cron.schedule('* * * * *', async () => {
   }
 });
 
-// 2. Broadcast approved on-chain withdrawals with 2X Priority Gas every // 3. Auto-sweep confirmed user balances to Hot Wallet every 5 minutes
+// 2. Auto-sweep confirmed user balances to Hot Wallet every 5 minutes
 cron.schedule('*/5 * * * *', async () => {
   try {
     const sweepRes = await runDepositSweeper();
