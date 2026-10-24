@@ -21,6 +21,10 @@ assert.ok(tronAmountValidation < tronAmbiguousStage, 'TRON amount validation mus
 assert.ok(tronContractValidation < tronAmbiguousStage, 'TRON contract validation must precede ambiguous stage');
 assert.ok(tronAmbiguousStage < tronSend, 'ambiguous stage must be set before invoking transfer helper');
 
+assert.ok(tron.includes('await markWithdrawalBroadcasted(withdrawal.id, txHash)'), 'TRON tx hash must be persisted before dispatch returns');
+assert.ok(tron.includes("status: 'BROADCASTED'"), 'TRON dispatch must return BROADCASTED, not completed');
+assert.ok(!tron.includes("rpc('complete_onchain_withdrawal'"), 'TRON dispatch must not settle before confirmation monitoring');
+
 const evm = source.slice(evmStart);
 const evmNonce = evm.indexOf('const nonce = await allocateEvmNonce');
 const evmFirstSend = evm.indexOf('isLocalCheckStage = false');
@@ -28,4 +32,11 @@ assert.ok(evmNonce >= 0 && evmFirstSend > evmNonce, 'EVM nonce allocation must p
 assert.ok(evm.includes('Withdrawal amount must be greater than zero'), 'EVM zero-amount guard must remain present');
 assert.ok(evm.includes('No valid token contract address configured'), 'EVM token contract validation must remain present');
 
-console.log('Withdrawal broadcast-stage source regression checks passed (10 assertions).');
+const evmDispatchEnd = evm.indexOf('  } catch (err: any) {');
+assert.ok(evmDispatchEnd > 0, 'EVM dispatch catch boundary must exist');
+const evmDispatch = evm.slice(0, evmDispatchEnd);
+assert.ok(evmDispatch.includes('await markWithdrawalBroadcasted(withdrawal.id, tx.hash)'), 'EVM tx hash must be persisted before dispatch returns');
+assert.ok(evmDispatch.includes("status: 'BROADCASTED'"), 'EVM dispatch must return BROADCASTED, not completed');
+assert.ok(!evmDispatch.includes("rpc('complete_onchain_withdrawal'"), 'EVM dispatch must not settle before confirmation monitoring');
+
+console.log('Withdrawal broadcast-stage source regression checks passed (18 assertions).');
