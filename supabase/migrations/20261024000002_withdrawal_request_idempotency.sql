@@ -85,6 +85,8 @@ BEGIN
         RETURN jsonb_build_object(
             'withdrawal_id', v_existing.withdrawal_id,
             'status', v_status,
+            'total_debited', v_existing.amount + v_existing.network_fee,
+            'message', 'Withdrawal already submitted (idempotent replay).',
             'replayed', TRUE
         );
     END IF;
@@ -125,6 +127,8 @@ BEGIN
     RETURN jsonb_build_object(
         'withdrawal_id', v_withdrawal_id,
         'status', v_status,
+        'total_debited', p_amount + COALESCE(p_fee, 0),
+        'message', COALESCE(v_request_result ->> 'message', 'Withdrawal Pending'),
         'replayed', FALSE
     );
 END;
