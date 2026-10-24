@@ -11,6 +11,7 @@ const legacyRoute = readFileSync(resolve(process.cwd(), 'src/app/api/internal/wi
 const directWithdrawalRoute = readFileSync(resolve(process.cwd(), 'src/app/api/workers/withdraw/route.ts'), 'utf8');
 const legacyEvmDispatchRoute = readFileSync(resolve(process.cwd(), 'src/app/api/withdrawals/dispatch/route.ts'), 'utf8');
 const deprecatedScheduler = readFileSync(resolve(process.cwd(), 'src/jobs/scheduler.ts'), 'utf8');
+const cronDispatchRoute = readFileSync(resolve(process.cwd(), 'src/app/api/cron/withdrawals/dispatch/route.ts'), 'utf8');
 const tronStart = source.indexOf("// BRANCH A: TRON Network (TRC-20 USDT)");
 const evmStart = source.indexOf("// BRANCH B: EVM Networks (ERC20, BEP20)", tronStart);
 assert.ok(tronStart >= 0 && evmStart > tronStart, 'TRON and EVM dispatch branches must exist');
@@ -69,5 +70,8 @@ assert.ok(legacyEvmDispatchRoute.includes('status: 410'), 'legacy EVM dispatch m
 assert.ok(legacyEvmDispatchRoute.includes('LEGACY_EVM_DISPATCH_DISABLED'), 'legacy EVM dispatch must explain why it is disabled');
 assert.ok(!deprecatedScheduler.includes("from '../lib/withdrawal-processor'"), 'deprecated scheduler must not import legacy withdrawal processor');
 assert.ok(!deprecatedScheduler.includes('processPendingWithdrawals'), 'deprecated scheduler must not schedule legacy withdrawal dispatch');
+assert.ok(cronDispatchRoute.includes("import { processWithdrawalQueue } from '@/jobs/withdrawalWorker'"), 'cron dispatch must import the canonical exported queue worker');
+assert.ok(cronDispatchRoute.includes('await processWithdrawalQueue()'), 'cron dispatch must invoke the canonical queue worker');
+assert.ok(!cronDispatchRoute.includes('processPendingWithdrawals'), 'cron dispatch must not call a missing legacy worker export');
 
 console.log('Withdrawal broadcast-stage source regression checks passed.');
