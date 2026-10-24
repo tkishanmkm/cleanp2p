@@ -10,6 +10,7 @@ const legacyProcessor = readFileSync(resolve(process.cwd(), 'src/lib/withdrawal-
 const legacyRoute = readFileSync(resolve(process.cwd(), 'src/app/api/internal/withdrawals/process/route.ts'), 'utf8');
 const directWithdrawalRoute = readFileSync(resolve(process.cwd(), 'src/app/api/workers/withdraw/route.ts'), 'utf8');
 const legacyEvmDispatchRoute = readFileSync(resolve(process.cwd(), 'src/app/api/withdrawals/dispatch/route.ts'), 'utf8');
+const deprecatedScheduler = readFileSync(resolve(process.cwd(), 'src/jobs/scheduler.ts'), 'utf8');
 const tronStart = source.indexOf("// BRANCH A: TRON Network (TRC-20 USDT)");
 const evmStart = source.indexOf("// BRANCH B: EVM Networks (ERC20, BEP20)", tronStart);
 assert.ok(tronStart >= 0 && evmStart > tronStart, 'TRON and EVM dispatch branches must exist');
@@ -66,5 +67,7 @@ assert.ok(directWithdrawalRoute.includes('status: 410'), 'direct hot-wallet rout
 assert.ok(directWithdrawalRoute.includes('LEGACY_DIRECT_WITHDRAWAL_DISABLED'), 'direct hot-wallet route must explain why dispatch is disabled');
 assert.ok(legacyEvmDispatchRoute.includes('status: 410'), 'legacy EVM dispatch must not settle before confirmations');
 assert.ok(legacyEvmDispatchRoute.includes('LEGACY_EVM_DISPATCH_DISABLED'), 'legacy EVM dispatch must explain why it is disabled');
+assert.ok(!deprecatedScheduler.includes("from '../lib/withdrawal-processor'"), 'deprecated scheduler must not import legacy withdrawal processor');
+assert.ok(!deprecatedScheduler.includes('processPendingWithdrawals'), 'deprecated scheduler must not schedule legacy withdrawal dispatch');
 
 console.log('Withdrawal broadcast-stage source regression checks passed.');
