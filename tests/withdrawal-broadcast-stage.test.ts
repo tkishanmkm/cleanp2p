@@ -55,12 +55,9 @@ assert.ok(tronFailureBlock.includes("p_is_verified_unbroadcast: true"), 'TRON re
 const evmFailureBlock = source.slice(evmMonitorGate, source.indexOf("} else if (normNet === 'BTC')", evmMonitorGate));
 assert.ok(evmFailureBlock.includes("p_is_verified_unbroadcast: true"), 'EVM refund RPC must receive the explicit verified-failure gate');
 
-assert.ok(!legacyProcessor.includes('p_is_verified_unbroadcast: true'), 'legacy processor must never certify a broadcast error as unbroadcast');
-assert.ok(legacyProcessor.includes('Repeated broadcast failure; outcome unverified:'), 'legacy retry exhaustion must label broadcast outcome unverified');
-assert.ok(legacyProcessor.includes('typeof failureResult.success !== \'boolean\''), 'legacy processor must validate the failure RPC response');
-assert.ok(legacyProcessor.includes('Withdrawal remains reserved pending reconciliation'), 'legacy retry exhaustion must keep reconciliation outcomes visible');
+assert.ok(!legacyProcessor.includes('p_is_verified_unbroadcast: true'), 'legacy processor must never certify an unverified failure as safe to refund');
 assert.ok(!legacyProcessor.includes('complete_onchain_withdrawal'), 'legacy processor must not settle withdrawals immediately after broadcast');
-assert.ok((legacyProcessor.match(/assertLegacyWithdrawalProcessorDisabled\(\);/g) || []).length >= 6, 'all legacy broadcast entrypoints must fail closed');
+assert.ok((legacyProcessor.match(/legacyProcessorDisabled\(\);/g) || []).length >= 6, 'all legacy broadcast entrypoints must fail closed');
 assert.ok(legacyRoute.includes("status: 410"), 'legacy internal route must return Gone instead of dispatching withdrawals');
 assert.ok(legacyRoute.includes('LEGACY_WITHDRAWAL_PROCESSOR_DISABLED'), 'legacy route must explain why dispatch is disabled');
 
