@@ -9,6 +9,8 @@ on:
       - 'src/lib/withdrawal-processor.ts'
       - 'src/lib/services/withdrawalService.ts'
       - 'supabase/migrations/20261024000002_withdrawal_request_idempotency.sql'
+      - 'supabase/migrations/20261024000003_withdrawal_daily_limit_usd_atomic.sql'
+      - 'tests/withdrawal-daily-limit-migration.test.ts'
       - 'src/app/api/internal/withdrawals/process/route.ts'
       - 'src/app/api/workers/withdraw/route.ts'
       - 'src/app/api/withdrawals/dispatch/route.ts'
@@ -30,6 +32,8 @@ on:
       - 'src/lib/withdrawal-processor.ts'
       - 'src/lib/services/withdrawalService.ts'
       - 'supabase/migrations/20261024000002_withdrawal_request_idempotency.sql'
+      - 'supabase/migrations/20261024000003_withdrawal_daily_limit_usd_atomic.sql'
+      - 'tests/withdrawal-daily-limit-migration.test.ts'
       - 'src/app/api/internal/withdrawals/process/route.ts'
       - 'src/app/api/workers/withdraw/route.ts'
       - 'src/app/api/withdrawals/dispatch/route.ts'
@@ -95,3 +99,5 @@ jobs:
         run: npm run test:withdrawal-stage
       - name: Test withdrawal refund migration guards
         run: npm run test:withdrawal-refund-migration
+      - name: Test atomic daily-limit migration guards
+        run: npm run test:withdrawal-daily-limit-migration
