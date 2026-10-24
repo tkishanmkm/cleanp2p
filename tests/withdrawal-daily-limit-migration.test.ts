@@ -26,6 +26,15 @@ assert.ok(sql.includes("''broadcasted''") && sql.includes("''ambiguous_broadcast
 assert.ok(sql.includes('DAILY_LIMIT_UNVERIFIABLE'), 'unverifiable daily totals block new withdrawals');
 assert.ok(sql.includes("COALESCE(UPPER(w.asset_symbol), '''')"), 'missing asset symbols cannot evade USD valuation validation');
 assert.ok(sql.includes("::NUMERIC <= 0") && sql.includes("::NUMERIC >= 1000000000000"), 'non-positive and implausibly large USD values fail closed');
+assert.ok(sql.includes("!~ ''^[0-9]+(\\\\.[0-9]+)?
+assert.ok(sql.includes('IF position(v_old_daily_check IN v_definition) = 0 THEN'), 'unexpected deployed logic aborts before function replacement');
+assert.ok(sql.includes('EXECUTE v_definition;'), 'only the verified patched deployed function is installed');
+assert.ok(sql.includes('REVOKE EXECUTE ON FUNCTION public.request_withdrawal(UUID, TEXT, TEXT, NUMERIC, NUMERIC, TEXT, NUMERIC) FROM PUBLIC, anon, authenticated;'), 'untrusted roles are revoked');
+assert.ok(sql.includes('GRANT EXECUTE ON FUNCTION public.request_withdrawal(UUID, TEXT, TEXT, NUMERIC, NUMERIC, TEXT, NUMERIC) TO service_role, postgres;'), 'trusted roles retain execute access');
+
+console.log('Withdrawal daily-limit migration source checks passed (25 assertions).');
+'"), 'malformed USD metadata is rejected before numeric casts');
+assert.ok(sql.includes('missing or have invalid USD-equivalent values'), 'unverifiable historical values produce a reconciliation-required failure');
 assert.ok(sql.includes('IF position(v_old_daily_check IN v_definition) = 0 THEN'), 'unexpected deployed logic aborts before function replacement');
 assert.ok(sql.includes('EXECUTE v_definition;'), 'only the verified patched deployed function is installed');
 assert.ok(sql.includes('REVOKE EXECUTE ON FUNCTION public.request_withdrawal(UUID, TEXT, TEXT, NUMERIC, NUMERIC, TEXT, NUMERIC) FROM PUBLIC, anon, authenticated;'), 'untrusted roles are revoked');
