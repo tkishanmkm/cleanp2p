@@ -62,49 +62,6 @@ export default async function UserProfilePage({ params }: PageProps) {
     console.warn('Error querying user ads:', err);
   }
 
-  // Fetch user's crypto balances for precise limit clamping
-  let userCryptoBalances: Record<string, number> = {
-    BTC: Number(profile.btc_balance || 0),
-    ETH: Number(profile.eth_balance || 0),
-    LTC: Number(profile.ltc_balance || 0),
-    USDT: Number(profile.usdt_balance || 0),
-    SOL: Number(profile.sol_balance || 0),
-  };
-
-  try {
-    const { data: userWallets } = await supabase
-      .from('user_wallets')
-      .select('*')
-      .eq('user_id', profile.id);
-
-    if (userWallets && userWallets.length > 0) {
-      userWallets.forEach((w: any) => {
-        const sym = (w.asset_symbol || w.symbol || w.crypto || '').toUpperCase();
-        const bal = Number(w.available_balance ?? w.available ?? w.balance ?? 0);
-        if (sym && bal > 0) {
-          userCryptoBalances[sym] = Math.max(userCryptoBalances[sym] || 0, bal);
-        }
-      });
-    }
-
-    const { data: walletAssets } = await supabase
-      .from('wallet_assets')
-      .select('*')
-      .eq('user_id', profile.id);
-
-    if (walletAssets && walletAssets.length > 0) {
-      walletAssets.forEach((a: any) => {
-        const sym = (a.asset_symbol || a.asset_code || a.symbol || a.crypto || '').toUpperCase();
-        const bal = Number(a.available ?? a.balance ?? a.amount ?? 0);
-        if (sym && bal > 0) {
-          userCryptoBalances[sym] = Math.max(userCryptoBalances[sym] || 0, bal);
-        }
-      });
-    }
-  } catch (err) {
-    console.warn('Error querying wallet balances:', err);
-  }
-
   // Filter ads from visitor perspective and attach available crypto:
   // 1. If advertiser created a 'SELL' ad, the visitor BUYs crypto from advertiser -> "Buy Ads" tab
   const buyAds = userAds
@@ -113,13 +70,10 @@ export default async function UserProfilePage({ params }: PageProps) {
       const isActive = ad.is_active !== false && ad.active !== false && String(ad.status || '').toUpperCase() !== 'INACTIVE';
       return (type === 'SELL' || type === 'ONLINE_SELL' || type === '') && isActive;
     })
-    .map((ad) => {
-      const sym = (ad.asset_symbol || ad.crypto || ad.asset || 'USDT').toUpperCase();
-      return {
-        ...ad,
-        available_crypto: userCryptoBalances[sym] ?? -1,
-      };
-    });
+    .map((ad) => ({
+      ...ad,
+      available_crypto: Number(ad.available_amount ?? ad.total_amount ?? 0),
+    }));
 
   // 2. If advertiser created a 'BUY' ad, the visitor SELLs crypto to advertiser -> "Sell Ads" tab
   const sellAds = userAds
@@ -134,9 +88,9 @@ export default async function UserProfilePage({ params }: PageProps) {
 
   // 3. Aggregate Real Trade Stats & Dynamic Averages from trades table
   let completedTradeCount = Number(profile.completed_trades || 0);
-  let totalVolumeUSD = Number(profile.total_trade_volume_usd || profile.trade_volume || profile.total_volume || 0);
-  let avgPayTimeSeconds = profile.avg_pay_time_seconds ?? null;
-  let avgReleaseTimeSeconds = profile.avg_release_time_seconds ?? null;
+  let totalVolumeUSD = Number(profile.trade_volume || 0);
+  let avgPayTimeSeconds: number | null = null;
+  let avgReleaseTimeSeconds: number | null = null;
 
   try {
     const { data: userTrades } = await supabase
@@ -308,23 +262,18 @@ export default async function UserProfilePage({ params }: PageProps) {
   const positiveRatio = totalFeedbackCount > 0 ? ((positiveFeedbacksCount / totalFeedbackCount) * 100).toFixed(0) : '100';
 
   // 6. Verification Statuses
-  const isEmailVerified = Boolean(
-    profile.is_email_verified ||
-    profile.email_verified ||
-    profile.email_confirmed_at ||
-    (profile.email && !profile.email.includes('placeholder'))
-  );
+  // Email addresses and email-confirmation metadata are not selected or exposed on public profiles.
+  const isEmailVerified = false;
 
   const verification = getIdentityVerificationState(profile);
-  const countryCode = (profile.country || profile.country_code || 'US').toUpperCase();
+  const countryCode = (profile.country || 'US').toUpperCase();
 
   return (
     <UserProfileClient
       profile={{
         ...profile,
-        last_seen: profile.last_seen || profile.last_seen_at || profile.last_active || profile.updated_at || null,
-        last_seen_at: profile.last_seen || profile.last_seen_at || profile.last_active || profile.updated_at || null,
-        last_active: profile.last_seen || profile.last_seen_at || profile.last_active || profile.updated_at || null,
+        last_seen: profile.last_seen_at || null,
+        last_seen_at: profile.last_seen_at || null,
         is_online: profile.is_online ?? false,
         username: profile.username || username,
         is_email_verified: isEmailVerified,
@@ -346,8 +295,8 @@ export default async function UserProfilePage({ params }: PageProps) {
         negativeFeedbacksCount,
         positiveRatio,
         totalFeedbackCount,
-        blockedBy: Number(profile.blocked_by_count || 0),
-        hasBlocked: Number(profile.blocking_count || 0),
+        blockedBy: 0,
+        hasBlocked: 0,
       }}
     />
   );

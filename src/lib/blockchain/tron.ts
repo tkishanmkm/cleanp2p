@@ -138,6 +138,7 @@ export async function sendTrxTransfer(params: {
 export async function getTronTransactionConfirmations(txHash: string): Promise<{
   confirmations: number;
   isConfirmed: boolean;
+  // false is emitted only for a confirmed on-chain failure; unknown states stay non-failing.
   success: boolean;
   blockNumber?: number;
   actualCostTrx?: string;
@@ -148,7 +149,8 @@ export async function getTronTransactionConfirmations(txHash: string): Promise<{
     // Get transaction info
     const txInfo = await tronWeb.trx.getTransactionInfo(txHash);
     if (!txInfo || !txInfo.blockNumber) {
-      return { confirmations: 0, isConfirmed: false, success: false };
+      // A missing transaction-info response is an unknown state, not proof of failure.
+      return { confirmations: 0, isConfirmed: false, success: true };
     }
 
     // Get current block
@@ -162,20 +164,22 @@ export async function getTronTransactionConfirmations(txHash: string): Promise<{
     const actualCostTrx = `${wholeTrx}.${fractionSun}`;
 
     if (!currentHeight) {
-      return { confirmations: 1, isConfirmed: false, success: !txInfo.receipt?.result, actualCostTrx };
+      return { confirmations: 0, isConfirmed: false, success: true, actualCostTrx };
     }
 
     const confirmations = Math.max(0, currentHeight - txInfo.blockNumber + 1);
-    const success = !txInfo.receipt?.result || txInfo.receipt.result === 'SUCCESS';
+    const receiptResult = txInfo.receipt?.result;
+    const hasExplicitFailure = Boolean(receiptResult) && receiptResult !== 'SUCCESS';
+    const success = !(hasExplicitFailure && confirmations >= TRON_CONFIG.requiredConfirmations);
 
     return {
       confirmations,
-      isConfirmed: confirmations >= TRON_CONFIG.requiredConfirmations && success,
+      isConfirmed: confirmations >= TRON_CONFIG.requiredConfirmations && receiptResult === 'SUCCESS',
       success,
       blockNumber: txInfo.blockNumber,
       actualCostTrx,
     };
   } catch (err) {
-    return { confirmations: 0, isConfirmed: false, success: false };
+    return { confirmations: 0, isConfirmed: false, success: true };
   }
 }

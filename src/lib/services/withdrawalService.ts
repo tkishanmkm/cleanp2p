@@ -10,8 +10,12 @@ import {
 } from '@/lib/fees';
 import { isValidTronAddress } from '@/lib/blockchain/tron';
 import { isTier2User } from '@/lib/kyc';
+import { parseWithdrawalAmount } from '@/lib/wallet/amount-validation';
 
-export const SUPPORTED_ASSETS = ['USDT', 'BTC', 'ETH', 'LTC'] as const;
+// The live canonical custodial withdrawal RPC currently supports USDT only.
+// Do not route other assets through the legacy request_withdrawal function,
+// whose target schema does not match the live withdrawals table.
+export const SUPPORTED_ASSETS = ['USDT'] as const;
 export const SUPPORTED_NETWORKS: Record<string, string[]> = {
   USDT: ['TRC20', 'ERC20', 'BEP20'],
   BTC: ['BTC'],
@@ -123,13 +127,23 @@ export async function executeCanonicalWithdrawal(input: WithdrawalRequestInput):
   const supabaseAdmin = getSupabaseAdminClient();
 
   // 1. Check Global Emergency Pause
-  const { data: settings } = await supabaseAdmin
+  const { data: settings, error: settingsError } = await supabaseAdmin
     .from('platform_settings')
     .select('global_kill_switch_active, withdrawals_enabled, max_single_withdrawal_usd, withdrawal_approval_threshold_usd, daily_withdrawal_limit_usd')
     .eq('id', 1)
     .maybeSingle();
 
-  if (settings && (settings.global_kill_switch_active || !settings.withdrawals_enabled)) {
+  if (settingsError || !settings) {
+    return {
+      success: false,
+      status: 'PLATFORM_SETTINGS_UNAVAILABLE',
+      error: 'Withdrawal controls could not be verified. Please try again later.',
+      message: 'Withdrawals are temporarily unavailable while platform controls are verified.',
+      statusCode: 503,
+    };
+  }
+
+  if (settings.global_kill_switch_active || !settings.withdrawals_enabled) {
     return {
       success: false,
       status: 'REJECTED',
@@ -269,13 +283,13 @@ export async function executeCanonicalWithdrawal(input: WithdrawalRequestInput):
     };
   }
 
-  const parsedAmount = typeof rawAmount === 'number' ? rawAmount : parseFloat(String(rawAmount));
-  if (isNaN(parsedAmount) || parsedAmount <= 0) {
+  const parsedAmount = parseWithdrawalAmount(rawAmount);
+  if (parsedAmount === null) {
     return {
       success: false,
       status: 'INVALID_AMOUNT',
-      error: 'Amount must be a positive number',
-      message: 'Amount must be a positive number',
+      error: 'Amount must be a positive decimal with at most 6 decimal places',
+      message: 'Invalid withdrawal amount',
       statusCode: 400,
     };
   }
@@ -379,21 +393,47 @@ export async function executeCanonicalWithdrawal(input: WithdrawalRequestInput):
   // RULE B: ROLLING 24-HOUR DAILY WITHDRAWAL LIMIT
   // =========================================================================
   const oneDayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
-  const { data: past24hWithdrawals } = await supabaseAdmin
-    .from('withdrawals')
-    .select('amount, asset_symbol, created_at')
-    .eq('user_id', user.id)
-    .gte('created_at', oneDayAgo)
-    .in('status', ['completed', 'processing', 'QUEUED', 'PENDING_APPROVAL', 'APPROVED', 'approved', 'pending']);
+  const [legacyWithdrawalsResult, onchainWithdrawalsResult] = await Promise.all([
+    supabaseAdmin
+      .from('withdrawals')
+      .select('id, amount, asset_symbol, created_at, status')
+      .eq('user_id', user.id)
+      .gte('created_at', oneDayAgo)
+      .in('status', ['completed', 'COMPLETED', 'processing', 'PROCESSING', 'QUEUED', 'PENDING_APPROVAL', 'APPROVED', 'approved', 'pending', 'PENDING']),
+    supabaseAdmin
+      .from('onchain_withdrawals')
+      .select('id, amount, asset_symbol, created_at, status')
+      .eq('user_id', user.id)
+      .gte('created_at', oneDayAgo)
+      .in('status', ['NEEDS_APPROVAL', 'needs_approval', 'PENDING_APPROVAL', 'pending_approval', 'PENDING', 'pending', 'QUEUED', 'BROADCASTED', 'PROCESSING', 'AMBIGUOUS_BROADCAST', 'COMPLETED', 'CONFIRMED']),
+  ]);
+
+  if (legacyWithdrawalsResult.error || onchainWithdrawalsResult.error) {
+    return {
+      success: false,
+      status: 'WITHDRAWAL_HISTORY_UNAVAILABLE',
+      error: 'Withdrawal history could not be verified. Please try again later.',
+      message: 'Withdrawals are temporarily unavailable while limits are verified.',
+      statusCode: 503,
+    };
+  }
+
+  // The legacy and on-chain tables may contain the same withdrawal ID. Count each
+  // operation once, preferring the canonical on-chain row when IDs overlap.
+  const withdrawalsById = new Map<string, { amount: number | string; asset_symbol: string | null }>();
+  for (const w of legacyWithdrawalsResult.data || []) {
+    withdrawalsById.set(String(w.id), { amount: w.amount, asset_symbol: w.asset_symbol });
+  }
+  for (const w of onchainWithdrawalsResult.data || []) {
+    withdrawalsById.set(String(w.id), { amount: w.amount, asset_symbol: w.asset_symbol });
+  }
 
   let rolling24hUsd = 0;
-  if (past24hWithdrawals && past24hWithdrawals.length > 0) {
-    for (const w of past24hWithdrawals) {
-      const wAsset = w.asset_symbol || 'USDT';
-      const wAmount = Number(w.amount || 0);
-      const wUsd = await calculateWithdrawalUsdEquivalent(wAsset, wAmount);
-      rolling24hUsd += wUsd;
-    }
+  for (const w of withdrawalsById.values()) {
+    const wAsset = w.asset_symbol || 'USDT';
+    const wAmount = Number(w.amount || 0);
+    const wUsd = await calculateWithdrawalUsdEquivalent(wAsset, wAmount);
+    rolling24hUsd += wUsd;
   }
 
   if (rolling24hUsd + usdEquivalent > dailyLimitUsd) {
@@ -428,55 +468,50 @@ export async function executeCanonicalWithdrawal(input: WithdrawalRequestInput):
     };
   }
 
-  // 7. Idempotency Check
-  if (input.idempotencyKey) {
-    const { data: existing } = await supabaseAdmin
-      .from('withdrawals')
-      .select('*')
-      .eq('user_id', user.id)
-      .eq('destination_address', validDestination)
-      .eq('amount', parsedAmount)
-      .order('created_at', { ascending: false })
-      .limit(1)
-      .maybeSingle();
-
-    if (existing && (existing.status === 'completed' || existing.status === 'processing' || existing.status === 'QUEUED' || existing.status === 'PENDING_APPROVAL')) {
-      return {
-        success: true,
-        status: existing.status,
-        withdrawalId: existing.id,
-        amountRequested: parsedAmount,
-        networkFee: Number(existing.network_fee || networkFee),
-        totalDebited: parsedAmount + Number(existing.network_fee || networkFee),
-        message: 'Withdrawal already submitted (idempotent replay).',
-        statusCode: 200,
-      };
-    }
+  // 7. Require an idempotency key for every value-moving withdrawal request.
+  const idempotencyKey = String(input.idempotencyKey || '').trim();
+  if (!idempotencyKey || idempotencyKey.length > 255) {
+    return {
+      success: false,
+      status: 'IDEMPOTENCY_KEY_REQUIRED',
+      error: 'A valid X-Idempotency-Key is required for withdrawals.',
+      message: 'A valid idempotency key is required.',
+      statusCode: 400,
+    };
   }
 
-  // 8. Execute Atomic Balance Reservation via Authoritative RPC
-  const { data: rpcResult, error: rpcError } = await supabaseAdmin.rpc('request_withdrawal', {
+  // 8. Atomic, idempotent reservation through the RPC aligned with the live
+  // onchain_withdrawals and wallet_assets schema. The legacy request_withdrawal
+  // RPC writes columns that do not exist in the live withdrawals table.
+  const { data: rpcResult, error: rpcError } = await supabaseAdmin.rpc('request_custodial_withdrawal', {
     p_user_id: user.id,
     p_network: networkCode,
+    p_asset_symbol: assetSymbol,
     p_to_address: validDestination,
     p_amount: parsedAmount,
     p_fee: networkFee,
-    p_asset: assetSymbol,
-    p_usd_equivalent: usdEquivalent,
+    p_idempotency_key: idempotencyKey,
   });
 
   if (rpcError) {
+    // Database errors may include internal schema details; keep them in server logs,
+    // not in the public API response.
+    console.error('[wallet-withdrawal] Atomic reservation failed', {
+      code: rpcError.code,
+      details: rpcError.details,
+      hint: rpcError.hint,
+    });
     return {
       success: false,
       status: 'RESERVATION_FAILED',
-      error: rpcError.message || 'Balance reservation failed',
-      message: rpcError.message || 'Balance reservation failed',
+      error: 'Withdrawal could not be reserved. Please verify the request and try again.',
+      message: 'Withdrawal reservation failed',
       statusCode: 400,
     };
   }
 
   const withdrawalId = rpcResult?.withdrawal_id || rpcResult;
-  const returnedStatus = rpcResult?.status || 'QUEUED';
+  const returnedStatus = rpcResult?.status || 'NEEDS_APPROVAL';
 
   // Activity Notification
   try {

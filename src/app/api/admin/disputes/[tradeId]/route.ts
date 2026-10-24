@@ -17,7 +17,7 @@ export async function POST(
     const adminId = auth.adminId || auth.user.id;
     const adminEmail = auth.adminEmail || 'admin@paxones.com';
 
-    const resolvedParams = typeof (params as any)?.then === 'function' ? await params : params;
+    const resolvedParams = await Promise.resolve(params);
     const tradeId = resolvedParams.tradeId;
 
     if (!tradeId) {
@@ -39,7 +39,11 @@ export async function POST(
       .or(`id.eq.${tradeId},trade_id.eq.${tradeId}`)
       .maybeSingle();
 
-    const actualTradeId = trade?.id || tradeId;
+    if (!trade) {
+      return NextResponse.json({ error: 'Trade not found.' }, { status: 404, headers: { 'Cache-Control': 'no-store' } });
+    }
+
+    const actualTradeId = trade.id;
 
     let rpcError: any = null;
     let rpcData: any = null;
@@ -61,10 +65,12 @@ export async function POST(
       rpcData = res.data;
     }
 
-    if (rpcError || (rpcData && !rpcData.success)) {
-      const errorMsg = rpcError?.message || rpcData?.message || 'Escrow settlement RPC failed.';
-      console.error('Dispute settlement RPC error:', errorMsg);
-      return NextResponse.json({ error: errorMsg }, { status: 400 });
+    if (rpcError || !rpcData || rpcData.success !== true) {
+      console.error('Dispute settlement RPC failed:', rpcError?.code || rpcData?.code || 'UNCONFIRMED_RESULT');
+      return NextResponse.json(
+        { error: 'Escrow settlement could not be confirmed. The dispute remains open for reconciliation.' },
+        { status: 409, headers: { 'Cache-Control': 'no-store' } }
+      );
     }
 
     // Update disputes record to resolved with full audit metadata

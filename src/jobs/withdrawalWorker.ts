@@ -42,7 +42,7 @@ export async function checkCircuitBreakers(): Promise<{ allowed: boolean; reason
       .maybeSingle();
 
     if (error || !settings) {
-      return { allowed: true };
+      return { allowed: false, reason: 'Unable to verify platform withdrawal controls; dispatch is paused fail-closed' };
     }
     if (settings.global_kill_switch_active) {
       return { allowed: false, reason: 'Global emergency kill switch is currently active' };
@@ -52,7 +52,7 @@ export async function checkCircuitBreakers(): Promise<{ allowed: boolean; reason
     }
     return { allowed: true };
   } catch (err) {
-    return { allowed: true };
+    return { allowed: false, reason: 'Unable to verify platform withdrawal controls; dispatch is paused fail-closed' };
   }
 }
 
@@ -65,20 +65,22 @@ export async function allocateEvmNonce(
   provider: ethers.JsonRpcProvider
 ): Promise<number> {
   const normNet = normalizeNetworkCode(network);
-  try {
-    const onchainPending = await provider.getTransactionCount(walletAddress, 'pending');
-    const { data: allocatedNonce, error } = await supabaseAdmin.rpc('allocate_hot_wallet_nonce', {
-      p_network: normNet,
-      p_wallet_address: walletAddress,
-      p_onchain_pending_nonce: onchainPending,
-    });
-    if (!error && allocatedNonce !== null && allocatedNonce !== undefined) {
-      return Number(allocatedNonce);
-    }
-  } catch (rpcErr) {
-    console.warn('[Nonce Manager] RPC allocate_hot_wallet_nonce failed, falling back to on-chain count:', rpcErr);
+  const onchainPending = await provider.getTransactionCount(walletAddress, 'pending');
+  const { data: allocatedNonce, error } = await supabaseAdmin.rpc('allocate_hot_wallet_nonce', {
+    p_network: normNet,
+    p_wallet_address: walletAddress,
+    p_onchain_pending_nonce: onchainPending,
+  });
+  if (error || allocatedNonce === null || allocatedNonce === undefined) {
+    // Never broadcast using an uncoordinated fallback nonce: concurrent workers
+    // could reuse it and create ambiguous or duplicate payout attempts.
+    throw new Error('Authoritative nonce allocation failed; refusing to broadcast withdrawal.');
   }
-  return await provider.getTransactionCount(walletAddress, 'pending');
+  const nonce = Number(allocatedNonce);
+  if (!Number.isSafeInteger(nonce) || nonce < 0) {
+    throw new Error('Authoritative nonce allocator returned an invalid nonce.');
+  }
+  return nonce;
 }
 
 /**
@@ -106,6 +108,7 @@ export async function processWithdrawalQueue(): Promise<WithdrawalProcessResult>
   const amountStr = withdrawal.amount.toString();
   const destination = withdrawal.to_address.trim();
   let isLocalCheckStage = true;
+  let broadcastTxHash: string | null = null;
 
   try {
     // BRANCH A: TRON Network (TRC-20 USDT)
@@ -125,18 +128,28 @@ export async function processWithdrawalQueue(): Promise<WithdrawalProcessResult>
         amount: amountStr,
       });
       const txHash = res.txHash;
+      broadcastTxHash = txHash;
 
-      await supabaseAdmin.rpc('complete_onchain_withdrawal', {
-        p_withdrawal_id: withdrawal.id,
-        p_tx_hash: txHash,
-      });
+      // Broadcasting is not settlement. Persist the hash and let the
+      // confirmation watcher complete the withdrawal only after chain finality.
+      const { error: broadcastRecordError } = await supabaseAdmin
+        .from('onchain_withdrawals')
+        .update({ status: 'BROADCASTED', tx_hash: txHash, updated_at: new Date().toISOString() })
+        .eq('id', withdrawal.id);
+      if (broadcastRecordError) throw new Error(`TRON transaction broadcast as ${txHash}, but recording broadcast state failed: ${broadcastRecordError.message}`);
 
-      console.log(`[Withdrawal Worker] Dispatched TRON payout ${withdrawal.id} (tx: ${txHash})`);
+      const { error: legacyRecordError } = await supabaseAdmin
+        .from('withdrawals')
+        .update({ status: 'BROADCASTED', tx_hash: txHash, updated_at: new Date().toISOString() })
+        .eq('id', withdrawal.id);
+      if (legacyRecordError) throw new Error(`TRON transaction broadcast as ${txHash}, but recording legacy broadcast state failed: ${legacyRecordError.message}`);
+
+      console.log(`[Withdrawal Worker] Broadcasted TRON payout ${withdrawal.id} (tx: ${txHash}); awaiting confirmations`);
       return {
         processed: true,
         withdrawalId: withdrawal.id,
         txHash,
-        status: 'COMPLETED',
+        status: 'BROADCASTED',
       };
     }
 
@@ -180,18 +193,28 @@ export async function processWithdrawalQueue(): Promise<WithdrawalProcessResult>
       });
     }
 
-    await supabaseAdmin.rpc('complete_onchain_withdrawal', {
-      p_withdrawal_id: withdrawal.id,
-      p_tx_hash: tx.hash,
-    });
+    broadcastTxHash = tx.hash;
+    // Persist broadcast state only. The confirmation watcher performs
+    // final settlement after the configured confirmation threshold is met.
+    const { error: broadcastRecordError } = await supabaseAdmin
+      .from('onchain_withdrawals')
+      .update({ status: 'BROADCASTED', tx_hash: tx.hash, updated_at: new Date().toISOString() })
+      .eq('id', withdrawal.id);
+    if (broadcastRecordError) throw new Error(`EVM transaction broadcast as ${tx.hash}, but recording broadcast state failed: ${broadcastRecordError.message}`);
 
-    console.log(`[Withdrawal Worker] Broadcasted EVM payout ${withdrawal.id} on ${network} (tx: ${tx.hash}, nonce: ${nonce})`);
+    const { error: legacyRecordError } = await supabaseAdmin
+      .from('withdrawals')
+      .update({ status: 'BROADCASTED', tx_hash: tx.hash, updated_at: new Date().toISOString() })
+      .eq('id', withdrawal.id);
+    if (legacyRecordError) throw new Error(`EVM transaction broadcast as ${tx.hash}, but recording legacy broadcast state failed: ${legacyRecordError.message}`);
+
+    console.log(`[Withdrawal Worker] Broadcasted EVM payout ${withdrawal.id} on ${network} (tx: ${tx.hash}, nonce: ${nonce}); awaiting confirmations`);
     return {
       processed: true,
       withdrawalId: withdrawal.id,
       txHash: tx.hash,
       nonce,
-      status: 'COMPLETED',
+      status: 'BROADCASTED',
     };
 
   } catch (err: any) {
@@ -227,6 +250,7 @@ export async function processWithdrawalQueue(): Promise<WithdrawalProcessResult>
           .from('onchain_withdrawals')
           .update({
             status: 'AMBIGUOUS_BROADCAST',
+            ...(broadcastTxHash ? { tx_hash: broadcastTxHash } : {}),
             error_message: `Ambiguous broadcast error: ${err.message}`,
             updated_at: new Date().toISOString(),
           })
@@ -236,6 +260,7 @@ export async function processWithdrawalQueue(): Promise<WithdrawalProcessResult>
           .from('withdrawals')
           .update({
             status: 'AMBIGUOUS_BROADCAST',
+            ...(broadcastTxHash ? { tx_hash: broadcastTxHash } : {}),
             broadcast_error: `Ambiguous broadcast error: ${err.message}`,
             updated_at: new Date().toISOString(),
           })
@@ -257,6 +282,29 @@ export async function processWithdrawalQueue(): Promise<WithdrawalProcessResult>
 /**
  * Checks previously BROADCASTED, PROCESSING, or AMBIGUOUS_BROADCAST withdrawals and confirms them once confirmations are met
  */
+async function getUtxoTransactionConfirmations(
+  apiBase: string,
+  status: { confirmed?: boolean; block_height?: number | string } | null | undefined
+): Promise<number> {
+  if (!status?.confirmed) return 0;
+
+  const blockHeight = Number(status.block_height);
+  if (!Number.isSafeInteger(blockHeight) || blockHeight <= 0) return 0;
+
+  try {
+    const tipResponse = await fetch(`${apiBase}/blocks/tip/height`);
+    if (!tipResponse.ok) return 0;
+
+    const tipHeight = Number((await tipResponse.text()).trim());
+    if (!Number.isSafeInteger(tipHeight) || tipHeight < blockHeight) return 0;
+
+    return tipHeight - blockHeight + 1;
+  } catch {
+    // An unavailable tip must leave the withdrawal pending, never settle it.
+    return 0;
+  }
+}
+
 export async function checkSubmittedWithdrawals(): Promise<{
   checked: number;
   confirmed: number;
@@ -306,7 +354,7 @@ export async function checkSubmittedWithdrawals(): Promise<{
         const { confirmations, status, actualGasCost } = await getTransactionConfirmations(provider, w.tx_hash);
         const gasAsset = normNet === 'BEP20' ? 'BNB' : 'ETH';
 
-        if (confirmations >= chain.requiredConfirmations && status !== 0) {
+        if (confirmations >= chain.requiredConfirmations && status === 1) {
           const actualGasStr = actualGasCost && actualGasCost.trim().length > 0 ? actualGasCost.trim() : '0';
           const { error: confErr } = await supabaseAdmin.rpc('complete_onchain_withdrawal', {
             p_withdrawal_id: w.id,
@@ -315,7 +363,7 @@ export async function checkSubmittedWithdrawals(): Promise<{
             p_gas_asset: gasAsset,
           });
           if (!confErr) confirmed++;
-        } else if (status === 0) {
+        } else if (status === 0 && confirmations >= chain.requiredConfirmations) {
           await supabaseAdmin.rpc('process_failed_withdrawal', {
             p_withdrawal_id: w.id,
             p_error_reason: `EVM transaction reverted on-chain on network ${w.network}`,
@@ -328,7 +376,8 @@ export async function checkSubmittedWithdrawals(): Promise<{
           const res = await fetch(`${btcApiBase}/tx/${w.tx_hash}`);
           if (res.ok) {
             const txData = await res.json();
-            if (txData && txData.status && txData.status.confirmed) {
+            const btcConfirmations = await getUtxoTransactionConfirmations(btcApiBase, txData?.status);
+            if (btcConfirmations >= 3) {
               let actualFeeBtc = '0';
               if (typeof txData.fee === 'number' && txData.fee >= 0) {
                 const feeSat = BigInt(txData.fee);
@@ -336,8 +385,8 @@ export async function checkSubmittedWithdrawals(): Promise<{
                 const fraction = (feeSat % 100000000n).toString().padStart(8, '0');
                 actualFeeBtc = `${whole}.${fraction}`;
               } else if (Array.isArray(txData.vin) && Array.isArray(txData.vout)) {
-                const inputSumSat = txData.vin.reduce((acc: bigint, v: any) => acc + BigInt(v.prevout?.value || 0), 0n);
-                const outputSumSat = txData.vout.reduce((acc: bigint, v: any) => acc + BigInt(v.value || 0), 0n);
+                const inputSumSat = (txData.vin as any[]).reduce((acc: bigint, v: any): bigint => acc + BigInt(v.prevout?.value || 0), 0n);
+                const outputSumSat = (txData.vout as any[]).reduce((acc: bigint, v: any): bigint => acc + BigInt(v.value || 0), 0n);
                 if (inputSumSat >= outputSumSat) {
                   const feeSat = inputSumSat - outputSumSat;
                   const whole = feeSat / 100000000n;
@@ -364,7 +413,8 @@ export async function checkSubmittedWithdrawals(): Promise<{
           const res = await fetch(`${ltcApiBase}/tx/${w.tx_hash}`);
           if (res.ok) {
             const txData = await res.json();
-            if (txData && txData.status && txData.status.confirmed) {
+            const ltcConfirmations = await getUtxoTransactionConfirmations(ltcApiBase, txData?.status);
+            if (ltcConfirmations >= 12) {
               let actualFeeLtc = '0';
               if (typeof txData.fee === 'number' && txData.fee >= 0) {
                 const feeLit = BigInt(txData.fee);
@@ -372,8 +422,8 @@ export async function checkSubmittedWithdrawals(): Promise<{
                 const fraction = (feeLit % 100000000n).toString().padStart(8, '0');
                 actualFeeLtc = `${whole}.${fraction}`;
               } else if (Array.isArray(txData.vin) && Array.isArray(txData.vout)) {
-                const inputSumLit = txData.vin.reduce((acc: bigint, v: any) => acc + BigInt(v.prevout?.value || 0), 0n);
-                const outputSumLit = txData.vout.reduce((acc: bigint, v: any) => acc + BigInt(v.value || 0), 0n);
+                const inputSumLit = (txData.vin as any[]).reduce((acc: bigint, v: any): bigint => acc + BigInt(v.prevout?.value || 0), 0n);
+                const outputSumLit = (txData.vout as any[]).reduce((acc: bigint, v: any): bigint => acc + BigInt(v.value || 0), 0n);
                 if (inputSumLit >= outputSumLit) {
                   const feeLit = inputSumLit - outputSumLit;
                   const whole = feeLit / 100000000n;
@@ -412,41 +462,20 @@ export async function processAllPendingWithdrawals(maxBatch: number = 20): Promi
   results: WithdrawalProcessResult[];
   locked?: boolean;
 }> {
-  // Acquire distributed singleton advisory lock
-  let hasLock = false;
-  try {
-    const { data: lockAcquired, error: lockErr } = await supabaseAdmin.rpc('acquire_withdrawal_worker_lock');
-    if (!lockErr && lockAcquired === true) {
-      hasLock = true;
-    } else if (!lockErr && lockAcquired === false) {
-      console.warn('[Withdrawal Worker Singleton] Another worker instance is currently holding the dispatch lease. Exiting batch run.');
-      return { totalProcessed: 0, results: [], locked: true };
-    }
-  } catch (lockRpcErr) {
-    // If RPC is unavailable, proceed defensively
-    hasLock = false;
-  }
-
+  // Each call atomically claims rows through claim_pending_withdrawals
+  // (FOR UPDATE SKIP LOCKED + PROCESSING transition). Session-level advisory
+  // locks are unsafe across separate PostgREST requests because acquisition and
+  // release are not guaranteed to use the same PostgreSQL backend connection.
   const results: WithdrawalProcessResult[] = [];
   let count = 0;
 
-  try {
-    while (count < maxBatch) {
-      const res = await processWithdrawalQueue();
-      if (!res.processed) {
-        break;
-      }
-      results.push(res);
-      count++;
+  while (count < maxBatch) {
+    const res = await processWithdrawalQueue();
+    if (!res.processed) {
+      break;
     }
-  } finally {
-    if (hasLock) {
-      try {
-        await supabaseAdmin.rpc('release_withdrawal_worker_lock');
-      } catch (unlockErr) {
-        console.warn('[Withdrawal Worker Singleton] Notice on lock release:', unlockErr);
-      }
-    }
+    results.push(res);
+    count++;
   }
 
   return { totalProcessed: count, results };

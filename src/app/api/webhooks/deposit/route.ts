@@ -4,6 +4,7 @@ import { ethers } from 'ethers';
 import { getSupabaseAdminClient } from '@/lib/supabase/server';
 import { normalizeDepositNetwork } from '@/lib/hd-derivation-engine';
 import { CANONICAL_USDT_CONTRACTS } from '@/jobs/depositIngestion';
+import { timingSafeEqualString } from '@/lib/security/worker-auth';
 
 export const dynamic = 'force-dynamic';
 
@@ -63,7 +64,7 @@ export async function POST(req: Request) {
     }
 
     const ingestHeader = req.headers.get('x-ingest-secret') || req.headers.get('x-api-key');
-    const isDirectHeaderValid = ingestHeader && secret && crypto.timingSafeEqual(Buffer.from(ingestHeader), Buffer.from(secret));
+    const isDirectHeaderValid = Boolean(ingestHeader && secret && timingSafeEqualString(ingestHeader, secret));
 
     if (!isDirectHeaderValid) {
       if (!signature || !verifySignature(rawBody, signature)) {
@@ -94,6 +95,7 @@ export async function POST(req: Request) {
       network: string;
       confirmations?: number;
       blockNumber?: number;
+      tokenContract?: string | null;
     }> = [];
 
     if (Array.isArray(payload.events)) {
@@ -107,7 +109,8 @@ export async function POST(req: Request) {
           assetSymbol: (ev.assetSymbol || ev.symbol || ev.asset || 'USDT').toUpperCase(),
           network: (ev.network || payload.network || 'ERC20'),
           confirmations: ev.confirmations,
-          blockNumber: ev.blockNumber ? parseInt(ev.blockNumber, 10) : undefined,
+          blockNumber: ev.blockNumber ? parseInt(String(ev.blockNumber), 10) : undefined,
+          tokenContract: ev.tokenContract || ev.contractAddress || ev.rawContract?.address || ev.token?.address || null,
         });
       }
     } else if (payload.event?.activity && Array.isArray(payload.event.activity)) {
@@ -120,7 +123,9 @@ export async function POST(req: Request) {
           value: act.value,
           assetSymbol: (act.asset || 'USDT').toUpperCase(),
           network: 'ERC20',
-          blockNumber: act.blockNum ? parseInt(act.blockNum, 16) : undefined,
+          blockNumber: act.blockNum ? parseInt(String(act.blockNum), 16) : undefined,
+          confirmations: act.confirmations,
+          tokenContract: act.rawContract?.address || act.contractAddress || null,
         });
       }
     } else if (payload.txHash || payload.hash) {
@@ -133,7 +138,8 @@ export async function POST(req: Request) {
         assetSymbol: (payload.assetSymbol || payload.symbol || 'USDT').toUpperCase(),
         network: (payload.network || 'ERC20'),
         confirmations: payload.confirmations,
-        blockNumber: payload.blockNumber ? parseInt(payload.blockNumber, 10) : undefined,
+        blockNumber: payload.blockNumber ? parseInt(String(payload.blockNumber), 10) : undefined,
+        tokenContract: payload.tokenContract || payload.contractAddress || null,
       });
     }
 
@@ -147,12 +153,42 @@ export async function POST(req: Request) {
       const destinationAddress = item.to?.trim();
       const txHash = item.txHash;
       const logIndex = item.logIndex;
-      const amount = typeof item.value === 'number' ? item.value : parseFloat(item.value);
+      const amount = typeof item.value === 'number' ? item.value : Number(item.value);
       const normNet = normalizeDepositNetwork(item.network);
       const assetSymbol = (item.assetSymbol || 'USDT').toUpperCase().trim();
       const tokenContract = CANONICAL_USDT_CONTRACTS[normNet] || null;
+      const confirmations = Number(item.confirmations);
+      const blockNumber = Number(item.blockNumber);
+      const allowedAssets = new Set(['BTC', 'ETH', 'LTC', 'USDT', 'BNB', 'TRX']);
 
-      if (!destinationAddress || !txHash || isNaN(amount) || amount <= 0) {
+      if (!destinationAddress || !txHash || !Number.isFinite(amount) || amount <= 0 || !allowedAssets.has(assetSymbol)) {
+        continue;
+      }
+
+      // Do not treat missing webhook metadata as confirmed. The canonical scanner
+      // will pick up these events after independently checking the chain.
+      if (!Number.isSafeInteger(confirmations) || confirmations < 0 || !Number.isSafeInteger(blockNumber) || blockNumber <= 0) {
+        processedResults.push({ txHash, logIndex, status: 'pending_verification', message: 'Missing confirmed block/confirmation metadata; deferred to canonical scanner.' });
+        continue;
+      }
+
+      // ERC-20/TRC-20 USDT must identify the actual canonical token contract.
+      // Never credit arbitrary token transfers as USDT based on a caller-supplied symbol.
+      if (assetSymbol === 'USDT') {
+        if (!tokenContract || !item.tokenContract) {
+          processedResults.push({ txHash, logIndex, status: 'pending_verification', message: 'Token contract is missing; deferred to canonical scanner.' });
+          continue;
+        }
+        const contractMatches = normNet === 'TRC20'
+          ? item.tokenContract === tokenContract
+          : item.tokenContract.toLowerCase() === tokenContract.toLowerCase();
+        if (!contractMatches) {
+          processedResults.push({ txHash, logIndex, status: 'ignored', message: 'Transfer contract does not match the canonical USDT contract.' });
+          continue;
+        }
+      } else if (item.tokenContract) {
+        // Native coin credits must not be inferred from arbitrary token-contract events.
+        processedResults.push({ txHash, logIndex, status: 'ignored', message: 'Token-contract event is not eligible for native-asset credit.' });
         continue;
       }
 
@@ -164,10 +200,10 @@ export async function POST(req: Request) {
         p_amount: amount,
         p_tx_hash: txHash,
         p_output_index: logIndex,
-        p_block_number: item.blockNumber ?? null,
+        p_block_number: blockNumber,
         p_from_address: item.from || null,
         p_token_contract: tokenContract,
-        p_confirmations: item.confirmations ?? 12,
+        p_confirmations: confirmations,
         p_provider: 'deposit_webhook',
       });
 

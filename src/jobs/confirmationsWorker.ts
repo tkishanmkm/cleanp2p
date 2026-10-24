@@ -1,16 +1,17 @@
-import { createClient } from '@supabase/supabase-js';
+import type { SupabaseClient } from '@supabase/supabase-js';
 import { ethers } from 'ethers';
 import { normalizeDepositNetwork } from '@/lib/hd-derivation-engine';
+import { getSupabaseAdminClient } from '@/lib/supabase/server';
 import { CANONICAL_USDT_CONTRACTS } from '@/jobs/depositIngestion';
+import { ERC20_ABI, SUPPORTED_EVM_CHAINS } from '@/lib/blockchain/providers';
+import { getTronWeb } from '@/lib/blockchain/tron';
 
-// Initialize Supabase admin client with service role key
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL || 'https://placeholder.supabase.co';
-const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'placeholder-key';
-
-const supabaseAdmin = createClient(supabaseUrl, supabaseKey, {
-  auth: {
-    persistSession: false,
-    autoRefreshToken: false,
+// Resolve privileged credentials only when the worker runs; never fall back to anon credentials.
+const supabaseAdmin = new Proxy({} as SupabaseClient, {
+  get(_target, property) {
+    const client = getSupabaseAdminClient();
+    const value = Reflect.get(client, property, client);
+    return typeof value === 'function' ? value.bind(client) : value;
   },
 });
 
@@ -51,100 +52,159 @@ function getRpcUrl(network: string): string {
  */
 async function fetchOnChainConfirmations(
   txHash: string,
-  network: string
+  network: string,
+  expected?: {
+    destinationAddress: string;
+    assetSymbol: string;
+    amount: string;
+    outputIndex: number;
+  }
 ): Promise<{ confirmations: number; blockNumber?: number; fromAddress?: string } | null> {
   const norm = normalizeDepositNetwork(network);
 
-  // Handle Tron TRC-20
   if (norm === 'TRC20') {
     try {
       const tronHost = (process.env.TRON_RPC_URL || 'https://api.trongrid.io').replace(/\/$/, '');
       const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-      if (process.env.TRON_PRO_API_KEY) {
-        headers['TRON-PRO-API-KEY'] = process.env.TRON_PRO_API_KEY;
+      const apiKey = process.env.TRON_GRID_API_KEY || process.env.TRONGRID_API_KEY || process.env.TRON_PRO_API_KEY;
+      if (apiKey) headers['TRON-PRO-API-KEY'] = apiKey;
+
+      const [infoRes, nowRes, txRes] = await Promise.all([
+        fetch(`${tronHost}/wallet/gettransactioninfobyid`, {
+          method: 'POST', headers, body: JSON.stringify({ value: txHash }),
+        }),
+        fetch(`${tronHost}/wallet/getnowblock`, {
+          method: 'POST', headers, body: JSON.stringify({}),
+        }),
+        fetch(`${tronHost}/wallet/gettransactionbyid`, {
+          method: 'POST', headers, body: JSON.stringify({ value: txHash }),
+        }),
+      ]);
+      if (!infoRes.ok || !nowRes.ok || !txRes.ok) return null;
+      const info = await infoRes.json();
+      const now = await nowRes.json();
+      const tx = await txRes.json();
+      const blockNumber = Number(info?.blockNumber);
+      const currentBlock = Number(now?.block_header?.raw_data?.number);
+      if (
+        !Number.isSafeInteger(blockNumber) || blockNumber <= 0 ||
+        !Number.isSafeInteger(currentBlock) || currentBlock < blockNumber ||
+        info?.receipt?.result !== 'SUCCESS'
+      ) return null;
+
+      if (expected) {
+        // Custodial TRC-20 deposits are direct USDT transfer(address,uint256)
+        // calls. Verify the canonical contract, calldata recipient and exact amount.
+        if (expected.assetSymbol !== 'USDT') return null;
+        const contractValue = tx?.raw_data?.contract?.[0]?.parameter?.value;
+        const contractHex = String(contractValue?.contract_address || '').replace(/^0x/i, '');
+        const callData = String(contractValue?.data || '').replace(/^0x/i, '').toLowerCase();
+        if (!contractHex || !callData.startsWith('a9059cbb') || callData.length < 136) return null;
+
+        const tronWeb = getTronWeb(false);
+        let contractAddress = '';
+        try {
+          contractAddress = tronWeb.address.fromHex(
+            contractHex.length === 42 ? contractHex : `41${contractHex.slice(-40)}`
+          );
+        } catch {
+          return null;
+        }
+        const expectedHex = tronWeb.address.toHex(expected.destinationAddress).replace(/^0x/i, '').slice(-40).toLowerCase();
+        const calldataRecipient = callData.slice(8, 72).slice(-40);
+        const calldataAmount = BigInt(`0x${callData.slice(-64)}`);
+        if (
+          contractAddress !== CANONICAL_USDT_CONTRACTS.TRC20 ||
+          calldataRecipient !== expectedHex ||
+          calldataAmount !== ethers.parseUnits(expected.amount, 6)
+        ) return null;
       }
 
-      const res = await fetch(`${tronHost}/wallet/gettransactioninfobyid`, {
-        method: 'POST',
-        headers,
-        body: JSON.stringify({ value: txHash }),
-      });
-
-      if (!res.ok) return null;
-      const data = await res.json();
-
-      if (!data || !data.blockNumber) {
-        return null;
-      }
-
-      const nowRes = await fetch(`${tronHost}/wallet/getnowblock`, {
-        method: 'POST',
-        headers,
-      });
-      const nowData = await nowRes.json();
-      const currentBlock = nowData?.block_header?.raw_data?.number;
-
-      if (currentBlock && data.blockNumber) {
-        const confs = Math.max(1, currentBlock - data.blockNumber + 1);
-        return { confirmations: confs, blockNumber: data.blockNumber };
-      }
-
-      return { confirmations: 19, blockNumber: data.blockNumber };
-    } catch (tronErr) {
-      console.warn(`Tron confirmation query error for ${txHash}:`, tronErr);
+      return { confirmations: currentBlock - blockNumber + 1, blockNumber };
+    } catch (err) {
+      console.warn(`TRON confirmation query error for ${txHash}:`, err);
       return null;
     }
   }
 
-  // Handle Bitcoin (BTC)
-  if (norm === 'BTC') {
+  if (norm === 'BTC' || norm === 'LTC') {
     try {
-      const btcApiBase = process.env.BTC_MEMPOOL_API || 'https://mempool.space/api';
-      const res = await fetch(`${btcApiBase}/tx/${txHash}/status`);
-      if (!res.ok) return null;
-      const statusData = await res.json();
-      const confs = statusData.confirmed ? 2 : 0;
-      return { confirmations: confs, blockNumber: statusData.block_height };
-    } catch (btcErr) {
-      console.warn(`BTC confirmation query error for ${txHash}:`, btcErr);
+      const apiBase = norm === 'BTC'
+        ? (process.env.BTC_MEMPOOL_API || 'https://mempool.space/api')
+        : (process.env.LTC_MEMPOOL_API || 'https://litecoinspace.org/api');
+      const [txRes, statusRes, tipRes] = await Promise.all([
+        fetch(`${apiBase}/tx/${txHash}`),
+        fetch(`${apiBase}/tx/${txHash}/status`),
+        fetch(`${apiBase}/blocks/tip/height`),
+      ]);
+      if (!txRes.ok || !statusRes.ok || !tipRes.ok) return null;
+      const tx = await txRes.json();
+      const status = await statusRes.json();
+      const tip = Number((await tipRes.text()).trim());
+      if (!status?.confirmed || !Number.isSafeInteger(status.block_height) ||
+          !Number.isSafeInteger(tip) || tip < status.block_height) return null;
+
+      if (expected) {
+        const output = Array.isArray(tx?.vout) ? tx.vout[expected.outputIndex] : null;
+        if (!output || output.scriptpubkey_address !== expected.destinationAddress) return null;
+        const outputAmount = BigInt(output.value ?? -1);
+        const expectedAmount = ethers.parseUnits(expected.amount, 8);
+        if (outputAmount !== expectedAmount) return null;
+      }
+
+      return {
+        confirmations: tip - status.block_height + 1,
+        blockNumber: status.block_height,
+      };
+    } catch (err) {
+      console.warn(`${norm} confirmation query error for ${txHash}:`, err);
       return null;
     }
   }
 
-  // Handle Litecoin (LTC)
-  if (norm === 'LTC') {
-    try {
-      const ltcApiBase = process.env.LTC_MEMPOOL_API || 'https://litecoinspace.org/api';
-      const res = await fetch(`${ltcApiBase}/tx/${txHash}/status`);
-      if (!res.ok) return null;
-      const statusData = await res.json();
-      const confs = statusData.confirmed ? 6 : 0;
-      return { confirmations: confs, blockNumber: statusData.block_height };
-    } catch (ltcErr) {
-      console.warn(`LTC confirmation query error for ${txHash}:`, ltcErr);
-      return null;
-    }
-  }
-
-  // Handle EVM networks (ERC20, BEP20, ETH)
   try {
-    const rpcUrl = getRpcUrl(network);
-    const provider = new ethers.JsonRpcProvider(rpcUrl);
+    const chain = SUPPORTED_EVM_CHAINS[norm];
+    const provider = new ethers.JsonRpcProvider(getRpcUrl(network));
+    const [receipt, currentBlock, tx] = await Promise.all([
+      provider.getTransactionReceipt(txHash),
+      provider.getBlockNumber(),
+      provider.getTransaction(txHash),
+    ]);
+    if (!receipt || receipt.status !== 1 || !receipt.blockNumber ||
+        currentBlock < receipt.blockNumber || !tx) return null;
 
-    const receiptPromise = provider.getTransactionReceipt(txHash);
-    const blockPromise = provider.getBlockNumber();
-
-    const [receipt, currentBlock] = await Promise.all([receiptPromise, blockPromise]);
-
-    if (!receipt || !receipt.blockNumber) {
-      return null; // Transaction still unmined
+    if (expected) {
+      if (norm === 'ETH') {
+        if (!tx.to || tx.to.toLowerCase() !== expected.destinationAddress.toLowerCase() ||
+            tx.value !== ethers.parseUnits(expected.amount, chain?.nativeDecimals ?? 18)) return null;
+      } else {
+        if (!chain) return null;
+        const contract = (CANONICAL_USDT_CONTRACTS[norm] || chain.usdtContractAddress || '').toLowerCase();
+        if (!contract) return null;
+        const iface = new ethers.Interface(ERC20_ABI);
+        const matchingLog = receipt.logs.find((log) => {
+          if (log.address.toLowerCase() !== contract) return false;
+          try {
+            const parsed = iface.parseLog({ topics: [...log.topics], data: log.data });
+            if (!parsed || parsed.name !== 'Transfer') return false;
+            const to = String(parsed.args[1]).toLowerCase();
+            const value = parsed.args[2] as bigint;
+            const expectedValue = ethers.parseUnits(expected.amount, chain.usdtDecimals ?? 6);
+            return to === expected.destinationAddress.toLowerCase() &&
+              value === expectedValue &&
+              log.index === expected.outputIndex;
+          } catch {
+            return false;
+          }
+        });
+        if (!matchingLog) return null;
+      }
     }
 
-    const confs = Math.max(1, currentBlock - receipt.blockNumber + 1);
     return {
-      confirmations: confs,
+      confirmations: currentBlock - receipt.blockNumber + 1,
       blockNumber: receipt.blockNumber,
-      fromAddress: receipt.from?.toLowerCase(),
+      fromAddress: tx.from?.toLowerCase(),
     };
   } catch (err: any) {
     console.warn(`EVM confirmation check failed for ${txHash} on ${network}:`, err?.message);
@@ -195,28 +255,39 @@ export async function runConfirmationsWorker(): Promise<ConfirmationWorkerResult
       const tokenContract = CANONICAL_USDT_CONTRACTS[normNet] || null;
 
       try {
-        const onChainData = await fetchOnChainConfirmations(deposit.tx_hash, normNet);
+        const onChainData = await fetchOnChainConfirmations(deposit.tx_hash, normNet, {
+          destinationAddress,
+          assetSymbol,
+          amount: String(deposit.amount),
+          outputIndex,
+        });
 
-        let currentConfirmations = prevConfs;
-        let blockNumber = deposit.block_number;
-        let fromAddress = deposit.from_address;
-
-        if (onChainData) {
-          currentConfirmations = onChainData.confirmations;
-          if (onChainData.blockNumber) {
-            blockNumber = onChainData.blockNumber;
-          }
-          if (onChainData.fromAddress) {
-            fromAddress = onChainData.fromAddress;
-          }
+        // Never reuse stale database confirmations when the chain provider cannot
+        // independently verify this deposit. Missing/reorged/failed transactions stay pending.
+        if (!onChainData) {
+          result.pendingCount++;
+          result.details.push({
+            depositId: deposit.id,
+            txHash: deposit.tx_hash,
+            network: normNet,
+            previousConfirmations: prevConfs,
+            newConfirmations: 0,
+            requiredConfirmations: requiredConfs,
+            status: 'PENDING',
+          });
+          continue;
         }
+
+        const currentConfirmations = onChainData.confirmations;
+        const blockNumber = onChainData.blockNumber ?? null;
+        const fromAddress = onChainData.fromAddress ?? deposit.from_address ?? null;
 
         // Call authoritative canonical RPC process_deposit_atomic
         const { data: rpcData, error: rpcErr } = await supabaseAdmin.rpc('process_deposit_atomic', {
           p_destination_address: destinationAddress,
           p_asset_symbol: assetSymbol,
           p_network_code: normNet,
-          p_amount: Number(deposit.amount),
+          p_amount: String(deposit.amount),
           p_tx_hash: deposit.tx_hash,
           p_output_index: outputIndex,
           p_block_number: blockNumber,
@@ -241,6 +312,20 @@ export async function runConfirmationsWorker(): Promise<ConfirmationWorkerResult
           });
         } else {
           const parsedRes = typeof rpcData === 'string' ? JSON.parse(rpcData) : rpcData;
+          if (parsedRes?.success === false) {
+            result.failedCount++;
+            result.details.push({
+              depositId: deposit.id,
+              txHash: deposit.tx_hash,
+              network: normNet,
+              previousConfirmations: prevConfs,
+              newConfirmations: currentConfirmations,
+              requiredConfirmations: requiredConfs,
+              status: 'ERROR',
+              error: String(parsedRes.code || parsedRes.message || 'Canonical deposit RPC rejected the record'),
+            });
+            continue;
+          }
           const isCredited = parsedRes?.status === 'credited' || parsedRes?.status === 'CONFIRMED' || parsedRes?.status === 'ALREADY_CREDITED';
 
           if (isCredited) {

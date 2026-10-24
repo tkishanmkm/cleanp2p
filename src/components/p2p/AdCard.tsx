@@ -52,6 +52,10 @@ export interface AdCardProps {
     user?: {
       username?: string | null;
       avatar_url?: string | null;
+      photo_url?: string | null;
+      photoURL?: string | null;
+      created_at?: string | null;
+      createdAt?: string | null;
       completed_trades?: number;
       positive_feedback?: number;
       negative_feedback?: number;
@@ -64,6 +68,10 @@ export interface AdCardProps {
       id?: string;
       username?: string | null;
       avatar_url?: string | null;
+      photo_url?: string | null;
+      photoURL?: string | null;
+      created_at?: string | null;
+      createdAt?: string | null;
       is_online?: boolean | null;
       last_seen?: string | null;
       seller_last_seen?: string | null;

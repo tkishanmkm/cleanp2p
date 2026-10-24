@@ -16,8 +16,8 @@ function verifyCronAuth(authHeader: string | null): boolean {
   ].filter((s): s is string => Boolean(s && s.trim().length > 0));
 
   if (validSecrets.length === 0) {
-    // If no secret configured in development, check for fallback Bearer token
-    return process.env.NODE_ENV === 'development';
+    // Financial reconciliation must fail closed in every environment.
+    return false;
   }
 
   const headerBuf = Buffer.from(authHeader);
@@ -173,7 +173,7 @@ async function performReconciliation() {
         .eq('asset_symbol', asset);
 
       // Record audit log
-      await admin
+      const { error: auditLogError } = await admin
         .from('audit_logs')
         .insert({
           action: 'LEDGER_DISCREPANCY_AUTO_FREEZE',
@@ -187,7 +187,8 @@ async function performReconciliation() {
           },
           created_at: new Date().toISOString(),
         })
-        .catch((e: any) => console.warn('Audit log insert notice:', e.message));
+        ;
+      if (auditLogError) console.warn('Audit log insert notice:', auditLogError.message);
 
       record.frozen = true;
       flaggedAccounts.push(record);

@@ -1,10 +1,11 @@
 import { createClient } from '@/utils/supabase/server';
+import { resolveAuthoritativeAdQuote } from '@/lib/p2p/authoritativeAdQuote';
+import { getTradeEligibilityFailure } from '@/lib/p2p/tradeEligibility';
 import { NextRequest, NextResponse } from 'next/server';
 import { generateTradeId } from '@/lib/id-generator';
 import { sendNewTradeNotificationEmail } from '@/lib/email/tradeEmailService';
 import { assertPlatformControlAllowed } from '@/lib/platform-guard';
 import { hasPendingWithdrawalApproval } from '@/lib/withdrawal-security';
-import { isTier2User } from '@/lib/kyc';
 
 export const dynamic = 'force-dynamic';
 
@@ -56,18 +57,17 @@ export async function POST(req: NextRequest) {
       fiat_amount,
       crypto_amount,
       payment_method,
-      price,
-      fiat_currency,
       trade_ref,
       idempotency_key,
     } = body;
 
-    const idempotencyKey =
-      (idempotency_key ||
-      body.idempotencyKey ||
-      req.headers.get('x-idempotency-key') ||
-      req.headers.get('idempotency-key') ||
-      '').trim();
+    const rawIdempotencyKey =
+      idempotency_key ??
+      body.idempotencyKey ??
+      req.headers.get('x-idempotency-key') ??
+      req.headers.get('idempotency-key') ??
+      '';
+    const idempotencyKey = typeof rawIdempotencyKey === 'string' ? rawIdempotencyKey.trim() : '';
 
     if (!idempotencyKey) {
       return NextResponse.json({
@@ -117,24 +117,26 @@ export async function POST(req: NextRequest) {
     }
 
     // 3. Resolve numerical values and authoritative parameters
-    const rawPrice = price ?? ad.fixed_rate ?? ad.price;
-    const unitPrice = Number(rawPrice);
-    if (!rawPrice || isNaN(unitPrice) || unitPrice <= 0) {
+    const adQuote = await resolveAuthoritativeAdQuote(ad);
+    if (!adQuote) {
       return NextResponse.json(
         { error: 'Advertisement unit price is invalid or market price is unavailable.' },
         { status: 400 }
       );
     }
+    const unitPrice = adQuote.price;
+    const adFiatCurrency = adQuote.fiatCurrency;
+    const resolvedFiatCurrency = String(adFiatCurrency || 'USD').toUpperCase();
     let calculatedCrypto = parseFloat(crypto_amount);
     let numericFiat = parseFloat(fiat_amount);
 
-    if (isNaN(calculatedCrypto) || calculatedCrypto <= 0) {
-      if (!isNaN(numericFiat) && numericFiat > 0 && unitPrice > 0) {
+    if (!Number.isFinite(calculatedCrypto) || calculatedCrypto <= 0) {
+      if (Number.isFinite(numericFiat) && numericFiat > 0 && unitPrice > 0) {
         calculatedCrypto = numericFiat / unitPrice;
       }
     }
 
-    if (isNaN(calculatedCrypto) || calculatedCrypto <= 0) {
+    if (!Number.isFinite(calculatedCrypto) || calculatedCrypto <= 0) {
       return NextResponse.json({ error: 'Invalid crypto amount.' }, { status: 400 });
     }
 
@@ -147,90 +149,46 @@ export async function POST(req: NextRequest) {
     const maxLimit = Number(ad.max_amount ?? ad.max_limit ?? Infinity);
     if (numericFiat < minLimit || numericFiat > maxLimit) {
       return NextResponse.json(
-        { error: `Amount must be between ${minLimit} and ${maxLimit} ${ad.fiat_currency || ad.fiat || 'USD'}` },
+        { error: `Amount must be between ${minLimit} and ${maxLimit} ${adFiatCurrency}` },
         { status: 400 }
       );
     }
 
-    // 5. Verify Trader Requirements (Full name & KYC)
-    const { data: buyerProfile } = await supabase
-      .from('profiles')
-      .select('*')
-      .eq('id', user.id)
-      .maybeSingle();
-
-    const hasFullName = Boolean(
-      buyerProfile?.full_name?.trim() ||
-      buyerProfile?.display_name?.trim() ||
-      user.user_metadata?.full_name?.trim() ||
-      user.user_metadata?.name?.trim()
-    );
-    const isKycVerified = isTier2User(buyerProfile);
-
-    if (ad.require_full_name_verified && !hasFullName) {
-      return NextResponse.json(
-        { error: 'This trade requires you to have a verified full legal name on your profile.' },
-        { status: 403 }
-      );
-    }
-
-    if (ad.require_verified_users && !isKycVerified) {
-      return NextResponse.json(
-        { error: 'This trade requires completed identity (KYC) verification.' },
-        { status: 403 }
-      );
-    }
-
-    // 6. Enforce $1,000 USD Cumulative Limit for Unverified Accounts
-    if (!isKycVerified) {
-      const userFiatCurrency = (ad.fiat_currency || ad.fiat || 'USD').toUpperCase();
-      let fiatToUsdRate = 1.0;
-      if (userFiatCurrency === 'INR') fiatToUsdRate = 1 / 85.0;
-      else if (userFiatCurrency === 'EUR') fiatToUsdRate = 1.08;
-      else if (userFiatCurrency === 'GBP') fiatToUsdRate = 1.28;
-      else if (userFiatCurrency === 'CAD' || userFiatCurrency === 'AUD') fiatToUsdRate = 0.68;
-      else if (userFiatCurrency === 'AED') fiatToUsdRate = 0.27;
-
-      const currentTradeUsd = numericFiat * fiatToUsdRate;
-
-      const { data: pastTrades } = await supabase
-        .from('trades')
-        .select('fiat_amount, fiat_currency, status')
-        .or(`buyer_id.eq.${user.id},seller_id.eq.${user.id}`)
-        .in('status', ['COMPLETED', 'completed', 'PAID', 'paid', 'ESCROW_LOCKED', 'in_escrow', 'DISPUTED']);
-
-      let priorTradedUsd = 0;
-      if (pastTrades && pastTrades.length > 0) {
-        for (const t of pastTrades) {
-          const curr = (t.fiat_currency || 'USD').toUpperCase();
-          let rate = 1.0;
-          if (curr === 'INR') rate = 1 / 85.0;
-          else if (curr === 'EUR') rate = 1.08;
-          else if (curr === 'GBP') rate = 1.28;
-          else if (curr === 'CAD' || curr === 'AUD') rate = 0.68;
-          else if (curr === 'AED') rate = 0.27;
-          priorTradedUsd += (Number(t.fiat_amount) || 0) * rate;
-        }
+    let allowedPaymentMethods: string[] = [];
+    if (Array.isArray(ad.payment_methods)) {
+      allowedPaymentMethods = ad.payment_methods;
+    } else if (typeof ad.payment_methods === 'string' && ad.payment_methods.trim()) {
+      try {
+        const parsed = JSON.parse(ad.payment_methods);
+        allowedPaymentMethods = Array.isArray(parsed) ? parsed : [ad.payment_methods];
+      } catch {
+        allowedPaymentMethods = [ad.payment_methods];
       }
+    } else if (typeof ad.payment_method === 'string' && ad.payment_method.trim()) {
+      allowedPaymentMethods = [ad.payment_method];
+    }
+    allowedPaymentMethods = allowedPaymentMethods
+      .filter((method: unknown): method is string => typeof method === 'string' && method.trim().length > 0)
+      .map((method) => method.trim());
 
-      if (priorTradedUsd + currentTradeUsd > 1000) {
-        return NextResponse.json(
-          {
-            error: `Unverified accounts have a cumulative limit of $1,000 USD in total trades (Current history: $${priorTradedUsd.toFixed(2)} USD). Please complete Identity Verification in Settings to trade without limits.`,
-          },
-          { status: 403 }
-        );
-      }
+    if (allowedPaymentMethods.length === 0) allowedPaymentMethods = ['Bank Transfer'];
+    const requestedPaymentMethod = typeof payment_method === 'string' ? payment_method.trim() : '';
+    if (allowedPaymentMethods.length > 1 && !requestedPaymentMethod) {
+      return NextResponse.json({ error: 'Select a payment method for this advertisement.' }, { status: 400 });
+    }
+    const matchedPaymentMethod = requestedPaymentMethod
+      ? allowedPaymentMethods.find((method) => method.toLowerCase() === requestedPaymentMethod.toLowerCase())
+      : allowedPaymentMethods[0];
+    if (!matchedPaymentMethod) {
+      return NextResponse.json({ error: 'Selected payment method is not supported by this advertisement.' }, { status: 400 });
+    }
+    const resolvedPaymentMethod = matchedPaymentMethod;
+
+    const eligibilityFailure = await getTradeEligibilityFailure(supabase, user, ad, numericFiat, adFiatCurrency);
+    if (eligibilityFailure) {
+      return NextResponse.json({ error: eligibilityFailure.error, code: eligibilityFailure.code }, { status: eligibilityFailure.status });
     }
 
-    // 7. Resolve Payment Method & Currency
-    const paymentMethods = Array.isArray(ad.payment_methods)
-      ? ad.payment_methods
-      : typeof ad.payment_methods === 'string'
-      ? JSON.parse(ad.payment_methods)
-      : ['Bank Transfer'];
-    const resolvedPaymentMethod = payment_method || paymentMethods[0] || 'Bank Transfer';
-    const resolvedFiatCurrency = fiat_currency || ad.fiat_currency || ad.fiat || 'USD';
     const shortRef = trade_ref || generateTradeId();
     const adIdentifier = String(ad.id || ad.public_ad_id || ad_id);
 
@@ -266,6 +224,10 @@ export async function POST(req: NextRequest) {
     const publicId = rpcResult.public_id || shortRef;
     const sellerId = rpcResult.seller_id;
     const buyerId = rpcResult.buyer_id;
+    const finalCryptoAmount = Number(rpcResult?.crypto_amount ?? calculatedCrypto);
+    const finalFiatAmount = Number(rpcResult?.fiat_amount ?? numericFiat);
+    const finalUnitPrice = Number(rpcResult?.price ?? unitPrice);
+    const finalFiatCurrency = String(rpcResult?.fiat_currency ?? resolvedFiatCurrency);
     const nowIso = new Date().toISOString();
 
     // 9. Send Auto-Reply Message if configured
@@ -320,7 +282,7 @@ export async function POST(req: NextRequest) {
         await supabase.from('notifications').insert({
           user_id: sellerId,
           title: 'Trade Request Initiated',
-          message: `New trade request #${publicId} opened: ${calculatedCrypto.toFixed(4)} ${formattedCoin} for ${numericFiat.toFixed(2)} ${resolvedFiatCurrency}.`,
+          message: `New trade request #${publicId} opened: ${finalCryptoAmount.toFixed(4)} ${formattedCoin} for ${finalFiatAmount.toFixed(2)} ${resolvedFiatCurrency}.`,
           type: 'trade_initiated',
           is_read: false,
           read: false,
@@ -352,11 +314,11 @@ export async function POST(req: NextRequest) {
           publicId: String(publicId),
           sellerId: String(sellerId),
           buyerId: String(buyerId || user.id),
-          cryptoAmount: calculatedCrypto,
-          fiatAmount: numericFiat,
-          fiatCurrency: resolvedFiatCurrency,
+          cryptoAmount: finalCryptoAmount,
+          fiatAmount: finalFiatAmount,
+          fiatCurrency: finalFiatCurrency,
           asset: String(rpcResult.asset || ad.crypto || 'USDT'),
-          price: unitPrice,
+          price: finalUnitPrice,
           paymentMethod: resolvedPaymentMethod,
           status: 'pending',
           createdAt: nowIso,

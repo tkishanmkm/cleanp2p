@@ -168,20 +168,22 @@ export function AdCard({ ad, marketPriceUsd: propMarketPriceUsd, fiatExchangeRat
   // If available crypto inventory is passed (token amount), calculate available fiat using unit price:
   // Max Limit (Fiat) = Available Crypto * Unit Price
   let availableFiatFromInventory = Infinity;
-  const rawAvailableCrypto = (ad as any).available_crypto ?? (ad as any).availableCrypto ?? (ad as any).available_tokens ?? (ad as any).crypto_inventory;
-  if (rawAvailableCrypto !== undefined && rawAvailableCrypto !== null && Number(rawAvailableCrypto) >= 0) {
+  const rawAvailableCrypto =
+    (ad as any).available_crypto ??
+    (ad as any).availableCrypto ??
+    (ad as any).available_tokens ??
+    (ad as any).crypto_inventory ??
+    (ad as any).available_amount ??
+    (ad as any).total_amount;
+  if (rawAvailableCrypto !== undefined && rawAvailableCrypto !== null && Number.isFinite(Number(rawAvailableCrypto)) && Number(rawAvailableCrypto) >= 0) {
     const availCryptoNum = Number(rawAvailableCrypto);
-    availableFiatFromInventory = availCryptoNum * (adPrice > 0 ? adPrice : 1);
-  } else if (adCreator?.cryptoBalances && adCreator.cryptoBalances[adCrypto] !== undefined) {
-    const availCryptoNum = Number(adCreator.cryptoBalances[adCrypto]);
     availableFiatFromInventory = availCryptoNum * (adPrice > 0 ? adPrice : 1);
   }
 
-  // Check if advertiser balance was given in fiat or USD
-  const rawAdvertiserBalanceUSD = Number((ad as any).advertiserBalanceUSD ?? (ad as any).creator_crypto_balance_fiat ?? 0);
-  const advertiserBalanceInFiat = rawAdvertiserBalanceUSD > 0
-    ? rawAdvertiserBalanceUSD * (adFiat === 'USD' ? 1 : (fiatRates[adFiat] || 1))
-    : (availableFiatFromInventory < Infinity ? availableFiatFromInventory : maxLimit);
+  // Use only public ad inventory/limits. Never infer it from the seller's private wallet balance.
+  const advertiserBalanceInFiat = availableFiatFromInventory < Infinity
+    ? availableFiatFromInventory
+    : maxLimit;
 
   // Effective max limit is capped by available inventory/balance
   const effectiveMaxLimit = maxLimit > 0
@@ -207,7 +209,7 @@ export function AdCard({ ad, marketPriceUsd: propMarketPriceUsd, fiatExchangeRat
                 </Link>
                 <MerchantBadge tier={adCreator?.merchant_tier || (ad as any)?.merchant_tier} size="sm" />
                 {adCreator?.country && <FlagIcon countryCode={adCreator.country} />}
-                {displayedBadges.map((badge, i) => (
+                {displayedBadges.map((badge: string, i: number) => (
                   <span
                     key={i}
                     title={badge}
@@ -254,12 +256,12 @@ export function AdCard({ ad, marketPriceUsd: propMarketPriceUsd, fiatExchangeRat
           )}
           
           <div className="flex flex-wrap gap-1">
-            {(ad.paymentMethods || []).map(pm => <Badge key={pm} variant="outline" className="text-xs">{pm}</Badge>)}
+            {(ad.paymentMethods || []).map((pm: string) => <Badge key={pm} variant="outline" className="text-xs">{pm}</Badge>)}
           </div>
           
           {ad.tags && ad.tags.length > 0 && (
             <div className="flex flex-wrap gap-1">
-              {ad.tags.map(tag => <Badge key={tag} variant="secondary">{tag}</Badge>)}
+              {ad.tags.map((tag: string) => <Badge key={tag} variant="secondary">{tag}</Badge>)}
             </div>
           )}
         </div>
@@ -351,7 +353,7 @@ export function AdCard({ ad, marketPriceUsd: propMarketPriceUsd, fiatExchangeRat
                         <DetailRow label="Price" value={<div className="flex items-center gap-2">{adPrice.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}<span className="text-muted-foreground">{adFiat} / {adCrypto}</span></div>} />
                         <DetailRow label="Limits" value={`${minLimit.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} - ${effectiveMaxLimit.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ${adFiat}`} />
                         <DetailRow label="Payment Window" value={`${configuredPaymentWindow} minutes`} />
-                        <DetailRow label="Payment Methods" value={<div className="flex flex-wrap gap-1 justify-end">{(ad.paymentMethods || []).map(pm => <Badge key={pm} variant="outline">{pm}</Badge>)}</div>} />
+                        <DetailRow label="Payment Methods" value={<div className="flex flex-wrap gap-1 justify-end">{(ad.paymentMethods || []).map((pm: string) => <Badge key={pm} variant="outline">{pm}</Badge>)}</div>} />
                       </div>
                       <div className="space-y-2 text-sm p-3 border rounded-md bg-secondary/50 mt-2">
                         <p className="font-medium">Terms & Conditions</p>
@@ -360,7 +362,7 @@ export function AdCard({ ad, marketPriceUsd: propMarketPriceUsd, fiatExchangeRat
                       {ad.tags && ad.tags.length > 0 && (
                         <div className="space-y-2 text-sm p-3 border rounded-md bg-secondary/50 mt-2">
                           <p className="font-medium">Tags</p>
-                          <div className="flex flex-wrap gap-1">{ad.tags.map(tag => <Badge key={tag} variant="secondary">{tag}</Badge>)}</div>
+                          <div className="flex flex-wrap gap-1">{ad.tags.map((tag: string) => <Badge key={tag} variant="secondary">{tag}</Badge>)}</div>
                         </div>
                       )}
                     </div>

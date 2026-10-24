@@ -5,6 +5,7 @@ import { findAdById, resolveBothTargetRows } from '@/lib/ad-lookup';
 import { resolveTradeType } from '@/utils/p2p-helpers';
 import { verifyServerAdmin } from '@/lib/server-admin-auth';
 import { FIAT_CURRENCIES } from '@/lib/currencies';
+import { resolveAuthoritativeAdQuote } from '@/lib/p2p/authoritativeAdQuote';
 
 export const dynamic = 'force-dynamic';
 
@@ -423,7 +424,10 @@ export async function PATCH(
     let newStatus: string;
 
     if (body.active !== undefined) {
-      isActive = Boolean(body.active);
+      if (typeof body.active !== 'boolean' && body.active !== 'true' && body.active !== 'false') {
+        return NextResponse.json({ error: 'The active field must be a boolean.' }, { status: 400 });
+      }
+      isActive = body.active === true || body.active === 'true';
       newStatus = isActive ? 'ACTIVE' : 'INACTIVE';
     } else if (body.status !== undefined) {
       const requestedStatus = String(body.status).toUpperCase().trim();
@@ -608,13 +612,28 @@ export async function PUT(
       ? Number(body.margin) 
       : (body.rate_percent !== undefined && body.rate_percent !== null && body.rate_percent !== '' ? Number(body.rate_percent) : undefined);
 
-    if (price !== undefined && price <= 0) {
-      return NextResponse.json({ error: 'Price must be greater than 0.' }, { status: 400 });
+    if (price !== undefined && (!Number.isFinite(price) || price <= 0)) {
+      return NextResponse.json({ error: 'Price must be a finite number greater than 0.' }, { status: 400 });
     }
-    if (minAmount !== undefined && minAmount <= 0) {
-      return NextResponse.json({ error: 'Minimum limit must be greater than 0.' }, { status: 400 });
+    if (unitPrice !== undefined && (!Number.isFinite(unitPrice) || unitPrice <= 0)) {
+      return NextResponse.json({ error: 'Unit price must be a finite number greater than 0.' }, { status: 400 });
     }
-    if (minAmount !== undefined && maxAmount !== undefined && maxAmount < minAmount) {
+    if (minAmount !== undefined && (!Number.isFinite(minAmount) || minAmount <= 0)) {
+      return NextResponse.json({ error: 'Minimum limit must be a finite number greater than 0.' }, { status: 400 });
+    }
+    if (maxAmount !== undefined && (!Number.isFinite(maxAmount) || maxAmount <= 0)) {
+      return NextResponse.json({ error: 'Maximum limit must be a finite number greater than 0.' }, { status: 400 });
+    }
+    if (margin !== undefined && !Number.isFinite(margin)) {
+      return NextResponse.json({ error: 'Margin must be a finite number.' }, { status: 400 });
+    }
+    const effectiveMinAmount = minAmount ?? Number(existingAd.min_amount ?? existingAd.min_limit ?? 0);
+    const effectiveMaxAmount = maxAmount ?? Number(existingAd.max_amount ?? existingAd.max_limit ?? Number.POSITIVE_INFINITY);
+    if (
+      Number.isFinite(effectiveMinAmount) &&
+      effectiveMinAmount > 0 &&
+      effectiveMaxAmount < effectiveMinAmount
+    ) {
       return NextResponse.json({ error: 'Maximum limit must be greater than or equal to minimum limit.' }, { status: 400 });
     }
 
@@ -633,7 +652,15 @@ export async function PUT(
       ? body.tags 
       : (Array.isArray(body.offer_tags) ? body.offer_tags : (Array.isArray(body.ad_tags) ? body.ad_tags : undefined));
 
-    const isFixed = body.rate_type === 'fixed' || body.pricing_type === 'FIXED' || Boolean(body.is_fixed);
+    const existingIsFixed = Boolean(existingAd.is_fixed) ||
+      String(existingAd.pricing_type || '').toUpperCase() === 'FIXED' ||
+      String(existingAd.rate_type || '').toLowerCase() === 'fixed';
+    const pricingWasSpecified = body.rate_type !== undefined || body.pricing_type !== undefined || body.is_fixed !== undefined;
+    const isFixed = pricingWasSpecified
+      ? (String(body.pricing_type || '').toUpperCase() === 'FIXED' ||
+         String(body.rate_type || '').toLowerCase() === 'fixed' ||
+         body.is_fixed === true)
+      : existingIsFixed;
     const pricingType = isFixed ? 'FIXED' : 'FLOAT';
     const rateType = isFixed ? 'fixed' : 'market';
 
@@ -670,10 +697,26 @@ export async function PUT(
     // Authoritative Server-Side ±50% Reference Market Price Validation for Edited Ads
     const effectiveAsset = String(updatedAsset || existingAd.asset_symbol || existingAd.asset || existingAd.crypto || 'USDT').toUpperCase().trim();
     const effectiveFiat = String(updatedFiat || existingAd.fiat_symbol || existingAd.fiat_currency || existingAd.fiat || 'USD').toUpperCase().trim();
+    const effectiveMargin = margin !== undefined
+      ? margin
+      : Number(existingAd.rate_percent ?? existingAd.margin ?? existingAd.price_margin ?? 0);
+    const updatedQuote = await resolveAuthoritativeAdQuote({
+      asset_symbol: effectiveAsset,
+      fiat_currency: effectiveFiat,
+      pricing_type: pricingType,
+      is_fixed: isFixed,
+      price: price !== undefined ? price : (existingAd.price ?? existingAd.unit_price ?? existingAd.fixed_rate),
+      fixed_rate: existingAd.fixed_rate,
+      margin: effectiveMargin,
+      rate_percent: effectiveMargin,
+    });
+    if (!updatedQuote) {
+      return NextResponse.json({ error: 'Unable to resolve a valid current advertisement price.' }, { status: 503 });
+    }
 
     if (isFixed) {
-      const effectiveEditPrice = price !== undefined ? price : Number(existingAd.price ?? existingAd.unit_price ?? 0);
-      if (effectiveEditPrice <= 0) {
+      const effectiveEditPrice = price !== undefined ? price : Number(existingAd.price ?? existingAd.unit_price ?? existingAd.fixed_rate ?? 0);
+      if (!Number.isFinite(effectiveEditPrice) || effectiveEditPrice <= 0) {
         return NextResponse.json({ error: 'Valid fixed price is required for fixed-rate ads.' }, { status: 400 });
       }
 
@@ -682,16 +725,18 @@ export async function PUT(
         .select('price_in_fiat, updated_at')
         .eq('asset_symbol', effectiveAsset)
         .eq('fiat_symbol', effectiveFiat)
+        .order('updated_at', { ascending: false, nullsFirst: false })
+        .limit(1)
         .maybeSingle();
 
-      if (marketError || !marketRow || !marketRow.price_in_fiat || Number(marketRow.price_in_fiat) <= 0) {
+      const refPrice = Number(marketRow?.price_in_fiat);
+      if (marketError || !marketRow || !Number.isFinite(refPrice) || refPrice <= 0) {
         return NextResponse.json(
           { error: `Market reference price is currently unavailable for ${effectiveAsset}/${effectiveFiat}. Please try again later.` },
           { status: 400 }
         );
       }
 
-      const refPrice = Number(marketRow.price_in_fiat);
       const minAllowedPrice = refPrice * 0.50;
       const maxAllowedPrice = refPrice * 1.50;
 
@@ -746,7 +791,6 @@ export async function PUT(
       if (maxAmount !== undefined) {
         p2pPayload.max_amount = maxAmount;
         p2pPayload.max_limit = maxAmount;
-        p2pPayload.available_amount = maxAmount;
       }
       if (margin !== undefined) {
         p2pPayload.rate_percent = margin;

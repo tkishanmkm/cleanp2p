@@ -4,6 +4,7 @@ import { generateTradeId } from '@/lib/id-generator';
 import { sendNewTradeNotificationEmail } from '@/lib/email/tradeEmailService';
 import { assertPlatformControlAllowed } from '@/lib/platform-guard';
 import { hasPendingWithdrawalApproval } from '@/lib/withdrawal-security';
+import { resolveAuthoritativeAdQuote } from '@/lib/p2p/authoritativeAdQuote';
 
 export const dynamic = 'force-dynamic';
 
@@ -92,16 +93,18 @@ export async function POST(req: NextRequest) {
     const adId = body.adId || body.ad_id;
     const rawCrypto = body.cryptoAmount ?? body.crypto_amount;
     const rawFiat = body.fiatAmount ?? body.fiat_amount;
-    const customRate = body.rate || body.price;
-    const customFiat = body.fiatCurrency || body.fiat_currency;
     const customPaymentMethod = body.paymentMethod || body.payment_method;
-    const tradeRef = body.tradeRef || body.trade_ref || generateTradeId();
-    const idempotencyKey =
-      (body.idempotencyKey ||
-      body.idempotency_key ||
-      req.headers.get('x-idempotency-key') ||
-      req.headers.get('idempotency-key') ||
-      '').trim();
+    const rawTradeRef = body.tradeRef ?? body.trade_ref;
+    const tradeRef = typeof rawTradeRef === 'string' && rawTradeRef.trim()
+      ? rawTradeRef.trim()
+      : generateTradeId();
+    const rawIdempotencyKey =
+      body.idempotencyKey ??
+      body.idempotency_key ??
+      req.headers.get('x-idempotency-key') ??
+      req.headers.get('idempotency-key') ??
+      '';
+    const idempotencyKey = typeof rawIdempotencyKey === 'string' ? rawIdempotencyKey.trim() : '';
 
     if (!idempotencyKey) {
       return NextResponse.json({
@@ -149,39 +152,64 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // 2. Resolve unit price & amounts
-    const rawPrice = customRate ?? ad.fixed_rate ?? ad.price;
-    const unitPrice = Number(rawPrice);
-    if (!rawPrice || isNaN(unitPrice) || unitPrice <= 0) {
+    if (ad.is_active === false || ad.active === false || ['INACTIVE', 'DELETED', 'SUSPENDED', 'REJECTED'].includes(String(ad.status || '').toUpperCase())) {
+      return NextResponse.json({ error: 'This advertisement is not available for new trades.' }, { status: 409 });
+    }
+
+    // Resolve price and fiat currency from server-side market/ad data only.
+    const adQuote = await resolveAuthoritativeAdQuote(ad);
+    if (!adQuote || !Number.isFinite(adQuote.price) || adQuote.price <= 0) {
       return NextResponse.json(
         { error: 'Advertisement unit price is invalid or market price is unavailable.' },
-        { status: 400 }
+        { status: 503 }
       );
     }
-    let calculatedCrypto = parseFloat(rawCrypto);
-    let numericFiat = parseFloat(rawFiat);
+    const unitPrice = adQuote.price;
+    const resolvedFiatCurrency = String(adQuote.fiatCurrency || 'USD').toUpperCase();
+    let calculatedCrypto = parseFloat(String(rawCrypto ?? ''));
+    let numericFiat = parseFloat(String(rawFiat ?? ''));
 
-    if (isNaN(calculatedCrypto) || calculatedCrypto <= 0) {
-      if (!isNaN(numericFiat) && numericFiat > 0 && unitPrice > 0) {
+    if (!Number.isFinite(calculatedCrypto) || calculatedCrypto <= 0) {
+      if (Number.isFinite(numericFiat) && numericFiat > 0) {
         calculatedCrypto = numericFiat / unitPrice;
       }
     }
 
-    if (isNaN(calculatedCrypto) || calculatedCrypto <= 0) {
+    if (!Number.isFinite(calculatedCrypto) || calculatedCrypto <= 0) {
       return NextResponse.json({ error: 'Invalid crypto amount.' }, { status: 400 });
     }
 
     calculatedCrypto = Number(calculatedCrypto.toFixed(8));
     numericFiat = Number((calculatedCrypto * unitPrice).toFixed(2));
+    if (!Number.isFinite(numericFiat) || numericFiat <= 0) {
+      return NextResponse.json({ error: 'Invalid fiat amount.' }, { status: 400 });
+    }
 
-    // 3. Resolve Payment Method & Currency
-    const paymentMethods = Array.isArray(ad.payment_methods)
-      ? ad.payment_methods
-      : typeof ad.payment_methods === 'string'
-      ? JSON.parse(ad.payment_methods)
-      : ['Bank Transfer'];
-    const resolvedPaymentMethod = customPaymentMethod || paymentMethods[0] || 'Bank Transfer';
-    const resolvedFiatCurrency = customFiat || ad.fiat_currency || ad.fiat || 'USD';
+    // 3. Validate the selected payment method against the advertisement.
+    let paymentMethods: string[] = [];
+    if (Array.isArray(ad.payment_methods)) {
+      paymentMethods = ad.payment_methods;
+    } else if (typeof ad.payment_methods === 'string' && ad.payment_methods.trim()) {
+      try {
+        const parsed = JSON.parse(ad.payment_methods);
+        paymentMethods = Array.isArray(parsed) ? parsed : [ad.payment_methods];
+      } catch {
+        paymentMethods = [ad.payment_methods];
+      }
+    }
+    paymentMethods = paymentMethods.filter((method: unknown): method is string => typeof method === 'string' && method.trim().length > 0).map((method) => method.trim());
+    if (paymentMethods.length === 0) paymentMethods = ['Bank Transfer'];
+    const requestedPaymentMethod = typeof customPaymentMethod === 'string' ? customPaymentMethod.trim() : '';
+    if (paymentMethods.length > 1 && !requestedPaymentMethod) {
+      return NextResponse.json({ error: 'Select a payment method for this advertisement.' }, { status: 400 });
+    }
+    const resolvedPaymentMethod = requestedPaymentMethod
+      ? paymentMethods.find((method) => method.toLowerCase() === requestedPaymentMethod.toLowerCase())
+      : paymentMethods[0];
+    if (!resolvedPaymentMethod) {
+      return NextResponse.json({ error: 'Selected payment method is not supported by this advertisement.' }, { status: 400 });
+    }
+
     const adIdentifier = String(ad.id || ad.public_ad_id || adId);
 
     // 4. Call Canonical Atomic Database RPC

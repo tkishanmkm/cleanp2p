@@ -20,6 +20,7 @@ export interface AuthUser {
   photoURL: string | null;
   avatar_url?: string | null;
   photo_url?: string | null;
+  created_at?: string;
   role: 'user' | 'admin' | 'moderator';
   isAdmin: boolean;
   rawUser: SupabaseUser;
@@ -32,6 +33,7 @@ export interface AuthContextState {
   session: Session | null;
   isAdmin: boolean;
   isLoading: boolean;
+  loading: boolean;
   isUserLoading: boolean;
   userError: Error | null;
   signIn: typeof signInWithEmail;
@@ -239,6 +241,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       photoURL: effectivePhoto,
       avatar_url: effectivePhoto,
       photo_url: effectivePhoto,
+      created_at: supabaseUser.created_at,
       role: (profile?.role || (isUserAdmin ? 'admin' : 'user')) as 'user' | 'admin' | 'moderator',
       isAdmin: isUserAdmin,
       rawUser: supabaseUser,
@@ -254,6 +257,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     session,
     isAdmin,
     isLoading,
+    loading: isLoading,
     isUserLoading: isLoading,
     userError,
     signIn: signInWithIdentifier,

@@ -1,53 +1,27 @@
-import { NextRequest, NextResponse } from 'next/server';
-import { processPendingWithdrawals } from '@/lib/withdrawal-processor';
-import { verifyWorkerAuth } from '@/lib/security/worker-auth';
+import { NextResponse } from 'next/server';
 
-export async function POST(req: NextRequest) {
-  try {
-    const auth = verifyWorkerAuth(req, {
-      allowedSecrets: [
-        process.env.WITHDRAWAL_WORKER_SECRET,
-        process.env.PROVISION_SERVICE_KEY,
-        process.env.CHAIN_INGEST_SECRET,
-      ],
-      customHeaderNames: ['x-withdrawal-secret', 'x-service-key', 'x-worker-secret'],
-    });
+export const dynamic = 'force-dynamic';
 
-    if (!auth.authorized) {
-      return NextResponse.json(
-        { error: 'Unauthorized: Invalid or missing withdrawal worker secret header.' },
-        { status: 401 }
-      );
-    }
+/**
+ * Retired legacy processor. All withdrawal dispatch must use the canonical
+ * withdrawal worker, which atomically claims onchain_withdrawals and preserves
+ * reservations for ambiguous broadcasts.
+ */
+function retiredResponse(): NextResponse {
+  return NextResponse.json(
+    {
+      success: false,
+      error: 'Legacy withdrawal processing is disabled. Use the authenticated canonical withdrawal queue.',
+      code: 'LEGACY_WITHDRAWAL_PROCESSOR_DISABLED',
+    },
+    { status: 410, headers: { 'Cache-Control': 'no-store' } }
+  );
+}
 
-    // Parse optional batch limit from query or body
-    let limit = 20;
-    try {
-      const url = new URL(req.url);
-      const limitParam = url.searchParams.get('limit');
-      if (limitParam) {
-        limit = parseInt(limitParam, 10) || 20;
-      }
-    } catch {
-      // Ignore URL parsing errors
-    }
+export async function POST(_request: Request): Promise<NextResponse> {
+  return retiredResponse();
+}
 
-    // Process pending approved withdrawals
-    const summary = await processPendingWithdrawals(limit);
-
-    return NextResponse.json({
-      success: true,
-      timestamp: new Date().toISOString(),
-      ...summary,
-    });
-  } catch (error: unknown) {
-    const message = error instanceof Error ? error.message : String(error);
-    return NextResponse.json(
-      {
-        success: false,
-        error: `Withdrawal broadcast processing failed: ${message}`,
-      },
-      { status: 500 }
-    );
-  }
+export async function GET(_request: Request): Promise<NextResponse> {
+  return retiredResponse();
 }

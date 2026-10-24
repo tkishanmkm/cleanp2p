@@ -5,6 +5,8 @@ import { generateTradeId } from '@/lib/id-generator';
 import { sendNewTradeNotificationEmail } from '@/lib/email/tradeEmailService';
 import { assertPlatformControlAllowed } from '@/lib/platform-guard';
 import { hasPendingWithdrawalApproval } from '@/lib/withdrawal-security';
+import { resolveAuthoritativeAdQuote } from '@/lib/p2p/authoritativeAdQuote';
+import { getTradeEligibilityFailure } from '@/lib/p2p/tradeEligibility';
 
 export const dynamic = 'force-dynamic';
 
@@ -29,13 +31,12 @@ export async function POST(req: Request) {
       data: { user },
       error: authError,
     } = await supabase.auth.getUser();
-    console.log('[DEBUG] Auth getUser result:', { user: user?.id, error: authError });
 
     if (authError || !user) {
-      return NextResponse.json({ 
-        error: 'Unauthorized. Please sign in.',
-        debug: { authError, userId: user?.id }
-      }, { status: 401 });
+      return NextResponse.json(
+        { error: 'Unauthorized. Please sign in.' },
+        { status: 401, headers: { 'Cache-Control': 'no-store' } }
+      );
     }
 
     // Pending Withdrawal Approval Lockout Check
@@ -62,15 +63,15 @@ export async function POST(req: Request) {
     const rawFiat = body.fiatAmount ?? body.fiat_amount;
     const rawCrypto = body.cryptoAmount ?? body.crypto_amount;
     const customPaymentMethod = body.paymentMethod || body.payment_method;
-    const customPrice = body.price || body.rate;
-    const customFiatCurrency = body.fiatCurrency || body.fiat_currency;
-    const tradeRef = body.tradeRef || body.trade_ref || generateTradeId();
-    const idempotencyKey =
-      (body.idempotencyKey ||
-      body.idempotency_key ||
-      req.headers.get('x-idempotency-key') ||
-      req.headers.get('idempotency-key') ||
-      '').trim();
+    const rawTradeRef = body.tradeRef ?? body.trade_ref;
+    const tradeRef = typeof rawTradeRef === 'string' && rawTradeRef.trim() ? rawTradeRef.trim() : generateTradeId();
+    const rawIdempotencyKey =
+      body.idempotencyKey ??
+      body.idempotency_key ??
+      req.headers.get('x-idempotency-key') ??
+      req.headers.get('idempotency-key') ??
+      '';
+    const idempotencyKey = typeof rawIdempotencyKey === 'string' ? rawIdempotencyKey.trim() : '';
 
     if (!idempotencyKey) {
       return NextResponse.json({
@@ -87,7 +88,6 @@ export async function POST(req: Request) {
 
     // 1. Fetch Ad safely to read metadata
     let ad: any = null;
-    console.log('[DEBUG] Auth User ID:', user?.id);
     
     let p2pQuery = supabase.from('p2p_ads').select('*');
     if (isIdUUID) {
@@ -113,6 +113,11 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: 'Advertisement not found.' }, { status: 404 });
     }
 
+    const adStatus = String(ad.status || '').trim().toUpperCase();
+    if (ad.is_active === false || ad.active === false || ['INACTIVE', 'DELETED', 'SUSPENDED', 'REJECTED', 'REMOVED', 'CANCELLED'].includes(adStatus)) {
+      return NextResponse.json({ error: 'This advertisement is not available for new trades.' }, { status: 409 });
+    }
+
     // 2. Prevent trading with own ad
     if (ad.user_id === user.id) {
       return NextResponse.json(
@@ -122,29 +127,35 @@ export async function POST(req: Request) {
     }
 
     // 3. Resolve numerical amounts with exact precision
-    const rawPrice = customPrice ?? ad.fixed_rate ?? ad.price;
-    const unitPrice = Number(rawPrice);
-    if (!rawPrice || isNaN(unitPrice) || unitPrice <= 0) {
+    const adQuote = await resolveAuthoritativeAdQuote(ad);
+    if (!adQuote || !Number.isFinite(adQuote.price) || adQuote.price <= 0) {
       return NextResponse.json(
         { error: 'Advertisement unit price is invalid or market price is unavailable.' },
         { status: 400 }
       );
     }
-    let calculatedCrypto = parseFloat(rawCrypto);
-    let numericFiat = parseFloat(rawFiat);
+    const unitPrice = adQuote.price;
+    const resolvedFiatCurrency = adQuote.fiatCurrency;
+    let calculatedCrypto = parseFloat(String(rawCrypto ?? ''));
+    let numericFiat = parseFloat(String(rawFiat ?? ''));
 
-    if (isNaN(calculatedCrypto) || calculatedCrypto <= 0) {
-      if (!isNaN(numericFiat) && numericFiat > 0 && unitPrice > 0) {
+    if (!Number.isFinite(calculatedCrypto) || calculatedCrypto <= 0) {
+      if (Number.isFinite(numericFiat) && numericFiat > 0 && unitPrice > 0) {
         calculatedCrypto = numericFiat / unitPrice;
       }
     }
 
-    if (isNaN(calculatedCrypto) || calculatedCrypto <= 0) {
+    if (!Number.isFinite(calculatedCrypto) || calculatedCrypto <= 0) {
       return NextResponse.json({ error: 'Invalid crypto amount.' }, { status: 400 });
     }
 
     calculatedCrypto = Number(calculatedCrypto.toFixed(8));
     numericFiat = Number((calculatedCrypto * unitPrice).toFixed(2));
+
+    const eligibilityFailure = await getTradeEligibilityFailure(supabase, user, ad, numericFiat, resolvedFiatCurrency);
+    if (eligibilityFailure) {
+      return NextResponse.json({ success: false, error: eligibilityFailure.error, code: eligibilityFailure.code }, { status: eligibilityFailure.status });
+    }
 
     // 4. Resolve Payment Method & Currency
     let rawPaymentMethods: any[] = [];
@@ -191,11 +202,9 @@ export async function POST(req: Request) {
       resolvedPaymentMethod = trimmedCustom || 'Bank Transfer';
     }
 
-    const resolvedFiatCurrency = customFiatCurrency || ad.fiat_currency || ad.fiat || 'USD';
     const adIdentifier = String(ad.id || ad.public_ad_id || adId);
 
     // 5. Call Canonical Atomic Database RPC
-    console.log('[DEBUG] Calling initiate_trade_with_escrow RPC with user ID:', user?.id);
     const { data: rpcResult, error: rpcError } = await supabase.rpc('initiate_trade_with_escrow', {
       p_ad_id: adIdentifier,
       p_crypto_amount: calculatedCrypto,
@@ -235,6 +244,10 @@ export async function POST(req: Request) {
     const publicId = rpcResult.public_id || tradeRef;
     const sellerId = rpcResult.seller_id || ad.user_id;
     const buyerId = rpcResult.buyer_id || user.id;
+    const finalCryptoAmount = Number(rpcResult?.crypto_amount ?? calculatedCrypto);
+    const finalFiatAmount = Number(rpcResult?.fiat_amount ?? numericFiat);
+    const finalUnitPrice = Number(rpcResult?.price ?? unitPrice);
+    const finalFiatCurrency = String(rpcResult?.fiat_currency ?? resolvedFiatCurrency);
 
     if (tradeId && resolvedPaymentMethod) {
       const adminClient = getSupabaseAdminClient();
@@ -252,11 +265,11 @@ export async function POST(req: Request) {
           publicId: String(publicId),
           sellerId: String(sellerId),
           buyerId: String(buyerId),
-          cryptoAmount: calculatedCrypto,
-          fiatAmount: numericFiat,
-          fiatCurrency: resolvedFiatCurrency,
+          cryptoAmount: finalCryptoAmount,
+          fiatAmount: finalFiatAmount,
+          fiatCurrency: finalFiatCurrency,
           asset: String(rpcResult.asset || ad.crypto || 'USDT'),
-          price: unitPrice,
+          price: finalUnitPrice,
           paymentMethod: resolvedPaymentMethod,
           status: 'pending',
           createdAt: new Date().toISOString(),

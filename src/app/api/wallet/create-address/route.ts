@@ -1,46 +1,118 @@
+import { NextRequest, NextResponse } from 'next/server';
+import { cookies } from 'next/headers';
+import { createServerClient } from '@supabase/ssr';
 import { createClient } from '@supabase/supabase-js';
-import { NextResponse } from 'next/server';
-import { ethers } from 'ethers';
+import { getSupabaseAdminClient } from '@/lib/supabase/server';
+import { getOrDeriveUserDepositAddresses, type CryptoDepositAddresses } from '@/lib/hd-derivation-engine';
 
 export const dynamic = 'force-dynamic';
 
-const supabaseAdmin = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://placeholder.supabase.co',
-  process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'placeholder-key'
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL || '';
+const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
+const authClient = createClient(
+  supabaseUrl || 'https://placeholder.supabase.co',
+  supabaseAnonKey || 'placeholder-anon-key',
+  { auth: { persistSession: false, autoRefreshToken: false } }
 );
 
-export async function POST(request: Request) {
-  try {
-    const body = await request.json();
-    const { userId, assetSymbol } = body;
+async function resolveAuthenticatedUserId(req: NextRequest): Promise<string | null> {
+  const authHeader = req.headers.get('authorization');
+  if (authHeader?.match(/^Bearer\s+/i)) {
+    const token = authHeader.replace(/^Bearer\s+/i, '').trim();
+    const { data, error } = await authClient.auth.getUser(token);
+    if (!error && data.user?.id) return data.user.id;
+  }
 
-    if (!userId || !assetSymbol) {
-      return NextResponse.json(
-        { success: false, error: 'Missing userId or assetSymbol' },
-        { status: 400 }
-      );
+  if (!supabaseUrl || !supabaseAnonKey) return null;
+  try {
+    const cookieStore = await cookies();
+    const ssrClient = createServerClient(supabaseUrl, supabaseAnonKey, {
+      cookies: {
+        getAll: () => cookieStore.getAll(),
+        setAll: () => {
+          // Read-only session verification for this endpoint.
+        },
+      },
+    });
+    const { data, error } = await ssrClient.auth.getUser();
+    if (!error && data.user?.id) return data.user.id;
+  } catch {
+    // Fail closed if session verification fails.
+  }
+  return null;
+}
+
+function resolveCanonicalAddress(addresses: CryptoDepositAddresses, symbol: string): string | null {
+  const map: Record<string, keyof CryptoDepositAddresses> = {
+    ETH: 'ETH',
+    BTC: 'BTC',
+    LTC: 'LTC',
+    USDT_ERC20: 'USDT_ERC20',
+    USDT_BEP20: 'USDT_BEP20',
+    USDT_TRC20: 'USDT_TRC20',
+  };
+  const key = map[symbol];
+  return key ? addresses[key] || null : null;
+}
+
+function addressesMatch(symbol: string, existingAddress: string, canonicalAddress: string): boolean {
+  // EVM and Bech32 addresses are case-insensitive; TRON Base58 addresses are case-sensitive.
+  if (symbol === 'USDT_TRC20') return existingAddress === canonicalAddress;
+  return existingAddress.toLowerCase() === canonicalAddress.toLowerCase();
+}
+
+export async function POST(req: NextRequest): Promise<NextResponse> {
+  try {
+    const userId = await resolveAuthenticatedUserId(req);
+    if (!userId) {
+      return NextResponse.json({ success: false, error: 'Unauthorized' }, { status: 401 });
     }
 
-    const symbol = assetSymbol.toUpperCase();
+    const body = await req.json().catch(() => ({}));
+    const symbol = String(body.assetSymbol || '').trim().toUpperCase();
+    const allowed = new Set(['ETH', 'BTC', 'LTC', 'USDT_ERC20', 'USDT_BEP20', 'USDT_TRC20']);
+    if (!allowed.has(symbol)) {
+      return NextResponse.json({ success: false, error: 'Unsupported assetSymbol' }, { status: 400 });
+    }
 
-    // 1. Check if wallet already exists
-    const { data: existingWallet } = await supabaseAdmin
+    const derived = await getOrDeriveUserDepositAddresses(userId);
+    const depositAddress = resolveCanonicalAddress(derived.addresses, symbol);
+    if (!depositAddress) {
+      return NextResponse.json({ success: false, error: 'No canonical deposit address is configured for this asset' }, { status: 503 });
+    }
+
+    const admin = getSupabaseAdminClient();
+    const { data: existingWallet, error: readError } = await admin
       .from('user_wallets')
       .select('*')
       .eq('user_id', userId)
       .eq('asset_symbol', symbol)
       .maybeSingle();
 
+    if (readError) throw readError;
+
     if (existingWallet) {
-      return NextResponse.json({ success: true, wallet: existingWallet });
+      if (existingWallet.deposit_address && !addressesMatch(symbol, String(existingWallet.deposit_address), depositAddress)) {
+        return NextResponse.json({
+          success: false,
+          error: 'A legacy deposit address differs from the canonical derived address. The record was not overwritten; manual reconciliation is required before changing it.',
+        }, { status: 409 });
+      }
+      if (existingWallet.deposit_address) {
+        return NextResponse.json({ success: true, wallet: existingWallet });
+      }
+      const { data: updatedWallet, error: updateError } = await admin
+        .from('user_wallets')
+        .update({ deposit_address: depositAddress, updated_at: new Date().toISOString() })
+        .eq('user_id', userId)
+        .eq('asset_symbol', symbol)
+        .select()
+        .single();
+      if (updateError) throw updateError;
+      return NextResponse.json({ success: true, wallet: updatedWallet });
     }
 
-    // 2. Generate new wallet address
-    const randomWallet = ethers.Wallet.createRandom();
-    const depositAddress = randomWallet.address;
-
-    // 3. Save to user_wallets table
-    const { data: newWallet, error: insertError } = await supabaseAdmin
+    const { data: newWallet, error: insertError } = await admin
       .from('user_wallets')
       .insert({
         user_id: userId,
@@ -53,12 +125,10 @@ export async function POST(request: Request) {
       .single();
 
     if (insertError) throw insertError;
-
     return NextResponse.json({ success: true, wallet: newWallet });
-  } catch (err: any) {
-    return NextResponse.json(
-      { success: false, error: err.message || 'Server Error' },
-      { status: 500 }
-    );
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : 'Server error';
+    console.error('[POST /api/wallet/create-address] Error:', message);
+    return NextResponse.json({ success: false, error: message }, { status: 500 });
   }
 }

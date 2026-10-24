@@ -1,5 +1,5 @@
 import { createServerClient } from '@supabase/ssr';
-import { createClient } from '@supabase/supabase-js';
+import { getSupabaseAdminClient } from '@/lib/supabase/server';
 import { cookies } from 'next/headers';
 import { NextResponse, type NextRequest } from 'next/server';
 import { findAdById, resolveBothTargetRows } from '@/lib/ad-lookup';
@@ -15,10 +15,7 @@ export async function GET(
     const resolvedParams = await Promise.resolve(params);
     const id = (resolvedParams.id || '').trim();
 
-    const supabaseAdmin = createClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL || 'https://placeholder.supabase.co',
-      process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'placeholder-anon-key'
-    );
+    const supabaseAdmin = getSupabaseAdminClient();
 
     // 1. Fetch ad by id, public_ad_id, public_id, or ad_id using universal resolver
     const resolved = await findAdById(id);
@@ -54,33 +51,7 @@ export async function GET(
       }
     }
 
-    // Fetch creator's wallet balance for the ad coin
-    let creatorBalance: number | null = null;
-    const coin = (ad.crypto || ad.coin || ad.asset || 'USDT').toUpperCase();
-
-    if (creatorId) {
-      try {
-        const { data: wallet } = await supabaseAdmin
-          .from('user_wallets')
-          .select('available_balance, balance, locked_balance')
-          .eq('user_id', creatorId)
-          .ilike('asset_symbol', coin)
-          .maybeSingle();
-
-        if (wallet) {
-          const avail = Number(wallet.available_balance ?? (Number(wallet.balance || 0) - Number(wallet.locked_balance || 0)));
-          creatorBalance = Math.max(0, avail);
-        } else if (creatorProfile) {
-          const colKey = `${coin.toLowerCase()}_balance`;
-          if (creatorProfile[colKey] !== undefined) {
-            creatorBalance = Number(creatorProfile[colKey] || 0);
-          }
-        }
-      } catch (wErr) {
-        console.warn('Wallet balance fetch error in /api/p2p/ads/[id]:', wErr);
-      }
-    }
-
+    // Never expose a seller's private wallet balance through a public ad endpoint.
     // STRICT USERNAME ENFORCEMENT: lowercase letters, numbers, dot, underscore only
     const username = creatorProfile?.username || ad.user_display_name || 'trader';
     const lastActive = creatorProfile?.last_seen || creatorProfile?.last_seen_at || creatorProfile?.last_active || creatorProfile?.updated_at || null;
@@ -104,7 +75,6 @@ export async function GET(
           avg_pay_time: creatorProfile?.avg_pay_time || null,
           avg_payment_minutes: creatorProfile?.avg_payment_minutes || null,
         },
-        creatorCryptoBalance: creatorBalance,
       },
     });
   } catch (err: any) {
@@ -122,8 +92,7 @@ export async function PATCH(
     const resolvedParams = await Promise.resolve(params);
     const { id } = resolvedParams;
 
-    const cookieHeader = cookies();
-    const cookieStore = typeof (cookieHeader as any)?.then === 'function' ? await cookieHeader : cookieHeader;
+    const cookieStore = await cookies();
 
     const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL || 'https://placeholder.supabase.co';
     const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'placeholder-anon-key';
@@ -136,7 +105,7 @@ export async function PATCH(
           getAll() {
             return cookieStore.getAll();
           },
-          setAll(cookiesToSet) {
+          setAll(cookiesToSet: Array<{ name: string; value: string; options?: any }>) {
             try {
               cookiesToSet.forEach(({ name, value, options }) =>
                 cookieStore.set(name, value, options)
@@ -189,7 +158,7 @@ export async function PATCH(
     }
 
     const adOwnerId = existingAd.user_id || existingAd.userId;
-    if (adOwnerId && String(adOwnerId) !== String(user.id)) {
+    if (!adOwnerId || String(adOwnerId) !== String(user.id)) {
       return NextResponse.json({ error: 'Forbidden. You do not own this advertisement.' }, { status: 403 });
     }
 
@@ -211,10 +180,7 @@ export async function PATCH(
     if (body.min_limit !== undefined && body.min_limit !== null && body.min_limit !== '') body.min_limit = Number(body.min_limit);
     if (body.max_limit !== undefined && body.max_limit !== null && body.max_limit !== '') body.max_limit = Number(body.max_limit);
 
-    const supabaseAdmin = createClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL || 'https://placeholder.supabase.co',
-      process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'placeholder-anon-key'
-    );
+    const supabaseAdmin = getSupabaseAdminClient();
 
     const { p2pAdsRow, adsRow } = await resolveBothTargetRows(existingAd, id, supabaseAdmin);
 
@@ -222,16 +188,23 @@ export async function PATCH(
     let adsMutated = false;
     let updatedResult: any = null;
 
+    for (const flagName of ['active', 'is_active'] as const) {
+      const flag = body[flagName];
+      if (flag !== undefined && typeof flag !== 'boolean' && flag !== 'true' && flag !== 'false') {
+        return NextResponse.json({ error: `${flagName} must be a boolean.` }, { status: 400 });
+      }
+    }
+
     const hasStatus = body.status !== undefined || body.active !== undefined || body.is_active !== undefined;
     let newStatus: string | undefined = undefined;
     let isActive: boolean | undefined = undefined;
 
     if (hasStatus) {
       if (body.active !== undefined) {
-        isActive = Boolean(body.active);
+        isActive = body.active === true || body.active === 'true';
         newStatus = isActive ? 'ACTIVE' : 'INACTIVE';
       } else if (body.is_active !== undefined) {
-        isActive = Boolean(body.is_active);
+        isActive = body.is_active === true || body.is_active === 'true';
         newStatus = isActive ? 'ACTIVE' : 'INACTIVE';
       } else if (body.status !== undefined) {
         newStatus = String(body.status).toUpperCase().trim();
@@ -263,7 +236,6 @@ export async function PATCH(
         const maxL = body.max_limit ?? body.max_amount;
         p2pPayload.max_limit = maxL;
         p2pPayload.max_amount = maxL;
-        p2pPayload.available_amount = maxL;
       }
       if (body.rate_percent !== undefined) {
         p2pPayload.rate_percent = body.rate_percent;
@@ -366,8 +338,7 @@ export async function DELETE(
     const resolvedParams = await Promise.resolve(params);
     const { id } = resolvedParams;
 
-    const cookieHeader = cookies();
-    const cookieStore = typeof (cookieHeader as any)?.then === 'function' ? await cookieHeader : cookieHeader;
+    const cookieStore = await cookies();
 
     const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL || 'https://placeholder.supabase.co';
     const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'placeholder-anon-key';
@@ -380,7 +351,7 @@ export async function DELETE(
           getAll() {
             return cookieStore.getAll();
           },
-          setAll(cookiesToSet) {
+          setAll(cookiesToSet: Array<{ name: string; value: string; options?: any }>) {
             try {
               cookiesToSet.forEach(({ name, value, options }) =>
                 cookieStore.set(name, value, options)
@@ -423,14 +394,11 @@ export async function DELETE(
     }
 
     const adOwnerId = existingAd.user_id || existingAd.userId;
-    if (adOwnerId && String(adOwnerId) !== String(user.id)) {
+    if (!adOwnerId || String(adOwnerId) !== String(user.id)) {
       return NextResponse.json({ error: 'Forbidden. You do not own this advertisement.' }, { status: 403 });
     }
 
-    const supabaseAdmin = createClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL || 'https://placeholder.supabase.co',
-      process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'placeholder-anon-key'
-    );
+    const supabaseAdmin = getSupabaseAdminClient();
 
     const { p2pAdsRow, adsRow } = await resolveBothTargetRows(existingAd, id, supabaseAdmin);
 

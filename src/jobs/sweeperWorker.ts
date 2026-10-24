@@ -26,12 +26,25 @@ const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE
 const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || 'placeholder-key';
 export const supabaseAdmin = createClient(supabaseUrl, supabaseServiceKey);
 
+function assertSweeperRuntimeConfiguration(): void {
+  const configuredUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL || '';
+  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
+  const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
+
+  if (!configuredUrl || !/^https:\/\//i.test(configuredUrl) || configuredUrl.includes('placeholder')) {
+    throw new Error('Deposit sweeper is paused: a valid Supabase URL is required');
+  }
+  if (!serviceKey || serviceKey === 'placeholder-key' || serviceKey === anonKey) {
+    throw new Error('Deposit sweeper is paused: a distinct SUPABASE_SERVICE_ROLE_KEY is required');
+  }
+}
+
 // Master Hot Wallet Seed / Private Key from environment
 const MASTER_SEED_OR_PRIV_KEY = process.env.HOT_WALLET_PRIVATE_KEY || process.env.EVM_HOT_WALLET_PRIVATE_KEY || '';
-const HOT_WALLET_ADDRESS = process.env.HOT_WALLET_ADDRESS || process.env.EVM_HOT_WALLET_ADDRESS || '0x0000000000000000000000000000000000000000';
+const HOT_WALLET_ADDRESS = process.env.HOT_WALLET_ADDRESS || process.env.EVM_HOT_WALLET_ADDRESS || '';
 const HOT_WALLET_TRON_ADDRESS = process.env.HOT_WALLET_TRON_ADDRESS || process.env.TRON_HOT_WALLET_ADDRESS || '';
-const HOT_WALLET_BTC_ADDRESS = process.env.HOT_WALLET_BTC_ADDRESS || 'bc1q00000000000000000000000000000000000000';
-const HOT_WALLET_LTC_ADDRESS = process.env.HOT_WALLET_LTC_ADDRESS || 'ltc1q00000000000000000000000000000000000000';
+const HOT_WALLET_BTC_ADDRESS = process.env.HOT_WALLET_BTC_ADDRESS || '';
+const HOT_WALLET_LTC_ADDRESS = process.env.HOT_WALLET_LTC_ADDRESS || '';
 
 // Minimum Sweep Thresholds
 const MIN_SWEEP_THRESHOLD_USDT = 1.0; // Sweeps any deposit >= 1 USDT
@@ -1104,6 +1117,7 @@ export async function sweepTronDepositAddress(
   sweepId?: string,
   workerId?: string
 ): Promise<SweepResult> {
+  assertSweeperRuntimeConfiguration();
   const stopHeartbeat = sweepId && workerId ? startSweeperHeartbeat(sweepId, workerId) : () => {};
   let delegatedEnergy = false;
 
@@ -1213,7 +1227,7 @@ export async function sweepTronDepositAddress(
     }
 
     const hotWalletDestination = resolveTronHotWalletAddress();
-    if (!hotWalletDestination || hotWalletDestination === 'T00000000000000000000000000000000' || hotWalletDestination.length < 30) {
+    if (!/^T[1-9A-HJ-NP-Za-km-z]{33}$/.test(hotWalletDestination)) {
       throw new Error('TRON hot wallet destination address is not configured (checked HOT_WALLET_TRON_ADDRESS and TRON_HOT_WALLET_ADDRESS)');
     }
 
@@ -1363,8 +1377,17 @@ export async function sweepBtcDepositAddress(
   sweepId?: string,
   workerId?: string
 ): Promise<SweepResult> {
+  assertSweeperRuntimeConfiguration();
   const stopHeartbeat = sweepId && workerId ? startSweeperHeartbeat(sweepId, workerId) : () => {};
   try {
+    if (!HOT_WALLET_BTC_ADDRESS) {
+      throw new Error('Deposit sweeper is paused: HOT_WALLET_BTC_ADDRESS is not configured');
+    }
+    try {
+      bitcoin.address.toOutputScript(HOT_WALLET_BTC_ADDRESS, bitcoin.networks.bitcoin);
+    } catch {
+      throw new Error('Deposit sweeper is paused: HOT_WALLET_BTC_ADDRESS is invalid for Bitcoin mainnet');
+    }
     const mnemonic = process.env.DEPOSIT_HD_MNEMONIC;
     if (!mnemonic || !mnemonic.trim()) {
       throw new Error('DEPOSIT_HD_MNEMONIC is not configured in environment');
@@ -1582,8 +1605,17 @@ export async function sweepLtcDepositAddress(
   sweepId?: string,
   workerId?: string
 ): Promise<SweepResult> {
+  assertSweeperRuntimeConfiguration();
   const stopHeartbeat = sweepId && workerId ? startSweeperHeartbeat(sweepId, workerId) : () => {};
   try {
+    if (!HOT_WALLET_LTC_ADDRESS) {
+      throw new Error('Deposit sweeper is paused: HOT_WALLET_LTC_ADDRESS is not configured');
+    }
+    try {
+      bitcoin.address.toOutputScript(HOT_WALLET_LTC_ADDRESS, LTC_NETWORK);
+    } catch {
+      throw new Error('Deposit sweeper is paused: HOT_WALLET_LTC_ADDRESS is invalid for Litecoin');
+    }
     const mnemonic = process.env.DEPOSIT_HD_MNEMONIC;
     if (!mnemonic || !mnemonic.trim()) {
       throw new Error('DEPOSIT_HD_MNEMONIC is not configured in environment');
@@ -1815,6 +1847,11 @@ export async function sweepUserDepositAddress(
 
   if (normNet === 'LTC' || normAsset === 'LTC') {
     return sweepLtcDepositAddress(depositAddress, derivationIndex, sweepId, workerId);
+  }
+
+  assertSweeperRuntimeConfiguration();
+  if (!ethers.isAddress(HOT_WALLET_ADDRESS) || HOT_WALLET_ADDRESS.toLowerCase() === ethers.ZeroAddress) {
+    throw new Error('Deposit sweeper is paused: a valid non-zero EVM hot-wallet destination is required');
   }
 
   const stopHeartbeat = sweepId && workerId ? startSweeperHeartbeat(sweepId, workerId) : () => {};
@@ -2443,6 +2480,7 @@ export async function reconcileAmbiguousSweep(sweepId: string, workerId: string)
  * Scans DB for confirmed deposits and sweeps using atomic worker claims.
  */
 export async function runAutomatedSweeperJob(): Promise<SweepResult[]> {
+  assertSweeperRuntimeConfiguration();
   const workerId = `sweeper_worker_${Math.random().toString(36).substring(2, 10)}`;
   const results: SweepResult[] = [];
 

@@ -1649,6 +1649,7 @@ export interface SystemMessagePayload {
     | 'MARKED_PAID'
     | 'MESSAGE_BLOCKED'
     | 'SECURITY_REMINDER'
+    | 'MODERATOR_JOINED'
     | 'CUSTOM';
   sellerUsername?: string;
   buyerUsername?: string;

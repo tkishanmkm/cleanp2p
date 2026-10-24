@@ -1,25 +1,25 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
 import { createServerClient } from '@supabase/ssr';
-import { createClient as createSupabaseClient } from '@supabase/supabase-js';
+import { getSupabaseAdminClient } from '@/lib/supabase/server';
+import { timingSafeEqualString } from '@/lib/security/worker-auth';
 import { getOrDeriveUserDepositAddresses } from '@/lib/hd-derivation-engine';
 
 export const dynamic = 'force-dynamic';
 
 function getAdminClient() {
-  const supabaseUrl =
-    process.env.NEXT_PUBLIC_SUPABASE_URL ||
-    process.env.SUPABASE_URL ||
-    'https://eaiwgfxoiwxepinvcykg.supabase.co';
+  return getSupabaseAdminClient();
+}
 
-  const serviceRoleKey =
-    process.env.SUPABASE_SERVICE_ROLE_KEY ||
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ||
-    'placeholder-key';
-
-  return createSupabaseClient(supabaseUrl, serviceRoleKey, {
-    auth: { persistSession: false, autoRefreshToken: false },
-  });
+function isTrustedProvisioningRequest(req: NextRequest): boolean {
+  const configuredSecret = process.env.WALLET_PROVISIONING_SECRET?.trim();
+  if (!configuredSecret || configuredSecret === 'placeholder-secret' || configuredSecret === 'placeholder-key') {
+    return false;
+  }
+  const authHeader = req.headers.get('authorization') || '';
+  const match = authHeader.match(/^Bearer\s+(.+)$/i);
+  const suppliedSecret = match?.[1]?.trim() || '';
+  return Boolean(suppliedSecret) && timingSafeEqualString(suppliedSecret, configuredSecret);
 }
 
 async function resolveAuthenticatedUserId(req: NextRequest): Promise<string | null> {
@@ -72,32 +72,37 @@ async function resolveAuthenticatedUserId(req: NextRequest): Promise<string | nu
 
 export async function POST(req: NextRequest) {
   try {
-    // 1. Authentication Check (Task 2)
-    const authenticatedUserId = await resolveAuthenticatedUserId(req);
-    if (!authenticatedUserId) {
+    // Accept either a verified user session for that same user or a dedicated,
+    // constant-time-checked internal provisioning secret for the database trigger.
+    const trustedInternalRequest = isTrustedProvisioningRequest(req);
+    const authenticatedUserId = trustedInternalRequest ? null : await resolveAuthenticatedUserId(req);
+    if (!trustedInternalRequest && !authenticatedUserId) {
       return NextResponse.json(
         { error: 'Unauthorized. Authentication is required to provision wallets.' },
         { status: 401 }
       );
     }
 
-    // 2. Authorization Check (Task 3)
     let bodyUserId: string | null = null;
     try {
       const body = await req.json();
-      bodyUserId = body?.userId || null;
+      bodyUserId = typeof body?.userId === 'string' ? body.userId.trim() : null;
     } catch {
-      // JSON body is optional; default to authenticated user
+      // User-session requests may omit a body; internal requests may not.
     }
 
-    if (bodyUserId && bodyUserId !== authenticatedUserId) {
+    if (trustedInternalRequest) {
+      if (!bodyUserId || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(bodyUserId)) {
+        return NextResponse.json({ error: 'A valid userId is required for internal provisioning.' }, { status: 400 });
+      }
+    } else if (bodyUserId && bodyUserId !== authenticatedUserId) {
       return NextResponse.json(
         { error: 'Forbidden. Cannot provision wallets for another user.' },
         { status: 403 }
       );
     }
 
-    const targetUserId = authenticatedUserId;
+    const targetUserId = trustedInternalRequest ? bodyUserId as string : authenticatedUserId as string;
     const adminClient = getAdminClient();
 
     // 3. Inspect existing profile to verify wallet_index presence (Task 4)

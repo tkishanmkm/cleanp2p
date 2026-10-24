@@ -47,9 +47,15 @@ export async function createClient() {
  */
 export function getSupabaseAdminClient(): SupabaseClient {
   const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY?.trim();
-  if (!serviceKey || serviceKey === 'placeholder-key' || serviceKey === 'placeholder-anon-key') {
+  const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY?.trim();
+  if (
+    !serviceKey ||
+    serviceKey === 'placeholder-key' ||
+    serviceKey === 'placeholder-anon-key' ||
+    (anonKey && serviceKey === anonKey)
+  ) {
     throw new Error(
-      'SUPABASE_SERVICE_ROLE_KEY is required for privileged admin operations but is missing or not configured.'
+      'SUPABASE_SERVICE_ROLE_KEY is required for privileged admin operations and must not equal the public anon key.'
     );
   }
 
@@ -68,4 +74,9 @@ export function getSupabaseAdminClient(): SupabaseClient {
   }
 
   return serverAdminClient;
+}
+
+/** Backwards-compatible name for server-only privileged operations. */
+export function createAdminClient(): SupabaseClient {
+  return getSupabaseAdminClient();
 }

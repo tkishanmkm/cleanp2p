@@ -34,13 +34,10 @@ export async function POST(req: Request) {
     }
 
     if (authError || !user) {
-      console.error('[Auth Error Details in /api/ads/create]:', authError?.message);
+      console.warn('[Ads Create] Authentication failed.');
       return NextResponse.json(
-        { 
-          error: 'No active session found! Please refresh or log in again.', 
-          details: authError?.message 
-        }, 
-        { status: 401 }
+        { error: 'No active session found. Please refresh or log in again.' },
+        { status: 401, headers: { 'Cache-Control': 'no-store' } }
       );
     }
 
@@ -148,6 +145,33 @@ export async function POST(req: Request) {
       max_amount: strippedFormData.max_amount !== undefined && strippedFormData.max_amount !== null && strippedFormData.max_amount !== '' ? Number(strippedFormData.max_amount) : (strippedFormData.max_order ? Number(strippedFormData.max_order) : null),
       is_fixed: Boolean(strippedFormData.is_fixed ?? (typeof strippedFormData.fixed_rate === 'boolean' ? strippedFormData.fixed_rate : false)),
     };
+
+    const numericAdFields = [
+      'price', 'margin', 'min_amount', 'max_amount', 'min_order', 'max_order',
+      'total_amount', 'available_amount', 'rate_percent', 'rate_adjustment',
+      'margin_percentage',
+    ];
+    for (const field of numericAdFields) {
+      const value = cleanPayload[field];
+      if (value !== undefined && value !== null && !Number.isFinite(Number(value))) {
+        return NextResponse.json({ error: `Invalid numeric value for ${field}.` }, { status: 400 });
+      }
+    }
+    if (cleanPayload.is_fixed && (cleanPayload.price === null || cleanPayload.price <= 0)) {
+      return NextResponse.json({ error: 'Fixed-price advertisements require a finite price greater than 0.' }, { status: 400 });
+    }
+    if (cleanPayload.min_amount !== null && cleanPayload.min_amount !== undefined && cleanPayload.min_amount <= 0) {
+      return NextResponse.json({ error: 'Minimum order amount must be greater than 0.' }, { status: 400 });
+    }
+    if (cleanPayload.max_amount !== null && cleanPayload.max_amount !== undefined && cleanPayload.max_amount <= 0) {
+      return NextResponse.json({ error: 'Maximum order amount must be greater than 0.' }, { status: 400 });
+    }
+    if (cleanPayload.min_amount != null && cleanPayload.max_amount != null && cleanPayload.max_amount < cleanPayload.min_amount) {
+      return NextResponse.json({ error: 'Maximum order amount must be greater than or equal to the minimum.' }, { status: 400 });
+    }
+    if (cleanPayload.total_amount != null && cleanPayload.available_amount != null && cleanPayload.available_amount > cleanPayload.total_amount) {
+      return NextResponse.json({ error: 'Available amount cannot exceed total amount.' }, { status: 400 });
+    }
 
     if (typeof cleanPayload.fixed_rate === 'boolean') {
       delete cleanPayload.fixed_rate;

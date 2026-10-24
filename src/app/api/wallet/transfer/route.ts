@@ -49,7 +49,11 @@ export async function POST(req: NextRequest) {
     
     const targetIdentifier = String(recipientInput || recipientUsername || '').trim();
     const coinSymbol = String(asset || crypto || 'USDT').toUpperCase().trim();
-    const numericAmount = Number(amount);
+    const numericAmount = typeof amount === 'number'
+      ? amount
+      : typeof amount === 'string' && amount.trim().length > 0
+        ? Number(amount)
+        : Number.NaN;
 
     // Extract and validate client idempotency key
     const headerIdempotencyKey = req.headers.get('x-idempotency-key') || req.headers.get('idempotency-key');
@@ -63,7 +67,7 @@ export async function POST(req: NextRequest) {
       }, { status: 400 });
     }
 
-    if (!targetIdentifier || !coinSymbol || isNaN(numericAmount) || numericAmount <= 0) {
+    if (!targetIdentifier || !coinSymbol || !Number.isFinite(numericAmount) || numericAmount <= 0) {
       return NextResponse.json({ error: 'Invalid transfer payload. Recipient and positive amount required.' }, { status: 400 });
     }
 
@@ -123,14 +127,14 @@ export async function POST(req: NextRequest) {
     }
 
     // 3. Resolve recipient: Can be username, profile ID, user's email, or user's deposit address
-    let recipientProfile: { id: string; username: string; is_banned?: boolean; is_restricted?: boolean; account_status?: string } | null = null;
+    let recipientProfile: { id: string; username: string; is_banned?: boolean; is_restricted?: boolean; is_emergency_frozen?: boolean; account_status?: string } | null = null;
     const cleanTarget = targetIdentifier.replace(/^@/, '').trim();
     const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(cleanTarget);
 
     // 3a. Check by exact / case-insensitive username in profiles
     const { data: profByUsername } = await admin
       .from('profiles')
-      .select('id, username, is_banned, is_restricted, account_status')
+      .select('id, username, is_banned, is_restricted, is_emergency_frozen, account_status')
       .ilike('username', cleanTarget)
       .maybeSingle();
 
@@ -142,7 +146,7 @@ export async function POST(req: NextRequest) {
     if (!recipientProfile && isUuid) {
       const { data: profById } = await admin
         .from('profiles')
-        .select('id, username, is_banned, is_restricted, account_status')
+        .select('id, username, is_banned, is_restricted, is_emergency_frozen, account_status')
         .eq('id', cleanTarget)
         .maybeSingle();
       if (profById) {
@@ -154,7 +158,7 @@ export async function POST(req: NextRequest) {
     if (!recipientProfile) {
       const { data: profByEmail } = await admin
         .from('profiles')
-        .select('id, username, is_banned, is_restricted, account_status')
+        .select('id, username, is_banned, is_restricted, is_emergency_frozen, account_status')
         .or(`email.ilike.${cleanTarget},full_name.ilike.${cleanTarget}`)
         .maybeSingle();
       if (profByEmail) {
@@ -173,7 +177,7 @@ export async function POST(req: NextRequest) {
       if (depAddr?.user_id) {
         const { data: profByAddr } = await admin
           .from('profiles')
-          .select('id, username, is_banned, is_restricted, account_status')
+          .select('id, username, is_banned, is_restricted, is_emergency_frozen, account_status')
           .eq('id', depAddr.user_id)
           .maybeSingle();
         if (profByAddr) {
@@ -182,58 +186,8 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // 3e. If still not found, check Supabase Auth admin to see if user exists in auth.users by email or username
-    if (!recipientProfile) {
-      try {
-        const { data: authData } = await admin.auth.admin.listUsers();
-        if (authData?.users) {
-          const matchedAuthUser = authData.users.find((u) => {
-            const email = u.email?.toLowerCase() || '';
-            const emailPrefix = email.split('@')[0];
-            const metaUsername = (u.user_metadata?.username || '').toLowerCase();
-            const targetLower = cleanTarget.toLowerCase();
-            return (
-              email === targetLower ||
-              emailPrefix === targetLower ||
-              metaUsername === targetLower ||
-              u.id === cleanTarget
-            );
-          });
-
-          if (matchedAuthUser) {
-            // Find or insert profile for this user
-            const { data: existingProf } = await admin
-              .from('profiles')
-              .select('id, username, is_banned, is_restricted, account_status')
-              .eq('id', matchedAuthUser.id)
-              .maybeSingle();
-
-            if (existingProf) {
-              recipientProfile = existingProf;
-            } else {
-              // Auto-create/upsert basic profile so transfer succeeds seamlessly
-              const fallbackUsername = matchedAuthUser.user_metadata?.username || matchedAuthUser.email?.split('@')[0] || `user_${matchedAuthUser.id.slice(0, 6)}`;
-              const { data: newProf } = await admin
-                .from('profiles')
-                .upsert({
-                  id: matchedAuthUser.id,
-                  username: fallbackUsername,
-                  email: matchedAuthUser.email,
-                  account_status: 'ACTIVE',
-                })
-                .select('id, username, is_banned, is_restricted, account_status')
-                .single();
-
-              if (newProf) {
-                recipientProfile = newProf;
-              }
-            }
-          }
-        }
-      } catch (authLookupErr) {
-        console.warn('Auth user search fallback notice in transfer:', authLookupErr);
-      }
-    }
+    // Do not enumerate Auth users or auto-create a profile during a financial transfer.
+    // Profile provisioning must happen through the dedicated, audited signup workflow.
 
     if (!recipientProfile) {
       return NextResponse.json({ error: `Recipient "${targetIdentifier}" not found on Paxones.` }, { status: 404 });
@@ -247,7 +201,7 @@ export async function POST(req: NextRequest) {
     if (
       recipientProfile.is_banned ||
       recipientProfile.is_restricted ||
-      (recipientProfile as any).is_emergency_frozen ||
+      recipientProfile.is_emergency_frozen ||
       recipientProfile.account_status === 'suspended' ||
       recipientProfile.account_status === 'banned' ||
       recipientProfile.account_status === 'restricted' ||
@@ -289,6 +243,8 @@ export async function POST(req: NextRequest) {
       gross_amount?: number | string;
       net_amount?: number | string;
       fee_amount?: number | string;
+      fee?: number | string;
+      total_deduction?: number | string;
       sender_balance_after?: number | string;
       recipient_balance_after?: number | string;
       status?: string;

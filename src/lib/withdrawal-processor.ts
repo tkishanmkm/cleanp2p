@@ -15,6 +15,7 @@ export interface WithdrawalTask {
   amount: string | number;
   asset_symbol: string;
   network: string;
+  network_code?: string;
 }
 
 export interface WithdrawalRecord {

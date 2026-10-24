@@ -15,7 +15,7 @@ export async function GET(
       return auth.response!;
     }
 
-    const resolvedParams = typeof (params as any)?.then === "function" ? await params : params;
+    const resolvedParams = await Promise.resolve(params);
     const tradeId = resolvedParams.tradeId;
 
     if (!tradeId) {
@@ -142,7 +142,7 @@ export async function POST(
     const adminEmail = auth.adminEmail || "admin@paxones.com";
     const adminId = auth.adminId || auth.user.id;
 
-    const resolvedParams = typeof (params as any)?.then === "function" ? await params : params;
+    const resolvedParams = await Promise.resolve(params);
     const tradeParam = resolvedParams.tradeId;
 
     if (!tradeParam) {

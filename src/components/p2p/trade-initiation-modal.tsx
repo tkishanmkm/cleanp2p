@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase/client";
 import {
@@ -53,6 +53,7 @@ export function TradeInitiationModal({ ad, isOpen, onClose }: TradeInitiationMod
   const [loading, setLoading] = useState<boolean>(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [sellerAvailableBalance, setSellerAvailableBalance] = useState<number>(0);
+  const idempotencyRef = useRef<{ fingerprint: string; key: string } | null>(null);
 
   const availablePaymentMethods = Array.isArray(ad?.payment_methods) && ad.payment_methods.length > 0
     ? ad.payment_methods
@@ -65,6 +66,7 @@ export function TradeInitiationModal({ ad, isOpen, onClose }: TradeInitiationMod
   // Reset inputs and fetch seller balance when modal opens with a new ad
   useEffect(() => {
     if (isOpen && ad) {
+      idempotencyRef.current = null;
       setFiatAmount("");
       setCryptoAmount("");
       setErrorMsg(null);
@@ -126,8 +128,14 @@ export function TradeInitiationModal({ ad, isOpen, onClose }: TradeInitiationMod
 
   const handleStartTrade = async () => {
     const numericFiat = parseFloat(fiatAmount);
+    const numericCrypto = parseFloat(cryptoAmount);
 
-    if (isNaN(numericFiat) || numericFiat <= 0) {
+    if (!Number.isFinite(numericCrypto) || numericCrypto <= 0) {
+      setErrorMsg("Please enter a valid crypto amount.");
+      return;
+    }
+
+    if (!Number.isFinite(numericFiat) || numericFiat <= 0) {
       setErrorMsg("Please enter a valid amount.");
       return;
     }
@@ -169,8 +177,14 @@ export function TradeInitiationModal({ ad, isOpen, onClose }: TradeInitiationMod
       }
 
       const paymentMethod = selectedPaymentMethod || availablePaymentMethods[0] || "Bank Transfer";
+      const requestFingerprint = [ad.id, numericCrypto.toFixed(8), numericFiat.toFixed(2), paymentMethod].join(':');
+      if (!idempotencyRef.current || idempotencyRef.current.fingerprint !== requestFingerprint) {
+        idempotencyRef.current = { fingerprint: requestFingerprint, key: crypto.randomUUID() };
+      }
+      const idempotencyKey = idempotencyRef.current.key;
 
-      // 1. First attempt trade creation via secure backend API route
+      // Only the server RPC may create the trade and lock escrow. Reuse the same
+      // key for retries of this exact request so a lost response cannot duplicate a trade.
       let tradeId: string | null = null;
       try {
         const response = await fetch('/api/trades/initiate', {
@@ -178,8 +192,8 @@ export function TradeInitiationModal({ ad, isOpen, onClose }: TradeInitiationMod
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             adId: ad.id,
-            buyerId,
-            sellerId,
+            // Server derives buyer/seller from the authenticated session and ad ownership.
+            idempotencyKey,
             cryptoAmount: numericCrypto,
             cryptoSymbol: ad.asset_symbol,
             rate: ad.price,
@@ -200,56 +214,13 @@ export function TradeInitiationModal({ ad, isOpen, onClose }: TradeInitiationMod
         console.warn('Trade API route creation warning, falling back to direct insert:', apiErr);
       }
 
-      // 2. Direct insert fallback if API route did not return ID
+      // Never create trades directly from the client: only the server RPC can
+      // atomically reserve the seller's coin and create the trade/escrow.
       if (!tradeId) {
-        const escrowFee = numericCrypto * 0.015;
-        let { data: trade, error: tradeError } = await supabase
-          .from("trades")
-          .insert({
-            ad_id: ad.id,
-            buyer_id: buyerId,
-            seller_id: sellerId,
-            crypto: ad.asset_symbol,
-            crypto_amount: numericCrypto,
-            amount: numericCrypto,
-            escrow_fee: escrowFee,
-            fiat_currency: ad.fiat_symbol || 'INR',
-            fiat_amount: numericFiat,
-            total_fiat: numericFiat,
-            rate: ad.price,
-            price: ad.price,
-            amount_usd: numericFiat,
-            payment_method: paymentMethod,
-            status: "pending",
-          })
-          .select("id")
-          .single();
-
-        if (tradeError) {
-          console.warn("Retrying trade insertion with minimal schema...", tradeError);
-          const { data: fallbackTrade, error: fallbackError } = await supabase
-            .from("trades")
-            .insert({
-              buyer_id: buyerId,
-              seller_id: sellerId,
-              amount_usd: numericFiat,
-              status: "pending",
-            })
-            .select("id")
-            .single();
-
-          if (fallbackError) {
-            throw fallbackError;
-          }
-          tradeId = fallbackTrade?.id;
-        } else {
-          tradeId = trade?.id;
-        }
+        throw new Error("Trade could not be created securely. Please retry.");
       }
 
-      if (!tradeId) {
-        throw new Error("Trade creation returned no ID.");
-      }
+
 
       // Sound feedback and redirect to trade execution page
       try {

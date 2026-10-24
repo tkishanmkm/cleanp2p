@@ -16,40 +16,36 @@ export interface WithdrawalGovernanceSettings {
 }
 
 /**
- * Checks whether a user has an active withdrawal currently awaiting administrator approval.
- * Queries public.withdrawals for status IN ('PENDING_APPROVAL', 'pending_approval').
+ * Checks both the legacy and canonical on-chain withdrawal queues. Database
+ * errors fail closed so a missing query result cannot bypass the approval lock.
  */
 export async function hasPendingWithdrawalApproval(userId: string): Promise<boolean> {
-  if (!userId) return false;
+  if (!userId) return true;
 
   try {
     const supabaseAdmin = getSupabaseAdminClient();
-    const { data, error } = await supabaseAdmin
-      .from('withdrawals')
-      .select('id')
-      .eq('user_id', userId)
-      .in('status', ['PENDING_APPROVAL', 'pending_approval'])
-      .limit(1)
-      .maybeSingle();
-
-    if (error) {
-      console.warn('[WithdrawalSecurity] Error checking pending withdrawal approval:', error.message);
-      // Fail-safe: query onchain_withdrawals
-      const { data: onchainData } = await supabaseAdmin
+    const [legacyResult, onchainResult] = await Promise.all([
+      supabaseAdmin
+        .from('withdrawals')
+        .select('id')
+        .eq('user_id', userId)
+        .in('status', ['PENDING_APPROVAL', 'pending_approval']),
+      supabaseAdmin
         .from('onchain_withdrawals')
         .select('id')
         .eq('user_id', userId)
-        .in('status', ['PENDING_APPROVAL', 'pending_approval'])
-        .limit(1)
-        .maybeSingle();
+        .in('status', ['NEEDS_APPROVAL', 'needs_approval', 'PENDING_APPROVAL', 'pending_approval']),
+    ]);
 
-      return Boolean(onchainData?.id);
+    if (legacyResult.error || onchainResult.error) {
+      console.error('[WithdrawalSecurity] Unable to verify pending withdrawal approval; failing closed.');
+      return true;
     }
 
-    return Boolean(data?.id);
+    return Boolean(legacyResult.data?.length || onchainResult.data?.length);
   } catch (err) {
-    console.error('[WithdrawalSecurity] Unexpected error in hasPendingWithdrawalApproval:', err);
-    return false;
+    console.error('[WithdrawalSecurity] Unexpected error in hasPendingWithdrawalApproval; failing closed:', err);
+    return true;
   }
 }
 
@@ -78,8 +74,16 @@ export async function checkPasswordChangeHold(userId: string): Promise<PasswordH
         .maybeSingle(),
     ]);
 
-    const passwordChangedAt = profileRes.data?.password_changed_at;
-    const holdHours = Number(settingsRes.data?.password_change_withdrawal_hold_hours || defaultHoldHours);
+    if (profileRes.error || settingsRes.error || !profileRes.data) {
+      console.error('[WithdrawalSecurity] Unable to verify password-change hold; failing closed.');
+      return { isHeld: true, remainingHours: defaultHoldHours, holdHours: defaultHoldHours };
+    }
+
+    const passwordChangedAt = profileRes.data.password_changed_at;
+    const rawHoldHours = Number(settingsRes.data?.password_change_withdrawal_hold_hours || defaultHoldHours);
+    const holdHours = Number.isFinite(rawHoldHours) && rawHoldHours >= 0 && rawHoldHours <= 168
+      ? rawHoldHours
+      : defaultHoldHours;
 
     if (!passwordChangedAt) {
       return { isHeld: false, holdHours };
@@ -87,7 +91,7 @@ export async function checkPasswordChangeHold(userId: string): Promise<PasswordH
 
     const changedTime = new Date(passwordChangedAt).getTime();
     if (isNaN(changedTime)) {
-      return { isHeld: false, holdHours };
+      return { isHeld: true, remainingHours: holdHours, holdHours };
     }
 
     const holdDurationMs = holdHours * 60 * 60 * 1000;
@@ -106,8 +110,8 @@ export async function checkPasswordChangeHold(userId: string): Promise<PasswordH
 
     return { isHeld: false, holdHours };
   } catch (err) {
-    console.error('[WithdrawalSecurity] Error in checkPasswordChangeHold:', err);
-    return { isHeld: false, holdHours: defaultHoldHours };
+    console.error('[WithdrawalSecurity] Error in checkPasswordChangeHold; failing closed:', err);
+    return { isHeld: true, remainingHours: defaultHoldHours, holdHours: defaultHoldHours };
   }
 }
 

@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { createClient } from '@/lib/supabase/server';
 import { getSupabaseAdminClient } from '@/lib/supabase/server';
 import { createPublicClient, http, formatEther } from 'viem';
 import { mainnet } from 'viem/chains';
@@ -7,6 +8,12 @@ export const dynamic = 'force-dynamic';
 
 export async function GET(req: NextRequest) {
   try {
+    const supabase = await createClient();
+    const { data: { user }, error: authError } = await supabase.auth.getUser();
+    if (authError || !user) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401, headers: { 'Cache-Control': 'no-store' } });
+    }
+
     const url = new URL(req.url);
     const address = url.searchParams.get('address')?.toLowerCase().trim() || '';
 
@@ -63,6 +70,11 @@ export async function GET(req: NextRequest) {
           .maybeSingle();
         if (onchainRecord?.user_id) targetUserId = onchainRecord.user_id;
       }
+    }
+
+    // Address lookups must never reveal an account's internal balance data to another user.
+    if (targetUserId && targetUserId !== user.id) {
+      return NextResponse.json({ error: 'Forbidden: cannot access another user wallet balance.' }, { status: 403, headers: { 'Cache-Control': 'no-store' } });
     }
 
     // If targetUserId is found, aggregate balances across profiles & onchain_deposits

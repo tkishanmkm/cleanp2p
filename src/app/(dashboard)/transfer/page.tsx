@@ -35,7 +35,7 @@ import {
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
-import { Loader2, ShieldCheck, ArrowRight, CheckCircle2 } from 'lucide-react';
+import { Loader2, ShieldCheck, Shield, Link, ArrowRight, CheckCircle2 } from 'lucide-react';
 import { CryptoCurrency, CoinTransfer } from '@/lib/types';
 import { useRouter } from 'next/navigation';
 import { TransferHistoryTable } from '@/components/wallets/transfer-history-table';
@@ -382,7 +382,7 @@ export default function TransferPage() {
                             <SelectItem key={c.name} value={c.name}>
                               <div className="flex items-center gap-2">
                                 <CoinBadgeLogo coin={c.name} className="h-5 w-5 shrink-0" />
-                                <span className="font-bold text-xs">{c.symbol}</span>
+                                <span className="font-bold text-xs">{c.name}</span>
                                 <span className="text-xs text-muted-foreground font-normal">({c.name})</span>
                               </div>
                             </SelectItem>

@@ -38,17 +38,10 @@ export function extractCandidateTokens(
     }
   }
 
-  if (checkQueryParam) {
-    try {
-      const url = new URL(req.url);
-      const key = url.searchParams.get('key');
-      if (key && key.trim().length > 0) {
-        candidates.push(key.trim());
-      }
-    } catch {
-      // Ignore URL parsing errors
-    }
-  }
+  // URL query credentials are intentionally never accepted: URLs commonly leak into
+  // access logs, analytics, browser history, and referrer headers. Keep the option
+  // parameter for source compatibility, but require Authorization/custom headers.
+  void checkQueryParam;
 
   return candidates;
 }

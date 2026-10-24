@@ -45,7 +45,7 @@ import { Card } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { ActiveTradesList } from "@/components/p2p/active-trades-list";
 
-type ExtendedCoinOption = 'ALL' | CryptoCurrency;
+type ExtendedCoinOption = 'ALL' | 'BTC' | 'USDT' | 'ETH' | 'LTC';
 
 const COIN_CONFIG: Record<ExtendedCoinOption, { label: string; fullName: string; badgeClass: string; textClass: string }> = {
   ALL: { label: 'All Coins', fullName: 'All Coins', badgeClass: 'bg-white/20 text-white border-white/30', textClass: 'text-white' },
@@ -59,7 +59,7 @@ const getCountryCodeForCurrency = (currencyCode: string): string => {
   return getCurrencyCountryCode(currencyCode);
 };
 
-const CryptoLogo = ({ crypto, className }: { crypto: ExtendedCoinOption, className?: string }) => {
+const CryptoLogo = ({ crypto, className }: { crypto: CryptoCurrency | ExtendedCoinOption, className?: string }) => {
     switch (crypto) {
         case 'BTC': return <BtcLogo className={className} />;
         case 'ETH': return <EthLogo className={className} />;
@@ -322,16 +322,17 @@ function P2PMarketplaceContent() {
       if (creatorIds.length > 0) {
         const { data: profiles } = await supabase
           .from('profiles')
-          .select('*')
+          .select('id, username, country, feedback_score, positive_feedback, negative_feedback, completed_trades, avg_release_minutes, avg_release_time, avg_payment_minutes, avg_pay_time, avatar_url, photo_url, badges, last_seen, last_seen_at, last_active, updated_at, created_at, is_verified, kyc_status')
           .in('id', creatorIds);
 
         if (profiles) {
           const map: Record<string, any> = {};
           profiles.forEach((p) => {
             map[p.id] = {
+              id: p.id,
               username: p.username || 'Trader',
               country: p.country,
-              feedbackScore: p.feedback_score ?? 100,
+              feedbackScore: p.feedback_score ?? 0,
               positiveFeedback: p.positive_feedback ?? 0,
               negativeFeedback: p.negative_feedback ?? 0,
               completedTrades: p.completed_trades ?? 0,
@@ -345,84 +346,9 @@ function P2PMarketplaceContent() {
               last_seen: p.last_seen || p.last_seen_at || p.last_active,
               last_seen_at: p.last_seen_at || p.last_seen || p.last_active,
               createdAt: p.created_at,
-              blockedUsers: p.blocked_users || [],
-              isVerified: p.is_verified ?? (p.kyc_status === 'VERIFIED') ?? false,
-              cryptoBalances: {
-                BTC: Number(p.btc_balance || 0),
-                ETH: Number(p.eth_balance || 0),
-                USDT: Number(p.usdt_balance || 0),
-                LTC: Number(p.ltc_balance || 0),
-              },
+              isVerified: p.is_verified ?? (p.kyc_status === 'VERIFIED'),
             };
           });
-
-          // Fetch wallet_assets & user_wallets to get live available balances
-          try {
-            const [
-              { data: walletAssets },
-              { data: userWallets },
-              { data: chainWallets }
-            ] = await Promise.all([
-              supabase
-                .from('wallet_assets')
-                .select('*')
-                .in('user_id', creatorIds),
-              supabase
-                .from('user_wallets')
-                .select('user_id, asset_symbol, balance, locked_balance, available_balance')
-                .in('user_id', creatorIds),
-              supabase
-                .from('wallets')
-                .select('user_id, currency, chain, balance, available_balance')
-                .in('user_id', creatorIds),
-            ]);
-
-            if (walletAssets && walletAssets.length > 0) {
-              walletAssets.forEach((wa: any) => {
-                const uId = wa.user_id;
-                if (map[uId]) {
-                  const coin = String(wa.asset_symbol || wa.asset_code || wa.symbol || '').toUpperCase();
-                  const avail = Number(wa.available ?? wa.balance ?? 0) - Number(wa.locked_escrow ?? wa.locked_balance ?? 0);
-                  if (coin) {
-                    if (!map[uId].cryptoBalances) map[uId].cryptoBalances = {};
-                    map[uId].cryptoBalances[coin] = Math.max(map[uId].cryptoBalances[coin] || 0, isNaN(avail) ? 0 : Math.max(0, avail));
-                  }
-                }
-              });
-            }
-
-            if (userWallets && userWallets.length > 0) {
-              userWallets.forEach((w: any) => {
-                const uId = w.user_id;
-                if (map[uId]) {
-                  const coin = String(w.asset_symbol || '').toUpperCase();
-                  const avail = Number(
-                    w.available_balance ?? (Number(w.balance || 0) - Number(w.locked_balance || 0))
-                  );
-                  if (coin) {
-                    if (!map[uId].cryptoBalances) map[uId].cryptoBalances = {};
-                    map[uId].cryptoBalances[coin] = Math.max(map[uId].cryptoBalances[coin] || 0, isNaN(avail) ? 0 : Math.max(0, avail));
-                  }
-                }
-              });
-            }
-
-            if (chainWallets && chainWallets.length > 0) {
-              chainWallets.forEach((cw: any) => {
-                const uId = cw.user_id;
-                if (map[uId]) {
-                  const coin = String(cw.currency || cw.chain || '').toUpperCase();
-                  const avail = Number(cw.available_balance ?? cw.balance ?? 0);
-                  if (coin) {
-                    if (!map[uId].cryptoBalances) map[uId].cryptoBalances = {};
-                    map[uId].cryptoBalances[coin] = Math.max(map[uId].cryptoBalances[coin] || 0, isNaN(avail) ? 0 : Math.max(0, avail));
-                  }
-                }
-              });
-            }
-          } catch (wErr) {
-            console.warn('Wallet balance fetch warning in sell page:', wErr);
-          }
 
           setAdCreators(map);
         }

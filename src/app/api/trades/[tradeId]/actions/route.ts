@@ -10,7 +10,7 @@ export async function POST(
   { params }: { params: Promise<{ tradeId: string }> | { tradeId: string } }
 ) {
   try {
-    const resolvedParams = typeof (params as any)?.then === 'function' ? await params : params;
+    const resolvedParams = await Promise.resolve(params);
     const tradeId = resolvedParams.tradeId;
 
     if (!tradeId) {
@@ -186,13 +186,13 @@ export async function POST(
       }
 
       // Execute Atomic Database RPC mark_p2p_trade_paid
-      const { data: rpcData, error: rpcError } = await adminClient.rpc('mark_p2p_trade_paid', {
+      const { data: rpcData, error: rpcError } = await supabase.rpc('mark_p2p_trade_paid', {
         p_trade_id: actualTradeId,
         p_caller_id: user.id,
         p_payment_method: confirmedPaymentMethod,
       });
 
-      if (rpcError || (rpcData && !rpcData.success)) {
+      if (rpcError || !rpcData || rpcData.success !== true) {
         const errorMsg = rpcError?.message || rpcData?.message || 'Failed to mark trade as paid.';
         console.error('mark_p2p_trade_paid RPC failed:', errorMsg);
         return NextResponse.json({ error: errorMsg }, { status: 400 });
@@ -280,12 +280,12 @@ export async function POST(
       }
 
       // Canonical RPC call
-      const { data: rpcData, error: rpcError } = await adminClient.rpc('release_trade_escrow', {
+      const { data: rpcData, error: rpcError } = await supabase.rpc('release_trade_escrow', {
         p_trade_id: actualTradeId,
         p_caller_id: user.id,
       });
 
-      if (rpcError || (rpcData && !rpcData.success)) {
+      if (rpcError || !rpcData || rpcData.success !== true) {
         const errorMsg = rpcError?.message || rpcData?.message || 'Failed to release escrow.';
         console.error('release_trade_escrow RPC failed:', errorMsg);
         return NextResponse.json({ error: errorMsg }, { status: 400 });
@@ -331,12 +331,12 @@ export async function POST(
       const now = new Date().toISOString();
 
       // Canonical RPC call
-      const { data: rpcData, error: rpcError } = await adminClient.rpc('cancel_p2p_trade', {
+      const { data: rpcData, error: rpcError } = await supabase.rpc('cancel_p2p_trade', {
         p_trade_id: actualTradeId,
         p_caller_id: user.id,
       });
 
-      if (rpcError || (rpcData && !rpcData.success)) {
+      if (rpcError || !rpcData || rpcData.success !== true) {
         const errorMsg = rpcError?.message || rpcData?.message || 'Failed to cancel trade.';
         console.error('cancel_p2p_trade RPC failed:', errorMsg);
         return NextResponse.json({ error: errorMsg }, { status: 400 });
@@ -430,7 +430,7 @@ export async function POST(
         p_trade_id: actualTradeId,
       });
 
-      if (rpcError || (rpcData && !rpcData.success)) {
+      if (rpcError || !rpcData || rpcData.success !== true) {
         const errorMsg = rpcError?.message || rpcData?.message || 'Failed to expire trade.';
         console.error('expire_p2p_trade RPC failed:', errorMsg);
         return NextResponse.json({ error: errorMsg }, { status: 400 });

@@ -327,6 +327,12 @@ export default function CreateP2PAdPage() {
   const router = useRouter();
   const { balances } = useWallet();
   const [user, setUser] = useState<any>(null);
+  const [profile, setProfile] = useState<{
+    is_verified?: boolean | null;
+    id_verified?: boolean | null;
+    kyc_status?: string | null;
+    verification_tier?: string | number | null;
+  } | null>(null);
   const [authLoading, setAuthLoading] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
@@ -334,33 +340,50 @@ export default function CreateP2PAdPage() {
   useEffect(() => {
     let isMounted = true;
 
+    const loadProfile = async (userId: string) => {
+      const { data, error } = await supabase
+        .from('profiles')
+        .select('is_verified, id_verified, kyc_status, verification_tier')
+        .eq('id', userId)
+        .maybeSingle();
+
+      if (!isMounted) return;
+      if (error) {
+        console.warn('Unable to load seller verification profile.');
+        setProfile(null);
+        return;
+      }
+      setProfile(data);
+    };
+
     const checkUser = async () => {
       try {
         const { data: { session } } = await supabase.auth.getSession();
-        if (isMounted && session?.user) {
-          setUser(session.user);
-        } else {
-          const { data: { user: currentUser } } = await supabase.auth.getUser();
-          if (isMounted && currentUser) {
-            setUser(currentUser);
-          }
+        let currentUser = session?.user ?? null;
+        if (!currentUser) {
+          const { data } = await supabase.auth.getUser();
+          currentUser = data.user;
         }
+        if (isMounted) setUser(currentUser);
+        if (currentUser) await loadProfile(currentUser.id);
+        else if (isMounted) setProfile(null);
       } catch (err) {
         console.error('Error fetching auth user:', err);
+        if (isMounted) setProfile(null);
       } finally {
-        if (isMounted) {
-          setAuthLoading(false);
-        }
+        if (isMounted) setAuthLoading(false);
       }
     };
 
     checkUser();
 
-    // Listen for session changes (e.g. token refresh, login, logout)
+    // Keep the KYC profile in sync with the authenticated user.
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      if (isMounted) {
-        setUser(session?.user ?? null);
-      }
+      if (!isMounted) return;
+      const currentUser = session?.user ?? null;
+      setUser(currentUser);
+      if (currentUser) void loadProfile(currentUser.id);
+      else setProfile(null);
     });
 
     return () => {
@@ -639,16 +662,16 @@ export default function CreateP2PAdPage() {
       }
 
       let availableBalance = balances[crypto as CryptoCurrency]?.available || 0;
-      const minCoinRequired = (parseFloat(minAmount || '0') || 0) / (effectiveAdPrice || 1);
+      const maxCoinRequired = (parseFloat(maxAmount || '0') || 0) / (effectiveAdPrice || 1);
 
-      if (availableBalance < minCoinRequired) {
+      if (!Number.isFinite(maxCoinRequired) || availableBalance < maxCoinRequired) {
         // Attempt fresh fetch from /api/wallet/balance in case state was stale
         try {
           const freshRes = await fetch('/api/wallet/balance');
           if (freshRes.ok) {
             const freshJson = await freshRes.json();
             const fetchedAvail = Number(freshJson?.balances?.[crypto]?.available ?? 0);
-            if (fetchedAvail >= minCoinRequired) {
+            if (fetchedAvail >= maxCoinRequired) {
               availableBalance = fetchedAvail;
             }
           }
@@ -657,8 +680,8 @@ export default function CreateP2PAdPage() {
         }
       }
 
-      if (availableBalance < minCoinRequired) {
-        toast.error(`Insufficient ${crypto} balance. You need at least ${minCoinRequired.toFixed(6)} ${crypto} to set a minimum limit of ${minAmount} ${fiat.code}. Available: ${availableBalance.toFixed(6)} ${crypto}.`);
+      if (availableBalance < maxCoinRequired) {
+        toast.error(`Insufficient ${crypto} balance. You need at least ${maxCoinRequired.toFixed(6)} ${crypto} to back the maximum offer limit of ${maxAmount} ${fiat.code}. Available: ${availableBalance.toFixed(6)} ${crypto}.`);
         return;
       }
     }

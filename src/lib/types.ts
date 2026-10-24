@@ -2,6 +2,34 @@
 
 export type CryptoCurrency = 'BTC' | 'ETH' | 'LTC' | 'USDT' | 'BNB' | 'TRX';
 
+export interface UserWallet {
+  id: string;
+  crypto: CryptoCurrency;
+  chain: string;
+  address?: string | null;
+  balance: number;
+  lockedBalance?: number;
+  available_balance?: number;
+  asset_symbol?: string;
+  deposit_address?: string | null;
+  created_at?: string;
+  updated_at?: string | null;
+}
+
+export interface UserWallet {
+  id: string;
+  crypto: CryptoCurrency;
+  chain: string;
+  address?: string | null;
+  balance: number;
+  lockedBalance?: number;
+  available_balance?: number;
+  asset_symbol?: string;
+  deposit_address?: string | null;
+  created_at?: string;
+  updated_at?: string | null;
+}
+
 export interface CurrencyConfig {
   code: string;
   name: string;
@@ -25,6 +53,7 @@ export interface P2PAd {
   userId: string;
   publicAdId?: string;
   user?: {
+    id?: string;
     username: string;
     country?: string;
     feedbackScore: number;
@@ -34,6 +63,9 @@ export interface P2PAd {
     photoURL?: string;
     badges?: string[];
     lastActive?: string;
+    last_seen?: string;
+    last_seen_at?: string;
+    last_active?: string;
     isVerified?: boolean;
     is_verified?: boolean;
   };
@@ -126,6 +158,10 @@ export type User = {
   id: string;
   userId: string;
   oldUserId?: string;
+  username?: string;
+  email?: string;
+  displayName?: string;
+  isSuspended?: boolean;
   fullName: string;
   dob: string;
   country?: string;

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useMemo, useEffect } from 'react';
+import { useState, useMemo, useEffect, useCallback } from 'react';
 import type { User } from '@/lib/types';
 import { useToast } from '@/hooks/use-toast';
 import { blockUser, unblockUser } from '@/lib/users';
@@ -30,22 +30,48 @@ import { ScrollArea } from '../ui/scroll-area';
 import { supabase } from '@/lib/supabase/client';
 import { useAuth } from '@/components/providers/auth-provider';
 
+type BlockedUser = {
+  id: string;
+  userId: string;
+  username?: string;
+  email?: string;
+  photoURL?: string;
+  country?: string;
+  preferredCurrency?: string;
+  isAdminAccount?: boolean;
+  isSuspended?: boolean;
+  createdAt?: string;
+  feedbackScore?: number;
+  completedTrades?: number;
+  fullName?: string;
+  dob?: string;
+  isBanned?: boolean;
+  isOnHold?: boolean;
+  tradeVolume?: number;
+  positiveFeedback?: number;
+  negativeFeedback?: number;
+  avgPaymentTime?: number;
+  avgReleaseTime?: number;
+  usernameChanged?: boolean;
+};
+
 export function BlockedUsersManagement({ user: currentUserData }: { user: User }) {
   const { user: authUser } = useAuth();
   const { toast } = useToast();
   const [usernameToBlock, setUsernameToBlock] = useState('');
   const [isBlocking, setIsBlocking] = useState(false);
 
-  const [searchResults, setSearchResults] = useState<User[]>([]);
+  const [searchResults, setSearchResults] = useState<BlockedUser[]>([]);
   const [isSearching, setIsSearching] = useState(false);
 
-  const [blockedUsers, setBlockedUsers] = useState<User[]>([]);
+  const [blockedUsers, setBlockedUsers] = useState<BlockedUser[]>([]);
   const [areBlockedUsersLoading, setAreBlockedUsersLoading] = useState(true);
 
   const blockedUserIdsKey = useMemo(() => {
     const list = currentUserData?.blockedUsers || [];
     return Array.isArray(list) ? list.join(',') : '';
   }, [currentUserData?.blockedUsers]);
+  const blockedUserIds = currentUserData?.blockedUsers || [];
 
   const fetchBlockedUsers = useCallback(async () => {
     const ids = blockedUserIdsKey ? blockedUserIdsKey.split(',').filter(Boolean) : [];
@@ -63,19 +89,29 @@ export function BlockedUsersManagement({ user: currentUserData }: { user: User }
 
       if (error) throw error;
 
-      const mapped: User[] = (data || []).map((u: any) => ({
+      const mapped: BlockedUser[] = (data || []).map((u: any) => ({
         id: u.id,
         userId: u.username || u.id,
         username: u.username,
+        fullName: u.full_name || u.username || '',
+        dob: u.dob || '',
         email: u.email,
         photoURL: u.photo_url,
         country: u.country,
         preferredCurrency: u.preferred_currency,
-        isAdminAccount: u.is_admin_account,
-        isSuspended: u.is_suspended,
-        createdAt: u.created_at,
-        feedbackScore: u.feedback_score,
-        completedTrades: u.completed_trades,
+        completedTrades: u.completed_trades ?? 0,
+        feedbackScore: u.feedback_score ?? 0,
+        isAdminAccount: Boolean(u.is_admin_account),
+        isSuspended: Boolean(u.is_suspended),
+        isBanned: Boolean(u.is_banned),
+        isOnHold: Boolean(u.is_on_hold),
+        tradeVolume: Number(u.trade_volume ?? 0),
+        positiveFeedback: Number(u.positive_feedback ?? 0),
+        negativeFeedback: Number(u.negative_feedback ?? 0),
+        avgPaymentTime: Number(u.avg_payment_time ?? 0),
+        avgReleaseTime: Number(u.avg_release_time ?? 0),
+        usernameChanged: Boolean(u.username_changed),
+        createdAt: u.created_at || '',
       }));
 
       setBlockedUsers(mapped);
@@ -117,9 +153,22 @@ export function BlockedUsersManagement({ user: currentUserData }: { user: User }
                   id: u.id,
                   userId: u.username || u.id,
                   username: u.username,
+                  fullName: u.full_name || u.username || '',
+                  dob: u.dob || '',
                   photoURL: u.photo_url,
-                  isAdminAccount: u.is_admin_account,
-                } as User)
+                  isAdminAccount: Boolean(u.is_admin_account),
+                  isBanned: Boolean(u.is_banned),
+                  isOnHold: Boolean(u.is_on_hold),
+                  tradeVolume: Number(u.trade_volume ?? 0),
+                  completedTrades: Number(u.completed_trades ?? 0),
+                  feedbackScore: Number(u.feedback_score ?? 0),
+                  positiveFeedback: Number(u.positive_feedback ?? 0),
+                  negativeFeedback: Number(u.negative_feedback ?? 0),
+                  avgPaymentTime: Number(u.avg_payment_time ?? 0),
+                  avgReleaseTime: Number(u.avg_release_time ?? 0),
+                  usernameChanged: Boolean(u.username_changed),
+                  createdAt: u.created_at || '',
+                } as BlockedUser)
             )
             .filter((u) => u.id !== authUserId && !u.isAdminAccount && !blockedIds.includes(u.id));
 

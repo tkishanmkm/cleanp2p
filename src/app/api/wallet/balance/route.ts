@@ -26,14 +26,17 @@ export async function GET(request: Request) {
       // Session fetch failed or not present
     }
 
-    if (!effectiveUserId && paramUserId) {
-      effectiveUserId = paramUserId;
-    }
-
     if (!effectiveUserId) {
       return NextResponse.json(
         { success: false, error: 'Unauthorized: User not found' },
         { status: 401 }
+      );
+    }
+
+    if (paramUserId && paramUserId !== effectiveUserId) {
+      return NextResponse.json(
+        { success: false, error: 'Forbidden: Cannot access another user wallet balance' },
+        { status: 403 }
       );
     }
 
@@ -44,10 +47,12 @@ export async function GET(request: Request) {
       ETH: { available: 0, inEscrow: 0, inWithdrawal: 0, total: 0 },
       LTC: { available: 0, inEscrow: 0, inWithdrawal: 0, total: 0 },
       USDT: { available: 0, inEscrow: 0, inWithdrawal: 0, total: 0 },
+      BNB: { available: 0, inEscrow: 0, inWithdrawal: 0, total: 0 },
+      TRX: { available: 0, inEscrow: 0, inWithdrawal: 0, total: 0 },
     };
 
     const rawRecords: any[] = [];
-    const coins: CryptoCurrency[] = ['BTC', 'ETH', 'LTC', 'USDT'];
+    const coins: CryptoCurrency[] = ['BTC', 'ETH', 'LTC', 'USDT', 'BNB', 'TRX'];
 
     // 1. Calculate real-time active escrow locked from seller's active trades
     const activeEscrowMap: Record<CryptoCurrency, number> = {
@@ -55,6 +60,8 @@ export async function GET(request: Request) {
       ETH: 0,
       LTC: 0,
       USDT: 0,
+      BNB: 0,
+      TRX: 0,
     };
 
     try {
@@ -120,6 +127,8 @@ export async function GET(request: Request) {
       ETH: false,
       LTC: false,
       USDT: false,
+      BNB: false,
+      TRX: false,
     };
 
     try {

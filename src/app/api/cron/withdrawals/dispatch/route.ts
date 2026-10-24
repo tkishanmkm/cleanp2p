@@ -1,31 +1,26 @@
 import { NextResponse } from 'next/server';
-import { processPendingWithdrawals } from '@/jobs/withdrawalWorker';
-import { verifyWorkerAuth } from '@/lib/security/worker-auth';
 
 export const dynamic = 'force-dynamic';
 
-export async function GET(req: Request) {
-  try {
-    const auth = verifyWorkerAuth(req, {
-      allowedSecrets: [
-        process.env.WORKER_SECRET,
-        process.env.CRON_SECRET,
-        process.env.CRON_SECRET_KEY,
-        process.env.WITHDRAWAL_WORKER_SECRET,
-      ],
-      customHeaderNames: ['x-cron-secret', 'x-worker-secret'],
-    });
+/**
+ * Retired legacy dispatcher. Use /api/workers/withdrawals or
+ * /api/workers/withdrawal-worker, both of which invoke the canonical queue.
+ */
+function retiredResponse(): NextResponse {
+  return NextResponse.json(
+    {
+      success: false,
+      error: 'Legacy withdrawal dispatch is disabled. Use the authenticated canonical withdrawal queue.',
+      code: 'LEGACY_WITHDRAWAL_DISPATCH_DISABLED',
+    },
+    { status: 410, headers: { 'Cache-Control': 'no-store' } }
+  );
+}
 
-    if (!auth.authorized) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
+export async function GET(_request: Request): Promise<NextResponse> {
+  return retiredResponse();
+}
 
-    console.log('[Cron Worker] Executing withdrawal dispatcher job...');
-    const result = await processPendingWithdrawals();
-
-    return NextResponse.json({ success: true, timestamp: new Date().toISOString(), result });
-  } catch (err: any) {
-    console.error('[Cron Dispatcher Error]:', err.message);
-    return NextResponse.json({ error: err.message }, { status: 500 });
-  }
+export async function POST(_request: Request): Promise<NextResponse> {
+  return retiredResponse();
 }
