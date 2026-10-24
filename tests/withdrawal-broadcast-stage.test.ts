@@ -77,6 +77,9 @@ assert.ok(cronDispatchRoute.includes('await processWithdrawalQueue()'), 'cron di
 assert.ok(!cronDispatchRoute.includes('processPendingWithdrawals'), 'cron dispatch must not call a missing legacy worker export');
 assert.ok(withdrawalService.includes("rpc('request_withdrawal_idempotent'"), 'withdrawal retries must use the atomic idempotency RPC when a key is supplied');
 assert.ok(withdrawalService.includes('const validRpcContract = validWithdrawalId'), 'withdrawal service must validate the reservation RPC response contract before reporting success');
+assert.ok(withdrawalService.includes("status: 'PLATFORM_CONTROLS_UNAVAILABLE'"), 'withdrawals must fail closed when platform controls cannot be read');
+assert.ok(withdrawalService.includes("status: 'PROFILE_VERIFICATION_UNAVAILABLE'"), 'withdrawals must fail closed when account security profile cannot be verified');
+assert.ok(withdrawalService.includes("status: 'DAILY_LIMIT_CHECK_UNAVAILABLE'"), 'withdrawals must fail closed when rolling daily withdrawal history cannot be read');
 assert.ok(withdrawalService.includes("status: 'RESERVATION_UNCONFIRMED'"), 'invalid reservation responses must fail closed and request reconciliation rather than reporting success');
 assert.ok(withdrawalService.includes('Do not submit a new withdrawal request'), 'ambiguous reservation responses must warn callers against unsafe duplicate retries');
 assert.ok(withdrawalService.includes('p_idempotency_key: idempotencyKey'), 'withdrawal service must forward the caller idempotency key');
