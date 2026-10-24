@@ -19,6 +19,7 @@ assert.ok(profileLock >= 0 && dailyLimit > profileLock, 'per-user profile lock p
 assert.ok(sql.includes('LEFT JOIN public.onchain_withdrawals AS ow ON ow.id = w.id'), 'daily check reads on-chain USD metadata');
 assert.ok(dailySum > dailyLimit, 'daily limit sums USD-equivalent values');
 assert.ok(sql.includes("WHEN UPPER(w.asset_symbol) = 'USDT'\n                    THEN w.amount"), 'USDT amount is used as the USD fallback');
+assert.ok(sql.includes('USD_EQUIVALENT_REQUIRED'), 'non-USDT requests without a verified USD equivalent fail closed');
 assert.ok(sql.includes("'broadcasted'") && sql.includes("'ambiguous_broadcast'"), 'broadcasted and ambiguous withdrawals count toward limits');
 assert.ok(missingValueGuard > dailySum, 'missing non-USDT USD values fail closed');
 assert.ok(sql.includes('DAILY_LIMIT_UNVERIFIABLE'), 'unverifiable daily totals block new withdrawals');
