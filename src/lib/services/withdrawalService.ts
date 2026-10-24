@@ -293,8 +293,13 @@ export async function executeCanonicalWithdrawal(input: WithdrawalRequestInput):
     };
   }
 
-  const parsedAmount = typeof rawAmount === 'number' ? rawAmount : parseFloat(String(rawAmount));
-  if (isNaN(parsedAmount) || parsedAmount <= 0) {
+  // Parse the complete decimal value; parseFloat('1.25junk') would silently accept 1.25.
+  const amountText = typeof rawAmount === 'string' ? rawAmount.trim() : String(rawAmount);
+  const validDecimalSyntax = typeof rawAmount === 'number'
+    ? Number.isFinite(rawAmount)
+    : /^(?:\d+(?:\.\d*)?|\.\d+)$/.test(amountText);
+  const parsedAmount = validDecimalSyntax ? Number(amountText) : Number.NaN;
+  if (!Number.isFinite(parsedAmount) || parsedAmount <= 0) {
     return {
       success: false,
       status: 'INVALID_AMOUNT',
