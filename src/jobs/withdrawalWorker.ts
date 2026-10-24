@@ -432,13 +432,17 @@ export async function checkSubmittedWithdrawals(): Promise<{
         
         if (isConfirmed && success) {
           const actualTrxStr = actualCostTrx && actualCostTrx.trim().length > 0 ? actualCostTrx.trim() : '0';
-          const { error: confErr } = await supabaseAdmin.rpc('complete_onchain_withdrawal', {
+          const { data: completionResult, error: confErr } = await supabaseAdmin.rpc('complete_onchain_withdrawal', {
             p_withdrawal_id: w.id,
             p_tx_hash: w.tx_hash,
             p_actual_gas_amount: actualTrxStr,
             p_gas_asset: 'TRX',
           });
-          if (!confErr) confirmed++;
+          if (confErr || completionResult?.success !== true) {
+            console.error(`[Withdrawal Worker] TRON completion was not confirmed for ${w.id}:`, confErr || completionResult);
+          } else {
+            confirmed++;
+          }
         } else if (isConfirmed && success === false) {
           const { data: failureResult, error: failureError } = await supabaseAdmin.rpc('process_failed_withdrawal', {
             p_withdrawal_id: w.id,
@@ -457,13 +461,17 @@ export async function checkSubmittedWithdrawals(): Promise<{
 
         if (confirmations >= chain.requiredConfirmations && status === 1) {
           const actualGasStr = actualGasCost && actualGasCost.trim().length > 0 ? actualGasCost.trim() : '0';
-          const { error: confErr } = await supabaseAdmin.rpc('complete_onchain_withdrawal', {
+          const { data: completionResult, error: confErr } = await supabaseAdmin.rpc('complete_onchain_withdrawal', {
             p_withdrawal_id: w.id,
             p_tx_hash: w.tx_hash,
             p_actual_gas_amount: actualGasStr,
             p_gas_asset: gasAsset,
           });
-          if (!confErr) confirmed++;
+          if (confErr || completionResult?.success !== true) {
+            console.error(`[Withdrawal Worker] EVM completion was not confirmed for ${w.id}:`, confErr || completionResult);
+          } else {
+            confirmed++;
+          }
         } else if (confirmations >= chain.requiredConfirmations && status === 0) {
           const { data: failureResult, error: failureError } = await supabaseAdmin.rpc('process_failed_withdrawal', {
             p_withdrawal_id: w.id,
@@ -502,13 +510,17 @@ export async function checkSubmittedWithdrawals(): Promise<{
                 }
               }
 
-              const { error: confErr } = await supabaseAdmin.rpc('complete_onchain_withdrawal', {
+              const { data: completionResult, error: confErr } = await supabaseAdmin.rpc('complete_onchain_withdrawal', {
                 p_withdrawal_id: w.id,
                 p_tx_hash: w.tx_hash,
                 p_actual_gas_amount: actualFeeBtc,
                 p_gas_asset: 'BTC',
               });
-              if (!confErr) confirmed++;
+              if (confErr || completionResult?.success !== true) {
+                console.error(`[Withdrawal Worker] BTC completion was not confirmed for ${w.id}:`, confErr || completionResult);
+              } else {
+                confirmed++;
+              }
             }
           }
         } catch (btcErr) {
@@ -542,13 +554,17 @@ export async function checkSubmittedWithdrawals(): Promise<{
                 }
               }
 
-              const { error: confErr } = await supabaseAdmin.rpc('complete_onchain_withdrawal', {
+              const { data: completionResult, error: confErr } = await supabaseAdmin.rpc('complete_onchain_withdrawal', {
                 p_withdrawal_id: w.id,
                 p_tx_hash: w.tx_hash,
                 p_actual_gas_amount: actualFeeLtc,
                 p_gas_asset: 'LTC',
               });
-              if (!confErr) confirmed++;
+              if (confErr || completionResult?.success !== true) {
+                console.error(`[Withdrawal Worker] LTC completion was not confirmed for ${w.id}:`, confErr || completionResult);
+              } else {
+                confirmed++;
+              }
             }
           }
         } catch (ltcErr) {
