@@ -170,7 +170,7 @@ BEGIN
     ELSIF v_asset_clean = 'USDT' THEN
         v_effective_usd := p_amount;
     ELSE
-        v_effective_usd := p_amount;
+        RAISE EXCEPTION 'USD_EQUIVALENT_REQUIRED: A verified USD-equivalent value is required for non-USDT withdrawals.';
     END IF;
 
     -- =========================================================================
