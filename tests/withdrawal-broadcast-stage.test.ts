@@ -6,6 +6,7 @@ import { resolve } from 'node:path';
 // worker enters the ambiguous-broadcast stage. This does not replace mocked
 // behavioral tests or controlled staging integration tests.
 const source = readFileSync(resolve(process.cwd(), 'src/jobs/withdrawalWorker.ts'), 'utf8');
+const legacyProcessor = readFileSync(resolve(process.cwd(), 'src/lib/withdrawal-processor.ts'), 'utf8');
 const tronStart = source.indexOf("// BRANCH A: TRON Network (TRC-20 USDT)");
 const evmStart = source.indexOf("// BRANCH B: EVM Networks (ERC20, BEP20)", tronStart);
 assert.ok(tronStart >= 0 && evmStart > tronStart, 'TRON and EVM dispatch branches must exist');
@@ -53,4 +54,9 @@ assert.ok(tronFailureBlock.includes("p_is_verified_unbroadcast: true"), 'TRON re
 const evmFailureBlock = source.slice(evmMonitorGate, source.indexOf("} else if (normNet === 'BTC')", evmMonitorGate));
 assert.ok(evmFailureBlock.includes("p_is_verified_unbroadcast: true"), 'EVM refund RPC must receive the explicit verified-failure gate');
 
-console.log('Withdrawal broadcast-stage source regression checks passed (22 assertions).');
+assert.ok(!legacyProcessor.includes('p_is_verified_unbroadcast: true'), 'legacy processor must never certify a broadcast error as unbroadcast');
+assert.ok(legacyProcessor.includes('Repeated broadcast failure; outcome unverified:'), 'legacy retry exhaustion must label broadcast outcome unverified');
+assert.ok(legacyProcessor.includes('typeof failureResult.success !== \'boolean\''), 'legacy processor must validate the failure RPC response');
+assert.ok(legacyProcessor.includes('Withdrawal remains reserved pending reconciliation'), 'legacy processor must keep failed RPC outcomes visible for reconciliation');
+
+console.log('Withdrawal broadcast-stage source regression checks passed (26 assertions).');
