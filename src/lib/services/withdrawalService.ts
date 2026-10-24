@@ -505,6 +505,22 @@ export async function executeCanonicalWithdrawal(input: WithdrawalRequestInput):
   }
 
   if (rpcError) {
+    // The idempotency RPC is installed by a database migration. If the API
+    // schema cache cannot resolve it, do not fall back to a non-idempotent
+    // reservation: that could make client retries unsafe during a partial rollout.
+    if (idempotencyKey && rpcError.code === 'PGRST202') {
+      console.error('[WithdrawalService] Idempotent withdrawal RPC is unavailable; deployment migration is required.', {
+        code: rpcError.code,
+      });
+      return {
+        success: false,
+        status: 'IDEMPOTENCY_UNAVAILABLE',
+        error: 'Secure withdrawal retry protection is temporarily unavailable. Please try again later.',
+        message: 'Withdrawals are temporarily unavailable while retry protection is verified.',
+        statusCode: 503,
+      };
+    }
+
     return {
       success: false,
       status: 'RESERVATION_FAILED',
