@@ -408,7 +408,7 @@ export async function executeCanonicalWithdrawal(input: WithdrawalRequestInput):
     .select('amount, asset_symbol, created_at')
     .eq('user_id', user.id)
     .gte('created_at', oneDayAgo)
-    .in('status', ['completed', 'processing', 'QUEUED', 'PENDING_APPROVAL', 'APPROVED', 'approved', 'pending']);
+    .in('status', ['completed', 'COMPLETED', 'processing', 'PROCESSING', 'broadcasted', 'BROADCASTED', 'ambiguous_broadcast', 'AMBIGUOUS_BROADCAST', 'queued', 'QUEUED', 'pending_approval', 'PENDING_APPROVAL', 'approved', 'APPROVED', 'pending', 'PENDING']);
 
   if (dailyHistoryError || !past24hWithdrawals) {
     console.error('[WithdrawalService] Unable to verify rolling 24-hour withdrawal history:', dailyHistoryError);
