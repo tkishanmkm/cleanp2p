@@ -6,8 +6,20 @@ import { USER_2FA_COOKIE_NAME, verifyUser2FASessionToken } from '@/lib/user-2fa-
 export async function middleware(request: NextRequest) {
   let supabaseResponse = NextResponse.next({ request });
 
-  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://placeholder.supabase.co';
-  const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'placeholder-anon-key';
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL?.trim();
+  const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY?.trim();
+
+  // Do not initialize auth with a fake project URL or placeholder key. Missing
+  // public Supabase configuration must stop the request instead of failing open.
+  if (
+    !supabaseUrl ||
+    !supabaseKey ||
+    supabaseUrl.includes('placeholder.supabase.co') ||
+    ['placeholder-anon-key', 'placeholder-key'].includes(supabaseKey)
+  ) {
+    console.error('Middleware blocked request: Supabase public environment configuration is missing or invalid.');
+    return new NextResponse('Service temporarily unavailable', { status: 503 });
+  }
 
   try {
     const authHeader = request.headers.get('Authorization') || request.headers.get('authorization');
@@ -42,11 +54,16 @@ export async function middleware(request: NextRequest) {
 
     // Check if user is banned across protected dashboard/wallet routes
     if (user && !url.pathname.startsWith('/dashboard/banned') && !url.pathname.startsWith('/api/')) {
-      const { data: bannedCheck } = await supabase
+      const { data: bannedCheck, error: bannedCheckError } = await supabase
         .from('profiles')
         .select('is_banned, status')
         .eq('id', user.id)
         .maybeSingle();
+
+      if (bannedCheckError) {
+        console.error('Middleware could not verify account status.');
+        return new NextResponse('Service temporarily unavailable', { status: 503 });
+      }
 
       if (bannedCheck && (bannedCheck.is_banned || bannedCheck.status === 'banned')) {
         url.pathname = '/dashboard/banned';
@@ -70,10 +87,15 @@ export async function middleware(request: NextRequest) {
 
     if (isMaintenanceOrLoginCheckPath) {
       try {
-        const { data: sysSettings } = await supabase
+        const { data: sysSettings, error: settingsError } = await supabase
           .from('system_settings')
           .select('key, value')
           .in('key', ['emergency_mode', 'maintenance_mode', 'prevent_user_login']);
+
+        if (settingsError) {
+          console.error('Middleware could not verify platform access settings.');
+          return new NextResponse('Service temporarily unavailable', { status: 503 });
+        }
 
         const isEmergencyOn = sysSettings?.some((s: any) => s.key === 'emergency_mode' && (s.value === 'true' || s.value === true));
         const isMaintenanceOn = sysSettings?.some((s: any) => s.key === 'maintenance_mode' && (s.value === 'true' || s.value === true));
@@ -239,11 +261,16 @@ export async function middleware(request: NextRequest) {
         url.pathname === '/api/admin/security/status';
 
       if (!is2FAExemptRoute) {
-        const { data: adminProf } = await supabase
+        const { data: adminProf, error: adminProfileError } = await supabase
           .from('profiles')
           .select('admin_2fa_enabled, is_2fa_enabled, admin_2fa_recovery_updated_at')
           .eq('id', user.id)
           .maybeSingle();
+
+        if (adminProfileError || !adminProf) {
+          console.error('Middleware could not verify administrator 2FA settings.');
+          return new NextResponse('Service temporarily unavailable', { status: 503 });
+        }
 
         const is2FAActive = Boolean(adminProf?.admin_2fa_enabled || adminProf?.is_2fa_enabled);
 
@@ -280,11 +307,16 @@ export async function middleware(request: NextRequest) {
         url.pathname === '/unauthorized';
 
       if (!isUser2FAExemptRoute) {
-        const { data: userProf } = await supabase
+        const { data: userProf, error: userProfileError } = await supabase
           .from('profiles')
           .select('is_2fa_enabled, is_mfa_enabled, two_factor_enabled, updated_at')
           .eq('id', user.id)
           .maybeSingle();
+
+        if (userProfileError || !userProf) {
+          console.error('Middleware could not verify user 2FA settings.');
+          return new NextResponse('Service temporarily unavailable', { status: 503 });
+        }
 
         const isUser2FAActive = Boolean(
           userProf?.is_2fa_enabled ||
@@ -313,8 +345,27 @@ export async function middleware(request: NextRequest) {
       }
     }
   } catch (e) {
-    // Silently continue if session read fails in middleware
-    console.warn('Middleware auth check warning:', e);
+    // Do not let middleware/database errors bypass authentication or 2FA checks
+    // on sensitive routes. Public pages remain available during auth outages.
+    console.error('Middleware security check failed:', e);
+    const path = request.nextUrl.pathname;
+    const isSensitivePath =
+      path.startsWith('/adminnarayan') ||
+      path.startsWith('/admin') ||
+      path.startsWith('/dashboard') ||
+      path.startsWith('/wallet') ||
+      (path.startsWith('/api/') &&
+        !path.startsWith('/api/webhooks') &&
+        !path.startsWith('/api/cron') &&
+        !path.startsWith('/api/didit/webhook') &&
+        !path.startsWith('/api/kyc/webhook'));
+
+    if (isSensitivePath) {
+      return NextResponse.json(
+        { success: false, error: 'Security checks are temporarily unavailable.' },
+        { status: 503 }
+      );
+    }
   }
 
   return supabaseResponse;
