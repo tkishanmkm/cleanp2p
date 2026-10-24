@@ -46,20 +46,29 @@ jobs:
           node-version: 20
           cache: npm
       - name: Install locked dependencies with diagnostics
+        id: install
         shell: bash
         run: |
           set -o pipefail
           npm ci --verbose 2>&1 | tee npm-ci.log
-      - name: Upload install diagnostics
+      - name: Record install diagnostics in job summary
         if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: withdrawal-regression-diagnostics
-          path: |
-            npm-ci.log
-            ~/.npm/_logs/*.log
-          if-no-files-found: warn
-          retention-days: 7
+        shell: bash
+        run: |
+          {
+            echo "## Withdrawal regression diagnostics"
+            echo "- npm ci outcome: ${{ steps.install.outcome }}"
+            echo "- Node: $(node --version 2>&1 || true)"
+            echo "- npm: $(npm --version 2>&1 || true)"
+            if [ -f npm-ci.log ]; then
+              echo '### npm ci log tail'
+              echo '```text'
+              tail -n 100 npm-ci.log
+              echo '```'
+            else
+              echo "npm-ci.log was not created; install step may not have started."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
       - name: Test TRON amount and receipt handling
         run: npm run test:tron-withdrawal
       - name: Test withdrawal broadcast-stage guards
