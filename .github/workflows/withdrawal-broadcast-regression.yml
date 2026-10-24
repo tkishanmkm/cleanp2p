@@ -1,6 +1,17 @@
 name: Withdrawal Broadcast Regression
 
 on:
+  push:
+    branches: ['security/withdrawal-broadcast-await-confirmations']
+    paths:
+      - 'src/jobs/withdrawalWorker.ts'
+      - 'src/lib/blockchain/tron.ts'
+      - 'src/lib/blockchain/tronReceiptStatus.ts'
+      - 'tests/withdrawal-broadcast-stage.test.ts'
+      - 'tests/tron-withdrawal-receipt.test.ts'
+      - 'package.json'
+      - 'package-lock.json'
+      - '.github/workflows/withdrawal-broadcast-regression.yml'
   pull_request:
     branches: [main]
     paths:
