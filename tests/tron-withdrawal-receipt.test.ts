@@ -7,6 +7,7 @@ const cases: Array<[unknown, 'success' | 'failure' | 'pending']> = [
   ['REVERT', 'failure'],
   ['OUT_OF_ENERGY', 'failure'],
   ['TRANSFER_FAILED', 'failure'],
+  ['UNKNOWN', 'pending'],
   ['unknown-provider-status', 'pending'],
   ['', 'pending'],
   [null, 'pending'],
