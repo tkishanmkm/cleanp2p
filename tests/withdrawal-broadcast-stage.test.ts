@@ -76,6 +76,9 @@ assert.ok(cronDispatchRoute.includes("import { processWithdrawalQueue } from '@/
 assert.ok(cronDispatchRoute.includes('await processWithdrawalQueue()'), 'cron dispatch must invoke the canonical queue worker');
 assert.ok(!cronDispatchRoute.includes('processPendingWithdrawals'), 'cron dispatch must not call a missing legacy worker export');
 assert.ok(withdrawalService.includes("rpc('request_withdrawal_idempotent'"), 'withdrawal retries must use the atomic idempotency RPC when a key is supplied');
+assert.ok(withdrawalService.includes("rpcError.code === 'PGRST202'"), 'missing idempotency RPC must be reported as unavailable');
+assert.ok(withdrawalService.includes("status: 'IDEMPOTENCY_UNAVAILABLE'"), 'missing idempotency migration must fail closed with a retry-protection error');
+assert.ok(withdrawalService.includes("statusCode: 503"), 'missing idempotency RPC must return a temporary service-unavailable response');
 assert.ok(withdrawalService.includes('const validRpcContract = validWithdrawalId'), 'withdrawal service must validate the reservation RPC response contract before reporting success');
 assert.ok(withdrawalService.includes("status: 'PLATFORM_CONTROLS_UNAVAILABLE'"), 'withdrawals must fail closed when platform controls cannot be read');
 assert.ok(withdrawalService.includes("status: 'PROFILE_VERIFICATION_UNAVAILABLE'"), 'withdrawals must fail closed when account security profile cannot be verified');
