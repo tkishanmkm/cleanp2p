@@ -482,18 +482,23 @@ export async function executeCanonicalWithdrawal(input: WithdrawalRequestInput):
   const withdrawalId = rpcResult?.withdrawal_id || rpcResult;
   const returnedStatus = rpcResult?.status || 'QUEUED';
 
-  // Activity Notification
-  try {
-    await supabaseAdmin.from('notifications').insert({
-      user_id: user.id,
-      title: 'Withdrawal Pending',
-      message: `Withdrawal of ${parsedAmount} ${assetSymbol} has been received and is pending processing.`,
-      type: 'withdrawal',
-      is_read: false,
-      metadata: { link: '/wallets' },
-      created_at: new Date().toISOString(),
-    });
-  } catch {}
+  // Only notify for a newly reserved withdrawal. Idempotent replays must
+  // not create duplicate notifications for the same withdrawal.
+  if (rpcResult?.replayed !== true) {
+    try {
+      await supabaseAdmin.from('notifications').insert({
+        user_id: user.id,
+        title: 'Withdrawal Pending',
+        message: `Withdrawal of ${parsedAmount} ${assetSymbol} has been received and is pending processing.`,
+        type: 'withdrawal',
+        is_read: false,
+        metadata: { link: '/wallets' },
+        created_at: new Date().toISOString(),
+      });
+    } catch (notificationError) {
+      console.error('[WithdrawalService] Failed to create withdrawal notification:', notificationError);
+    }
+  }
 
   return {
     success: true,
