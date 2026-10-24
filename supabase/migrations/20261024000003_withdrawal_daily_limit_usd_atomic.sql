@@ -86,7 +86,7 @@ DECLARE
         RAISE EXCEPTION ''DAILY_LIMIT_UNVERIFIABLE: Existing withdrawals are missing or have invalid USD-equivalent values; manual reconciliation is required.'';
     END IF;
 
-    IF (v_rolling_24h_usd + v_effective_usd) > v_daily_limit_usd THEN'
+    IF (v_rolling_24h_usd + v_effective_usd) > v_daily_limit_usd THEN';
 BEGIN
     SELECT pg_get_functiondef(
         to_regprocedure('public.request_withdrawal(uuid,text,text,numeric,numeric,text,numeric)')
