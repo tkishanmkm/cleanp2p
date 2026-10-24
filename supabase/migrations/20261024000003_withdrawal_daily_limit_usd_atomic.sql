@@ -51,7 +51,7 @@ DECLARE
     SELECT
         COALESCE(SUM(
             CASE
-                WHEN (ow.metadata ->> ''usd_equivalent'') ~ ''^[0-9]+(\\.[0-9]+)?$'' THEN
+                WHEN (ow.metadata ->> ''usd_equivalent'') ~ ''^[0-9]+(\.[0-9]+)?$'' THEN
                     CASE
                         WHEN (ow.metadata ->> ''usd_equivalent'')::NUMERIC > 0
                              AND (ow.metadata ->> ''usd_equivalent'')::NUMERIC < 1000000000000
@@ -67,7 +67,7 @@ DECLARE
             WHERE COALESCE(UPPER(w.asset_symbol), '''') <> ''USDT''
               AND CASE
                   WHEN NULLIF(ow.metadata ->> ''usd_equivalent'', '''') IS NULL THEN TRUE
-                  WHEN (ow.metadata ->> ''usd_equivalent'') !~ ''^[0-9]+(\\.[0-9]+)?$'' THEN TRUE
+                  WHEN (ow.metadata ->> ''usd_equivalent'') !~ ''^[0-9]+(\.[0-9]+)?$'' THEN TRUE
                   ELSE (ow.metadata ->> ''usd_equivalent'')::NUMERIC <= 0
                        OR (ow.metadata ->> ''usd_equivalent'')::NUMERIC >= 1000000000000
               END
@@ -98,7 +98,7 @@ BEGIN
     END IF;
 
     -- Normalize source line endings so exact, guarded replacements are stable.
-    v_definition := replace(v_definition, E'\\r\\n', E'\\n');
+    v_definition := replace(v_definition, E'\r\n', E'\n');
 
     IF position(v_old_declaration IN v_definition) = 0 THEN
         RAISE EXCEPTION 'Unexpected request_withdrawal declaration; migration stopped without changing the function.';
