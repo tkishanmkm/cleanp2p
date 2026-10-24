@@ -1,0 +1,40 @@
+name: Withdrawal Safety Regression
+
+on:
+  pull_request:
+    paths:
+      - "src/jobs/withdrawalWorker.ts"
+      - "tests/withdrawal-safety-source.test.ts"
+      - "package.json"
+      - "package-lock.json"
+      - ".github/workflows/withdrawal-safety.yml"
+  push:
+    branches:
+      - main
+      - "security/withdrawal-worker-lock-fail-closed"
+    paths:
+      - "src/jobs/withdrawalWorker.ts"
+      - "tests/withdrawal-safety-source.test.ts"
+      - "package.json"
+      - "package-lock.json"
+      - ".github/workflows/withdrawal-safety.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  withdrawal-safety-regression:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - name: Install locked dependencies
+        run: npm ci
+      - name: Run offline withdrawal safety regression checks
+        run: npm run test:withdrawal-safety
