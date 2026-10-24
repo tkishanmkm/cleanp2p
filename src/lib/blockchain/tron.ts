@@ -67,9 +67,25 @@ export function isValidTronAddress(address: string): boolean {
  * Converts human readable token amount to base atomic units with specified decimals
  */
 export function parseUnitsTron(amount: string | number, decimals: number = 6): bigint {
-  const [whole, fraction = ''] = amount.toString().trim().split('.');
-  const paddedFraction = fraction.padEnd(decimals, '0').slice(0, decimals);
-  const combined = `${whole || '0'}${paddedFraction}`.replace(/^0+(?=\d)/, '');
+  if (!Number.isSafeInteger(decimals) || decimals < 0 || decimals > 30) {
+    throw new Error('Invalid token decimal precision');
+  }
+
+  const normalized = String(amount).trim();
+  // Reject signs, exponents, separators, and non-decimal input rather than
+  // silently truncating or coercing a withdrawal amount.
+  const match = /^(\d+)(?:\.(\d+))?$/.exec(normalized);
+  if (!match) {
+    throw new Error('Invalid token amount');
+  }
+
+  const whole = match[1];
+  const fraction = match[2] ?? '';
+  if (fraction.length > decimals) {
+    throw new Error(`Token amount supports at most ${decimals} decimal places`);
+  }
+
+  const combined = `${whole}${fraction.padEnd(decimals, '0')}`.replace(/^0+(?=\d)/, '');
   return BigInt(combined || '0');
 }
 
