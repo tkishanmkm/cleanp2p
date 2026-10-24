@@ -51,10 +51,13 @@ DECLARE
     SELECT
         COALESCE(SUM(
             CASE
-                WHEN NULLIF(ow.metadata ->> ''usd_equivalent'', '''') IS NOT NULL
-                     AND (ow.metadata ->> ''usd_equivalent'')::NUMERIC > 0
-                     AND (ow.metadata ->> ''usd_equivalent'')::NUMERIC < 1000000000000
-                    THEN (ow.metadata ->> ''usd_equivalent'')::NUMERIC
+                WHEN (ow.metadata ->> ''usd_equivalent'') ~ ''^[0-9]+(\\.[0-9]+)?$'' THEN
+                    CASE
+                        WHEN (ow.metadata ->> ''usd_equivalent'')::NUMERIC > 0
+                             AND (ow.metadata ->> ''usd_equivalent'')::NUMERIC < 1000000000000
+                            THEN (ow.metadata ->> ''usd_equivalent'')::NUMERIC
+                        ELSE NULL
+                    END
                 WHEN UPPER(w.asset_symbol) = ''USDT''
                     THEN w.amount
                 ELSE NULL
@@ -62,11 +65,12 @@ DECLARE
         ), 0),
         COUNT(*) FILTER (
             WHERE COALESCE(UPPER(w.asset_symbol), '''') <> ''USDT''
-              AND (
-                  NULLIF(ow.metadata ->> ''usd_equivalent'', '''') IS NULL
-                  OR (ow.metadata ->> ''usd_equivalent'')::NUMERIC <= 0
-                  OR (ow.metadata ->> ''usd_equivalent'')::NUMERIC >= 1000000000000
-              )
+              AND CASE
+                  WHEN NULLIF(ow.metadata ->> ''usd_equivalent'', '''') IS NULL THEN TRUE
+                  WHEN (ow.metadata ->> ''usd_equivalent'') !~ ''^[0-9]+(\\.[0-9]+)?$'' THEN TRUE
+                  ELSE (ow.metadata ->> ''usd_equivalent'')::NUMERIC <= 0
+                       OR (ow.metadata ->> ''usd_equivalent'')::NUMERIC >= 1000000000000
+              END
         )
     INTO v_rolling_24h_usd, v_missing_usd_equivalent_count
     FROM public.withdrawals AS w
@@ -79,10 +83,10 @@ DECLARE
       );
 
     IF v_missing_usd_equivalent_count > 0 THEN
-        RAISE EXCEPTION ''DAILY_LIMIT_UNVERIFIABLE: Existing withdrawals are missing USD-equivalent values; manual reconciliation is required.'';
+        RAISE EXCEPTION ''DAILY_LIMIT_UNVERIFIABLE: Existing withdrawals are missing or have invalid USD-equivalent values; manual reconciliation is required.'';
     END IF;
 
-    IF (v_rolling_24h_usd + v_effective_usd) > v_daily_limit_usd THEN';
+    IF (v_rolling_24h_usd + v_effective_usd) > v_daily_limit_usd THEN'
 BEGIN
     SELECT pg_get_functiondef(
         to_regprocedure('public.request_withdrawal(uuid,text,text,numeric,numeric,text,numeric)')
