@@ -1,0 +1,42 @@
+name: Withdrawal Broadcast Regression
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'src/jobs/withdrawalWorker.ts'
+      - 'src/lib/blockchain/tron.ts'
+      - 'src/lib/blockchain/tronReceiptStatus.ts'
+      - 'tests/withdrawal-broadcast-stage.test.ts'
+      - 'tests/tron-withdrawal-receipt.test.ts'
+      - 'package.json'
+      - 'package-lock.json'
+      - '.github/workflows/withdrawal-broadcast-regression.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: withdrawal-broadcast-regression-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  regression:
+    name: Offline withdrawal regression tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - name: Install locked dependencies
+        run: npm ci
+      - name: Test TRON amount and receipt handling
+        run: npm run test:tron-withdrawal
+      - name: Test withdrawal broadcast-stage guards
+        run: npm run test:withdrawal-stage
