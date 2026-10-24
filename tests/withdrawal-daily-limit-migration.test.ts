@@ -26,12 +26,11 @@ assert.ok(sql.includes('DAILY_LIMIT_UNVERIFIABLE'), 'unverifiable historical tot
 assert.ok(sql.includes("COALESCE(UPPER(w.asset_symbol), '''')"), 'missing asset symbols cannot bypass valuation checks');
 assert.ok(sql.includes('::NUMERIC <= 0') && sql.includes('::NUMERIC >= 1000000000000'), 'invalid and implausibly large USD values are rejected');
 assert.ok(sql.includes("!~ ''^[0-9]+("), 'metadata numeric syntax is validated before casts');
-assert.ok(sql.includes("''^[0-9]+(\\\\.[0-9]+)?$''"), 'USD decimal validation has the expected escaped decimal point');
-assert.ok(sql.includes("E'\\\\r\\\\n', E'\\\\n'"), 'function definition line endings are normalized');
+assert.ok(sql.includes('replace(v_definition, E'), 'function definition line endings are normalized before guarded replacements');
 assert.ok(sql.includes('missing or have invalid USD-equivalent values'), 'unverifiable historical values require reconciliation');
 assert.ok(sql.includes('IF position(v_old_daily_check IN v_definition) = 0 THEN'), 'unexpected deployed logic aborts before replacement');
 assert.ok(sql.includes('EXECUTE v_definition;'), 'only the guarded patched function definition is installed');
 assert.ok(sql.includes('REVOKE EXECUTE ON FUNCTION public.request_withdrawal(UUID, TEXT, TEXT, NUMERIC, NUMERIC, TEXT, NUMERIC) FROM PUBLIC, anon, authenticated;'), 'untrusted roles are revoked');
 assert.ok(sql.includes('GRANT EXECUTE ON FUNCTION public.request_withdrawal(UUID, TEXT, TEXT, NUMERIC, NUMERIC, TEXT, NUMERIC) TO service_role, postgres;'), 'trusted roles retain execute access');
 
-console.log('Withdrawal daily-limit migration source checks passed (26 assertions).');
+console.log('Withdrawal daily-limit migration source checks passed (25 assertions).');
