@@ -592,15 +592,23 @@ export async function processPendingWithdrawals(limit: number = 20): Promise<Pro
       const isPermanentlyFailed = attempts >= 3;
 
       if (isPermanentlyFailed) {
-        // Trigger automated refund via process_failed_withdrawal RPC
+        // A broadcast error after dispatch may mean the transaction reached the chain.
+        // Never certify this as unbroadcast: let the hardened RPC preserve the
+        // reservation and move the withdrawal to AMBIGUOUS_BROADCAST for reconciliation.
         try {
-          await supabaseAdmin.rpc('process_failed_withdrawal', {
+          const { data: failureResult, error: failureError } = await supabaseAdmin.rpc('process_failed_withdrawal', {
             p_withdrawal_id: item.id,
-            p_error_reason: errorMsg,
-            p_is_verified_unbroadcast: true,
+            p_error_reason: `Repeated broadcast failure; outcome unverified: ${errorMsg}`,
           });
+          if (failureError) {
+            console.error('[processPendingWithdrawals] Could not persist ambiguous withdrawal state:', failureError);
+          } else if (!failureResult || failureResult.success !== false && failureResult.success !== true) {
+            console.error('[processPendingWithdrawals] Unexpected failure RPC response; manual reconciliation required:', failureResult);
+          } else if (failureResult.success === false) {
+            console.warn('[processPendingWithdrawals] Withdrawal remains reserved pending reconciliation:', failureResult);
+          }
         } catch (rpcErr) {
-          console.error('[processPendingWithdrawals] Refund RPC failed:', rpcErr);
+          console.error('[processPendingWithdrawals] Could not persist ambiguous withdrawal state:', rpcErr);
         }
       } else {
         await supabaseAdmin
