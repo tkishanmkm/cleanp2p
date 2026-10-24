@@ -10,6 +10,7 @@ on:
       - 'src/lib/services/withdrawalService.ts'
       - 'supabase/migrations/20261024000002_withdrawal_request_idempotency.sql'
       - 'supabase/migrations/20261024000003_withdrawal_daily_limit_usd_atomic.sql'
+      - 'supabase/migrations/20261024000004_admin_rpc_authorization_hardening.sql'
       - 'tests/withdrawal-daily-limit-migration.test.ts'
       - 'src/app/api/internal/withdrawals/process/route.ts'
       - 'src/app/api/workers/withdraw/route.ts'
@@ -19,6 +20,7 @@ on:
       - 'src/lib/blockchain/tronReceiptStatus.ts'
       - 'tests/withdrawal-broadcast-stage.test.ts'
       - 'tests/withdrawal-amount-parser.test.ts'
+      - 'tests/admin-rpc-authorization-migration.test.ts'
       - 'tests/withdrawal-refund-wallet-row-migration.test.ts'
       - 'supabase/migrations/20261024000001_withdrawal_refund_wallet_row_fail_closed.sql'
       - 'tests/tron-withdrawal-receipt.test.ts'
@@ -96,6 +98,8 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
       - name: Test strict withdrawal amount parsing
         run: npm run test:withdrawal-amount
+      - name: Test admin RPC authorization migration
+        run: npm run test:admin-rpc-migration
       - name: Test TRON amount and receipt handling
         run: npm run test:tron-withdrawal
       - name: Test withdrawal broadcast-stage guards
