@@ -8,16 +8,31 @@ import {
 import { TRON_CONFIG, getTronWeb, isValidTronAddress } from '@/lib/blockchain/tron';
 import { normalizeDepositNetwork } from '@/lib/hd-derivation-engine';
 
-// Initialize Supabase admin client with service role
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL || 'https://eaiwgfxoiwxepinvcykg.supabase.co';
-const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'placeholder-key';
+// Create the privileged database client only when ingestion actually runs.
+// Never fall back to the public anon key: deposit crediting requires service_role.
+let depositSupabaseAdmin: ReturnType<typeof createClient> | null = null;
 
-export const supabaseAdmin = createClient(supabaseUrl, supabaseKey, {
-  auth: {
-    persistSession: false,
-    autoRefreshToken: false,
-  },
-});
+function getDepositSupabaseAdmin() {
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL;
+  const supabaseServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+
+  if (!supabaseUrl || !supabaseServiceRoleKey) {
+    throw new Error(
+      'Deposit ingestion is disabled: SUPABASE_URL (or NEXT_PUBLIC_SUPABASE_URL) and SUPABASE_SERVICE_ROLE_KEY are required.'
+    );
+  }
+
+  if (!depositSupabaseAdmin) {
+    depositSupabaseAdmin = createClient(supabaseUrl, supabaseServiceRoleKey, {
+      auth: {
+        persistSession: false,
+        autoRefreshToken: false,
+      },
+    });
+  }
+
+  return depositSupabaseAdmin;
+}
 
 export const CANONICAL_USDT_CONTRACTS: Record<string, string> = {
   ERC20: process.env.USDT_CONTRACT_ERC20 || '0xdAC17F958D2ee523a2206206994597C13D831ec7',
@@ -63,11 +78,13 @@ export async function getMonitoredAddresses(): Promise<{
 
   try {
     // 1. Fetch from deposit_addresses
-    const { data: primaryAddresses, error: pErr } = await supabaseAdmin
+    const { data: primaryAddresses, error: pErr } = await getDepositSupabaseAdmin()
       .from('deposit_addresses')
       .select('address, network_code, asset_code');
 
-    if (!pErr && primaryAddresses) {
+    if (pErr) throw new Error(`Failed to load deposit_addresses: ${pErr.message}`);
+    if (!primaryAddresses) throw new Error('Failed to load deposit_addresses: query returned no data');
+    {
       for (const row of primaryAddresses) {
         if (!row.address) continue;
         const clean = row.address.trim();
@@ -93,11 +110,13 @@ export async function getMonitoredAddresses(): Promise<{
     }
 
     // 2. Fetch from user_deposit_addresses
-    const { data: fallbackAddresses, error: fErr } = await supabaseAdmin
+    const { data: fallbackAddresses, error: fErr } = await getDepositSupabaseAdmin()
       .from('user_deposit_addresses')
       .select('address, network, coin');
 
-    if (!fErr && fallbackAddresses) {
+    if (fErr) throw new Error(`Failed to load user_deposit_addresses: ${fErr.message}`);
+    if (!fallbackAddresses) throw new Error('Failed to load user_deposit_addresses: query returned no data');
+    {
       for (const row of fallbackAddresses) {
         if (!row.address) continue;
         const clean = row.address.trim();
@@ -123,11 +142,13 @@ export async function getMonitoredAddresses(): Promise<{
     }
 
     // 3. Fetch from wallets (User dashboard wallets)
-    const { data: userWallets, error: wErr } = await supabaseAdmin
+    const { data: userWallets, error: wErr } = await getDepositSupabaseAdmin()
       .from('wallets')
       .select('address, chain, currency');
 
-    if (!wErr && userWallets) {
+    if (wErr) throw new Error(`Failed to load wallets: ${wErr.message}`);
+    if (!userWallets) throw new Error('Failed to load wallets: query returned no data');
+    {
       for (const row of userWallets) {
         if (!row.address) continue;
         const clean = row.address.trim();
@@ -152,7 +173,8 @@ export async function getMonitoredAddresses(): Promise<{
       }
     }
   } catch (err) {
-    console.error('[Deposit Ingestion] Error querying monitored deposit addresses:', err);
+    console.error('[Deposit Ingestion] Critical failure loading monitored deposit addresses:', err);
+    throw new Error('Deposit ingestion aborted: monitored address loading was incomplete.', { cause: err });
   }
 
   return { evmAddresses, tronAddresses, btcAddresses, ltcAddresses };
@@ -225,7 +247,7 @@ async function scanEvmTokenDeposits(
         const confirmations = Math.max(1, latestBlock - log.blockNumber + 1);
 
         // Call canonical atomic deposit RPC
-        const { data, error } = await supabaseAdmin.rpc('process_deposit_atomic', {
+        const { data, error } = await rejectUnverifiedScannerCredit({
           p_destination_address: toAddress,
           p_asset_symbol: 'USDT',
           p_network_code: normNet,
@@ -307,7 +329,7 @@ async function scanEvmNativeDeposits(
                 const confirmations = latestBlock >= txBlock ? latestBlock - txBlock + 1 : 1;
 
                 detected++;
-                const { data, error } = await supabaseAdmin.rpc('process_deposit_atomic', {
+                const { data, error } = await rejectUnverifiedScannerCredit({
                   p_destination_address: address.toLowerCase(),
                   p_asset_symbol: assetSymbol === 'ETH' ? 'ETH' : assetSymbol,
                   p_network_code: normNet === 'ERC20' ? 'ETH' : normNet,
@@ -354,7 +376,7 @@ async function scanEvmNativeDeposits(
           const numericAmount = parseFloat(formattedAmount);
           const confirmations = Math.max(1, latestBlock - b + 1);
 
-          const { data, error } = await supabaseAdmin.rpc('process_deposit_atomic', {
+          const { data, error } = await rejectUnverifiedScannerCredit({
             p_destination_address: toClean,
             p_asset_symbol: chainConfig.nativeSymbol === 'ETH' ? 'ETH' : chainConfig.nativeSymbol,
             p_network_code: normNet === 'ERC20' ? 'ETH' : normNet,
@@ -555,7 +577,7 @@ async function scanTronDeposits(
 
             detected++;
 
-            const { data: rpcData, error } = await supabaseAdmin.rpc('process_deposit_atomic', {
+            const { data: rpcData, error } = await rejectUnverifiedScannerCredit({
               p_destination_address: toAddr,
               p_asset_symbol: 'USDT',
               p_network_code: 'TRC20',
@@ -625,7 +647,7 @@ async function scanTronDeposits(
               ? latestBlock - eventBlock + 1
               : 1;
 
-            const { data: rpcData, error } = await supabaseAdmin.rpc('process_deposit_atomic', {
+            const { data: rpcData, error } = await rejectUnverifiedScannerCredit({
               p_destination_address: toBase58,
               p_asset_symbol: 'USDT',
               p_network_code: 'TRC20',
@@ -753,7 +775,7 @@ async function scanTronDeposits(
 
           detected++;
 
-          const { data: rpcData, error } = await supabaseAdmin.rpc('process_deposit_atomic', {
+          const { data: rpcData, error } = await rejectUnverifiedScannerCredit({
             p_destination_address: toBase58,
             p_asset_symbol: 'USDT',
             p_network_code: 'TRC20',
@@ -830,7 +852,7 @@ async function scanBtcDeposits(
           const blockHeight = tx.status?.block_height;
           let confirmations = isConfirmed ? 2 : 0;
 
-          const { data, error } = await supabaseAdmin.rpc('process_deposit_atomic', {
+          const { data, error } = await rejectUnverifiedScannerCredit({
             p_destination_address: btcAddr,
             p_asset_symbol: 'BTC',
             p_network_code: 'BTC',
@@ -905,7 +927,7 @@ async function scanLtcDeposits(
           const blockHeight = tx.status?.block_height;
           let confirmations = isConfirmed ? 6 : 0;
 
-          const { data, error } = await supabaseAdmin.rpc('process_deposit_atomic', {
+          const { data, error } = await rejectUnverifiedScannerCredit({
             p_destination_address: ltcAddr,
             p_asset_symbol: 'LTC',
             p_network_code: 'LTC',
@@ -943,251 +965,265 @@ async function scanLtcDeposits(
 export async function refreshPendingDepositConfirmations(): Promise<{
   checked: number;
   newlyCredited: number;
+  errors: string[];
 }> {
   let checked = 0;
   let newlyCredited = 0;
+  const errors: string[] = [];
 
-  try {
-    const { data: pendingDeposits, error } = await supabaseAdmin
-      .from('onchain_deposits')
-      .select('*')
-      .eq('status', 'PENDING')
-      .limit(50);
+  const { data: pendingDeposits, error } = await getDepositSupabaseAdmin()
+    .from('onchain_deposits')
+    .select('*')
+    .eq('status', 'PENDING')
+    .limit(50);
 
-    if (error || !pendingDeposits || pendingDeposits.length === 0) {
-      return { checked: 0, newlyCredited: 0 };
-    }
-
-    checked = pendingDeposits.length;
-
-    for (const dep of pendingDeposits) {
-      const normNet = normalizeDepositNetwork(dep.network);
-      const destinationAddress = dep.to_address || dep.address;
-      const outputIndex = dep.output_index ?? dep.log_index ?? 0;
-      const assetSymbol = (dep.asset_symbol || 'USDT').toUpperCase().trim();
-      const tokenContract = CANONICAL_USDT_CONTRACTS[normNet] || null;
-
-      if (normNet === 'TRC20') {
-        const tronWeb = getTronWeb(false);
-        const txInfo = await tronWeb.trx.getTransactionInfo(dep.tx_hash);
-        if (txInfo && txInfo.blockNumber) {
-          const currentBlock = await tronWeb.trx.getCurrentBlock();
-          const currentHeight = currentBlock.block_header?.raw_data?.number || 0;
-          const confs = Math.max(1, currentHeight - txInfo.blockNumber + 1);
-
-          const { data, error: rpcErr } = await supabaseAdmin.rpc('process_deposit_atomic', {
-            p_destination_address: destinationAddress,
-            p_asset_symbol: assetSymbol,
-            p_network_code: 'TRC20',
-            p_amount: Number(dep.amount),
-            p_tx_hash: dep.tx_hash,
-            p_output_index: outputIndex,
-            p_block_number: txInfo.blockNumber,
-            p_from_address: dep.from_address || null,
-            p_token_contract: tokenContract,
-            p_confirmations: confs,
-            p_provider: 'confirmations_worker',
-          });
-
-          if (!rpcErr) {
-            const res = typeof data === 'string' ? JSON.parse(data) : data;
-            if (res?.status === 'credited') {
-              newlyCredited++;
-            }
-          }
-        }
-      } else if (normNet === 'BTC') {
-        const btcApiBase = process.env.BTC_MEMPOOL_API || 'https://mempool.space/api';
-        try {
-          const res = await fetch(`${btcApiBase}/tx/${dep.tx_hash}/status`);
-          if (res.ok) {
-            const statusData = await res.json();
-            const confs = statusData.confirmed ? 2 : 0;
-            const { data, error: rpcErr } = await supabaseAdmin.rpc('process_deposit_atomic', {
-              p_destination_address: destinationAddress,
-              p_asset_symbol: 'BTC',
-              p_network_code: 'BTC',
-              p_amount: Number(dep.amount),
-              p_tx_hash: dep.tx_hash,
-              p_output_index: outputIndex,
-              p_block_number: statusData.block_height || null,
-              p_from_address: null,
-              p_token_contract: null,
-              p_confirmations: confs,
-              p_provider: 'confirmations_worker',
-            });
-            if (!rpcErr) {
-              const r = typeof data === 'string' ? JSON.parse(data) : data;
-              if (r?.status === 'credited') newlyCredited++;
-            }
-          }
-        } catch (_) {}
-      } else if (normNet === 'LTC') {
-        const ltcApiBase = process.env.LTC_MEMPOOL_API || 'https://litecoinspace.org/api';
-        try {
-          const res = await fetch(`${ltcApiBase}/tx/${dep.tx_hash}/status`);
-          if (res.ok) {
-            const statusData = await res.json();
-            const confs = statusData.confirmed ? 6 : 0;
-            const { data, error: rpcErr } = await supabaseAdmin.rpc('process_deposit_atomic', {
-              p_destination_address: destinationAddress,
-              p_asset_symbol: 'LTC',
-              p_network_code: 'LTC',
-              p_amount: Number(dep.amount),
-              p_tx_hash: dep.tx_hash,
-              p_output_index: outputIndex,
-              p_block_number: statusData.block_height || null,
-              p_from_address: null,
-              p_token_contract: null,
-              p_confirmations: confs,
-              p_provider: 'confirmations_worker',
-            });
-            if (!rpcErr) {
-              const r = typeof data === 'string' ? JSON.parse(data) : data;
-              if (r?.status === 'credited') newlyCredited++;
-            }
-          }
-        } catch (_) {}
-      } else {
-        const chain = SUPPORTED_EVM_CHAINS[normNet];
-        if (chain) {
-          const provider = getEvmProvider(normNet);
-          const receipt = await provider.getTransactionReceipt(dep.tx_hash);
-          if (receipt && receipt.blockNumber) {
-            const currentBlock = await provider.getBlockNumber();
-            const confs = Math.max(1, currentBlock - receipt.blockNumber + 1);
-
-            const { data, error: rpcErr } = await supabaseAdmin.rpc('process_deposit_atomic', {
-              p_destination_address: destinationAddress,
-              p_asset_symbol: assetSymbol,
-              p_network_code: normNet,
-              p_amount: Number(dep.amount),
-              p_tx_hash: dep.tx_hash,
-              p_output_index: outputIndex,
-              p_block_number: receipt.blockNumber,
-              p_from_address: receipt.from?.toLowerCase() || dep.from_address || null,
-              p_token_contract: tokenContract,
-              p_confirmations: confs,
-              p_provider: 'confirmations_worker',
-            });
-
-            if (!rpcErr) {
-              const res = typeof data === 'string' ? JSON.parse(data) : data;
-              if (res?.status === 'credited') {
-                newlyCredited++;
-              }
-            }
-          }
-        }
-      }
-    }
-  } catch (err) {
-    console.error('[Deposit Ingestion] Error refreshing pending confirmations:', err);
+  if (error) {
+    throw new Error(`Failed to load pending on-chain deposits: ${error.message}`);
+  }
+  if (!pendingDeposits) {
+    throw new Error('Failed to load pending on-chain deposits: query returned no data');
   }
 
-  return { checked, newlyCredited };
+  checked = pendingDeposits.length;
+  const erc20Interface = new ethers.Interface(ERC20_ABI);
+  const transferTopic = erc20Interface.getEvent('Transfer')?.topicHash;
+  if (!transferTopic) throw new Error('Unable to construct ERC-20 Transfer event topic');
+
+  const normalizeDecimal = (value: unknown): string => {
+    const raw = typeof value === 'string' ? value.trim() : String(value);
+    if (!/^(?:0|[1-9][0-9]*)(?:\.[0-9]+)?$/.test(raw)) {
+      throw new Error('Amount is not a plain non-negative decimal string');
+    }
+    const [whole, fraction = ''] = raw.split('.');
+    const trimmedFraction = fraction.replace(/0+$/, '');
+    return trimmedFraction ? `${whole}.${trimmedFraction}` : whole;
+  };
+
+  for (const dep of pendingDeposits) {
+    try {
+      const normNet = normalizeDepositNetwork(dep.network);
+      const chain = SUPPORTED_EVM_CHAINS[normNet];
+      if (!chain) {
+        errors.push(`Pending deposit ${dep.tx_hash || dep.id || '(unknown)'} on ${normNet || '(empty)'}: chain-specific verification remains disabled`);
+        continue;
+      }
+
+      const txHash = String(dep.tx_hash || '').trim();
+      if (!/^0x[0-9a-fA-F]{64}$/.test(txHash)) throw new Error('Invalid EVM transaction hash');
+      const destination = String(dep.to_address || dep.address || '').trim().toLowerCase();
+      if (!ethers.isAddress(destination)) throw new Error('Invalid destination address');
+
+      const provider = getEvmProvider(normNet);
+      const [receipt, tx] = await Promise.all([
+        provider.getTransactionReceipt(txHash),
+        provider.getTransaction(txHash),
+      ]);
+      if (!receipt || !tx) throw new Error('Transaction or receipt not found');
+      if (receipt.status !== 1) throw new Error('Transaction receipt is not successful');
+      if (!receipt.blockHash || receipt.blockNumber < 1) throw new Error('Receipt is missing canonical block metadata');
+      const [canonicalBlock, currentBlock] = await Promise.all([
+        provider.getBlock(receipt.blockNumber),
+        provider.getBlockNumber(),
+      ]);
+      if (!canonicalBlock?.hash || canonicalBlock.hash.toLowerCase() !== receipt.blockHash.toLowerCase()) {
+        throw new Error('Receipt block is not canonical');
+      }
+      const confirmations = Math.max(0, currentBlock - receipt.blockNumber + 1);
+      const assetSymbol = String(dep.asset_symbol || '').toUpperCase().trim();
+      if (!assetSymbol) throw new Error('Stored asset symbol is missing; refusing to assume USDT');
+      if ((normNet === 'ERC20' || normNet === 'BEP20') && assetSymbol !== 'USDT') {
+        throw new Error(`Unsupported asset/network pairing: ${assetSymbol} on ${normNet}`);
+      }
+      if (normNet === 'ETH' && assetSymbol !== chain.nativeSymbol) {
+        throw new Error(`Unsupported asset/network pairing: ${assetSymbol} on ${normNet}`);
+      }
+      let verifiedAmount: string;
+      let fromAddress: string | null = null;
+      let tokenContract: string | null = null;
+      const storedOutputIndex = dep.output_index ?? dep.log_index;
+
+      if (assetSymbol !== 'USDT' && assetSymbol !== chain.nativeSymbol) {
+        throw new Error(`Unsupported EVM asset for pending confirmation: ${assetSymbol}`);
+      }
+
+      if (assetSymbol === 'USDT' || dep.token_contract) {
+        const expectedContract = (CANONICAL_USDT_CONTRACTS[normNet] || chain.usdtContractAddress || '').toLowerCase();
+        if (!expectedContract || !ethers.isAddress(expectedContract)) throw new Error('Canonical token contract is not configured');
+        if (dep.token_contract && String(dep.token_contract).toLowerCase() !== expectedContract) {
+          throw new Error('Stored token contract does not match configured canonical token contract');
+        }
+        if (storedOutputIndex === null || storedOutputIndex === undefined || !Number.isSafeInteger(Number(storedOutputIndex))) {
+          throw new Error('Stored token log index is missing or invalid');
+        }
+        const logIndex = Number(storedOutputIndex);
+        const log = receipt.logs.find((candidate) => candidate.index === logIndex);
+        if (
+          !log ||
+          log.address.toLowerCase() !== expectedContract ||
+          log.topics.length !== 3 ||
+          log.topics[0]?.toLowerCase() !== transferTopic.toLowerCase() ||
+          log.transactionHash.toLowerCase() !== receipt.hash.toLowerCase() ||
+          log.blockHash?.toLowerCase() !== receipt.blockHash.toLowerCase() ||
+          log.blockNumber !== receipt.blockNumber
+        ) {
+          throw new Error('Receipt does not contain the expected token Transfer log at the stored log index');
+        }
+        const parsed = erc20Interface.parseLog({ topics: [...log.topics], data: log.data });
+        if (!parsed || parsed.name !== 'Transfer') throw new Error('Unable to decode token Transfer log');
+        const from = String(parsed.args[0]).toLowerCase();
+        const to = String(parsed.args[1]).toLowerCase();
+        const rawAmount = parsed.args[2] as bigint;
+        if (to !== destination) throw new Error('On-chain token destination does not match the stored deposit address');
+        if (rawAmount <= 0n) throw new Error('On-chain token amount is not positive');
+        verifiedAmount = ethers.formatUnits(rawAmount, chain.usdtDecimals ?? 6);
+        fromAddress = from;
+        tokenContract = expectedContract;
+      } else {
+        if (!tx.to || tx.to.toLowerCase() !== destination) throw new Error('Native transaction destination does not match stored deposit address');
+        if (tx.value <= 0n) throw new Error('Native transaction amount is not positive');
+        if (storedOutputIndex !== null && storedOutputIndex !== undefined && Number(storedOutputIndex) !== 0) {
+          throw new Error('Native transfer output index must be zero');
+        }
+        verifiedAmount = ethers.formatUnits(tx.value, chain.nativeDecimals);
+        fromAddress = tx.from.toLowerCase();
+      }
+
+      if (normalizeDecimal(verifiedAmount) !== normalizeDecimal(dep.amount)) {
+        throw new Error('Verified on-chain amount does not exactly match stored deposit amount');
+      }
+
+      const { data, error: rpcError } = await getDepositSupabaseAdmin().rpc('process_deposit_atomic', {
+        p_destination_address: destination,
+        p_asset_symbol: assetSymbol,
+        p_network_code: normNet,
+        p_amount: verifiedAmount,
+        p_tx_hash: txHash,
+        p_output_index: storedOutputIndex ?? 0,
+        p_block_number: receipt.blockNumber,
+        p_from_address: fromAddress,
+        p_token_contract: tokenContract,
+        p_confirmations: confirmations,
+        p_provider: 'confirmations_worker',
+      });
+      if (rpcError) throw new Error(`Deposit credit RPC failed: ${rpcError.message}`);
+      const result = typeof data === 'string' ? JSON.parse(data) : data;
+      if (result?.status === 'credited') newlyCredited++;
+    } catch (rowError: unknown) {
+      errors.push(`Pending deposit row ${dep?.id ?? dep?.tx_hash ?? '(unknown)'}: ${rowError instanceof Error ? rowError.message : String(rowError)}`);
+    }
+  }
+
+  if (errors.length > 0) {
+    console.error('[Deposit Ingestion] Pending confirmation refresh reported errors:', {
+      checked,
+      errorCount: errors.length,
+      errors: errors.slice(0, 20),
+    });
+  }
+
+  return { checked, newlyCredited, errors };
 }
 
 /**
  * Main deposit ingestion cycle execution
  */
+// Legacy scanner paths have not yet proved canonical transaction inclusion and exact
+// output/event identity. Keep them from reaching the credit RPC until each path is
+// independently hardened. The canonical pending verifier uses the real RPC below.
+async function rejectUnverifiedScannerCredit(
+  _params: Record<string, unknown>,
+): Promise<{ data: null; error: { message: string } }> {
+  return {
+    data: null,
+    error: { message: 'Direct scanner credit disabled: canonical transaction verification is required' },
+  };
+}
+
 export async function runDepositIngestion(): Promise<{
+  ok: boolean;
+  errorCount: number;
   results: IngestionResult[];
-  pendingRecheck: { checked: number; newlyCredited: number };
+  pendingRecheck: { checked: number; newlyCredited: number; errors: string[] };
 }> {
+  // Address loading is a prerequisite. getMonitoredAddresses throws on any query failure.
   const { evmAddresses, tronAddresses, btcAddresses, ltcAddresses } = await getMonitoredAddresses();
   const results: IngestionResult[] = [];
 
-  // 1. Scan EVM Chains (ERC20, BEP20)
-  for (const [netKey, chain] of Object.entries(SUPPORTED_EVM_CHAINS)) {
-    const netResult: IngestionResult = {
-      network: netKey,
-      depositsDetected: 0,
-      depositsCredited: 0,
-      errors: [],
-    };
-
+  // Scan each configured EVM chain independently and expose failures in the result.
+  for (const [netKey] of Object.entries(SUPPORTED_EVM_CHAINS)) {
+    const netResult: IngestionResult = { network: netKey, depositsDetected: 0, depositsCredited: 0, errors: [] };
     try {
       const provider = getEvmProvider(netKey);
       const latestBlock = await provider.getBlockNumber();
-      // Scan a safe trailing block window of 100 blocks
       const scanWindow = 100;
       const fromBlock = Math.max(0, latestBlock - scanWindow);
-
       netResult.scannedBlocks = latestBlock - fromBlock;
 
       if (evmAddresses.size > 0) {
-        // Scan ERC20 / BEP20 USDT
         const tokenRes = await scanEvmTokenDeposits(netKey, evmAddresses, fromBlock, latestBlock);
         netResult.depositsDetected += tokenRes.detected;
         netResult.depositsCredited += tokenRes.credited;
         netResult.errors.push(...tokenRes.errors);
 
-        // Scan Native transfers (ETH)
         const nativeRes = await scanEvmNativeDeposits(netKey, evmAddresses, fromBlock, latestBlock);
         netResult.depositsDetected += nativeRes.detected;
         netResult.depositsCredited += nativeRes.credited;
         netResult.errors.push(...nativeRes.errors);
       }
-    } catch (chainErr: any) {
-      netResult.errors.push(`Chain scan failed: ${chainErr.message}`);
+    } catch (chainErr: unknown) {
+      netResult.errors.push(`Chain scan failed: ${chainErr instanceof Error ? chainErr.message : String(chainErr)}`);
     }
-
     results.push(netResult);
   }
 
-  // 2. Scan TRON
-  const tronResult: IngestionResult = {
-    network: 'TRC20',
-    depositsDetected: 0,
-    depositsCredited: 0,
-    errors: [],
-  };
+  const otherScans: Array<{ network: string; addresses: Set<string>; scan: (addresses: Set<string>) => Promise<{ detected: number; credited: number; errors: string[] }> }> = [
+    { network: 'TRC20', addresses: tronAddresses, scan: scanTronDeposits },
+    { network: 'BTC', addresses: btcAddresses, scan: scanBtcDeposits },
+    { network: 'LTC', addresses: ltcAddresses, scan: scanLtcDeposits },
+  ];
 
-  if (tronAddresses.size > 0) {
-    const tRes = await scanTronDeposits(tronAddresses);
-    tronResult.depositsDetected += tRes.detected;
-    tronResult.depositsCredited += tRes.credited;
-    tronResult.errors.push(...tRes.errors);
+  for (const item of otherScans) {
+    const result: IngestionResult = { network: item.network, depositsDetected: 0, depositsCredited: 0, errors: [] };
+    if (item.addresses.size > 0) {
+      try {
+        const scanResult = await item.scan(item.addresses);
+        result.depositsDetected = scanResult.detected;
+        result.depositsCredited = scanResult.credited;
+        result.errors.push(...scanResult.errors);
+      } catch (scanErr: unknown) {
+        result.errors.push(`Chain scan failed: ${scanErr instanceof Error ? scanErr.message : String(scanErr)}`);
+      }
+    }
+    results.push(result);
   }
-  results.push(tronResult);
 
-  // 3. Scan Bitcoin (BTC)
-  const btcResult: IngestionResult = {
-    network: 'BTC',
-    depositsDetected: 0,
-    depositsCredited: 0,
-    errors: [],
-  };
-
-  if (btcAddresses.size > 0) {
-    const bRes = await scanBtcDeposits(btcAddresses);
-    btcResult.depositsDetected += bRes.detected;
-    btcResult.depositsCredited += bRes.credited;
-    btcResult.errors.push(...bRes.errors);
+  let pendingRecheck = { checked: 0, newlyCredited: 0, errors: [] as string[] };
+  try {
+    pendingRecheck = await refreshPendingDepositConfirmations();
+  } catch (pendingErr: unknown) {
+    results.push({
+      network: 'PENDING_CONFIRMATIONS',
+      depositsDetected: 0,
+      depositsCredited: 0,
+      errors: [`Pending confirmation refresh failed: ${pendingErr instanceof Error ? pendingErr.message : String(pendingErr)}`],
+    });
   }
-  results.push(btcResult);
 
-  // 4. Scan Litecoin (LTC)
-  const ltcResult: IngestionResult = {
-    network: 'LTC',
-    depositsDetected: 0,
-    depositsCredited: 0,
-    errors: [],
-  };
-
-  if (ltcAddresses.size > 0) {
-    const lRes = await scanLtcDeposits(ltcAddresses);
-    ltcResult.depositsDetected += lRes.detected;
-    ltcResult.depositsCredited += lRes.credited;
-    ltcResult.errors.push(...lRes.errors);
+  const errorCount = results.reduce((count, result) => count + result.errors.length, 0) + pendingRecheck.errors.length;
+  const summary = { ok: errorCount === 0, errorCount, results, pendingRecheck };
+  if (!summary.ok) {
+    console.error('[Deposit Ingestion] Cycle completed with errors:', {
+      errorCount,
+      failedNetworks: results.filter((result) => result.errors.length > 0).map((result) => ({ network: result.network, errors: result.errors })),
+    });
+  } else {
+    console.info('[Deposit Ingestion] Cycle completed without reported errors.', {
+      networksScanned: results.length,
+      pendingChecked: pendingRecheck.checked,
+      newlyCredited: pendingRecheck.newlyCredited,
+    });
   }
-  results.push(ltcResult);
-
-  // 5. Recheck previously PENDING deposits
-  const pendingRecheck = await refreshPendingDepositConfirmations();
-
-  return { results, pendingRecheck };
+  return summary;
 }
 
 let ingestionInterval: NodeJS.Timeout | null = null;
@@ -1195,15 +1231,6 @@ let ingestionInterval: NodeJS.Timeout | null = null;
 export function startDepositIngestionWorker(intervalMs: number = 30000): void {
   if (ingestionInterval) return;
   console.log(`[Deposit Ingestion] Background worker started, polling every ${intervalMs}ms...`);
-  runDepositIngestion().catch((e) => console.error('[Deposit Ingestion] Cycle failed:', e));
+  runDepositIngestion().catch((e) => console.error('[Deposit Ingestion] Cycle failed before completion:', e));
   ingestionInterval = setInterval(() => {
     runDepositIngestion().catch((e) => console.error('[Deposit Ingestion] Cycle failed:', e));
-  }, intervalMs);
-}
-
-export function stopDepositIngestionWorker(): void {
-  if (ingestionInterval) {
-    clearInterval(ingestionInterval);
-    ingestionInterval = null;
-  }
-}
