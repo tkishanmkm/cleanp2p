@@ -302,13 +302,13 @@ export async function processWithdrawalQueue(): Promise<WithdrawalProcessResult>
     if (isLocalCheckStage) {
       console.warn(`[Withdrawal Worker] Pre-broadcast validation failure: refunding withdrawal ${withdrawal.id}`);
       try {
-        const { error: refundError } = await supabaseAdmin.rpc('process_failed_withdrawal', {
+        const { data: refundResult, error: refundError } = await supabaseAdmin.rpc('process_failed_withdrawal', {
           p_withdrawal_id: withdrawal.id,
           p_error_reason: err.message || 'Transaction pre-broadcast validation failure',
           p_is_verified_unbroadcast: true,
         });
-        if (refundError) {
-          console.error(`[Withdrawal Worker] Refund RPC returned an error for ${withdrawal.id}:`, refundError);
+        if (refundError || refundResult?.success !== true) {
+          console.error(`[Withdrawal Worker] Refund was not confirmed for ${withdrawal.id}:`, refundError || refundResult);
           return {
             processed: true,
             withdrawalId: withdrawal.id,
@@ -440,13 +440,13 @@ export async function checkSubmittedWithdrawals(): Promise<{
           });
           if (!confErr) confirmed++;
         } else if (isConfirmed && success === false) {
-          const { error: failureError } = await supabaseAdmin.rpc('process_failed_withdrawal', {
+          const { data: failureResult, error: failureError } = await supabaseAdmin.rpc('process_failed_withdrawal', {
             p_withdrawal_id: w.id,
             p_error_reason: `TRON transaction reverted on-chain`,
             p_is_verified_unbroadcast: true,
           });
-          if (failureError) {
-            console.error(`[Withdrawal Worker] Could not persist verified TRON failure for ${w.id}:`, failureError);
+          if (failureError || failureResult?.success !== true) {
+            console.error(`[Withdrawal Worker] Could not confirm verified TRON failure for ${w.id}:`, failureError || failureResult);
           }
         }
       } else if (SUPPORTED_EVM_CHAINS[normNet]) {
@@ -465,13 +465,13 @@ export async function checkSubmittedWithdrawals(): Promise<{
           });
           if (!confErr) confirmed++;
         } else if (confirmations >= chain.requiredConfirmations && status === 0) {
-          const { error: failureError } = await supabaseAdmin.rpc('process_failed_withdrawal', {
+          const { data: failureResult, error: failureError } = await supabaseAdmin.rpc('process_failed_withdrawal', {
             p_withdrawal_id: w.id,
             p_error_reason: `EVM transaction reverted on-chain on network ${w.network}`,
             p_is_verified_unbroadcast: true,
           });
-          if (failureError) {
-            console.error(`[Withdrawal Worker] Could not persist verified EVM failure for ${w.id}:`, failureError);
+          if (failureError || failureResult?.success !== true) {
+            console.error(`[Withdrawal Worker] Could not confirm verified EVM failure for ${w.id}:`, failureError || failureResult);
           }
         }
       } else if (normNet === 'BTC') {
