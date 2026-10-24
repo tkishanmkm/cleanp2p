@@ -18,6 +18,7 @@ on:
       - 'src/lib/blockchain/tron.ts'
       - 'src/lib/blockchain/tronReceiptStatus.ts'
       - 'tests/withdrawal-broadcast-stage.test.ts'
+      - 'tests/withdrawal-amount-parser.test.ts'
       - 'tests/withdrawal-refund-wallet-row-migration.test.ts'
       - 'supabase/migrations/20261024000001_withdrawal_refund_wallet_row_fail_closed.sql'
       - 'tests/tron-withdrawal-receipt.test.ts'
@@ -93,6 +94,8 @@ jobs:
               echo "npm-ci.log was not created; install step may not have started."
             fi
           } >> "$GITHUB_STEP_SUMMARY"
+      - name: Test strict withdrawal amount parsing
+        run: npm run test:withdrawal-amount
       - name: Test TRON amount and receipt handling
         run: npm run test:tron-withdrawal
       - name: Test withdrawal broadcast-stage guards
