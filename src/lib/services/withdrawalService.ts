@@ -504,8 +504,8 @@ export async function executeCanonicalWithdrawal(input: WithdrawalRequestInput):
     destinationAddress: validDestination,
     amountRequested: parsedAmount,
     networkFee: networkFee,
-    totalDebited: parsedAmount + networkFee,
-    message: 'Withdrawal Pending',
+    totalDebited: Number(rpcResult?.total_debited ?? (parsedAmount + networkFee)),
+    message: String(rpcResult?.message || (rpcResult?.replayed ? 'Withdrawal already submitted (idempotent replay).' : 'Withdrawal Pending')),
     statusCode: 200,
   };
 }
