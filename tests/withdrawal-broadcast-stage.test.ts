@@ -8,6 +8,7 @@ import { resolve } from 'node:path';
 const source = readFileSync(resolve(process.cwd(), 'src/jobs/withdrawalWorker.ts'), 'utf8');
 const legacyProcessor = readFileSync(resolve(process.cwd(), 'src/lib/withdrawal-processor.ts'), 'utf8');
 const legacyRoute = readFileSync(resolve(process.cwd(), 'src/app/api/internal/withdrawals/process/route.ts'), 'utf8');
+const directWithdrawalRoute = readFileSync(resolve(process.cwd(), 'src/app/api/workers/withdraw/route.ts'), 'utf8');
 const tronStart = source.indexOf("// BRANCH A: TRON Network (TRC-20 USDT)");
 const evmStart = source.indexOf("// BRANCH B: EVM Networks (ERC20, BEP20)", tronStart);
 assert.ok(tronStart >= 0 && evmStart > tronStart, 'TRON and EVM dispatch branches must exist');
@@ -60,5 +61,7 @@ assert.ok(!legacyProcessor.includes('complete_onchain_withdrawal'), 'legacy proc
 assert.ok((legacyProcessor.match(/legacyProcessorDisabled\(\);/g) || []).length >= 6, 'all legacy broadcast entrypoints must fail closed');
 assert.ok(legacyRoute.includes("status: 410"), 'legacy internal route must return Gone instead of dispatching withdrawals');
 assert.ok(legacyRoute.includes('LEGACY_WITHDRAWAL_PROCESSOR_DISABLED'), 'legacy route must explain why dispatch is disabled');
+assert.ok(directWithdrawalRoute.includes('status: 410'), 'direct hot-wallet route must not broadcast or settle withdrawals');
+assert.ok(directWithdrawalRoute.includes('LEGACY_DIRECT_WITHDRAWAL_DISABLED'), 'direct hot-wallet route must explain why dispatch is disabled');
 
 console.log('Withdrawal broadcast-stage source regression checks passed.');
