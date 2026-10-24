@@ -39,4 +39,12 @@ assert.ok(evmDispatch.includes('await markWithdrawalBroadcasted(withdrawal.id, t
 assert.ok(evmDispatch.includes("status: 'BROADCASTED'"), 'EVM dispatch must return BROADCASTED, not completed');
 assert.ok(!evmDispatch.includes("rpc('complete_onchain_withdrawal'"), 'EVM dispatch must not settle before confirmation monitoring');
 
-console.log('Withdrawal broadcast-stage source regression checks passed (16 assertions).');
+
+const tronMonitorGate = source.indexOf('if (isConfirmed && success === false)');
+const evmMonitorGate = source.indexOf('confirmations >= chain.requiredConfirmations && status === 0');
+assert.ok(tronMonitorGate >= 0, 'TRON refund path must require a confirmed terminal failure');
+assert.ok(evmMonitorGate >= 0, 'EVM refund path must require configured confirmations and a reverted receipt');
+assert.ok(source.includes("classifyTronReceiptResult(txInfo.receipt?.result)"), 'unknown TRON receipt results must use conservative receipt classification');
+assert.ok(source.includes("if (outcome !== 'pending')"), 'TRON confirmation status must remain pending for unknown receipt outcomes');
+
+console.log('Withdrawal broadcast-stage source regression checks passed (20 assertions).');
