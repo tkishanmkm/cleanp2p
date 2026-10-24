@@ -602,7 +602,7 @@ export async function processPendingWithdrawals(limit: number = 20): Promise<Pro
           });
           if (failureError) {
             console.error('[processPendingWithdrawals] Could not persist ambiguous withdrawal state:', failureError);
-          } else if (!failureResult || failureResult.success !== false && failureResult.success !== true) {
+          } else if (!failureResult || typeof failureResult.success !== 'boolean') {
             console.error('[processPendingWithdrawals] Unexpected failure RPC response; manual reconciliation required:', failureResult);
           } else if (failureResult.success === false) {
             console.warn('[processPendingWithdrawals] Withdrawal remains reserved pending reconciliation:', failureResult);
