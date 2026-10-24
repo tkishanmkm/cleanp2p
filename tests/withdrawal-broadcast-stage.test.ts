@@ -77,6 +77,7 @@ assert.ok(cronDispatchRoute.includes('await processWithdrawalQueue()'), 'cron di
 assert.ok(!cronDispatchRoute.includes('processPendingWithdrawals'), 'cron dispatch must not call a missing legacy worker export');
 assert.ok(withdrawalService.includes("rpc('request_withdrawal_idempotent'"), 'withdrawal retries must use the atomic idempotency RPC when a key is supplied');
 assert.ok(withdrawalService.includes('p_idempotency_key: idempotencyKey'), 'withdrawal service must forward the caller idempotency key');
+assert.ok(withdrawalService.includes('if (rpcResult?.replayed !== true)'), 'idempotent replays must not create duplicate withdrawal notifications');
 assert.ok(!withdrawalService.includes(".eq('destination_address', validDestination)"), 'withdrawal service must not guess idempotency from a matching destination and amount');
 assert.ok(withdrawalIdempotencyMigration.includes('pg_advisory_xact_lock'), 'database idempotency must serialize concurrent retries');
 assert.ok(withdrawalIdempotencyMigration.includes('different withdrawal request'), 'database must reject reusing a key for a different request payload');
