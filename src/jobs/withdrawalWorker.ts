@@ -12,6 +12,7 @@ import {
 } from '@/lib/blockchain/providers';
 import {
   sendTrc20Transfer,
+  parseUnitsTron,
   getTronTransactionConfirmations,
   TRON_CONFIG,
   isValidTronAddress,
@@ -196,6 +197,16 @@ export async function processWithdrawalQueue(): Promise<WithdrawalProcessResult>
       const tronWeb = getTronWeb(true);
       if (!tronWeb.defaultPrivateKey) {
         throw new Error('TRON hot wallet private key is not configured');
+      }
+
+      // Complete deterministic amount/contract validation before classifying
+      // any later transfer error as an ambiguous broadcast.
+      const rawAmount = parseUnitsTron(amountStr, TRON_CONFIG.usdtDecimals);
+      if (rawAmount <= 0n) {
+        throw new Error('TRON token transfer amount must be greater than zero');
+      }
+      if (!tronWeb.isAddress(TRON_CONFIG.usdtContract.trim())) {
+        throw new Error('Invalid configured TRON token contract address');
       }
 
       isLocalCheckStage = false;
