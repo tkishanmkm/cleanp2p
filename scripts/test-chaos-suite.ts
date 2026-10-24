@@ -1,15 +1,21 @@
 import { createClient } from '@supabase/supabase-js';
 import { ethers } from 'ethers';
 
-const supabaseUrl =
-  process.env.NEXT_PUBLIC_SUPABASE_URL ||
-  process.env.SUPABASE_URL ||
-  'https://placeholder.supabase.co';
+// This suite issues withdrawal RPCs and inserts withdrawal records.
+// Require explicit privileged credentials for a dedicated test project; never use anon or placeholder fallbacks.
+const supabaseUrl = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL;
+const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
-const supabaseServiceKey =
-  process.env.SUPABASE_SERVICE_ROLE_KEY ||
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ||
-  'placeholder-key';
+if (!supabaseUrl || !supabaseServiceKey) {
+  throw new Error(
+    'Chaos tests require SUPABASE_URL (or NEXT_PUBLIC_SUPABASE_URL) and SUPABASE_SERVICE_ROLE_KEY for a dedicated test project.'
+  );
+}
+
+const parsedSupabaseUrl = new URL(supabaseUrl);
+if (parsedSupabaseUrl.hostname.startsWith('eaiwgfxoiwxepinvcykg.')) {
+  throw new Error('Chaos tests are blocked from running against the production Supabase project.');
+}
 
 const supabaseAdmin = createClient(supabaseUrl, supabaseServiceKey, {
   auth: {
