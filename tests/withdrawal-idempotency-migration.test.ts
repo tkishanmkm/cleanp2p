@@ -26,5 +26,10 @@ assert.ok(migration.includes('TO service_role, postgres'), 'only trusted server 
 assert.ok(migration.includes('public.request_withdrawal('), 'idempotent wrapper must delegate to the canonical reservation RPC');
 assert.ok(migration.includes('manual reconciliation required'), 'missing replay records must fail closed');
 assert.ok(migration.includes('replayed',), 'response must identify idempotent replays');
+assert.equal(
+  migration.split("'success', TRUE").length - 1,
+  2,
+  'new reservations and idempotent replays must both return an explicit success flag',
+);
 
 console.log('Withdrawal idempotency migration source guards passed.');
