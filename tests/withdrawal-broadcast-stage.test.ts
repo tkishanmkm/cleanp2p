@@ -12,6 +12,8 @@ const directWithdrawalRoute = readFileSync(resolve(process.cwd(), 'src/app/api/w
 const legacyEvmDispatchRoute = readFileSync(resolve(process.cwd(), 'src/app/api/withdrawals/dispatch/route.ts'), 'utf8');
 const deprecatedScheduler = readFileSync(resolve(process.cwd(), 'src/jobs/scheduler.ts'), 'utf8');
 const cronDispatchRoute = readFileSync(resolve(process.cwd(), 'src/app/api/cron/withdrawals/dispatch/route.ts'), 'utf8');
+const withdrawalService = readFileSync(resolve(process.cwd(), 'src/lib/services/withdrawalService.ts'), 'utf8');
+const withdrawalIdempotencyMigration = readFileSync(resolve(process.cwd(), 'supabase/migrations/20261024000002_withdrawal_request_idempotency.sql'), 'utf8');
 const tronStart = source.indexOf("// BRANCH A: TRON Network (TRC-20 USDT)");
 const evmStart = source.indexOf("// BRANCH B: EVM Networks (ERC20, BEP20)", tronStart);
 assert.ok(tronStart >= 0 && evmStart > tronStart, 'TRON and EVM dispatch branches must exist');
@@ -73,5 +75,11 @@ assert.ok(!deprecatedScheduler.includes('processPendingWithdrawals'), 'deprecate
 assert.ok(cronDispatchRoute.includes("import { processWithdrawalQueue } from '@/jobs/withdrawalWorker'"), 'cron dispatch must import the canonical exported queue worker');
 assert.ok(cronDispatchRoute.includes('await processWithdrawalQueue()'), 'cron dispatch must invoke the canonical queue worker');
 assert.ok(!cronDispatchRoute.includes('processPendingWithdrawals'), 'cron dispatch must not call a missing legacy worker export');
+assert.ok(withdrawalService.includes("rpc('request_withdrawal_idempotent'"), 'withdrawal retries must use the atomic idempotency RPC when a key is supplied');
+assert.ok(withdrawalService.includes('p_idempotency_key: idempotencyKey'), 'withdrawal service must forward the caller idempotency key');
+assert.ok(!withdrawalService.includes(".eq('destination_address', validDestination)"), 'withdrawal service must not guess idempotency from a matching destination and amount');
+assert.ok(withdrawalIdempotencyMigration.includes('pg_advisory_xact_lock'), 'database idempotency must serialize concurrent retries');
+assert.ok(withdrawalIdempotencyMigration.includes('different withdrawal request'), 'database must reject reusing a key for a different request payload');
+assert.ok(withdrawalIdempotencyMigration.includes('p_usd_equivalent := p_usd_equivalent'), 'idempotent wrapper must preserve authoritative USD approval thresholds');
 
 console.log('Withdrawal broadcast-stage source regression checks passed.');
