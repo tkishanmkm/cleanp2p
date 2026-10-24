@@ -108,10 +108,18 @@ export async function sendTrc20Transfer(params: {
     throw new Error('TRON hot wallet private key is not configured');
   }
 
-  const rawAmount = parseUnitsTron(amount, TRON_CONFIG.usdtDecimals).toString();
+  if (typeof contractAddress !== 'string' || !tronWeb.isAddress(contractAddress.trim())) {
+    throw new Error('Invalid TRON token contract address');
+  }
+
+  const rawAmountValue = parseUnitsTron(amount, TRON_CONFIG.usdtDecimals);
+  if (rawAmountValue <= 0n) {
+    throw new Error('TRON token transfer amount must be greater than zero');
+  }
+  const rawAmount = rawAmountValue.toString();
 
   // Load contract and call transfer method
-  const contract = await tronWeb.contract().at(contractAddress);
+  const contract = await tronWeb.contract().at(contractAddress.trim());
   const txHash = await contract.methods.transfer(toAddress, rawAmount).send();
 
   if (!txHash || typeof txHash !== 'string') {
