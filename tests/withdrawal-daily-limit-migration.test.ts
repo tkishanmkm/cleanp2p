@@ -22,6 +22,8 @@ assert.ok(sql.includes('LEFT JOIN public.onchain_withdrawals AS ow ON ow.id = w.
 assert.ok(sql.includes("WHEN UPPER(w.asset_symbol) = ''USDT''"), 'USDT amount is used as the USD fallback');
 assert.ok(sql.includes("''broadcasted''") && sql.includes("''ambiguous_broadcast''"), 'broadcasted and ambiguous withdrawals count toward limits');
 assert.ok(sql.includes('DAILY_LIMIT_UNVERIFIABLE'), 'unverifiable daily totals block new withdrawals');
+assert.ok(sql.includes("COALESCE(UPPER(w.asset_symbol), '''')"), 'missing asset symbols cannot evade USD valuation validation');
+assert.ok(sql.includes("::NUMERIC <= 0") && sql.includes("::NUMERIC >= 1000000000000"), 'non-positive and implausibly large USD values fail closed');
 assert.ok(sql.includes('IF position(v_old_daily_check IN v_definition) = 0 THEN'), 'unexpected deployed logic aborts before function replacement');
 assert.ok(sql.includes('EXECUTE v_definition;'), 'only the verified patched deployed function is installed');
 assert.ok(sql.includes('REVOKE EXECUTE ON FUNCTION public.request_withdrawal(UUID, TEXT, TEXT, NUMERIC, NUMERIC, TEXT, NUMERIC) FROM PUBLIC, anon, authenticated;'), 'untrusted roles are revoked');
