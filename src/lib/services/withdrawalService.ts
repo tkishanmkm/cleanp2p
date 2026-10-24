@@ -330,6 +330,20 @@ export async function executeCanonicalWithdrawal(input: WithdrawalRequestInput):
     };
   }
 
+  // The canonical queue worker currently broadcasts TRON and EVM transactions,
+  // but has no Bitcoin/Litecoin UTXO transaction-construction/broadcast path.
+  // Reject these networks before fees or balance reservation so funds cannot
+  // be reserved for a withdrawal that this worker cannot dispatch.
+  if (networkCode === 'BTC' || networkCode === 'LTC') {
+    return {
+      success: false,
+      status: 'NETWORK_PROCESSOR_UNAVAILABLE',
+      error: `Withdrawals on ${networkCode} are temporarily unavailable until the UTXO dispatch and confirmation path is enabled.`,
+      message: `Withdrawals on ${networkCode} are temporarily unavailable. No funds have been reserved.`,
+      statusCode: 503,
+    };
+  }
+
   // Validate Destination Address Format
   if (!input.destinationAddress) {
     return {
