@@ -159,6 +159,63 @@ export async function getMonitoredAddresses(): Promise<{
 }
 
 /**
+ * Verify a token Transfer log against a successful receipt in the provider's
+ * canonical block. Do not credit a log if the receipt is missing, reverted,
+ * reorged, or does not contain the exact log being processed.
+ */
+async function isCanonicalTokenTransferLog(
+  provider: ethers.Provider,
+  log: ethers.Log,
+  expectedContractAddress: string
+): Promise<boolean> {
+  try {
+    if (
+      !log.transactionHash ||
+      !Number.isSafeInteger(log.blockNumber) ||
+      log.blockNumber < 0 ||
+      !Number.isSafeInteger(log.index) ||
+      log.index < 0 ||
+      log.address.toLowerCase() !== expectedContractAddress.toLowerCase()
+    ) {
+      return false;
+    }
+
+    const receipt = await provider.getTransactionReceipt(log.transactionHash);
+    if (
+      !receipt ||
+      receipt.status !== 1 ||
+      receipt.blockNumber !== log.blockNumber ||
+      receipt.blockHash.toLowerCase() !== log.blockHash.toLowerCase()
+    ) {
+      return false;
+    }
+
+    const canonicalBlock = await provider.getBlock(receipt.blockNumber);
+    if (!canonicalBlock || canonicalBlock.hash?.toLowerCase() !== receipt.blockHash.toLowerCase()) {
+      return false;
+    }
+
+    const receiptLog = receipt.logs.find((candidate) => candidate.index === log.index);
+    if (
+      !receiptLog ||
+      receiptLog.address.toLowerCase() !== log.address.toLowerCase() ||
+      receiptLog.blockHash.toLowerCase() !== log.blockHash.toLowerCase() ||
+      receiptLog.transactionHash.toLowerCase() !== log.transactionHash.toLowerCase() ||
+      receiptLog.topics.length !== log.topics.length ||
+      !receiptLog.topics.every((topic, index) => topic.toLowerCase() === log.topics[index]?.toLowerCase()) ||
+      receiptLog.data.toLowerCase() !== log.data.toLowerCase()
+    ) {
+      return false;
+    }
+
+    return true;
+  } catch {
+    // Fail closed whenever receipt/canonical-chain evidence cannot be verified.
+    return false;
+  }
+}
+
+/**
  * Scans EVM logs for incoming ERC-20 token transfers targeting monitored addresses
  */
 async function scanEvmTokenDeposits(
@@ -208,6 +265,11 @@ async function scanEvmTokenDeposits(
         });
 
         if (!parsed || parsed.name !== 'Transfer') continue;
+
+        if (!(await isCanonicalTokenTransferLog(provider, log, tokenContractAddress))) {
+          errors.push(`Skipped unverified or non-canonical token log ${log.transactionHash}:${log.index}`);
+          continue;
+        }
 
         const fromAddress = (parsed.args[0] as string).toLowerCase();
         const toAddress = (parsed.args[1] as string).toLowerCase();
@@ -1198,12 +1260,3 @@ export function startDepositIngestionWorker(intervalMs: number = 30000): void {
   runDepositIngestion().catch((e) => console.error('[Deposit Ingestion] Cycle failed:', e));
   ingestionInterval = setInterval(() => {
     runDepositIngestion().catch((e) => console.error('[Deposit Ingestion] Cycle failed:', e));
-  }, intervalMs);
-}
-
-export function stopDepositIngestionWorker(): void {
-  if (ingestionInterval) {
-    clearInterval(ingestionInterval);
-    ingestionInterval = null;
-  }
-}
