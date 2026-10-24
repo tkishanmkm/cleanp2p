@@ -62,6 +62,12 @@ const evmFailureBlock = source.slice(evmMonitorGate, source.indexOf("} else if (
 assert.ok(evmFailureBlock.includes("p_is_verified_unbroadcast: true"), 'EVM refund RPC must receive the explicit verified-failure gate');
 assert.ok(source.includes('refundError || refundResult?.success !== true'), 'pre-broadcast path must not report refund success unless the refund RPC confirms success');
 assert.ok(source.includes('failureError || failureResult?.success !== true'), 'confirmed chain-revert paths must validate the refund RPC success payload as well as transport errors');
+assert.equal(
+  source.split('completionResult?.success !== true').length - 1,
+  4,
+  'TRON, EVM, BTC and LTC completion paths must require an explicit success payload from the settlement RPC',
+);
+assert.ok(!source.includes('if (!confErr) confirmed++'), 'settlement must not be counted as confirmed based on transport success alone');
 assert.ok(source.includes('Refund was not confirmed'), 'unconfirmed refund results must be logged for reconciliation');
 
 assert.ok(!legacyProcessor.includes('p_is_verified_unbroadcast: true'), 'legacy processor must never certify an unverified failure as safe to refund');
