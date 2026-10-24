@@ -41,6 +41,8 @@ DECLARE
         COALESCE(SUM(
             CASE
                 WHEN NULLIF(ow.metadata ->> ''usd_equivalent'', '''') IS NOT NULL
+                     AND (ow.metadata ->> ''usd_equivalent'')::NUMERIC > 0
+                     AND (ow.metadata ->> ''usd_equivalent'')::NUMERIC < 1000000000000
                     THEN (ow.metadata ->> ''usd_equivalent'')::NUMERIC
                 WHEN UPPER(w.asset_symbol) = ''USDT''
                     THEN w.amount
@@ -48,8 +50,12 @@ DECLARE
             END
         ), 0),
         COUNT(*) FILTER (
-            WHERE UPPER(w.asset_symbol) <> ''USDT''
-              AND NULLIF(ow.metadata ->> ''usd_equivalent'', '''') IS NULL
+            WHERE COALESCE(UPPER(w.asset_symbol), '''') <> ''USDT''
+              AND (
+                  NULLIF(ow.metadata ->> ''usd_equivalent'', '''') IS NULL
+                  OR (ow.metadata ->> ''usd_equivalent'')::NUMERIC <= 0
+                  OR (ow.metadata ->> ''usd_equivalent'')::NUMERIC >= 1000000000000
+              )
         )
     INTO v_rolling_24h_usd, v_missing_usd_equivalent_count
     FROM public.withdrawals AS w
