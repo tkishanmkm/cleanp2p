@@ -3,6 +3,13 @@
 -- emergency controls and any other deployed security logic.
 BEGIN;
 
+-- The deployed request_withdrawal definition already writes USD valuation
+-- metadata to onchain_withdrawals. Production schema inspection found that
+-- column missing, which would make new withdrawal reservations fail at runtime.
+-- Add it explicitly before both the existing insert and the daily-limit query use it.
+ALTER TABLE public.onchain_withdrawals
+    ADD COLUMN IF NOT EXISTS metadata JSONB NOT NULL DEFAULT '{}'::jsonb;
+
 DO $migration$
 DECLARE
     v_definition TEXT;
