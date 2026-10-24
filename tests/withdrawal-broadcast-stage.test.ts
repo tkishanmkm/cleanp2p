@@ -84,6 +84,10 @@ assert.ok(withdrawalService.includes("status: 'IDEMPOTENCY_UNAVAILABLE'"), 'miss
 assert.ok(withdrawalService.includes("statusCode: 503"), 'missing idempotency RPC must return a temporary service-unavailable response');
 assert.ok(withdrawalService.includes('const validRpcContract = validWithdrawalId'), 'withdrawal service must validate the reservation RPC response contract before reporting success');
 assert.ok(withdrawalService.includes("status: 'PLATFORM_CONTROLS_UNAVAILABLE'"), 'withdrawals must fail closed when platform controls cannot be read');
+const utxoFailClosed = withdrawalService.indexOf("if (networkCode === 'BTC' || networkCode === 'LTC')");
+const utxoReservationRpc = withdrawalService.indexOf("rpc('request_withdrawal'");
+assert.ok(utxoFailClosed >= 0, 'BTC/LTC requests must fail closed while the canonical UTXO dispatch path is unavailable');
+assert.ok(utxoReservationRpc > utxoFailClosed, 'BTC/LTC requests must be rejected before any withdrawal reservation RPC');
 assert.ok(withdrawalService.includes("status: 'PROFILE_VERIFICATION_UNAVAILABLE'"), 'withdrawals must fail closed when account security profile cannot be verified');
 assert.ok(withdrawalService.includes("status: 'DAILY_LIMIT_CHECK_UNAVAILABLE'"), 'withdrawals must fail closed when rolling daily withdrawal history cannot be read');
 assert.ok(withdrawalService.includes("'BROADCASTED', 'ambiguous_broadcast', 'AMBIGUOUS_BROADCAST'"), 'broadcasted and ambiguous withdrawals must count toward rolling daily limits');
