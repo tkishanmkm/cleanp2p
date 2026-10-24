@@ -13,6 +13,9 @@ assert.ok(migration.includes('pg_advisory_xact_lock'), 'concurrent retries must 
 assert.ok(migration.includes('FOR UPDATE'), 'existing idempotency mapping must be locked while replay is checked');
 assert.ok(migration.includes('v_existing.amount IS DISTINCT FROM p_amount'), 'key reuse with a changed amount must be rejected');
 assert.ok(migration.includes('v_existing.network_fee IS DISTINCT FROM p_fee'), 'key reuse with a changed fee must be rejected');
+assert.ok(migration.includes('v_existing.usd_equivalent IS DISTINCT FROM p_usd_equivalent'), 'key reuse with a changed USD valuation must be rejected');
+assert.ok(migration.includes('usd_equivalent NUMERIC(18, 2)'), 'idempotency mapping must preserve the original USD valuation');
+assert.ok(migration.includes('network_fee, usd_equivalent'), 'new mappings must persist the USD valuation');
 assert.ok(migration.includes('v_existing.destination_address IS DISTINCT FROM v_address'), 'key reuse with a changed destination must be rejected');
 assert.ok(migration.includes('v_existing.asset_symbol IS DISTINCT FROM v_asset'), 'key reuse with a changed asset must be rejected');
 assert.ok(migration.includes('v_existing.network_code IS DISTINCT FROM v_network'), 'key reuse with a changed network must be rejected');
