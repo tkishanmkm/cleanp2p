@@ -16,15 +16,17 @@ export async function POST(request: Request) {
     const { results, pendingRecheck } = await runDepositIngestion();
 
     return NextResponse.json({
-      success: true,
+      success: false,
+      code: 'DEPOSIT_CREDITING_PAUSED',
+      depositsPaused: true,
       results,
       pendingRecheck,
-      message: 'Deposit ingestion completed via canonical process_deposit_atomic',
-    });
+      message: 'Deposit ingestion is paused pending independent chain verification. No deposits were credited.',
+    }, { status: 503 });
   } catch (error: any) {
     console.error('Deposit worker error:', error);
     return NextResponse.json(
-      { error: error.message || 'Internal Server Error' },
+      { error: 'Internal Server Error', code: 'DEPOSIT_WORKER_FAILED' },
       { status: 500 }
     );
   }

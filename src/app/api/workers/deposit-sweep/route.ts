@@ -22,9 +22,10 @@ export async function GET(req: NextRequest) {
     const { runDepositSweeper } = await import('@/jobs/sweeperWorker');
     const result = await runDepositSweeper();
     return NextResponse.json({ success: true, mode: 'automated_queue', timestamp: new Date().toISOString(), result });
-  } catch (err: any) {
+  } catch (err: unknown) {
+    // Keep detailed diagnostics in server logs; never expose provider/DB errors to callers.
     console.error('Deposit sweep GET error:', err);
-    return NextResponse.json({ error: err.message || 'Internal server error' }, { status: 500 });
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }
 

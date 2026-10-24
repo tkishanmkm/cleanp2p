@@ -12,7 +12,6 @@ function isAuthorized(req: NextRequest): boolean {
       process.env.DEPOSIT_WORKER_SECRET,
     ],
     customHeaderNames: ['x-service-key', 'x-worker-secret'],
-    checkQueryParam: true,
   });
 
   return result.authorized;
@@ -25,7 +24,11 @@ export async function GET(req: NextRequest) {
 
   const result = await runConfirmationsWorker();
   return NextResponse.json({
+    // The worker completed diagnostic probes only; this is not deposit verification.
     success: true,
+    code: 'VERIFICATION_REQUIRED',
+    depositCreditingEnabled: false,
+    message: 'Confirmation diagnostics completed only. Deposits remain uncredited until exact-event verification is implemented.',
     timestamp: new Date().toISOString(),
     result,
   });

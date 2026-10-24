@@ -2,10 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { runDepositIngestion } from '@/jobs/depositIngestion';
 import { verifyWorkerAuth } from '@/lib/security/worker-auth';
 
-// 1. Force dynamic execution (Prevents Next.js build-time static caching)
 export const dynamic = 'force-dynamic';
-
-// 2. Allow execution time up to 30 seconds on Render
 export const maxDuration = 30;
 
 function isAuthorized(req: NextRequest): boolean {
@@ -16,7 +13,6 @@ function isAuthorized(req: NextRequest): boolean {
       process.env.DEPOSIT_WORKER_SECRET,
     ],
     customHeaderNames: ['x-service-key', 'x-worker-secret'],
-    checkQueryParam: true,
   });
 
   return result.authorized;
@@ -29,15 +25,14 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: 'Unauthorized request' }, { status: 401 });
     }
 
-    // 2. Run Indexing Routines for Multi-Chain Networks
-    console.log('[CRON INDEXER] Triggered successfully at:', new Date().toISOString());
-
-    // Trigger your network event indexers (ETH, BSC, TRON, etc.)
+    console.warn('[CRON INDEXER] Authenticated request received; indexing remains paused at:', new Date().toISOString());
     const indexerResult = await runDepositIngestion();
 
     return NextResponse.json({
-      success: true,
-      message: 'Multi-chain indexer executed successfully',
+      success: false,
+      code: 'DEPOSIT_CREDITING_PAUSED',
+      depositsPaused: true,
+      message: 'Deposit indexing is paused pending independent chain verification. No deposits were credited.',
       timestamp: new Date().toISOString(),
       details: {
         chainsIndexed: indexerResult?.results?.map((r: any) => ({
@@ -47,12 +42,11 @@ export async function GET(request: NextRequest) {
         })) || [],
         pendingRecheck: indexerResult?.pendingRecheck || 0,
       },
-    }, { status: 200 });
-
+    }, { status: 503 });
   } catch (error: any) {
     console.error('[CRON INDEXER ERROR]:', error);
     return NextResponse.json(
-      { success: false, error: error.message || 'Internal Server Error' },
+      { success: false, error: 'Internal Server Error' },
       { status: 500 }
     );
   }
