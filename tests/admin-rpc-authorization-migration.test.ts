@@ -23,4 +23,15 @@ assert.equal(
 assert.ok(migration.includes('Could not safely harden null-session identity fallback'), 'migration must fail closed if either identity patch does not match');
 assert.ok(migration.includes('REVOKE EXECUTE ON FUNCTION public.verify_admin_login(uuid, uuid) FROM PUBLIC, anon'), 'anonymous role probing must be revoked');
 
+
+const adminLogin = migration.split('-- raw_user_meta_data is user-editable')[0];
+assert.ok(adminLogin.includes('IF v_auth_uid IS NOT NULL'), 'admin lookup must branch on the real authenticated identity');
+assert.ok(adminLogin.includes('IF v_uid <> v_auth_uid THEN'), 'authenticated users must not inspect another user UUID');
+assert.ok(adminLogin.indexOf('IF v_uid <> v_auth_uid THEN') < adminLogin.indexOf('FROM auth.users AS u'), 'identity mismatch must be rejected before reading target-user authorization data');
+assert.ok(adminLogin.includes("current_setting('role', true) IS DISTINCT FROM 'service_role'"), 'null-session cross-user lookup must require service role');
+assert.ok(adminLogin.includes('COALESCE(p.is_admin, FALSE)'), 'profile admin flag behavior must be explicit');
+assert.ok(adminLogin.includes("LOWER(COALESCE(p.role::text, '')) = 'admin'") || adminLogin.includes("LOWER(COALESCE(v_profile_role, '')) = 'admin'"), 'profile role authorization behavior must be explicit');
+assert.ok(adminLogin.includes('public.app_admins AS aa'), 'canonical admin registry must be checked in the hardened lookup');
+assert.ok(!adminLogin.includes('raw_user_meta_data'), 'user-editable metadata must not authorize the admin lookup');
+
 console.log('Admin RPC authorization migration source guards passed.');
