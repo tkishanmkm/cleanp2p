@@ -16,7 +16,10 @@ export interface AdminAuthResult {
  * If Admin 2FA is enabled, strictly verifies the cryptographic pax_admin_2fa_session cookie.
  * Never trusts request body parameters or client headers for identity or 2FA verification.
  */
-export async function verifyServerAdmin(req?: NextRequest): Promise<AdminAuthResult> {
+export async function verifyServerAdmin(
+  req?: NextRequest,
+  options: { require2FA?: boolean } = {}
+): Promise<AdminAuthResult> {
   try {
     const supabase = await createClient();
     const adminClient = getSupabaseAdminClient();
@@ -50,7 +53,9 @@ export async function verifyServerAdmin(req?: NextRequest): Promise<AdminAuthRes
     let isAdmin = false;
 
     // Check JWT app_metadata
-    if (user.app_metadata?.role === "admin" || user.user_metadata?.role === "admin") {
+    // Only trusted server-managed app_metadata may grant the role directly.
+    // user_metadata is user-editable and must never grant administrator access.
+    if (user.app_metadata?.role === "admin") {
       isAdmin = true;
     }
 
@@ -63,10 +68,11 @@ export async function verifyServerAdmin(req?: NextRequest): Promise<AdminAuthRes
       .maybeSingle();
 
     if (profile) {
+      // profiles has a self-update policy, so role/is_admin fields read here are
+      // not an authoritative privilege source. Keep this row only for the
+      // existing 2FA settings lookup; admin membership is checked below using
+      // trusted app_metadata, app_admins, or the server environment allowlist.
       adminProfile = profile;
-      if (profile.role === "admin" || profile.is_admin === true || profile.is_admin_account === true) {
-        isAdmin = true;
-      }
     }
 
     // Check app_admins table
@@ -107,7 +113,7 @@ export async function verifyServerAdmin(req?: NextRequest): Promise<AdminAuthRes
     // 3. Admin 2FA Enforcement Gate
     const is2FAEnabled = Boolean(adminProfile?.admin_2fa_enabled || adminProfile?.is_2fa_enabled);
 
-    if (is2FAEnabled) {
+    if (is2FAEnabled && options.require2FA !== false) {
       // Extract cookie from NextRequest or Supabase cookies
       let sessionCookie: string | undefined;
       if (req) {

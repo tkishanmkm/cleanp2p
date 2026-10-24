@@ -9,8 +9,8 @@ import { TRON_CONFIG, getTronWeb, isValidTronAddress } from '@/lib/blockchain/tr
 import { normalizeDepositNetwork } from '@/lib/hd-derivation-engine';
 
 // Initialize Supabase admin client with service role
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL || 'https://eaiwgfxoiwxepinvcykg.supabase.co';
-const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'placeholder-key';
+const supabaseUrl = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL || '';
+const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
 
 export const supabaseAdmin = createClient(supabaseUrl, supabaseKey, {
   auth: {
@@ -404,7 +404,13 @@ async function scanTronDeposits(
   try {
     const tronWeb = getTronWeb(false);
     const tronHost = (process.env.TRON_RPC_URL || TRON_CONFIG.fullHost || 'https://api.trongrid.io').replace(/\/$/, '');
-    const contractAddress = process.env.USDT_CONTRACT_TRC20 || TRON_CONFIG.usdtContract || CANONICAL_USDT_CONTRACTS.TRC20;
+    const canonicalTrc20Usdt = CANONICAL_USDT_CONTRACTS.TRC20;
+    const configuredTrc20Usdt = process.env.USDT_CONTRACT_TRC20 || TRON_CONFIG.usdtContract || canonicalTrc20Usdt;
+    if (configuredTrc20Usdt.trim().toLowerCase() !== canonicalTrc20Usdt.toLowerCase()) {
+      errors.push('Configured TRC-20 USDT contract does not match the canonical mainnet contract; TRON ingestion skipped.');
+      return { detected, credited, errors };
+    }
+    const contractAddress = canonicalTrc20Usdt;
 
     // Determine TronGrid REST host (Mainnet)
     const getTronGridHost = (rpcUrl: string): string => {
@@ -531,7 +537,13 @@ async function scanTronDeposits(
             const amount = parseFloat(formattedAmount);
             if (amount <= 0) continue;
 
-            const tokenContract = item.token_info?.address || contractAddress;
+            const tokenContract = item.token_info?.address;
+            if (typeof tokenContract !== 'string' || tokenContract.trim().toLowerCase() !== contractAddress.toLowerCase()) {
+              continue; // Do not infer a token contract from missing provider metadata.
+            }
+            if (decimals !== 6) {
+              continue; // Canonical TRC-20 USDT uses six decimals.
+            }
 
             // Fetch block number from TRON RPC if missing from account event
             let eventBlock = item.block_number || 0;
@@ -551,7 +563,7 @@ async function scanTronDeposits(
 
             const confirmations = (latestBlock && eventBlock && latestBlock >= eventBlock)
               ? latestBlock - eventBlock + 1
-              : 1;
+              : 0;
 
             detected++;
 
@@ -573,7 +585,7 @@ async function scanTronDeposits(
               errors.push(`RPC error for TRON deposit ${txId}: ${error.message}`);
             } else {
               const r = typeof rpcData === 'string' ? JSON.parse(rpcData) : rpcData;
-              if (r?.status === 'credited' || (r?.success && confirmations >= TRON_CONFIG.requiredConfirmations)) {
+              if (r?.status === 'credited') {
                 credited++;
               }
             }
@@ -585,7 +597,7 @@ async function scanTronDeposits(
     }
 
     // 3. Strategy B: TronGrid Contract Event Ingestion (Transfer events on known USDT contracts)
-    for (const cAddr of knownContracts) {
+    for (const cAddr of knownContracts.filter((candidate) => candidate.toLowerCase() === contractAddress.toLowerCase())) {
       try {
         const eventUrl = `${tronGridHost}/v1/contracts/${cAddr}/events?event_name=Transfer&limit=50&order_by=block_timestamp,desc`;
         const res = await fetch(eventUrl, { headers: tronGridHeaders });
@@ -623,7 +635,7 @@ async function scanTronDeposits(
             const eventBlock = evt.block_number || 0;
             const confirmations = (latestBlock && eventBlock && latestBlock >= eventBlock)
               ? latestBlock - eventBlock + 1
-              : 1;
+              : 0;
 
             const { data: rpcData, error } = await supabaseAdmin.rpc('process_deposit_atomic', {
               p_destination_address: toBase58,
@@ -643,7 +655,7 @@ async function scanTronDeposits(
               errors.push(`RPC error for TRON deposit ${txId}: ${error.message}`);
             } else {
               const r = typeof rpcData === 'string' ? JSON.parse(rpcData) : rpcData;
-              if (r?.status === 'credited' || (r?.success && confirmations >= TRON_CONFIG.requiredConfirmations)) {
+              if (r?.status === 'credited') {
                 credited++;
               }
             }
@@ -743,7 +755,7 @@ async function scanTronDeposits(
           if (numericAmount <= 0) continue;
 
           const eventBlock = parseInt(log.blockNumber || '0x0', 16) || 0;
-          const confirmations = latestBlock > eventBlock ? latestBlock - eventBlock + 1 : 1;
+          const confirmations = latestBlock > eventBlock ? latestBlock - eventBlock + 1 : 0;
 
           let eventContractBase58 = contractAddress;
           try {
@@ -771,7 +783,7 @@ async function scanTronDeposits(
             errors.push(`RPC error for TRON deposit ${txHash}: ${error.message}`);
           } else {
             const res = typeof rpcData === 'string' ? JSON.parse(rpcData) : rpcData;
-            if (res?.status === 'credited' || (res?.success && confirmations >= TRON_CONFIG.requiredConfirmations)) {
+            if (res?.status === 'credited') {
               credited++;
             }
           }
@@ -803,32 +815,62 @@ async function scanBtcDeposits(
 
   const btcApiBase = getBtcMempoolApi();
 
+  // Confirmation counts must be derived from the current chain tip. If this
+  // request fails, do not ingest BTC transactions using guessed confirmations.
+  let tipHeight: number;
+  try {
+    const tipRes = await fetch(`${btcApiBase}/blocks/tip/height`);
+    if (!tipRes.ok) {
+      errors.push(`Unable to retrieve Bitcoin tip height (HTTP ${tipRes.status}); BTC ingestion skipped.`);
+      return { detected, credited, errors };
+    }
+    const tipText = (await tipRes.text()).trim();
+    tipHeight = Number(tipText);
+    if (!Number.isSafeInteger(tipHeight) || tipHeight < 0) {
+      errors.push('Bitcoin tip-height response was invalid; BTC ingestion skipped.');
+      return { detected, credited, errors };
+    }
+  } catch (err: any) {
+    errors.push(`Unable to retrieve Bitcoin tip height; BTC ingestion skipped: ${err?.message || 'request failed'}`);
+    return { detected, credited, errors };
+  }
+
   for (const btcAddr of Array.from(monitoredBtcAddresses)) {
     try {
       const res = await fetch(`${btcApiBase}/address/${btcAddr}/txs`);
-      if (!res.ok) continue;
+      if (!res.ok) {
+        errors.push(`Bitcoin address scan failed for ${btcAddr} (HTTP ${res.status}).`);
+        continue;
+      }
 
       const txs = await res.json();
-      if (!Array.isArray(txs)) continue;
+      if (!Array.isArray(txs)) {
+        errors.push(`Bitcoin address scan returned invalid data for ${btcAddr}.`);
+        continue;
+      }
 
       for (const tx of txs) {
-        let outputAmountSat = 0;
-        let voutIndex = 0;
+        if (typeof tx?.txid !== 'string' || !Array.isArray(tx?.vout)) continue;
 
-        for (let i = 0; i < (tx.vout || []).length; i++) {
-          const out = tx.vout[i];
-          if (out.scriptpubkey_address === btcAddr) {
-            outputAmountSat += out.value || 0;
-            voutIndex = i;
-          }
-        }
+        const isConfirmed = tx.status?.confirmed === true;
+        const blockHeight = tx.status?.block_height;
+        const confirmations =
+          isConfirmed && Number.isSafeInteger(blockHeight) && blockHeight > 0 && blockHeight <= tipHeight
+            ? tipHeight - blockHeight + 1
+            : 0;
 
-        if (outputAmountSat > 0) {
+        // A tx may have more than one output to the same address. Process each
+        // vout independently so amount and output_index always identify the
+        // same on-chain output (never sum outputs under one vout index).
+        for (let outputIndex = 0; outputIndex < tx.vout.length; outputIndex++) {
+          const out = tx.vout[outputIndex];
+          if (out?.scriptpubkey_address !== btcAddr) continue;
+
+          const satoshis = Number(out.value);
+          if (!Number.isSafeInteger(satoshis) || satoshis <= 0) continue;
+
           detected++;
-          const btcAmount = outputAmountSat / 100_000_000;
-          const isConfirmed = tx.status?.confirmed === true;
-          const blockHeight = tx.status?.block_height;
-          let confirmations = isConfirmed ? 2 : 0;
+          const btcAmount = satoshis / 100_000_000;
 
           const { data, error } = await supabaseAdmin.rpc('process_deposit_atomic', {
             p_destination_address: btcAddr,
@@ -836,8 +878,8 @@ async function scanBtcDeposits(
             p_network_code: 'BTC',
             p_amount: btcAmount,
             p_tx_hash: tx.txid,
-            p_output_index: voutIndex,
-            p_block_number: blockHeight || null,
+            p_output_index: outputIndex,
+            p_block_number: confirmations > 0 ? blockHeight : null,
             p_from_address: null,
             p_token_contract: null,
             p_confirmations: confirmations,
@@ -845,17 +887,15 @@ async function scanBtcDeposits(
           });
 
           if (error) {
-            errors.push(`RPC error for BTC deposit ${tx.txid}: ${error.message}`);
+            errors.push(`RPC error for BTC deposit ${tx.txid} output ${outputIndex}: ${error.message}`);
           } else {
-            const res = typeof data === 'string' ? JSON.parse(data) : data;
-            if (res?.status === 'credited' || (res?.success && confirmations >= 2)) {
-              credited++;
-            }
+            const result = typeof data === 'string' ? JSON.parse(data) : data;
+            if (result?.status === 'credited') credited++;
           }
         }
       }
     } catch (err: any) {
-      errors.push(`Failed scanning BTC for ${btcAddr}: ${err?.message}`);
+      errors.push(`Failed scanning BTC for ${btcAddr}: ${err?.message || 'request failed'}`);
     }
   }
 
@@ -876,34 +916,62 @@ async function scanLtcDeposits(
     return { detected: 0, credited: 0, errors: [] };
   }
 
-  const ltcApiBase = process.env.LTC_MEMPOOL_API || 'https://litecoinspace.org/api';
+  const ltcApiBase = (process.env.LTC_MEMPOOL_API || 'https://litecoinspace.org/api').replace(/\/$/, '');
+
+  // Never infer Litecoin confirmations from the boolean confirmed flag alone.
+  let tipHeight: number;
+  try {
+    const tipRes = await fetch(`${ltcApiBase}/blocks/tip/height`);
+    if (!tipRes.ok) {
+      errors.push(`Unable to retrieve Litecoin tip height (HTTP ${tipRes.status}); LTC ingestion skipped.`);
+      return { detected, credited, errors };
+    }
+    const tipText = (await tipRes.text()).trim();
+    tipHeight = Number(tipText);
+    if (!Number.isSafeInteger(tipHeight) || tipHeight < 0) {
+      errors.push('Litecoin tip-height response was invalid; LTC ingestion skipped.');
+      return { detected, credited, errors };
+    }
+  } catch (err: any) {
+    errors.push(`Unable to retrieve Litecoin tip height; LTC ingestion skipped: ${err?.message || 'request failed'}`);
+    return { detected, credited, errors };
+  }
 
   for (const ltcAddr of Array.from(monitoredLtcAddresses)) {
     try {
       const res = await fetch(`${ltcApiBase}/address/${ltcAddr}/txs`);
-      if (!res.ok) continue;
+      if (!res.ok) {
+        errors.push(`Litecoin address scan failed for ${ltcAddr} (HTTP ${res.status}).`);
+        continue;
+      }
 
       const txs = await res.json();
-      if (!Array.isArray(txs)) continue;
+      if (!Array.isArray(txs)) {
+        errors.push(`Litecoin address scan returned invalid data for ${ltcAddr}.`);
+        continue;
+      }
 
       for (const tx of txs) {
-        let outputAmountLit = 0;
-        let voutIndex = 0;
+        if (typeof tx?.txid !== 'string' || !Array.isArray(tx?.vout)) continue;
 
-        for (let i = 0; i < (tx.vout || []).length; i++) {
-          const out = tx.vout[i];
-          if (out.scriptpubkey_address === ltcAddr) {
-            outputAmountLit += out.value || 0;
-            voutIndex = i;
-          }
-        }
+        const isConfirmed = tx.status?.confirmed === true;
+        const blockHeight = tx.status?.block_height;
+        const confirmations =
+          isConfirmed && Number.isSafeInteger(blockHeight) && blockHeight > 0 && blockHeight <= tipHeight
+            ? tipHeight - blockHeight + 1
+            : 0;
 
-        if (outputAmountLit > 0) {
+        // Each output is a separate deposit identity; do not aggregate distinct
+        // outputs under a single output index.
+        for (let outputIndex = 0; outputIndex < tx.vout.length; outputIndex++) {
+          const out = tx.vout[outputIndex];
+          if (out?.scriptpubkey_address !== ltcAddr) continue;
+
+          const litoshis = Number(out.value);
+          if (!Number.isSafeInteger(litoshis) || litoshis <= 0) continue;
+
           detected++;
-          const ltcAmount = outputAmountLit / 100_000_000;
-          const isConfirmed = tx.status?.confirmed === true;
-          const blockHeight = tx.status?.block_height;
-          let confirmations = isConfirmed ? 6 : 0;
+          const ltcAmount = litoshis / 100_000_000;
 
           const { data, error } = await supabaseAdmin.rpc('process_deposit_atomic', {
             p_destination_address: ltcAddr,
@@ -911,8 +979,8 @@ async function scanLtcDeposits(
             p_network_code: 'LTC',
             p_amount: ltcAmount,
             p_tx_hash: tx.txid,
-            p_output_index: voutIndex,
-            p_block_number: blockHeight || null,
+            p_output_index: outputIndex,
+            p_block_number: confirmations > 0 ? blockHeight : null,
             p_from_address: null,
             p_token_contract: null,
             p_confirmations: confirmations,
@@ -920,17 +988,15 @@ async function scanLtcDeposits(
           });
 
           if (error) {
-            errors.push(`RPC error for LTC deposit ${tx.txid}: ${error.message}`);
+            errors.push(`RPC error for LTC deposit ${tx.txid} output ${outputIndex}: ${error.message}`);
           } else {
-            const res = typeof data === 'string' ? JSON.parse(data) : data;
-            if (res?.status === 'credited' || (res?.success && confirmations >= 6)) {
-              credited++;
-            }
+            const result = typeof data === 'string' ? JSON.parse(data) : data;
+            if (result?.status === 'credited') credited++;
           }
         }
       }
     } catch (err: any) {
-      errors.push(`Failed scanning LTC for ${ltcAddr}: ${err?.message}`);
+      errors.push(`Failed scanning LTC for ${ltcAddr}: ${err?.message || 'request failed'}`);
     }
   }
 

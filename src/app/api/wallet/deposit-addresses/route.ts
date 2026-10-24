@@ -2,20 +2,16 @@ import { NextRequest, NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
 import { createServerClient } from '@supabase/ssr';
 import { createClient } from '@supabase/supabase-js';
-import { getOrDeriveUserDepositAddresses, deriveAllAddresses } from '@/lib/hd-derivation-engine';
+import { getOrDeriveUserDepositAddresses } from '@/lib/hd-derivation-engine';
 
 export const dynamic = 'force-dynamic';
 
 function getAdminClient() {
-  const supabaseUrl =
-    process.env.NEXT_PUBLIC_SUPABASE_URL ||
-    process.env.SUPABASE_URL ||
-    'https://eaiwgfxoiwxepinvcykg.supabase.co';
-
-  const serviceRoleKey =
-    process.env.SUPABASE_SERVICE_ROLE_KEY ||
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ||
-    'placeholder-key';
+  const supabaseUrl = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!supabaseUrl || !serviceRoleKey) {
+    throw new Error('Server-side Supabase configuration is incomplete.');
+  }
 
   return createClient(supabaseUrl, serviceRoleKey, {
     auth: { persistSession: false, autoRefreshToken: false },
@@ -24,11 +20,11 @@ function getAdminClient() {
 
 export async function GET(req: NextRequest) {
   try {
-    const supabaseUrl =
-      process.env.NEXT_PUBLIC_SUPABASE_URL ||
-      process.env.SUPABASE_URL ||
-      'https://eaiwgfxoiwxepinvcykg.supabase.co';
-    const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
+    const supabaseUrl = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL;
+    const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY; 
+    if (!supabaseUrl || !supabaseAnonKey) {
+      return NextResponse.json({ success: false, error: 'Authentication is not configured.' }, { status: 503 });
+    }
 
     const adminClient = getAdminClient();
     let userId: string | null = null;
@@ -69,13 +65,6 @@ export async function GET(req: NextRequest) {
       }
     }
 
-    // 3. Allow query parameter user_id override if present
-    const { searchParams } = new URL(req.url);
-    const queryUserId = searchParams.get('user_id');
-    if (queryUserId && !userId) {
-      userId = queryUserId;
-    }
-
     // 4. Authenticated / identified user logic
     if (userId) {
       const result = await getOrDeriveUserDepositAddresses(userId);
@@ -98,51 +87,19 @@ export async function GET(req: NextRequest) {
         },
         userId: result.userId,
         walletIndex: result.walletIndex,
-        profile: result.profile || null,
         records: result.records,
         metadata: result.metadata,
       });
     }
 
-    // 5. Fallback for unauthenticated/preview state: deterministic index 1 addresses
-    const defaultAddresses = deriveAllAddresses(1);
-
-    return NextResponse.json({
-      success: true,
-      authenticated: false,
-      wallet_index: 1,
-      addresses: {
-        evm: defaultAddresses.ETH,
-        tron: defaultAddresses.USDT_TRC20,
-        btc: defaultAddresses.BTC,
-        ltc: defaultAddresses.LTC,
-        BTC: defaultAddresses.BTC,
-        ETH: defaultAddresses.ETH,
-        LTC: defaultAddresses.LTC,
-        USDT_ERC20: defaultAddresses.USDT_ERC20,
-        USDT_BEP20: defaultAddresses.USDT_BEP20,
-        USDT_TRC20: defaultAddresses.USDT_TRC20,
-      },
-      walletIndex: 1,
-      profile: null,
-      metadata: {
-        btcDerivationPath: "m/84'/0'/0'/0/1",
-        ethDerivationPath: "m/44'/60'/0'/0/1",
-        ltcDerivationPath: "m/84'/2'/0'/0/1",
-        tronDerivationPath: "m/44'/195'/0'/0/1",
-        evmAddressReusedFor: ['ETH', 'USDT_ERC20', 'USDT_BEP20'],
-        allowedChainNetworks: ['ERC20', 'BEP20', 'TRC20', 'BTC', 'LTC', 'ETH'],
-        derivedAt: new Date().toISOString(),
-      },
-    });
-  } catch (err: unknown) {
-    const errorMsg = err instanceof Error ? err.message : String(err);
-    console.error('[GET /api/wallet/deposit-addresses] Error:', errorMsg);
     return NextResponse.json(
-      {
-        success: false,
-        error: errorMsg,
-      },
+      { success: false, authenticated: false, error: 'Authentication required.' },
+      { status: 401 }
+    );
+  } catch (err: unknown) {
+    console.error('[GET /api/wallet/deposit-addresses] Address retrieval failed.');
+    return NextResponse.json(
+      { success: false, error: 'Unable to retrieve deposit addresses.' },
       { status: 500 }
     );
   }

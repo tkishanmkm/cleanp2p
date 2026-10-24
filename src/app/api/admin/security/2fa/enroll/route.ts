@@ -1,31 +1,21 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createClient, createAdminClient } from '@/lib/supabase/server';
+import { createAdminClient } from '@/lib/supabase/server';
+import { verifyServerAdmin } from '@/lib/server-admin-auth';
 import speakeasy from 'speakeasy';
 import { logAdminSecurityAudit, encryptAdminTOTPSecret } from '@/lib/admin-security';
 
 export async function POST(req: NextRequest) {
   try {
-    const supabase = await createClient();
-    const { data: { session } } = await supabase.auth.getSession();
-    if (!session?.user) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    const auth = await verifyServerAdmin(req);
+    if (!auth.authorized || !auth.user) {
+      return auth.response || NextResponse.json({ error: 'Forbidden' }, { status: 403 });
     }
 
-    const adminId = session.user.id;
-    const adminEmail = session.user.email || 'admin';
+    const adminId = auth.user.id;
+    const adminEmail = auth.user.email || 'admin';
 
     // Verify admin status
     const adminDb = createAdminClient();
-    const { data: profile } = await adminDb
-      .from('profiles')
-      .select('id, is_admin, role')
-      .eq('id', adminId)
-      .single();
-
-    if (!profile || (!profile.is_admin && profile.role !== 'admin')) {
-      return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
-    }
-
     // Generate TOTP secret
     const secret = speakeasy.generateSecret({
       length: 20,

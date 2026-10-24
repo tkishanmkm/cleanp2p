@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createClient, createAdminClient } from '@/lib/supabase/server';
+import { createAdminClient } from '@/lib/supabase/server';
+import { verifyServerAdmin } from '@/lib/server-admin-auth';
 import {
   hashRecoveryPassword,
   verifyRecoveryPasswordHash,
@@ -9,10 +10,9 @@ import {
 
 export async function POST(req: NextRequest) {
   try {
-    const supabase = await createClient();
-    const { data: { session } } = await supabase.auth.getSession();
-    if (!session?.user) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    const auth = await verifyServerAdmin(req, { require2FA: false });
+    if (!auth.authorized || !auth.user) {
+      return auth.response || NextResponse.json({ error: 'Forbidden' }, { status: 403 });
     }
 
     const { recoveryPassword } = await req.json();
@@ -20,18 +20,18 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Recovery password is required' }, { status: 400 });
     }
 
-    const adminId = session.user.id;
-    const adminEmail = session.user.email || 'admin';
+    const adminId = auth.user.id;
+    const adminEmail = auth.user.email || 'admin';
     const adminDb = createAdminClient();
 
     const { data: profile } = await adminDb
       .from('profiles')
-      .select('id, admin_2fa_recovery_hash, is_admin, role')
+      .select('id, admin_2fa_recovery_hash')
       .eq('id', adminId)
       .single();
 
-    if (!profile || (!profile.is_admin && profile.role !== 'admin')) {
-      return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+    if (!profile) {
+      return NextResponse.json({ error: 'Administrator security profile not found' }, { status: 403 });
     }
 
     if (!profile.admin_2fa_recovery_hash) {

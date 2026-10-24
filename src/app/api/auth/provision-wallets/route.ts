@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import crypto from 'crypto';
 import { cookies } from 'next/headers';
 import { createServerClient } from '@supabase/ssr';
 import { createClient as createSupabaseClient } from '@supabase/supabase-js';
@@ -7,15 +8,16 @@ import { getOrDeriveUserDepositAddresses } from '@/lib/hd-derivation-engine';
 export const dynamic = 'force-dynamic';
 
 function getAdminClient() {
-  const supabaseUrl =
-    process.env.NEXT_PUBLIC_SUPABASE_URL ||
-    process.env.SUPABASE_URL ||
-    'https://eaiwgfxoiwxepinvcykg.supabase.co';
+  // This route reads privileged profile fields; never downgrade to an anon key
+  // or silently target a hard-coded production project.
+  const supabaseUrl = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
-  const serviceRoleKey =
-    process.env.SUPABASE_SERVICE_ROLE_KEY ||
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ||
-    'placeholder-key';
+  if (!supabaseUrl || !serviceRoleKey) {
+    throw new Error(
+      'Wallet provisioning admin client is not configured: SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are required.'
+    );
+  }
 
   return createSupabaseClient(supabaseUrl, serviceRoleKey, {
     auth: { persistSession: false, autoRefreshToken: false },
@@ -40,10 +42,7 @@ async function resolveAuthenticatedUserId(req: NextRequest): Promise<string | nu
   }
 
   // 2. Check SSR Cookies
-  const supabaseUrl =
-    process.env.NEXT_PUBLIC_SUPABASE_URL ||
-    process.env.SUPABASE_URL ||
-    'https://eaiwgfxoiwxepinvcykg.supabase.co';
+  const supabaseUrl = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL;
   const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
 
   if (supabaseUrl && supabaseAnonKey) {
@@ -72,32 +71,56 @@ async function resolveAuthenticatedUserId(req: NextRequest): Promise<string | nu
 
 export async function POST(req: NextRequest) {
   try {
-    // 1. Authentication Check (Task 2)
-    const authenticatedUserId = await resolveAuthenticatedUserId(req);
-    if (!authenticatedUserId) {
-      return NextResponse.json(
-        { error: 'Unauthorized. Authentication is required to provision wallets.' },
-        { status: 401 }
-      );
-    }
-
-    // 2. Authorization Check (Task 3)
+    // Parse the body once. Database-triggered provisioning uses a separate,
+    // server-only shared secret; normal callers must authenticate as themselves.
     let bodyUserId: string | null = null;
     try {
       const body = await req.json();
-      bodyUserId = body?.userId || null;
+      bodyUserId = typeof body?.userId === 'string' ? body.userId : null;
     } catch {
-      // JSON body is optional; default to authenticated user
+      return NextResponse.json({ error: 'Invalid JSON body.' }, { status: 400 });
     }
 
-    if (bodyUserId && bodyUserId !== authenticatedUserId) {
-      return NextResponse.json(
-        { error: 'Forbidden. Cannot provision wallets for another user.' },
-        { status: 403 }
-      );
+    if (bodyUserId && !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(bodyUserId)) {
+      return NextResponse.json({ error: 'Invalid user ID.' }, { status: 400 });
     }
 
-    const targetUserId = authenticatedUserId;
+    const authHeader = req.headers.get('authorization') || '';
+    const bearerToken = authHeader.match(/^Bearer\s+(.+)$/i)?.[1]?.trim() || '';
+    const internalSecret = process.env.WALLET_PROVISIONING_BEARER || '';
+    let isInternalProvisioning = false;
+
+    if (internalSecret && bearerToken) {
+      const supplied = Buffer.from(bearerToken, 'utf8');
+      const expected = Buffer.from(internalSecret, 'utf8');
+      if (supplied.length === expected.length && crypto.timingSafeEqual(supplied, expected)) {
+        isInternalProvisioning = true;
+      }
+    }
+
+    let targetUserId: string;
+    if (isInternalProvisioning) {
+      if (!bodyUserId) {
+        return NextResponse.json({ error: 'Internal provisioning requires a user ID.' }, { status: 400 });
+      }
+      targetUserId = bodyUserId;
+    } else {
+      const authenticatedUserId = await resolveAuthenticatedUserId(req);
+      if (!authenticatedUserId) {
+        return NextResponse.json(
+          { error: 'Unauthorized. Authentication is required to provision wallets.' },
+          { status: 401 }
+        );
+      }
+
+      if (bodyUserId && bodyUserId !== authenticatedUserId) {
+        return NextResponse.json(
+          { error: 'Forbidden. Cannot provision wallets for another user.' },
+          { status: 403 }
+        );
+      }
+      targetUserId = authenticatedUserId;
+    }
     const adminClient = getAdminClient();
 
     // 3. Inspect existing profile to verify wallet_index presence (Task 4)
@@ -144,11 +167,11 @@ export async function POST(req: NextRequest) {
       },
       userId: targetUserId,
     });
-  } catch (err: unknown) {
-    const errorMsg = err instanceof Error ? err.message : String(err);
-    console.error('[POST /api/auth/provision-wallets] Error:', errorMsg);
+  } catch {
+    // Keep database/configuration details in server logs, never in API responses.
+    console.error('[POST /api/auth/provision-wallets] Wallet provisioning failed.');
     return NextResponse.json(
-      { error: errorMsg || 'Failed to provision wallets' },
+      { error: 'Unable to provision wallets.' },
       { status: 500 }
     );
   }

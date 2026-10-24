@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createClient, createAdminClient } from '@/lib/supabase/server';
+import { createAdminClient } from '@/lib/supabase/server';
+import { verifyServerAdmin } from '@/lib/server-admin-auth';
 import {
   verifyAdminTOTPToken,
   generateRecoveryPassword,
@@ -11,10 +12,9 @@ import { createAdmin2FASessionToken, setAdmin2FACookie } from '@/lib/admin-2fa-s
 
 export async function POST(req: NextRequest) {
   try {
-    const supabase = await createClient();
-    const { data: { session } } = await supabase.auth.getSession();
-    if (!session?.user) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    const auth = await verifyServerAdmin(req);
+    if (!auth.authorized || !auth.user) {
+      return auth.response || NextResponse.json({ error: 'Forbidden' }, { status: 403 });
     }
 
     const { code } = await req.json();
@@ -22,18 +22,18 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Verification code is required' }, { status: 400 });
     }
 
-    const adminId = session.user.id;
-    const adminEmail = session.user.email || 'admin';
+    const adminId = auth.user.id;
+    const adminEmail = auth.user.email || 'admin';
     const adminDb = createAdminClient();
 
     const { data: profile } = await adminDb
       .from('profiles')
-      .select('id, admin_2fa_secret, two_factor_secret, is_admin, role')
+      .select('id, admin_2fa_secret, two_factor_secret')
       .eq('id', adminId)
       .single();
 
-    if (!profile || (!profile.is_admin && profile.role !== 'admin')) {
-      return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+    if (!profile) {
+      return NextResponse.json({ error: 'Administrator security profile not found' }, { status: 403 });
     }
 
     const secret = profile.admin_2fa_secret || profile.two_factor_secret;
