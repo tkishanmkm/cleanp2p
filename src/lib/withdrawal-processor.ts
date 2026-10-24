@@ -361,7 +361,6 @@ export async function processEvmWithdrawalOnChain(
   const formattedKey = privateKeyHex.startsWith('0x') ? privateKeyHex : `0x${privateKeyHex}`;
   const provider = new ethers.JsonRpcProvider(rpcUrl);
   const wallet = new ethers.Wallet(formattedKey, provider);
-
   console.log(`[Withdrawal Engine] Processing Withdrawal ID: ${withdrawal.id}`);
 
   let txResponse: ethers.TransactionResponse;
@@ -407,7 +406,21 @@ export async function processEvmWithdrawalOnChain(
     }
 
     const contract = new ethers.Contract(tokenContractAddress, ERC20_ABI, wallet);
-    return txResponse.hash;
+    try {
+      decimals = await contract.decimals();
+    } catch {
+      // Keep default
+    }
+
+    const parsedAmount = ethers.parseUnits(amountStr, decimals);
+    txResponse = await contract.transfer(withdrawal.destination_address, parsedAmount, txOverrides);
+  } else {
+    throw new Error(`Unsupported EVM asset: ${symbol}`);
+  }
+
+  console.log(`[Withdrawal Engine] Broadcast Successful. TxHash: ${txResponse.hash}`);
+
+  return txResponse.hash;
 }
 
 /**
