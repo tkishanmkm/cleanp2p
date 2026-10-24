@@ -479,8 +479,33 @@ export async function executeCanonicalWithdrawal(input: WithdrawalRequestInput):
     };
   }
 
-  const withdrawalId = rpcResult?.withdrawal_id || rpcResult;
-  const returnedStatus = rpcResult?.status || 'QUEUED';
+  // Treat the database response as an untrusted boundary. A successful RPC
+  // transport is not proof that a withdrawal was reserved: require a valid
+  // UUID and explicit status before reporting success to the caller.
+  const withdrawalId = rpcResult && typeof rpcResult === 'object' && !Array.isArray(rpcResult)
+    ? rpcResult.withdrawal_id
+    : undefined;
+  const returnedStatus = typeof rpcResult?.status === 'string' ? rpcResult.status.trim() : '';
+  const validWithdrawalId = typeof withdrawalId === 'string'
+    && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(withdrawalId);
+  const validRpcContract = validWithdrawalId
+    && returnedStatus.length > 0
+    && (rpcResult?.success === undefined || rpcResult.success === true);
+
+  if (!validRpcContract) {
+    console.error('[WithdrawalService] Withdrawal RPC returned an invalid reservation response; manual reconciliation is required.', {
+      hasWithdrawalId: typeof withdrawalId === 'string',
+      hasStatus: returnedStatus.length > 0,
+      successFlag: rpcResult?.success,
+    });
+    return {
+      success: false,
+      status: 'RESERVATION_UNCONFIRMED',
+      error: 'The reservation result could not be verified. Do not submit a new withdrawal request; contact support for reconciliation.',
+      message: 'Withdrawal reservation could not be verified. Please contact support before retrying.',
+      statusCode: 503,
+    };
+  }
 
   // Only notify for a newly reserved withdrawal. Idempotent replays must
   // not create duplicate notifications for the same withdrawal.
