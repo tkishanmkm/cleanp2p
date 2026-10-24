@@ -7,6 +7,7 @@ import { resolve } from 'node:path';
 // behavioral tests or controlled staging integration tests.
 const source = readFileSync(resolve(process.cwd(), 'src/jobs/withdrawalWorker.ts'), 'utf8');
 const legacyProcessor = readFileSync(resolve(process.cwd(), 'src/lib/withdrawal-processor.ts'), 'utf8');
+const legacyRoute = readFileSync(resolve(process.cwd(), 'src/app/api/internal/withdrawals/process/route.ts'), 'utf8');
 const tronStart = source.indexOf("// BRANCH A: TRON Network (TRC-20 USDT)");
 const evmStart = source.indexOf("// BRANCH B: EVM Networks (ERC20, BEP20)", tronStart);
 assert.ok(tronStart >= 0 && evmStart > tronStart, 'TRON and EVM dispatch branches must exist');
@@ -57,6 +58,10 @@ assert.ok(evmFailureBlock.includes("p_is_verified_unbroadcast: true"), 'EVM refu
 assert.ok(!legacyProcessor.includes('p_is_verified_unbroadcast: true'), 'legacy processor must never certify a broadcast error as unbroadcast');
 assert.ok(legacyProcessor.includes('Repeated broadcast failure; outcome unverified:'), 'legacy retry exhaustion must label broadcast outcome unverified');
 assert.ok(legacyProcessor.includes('typeof failureResult.success !== \'boolean\''), 'legacy processor must validate the failure RPC response');
-assert.ok(legacyProcessor.includes('Withdrawal remains reserved pending reconciliation'), 'legacy processor must keep failed RPC outcomes visible for reconciliation');
+assert.ok(legacyProcessor.includes('Withdrawal remains reserved pending reconciliation'), 'legacy retry exhaustion must keep reconciliation outcomes visible');
+assert.ok(!legacyProcessor.includes('complete_onchain_withdrawal'), 'legacy processor must not settle withdrawals immediately after broadcast');
+assert.ok((legacyProcessor.match(/assertLegacyWithdrawalProcessorDisabled\(\);/g) || []).length >= 6, 'all legacy broadcast entrypoints must fail closed');
+assert.ok(legacyRoute.includes("status: 410"), 'legacy internal route must return Gone instead of dispatching withdrawals');
+assert.ok(legacyRoute.includes('LEGACY_WITHDRAWAL_PROCESSOR_DISABLED'), 'legacy route must explain why dispatch is disabled');
 
-console.log('Withdrawal broadcast-stage source regression checks passed (26 assertions).');
+console.log('Withdrawal broadcast-stage source regression checks passed.');
