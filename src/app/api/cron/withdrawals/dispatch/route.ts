@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { processPendingWithdrawals } from '@/jobs/withdrawalWorker';
+import { processWithdrawalQueue } from '@/jobs/withdrawalWorker';
 import { verifyWorkerAuth } from '@/lib/security/worker-auth';
 
 export const dynamic = 'force-dynamic';
@@ -21,7 +21,7 @@ export async function GET(req: Request) {
     }
 
     console.log('[Cron Worker] Executing withdrawal dispatcher job...');
-    const result = await processPendingWithdrawals();
+    const result = await processWithdrawalQueue();
 
     return NextResponse.json({ success: true, timestamp: new Date().toISOString(), result });
   } catch (err: any) {
