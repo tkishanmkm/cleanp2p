@@ -17,6 +17,7 @@
     "test:blockchain": "tsx tests/blockchain-worker.test.ts",
     "test:reconcile": "tsx tests/reconciliation.test.ts",
     "test:security": "tsx tests/security-verification.test.ts",
+    "test:withdrawal-safety": "tsx tests/withdrawal-safety-source.test.ts",
     "test:all": "tsx tests/p2p-trade-flow.test.ts && tsx tests/blockchain-worker.test.ts && tsx tests/reconciliation.test.ts && tsx tests/security-verification.test.ts"
   },
   "dependencies": {
