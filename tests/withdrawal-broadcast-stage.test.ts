@@ -47,4 +47,10 @@ assert.ok(evmMonitorGate >= 0, 'EVM refund path must require configured confirma
 assert.ok(source.includes("classifyTronReceiptResult(txInfo.receipt?.result)"), 'unknown TRON receipt results must use conservative receipt classification');
 assert.ok(source.includes("if (outcome !== 'pending')"), 'TRON confirmation status must remain pending for unknown receipt outcomes');
 
-console.log('Withdrawal broadcast-stage source regression checks passed (20 assertions).');
+
+const tronFailureBlock = source.slice(tronMonitorGate, source.indexOf("} else if (SUPPORTED_EVM_CHAINS[normNet])", tronMonitorGate));
+assert.ok(tronFailureBlock.includes("p_is_verified_unbroadcast: true"), 'TRON refund RPC must receive the explicit verified-failure gate');
+const evmFailureBlock = source.slice(evmMonitorGate, source.indexOf("} else if (normNet === 'BTC')", evmMonitorGate));
+assert.ok(evmFailureBlock.includes("p_is_verified_unbroadcast: true"), 'EVM refund RPC must receive the explicit verified-failure gate');
+
+console.log('Withdrawal broadcast-stage source regression checks passed (22 assertions).');
