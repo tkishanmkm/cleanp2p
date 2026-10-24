@@ -8,6 +8,14 @@ import { LTC_NETWORK } from '@/lib/crypto/hd-engine';
 
 const ECPair = ECPairFactory(ecc);
 
+/**
+ * The legacy withdrawal processor bypasses the canonical confirmation worker.
+ * Fail closed until callers are migrated to processWithdrawalQueue/checkSubmittedWithdrawals.
+ */
+function assertLegacyWithdrawalProcessorDisabled(): never {
+  throw new Error('Legacy withdrawal processor is disabled: use the confirmation-aware withdrawal worker');
+}
+
 export interface WithdrawalTask {
   id: string;
   user_id: string;
@@ -87,6 +95,7 @@ export async function processTronWithdrawalOnChain(
   withdrawal: WithdrawalTask,
   tronPrivateKeyHex?: string
 ): Promise<string> {
+  assertLegacyWithdrawalProcessorDisabled();
   const privKey =
     tronPrivateKeyHex ||
     process.env.HOT_WALLET_TRON_PRIVATE_KEY ||
@@ -118,17 +127,6 @@ export async function processTronWithdrawalOnChain(
 
   console.log(`[TRON Withdrawal Engine] Broadcast Successful. TxID: ${txid}`);
 
-  try {
-    await supabase.rpc('complete_onchain_withdrawal', {
-      p_withdrawal_id: withdrawal.id,
-      p_tx_hash: txid,
-      p_actual_gas_amount: 0,
-      p_gas_asset: 'TRX',
-    });
-  } catch (dbErr) {
-    console.warn('[TRON Withdrawal Engine] DB notice on update:', dbErr);
-  }
-
   return txid;
 }
 
@@ -139,6 +137,7 @@ export async function processBtcWithdrawalOnChain(
   withdrawal: WithdrawalTask,
   btcPrivateKeyHex?: string
 ): Promise<string> {
+  assertLegacyWithdrawalProcessorDisabled();
   const privKey =
     btcPrivateKeyHex ||
     process.env.HOT_WALLET_BTC_PRIVATE_KEY ||
@@ -239,18 +238,6 @@ export async function processBtcWithdrawalOnChain(
   console.log(`[BTC Withdrawal Engine] Broadcast Successful. TxID: ${txid}`);
 
   const supabase = getSupabaseAdminClient();
-  try {
-    const feeBtc = Number((networkFeeSat / 1e8).toFixed(8));
-    await supabase.rpc('complete_onchain_withdrawal', {
-      p_withdrawal_id: withdrawal.id,
-      p_tx_hash: txid,
-      p_actual_gas_amount: feeBtc,
-      p_gas_asset: 'BTC',
-    });
-  } catch (dbErr) {
-    console.warn('[BTC Withdrawal Engine] DB notice on update:', dbErr);
-  }
-
   return txid;
 }
 
@@ -261,6 +248,7 @@ export async function processLtcWithdrawalOnChain(
   withdrawal: WithdrawalTask,
   ltcPrivateKeyHex?: string
 ): Promise<string> {
+  assertLegacyWithdrawalProcessorDisabled();
   const privKey =
     ltcPrivateKeyHex ||
     process.env.HOT_WALLET_LTC_PRIVATE_KEY ||
@@ -361,18 +349,6 @@ export async function processLtcWithdrawalOnChain(
   console.log(`[LTC Withdrawal Engine] Broadcast Successful. TxID: ${txid}`);
 
   const supabase = getSupabaseAdminClient();
-  try {
-    const feeLtc = Number((networkFeeLit / 1e8).toFixed(8));
-    await supabase.rpc('complete_onchain_withdrawal', {
-      p_withdrawal_id: withdrawal.id,
-      p_tx_hash: txid,
-      p_actual_gas_amount: feeLtc,
-      p_gas_asset: 'LTC',
-    });
-  } catch (dbErr) {
-    console.warn('[LTC Withdrawal Engine] DB notice on update:', dbErr);
-  }
-
   return txid;
 }
 
@@ -384,6 +360,7 @@ export async function processEvmWithdrawalOnChain(
   privateKeyHex: string,
   rpcUrl: string
 ): Promise<string> {
+  assertLegacyWithdrawalProcessorDisabled();
   const formattedKey = privateKeyHex.startsWith('0x') ? privateKeyHex : `0x${privateKeyHex}`;
   const provider = new ethers.JsonRpcProvider(rpcUrl);
   const wallet = new ethers.Wallet(formattedKey, provider);
@@ -434,40 +411,14 @@ export async function processEvmWithdrawalOnChain(
     }
 
     const contract = new ethers.Contract(tokenContractAddress, ERC20_ABI, wallet);
-    try {
-      decimals = await contract.decimals();
-    } catch {
-      // Keep default
-    }
-
-    const parsedAmount = ethers.parseUnits(amountStr, decimals);
-    txResponse = await contract.transfer(withdrawal.destination_address, parsedAmount, txOverrides);
-  } else {
-    throw new Error(`Unsupported EVM asset: ${symbol}`);
-  }
-
-  console.log(`[Withdrawal Engine] Broadcast Successful. TxHash: ${txResponse.hash}`);
-
-  // Settle via authoritative complete_onchain_withdrawal RPC
-  try {
-    const gasAsset = (withdrawal.network_code || '').toUpperCase().includes('BEP') || (withdrawal.network_code || '').toUpperCase().includes('BSC') ? 'BNB' : 'ETH';
-    await supabase.rpc('complete_onchain_withdrawal', {
-      p_withdrawal_id: withdrawal.id,
-      p_tx_hash: txResponse.hash,
-      p_actual_gas_amount: 0,
-      p_gas_asset: gasAsset,
-    });
-  } catch (dbErr) {
-    console.warn('[Withdrawal Engine] DB notice on RPC execution:', dbErr);
-  }
-
-  return txResponse.hash;
+    return txResponse.hash;
 }
 
 /**
  * Sign and broadcast router for pending records
  */
 export async function signAndBroadcast(withdrawal: WithdrawalRecord): Promise<string> {
+  assertLegacyWithdrawalProcessorDisabled();
   const normNet = (withdrawal.network_code || '').toUpperCase().trim();
   const normAsset = (withdrawal.asset_code || '').toUpperCase().trim();
 
@@ -505,6 +456,7 @@ export async function signAndBroadcast(withdrawal: WithdrawalRecord): Promise<st
  * Batch processor for pending approved withdrawals
  */
 export async function processPendingWithdrawals(limit: number = 20): Promise<ProcessWithdrawalsSummary> {
+  assertLegacyWithdrawalProcessorDisabled();
   const supabaseAdmin = getSupabaseAdminClient();
 
   const { data: withdrawals, error: fetchError } = await supabaseAdmin
