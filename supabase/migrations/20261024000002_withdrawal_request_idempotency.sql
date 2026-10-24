@@ -26,6 +26,7 @@ CREATE OR REPLACE FUNCTION public.request_withdrawal_idempotent(
     p_amount NUMERIC(36, 18),
     p_fee NUMERIC(36, 18),
     p_asset TEXT DEFAULT 'USDT',
+    p_usd_equivalent NUMERIC(18, 2) DEFAULT NULL,
     p_idempotency_key TEXT DEFAULT NULL
 )
 RETURNS JSONB
@@ -40,6 +41,7 @@ DECLARE
     v_address TEXT := BTRIM(COALESCE(p_to_address, ''));
     v_existing public.withdrawal_idempotency_requests%ROWTYPE;
     v_withdrawal_id UUID;
+    v_request_result JSONB;
     v_status TEXT;
 BEGIN
     IF p_user_id IS NULL THEN
@@ -87,14 +89,22 @@ BEGIN
         );
     END IF;
 
-    v_withdrawal_id := public.request_withdrawal(
+    v_request_result := public.request_withdrawal(
         p_user_id := p_user_id,
         p_network := p_network,
         p_to_address := p_to_address,
         p_amount := p_amount,
         p_fee := p_fee,
-        p_asset := v_asset
+        p_asset := v_asset,
+        p_usd_equivalent := p_usd_equivalent
     );
+
+    IF COALESCE((v_request_result ->> 'success')::BOOLEAN, FALSE) IS NOT TRUE
+       OR NULLIF(v_request_result ->> 'withdrawal_id', '') IS NULL THEN
+        RAISE EXCEPTION 'Withdrawal reservation failed or returned an invalid result';
+    END IF;
+
+    v_withdrawal_id := (v_request_result ->> 'withdrawal_id')::UUID;
 
     SELECT status INTO v_status
     FROM public.withdrawals
@@ -120,5 +130,5 @@ BEGIN
 END;
 $$;
 
-REVOKE ALL ON FUNCTION public.request_withdrawal_idempotent(UUID, TEXT, TEXT, NUMERIC, NUMERIC, TEXT, TEXT) FROM PUBLIC, anon, authenticated;
-GRANT EXECUTE ON FUNCTION public.request_withdrawal_idempotent(UUID, TEXT, TEXT, NUMERIC, NUMERIC, TEXT, TEXT) TO service_role, postgres;
+REVOKE ALL ON FUNCTION public.request_withdrawal_idempotent(UUID, TEXT, TEXT, NUMERIC, NUMERIC, TEXT, NUMERIC, TEXT) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.request_withdrawal_idempotent(UUID, TEXT, TEXT, NUMERIC, NUMERIC, TEXT, NUMERIC, TEXT) TO service_role, postgres;
