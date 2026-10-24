@@ -85,6 +85,7 @@ BEGIN
         END IF;
 
         RETURN jsonb_build_object(
+            'success', TRUE,
             'withdrawal_id', v_existing.withdrawal_id,
             'status', v_status,
             'total_debited', v_existing.amount + v_existing.network_fee,
@@ -127,6 +128,7 @@ BEGIN
     );
 
     RETURN jsonb_build_object(
+        'success', TRUE,
         'withdrawal_id', v_withdrawal_id,
         'status', v_status,
         'total_debited', p_amount + COALESCE(p_fee, 0),
