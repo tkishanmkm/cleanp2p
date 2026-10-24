@@ -6,8 +6,12 @@ BEGIN;
 -- The deployed request_withdrawal definition already writes USD valuation
 -- metadata to onchain_withdrawals. Production schema inspection found that
 -- column missing, which would make new withdrawal reservations fail at runtime.
--- Add it explicitly before both the existing insert and the daily-limit query use it.
+-- The refund RPC also reads metadata from withdrawals when it must use the
+-- fallback table, so both tables need the same column before the function patch.
 ALTER TABLE public.onchain_withdrawals
+    ADD COLUMN IF NOT EXISTS metadata JSONB NOT NULL DEFAULT '{}'::jsonb;
+
+ALTER TABLE public.withdrawals
     ADD COLUMN IF NOT EXISTS metadata JSONB NOT NULL DEFAULT '{}'::jsonb;
 
 DO $migration$
@@ -90,7 +94,7 @@ BEGIN
     END IF;
 
     -- Normalize source line endings so exact, guarded replacements are stable.
-    v_definition := replace(v_definition, E'\r\n', E'\n');
+    v_definition := replace(v_definition, E'\\r\\n', E'\\n');
 
     IF position(v_old_declaration IN v_definition) = 0 THEN
         RAISE EXCEPTION 'Unexpected request_withdrawal declaration; migration stopped without changing the function.';
