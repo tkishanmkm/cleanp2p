@@ -39,4 +39,4 @@ assert.ok(evmDispatch.includes('await markWithdrawalBroadcasted(withdrawal.id, t
 assert.ok(evmDispatch.includes("status: 'BROADCASTED'"), 'EVM dispatch must return BROADCASTED, not completed');
 assert.ok(!evmDispatch.includes("rpc('complete_onchain_withdrawal'"), 'EVM dispatch must not settle before confirmation monitoring');
 
-console.log('Withdrawal broadcast-stage source regression checks passed (18 assertions).');
+console.log('Withdrawal broadcast-stage source regression checks passed (16 assertions).');
