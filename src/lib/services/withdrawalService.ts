@@ -10,6 +10,7 @@ import {
 } from '@/lib/fees';
 import { isValidTronAddress } from '@/lib/blockchain/tron';
 import { isTier2User } from '@/lib/kyc';
+import { parseWithdrawalAmount } from '@/lib/withdrawalAmount';
 
 export const SUPPORTED_ASSETS = ['USDT', 'BTC', 'ETH', 'LTC'] as const;
 export const SUPPORTED_NETWORKS: Record<string, string[]> = {
@@ -293,12 +294,7 @@ export async function executeCanonicalWithdrawal(input: WithdrawalRequestInput):
     };
   }
 
-  // Parse the complete decimal value; parseFloat('1.25junk') would silently accept 1.25.
-  const amountText = typeof rawAmount === 'string' ? rawAmount.trim() : String(rawAmount);
-  const validDecimalSyntax = typeof rawAmount === 'number'
-    ? Number.isFinite(rawAmount)
-    : /^(?:\d+(?:\.\d*)?|\.\d+)$/.test(amountText);
-  const parsedAmount = validDecimalSyntax ? Number(amountText) : Number.NaN;
+  const parsedAmount = parseWithdrawalAmount(rawAmount);
   if (!Number.isFinite(parsedAmount) || parsedAmount <= 0) {
     return {
       success: false,
