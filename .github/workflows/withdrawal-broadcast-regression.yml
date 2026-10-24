@@ -21,6 +21,8 @@ on:
       - 'src/lib/blockchain/tron.ts'
       - 'src/lib/blockchain/tronReceiptStatus.ts'
       - 'tests/withdrawal-broadcast-stage.test.ts'
+      - 'tests/withdrawal-refund-wallet-row-migration.test.ts'
+      - 'supabase/migrations/20261024000001_withdrawal_refund_wallet_row_fail_closed.sql'
       - 'tests/tron-withdrawal-receipt.test.ts'
       - 'package.json'
       - 'package-lock.json'
