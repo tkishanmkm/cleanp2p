@@ -6,7 +6,80 @@ import * as ecc from 'tiny-secp256k1';
 import { getSupabaseAdminClient } from '@/lib/supabase/server';
 import { LTC_NETWORK } from '@/lib/crypto/hd-engine';
 
+
 const ECPair = ECPairFactory(ecc);
+
+/**
+ * Persist a broadcast without settling the withdrawal. This function deliberately
+ * does not throw after a transaction hash exists: a database error must never
+ * route a possibly-broadcast transaction into an automatic refund path.
+ */
+async function recordWithdrawalBroadcast(
+  withdrawalId: string,
+  txHash: string,
+  gasAmount?: number,
+  gasAsset?: string,
+): Promise<void> {
+  const supabase = getSupabaseAdminClient();
+  const now = new Date().toISOString();
+
+  const { error: onchainError } = await supabase
+    .from('onchain_withdrawals')
+    .update({
+      status: 'BROADCASTED',
+      tx_hash: txHash,
+      updated_at: now,
+      ...(gasAmount === undefined ? {} : { actual_gas_amount: gasAmount }),
+      ...(gasAsset === undefined ? {} : { gas_asset: gasAsset }),
+    })
+    .eq('id', withdrawalId);
+
+  const { error: withdrawalError } = await supabase
+    .from('withdrawals')
+    .update({
+      status: 'BROADCASTED',
+      tx_hash: txHash,
+      txid: txHash,
+      broadcasted_at: now,
+      updated_at: now,
+    })
+    .eq('id', withdrawalId);
+
+  if (onchainError || withdrawalError) {
+    const reason = [
+      onchainError ? `onchain_withdrawals: ${onchainError.message}` : '',
+      withdrawalError ? `withdrawals: ${withdrawalError.message}` : '',
+    ].filter(Boolean).join('; ');
+
+    console.error('[Withdrawal Engine] Broadcast exists but status persistence failed; manual reconciliation required', {
+      withdrawalId, txHash, reason,
+    });
+
+    // Best-effort preserve the hash and quarantine the record from ordinary
+    // pending-queue selection. Never invoke the verified-unbroadcast refund RPC.
+    const [onchainAmbiguous, withdrawalAmbiguous] = await Promise.all([
+      supabase.from('onchain_withdrawals')
+        .update({ status: 'AMBIGUOUS_BROADCAST', tx_hash: txHash, updated_at: now })
+        .eq('id', withdrawalId),
+      supabase.from('withdrawals')
+        .update({
+          status: 'AMBIGUOUS_BROADCAST',
+          tx_hash: txHash,
+          txid: txHash,
+          broadcast_error: reason,
+          updated_at: now,
+        })
+        .eq('id', withdrawalId),
+    ]);
+    if (onchainAmbiguous.error || withdrawalAmbiguous.error) {
+      console.error('[Withdrawal Engine] Could not persist ambiguous broadcast quarantine', {
+        withdrawalId,
+        onchainError: onchainAmbiguous.error?.message,
+        withdrawalError: withdrawalAmbiguous.error?.message,
+      });
+    }
+  }
+}
 
 export interface WithdrawalTask {
   id: string;
@@ -103,7 +176,6 @@ export async function processTronWithdrawalOnChain(
     privateKey: privKey,
   });
 
-  const supabase = getSupabaseAdminClient();
   const usdtContractAddress = process.env.USDT_CONTRACT_TRC20 || 'TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t';
   const contract = await tronWeb.contract().at(usdtContractAddress);
 
@@ -118,16 +190,7 @@ export async function processTronWithdrawalOnChain(
 
   console.log(`[TRON Withdrawal Engine] Broadcast Successful. TxID: ${txid}`);
 
-  try {
-    await supabase.rpc('complete_onchain_withdrawal', {
-      p_withdrawal_id: withdrawal.id,
-      p_tx_hash: txid,
-      p_actual_gas_amount: 0,
-      p_gas_asset: 'TRX',
-    });
-  } catch (dbErr) {
-    console.warn('[TRON Withdrawal Engine] DB notice on update:', dbErr);
-  }
+  await recordWithdrawalBroadcast(withdrawal.id, txid, 0, 'TRX');
 
   return txid;
 }
@@ -239,17 +302,8 @@ export async function processBtcWithdrawalOnChain(
   console.log(`[BTC Withdrawal Engine] Broadcast Successful. TxID: ${txid}`);
 
   const supabase = getSupabaseAdminClient();
-  try {
-    const feeBtc = Number((networkFeeSat / 1e8).toFixed(8));
-    await supabase.rpc('complete_onchain_withdrawal', {
-      p_withdrawal_id: withdrawal.id,
-      p_tx_hash: txid,
-      p_actual_gas_amount: feeBtc,
-      p_gas_asset: 'BTC',
-    });
-  } catch (dbErr) {
-    console.warn('[BTC Withdrawal Engine] DB notice on update:', dbErr);
-  }
+  const feeBtc = Number((networkFeeSat / 1e8).toFixed(8));
+  await recordWithdrawalBroadcast(withdrawal.id, txid, feeBtc, 'BTC');
 
   return txid;
 }
@@ -360,18 +414,8 @@ export async function processLtcWithdrawalOnChain(
   const txid = (await broadcastRes.text()).trim();
   console.log(`[LTC Withdrawal Engine] Broadcast Successful. TxID: ${txid}`);
 
-  const supabase = getSupabaseAdminClient();
-  try {
-    const feeLtc = Number((networkFeeLit / 1e8).toFixed(8));
-    await supabase.rpc('complete_onchain_withdrawal', {
-      p_withdrawal_id: withdrawal.id,
-      p_tx_hash: txid,
-      p_actual_gas_amount: feeLtc,
-      p_gas_asset: 'LTC',
-    });
-  } catch (dbErr) {
-    console.warn('[LTC Withdrawal Engine] DB notice on update:', dbErr);
-  }
+  const feeLtc = Number((networkFeeLit / 1e8).toFixed(8));
+  await recordWithdrawalBroadcast(withdrawal.id, txid, feeLtc, 'LTC');
 
   return txid;
 }
@@ -387,7 +431,6 @@ export async function processEvmWithdrawalOnChain(
   const formattedKey = privateKeyHex.startsWith('0x') ? privateKeyHex : `0x${privateKeyHex}`;
   const provider = new ethers.JsonRpcProvider(rpcUrl);
   const wallet = new ethers.Wallet(formattedKey, provider);
-  const supabase = getSupabaseAdminClient();
 
   console.log(`[Withdrawal Engine] Processing Withdrawal ID: ${withdrawal.id}`);
 
@@ -448,18 +491,8 @@ export async function processEvmWithdrawalOnChain(
 
   console.log(`[Withdrawal Engine] Broadcast Successful. TxHash: ${txResponse.hash}`);
 
-  // Settle via authoritative complete_onchain_withdrawal RPC
-  try {
-    const gasAsset = (withdrawal.network_code || '').toUpperCase().includes('BEP') || (withdrawal.network_code || '').toUpperCase().includes('BSC') ? 'BNB' : 'ETH';
-    await supabase.rpc('complete_onchain_withdrawal', {
-      p_withdrawal_id: withdrawal.id,
-      p_tx_hash: txResponse.hash,
-      p_actual_gas_amount: 0,
-      p_gas_asset: gasAsset,
-    });
-  } catch (dbErr) {
-    console.warn('[Withdrawal Engine] DB notice on RPC execution:', dbErr);
-  }
+  const gasAsset = (withdrawal.network_code || '').toUpperCase().includes('BEP') || (withdrawal.network_code || '').toUpperCase().includes('BSC') ? 'BNB' : 'ETH';
+  await recordWithdrawalBroadcast(withdrawal.id, txResponse.hash, 0, gasAsset);
 
   return txResponse.hash;
 }
@@ -510,7 +543,7 @@ export async function processPendingWithdrawals(limit: number = 20): Promise<Pro
   const { data: withdrawals, error: fetchError } = await supabaseAdmin
     .from('withdrawals')
     .select('*')
-    .in('status', ['approved', 'processing', 'QUEUED'])
+    .in('status', ['approved', 'QUEUED'])
     .order('created_at', { ascending: true })
     .limit(limit);
 
@@ -538,16 +571,43 @@ export async function processPendingWithdrawals(limit: number = 20): Promise<Pro
     const destAddr = item.destination_address;
     const amountNum = Number(item.amount);
 
-    try {
-      await supabaseAdmin
-        .from('withdrawals')
-        .update({
-          status: 'processing',
-          broadcast_attempts: attempts,
-          updated_at: new Date().toISOString(),
-        })
-        .eq('id', item.id);
+    // Claim only if the row is still in the exact status observed by this
+    // worker. Concurrent workers cannot both move the same row out of that
+    // status. Existing "processing" rows are deliberately excluded above:
+    // they require reconciliation, not a blind rebroadcast.
+    const { data: claimed, error: claimError } = await supabaseAdmin
+      .from('withdrawals')
+      .update({
+        status: 'processing',
+        broadcast_attempts: attempts,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', item.id)
+      .eq('status', item.status)
+      .select('id')
+      .maybeSingle();
 
+    if (claimError) {
+      failed++;
+      results.push({
+        id: item.id,
+        assetCode,
+        networkCode,
+        destinationAddress: destAddr,
+        amount: amountNum,
+        success: false,
+        error: `Could not claim withdrawal; no broadcast attempted: ${claimError.message}`,
+        attempts: item.broadcast_attempts || 0,
+      });
+      continue;
+    }
+
+    if (!claimed) {
+      // Another worker claimed or changed this row after our read.
+      continue;
+    }
+
+    try {
       const task: WithdrawalTask = {
         id: item.id,
         user_id: item.user_id,
@@ -589,29 +649,37 @@ export async function processPendingWithdrawals(limit: number = 20): Promise<Pro
       successful++;
     } catch (broadcastErr: unknown) {
       const errorMsg = broadcastErr instanceof Error ? broadcastErr.message : String(broadcastErr);
-      const isPermanentlyFailed = attempts >= 3;
+      const now = new Date().toISOString();
 
-      if (isPermanentlyFailed) {
-        // Trigger automated refund via process_failed_withdrawal RPC
-        try {
-          await supabaseAdmin.rpc('process_failed_withdrawal', {
-            p_withdrawal_id: item.id,
-            p_error_reason: errorMsg,
-            p_is_verified_unbroadcast: true,
-          });
-        } catch (rpcErr) {
-          console.error('[processPendingWithdrawals] Refund RPC failed:', rpcErr);
-        }
-      } else {
-        await supabaseAdmin
+      // A provider timeout/error does not prove that the transaction was not
+      // broadcast. Never refund or automatically retry from this generic catch.
+      // Quarantine both records for transaction-hash / chain reconciliation.
+      const [withdrawalQuarantine, onchainQuarantine] = await Promise.all([
+        supabaseAdmin
           .from('withdrawals')
           .update({
-            status: 'processing',
+            status: 'AMBIGUOUS_BROADCAST',
             broadcast_attempts: attempts,
             broadcast_error: errorMsg,
-            updated_at: new Date().toISOString(),
+            updated_at: now,
           })
-          .eq('id', item.id);
+          .eq('id', item.id),
+        supabaseAdmin
+          .from('onchain_withdrawals')
+          .update({
+            status: 'AMBIGUOUS_BROADCAST',
+            error_message: errorMsg,
+            updated_at: now,
+          })
+          .eq('id', item.id),
+      ]);
+
+      if (withdrawalQuarantine.error || onchainQuarantine.error) {
+        console.error('[processPendingWithdrawals] Failed to quarantine ambiguous withdrawal', {
+          withdrawalId: item.id,
+          withdrawalError: withdrawalQuarantine.error?.message,
+          onchainError: onchainQuarantine.error?.message,
+        });
       }
 
       results.push({
