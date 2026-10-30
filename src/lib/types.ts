@@ -71,6 +71,7 @@ export interface InitiateTradePayload {
 
 export type SupportedCrypto = {
   name: CryptoCurrency;
+  symbol?: string;
   chains: string[];
 };
 
