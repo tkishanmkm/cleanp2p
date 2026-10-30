@@ -20,7 +20,7 @@ export interface WithdrawalGovernanceSettings {
  * Queries public.withdrawals for status IN ('PENDING_APPROVAL', 'pending_approval').
  */
 export async function hasPendingWithdrawalApproval(userId: string): Promise<boolean> {
-  if (!userId) return false;
+  if (!userId) return true;
 
   try {
     const supabaseAdmin = getSupabaseAdminClient();
@@ -35,7 +35,7 @@ export async function hasPendingWithdrawalApproval(userId: string): Promise<bool
     if (error) {
       console.warn('[WithdrawalSecurity] Error checking pending withdrawal approval:', error.message);
       // Fail-safe: query onchain_withdrawals
-      const { data: onchainData } = await supabaseAdmin
+      const { data: onchainData, error: onchainError } = await supabaseAdmin
         .from('onchain_withdrawals')
         .select('id')
         .eq('user_id', userId)
@@ -43,13 +43,17 @@ export async function hasPendingWithdrawalApproval(userId: string): Promise<bool
         .limit(1)
         .maybeSingle();
 
+      if (onchainError) {
+        console.error('[WithdrawalSecurity] Both approval-lock lookups failed; blocking withdrawal.', onchainError.message);
+        return true;
+      }
       return Boolean(onchainData?.id);
     }
 
     return Boolean(data?.id);
   } catch (err) {
-    console.error('[WithdrawalSecurity] Unexpected error in hasPendingWithdrawalApproval:', err);
-    return false;
+    console.error('[WithdrawalSecurity] Unexpected error in hasPendingWithdrawalApproval; blocking withdrawal:', err);
+    return true;
   }
 }
 
@@ -78,8 +82,16 @@ export async function checkPasswordChangeHold(userId: string): Promise<PasswordH
         .maybeSingle(),
     ]);
 
-    const passwordChangedAt = profileRes.data?.password_changed_at;
-    const holdHours = Number(settingsRes.data?.password_change_withdrawal_hold_hours || defaultHoldHours);
+    if (profileRes.error || !profileRes.data || settingsRes.error || !settingsRes.data) {
+      console.error('[WithdrawalSecurity] Password-hold state could not be verified; applying a temporary fail-closed hold.', {
+        profileError: profileRes.error?.message,
+        settingsError: settingsRes.error?.message,
+      });
+      return { isHeld: true, remainingHours: defaultHoldHours, holdHours: defaultHoldHours };
+    }
+
+    const passwordChangedAt = profileRes.data.password_changed_at;
+    const holdHours = Number(settingsRes.data.password_change_withdrawal_hold_hours || defaultHoldHours);
 
     if (!passwordChangedAt) {
       return { isHeld: false, holdHours };
@@ -106,8 +118,8 @@ export async function checkPasswordChangeHold(userId: string): Promise<PasswordH
 
     return { isHeld: false, holdHours };
   } catch (err) {
-    console.error('[WithdrawalSecurity] Error in checkPasswordChangeHold:', err);
-    return { isHeld: false, holdHours: defaultHoldHours };
+    console.error('[WithdrawalSecurity] Password-hold check failed; applying a temporary fail-closed hold:', err);
+    return { isHeld: true, remainingHours: defaultHoldHours, holdHours: defaultHoldHours };
   }
 }
 

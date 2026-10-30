@@ -123,13 +123,24 @@ export async function executeCanonicalWithdrawal(input: WithdrawalRequestInput):
   const supabaseAdmin = getSupabaseAdminClient();
 
   // 1. Check Global Emergency Pause
-  const { data: settings } = await supabaseAdmin
+  const { data: settings, error: settingsError } = await supabaseAdmin
     .from('platform_settings')
     .select('global_kill_switch_active, withdrawals_enabled, max_single_withdrawal_usd, withdrawal_approval_threshold_usd, daily_withdrawal_limit_usd')
     .eq('id', 1)
     .maybeSingle();
 
-  if (settings && (settings.global_kill_switch_active || !settings.withdrawals_enabled)) {
+  if (settingsError || !settings) {
+    console.error('[Withdrawal Service] Unable to verify platform withdrawal controls; rejecting request.', settingsError);
+    return {
+      success: false,
+      status: 'PLATFORM_CONTROLS_UNAVAILABLE',
+      error: 'Withdrawal controls could not be verified. Please try again later.',
+      message: 'Withdrawals are temporarily unavailable.',
+      statusCode: 503,
+    };
+  }
+
+  if (settings.global_kill_switch_active || !settings.withdrawals_enabled) {
     return {
       success: false,
       status: 'REJECTED',
@@ -171,11 +182,22 @@ export async function executeCanonicalWithdrawal(input: WithdrawalRequestInput):
   }
 
   // 3. User Profile Verification & Security Checks
-  const { data: userProfile } = await supabaseAdmin
+  const { data: userProfile, error: profileError } = await supabaseAdmin
     .from('profiles')
     .select('id, is_verified, kyc_status, id_verified, is_2fa_enabled, is_mfa_enabled, two_factor_enabled, totp_secret, two_factor_secret, is_banned, is_on_hold, is_withdrawal_locked, account_status')
     .eq('id', user.id)
     .maybeSingle();
+
+  if (profileError || !userProfile) {
+    console.error('[Withdrawal Service] Unable to verify user profile; rejecting withdrawal.', profileError);
+    return {
+      success: false,
+      status: 'PROFILE_VERIFICATION_UNAVAILABLE',
+      error: 'Account security checks could not be completed. Please try again later.',
+      message: 'Withdrawal request could not be verified.',
+      statusCode: 503,
+    };
+  }
 
   if (
     userProfile?.is_banned ||
@@ -270,7 +292,7 @@ export async function executeCanonicalWithdrawal(input: WithdrawalRequestInput):
   }
 
   const parsedAmount = typeof rawAmount === 'number' ? rawAmount : parseFloat(String(rawAmount));
-  if (isNaN(parsedAmount) || parsedAmount <= 0) {
+  if (!Number.isFinite(parsedAmount) || parsedAmount <= 0) {
     return {
       success: false,
       status: 'INVALID_AMOUNT',
@@ -379,12 +401,23 @@ export async function executeCanonicalWithdrawal(input: WithdrawalRequestInput):
   // RULE B: ROLLING 24-HOUR DAILY WITHDRAWAL LIMIT
   // =========================================================================
   const oneDayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
-  const { data: past24hWithdrawals } = await supabaseAdmin
+  const { data: past24hWithdrawals, error: pastWithdrawalsError } = await supabaseAdmin
     .from('withdrawals')
     .select('amount, asset_symbol, created_at')
     .eq('user_id', user.id)
     .gte('created_at', oneDayAgo)
     .in('status', ['completed', 'processing', 'QUEUED', 'PENDING_APPROVAL', 'APPROVED', 'approved', 'pending']);
+
+  if (pastWithdrawalsError || !past24hWithdrawals) {
+    console.error('[Withdrawal Service] Unable to verify rolling withdrawal limit; rejecting request.', pastWithdrawalsError);
+    return {
+      success: false,
+      status: 'DAILY_LIMIT_CHECK_UNAVAILABLE',
+      error: 'The rolling withdrawal limit could not be verified. Please try again later.',
+      message: 'Withdrawals are temporarily unavailable.',
+      statusCode: 503,
+    };
+  }
 
   let rolling24hUsd = 0;
   if (past24hWithdrawals && past24hWithdrawals.length > 0) {
