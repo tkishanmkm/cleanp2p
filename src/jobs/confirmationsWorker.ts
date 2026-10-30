@@ -197,21 +197,31 @@ export async function runConfirmationsWorker(): Promise<ConfirmationWorkerResult
       try {
         const onChainData = await fetchOnChainConfirmations(deposit.tx_hash, normNet);
 
-        let currentConfirmations = prevConfs;
-        let blockNumber = deposit.block_number;
-        let fromAddress = deposit.from_address;
-
-        if (onChainData) {
-          currentConfirmations = onChainData.confirmations;
-          if (onChainData.blockNumber) {
-            blockNumber = onChainData.blockNumber;
-          }
-          if (onChainData.fromAddress) {
-            fromAddress = onChainData.fromAddress;
-          }
+        // Never reuse stored/provider-supplied confirmations when live chain
+        // verification is unavailable. The canonical RPC trusts the count passed
+        // to it, so a stale value must not be allowed to trigger financial credit.
+        if (!onChainData) {
+          result.failedCount++;
+          result.details.push({
+            depositId: deposit.id,
+            txHash: deposit.tx_hash,
+            network: normNet,
+            previousConfirmations: prevConfs,
+            newConfirmations: prevConfs,
+            requiredConfirmations: requiredConfs,
+            status: 'ERROR',
+            error: 'Live on-chain confirmation lookup unavailable; deposit was not credited.',
+          });
+          continue;
         }
 
-        // Call authoritative canonical RPC process_deposit_atomic
+        let currentConfirmations = onChainData.confirmations;
+        let blockNumber = onChainData.blockNumber ?? null;
+        let fromAddress = onChainData.fromAddress ?? null;
+
+        // Call canonical RPC only with a fresh confirmation count. Full transfer
+        // matching (destination, amount, token/log or output index) remains a
+        // separate required control before this worker can be considered safe.
         const { data: rpcData, error: rpcErr } = await supabaseAdmin.rpc('process_deposit_atomic', {
           p_destination_address: destinationAddress,
           p_asset_symbol: assetSymbol,
