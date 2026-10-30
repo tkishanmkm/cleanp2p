@@ -64,6 +64,8 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
     USDT: { available: 0, inEscrow: 0, inWithdrawal: 0 },
     BNB: { available: 0, inEscrow: 0, inWithdrawal: 0 },
     TRX: { available: 0, inEscrow: 0, inWithdrawal: 0 },
+    BNB: { available: 0, inEscrow: 0, inWithdrawal: 0 },
+    TRX: { available: 0, inEscrow: 0, inWithdrawal: 0 },
   });
 
   const [isLoading, setIsLoading] = useState<boolean>(true);
