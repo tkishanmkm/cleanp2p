@@ -11,7 +11,7 @@
     "emergency:halt": "ts-node scripts/kill-switch.ts halt",
     "emergency:resume": "ts-node scripts/kill-switch.ts resume",
     "workers:start": "node dist/worker.js",
-    "build:worker": "tsc",
+    "build:worker": "tsc -p tsconfig.worker.json && node scripts/rewrite-worker-aliases.mjs",
     "start:worker": "node dist/worker.js",
     "test:p2p": "tsx tests/p2p-trade-flow.test.ts",
     "test:blockchain": "tsx tests/blockchain-worker.test.ts",
