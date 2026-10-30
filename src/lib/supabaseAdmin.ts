@@ -18,8 +18,11 @@ export function getAuthoritativeAdminClient(): SupabaseClient {
   if (!_cachedClient) {
     const supabaseUrl =
       process.env.NEXT_PUBLIC_SUPABASE_URL?.trim() ||
-      process.env.SUPABASE_URL?.trim() ||
-      'https://placeholder.supabase.co';
+      process.env.SUPABASE_URL?.trim();
+
+    if (!supabaseUrl || supabaseUrl.includes('placeholder')) {
+      throw new Error('SUPABASE_URL or NEXT_PUBLIC_SUPABASE_URL is required for privileged database operations.');
+    }
 
     _cachedClient = createClient(supabaseUrl, serviceKey, {
       auth: {
