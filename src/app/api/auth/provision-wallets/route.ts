@@ -7,15 +7,19 @@ import { getOrDeriveUserDepositAddresses } from '@/lib/hd-derivation-engine';
 export const dynamic = 'force-dynamic';
 
 function getAdminClient() {
-  const supabaseUrl =
+  const supabaseUrl = (
     process.env.NEXT_PUBLIC_SUPABASE_URL ||
     process.env.SUPABASE_URL ||
-    'https://eaiwgfxoiwxepinvcykg.supabase.co';
+    ''
+  ).trim().replace(/\/$/, '');
+  const serviceRoleKey = (process.env.SUPABASE_SERVICE_ROLE_KEY || '').trim();
 
-  const serviceRoleKey =
-    process.env.SUPABASE_SERVICE_ROLE_KEY ||
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ||
-    'placeholder-key';
+  // Never use a public anon key, placeholder, or hard-coded project for privileged operations.
+  if (!supabaseUrl || !/^https:\/\//i.test(supabaseUrl) ||
+      !serviceRoleKey || serviceRoleKey === 'placeholder-key' ||
+      serviceRoleKey === 'placeholder-anon-key') {
+    throw new Error('Wallet provisioning requires configured Supabase URL and service-role key.');
+  }
 
   return createSupabaseClient(supabaseUrl, serviceRoleKey, {
     auth: { persistSession: false, autoRefreshToken: false },
@@ -40,10 +44,7 @@ async function resolveAuthenticatedUserId(req: NextRequest): Promise<string | nu
   }
 
   // 2. Check SSR Cookies
-  const supabaseUrl =
-    process.env.NEXT_PUBLIC_SUPABASE_URL ||
-    process.env.SUPABASE_URL ||
-    'https://eaiwgfxoiwxepinvcykg.supabase.co';
+  const supabaseUrl = (process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL || '').trim();
   const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
 
   if (supabaseUrl && supabaseAnonKey) {
@@ -72,6 +73,14 @@ async function resolveAuthenticatedUserId(req: NextRequest): Promise<string | nu
 
 export async function POST(req: NextRequest) {
   try {
+    // Fail closed before authenticating if privileged server configuration is missing.
+    const configuredUrl = (process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL || '').trim();
+    const configuredServiceKey = (process.env.SUPABASE_SERVICE_ROLE_KEY || '').trim();
+    if (!configuredUrl || !/^https:\/\//i.test(configuredUrl) || !configuredServiceKey ||
+        configuredServiceKey === 'placeholder-key' || configuredServiceKey === 'placeholder-anon-key') {
+      return NextResponse.json({ error: 'Wallet provisioning is temporarily unavailable.' }, { status: 503 });
+    }
+
     // 1. Authentication Check (Task 2)
     const authenticatedUserId = await resolveAuthenticatedUserId(req);
     if (!authenticatedUserId) {
