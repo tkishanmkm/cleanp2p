@@ -63,8 +63,15 @@ export async function POST(req: Request) {
       .eq('id', authUser.id)
       .maybeSingle();
 
-    if (profileErr) {
-      console.error('[RESET_PASSWORD] Profile query error:', profileErr);
+    if (profileErr || !profile) {
+      // Do not continue with password recovery when the account security
+      // record could not be loaded or is missing. Treating a query failure
+      // like an unconfigured security question would fail open.
+      console.error('[RESET_PASSWORD] Unable to verify account security record:', profileErr || 'profile not found');
+      return NextResponse.json(
+        { error: 'Unable to verify account recovery details. Please try again or request a new recovery link.' },
+        { status: profileErr ? 503 : 403 }
+      );
     }
 
     const cleanInputAnswer = securityAnswer.trim().toLowerCase();

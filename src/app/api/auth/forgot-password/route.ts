@@ -12,28 +12,45 @@ export async function POST(req: Request) {
       );
     }
 
-    // Optional server-side hCaptcha secret key validation if configured
-    const hcaptchaSecret = process.env.HCAPTCHA_SECRET_KEY;
-    if (hcaptchaSecret) {
-      try {
-        const verifyRes = await fetch('https://hcaptcha.com/siteverify', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-          body: new URLSearchParams({
-            secret: hcaptchaSecret,
-            response: captchaToken,
-          }),
-        });
-        const verifyData = await verifyRes.json();
-        if (!verifyData.success) {
-          return NextResponse.json(
-            { error: 'Captcha validation failed. Please solve the captcha challenge again.' },
-            { status: 400 }
-          );
-        }
-      } catch (captchaErr) {
-        console.warn('hCaptcha siteverify warning:', captchaErr);
+    // Password recovery must fail closed if server-side CAPTCHA verification
+    // is not configured or the provider cannot be reached. A client-supplied
+    // token alone is not proof that CAPTCHA was passed.
+    const hcaptchaSecret = process.env.HCAPTCHA_SECRET_KEY?.trim();
+    if (!hcaptchaSecret) {
+      console.error('[FORGOT_PASSWORD] HCAPTCHA_SECRET_KEY is not configured.');
+      return NextResponse.json(
+        { error: 'Password recovery is temporarily unavailable. Please try again later.' },
+        { status: 503 }
+      );
+    }
+
+    try {
+      const verifyRes = await fetch('https://hcaptcha.com/siteverify', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams({
+          secret: hcaptchaSecret,
+          response: captchaToken,
+          remoteip: req.headers.get('x-forwarded-for')?.split(',')[0]?.trim() || '',
+        }),
+        signal: AbortSignal.timeout(5000),
+      });
+      if (!verifyRes.ok) {
+        throw new Error(`hCaptcha returned HTTP ${verifyRes.status}`);
       }
+      const verifyData = await verifyRes.json();
+      if (verifyData?.success !== true) {
+        return NextResponse.json(
+          { error: 'Captcha validation failed. Please solve the captcha challenge again.' },
+          { status: 400 }
+        );
+      }
+    } catch (captchaErr) {
+      console.error('[FORGOT_PASSWORD] hCaptcha verification unavailable:', captchaErr);
+      return NextResponse.json(
+        { error: 'Password recovery is temporarily unavailable. Please try again later.' },
+        { status: 503 }
+      );
     }
 
     if (!identifier || !identifier.trim()) {
