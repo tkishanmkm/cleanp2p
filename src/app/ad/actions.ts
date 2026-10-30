@@ -625,10 +625,23 @@ export async function createTradeOrderWithEscrow(input: {
     }
 
     // 4. Calculate Base Amounts & Limits
-    const price = Number(ad.price || ad.fixed_rate || ad.fixedRate || ad.unit_price) || 80116.02;
+    const price = Number(ad.price ?? ad.fixed_rate ?? ad.fixedRate ?? ad.unit_price);
     const fiatAmount = Number(input.fiatAmount);
-    const minLimit = Number(ad.min_limit ?? ad.min_amount ?? 100) || 100;
-    const maxLimit = Number(ad.max_limit ?? ad.max_amount ?? 5000) || 5000;
+    const minLimit = Number(ad.min_limit ?? ad.min_amount);
+    const maxLimit = Number(ad.max_limit ?? ad.max_amount);
+
+    if (!Number.isFinite(price) || price <= 0 ||
+        !Number.isFinite(fiatAmount) || fiatAmount <= 0 ||
+        !Number.isFinite(minLimit) || minLimit <= 0 ||
+        !Number.isFinite(maxLimit) || maxLimit < minLimit) {
+      return {
+        data: null,
+        error: {
+          message: 'The advertisement price or trade limits are invalid. No trade was created.',
+          code: 'INVALID_AD_TERMS',
+        },
+      };
+    }
     const assetSymbol = (ad.asset_symbol || ad.crypto || ad.asset_code || 'BTC').toUpperCase();
     const fiatSymbol = (ad.fiat_symbol || ad.fiat || ad.fiat_currency || 'USD').toUpperCase();
 
@@ -645,8 +658,17 @@ export async function createTradeOrderWithEscrow(input: {
     const isInitiatorSelling = isBuyAd;
     const isAdSell = !isBuyAd;
 
-    const adOwnerId = ad.user_id || ad.seller_id || ad.advertiser_id || (ad.profiles && ad.profiles.id) || 'trader_verified_1';
-    const sellerId = isInitiatorSelling ? user.id : adOwnerId;
+    const adOwnerId = ad.user_id || ad.seller_id || ad.advertiser_id || (ad.profiles && ad.profiles.id);
+    if (!adOwnerId || !isValidUUID(String(adOwnerId))) {
+      return {
+        data: null,
+        error: {
+          message: 'The advertisement does not have a valid seller account.',
+          code: 'INVALID_AD_OWNER',
+        },
+      };
+    }
+    const sellerId = isInitiatorSelling ? user.id : String(adOwnerId);
     const buyerId = isInitiatorSelling ? adOwnerId : user.id;
     const resolvedPublicId = String(ad.public_id || ad.public_ad_id || ad.publicAdId || ad.id);
     const resolvedSellerId = String(sellerId);
@@ -709,10 +731,6 @@ export async function createTradeOrderWithEscrow(input: {
     // Check Seller available balance comprehensively
     const sellerBalanceInfo = await fetchUserCryptoBalance(sellerId, assetSymbol);
     let currentSellerAvail = sellerBalanceInfo.available;
-
-    if (isAdSell && Number(ad.total_amount || 0) > currentSellerAvail) {
-      currentSellerAvail = Number(ad.total_amount);
-    }
 
     // Effective max limit check
     let effectiveMaxLimit = maxLimit;
