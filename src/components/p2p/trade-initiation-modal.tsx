@@ -126,8 +126,9 @@ export function TradeInitiationModal({ ad, isOpen, onClose }: TradeInitiationMod
 
   const handleStartTrade = async () => {
     const numericFiat = parseFloat(fiatAmount);
+    const numericCrypto = parseFloat(cryptoAmount);
 
-    if (isNaN(numericFiat) || numericFiat <= 0) {
+    if (!Number.isFinite(numericFiat) || numericFiat <= 0 || !Number.isFinite(numericCrypto) || numericCrypto <= 0) {
       setErrorMsg("Please enter a valid amount.");
       return;
     }
@@ -170,86 +171,36 @@ export function TradeInitiationModal({ ad, isOpen, onClose }: TradeInitiationMod
 
       const paymentMethod = selectedPaymentMethod || availablePaymentMethods[0] || "Bank Transfer";
 
-      // 1. First attempt trade creation via secure backend API route
-      let tradeId: string | null = null;
-      try {
-        const response = await fetch('/api/trades/initiate', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            adId: ad.id,
-            buyerId,
-            sellerId,
-            cryptoAmount: numericCrypto,
-            cryptoSymbol: ad.asset_symbol,
-            rate: ad.price,
-            price: ad.price,
-            fiatAmount: numericFiat,
-            fiatCurrency: ad.fiat_symbol || 'INR',
-            paymentMethod,
-          }),
-        });
+      // All trade creation must go through the server-side escrow RPC. Never
+      // fall back to a direct client INSERT, which could create an unescrowed trade.
+      const response = await fetch('/api/trades/initiate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({
+          adId: ad.id,
+          buyerId,
+          sellerId,
+          cryptoAmount: numericCrypto,
+          cryptoSymbol: ad.asset_symbol,
+          rate: ad.price,
+          price: ad.price,
+          fiatAmount: numericFiat,
+          fiatCurrency: ad.fiat_symbol || 'INR',
+          paymentMethod,
+        }),
+      });
 
-        if (response.ok) {
-          const resData = await response.json();
-          if (resData?.tradeId || resData?.trade?.id || resData?.id) {
-            tradeId = resData.tradeId || resData.trade?.id || resData.id;
-          }
-        }
-      } catch (apiErr) {
-        console.warn('Trade API route creation warning, falling back to direct insert:', apiErr);
+      const resData = await response.json().catch(() => null);
+      if (!response.ok) {
+        throw new Error(resData?.error || resData?.message || 'Secure trade creation failed. Please try again.');
       }
 
-      // 2. Direct insert fallback if API route did not return ID
-      if (!tradeId) {
-        const escrowFee = numericCrypto * 0.015;
-        let { data: trade, error: tradeError } = await supabase
-          .from("trades")
-          .insert({
-            ad_id: ad.id,
-            buyer_id: buyerId,
-            seller_id: sellerId,
-            crypto: ad.asset_symbol,
-            crypto_amount: numericCrypto,
-            amount: numericCrypto,
-            escrow_fee: escrowFee,
-            fiat_currency: ad.fiat_symbol || 'INR',
-            fiat_amount: numericFiat,
-            total_fiat: numericFiat,
-            rate: ad.price,
-            price: ad.price,
-            amount_usd: numericFiat,
-            payment_method: paymentMethod,
-            status: "pending",
-          })
-          .select("id")
-          .single();
-
-        if (tradeError) {
-          console.warn("Retrying trade insertion with minimal schema...", tradeError);
-          const { data: fallbackTrade, error: fallbackError } = await supabase
-            .from("trades")
-            .insert({
-              buyer_id: buyerId,
-              seller_id: sellerId,
-              amount_usd: numericFiat,
-              status: "pending",
-            })
-            .select("id")
-            .single();
-
-          if (fallbackError) {
-            throw fallbackError;
-          }
-          tradeId = fallbackTrade?.id;
-        } else {
-          tradeId = trade?.id;
-        }
+      const returnedTradeId = resData?.tradeId || resData?.trade?.id || resData?.id;
+      if (!returnedTradeId) {
+        throw new Error('Secure trade service returned no trade ID.');
       }
-
-      if (!tradeId) {
-        throw new Error("Trade creation returned no ID.");
-      }
+      const tradeId = String(returnedTradeId);
 
       // Sound feedback and redirect to trade execution page
       try {
