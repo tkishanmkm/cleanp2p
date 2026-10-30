@@ -35,13 +35,21 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: 'File extension is not allowed for this upload category.' }, { status: 400 });
     }
 
-    const allowedContentTypes = new Set([
-      'image/webp', 'image/png', 'image/jpeg', 'application/pdf',
-      'text/plain', 'application/json', 'application/gzip', 'application/octet-stream',
-    ]);
-    const normalizedContentType = String(contentType || 'image/webp').toLowerCase().trim();
-    if (!allowedContentTypes.has(normalizedContentType)) {
-      return NextResponse.json({ error: 'File content type is not allowed.' }, { status: 400 });
+    const contentTypeByExtension: Record<string, string> = {
+      webp: 'image/webp',
+      png: 'image/png',
+      jpg: 'image/jpeg',
+      jpeg: 'image/jpeg',
+      pdf: 'application/pdf',
+      txt: 'text/plain',
+      json: 'application/json',
+      gz: 'application/gzip',
+    };
+    const normalizedContentType = String(
+      contentType || (category === 'kyc-data' ? 'application/gzip' : contentTypeByExtension[extension])
+    ).toLowerCase().trim();
+    if (normalizedContentType !== contentTypeByExtension[extension]) {
+      return NextResponse.json({ error: 'File extension and content type do not match.' }, { status: 400 });
     }
     if (isTxtData && (category !== 'kyc-data' || typeof txtContent !== 'string' || Buffer.byteLength(txtContent, 'utf8') > 1024 * 1024)) {
       return NextResponse.json({ error: 'Invalid or oversized text upload.' }, { status: 400 });
