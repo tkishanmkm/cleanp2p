@@ -180,7 +180,9 @@ async function handleSync(req: NextRequest) {
       const idVerifications = decisionObj.id_verifications || diditResult.id_verifications || [];
       const primaryId = Array.isArray(idVerifications) && idVerifications.length > 0 ? idVerifications[0] : null;
 
-      const isApproved = statusStr === 'approved' || statusStr === 'passed' || (primaryId && isApprovedText(primaryId.status));
+      // Approve only when Didit reports a final session/decision-level pass.
+      // An approved ID sub-check alone is not proof that the whole KYC session passed.
+      const isApproved = statusStr === 'approved' || statusStr === 'passed';
       const isDeclined = statusStr === 'declined' || statusStr === 'rejected' || statusStr === 'failed';
 
       if (isApproved) {
@@ -234,14 +236,45 @@ async function handleSync(req: NextRequest) {
           updatePayload.is_address_locked = true;
         }
 
-        await admin.from('profiles').update(updatePayload).eq('id', targetUserId);
-
+        // Persist the provider decision record first. If it cannot be recorded,
+        // do not elevate the profile to verified.
         if (sessionId) {
-          await admin.from('kyc_verifications').update({
-            status: 'APPROVED',
-            decision: diditResult,
-            updated_at: new Date().toISOString(),
-          }).eq('session_id', sessionId);
+          const { data: verificationRow, error: verificationUpdateError } = await admin
+            .from('kyc_verifications')
+            .update({
+              status: 'APPROVED',
+              decision: diditResult,
+              updated_at: new Date().toISOString(),
+            })
+            .eq('session_id', sessionId)
+            .select('session_id')
+            .maybeSingle();
+
+          if (verificationUpdateError || !verificationRow) {
+            console.error('[KYC_SYNC] Could not persist provider approval record:', verificationUpdateError || 'verification row not found');
+            return NextResponse.json(
+              { error: 'Verification status could not be safely recorded. Please retry shortly.' },
+              { status: 503 }
+            );
+          }
+        } else {
+          return NextResponse.json(
+            { error: 'Verification session is missing; approval cannot be applied.' },
+            { status: 503 }
+          );
+        }
+
+        const { error: profileUpdateError } = await admin
+          .from('profiles')
+          .update(updatePayload)
+          .eq('id', targetUserId);
+
+        if (profileUpdateError) {
+          console.error('[KYC_SYNC] Provider approved but profile update failed:', profileUpdateError);
+          return NextResponse.json(
+            { error: 'Verification decision was received but could not be applied. Please retry shortly.' },
+            { status: 503 }
+          );
         }
 
         return NextResponse.json({
@@ -259,7 +292,7 @@ async function handleSync(req: NextRequest) {
         const attempts = (profile.kyc_retry_count || profile.kyc_attempts || 0) + 1;
         const newStatus = attempts >= 3 ? 'permanently_rejected' : 'declined';
 
-        await admin.from('profiles').update({
+        const { error: declineUpdateError } = await admin.from('profiles').update({
           kyc_status: newStatus,
           is_verified: false,
           id_verified: false,
@@ -267,6 +300,14 @@ async function handleSync(req: NextRequest) {
           kyc_attempts: attempts,
           updated_at: new Date().toISOString(),
         }).eq('id', targetUserId);
+
+        if (declineUpdateError) {
+          console.error('[KYC_SYNC] Failed to persist provider decline:', declineUpdateError);
+          return NextResponse.json(
+            { error: 'Verification status could not be saved. Please retry shortly.' },
+            { status: 503 }
+          );
+        }
 
         return NextResponse.json({
           success: true,
