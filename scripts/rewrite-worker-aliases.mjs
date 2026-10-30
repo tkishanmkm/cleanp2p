@@ -29,4 +29,21 @@ if (!fs.existsSync(path.join(distRoot, 'worker.js'))) {
   throw new Error('Worker compilation did not produce dist/worker.js');
 }
 walk(distRoot);
-console.log('[Worker Build] Compiled output and rewrote @/ aliases to relative paths.');
+
+const unresolved = [];
+function findUnresolved(directory) {
+  for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
+    const filePath = path.join(directory, entry.name);
+    if (entry.isDirectory()) {
+      findUnresolved(filePath);
+    } else if (entry.isFile() && filePath.endsWith('.js')) {
+      const source = fs.readFileSync(filePath, 'utf8');
+      if (/require\((['"])@\//.test(source)) unresolved.push(path.relative(distRoot, filePath));
+    }
+  }
+}
+findUnresolved(distRoot);
+if (unresolved.length > 0) {
+  throw new Error('Unresolved @/ aliases remain in worker output: ' + unresolved.join(', '));
+}
+console.log('[Worker Build] Compiled output and verified @/ aliases were rewritten to relative paths.');
