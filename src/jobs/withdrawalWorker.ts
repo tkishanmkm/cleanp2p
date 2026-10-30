@@ -84,6 +84,50 @@ export async function allocateEvmNonce(
 }
 
 /**
+ * Persist a broadcast transaction without finalizing the withdrawal. Final
+ * completion must wait for the network-specific confirmation threshold.
+ */
+async function persistBroadcast(withdrawalId: string, txHash: string, nonce?: number): Promise<void> {
+  const now = new Date().toISOString();
+  const onchainUpdate: Record<string, any> = {
+    status: 'BROADCASTED',
+    tx_hash: txHash,
+    error_message: null,
+    updated_at: now,
+  };
+  if (nonce !== undefined) onchainUpdate.nonce = nonce;
+
+  const { data: onchainRow, error: onchainError } = await supabaseAdmin
+    .from('onchain_withdrawals')
+    .update(onchainUpdate)
+    .eq('id', withdrawalId)
+    .select('id')
+    .maybeSingle();
+
+  if (onchainError || !onchainRow) {
+    throw new Error(`Transaction ${txHash} was broadcast, but its on-chain record could not be persisted: ${onchainError?.message || 'row not found'}`);
+  }
+
+  const { data: withdrawalRow, error: withdrawalError } = await supabaseAdmin
+    .from('withdrawals')
+    .update({
+      status: 'processing',
+      tx_hash: txHash,
+      txid: txHash,
+      broadcasted_at: now,
+      broadcast_error: null,
+      updated_at: now,
+    })
+    .eq('id', withdrawalId)
+    .select('id')
+    .maybeSingle();
+
+  if (withdrawalError || !withdrawalRow) {
+    throw new Error(`Transaction ${txHash} was broadcast, but the canonical withdrawal record could not be persisted: ${withdrawalError?.message || 'row not found'}`);
+  }
+}
+
+/**
  * Processes a single pending withdrawal from the onchain_withdrawals queue
  */
 export async function processWithdrawalQueue(): Promise<WithdrawalProcessResult> {
@@ -112,6 +156,8 @@ export async function processWithdrawalQueue(): Promise<WithdrawalProcessResult>
   const amountStr = withdrawal.amount.toString();
   const destination = withdrawal.to_address.trim();
   let isLocalCheckStage = true;
+  let broadcastTxHash: string | undefined;
+  let broadcastNonce: number | undefined;
 
   try {
     // BRANCH A: TRON Network (TRC-20 USDT)
@@ -131,19 +177,15 @@ export async function processWithdrawalQueue(): Promise<WithdrawalProcessResult>
         amount: amountStr,
       });
       const txHash = res.txHash;
+      broadcastTxHash = txHash;
+      await persistBroadcast(withdrawal.id, txHash);
 
-      const { error: completionError } = await supabaseAdmin.rpc('complete_onchain_withdrawal', {
-        p_withdrawal_id: withdrawal.id,
-        p_tx_hash: txHash,
-      });
-      if (completionError) throw new Error(`Payout broadcast but completion state could not be persisted: ${completionError.message}`);
-
-      console.log(`[Withdrawal Worker] Dispatched TRON payout ${withdrawal.id} (tx: ${txHash})`);
+      console.log(`[Withdrawal Worker] Broadcasted TRON payout ${withdrawal.id} (tx: ${txHash}); awaiting confirmations`);
       return {
         processed: true,
         withdrawalId: withdrawal.id,
         txHash,
-        status: 'COMPLETED',
+        status: 'BROADCASTED',
       };
     }
 
@@ -187,19 +229,17 @@ export async function processWithdrawalQueue(): Promise<WithdrawalProcessResult>
       });
     }
 
-    const { error: completionError } = await supabaseAdmin.rpc('complete_onchain_withdrawal', {
-      p_withdrawal_id: withdrawal.id,
-      p_tx_hash: tx.hash,
-    });
-    if (completionError) throw new Error(`Payout broadcast but completion state could not be persisted: ${completionError.message}`);
+    broadcastTxHash = tx.hash;
+    broadcastNonce = nonce;
+    await persistBroadcast(withdrawal.id, tx.hash, nonce);
 
-    console.log(`[Withdrawal Worker] Broadcasted EVM payout ${withdrawal.id} on ${network} (tx: ${tx.hash}, nonce: ${nonce})`);
+    console.log(`[Withdrawal Worker] Broadcasted EVM payout ${withdrawal.id} on ${network} (tx: ${tx.hash}, nonce: ${nonce}); awaiting confirmations`);
     return {
       processed: true,
       withdrawalId: withdrawal.id,
       txHash: tx.hash,
       nonce,
-      status: 'COMPLETED',
+      status: 'BROADCASTED',
     };
 
   } catch (err: any) {
@@ -236,6 +276,8 @@ export async function processWithdrawalQueue(): Promise<WithdrawalProcessResult>
           .from('onchain_withdrawals')
           .update({
             status: 'AMBIGUOUS_BROADCAST',
+            ...(broadcastTxHash ? { tx_hash: broadcastTxHash } : {}),
+            ...(broadcastNonce !== undefined ? { nonce: broadcastNonce } : {}),
             error_message: `Ambiguous broadcast error: ${err.message}`,
             updated_at: new Date().toISOString(),
           })
@@ -245,6 +287,8 @@ export async function processWithdrawalQueue(): Promise<WithdrawalProcessResult>
           .from('withdrawals')
           .update({
             status: 'AMBIGUOUS_BROADCAST',
+            ...(broadcastTxHash ? { tx_hash: broadcastTxHash, txid: broadcastTxHash, broadcasted_at: new Date().toISOString() } : {}),
+            ...(broadcastNonce !== undefined ? { broadcast_attempts: 1 } : {}),
             broadcast_error: `Ambiguous broadcast error: ${err.message}`,
             updated_at: new Date().toISOString(),
           })
