@@ -211,6 +211,25 @@ export async function runConfirmationsWorker(): Promise<ConfirmationWorkerResult
           }
         }
 
+        // SECURITY HOLD: confirmation depth alone does not prove that this transaction
+        // paid the recorded destination and amount. This worker currently does not
+        // verify receipt success, exact native transfer value/destination, ERC-20
+        // Transfer log contract + recipient + amount + log index, or BTC/LTC output
+        // scripts/values. Do not call the privileged credit RPC until those checks
+        // are implemented and covered by fixtures for each supported network.
+        result.failedCount++;
+        result.details.push({
+          depositId: deposit.id,
+          txHash: deposit.tx_hash,
+          network: normNet,
+          previousConfirmations: prevConfs,
+          newConfirmations: currentConfirmations,
+          requiredConfirmations: requiredConfs,
+          status: 'HOLD_UNVERIFIED_TRANSFER',
+          error: 'Deposit credit held: transaction destination, asset, amount, and output/log index have not been independently verified.',
+        });
+        continue;
+
         // Call authoritative canonical RPC process_deposit_atomic
         const { data: rpcData, error: rpcErr } = await supabaseAdmin.rpc('process_deposit_atomic', {
           p_destination_address: destinationAddress,
