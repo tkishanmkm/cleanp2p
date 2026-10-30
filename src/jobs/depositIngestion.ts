@@ -1,5 +1,5 @@
 import { ethers } from 'ethers';
-import { createClient } from '@supabase/supabase-js';
+import { supabaseAdmin } from '@/lib/supabaseAdmin';
 import {
   SUPPORTED_EVM_CHAINS,
   getEvmProvider,
@@ -8,16 +8,8 @@ import {
 import { TRON_CONFIG, getTronWeb, isValidTronAddress } from '@/lib/blockchain/tron';
 import { normalizeDepositNetwork } from '@/lib/hd-derivation-engine';
 
-// Initialize Supabase admin client with service role
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL || 'https://eaiwgfxoiwxepinvcykg.supabase.co';
-const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'placeholder-key';
-
-export const supabaseAdmin = createClient(supabaseUrl, supabaseKey, {
-  auth: {
-    persistSession: false,
-    autoRefreshToken: false,
-  },
-});
+// Re-export the shared strict service-role client for existing imports.
+export { supabaseAdmin };
 
 export const CANONICAL_USDT_CONTRACTS: Record<string, string> = {
   ERC20: process.env.USDT_CONTRACT_ERC20 || '0xdAC17F958D2ee523a2206206994597C13D831ec7',
