@@ -9,15 +9,32 @@ export async function POST(req: Request) {
     const authHeader = req.headers.get('authorization');
     const webhookSecret = process.env.BLOCKCHAIN_WEBHOOK_SECRET;
 
-    if (webhookSecret && authHeader !== `Bearer ${webhookSecret}`) {
+    if (!webhookSecret) {
+      console.error('[Deposit API] BLOCKCHAIN_WEBHOOK_SECRET is not configured; refusing deposit processing.');
+      return NextResponse.json({ error: 'Deposit processing is temporarily unavailable' }, { status: 503 });
+    }
+    if (authHeader !== `Bearer ${webhookSecret}`) {
       return NextResponse.json({ error: 'Unauthorized webhook' }, { status: 401 });
     }
 
     const body = await req.json().catch(() => ({}));
-    const { userId, assetCode, networkCode, amount, txHash, destinationAddress, outputIndex = 0 } = body;
+    const { userId, assetCode, networkCode, amount, txHash, destinationAddress, outputIndex = 0, confirmations, blockNumber } = body;
 
-    if (!assetCode || !amount || !txHash) {
-      return NextResponse.json({ error: 'Missing deposit payload fields' }, { status: 400 });
+    const parsedAmount = Number(amount);
+    const parsedOutputIndex = Number(outputIndex);
+    const parsedConfirmations = Number(confirmations);
+    const parsedBlockNumber = Number(blockNumber);
+
+    if (
+      typeof assetCode !== 'string' || !assetCode.trim() ||
+      typeof networkCode !== 'string' || !networkCode.trim() ||
+      typeof txHash !== 'string' || !txHash.trim() ||
+      !Number.isFinite(parsedAmount) || parsedAmount <= 0 ||
+      !Number.isSafeInteger(parsedOutputIndex) || parsedOutputIndex < 0 ||
+      !Number.isSafeInteger(parsedConfirmations) || parsedConfirmations < 0 ||
+      !Number.isSafeInteger(parsedBlockNumber) || parsedBlockNumber <= 0
+    ) {
+      return NextResponse.json({ error: 'Invalid deposit payload; positive amount, transaction, block and explicit confirmation data are required' }, { status: 400 });
     }
 
     const normNet = normalizeDepositNetwork(networkCode || 'ERC20');
@@ -55,13 +72,13 @@ export async function POST(req: Request) {
       p_destination_address: targetAddress,
       p_asset_symbol: normAsset,
       p_network_code: normNet,
-      p_amount: Number(amount),
-      p_tx_hash: txHash,
-      p_output_index: Number(outputIndex) || 0,
-      p_block_number: null,
+      p_amount: parsedAmount,
+      p_tx_hash: txHash.trim(),
+      p_output_index: parsedOutputIndex,
+      p_block_number: parsedBlockNumber,
       p_from_address: null,
       p_token_contract: tokenContract,
-      p_confirmations: 12,
+      p_confirmations: parsedConfirmations,
       p_provider: 'wallet_deposit_api',
     });
 
