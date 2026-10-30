@@ -50,7 +50,9 @@ export async function verifyServerAdmin(req?: NextRequest): Promise<AdminAuthRes
     let isAdmin = false;
 
     // Check JWT app_metadata
-    if (user.app_metadata?.role === "admin" || user.user_metadata?.role === "admin") {
+    // Only trust server-controlled app_metadata here. user_metadata is user-editable
+    // and must never grant administrator privileges.
+    if (user.app_metadata?.role === "admin") {
       isAdmin = true;
     }
 
