@@ -27,6 +27,27 @@ export interface UserProfile {
   is_banned?: boolean;
   is_restricted?: boolean;
   account_status?: string;
+  // Optional profile/KYC aliases consumed by existing P2P screens. Server-side
+  // authorization still reads authoritative profile data and does not trust these
+  // client-facing aliases for privileged decisions.
+  is_verified?: boolean;
+  id_verified?: boolean;
+  is_id_verified?: boolean;
+  kyc_status?: string | null;
+  verification_tier?: string | number | null;
+  is_email_verified?: boolean;
+  is_phone_verified?: boolean;
+  isVerified?: boolean;
+  feedbackScore?: number;
+  positiveFeedback?: number;
+  negativeFeedback?: number;
+  completedTrades?: number;
+  tradeVolume?: number;
+  blockedUsers?: string[];
+  badges?: string[];
+  photoURL?: string | null;
+  lastActive?: string | null;
+  displayName?: string | null;
   btc_balance?: number;
   eth_balance?: number;
   usdt_balance?: number;
