@@ -176,15 +176,19 @@ export const BIP_PATHS = {
 // ============================================================================
 
 export function getAdminClient(): SupabaseClient {
-  const supabaseUrl =
+  const supabaseUrl = (
     process.env.NEXT_PUBLIC_SUPABASE_URL ||
     process.env.SUPABASE_URL ||
-    'https://eaiwgfxoiwxepinvcykg.supabase.co';
+    ''
+  ).trim().replace(/\/$/, '');
+  const serviceRoleKey = (process.env.SUPABASE_SERVICE_ROLE_KEY || '').trim();
 
-  const serviceRoleKey =
-    process.env.SUPABASE_SERVICE_ROLE_KEY ||
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ||
-    'placeholder-key';
+  // Never fall back to a public anon key, placeholder, or hard-coded project.
+  if (!supabaseUrl || !/^https:\/\//i.test(supabaseUrl) ||
+      !serviceRoleKey || serviceRoleKey === 'placeholder-key' ||
+      serviceRoleKey === 'placeholder-anon-key') {
+    throw new Error('SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are required for wallet provisioning.');
+  }
 
   return createClient(supabaseUrl, serviceRoleKey, {
     auth: {
