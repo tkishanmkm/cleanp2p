@@ -126,6 +126,7 @@ export type Withdrawal = {
 export type User = {
   id: string;
   userId: string;
+  username?: string;
   oldUserId?: string;
   fullName: string;
   dob: string;
