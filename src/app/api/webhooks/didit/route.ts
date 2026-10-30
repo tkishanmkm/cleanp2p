@@ -202,7 +202,7 @@ export async function POST(req: NextRequest) {
           await requireWrite(supabase.from('profiles').update({
             kyc_status: 'declined',
             updated_at: new Date().toISOString(),
-          }).eq('id', userId), 'profile update')
+          }).eq('id', userId), 'profile update');
 
           return new NextResponse(JSON.stringify({ message: 'Modules incomplete or unapproved', idPassed, livenessPassed, faceMatchPassed }), {
             status: 200,
@@ -254,7 +254,7 @@ export async function POST(req: NextRequest) {
               kyc_status: 'banned',
               suspension_reason: 'No minor allowed for minor safety',
               updated_at: new Date().toISOString(),
-            }).eq('id', userId), 'profile update')
+            }).eq('id', userId), 'profile update');
 
             return new NextResponse(JSON.stringify({
               status: 'banned',
@@ -300,7 +300,7 @@ export async function POST(req: NextRequest) {
               kyc_status: 'banned',
               suspension_reason: 'Multi-account violation: Attempting KYC with an identity already associated with another account.',
               updated_at: new Date().toISOString(),
-            }).eq('id', userId), 'profile update')
+            }).eq('id', userId), 'profile update');
 
             return new NextResponse(JSON.stringify({
               status: 'banned',
@@ -347,7 +347,7 @@ export async function POST(req: NextRequest) {
       const { error: updateErr } = await requireWrite(supabase
         .from('profiles')
         .update(updatePayload)
-        .eq('id', userId), 'profile update')
+        .eq('id', userId), 'profile update');
 
       if (updateErr) {
         console.error('[DIDIT WEBHOOK] Profile update error:', updateErr);
@@ -363,7 +363,7 @@ export async function POST(req: NextRequest) {
             decision: parsed,
             updated_at: new Date().toISOString(),
           })
-          .eq('session_id', sessionId), 'verification update')
+          .eq('session_id', sessionId), 'verification update');
       }
 
       // Notify User
@@ -394,7 +394,7 @@ export async function POST(req: NextRequest) {
         is_verified: false,
         id_verified: false,
         updated_at: new Date().toISOString(),
-      }).eq('id', userId), 'profile update')
+      }).eq('id', userId), 'profile update');
 
       if (sessionId) {
         await requireWrite(supabase
@@ -404,7 +404,7 @@ export async function POST(req: NextRequest) {
             decision: parsed,
             updated_at: new Date().toISOString(),
           })
-          .eq('session_id', sessionId), 'verification update')
+          .eq('session_id', sessionId), 'verification update');
       }
 
       console.log(`[DIDIT WEBHOOK] User ${userId} KYC marked as in_review.`);
@@ -439,7 +439,7 @@ export async function POST(req: NextRequest) {
           is_kyc_locked: true,
           suspension_reason: 'KYC failed 3 consecutive times in 24 hours. Contact support for manual verification.',
           updated_at: new Date().toISOString(),
-        }).eq('id', userId), 'profile update')
+        }).eq('id', userId), 'profile update');
 
         if (sessionId) {
           await requireWrite(supabase
@@ -449,7 +449,7 @@ export async function POST(req: NextRequest) {
               decision: parsed,
               updated_at: new Date().toISOString(),
             })
-            .eq('session_id', sessionId), 'verification update')
+            .eq('session_id', sessionId), 'verification update');
         }
 
         try {
@@ -476,7 +476,7 @@ export async function POST(req: NextRequest) {
           kyc_attempts: newRetries,
           kyc_last_attempt_at: new Date().toISOString(),
           updated_at: new Date().toISOString(),
-        }).eq('id', userId), 'profile update')
+        }).eq('id', userId), 'profile update');
 
         if (sessionId) {
           await requireWrite(supabase
@@ -486,7 +486,7 @@ export async function POST(req: NextRequest) {
               decision: parsed,
               updated_at: new Date().toISOString(),
             })
-            .eq('session_id', sessionId), 'verification update')
+            .eq('session_id', sessionId), 'verification update');
         }
 
         try {
@@ -511,7 +511,7 @@ export async function POST(req: NextRequest) {
         is_verified: false,
         id_verified: false,
         updated_at: new Date().toISOString(),
-      }).eq('id', userId), 'profile update')
+      }).eq('id', userId), 'profile update');
 
       if (sessionId) {
         await requireWrite(supabase
@@ -522,7 +522,7 @@ export async function POST(req: NextRequest) {
             vendor_data: { ...(parsed.vendor_data || {}), resubmit_info: parsed.resubmit_info, last_event_id: eventId },
             updated_at: new Date().toISOString(),
           })
-          .eq('session_id', sessionId), 'verification update')
+          .eq('session_id', sessionId), 'verification update');
       }
 
       try {
@@ -545,7 +545,7 @@ export async function POST(req: NextRequest) {
         id_verified: false,
         is_kyc_locked: false,
         updated_at: new Date().toISOString(),
-      }).eq('id', userId), 'profile update')
+      }).eq('id', userId), 'profile update');
 
       if (sessionId) {
         await requireWrite(supabase
@@ -555,7 +555,7 @@ export async function POST(req: NextRequest) {
             decision: parsed,
             updated_at: new Date().toISOString(),
           })
-          .eq('session_id', sessionId), 'verification update')
+          .eq('session_id', sessionId), 'verification update');
       }
 
       try {
@@ -577,7 +577,7 @@ export async function POST(req: NextRequest) {
         is_verified: false,
         id_verified: false,
         updated_at: new Date().toISOString(),
-      }).eq('id', userId), 'profile update')
+      }).eq('id', userId), 'profile update');
 
       if (sessionId) {
         await requireWrite(supabase
@@ -587,7 +587,7 @@ export async function POST(req: NextRequest) {
             decision: parsed,
             updated_at: new Date().toISOString(),
           })
-          .eq('session_id', sessionId), 'verification update')
+          .eq('session_id', sessionId), 'verification update');
       }
     }
 
