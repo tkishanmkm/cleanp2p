@@ -16,7 +16,16 @@ export async function POST(req: NextRequest) {
 
     const hcaptchaSecret = process.env.HCAPTCHA_SECRET_KEY?.trim();
 
-    if (hcaptchaSecret) {
+    // Fail closed: a missing provider secret must never turn CAPTCHA into a bypass.
+    if (!hcaptchaSecret) {
+      console.error('[Admin Login CAPTCHA] HCAPTCHA_SECRET_KEY is not configured.');
+      return NextResponse.json(
+        { success: false, error: 'Security verification is temporarily unavailable. Please contact support.' },
+        { status: 503 }
+      );
+    }
+
+    {
       const verifyRes = await fetch('https://hcaptcha.com/siteverify', {
         method: 'POST',
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
@@ -38,8 +47,6 @@ export async function POST(req: NextRequest) {
           { status: 400 }
         );
       }
-    } else {
-      console.warn('[Admin Login CAPTCHA] Notice: HCAPTCHA_SECRET_KEY is not configured on server.');
     }
 
     return NextResponse.json({ success: true });
