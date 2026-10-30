@@ -3,16 +3,27 @@ import { ethers } from 'ethers';
 import { normalizeDepositNetwork } from '@/lib/hd-derivation-engine';
 import { CANONICAL_USDT_CONTRACTS } from '@/jobs/depositIngestion';
 
-// Initialize Supabase admin client with service role key
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL || 'https://placeholder.supabase.co';
-const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'placeholder-key';
+// Fail closed: never use an anonymous or placeholder credential for a financial worker.
+const supabaseUrl = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL;
+const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+const supabaseAdmin =
+  supabaseUrl && supabaseKey
+    ? createClient(supabaseUrl, supabaseKey, {
+        auth: { persistSession: false, autoRefreshToken: false },
+      })
+    : null;
 
-const supabaseAdmin = createClient(supabaseUrl, supabaseKey, {
-  auth: {
-    persistSession: false,
-    autoRefreshToken: false,
-  },
-});
+function getRequiredConfirmations(network: string): number | null {
+  switch (normalizeDepositNetwork(network)) {
+    case 'BTC': return 3;
+    case 'LTC': return 12;
+    case 'ETH':
+    case 'ERC20': return 12;
+    case 'BEP20': return 15;
+    case 'TRC20': return 19;
+    default: return null;
+  }
+}
 
 export interface ConfirmationWorkerResult {
   totalScanned: number;
@@ -165,6 +176,14 @@ export async function runConfirmationsWorker(): Promise<ConfirmationWorkerResult
   };
 
   try {
+    if (!supabaseAdmin) {
+      result.failedCount = 1;
+      console.error(
+        'Confirmations worker configuration error: SUPABASE_URL (or NEXT_PUBLIC_SUPABASE_URL) and SUPABASE_SERVICE_ROLE_KEY are required.'
+      );
+      return result;
+    }
+
     // 1. Fetch pending on-chain deposits
     const { data: pendingDeposits, error } = await supabaseAdmin
       .from('onchain_deposits')
@@ -187,8 +206,23 @@ export async function runConfirmationsWorker(): Promise<ConfirmationWorkerResult
     // 2. Iterate through each pending deposit
     for (const deposit of pendingDeposits) {
       const normNet = normalizeDepositNetwork(deposit.network);
-      const requiredConfs = deposit.required_confirmations || 12;
+      const requiredConfs = getRequiredConfirmations(normNet);
       const prevConfs = deposit.confirmations || 0;
+
+      if (requiredConfs === null) {
+        result.failedCount++;
+        result.details.push({
+          depositId: deposit.id,
+          txHash: deposit.tx_hash,
+          network: deposit.network,
+          previousConfirmations: prevConfs,
+          newConfirmations: prevConfs,
+          requiredConfirmations: 0,
+          status: 'ERROR',
+          error: 'Unsupported deposit network; no default confirmation threshold is permitted.',
+        });
+        continue;
+      }
       const destinationAddress = deposit.to_address || deposit.address;
       const outputIndex = deposit.output_index ?? deposit.log_index ?? 0;
       const assetSymbol = (deposit.asset_symbol || 'USDT').toUpperCase().trim();
@@ -295,6 +329,18 @@ let workerIntervalHandle: NodeJS.Timeout | null = null;
 export function startConfirmationsWorker(intervalMs: number = 30000): void {
   if (workerIntervalHandle) {
     console.log('Confirmations worker already running.');
+    return;
+  }
+
+  if (!supabaseAdmin) {
+    console.error(
+      'Confirmations worker not started: SUPABASE_URL (or NEXT_PUBLIC_SUPABASE_URL) and SUPABASE_SERVICE_ROLE_KEY are required.'
+    );
+    return;
+  }
+
+  if (!Number.isFinite(intervalMs) || intervalMs < 1000) {
+    console.error('Confirmations worker not started: polling interval must be at least 1000ms.');
     return;
   }
 
