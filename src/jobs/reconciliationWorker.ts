@@ -243,14 +243,22 @@ export async function reconcileLedgerVsChain(assetSymbol = 'USDT'): Promise<Reco
   }
 
   // 6. Alert Logging
-  // 1. Log Under-Collateralization Alert if DB liabilities exceed on-chain assets
-  if (!isBalanced) {
+  // Do not label a partial chain snapshot as proven under-collateralization.
+  if (failedNetworks.length > 0) {
+    await createSystemAlert(
+      'WORKER_ERROR',
+      'CRITICAL',
+      'Reconciliation Incomplete',
+      `Unable to verify hot-wallet reserves on: ${failedNetworks.join(', ')}. Balance status is unknown; investigate RPC/provider availability before any launch decision.`,
+      { totalDbLiability, totalOnChainBalance, discrepancy, failedNetworks }
+    );
+  } else if (discrepancy < 0) {
     await createSystemAlert(
       'UNDER_COLLATERALIZED',
       'CRITICAL',
       'System Under-Collateralization Detected',
       `Database liabilities (${totalDbLiability.toFixed(2)} USDT) exceed on-chain hot wallet reserves (${totalOnChainBalance.toFixed(2)} USDT) by ${Math.abs(discrepancy).toFixed(2)} USDT.`,
-      { totalDbLiability, totalOnChainBalance, discrepancy, failedNetworks }
+      { totalDbLiability, totalOnChainBalance, discrepancy }
     );
   }
 
