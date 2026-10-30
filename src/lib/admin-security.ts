@@ -1,4 +1,4 @@
-import { createAdminClient } from '@/lib/supabase/server';
+import { createAdminClient } from '@/lib/supabase/admin';
 import speakeasy from 'speakeasy';
 import {
   encryptAdminTOTPSecret,
