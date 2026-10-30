@@ -336,8 +336,10 @@ export async function checkSubmittedWithdrawals(): Promise<{
                 const fraction = (feeSat % 100000000n).toString().padStart(8, '0');
                 actualFeeBtc = `${whole}.${fraction}`;
               } else if (Array.isArray(txData.vin) && Array.isArray(txData.vout)) {
-                const inputSumSat = txData.vin.reduce((acc: bigint, v: any) => acc + BigInt(v.prevout?.value || 0), 0n);
-                const outputSumSat = txData.vout.reduce((acc: bigint, v: any) => acc + BigInt(v.value || 0), 0n);
+                const btcInputs: any[] = txData.vin;
+                const btcOutputs: any[] = txData.vout;
+                const inputSumSat = btcInputs.reduce((acc: bigint, v: any): bigint => acc + BigInt(v.prevout?.value || 0), 0n);
+                const outputSumSat = btcOutputs.reduce((acc: bigint, v: any): bigint => acc + BigInt(v.value || 0), 0n);
                 if (inputSumSat >= outputSumSat) {
                   const feeSat = inputSumSat - outputSumSat;
                   const whole = feeSat / 100000000n;
@@ -372,8 +374,10 @@ export async function checkSubmittedWithdrawals(): Promise<{
                 const fraction = (feeLit % 100000000n).toString().padStart(8, '0');
                 actualFeeLtc = `${whole}.${fraction}`;
               } else if (Array.isArray(txData.vin) && Array.isArray(txData.vout)) {
-                const inputSumLit = txData.vin.reduce((acc: bigint, v: any) => acc + BigInt(v.prevout?.value || 0), 0n);
-                const outputSumLit = txData.vout.reduce((acc: bigint, v: any) => acc + BigInt(v.value || 0), 0n);
+                const ltcInputs: any[] = txData.vin;
+                const ltcOutputs: any[] = txData.vout;
+                const inputSumLit = ltcInputs.reduce((acc: bigint, v: any): bigint => acc + BigInt(v.prevout?.value || 0), 0n);
+                const outputSumLit = ltcOutputs.reduce((acc: bigint, v: any): bigint => acc + BigInt(v.value || 0), 0n);
                 if (inputSumLit >= outputSumLit) {
                   const feeLit = inputSumLit - outputSumLit;
                   const whole = feeLit / 100000000n;
