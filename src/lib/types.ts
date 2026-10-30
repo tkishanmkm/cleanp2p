@@ -27,6 +27,14 @@ export interface P2PAd {
   user?: {
     username: string;
     country?: string;
+    created_at?: string;
+    createdAt?: string;
+    photo_url?: string;
+    photoURL?: string;
+    is_online?: boolean;
+    last_seen?: string | null;
+    last_seen_at?: string | null;
+    seller_last_seen?: string | null;
     feedbackScore: number;
     positiveFeedback?: number;
     negativeFeedback?: number;
@@ -71,6 +79,7 @@ export interface InitiateTradePayload {
 
 export type SupportedCrypto = {
   name: CryptoCurrency;
+  symbol?: string;
   chains: string[];
 };
 
@@ -125,6 +134,7 @@ export type Withdrawal = {
 export type User = {
   id: string;
   userId: string;
+  username?: string;
   oldUserId?: string;
   fullName: string;
   dob: string;
@@ -164,6 +174,8 @@ export type TradeStatus = 'active' | 'paid' | 'released' | 'disputed' | 'cancell
 export type Trade = {
   id: string;
   tradeId: string;
+  trade_id?: string;
+  public_id?: string;
   adId: string;
   buyerId: string;
   sellerId: string;

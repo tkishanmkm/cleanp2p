@@ -1976,6 +1976,7 @@ export const OFF_PLATFORM_PATTERNS = [
 export function checkOffPlatformMessage(text: string): {
   isBlocked: boolean;
   matchedTerm?: string;
+  reason?: string;
 } {
   if (!text) return { isBlocked: false };
 
@@ -1983,14 +1984,14 @@ export function checkOffPlatformMessage(text: string): {
 
   for (const keyword of OFF_PLATFORM_KEYWORDS) {
     if (lower.includes(keyword)) {
-      return { isBlocked: true, matchedTerm: keyword };
+      return { isBlocked: true, matchedTerm: keyword, reason: 'Off-platform communication is not permitted in trade chat.' };
     }
   }
 
   for (const pattern of OFF_PLATFORM_PATTERNS) {
     pattern.lastIndex = 0;
     if (pattern.test(text)) {
-      return { isBlocked: true, matchedTerm: 'contact pattern' };
+      return { isBlocked: true, matchedTerm: 'contact pattern', reason: 'Off-platform communication is not permitted in trade chat.' };
     }
   }
 

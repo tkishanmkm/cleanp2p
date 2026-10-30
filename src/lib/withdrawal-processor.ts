@@ -450,7 +450,8 @@ export async function processEvmWithdrawalOnChain(
 
   // Settle via authoritative complete_onchain_withdrawal RPC
   try {
-    const gasAsset = (withdrawal.network_code || '').toUpperCase().includes('BEP') || (withdrawal.network_code || '').toUpperCase().includes('BSC') ? 'BNB' : 'ETH';
+    const networkCode = String(withdrawal.network || '').toUpperCase();
+    const gasAsset = networkCode.includes('BEP') || networkCode.includes('BSC') ? 'BNB' : 'ETH';
     await supabase.rpc('complete_onchain_withdrawal', {
       p_withdrawal_id: withdrawal.id,
       p_tx_hash: txResponse.hash,
@@ -504,135 +505,9 @@ export async function signAndBroadcast(withdrawal: WithdrawalRecord): Promise<st
 /**
  * Batch processor for pending approved withdrawals
  */
-export async function processPendingWithdrawals(limit: number = 20): Promise<ProcessWithdrawalsSummary> {
-  const supabaseAdmin = getSupabaseAdminClient();
-
-  const { data: withdrawals, error: fetchError } = await supabaseAdmin
-    .from('withdrawals')
-    .select('*')
-    .in('status', ['approved', 'processing', 'QUEUED'])
-    .order('created_at', { ascending: true })
-    .limit(limit);
-
-  if (fetchError) {
-    throw new Error(`Failed to query pending withdrawals: ${fetchError.message}`);
-  }
-
-  if (!withdrawals || withdrawals.length === 0) {
-    return {
-      processedCount: 0,
-      successful: 0,
-      failed: 0,
-      details: [],
-    };
-  }
-
-  const results: BroadcastResult[] = [];
-  let successful = 0;
-  let failed = 0;
-
-  for (const item of withdrawals) {
-    const attempts = (item.broadcast_attempts || 0) + 1;
-    const assetCode = item.asset_symbol || item.asset_code || 'USDT';
-    const networkCode = (item.network || item.network_code || 'TRC20').toUpperCase().trim();
-    const destAddr = item.destination_address;
-    const amountNum = Number(item.amount);
-
-    try {
-      await supabaseAdmin
-        .from('withdrawals')
-        .update({
-          status: 'processing',
-          broadcast_attempts: attempts,
-          updated_at: new Date().toISOString(),
-        })
-        .eq('id', item.id);
-
-      const task: WithdrawalTask = {
-        id: item.id,
-        user_id: item.user_id,
-        destination_address: destAddr,
-        amount: item.amount,
-        asset_symbol: assetCode,
-        network: networkCode,
-      };
-
-      let txid: string;
-
-      if (networkCode === 'TRC20' || networkCode === 'TRON') {
-        txid = await processTronWithdrawalOnChain(task);
-      } else if (networkCode === 'BTC' || assetCode === 'BTC') {
-        txid = await processBtcWithdrawalOnChain(task);
-      } else if (networkCode === 'LTC' || assetCode === 'LTC') {
-        txid = await processLtcWithdrawalOnChain(task);
-      } else {
-        const privateKey = process.env.HOT_WALLET_PRIVATE_KEY || process.env.EVM_HOT_WALLET_PRIVATE_KEY;
-        if (!privateKey) {
-          throw new Error('EVM_HOT_WALLET_PRIVATE_KEY is not configured');
-        }
-
-        const rpcUrl = getRpcUrlForNetwork(networkCode);
-        txid = await processEvmWithdrawalOnChain(task, privateKey, rpcUrl);
-      }
-
-      results.push({
-        id: item.id,
-        assetCode,
-        networkCode,
-        destinationAddress: destAddr,
-        amount: amountNum,
-        success: true,
-        txid,
-        attempts,
-      });
-
-      successful++;
-    } catch (broadcastErr: unknown) {
-      const errorMsg = broadcastErr instanceof Error ? broadcastErr.message : String(broadcastErr);
-      const isPermanentlyFailed = attempts >= 3;
-
-      if (isPermanentlyFailed) {
-        // Trigger automated refund via process_failed_withdrawal RPC
-        try {
-          await supabaseAdmin.rpc('process_failed_withdrawal', {
-            p_withdrawal_id: item.id,
-            p_error_reason: errorMsg,
-            p_is_verified_unbroadcast: true,
-          });
-        } catch (rpcErr) {
-          console.error('[processPendingWithdrawals] Refund RPC failed:', rpcErr);
-        }
-      } else {
-        await supabaseAdmin
-          .from('withdrawals')
-          .update({
-            status: 'processing',
-            broadcast_attempts: attempts,
-            broadcast_error: errorMsg,
-            updated_at: new Date().toISOString(),
-          })
-          .eq('id', item.id);
-      }
-
-      results.push({
-        id: item.id,
-        assetCode,
-        networkCode,
-        destinationAddress: destAddr,
-        amount: amountNum,
-        success: false,
-        error: errorMsg,
-        attempts,
-      });
-
-      failed++;
-    }
-  }
-
-  return {
-    processedCount: withdrawals.length,
-    successful,
-    failed,
-    details: results,
-  };
+export async function processPendingWithdrawals(_limit: number = 20): Promise<ProcessWithdrawalsSummary> {
+  // This legacy dispatcher re-queries already-processing rows and finalizes
+  // withdrawals immediately after broadcast. Disable it until it uses the same
+  // atomic claim + confirmation-aware state machine as src/jobs/withdrawalWorker.ts.
+  throw new Error('Legacy withdrawal processor is disabled. Use the confirmation-aware withdrawal worker.');
 }

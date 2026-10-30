@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useMemo, useEffect } from 'react';
+import { useState, useMemo, useEffect, useCallback } from 'react';
 import type { User } from '@/lib/types';
 import { useToast } from '@/hooks/use-toast';
 import { blockUser, unblockUser } from '@/lib/users';
@@ -30,6 +30,33 @@ import { ScrollArea } from '../ui/scroll-area';
 import { supabase } from '@/lib/supabase/client';
 import { useAuth } from '@/components/providers/auth-provider';
 
+function mapProfileToUser(row: any): User {
+  return {
+    id: String(row.id || ''),
+    userId: String(row.username || row.id || ''),
+    username: row.username || undefined,
+    fullName: String(row.full_name || row.display_name || row.username || ''),
+    dob: String(row.dob || ''),
+    country: row.country || undefined,
+    photoURL: row.photo_url || row.avatar_url || undefined,
+    preferredCurrency: row.preferred_currency || undefined,
+    isBanned: Boolean(row.is_banned),
+    isOnHold: Boolean(row.is_on_hold),
+    tradeVolume: Number(row.trade_volume || 0),
+    completedTrades: Number(row.completed_trades || row.total_completed_trades || 0),
+    feedbackScore: Number(row.feedback_score || 0),
+    positiveFeedback: Number(row.positive_feedback || 0),
+    negativeFeedback: Number(row.negative_feedback || 0),
+    avgPaymentTime: Number(row.avg_payment_time || 0),
+    avgReleaseTime: Number(row.avg_release_time || 0),
+    usernameChanged: Boolean(row.username_changed),
+    createdAt: String(row.created_at || new Date(0).toISOString()),
+    blockedUsers: Array.isArray(row.blocked_users) ? row.blocked_users : [],
+    badges: Array.isArray(row.badges) ? row.badges : [],
+    isAdminAccount: Boolean(row.is_admin_account || row.is_admin),
+  };
+}
+
 export function BlockedUsersManagement({ user: currentUserData }: { user: User }) {
   const { user: authUser } = useAuth();
   const { toast } = useToast();
@@ -41,6 +68,7 @@ export function BlockedUsersManagement({ user: currentUserData }: { user: User }
 
   const [blockedUsers, setBlockedUsers] = useState<User[]>([]);
   const [areBlockedUsersLoading, setAreBlockedUsersLoading] = useState(true);
+  const blockedUserIds = currentUserData?.blockedUsers || [];
 
   const blockedUserIdsKey = useMemo(() => {
     const list = currentUserData?.blockedUsers || [];
@@ -63,20 +91,7 @@ export function BlockedUsersManagement({ user: currentUserData }: { user: User }
 
       if (error) throw error;
 
-      const mapped: User[] = (data || []).map((u: any) => ({
-        id: u.id,
-        userId: u.username || u.id,
-        username: u.username,
-        email: u.email,
-        photoURL: u.photo_url,
-        country: u.country,
-        preferredCurrency: u.preferred_currency,
-        isAdminAccount: u.is_admin_account,
-        isSuspended: u.is_suspended,
-        createdAt: u.created_at,
-        feedbackScore: u.feedback_score,
-        completedTrades: u.completed_trades,
-      }));
+      const mapped: User[] = (data || []).map(mapProfileToUser);
 
       setBlockedUsers(mapped);
     } catch (err) {
@@ -114,11 +129,7 @@ export function BlockedUsersManagement({ user: currentUserData }: { user: User }
             .map(
               (u: any) =>
                 ({
-                  id: u.id,
-                  userId: u.username || u.id,
-                  username: u.username,
-                  photoURL: u.photo_url,
-                  isAdminAccount: u.is_admin_account,
+                  ...mapProfileToUser(u),
                 } as User)
             )
             .filter((u) => u.id !== authUserId && !u.isAdminAccount && !blockedIds.includes(u.id));

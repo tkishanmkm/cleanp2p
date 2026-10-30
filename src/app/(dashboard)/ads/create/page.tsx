@@ -626,18 +626,8 @@ export default function CreateP2PAdPage() {
       : Number(fixedPrice || 1);
 
     if (adType === 'sell') {
-      const isTier2 = Boolean(
-        profile?.is_verified === true ||
-        profile?.id_verified === true ||
-        ['approved', 'verified'].includes(String(profile?.kyc_status || '').toLowerCase().trim()) ||
-        ['2', 'tier_2', 'tier2'].includes(String(profile?.verification_tier || '').toLowerCase().trim())
-      );
-
-      if (!isTier2) {
-        toast.error('KYC verification is required to sell.');
-        return;
-      }
-
+      // The API performs the authoritative Tier 2 KYC check. Do not rely on
+      // client-side profile fields for this security decision.
       let availableBalance = balances[crypto as CryptoCurrency]?.available || 0;
       const minCoinRequired = (parseFloat(minAmount || '0') || 0) / (effectiveAdPrice || 1);
 

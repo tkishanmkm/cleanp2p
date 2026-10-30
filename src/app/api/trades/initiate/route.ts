@@ -19,9 +19,14 @@ export async function POST(req: Request) {
     const authHeader = req.headers.get('Authorization');
     if (authHeader && authHeader.startsWith('Bearer ')) {
       const token = authHeader.substring(7);
+      const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL?.trim() || process.env.SUPABASE_URL?.trim();
+      const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY?.trim();
+      if (!supabaseUrl || supabaseUrl.includes('placeholder') || !supabaseAnonKey || supabaseAnonKey.includes('placeholder')) {
+        return NextResponse.json({ error: 'Authentication service is not configured.' }, { status: 503 });
+      }
       supabase = createSupabaseClient(
-        process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://placeholder.supabase.co',
-        process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'placeholder-key',
+        supabaseUrl,
+        supabaseAnonKey,
         { global: { headers: { Authorization: `Bearer ${token}` } } }
       );
     }
@@ -29,12 +34,9 @@ export async function POST(req: Request) {
       data: { user },
       error: authError,
     } = await supabase.auth.getUser();
-    console.log('[DEBUG] Auth getUser result:', { user: user?.id, error: authError });
-
     if (authError || !user) {
       return NextResponse.json({ 
-        error: 'Unauthorized. Please sign in.',
-        debug: { authError, userId: user?.id }
+        error: 'Unauthorized. Please sign in.'
       }, { status: 401 });
     }
 
@@ -62,7 +64,7 @@ export async function POST(req: Request) {
     const rawFiat = body.fiatAmount ?? body.fiat_amount;
     const rawCrypto = body.cryptoAmount ?? body.crypto_amount;
     const customPaymentMethod = body.paymentMethod || body.payment_method;
-    const customPrice = body.price || body.rate;
+    // Price is taken only from the stored advertisement; clients cannot set it.
     const customFiatCurrency = body.fiatCurrency || body.fiat_currency;
     const tradeRef = body.tradeRef || body.trade_ref || generateTradeId();
     const idempotencyKey =
@@ -87,8 +89,6 @@ export async function POST(req: Request) {
 
     // 1. Fetch Ad safely to read metadata
     let ad: any = null;
-    console.log('[DEBUG] Auth User ID:', user?.id);
-    
     let p2pQuery = supabase.from('p2p_ads').select('*');
     if (isIdUUID) {
       p2pQuery = p2pQuery.or(`id.eq.${adId},public_ad_id.eq.${adId}`);
@@ -122,7 +122,7 @@ export async function POST(req: Request) {
     }
 
     // 3. Resolve numerical amounts with exact precision
-    const rawPrice = customPrice ?? ad.fixed_rate ?? ad.price;
+    const rawPrice = ad.fixed_rate ?? ad.price ?? ad.unit_price;
     const unitPrice = Number(rawPrice);
     if (!rawPrice || isNaN(unitPrice) || unitPrice <= 0) {
       return NextResponse.json(
@@ -191,11 +191,10 @@ export async function POST(req: Request) {
       resolvedPaymentMethod = trimmedCustom || 'Bank Transfer';
     }
 
-    const resolvedFiatCurrency = customFiatCurrency || ad.fiat_currency || ad.fiat || 'USD';
+    const resolvedFiatCurrency = String(ad.fiat_currency || ad.fiat || ad.fiat_symbol || 'USD').toUpperCase();
     const adIdentifier = String(ad.id || ad.public_ad_id || adId);
 
     // 5. Call Canonical Atomic Database RPC
-    console.log('[DEBUG] Calling initiate_trade_with_escrow RPC with user ID:', user?.id);
     const { data: rpcResult, error: rpcError } = await supabase.rpc('initiate_trade_with_escrow', {
       p_ad_id: adIdentifier,
       p_crypto_amount: calculatedCrypto,

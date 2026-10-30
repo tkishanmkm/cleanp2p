@@ -97,7 +97,7 @@ function getTronAddressFromPrivateKey(privKey: string): string {
     return encoded;
   } catch (err) {
     console.error("Provision address: failed to derive Tron address from private key:", err);
-    return process.env.TRON_HOT_WALLET_ADDRESS || '';
+    throw new Error('Refusing to substitute the shared TRON hot-wallet address for a user deposit address.');
   }
 }
 
@@ -131,7 +131,7 @@ function getBtcSegwitAddressFromPrivateKey(privKey: string): string {
     return encodeBech32('bc1', ripemd160Hash);
   } catch (err) {
     console.error("Provision address: failed to derive BTC address from private key:", err);
-    return process.env.BTC_HOT_WALLET_ADDRESS || '';
+    throw new Error('Refusing to substitute the shared BTC hot-wallet address for a user deposit address.');
   }
 }
 
@@ -156,7 +156,7 @@ function getLtcSegwitAddressFromPrivateKey(privKey: string): string {
     return encodeBech32('ltc1', ripemd160Hash);
   } catch (err) {
     console.error("Provision address: failed to derive LTC address from private key:", err);
-    return process.env.LTC_HOT_WALLET_ADDRESS || '';
+    throw new Error('Refusing to substitute the shared LTC hot-wallet address for a user deposit address.');
   }
 }
 

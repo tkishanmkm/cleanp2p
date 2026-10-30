@@ -65,15 +65,19 @@ export async function resolveTradeAction(tradeId: string, decision: "release" | 
   if (error) return { success: false, error: error.message };
 
   // Update associated dispute if any
-  await adminSupabase
+  const { error: disputeUpdateError } = await adminSupabase
     .from("disputes")
     .update({
       status: "resolved",
       resolved_by: adminId,
       resolved_at: new Date().toISOString(),
     })
-    .eq("trade_id", tradeId)
-    .catch(() => null);
+    .eq("trade_id", tradeId);
+
+  if (disputeUpdateError) {
+    console.error('[Admin Trade Resolution] Trade state changed but dispute record update failed:', disputeUpdateError);
+    return { success: false, error: 'Trade state changed, but dispute status could not be updated. Manual reconciliation is required.' };
+  }
 
   // 3. Record Audit Event with verified admin identity
   await logAdminAction({

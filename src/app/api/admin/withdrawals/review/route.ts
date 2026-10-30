@@ -48,7 +48,7 @@ export async function POST(req: NextRequest) {
       }
 
       // Record Admin Rejection in Audit Log
-      await supabaseAdmin.from('admin_audit_logs').insert({
+      const { error: auditError } = await supabaseAdmin.from('admin_audit_logs').insert({
         admin_id: adminId,
         admin_email: auth.adminEmail || 'admin@paxones.com',
         action: 'ADMIN_REJECTED_WITHDRAWAL',
@@ -57,7 +57,16 @@ export async function POST(req: NextRequest) {
           rejection_reason: rejectionReason || 'Rejected by administrator during security review.',
         },
         created_at: new Date().toISOString(),
-      }).catch(() => null);
+      });
+
+      if (auditError) {
+        console.error('[Withdrawal Review] Refund completed but audit log insert failed:', auditError);
+        return NextResponse.json({
+          success: false,
+          settlementCompleted: true,
+          error: 'Withdrawal refund completed, but audit logging failed. Manual review is required.',
+        }, { status: 500 });
+      }
 
       return NextResponse.json({
         success: true,

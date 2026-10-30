@@ -433,6 +433,7 @@ export async function getAdDetails(adId: string): Promise<ActionResponse<any>> {
 export async function createAd(formData: any): Promise<ActionResponse<any>> {
   try {
     const supabase = await createClient();
+    const adminClient = getSupabaseAdminClient();
 
     const { data: { user }, error: authError } = await supabase.auth.getUser();
 
@@ -574,40 +575,20 @@ export async function createTradeOrderWithEscrow(input: {
       }
     }
 
-    // C. If still not found, construct fallback active advertisement object so trade creation can succeed seamlessly
-    if (!ad) {
-      ad = {
-        id: cleanAdId,
-        public_id: cleanAdId,
-        public_ad_id: cleanAdId,
-        user_id: 'trader_verified_1',
-        type: 'SELL',
-        ad_type: 'SELL',
-        crypto: 'BTC',
-        asset_symbol: 'BTC',
-        fiat: 'USD',
-        fiat_currency: 'USD',
-        fiat_symbol: 'USD',
-        price: 64250,
-        unit_price: 64250,
-        fixed_rate: 64250,
-        pricing_type: 'FLOAT',
-        margin_percent: 1.5,
-        status: 'ACTIVE',
-        active: true,
-        is_active: true,
-        min_limit: 10,
-        max_limit: 10000,
-        min_amount: 10,
-        max_amount: 10000,
-        total_amount: 1.0,
-        available_amount: 1.0,
-        payment_methods: ['Bank Transfer', 'Revolut', 'Wise'],
+    // Never fabricate an active advertisement. Trades must reference a real,
+    // verified ad so escrow, pricing, seller identity, and limits are authoritative.
+    if (!ad || !validAdUuid) {
+      return {
+        data: null,
+        error: {
+          message: 'This advertisement could not be found or is not a valid active listing.',
+          code: 'AD_NOT_FOUND',
+        },
       };
     }
 
     // Rule: Users cannot open trades on their own ads (unless it is a system/demo ad)
-    if (ad.user_id === user.id && ad.user_id !== 'trader_verified_1') {
+    if (ad.user_id === user.id) {
       return {
         data: null,
         error: {
@@ -644,10 +625,23 @@ export async function createTradeOrderWithEscrow(input: {
     }
 
     // 4. Calculate Base Amounts & Limits
-    const price = Number(ad.price || ad.fixed_rate || ad.fixedRate || ad.unit_price) || 80116.02;
+    const price = Number(ad.price ?? ad.fixed_rate ?? ad.fixedRate ?? ad.unit_price);
     const fiatAmount = Number(input.fiatAmount);
-    const minLimit = Number(ad.min_limit ?? ad.min_amount ?? 100) || 100;
-    const maxLimit = Number(ad.max_limit ?? ad.max_amount ?? 5000) || 5000;
+    const minLimit = Number(ad.min_limit ?? ad.min_amount);
+    const maxLimit = Number(ad.max_limit ?? ad.max_amount);
+
+    if (!Number.isFinite(price) || price <= 0 ||
+        !Number.isFinite(fiatAmount) || fiatAmount <= 0 ||
+        !Number.isFinite(minLimit) || minLimit <= 0 ||
+        !Number.isFinite(maxLimit) || maxLimit < minLimit) {
+      return {
+        data: null,
+        error: {
+          message: 'The advertisement price or trade limits are invalid. No trade was created.',
+          code: 'INVALID_AD_TERMS',
+        },
+      };
+    }
     const assetSymbol = (ad.asset_symbol || ad.crypto || ad.asset_code || 'BTC').toUpperCase();
     const fiatSymbol = (ad.fiat_symbol || ad.fiat || ad.fiat_currency || 'USD').toUpperCase();
 
@@ -664,9 +658,21 @@ export async function createTradeOrderWithEscrow(input: {
     const isInitiatorSelling = isBuyAd;
     const isAdSell = !isBuyAd;
 
-    const adOwnerId = ad.user_id || ad.seller_id || ad.advertiser_id || (ad.profiles && ad.profiles.id) || 'trader_verified_1';
-    const sellerId = isInitiatorSelling ? user.id : adOwnerId;
+    const adOwnerId = ad.user_id || ad.seller_id || ad.advertiser_id || (ad.profiles && ad.profiles.id);
+    if (!adOwnerId || !isValidUUID(String(adOwnerId))) {
+      return {
+        data: null,
+        error: {
+          message: 'The advertisement does not have a valid seller account.',
+          code: 'INVALID_AD_OWNER',
+        },
+      };
+    }
+    const sellerId = isInitiatorSelling ? user.id : String(adOwnerId);
     const buyerId = isInitiatorSelling ? adOwnerId : user.id;
+    const resolvedPublicId = String(ad.public_id || ad.public_ad_id || ad.publicAdId || ad.id);
+    const resolvedSellerId = String(sellerId);
+    const resolvedBuyerId = String(buyerId);
 
     // 5.1 Enforce KYC Tier 1 / Tier 2 Business Rules
     // Seller MUST be Tier 2
@@ -725,10 +731,6 @@ export async function createTradeOrderWithEscrow(input: {
     // Check Seller available balance comprehensively
     const sellerBalanceInfo = await fetchUserCryptoBalance(sellerId, assetSymbol);
     let currentSellerAvail = sellerBalanceInfo.available;
-
-    if (isAdSell && Number(ad.total_amount || 0) > currentSellerAvail) {
-      currentSellerAvail = Number(ad.total_amount);
-    }
 
     // Effective max limit check
     let effectiveMaxLimit = maxLimit;

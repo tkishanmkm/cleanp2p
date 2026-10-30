@@ -6,6 +6,7 @@ import { generateAdId } from '@/lib/id-generator';
 import { calculateMinimumFiatAmount } from '@/lib/currency';
 import { resolveTradeType } from '@/utils/p2p-helpers';
 import { assertPlatformControlAllowed } from '@/lib/platform-guard';
+import { isTier2User } from '@/lib/kyc';
 
 export const dynamic = 'force-dynamic';
 
@@ -14,8 +15,12 @@ export async function POST(request: NextRequest) {
     const cookieHeader = cookies();
     const cookieStore = typeof (cookieHeader as any)?.then === 'function' ? await cookieHeader : cookieHeader;
 
-    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL || 'https://placeholder.supabase.co';
-    const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'placeholder-anon-key';
+    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL?.trim() || process.env.SUPABASE_URL?.trim();
+    const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY?.trim();
+
+    if (!supabaseUrl || supabaseUrl.includes('placeholder') || !supabaseAnonKey || supabaseAnonKey.includes('placeholder')) {
+      return NextResponse.json({ error: 'Authentication service is not configured.' }, { status: 503 });
+    }
 
     const supabase = createServerClient(
       supabaseUrl,
@@ -25,7 +30,7 @@ export async function POST(request: NextRequest) {
           getAll() {
             return cookieStore.getAll();
           },
-          setAll(cookiesToSet) {
+          setAll(cookiesToSet: Array<{ name: string; value: string; options?: any }>) {
             try {
               cookiesToSet.forEach(({ name, value, options }) =>
                 cookieStore.set(name, value, options)
@@ -109,6 +114,23 @@ export async function POST(request: NextRequest) {
         { error: 'Invalid or missing ad trade direction (BUY/SELL).' },
         { status: 400 }
       );
+    }
+
+    if (String(adSide).toUpperCase() === 'SELL') {
+      const adminClient = getSupabaseAdminClient();
+      const { data: sellerProfile, error: sellerProfileError } = await adminClient
+        .from('profiles')
+        .select('is_verified, id_verified, is_id_verified, kyc_status, verification_tier')
+        .eq('id', user.id)
+        .maybeSingle();
+
+      if (sellerProfileError || !sellerProfile || !isTier2User(sellerProfile)) {
+        console.warn('[P2P Ads] SELL listing rejected because Tier 2 KYC could not be verified.', sellerProfileError);
+        return NextResponse.json({
+          error: sellerProfileError ? 'Unable to verify seller KYC. Please try again later.' : 'Tier 2 KYC verification is required to publish a SELL advertisement.',
+          code: sellerProfileError ? 'KYC_CHECK_UNAVAILABLE' : 'KYC_REQUIRED',
+        }, { status: sellerProfileError ? 503 : 403 });
+      }
     }
 
     const requestedMax = Number(body.max_amount ?? body.max_limit ?? body.maxAmount ?? 5000);

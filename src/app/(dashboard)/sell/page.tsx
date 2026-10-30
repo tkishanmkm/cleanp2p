@@ -53,6 +53,8 @@ const COIN_CONFIG: Record<ExtendedCoinOption, { label: string; fullName: string;
   USDT: { label: 'TETHER (USDT)', fullName: 'Tether', badgeClass: 'bg-emerald-500/20 text-emerald-300 border-emerald-400/30', textClass: 'text-emerald-300' },
   ETH: { label: 'Ethereum (ETH)', fullName: 'Ethereum', badgeClass: 'bg-purple-300/20 text-purple-200 border-purple-300/30', textClass: 'text-purple-200' },
   LTC: { label: 'Litecoin (LTC)', fullName: 'Litecoin', badgeClass: 'bg-sky-400/20 text-sky-200 border-sky-300/30', textClass: 'text-sky-200' },
+  BNB: { label: 'BNB', fullName: 'BNB', badgeClass: 'bg-yellow-400/20 text-yellow-200 border-yellow-300/30', textClass: 'text-yellow-200' },
+  TRX: { label: 'TRON (TRX)', fullName: 'TRON', badgeClass: 'bg-red-400/20 text-red-200 border-red-300/30', textClass: 'text-red-200' },
 };
 
 const getCountryCodeForCurrency = (currencyCode: string): string => {

@@ -1,5 +1,5 @@
 import { createServerClient } from '@supabase/ssr';
-import { createClient } from '@supabase/supabase-js';
+import { getSupabaseAdminClient } from '@/lib/supabase/server';
 import { cookies } from 'next/headers';
 import { NextResponse, type NextRequest } from 'next/server';
 import { findAdById, resolveBothTargetRows } from '@/lib/ad-lookup';
@@ -15,10 +15,7 @@ export async function GET(
     const resolvedParams = await Promise.resolve(params);
     const id = (resolvedParams.id || '').trim();
 
-    const supabaseAdmin = createClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL || 'https://placeholder.supabase.co',
-      process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'placeholder-anon-key'
-    );
+    const supabaseAdmin = getSupabaseAdminClient();
 
     // 1. Fetch ad by id, public_ad_id, public_id, or ad_id using universal resolver
     const resolved = await findAdById(id);
@@ -54,33 +51,6 @@ export async function GET(
       }
     }
 
-    // Fetch creator's wallet balance for the ad coin
-    let creatorBalance: number | null = null;
-    const coin = (ad.crypto || ad.coin || ad.asset || 'USDT').toUpperCase();
-
-    if (creatorId) {
-      try {
-        const { data: wallet } = await supabaseAdmin
-          .from('user_wallets')
-          .select('available_balance, balance, locked_balance')
-          .eq('user_id', creatorId)
-          .ilike('asset_symbol', coin)
-          .maybeSingle();
-
-        if (wallet) {
-          const avail = Number(wallet.available_balance ?? (Number(wallet.balance || 0) - Number(wallet.locked_balance || 0)));
-          creatorBalance = Math.max(0, avail);
-        } else if (creatorProfile) {
-          const colKey = `${coin.toLowerCase()}_balance`;
-          if (creatorProfile[colKey] !== undefined) {
-            creatorBalance = Number(creatorProfile[colKey] || 0);
-          }
-        }
-      } catch (wErr) {
-        console.warn('Wallet balance fetch error in /api/p2p/ads/[id]:', wErr);
-      }
-    }
-
     // STRICT USERNAME ENFORCEMENT: lowercase letters, numbers, dot, underscore only
     const username = creatorProfile?.username || ad.user_display_name || 'trader';
     const lastActive = creatorProfile?.last_seen || creatorProfile?.last_seen_at || creatorProfile?.last_active || creatorProfile?.updated_at || null;
@@ -104,7 +74,6 @@ export async function GET(
           avg_pay_time: creatorProfile?.avg_pay_time || null,
           avg_payment_minutes: creatorProfile?.avg_payment_minutes || null,
         },
-        creatorCryptoBalance: creatorBalance,
       },
     });
   } catch (err: any) {
@@ -125,8 +94,12 @@ export async function PATCH(
     const cookieHeader = cookies();
     const cookieStore = typeof (cookieHeader as any)?.then === 'function' ? await cookieHeader : cookieHeader;
 
-    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL || 'https://placeholder.supabase.co';
-    const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'placeholder-anon-key';
+    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL?.trim() || process.env.SUPABASE_URL?.trim();
+    const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY?.trim();
+
+    if (!supabaseUrl || supabaseUrl.includes('placeholder') || !supabaseAnonKey || supabaseAnonKey.includes('placeholder')) {
+      return NextResponse.json({ error: 'Authentication service is not configured.' }, { status: 503 });
+    }
 
     const supabase = createServerClient(
       supabaseUrl,
@@ -136,7 +109,7 @@ export async function PATCH(
           getAll() {
             return cookieStore.getAll();
           },
-          setAll(cookiesToSet) {
+          setAll(cookiesToSet: Array<{ name: string; value: string; options?: any }>) {
             try {
               cookiesToSet.forEach(({ name, value, options }) =>
                 cookieStore.set(name, value, options)
