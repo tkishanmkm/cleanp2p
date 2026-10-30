@@ -5,10 +5,20 @@ import { createClient } from '@supabase/supabase-js';
 export const dynamic = 'force-dynamic';
 
 function getSupabaseClient() {
-  return createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://placeholder.supabase.co',
-    process.env.SUPABASE_SERVICE_ROLE_KEY || 'placeholder-key'
-  );
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL;
+  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!url || !serviceRoleKey) {
+    throw new Error('Didit webhook storage is unavailable: Supabase URL and service-role key are required');
+  }
+  return createClient(url, serviceRoleKey, {
+    auth: { persistSession: false, autoRefreshToken: false },
+  });
+}
+
+type DbWriteResult = { error: { message: string } | null };
+async function requireWrite(operation: PromiseLike<DbWriteResult>, context: string): Promise<void> {
+  const { error } = await operation;
+  if (error) throw new Error(`Didit webhook ${context} failed: ${error.message}`);
 }
 
 function shortenFloats(v: unknown): unknown {
@@ -189,10 +199,10 @@ export async function POST(req: NextRequest) {
 
         if (!idPassed || !livenessPassed || !faceMatchPassed) {
           console.warn(`[DIDIT WEBHOOK] Verification incomplete for user ${userId}: ID=${idPassed}, Liveness=${livenessPassed}, Face=${faceMatchPassed}`);
-          await supabase.from('profiles').update({
+          await requireWrite(supabase.from('profiles').update({
             kyc_status: 'declined',
             updated_at: new Date().toISOString(),
-          }).eq('id', userId);
+          }).eq('id', userId), 'profile update');
 
           return new NextResponse(JSON.stringify({ message: 'Modules incomplete or unapproved', idPassed, livenessPassed, faceMatchPassed }), {
             status: 200,
@@ -237,14 +247,14 @@ export async function POST(req: NextRequest) {
           if (age < 18) {
             console.error(`[DIDIT WEBHOOK] Under 18 minor detected in KYC for user ${userId}. Age: ${age}, DOB: ${extractedDob}`);
 
-            await supabase.from('profiles').update({
+            await requireWrite(supabase.from('profiles').update({
               is_banned: true,
               status: 'banned',
               is_suspended: true,
               kyc_status: 'banned',
               suspension_reason: 'No minor allowed for minor safety',
               updated_at: new Date().toISOString(),
-            }).eq('id', userId);
+            }).eq('id', userId), 'profile update');
 
             return new NextResponse(JSON.stringify({
               status: 'banned',
@@ -273,19 +283,24 @@ export async function POST(req: NextRequest) {
         }
 
         if (orConditions.length > 0) {
-          const { data: existingMatches } = await duplicateQuery.or(orConditions.join(','));
+          const { data: existingMatches, error: duplicateLookupError } = await duplicateQuery.or(orConditions.join(','));
+
+          if (duplicateLookupError) {
+            console.error('[DIDIT WEBHOOK] Duplicate identity lookup failed; refusing approval', duplicateLookupError);
+            return new NextResponse('Identity uniqueness check unavailable', { status: 503 });
+          }
 
           if (existingMatches && existingMatches.length > 0) {
             console.error(`[DIDIT WEBHOOK] Duplicate identity detected for user ${userId}. Matching existing user(s):`, existingMatches);
 
-            await supabase.from('profiles').update({
+            await requireWrite(supabase.from('profiles').update({
               is_banned: true,
               status: 'banned',
               is_suspended: true,
               kyc_status: 'banned',
               suspension_reason: 'Multi-account violation: Attempting KYC with an identity already associated with another account.',
               updated_at: new Date().toISOString(),
-            }).eq('id', userId);
+            }).eq('id', userId), 'profile update');
 
             return new NextResponse(JSON.stringify({
               status: 'banned',
@@ -329,10 +344,10 @@ export async function POST(req: NextRequest) {
         updatePayload.is_address_locked = true;
       }
 
-      const { error: updateErr } = await supabase
+      const { error: updateErr } = await requireWrite(supabase
         .from('profiles')
         .update(updatePayload)
-        .eq('id', userId);
+        .eq('id', userId), 'profile update');
 
       if (updateErr) {
         console.error('[DIDIT WEBHOOK] Profile update error:', updateErr);
@@ -341,14 +356,14 @@ export async function POST(req: NextRequest) {
 
       // Update kyc_verifications table
       if (sessionId) {
-        await supabase
+        await requireWrite(supabase
           .from('kyc_verifications')
           .update({
             status: 'APPROVED',
             decision: parsed,
             updated_at: new Date().toISOString(),
           })
-          .eq('session_id', sessionId);
+          .eq('session_id', sessionId), 'verification update');
       }
 
       // Notify User
@@ -374,22 +389,22 @@ export async function POST(req: NextRequest) {
       overallStatus === 'pending_review'
     ) {
       // User is under review
-      await supabase.from('profiles').update({
+      await requireWrite(supabase.from('profiles').update({
         kyc_status: 'in_review',
         is_verified: false,
         id_verified: false,
         updated_at: new Date().toISOString(),
-      }).eq('id', userId);
+      }).eq('id', userId), 'profile update');
 
       if (sessionId) {
-        await supabase
+        await requireWrite(supabase
           .from('kyc_verifications')
           .update({
             status: 'PENDING_REVIEW',
             decision: parsed,
             updated_at: new Date().toISOString(),
           })
-          .eq('session_id', sessionId);
+          .eq('session_id', sessionId), 'verification update');
       }
 
       console.log(`[DIDIT WEBHOOK] User ${userId} KYC marked as in_review.`);
@@ -414,7 +429,7 @@ export async function POST(req: NextRequest) {
       const newRetries = currentRetries + 1;
 
       if (newRetries >= 3) {
-        await supabase.from('profiles').update({
+        await requireWrite(supabase.from('profiles').update({
           kyc_status: 'permanently_rejected',
           is_verified: false,
           id_verified: false,
@@ -424,17 +439,17 @@ export async function POST(req: NextRequest) {
           is_kyc_locked: true,
           suspension_reason: 'KYC failed 3 consecutive times in 24 hours. Contact support for manual verification.',
           updated_at: new Date().toISOString(),
-        }).eq('id', userId);
+        }).eq('id', userId), 'profile update');
 
         if (sessionId) {
-          await supabase
+          await requireWrite(supabase
             .from('kyc_verifications')
             .update({
               status: 'SUPPORT_REQUIRED',
               decision: parsed,
               updated_at: new Date().toISOString(),
             })
-            .eq('session_id', sessionId);
+            .eq('session_id', sessionId), 'verification update');
         }
 
         try {
@@ -453,7 +468,7 @@ export async function POST(req: NextRequest) {
 
         console.warn(`[DIDIT WEBHOOK] User ${userId} reached 3 KYC attempts in 24 hours.`);
       } else {
-        await supabase.from('profiles').update({
+        await requireWrite(supabase.from('profiles').update({
           kyc_status: 'declined',
           is_verified: false,
           id_verified: false,
@@ -461,17 +476,17 @@ export async function POST(req: NextRequest) {
           kyc_attempts: newRetries,
           kyc_last_attempt_at: new Date().toISOString(),
           updated_at: new Date().toISOString(),
-        }).eq('id', userId);
+        }).eq('id', userId), 'profile update');
 
         if (sessionId) {
-          await supabase
+          await requireWrite(supabase
             .from('kyc_verifications')
             .update({
               status: 'DECLINED',
               decision: parsed,
               updated_at: new Date().toISOString(),
             })
-            .eq('session_id', sessionId);
+            .eq('session_id', sessionId), 'verification update');
         }
 
         try {
@@ -491,15 +506,15 @@ export async function POST(req: NextRequest) {
         console.log(`[DIDIT WEBHOOK] User ${userId} KYC declined. Attempt ${newRetries}/3 recorded.`);
       }
     } else if (overallStatus === 'resubmitted') {
-      await supabase.from('profiles').update({
+      await requireWrite(supabase.from('profiles').update({
         kyc_status: 'resubmit_required',
         is_verified: false,
         id_verified: false,
         updated_at: new Date().toISOString(),
-      }).eq('id', userId);
+      }).eq('id', userId), 'profile update');
 
       if (sessionId) {
-        await supabase
+        await requireWrite(supabase
           .from('kyc_verifications')
           .update({
             status: 'RESUBMIT_REQUIRED',
@@ -507,7 +522,7 @@ export async function POST(req: NextRequest) {
             vendor_data: { ...(parsed.vendor_data || {}), resubmit_info: parsed.resubmit_info, last_event_id: eventId },
             updated_at: new Date().toISOString(),
           })
-          .eq('session_id', sessionId);
+          .eq('session_id', sessionId), 'verification update');
       }
 
       try {
@@ -524,23 +539,23 @@ export async function POST(req: NextRequest) {
         console.warn('Non-fatal: notification failed:', notifErr);
       }
     } else if (overallStatus === 'kyc_expired') {
-      await supabase.from('profiles').update({
+      await requireWrite(supabase.from('profiles').update({
         kyc_status: 'expired',
         is_verified: false,
         id_verified: false,
         is_kyc_locked: false,
         updated_at: new Date().toISOString(),
-      }).eq('id', userId);
+      }).eq('id', userId), 'profile update');
 
       if (sessionId) {
-        await supabase
+        await requireWrite(supabase
           .from('kyc_verifications')
           .update({
             status: 'EXPIRED',
             decision: parsed,
             updated_at: new Date().toISOString(),
           })
-          .eq('session_id', sessionId);
+          .eq('session_id', sessionId), 'verification update');
       }
 
       try {
@@ -557,22 +572,22 @@ export async function POST(req: NextRequest) {
         console.warn('Non-fatal: notification failed:', notifErr);
       }
     } else if (overallStatus === 'abandoned' || overallStatus === 'expired') {
-      await supabase.from('profiles').update({
+      await requireWrite(supabase.from('profiles').update({
         kyc_status: overallStatus,
         is_verified: false,
         id_verified: false,
         updated_at: new Date().toISOString(),
-      }).eq('id', userId);
+      }).eq('id', userId), 'profile update');
 
       if (sessionId) {
-        await supabase
+        await requireWrite(supabase
           .from('kyc_verifications')
           .update({
             status: overallStatus.toUpperCase(),
             decision: parsed,
             updated_at: new Date().toISOString(),
           })
-          .eq('session_id', sessionId);
+          .eq('session_id', sessionId), 'verification update');
       }
     }
 
