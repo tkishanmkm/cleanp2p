@@ -62,48 +62,12 @@ export default async function UserProfilePage({ params }: PageProps) {
     console.warn('Error querying user ads:', err);
   }
 
-  // Fetch user's crypto balances for precise limit clamping
-  let userCryptoBalances: Record<string, number> = {
-    BTC: Number(profile.btc_balance || 0),
-    ETH: Number(profile.eth_balance || 0),
-    LTC: Number(profile.ltc_balance || 0),
-    USDT: Number(profile.usdt_balance || 0),
-    SOL: Number(profile.sol_balance || 0),
+  // Only expose the amount explicitly advertised on the listing. Never query or
+  // publish a user's private wallet balances from a public profile page.
+  const getAdvertisedAvailable = (ad: any): number => {
+    const amount = Number(ad.available_amount ?? ad.total_amount ?? ad.surplus_amount ?? 0);
+    return Number.isFinite(amount) && amount > 0 ? amount : 0;
   };
-
-  try {
-    const { data: userWallets } = await supabase
-      .from('user_wallets')
-      .select('*')
-      .eq('user_id', profile.id);
-
-    if (userWallets && userWallets.length > 0) {
-      userWallets.forEach((w: any) => {
-        const sym = (w.asset_symbol || w.symbol || w.crypto || '').toUpperCase();
-        const bal = Number(w.available_balance ?? w.available ?? w.balance ?? 0);
-        if (sym && bal > 0) {
-          userCryptoBalances[sym] = Math.max(userCryptoBalances[sym] || 0, bal);
-        }
-      });
-    }
-
-    const { data: walletAssets } = await supabase
-      .from('wallet_assets')
-      .select('*')
-      .eq('user_id', profile.id);
-
-    if (walletAssets && walletAssets.length > 0) {
-      walletAssets.forEach((a: any) => {
-        const sym = (a.asset_symbol || a.asset_code || a.symbol || a.crypto || '').toUpperCase();
-        const bal = Number(a.available ?? a.balance ?? a.amount ?? 0);
-        if (sym && bal > 0) {
-          userCryptoBalances[sym] = Math.max(userCryptoBalances[sym] || 0, bal);
-        }
-      });
-    }
-  } catch (err) {
-    console.warn('Error querying wallet balances:', err);
-  }
 
   // Filter ads from visitor perspective and attach available crypto:
   // 1. If advertiser created a 'SELL' ad, the visitor BUYs crypto from advertiser -> "Buy Ads" tab
@@ -117,7 +81,7 @@ export default async function UserProfilePage({ params }: PageProps) {
       const sym = (ad.asset_symbol || ad.crypto || ad.asset || 'USDT').toUpperCase();
       return {
         ...ad,
-        available_crypto: userCryptoBalances[sym] ?? -1,
+        available_crypto: getAdvertisedAvailable(ad),
       };
     });
 
