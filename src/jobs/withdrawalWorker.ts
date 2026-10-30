@@ -42,7 +42,8 @@ export async function checkCircuitBreakers(): Promise<{ allowed: boolean; reason
       .maybeSingle();
 
     if (error || !settings) {
-      return { allowed: true };
+      console.error('[Withdrawal Worker] Cannot verify platform withdrawal controls; dispatch fails closed.', error);
+      return { allowed: false, reason: 'Unable to verify platform withdrawal controls' };
     }
     if (settings.global_kill_switch_active) {
       return { allowed: false, reason: 'Global emergency kill switch is currently active' };
@@ -52,7 +53,8 @@ export async function checkCircuitBreakers(): Promise<{ allowed: boolean; reason
     }
     return { allowed: true };
   } catch (err) {
-    return { allowed: true };
+    console.error('[Withdrawal Worker] Platform control lookup failed; dispatch fails closed.', err);
+    return { allowed: false, reason: 'Unable to verify platform withdrawal controls' };
   }
 }
 
@@ -96,7 +98,11 @@ export async function processWithdrawalQueue(): Promise<WithdrawalProcessResult>
     p_limit: 1,
   });
 
-  if (error || !queue || queue.length === 0) {
+  if (error) {
+    console.error('[Withdrawal Worker] Failed to claim withdrawal queue; no dispatch attempted.', error);
+    return { processed: false, error: 'Unable to claim withdrawal queue safely' };
+  }
+  if (!queue || queue.length === 0) {
     return { processed: false };
   }
 
@@ -126,10 +132,11 @@ export async function processWithdrawalQueue(): Promise<WithdrawalProcessResult>
       });
       const txHash = res.txHash;
 
-      await supabaseAdmin.rpc('complete_onchain_withdrawal', {
+      const { error: completionError } = await supabaseAdmin.rpc('complete_onchain_withdrawal', {
         p_withdrawal_id: withdrawal.id,
         p_tx_hash: txHash,
       });
+      if (completionError) throw new Error(`Payout broadcast but completion state could not be persisted: ${completionError.message}`);
 
       console.log(`[Withdrawal Worker] Dispatched TRON payout ${withdrawal.id} (tx: ${txHash})`);
       return {
@@ -180,10 +187,11 @@ export async function processWithdrawalQueue(): Promise<WithdrawalProcessResult>
       });
     }
 
-    await supabaseAdmin.rpc('complete_onchain_withdrawal', {
+    const { error: completionError } = await supabaseAdmin.rpc('complete_onchain_withdrawal', {
       p_withdrawal_id: withdrawal.id,
       p_tx_hash: tx.hash,
     });
+    if (completionError) throw new Error(`Payout broadcast but completion state could not be persisted: ${completionError.message}`);
 
     console.log(`[Withdrawal Worker] Broadcasted EVM payout ${withdrawal.id} on ${network} (tx: ${tx.hash}, nonce: ${nonce})`);
     return {
@@ -200,11 +208,12 @@ export async function processWithdrawalQueue(): Promise<WithdrawalProcessResult>
     if (isLocalCheckStage) {
       console.warn(`[Withdrawal Worker] Pre-broadcast validation failure: refunding withdrawal ${withdrawal.id}`);
       try {
-        await supabaseAdmin.rpc('process_failed_withdrawal', {
+        const { error: refundError } = await supabaseAdmin.rpc('process_failed_withdrawal', {
           p_withdrawal_id: withdrawal.id,
           p_error_reason: err.message || 'Transaction pre-broadcast validation failure',
           p_is_verified_unbroadcast: true,
         });
+        if (refundError) throw new Error(`Refund RPC returned an error: ${refundError.message}`);
         return {
           processed: true,
           withdrawalId: withdrawal.id,
