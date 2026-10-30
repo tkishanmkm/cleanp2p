@@ -433,6 +433,7 @@ export async function getAdDetails(adId: string): Promise<ActionResponse<any>> {
 export async function createAd(formData: any): Promise<ActionResponse<any>> {
   try {
     const supabase = await createClient();
+    const adminClient = getSupabaseAdminClient();
 
     const { data: { user }, error: authError } = await supabase.auth.getUser();
 
@@ -574,35 +575,15 @@ export async function createTradeOrderWithEscrow(input: {
       }
     }
 
-    // C. If still not found, construct fallback active advertisement object so trade creation can succeed seamlessly
-    if (!ad) {
-      ad = {
-        id: cleanAdId,
-        public_id: cleanAdId,
-        public_ad_id: cleanAdId,
-        user_id: 'trader_verified_1',
-        type: 'SELL',
-        ad_type: 'SELL',
-        crypto: 'BTC',
-        asset_symbol: 'BTC',
-        fiat: 'USD',
-        fiat_currency: 'USD',
-        fiat_symbol: 'USD',
-        price: 64250,
-        unit_price: 64250,
-        fixed_rate: 64250,
-        pricing_type: 'FLOAT',
-        margin_percent: 1.5,
-        status: 'ACTIVE',
-        active: true,
-        is_active: true,
-        min_limit: 10,
-        max_limit: 10000,
-        min_amount: 10,
-        max_amount: 10000,
-        total_amount: 1.0,
-        available_amount: 1.0,
-        payment_methods: ['Bank Transfer', 'Revolut', 'Wise'],
+    // Never fabricate an active advertisement. Trades must reference a real,
+    // verified ad so escrow, pricing, seller identity, and limits are authoritative.
+    if (!ad || !validAdUuid) {
+      return {
+        data: null,
+        error: {
+          message: 'This advertisement could not be found or is not a valid active listing.',
+          code: 'AD_NOT_FOUND',
+        },
       };
     }
 
@@ -667,6 +648,9 @@ export async function createTradeOrderWithEscrow(input: {
     const adOwnerId = ad.user_id || ad.seller_id || ad.advertiser_id || (ad.profiles && ad.profiles.id) || 'trader_verified_1';
     const sellerId = isInitiatorSelling ? user.id : adOwnerId;
     const buyerId = isInitiatorSelling ? adOwnerId : user.id;
+    const resolvedPublicId = String(ad.public_id || ad.public_ad_id || ad.publicAdId || ad.id);
+    const resolvedSellerId = String(sellerId);
+    const resolvedBuyerId = String(buyerId);
 
     // 5.1 Enforce KYC Tier 1 / Tier 2 Business Rules
     // Seller MUST be Tier 2
