@@ -27,4 +27,9 @@ assert.ok(blockcypherWebhook.includes("status: 503"), 'BlockCypher webhook must 
 assert.ok(blockcypherWebhook.includes('crypto.timingSafeEqual'), 'BlockCypher webhook token comparison must be timing-safe');
 assert.ok(blockcypherWebhook.indexOf('Unauthorized webhook.') < blockcypherWebhook.indexOf('await req.json()'), 'BlockCypher webhook must authenticate before parsing or processing its payload');
 
+const alchemyWebhook = readFileSync(resolve(process.cwd(), 'src/app/api/webhooks/alchemy/route.ts'), 'utf8');
+assert.ok(alchemyWebhook.includes('if (!webhookSecret)'), 'Alchemy webhook must reject requests when its signing secret is missing');
+assert.ok(alchemyWebhook.includes('verifySignature(rawBody, signature, webhookSecret)'), 'Alchemy webhook must verify the provider signature');
+assert.ok(alchemyWebhook.includes('observedTokenContract.toLowerCase() !== expectedTokenContract.toLowerCase()'), 'Alchemy webhook must reject non-canonical USDT contracts');
+
 console.log('Auth and webhook hardening source guards passed.');
