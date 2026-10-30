@@ -88,9 +88,10 @@ BEGIN
       (p_user_id, 'USDT', 'ERC20', 'ERC20', 'USDT', 'ERC20', p_evm_address, 'm/44''/60''/0''/0/' || p_wallet_index::text, NOW()),
       (p_user_id, 'USDT', 'BEP20', 'BEP20', 'USDT', 'BEP20', p_evm_address, 'm/44''/60''/0''/0/' || p_wallet_index::text, NOW()),
       (p_user_id, 'USDT', 'TRC20', 'TRC20', 'USDT', 'TRC20', p_tron_address, 'm/44''/195''/0''/0/' || p_wallet_index::text, NOW())
-    ON CONFLICT (address, network) DO UPDATE
-       SET derivation_path = EXCLUDED.derivation_path
-     WHERE user_deposit_addresses.user_id = EXCLUDED.user_id;
+    -- The canonical uniqueness index uses normalized expressions, so do not
+    -- infer a raw (address, network) conflict target. Existing canonical rows
+    -- are left untouched; cross-user collisions were rejected above.
+    ON CONFLICT DO NOTHING;
 
     INSERT INTO public.wallets
       (user_id, wallet_index, evm_address, tron_address, btc_address, ltc_address, status, created_at, updated_at)
