@@ -7,8 +7,12 @@ export async function createClient() {
   const { cookies } = await import("next/headers");
   const cookieStore = await cookies();
 
-  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://eaiwgfxoiwxepinvcykg.supabase.co';
-  const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'placeholder-anon-key';
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL?.trim() || process.env.SUPABASE_URL?.trim();
+  const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY?.trim();
+
+  if (!supabaseUrl || supabaseUrl.includes('placeholder') || !supabaseAnonKey || supabaseAnonKey.includes('placeholder')) {
+    throw new Error('NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY must be configured for user-session access.');
+  }
 
   return createServerClient(
     supabaseUrl,
@@ -56,8 +60,11 @@ export function getSupabaseAdminClient(): SupabaseClient {
   if (!serverAdminClient) {
     const supabaseUrl =
       process.env.NEXT_PUBLIC_SUPABASE_URL?.trim() ||
-      process.env.SUPABASE_URL?.trim() ||
-      'https://eaiwgfxoiwxepinvcykg.supabase.co';
+      process.env.SUPABASE_URL?.trim();
+
+    if (!supabaseUrl || supabaseUrl.includes('placeholder')) {
+      throw new Error('NEXT_PUBLIC_SUPABASE_URL or SUPABASE_URL is required for privileged admin operations.');
+    }
 
     serverAdminClient = createSupabaseClient(supabaseUrl, serviceKey, {
       auth: {
@@ -68,4 +75,9 @@ export function getSupabaseAdminClient(): SupabaseClient {
   }
 
   return serverAdminClient;
+}
+
+/** Compatibility export for existing server-only admin call sites. */
+export function createAdminClient(): SupabaseClient {
+  return getSupabaseAdminClient();
 }
