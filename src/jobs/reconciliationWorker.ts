@@ -2,8 +2,12 @@ import { createClient } from '@supabase/supabase-js';
 import { ethers } from 'ethers';
 import { getUsdtConfig } from '../lib/constants';
 
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL || 'https://placeholder.supabase.co';
-const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'placeholder-key';
+const supabaseUrl = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL;
+const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+
+if (!supabaseUrl || !supabaseKey) {
+  throw new Error('[Reconciliation] SUPABASE_URL/NEXT_PUBLIC_SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are required; refusing to run with placeholder or anon credentials.');
+}
 
 const supabaseAdmin = createClient(supabaseUrl, supabaseKey, {
   auth: {
@@ -133,36 +137,36 @@ export async function checkHotWalletGasLevels(): Promise<GasStatus[]> {
  * Reconciles total database user liabilities against live on-chain hot wallet balances.
  */
 export async function reconcileLedgerVsChain(assetSymbol = 'USDT'): Promise<ReconciliationReport> {
-  // 1. Calculate sum of user spot wallet balances from DB
-  let totalDbUserBalance = 0;
-  const { data: userBalData, error: userBalErr } = await supabaseAdmin
-    .from('user_wallets')
-    .select('main_balance, locked_balance')
+  // 1. Calculate wallet liabilities using the canonical wallet_assets buckets.
+  // Do not silently substitute zero or fall back to a legacy table: that can
+  // make a broken reconciliation look solvent.
+  const { data: walletAssetsData, error: walletAssetsError } = await supabaseAdmin
+    .from('wallet_assets')
+    .select('balance, locked_balance, reserved_balance, in_escrow, in_withdrawal')
     .eq('asset_symbol', assetSymbol);
 
-  if (!userBalErr && userBalData) {
-    totalDbUserBalance = (userBalData || []).reduce(
-      (acc, row) => acc + (parseFloat(row.main_balance) || 0) + (parseFloat(row.locked_balance) || 0),
-      0
-    );
-  } else {
-    // Fallback directly to wallet_assets if user_wallets view is pending migration
-    const { data: walletAssetsData } = await supabaseAdmin
-      .from('wallet_assets')
-      .select('available, locked_escrow, locked_withdrawal')
-      .eq('asset_code', assetSymbol);
-
-    if (walletAssetsData) {
-      totalDbUserBalance = (walletAssetsData || []).reduce(
-        (acc, row) =>
-          acc +
-          (parseFloat(row.available) || 0) +
-          (parseFloat(row.locked_escrow) || 0) +
-          (parseFloat(row.locked_withdrawal) || 0),
-        0
-      );
-    }
+  if (walletAssetsError || !walletAssetsData) {
+    const reason = walletAssetsError?.message || 'Wallet liability query returned no data';
+    console.error('[Reconciliation] Unable to calculate wallet liabilities:', reason);
+    throw new Error(`Reconciliation aborted: unable to calculate wallet liabilities: ${reason}`);
   }
+
+  const totalDbUserBalance = walletAssetsData.reduce((acc, row: any) => {
+    const buckets = [
+      row.balance,
+      row.locked_balance,
+      row.reserved_balance,
+      row.in_escrow,
+      row.in_withdrawal,
+    ];
+    return acc + buckets.reduce((sum, value) => {
+      const parsed = Number(value ?? 0);
+      if (!Number.isFinite(parsed) || parsed < 0) {
+        throw new Error('Reconciliation aborted: invalid or negative wallet liability bucket');
+      }
+      return sum + parsed;
+    }, 0);
+  }, 0);
 
   // 2. Calculate pending / processing withdrawals held in queue
   let totalPendingWithdrawals = 0;
@@ -171,35 +175,26 @@ export async function reconcileLedgerVsChain(assetSymbol = 'USDT'): Promise<Reco
     .select('amount, fee, metadata')
     .in('status', ['PENDING', 'PROCESSING', 'NEEDS_APPROVAL']);
 
-  if (!pendingErr && pendingData) {
-    totalPendingWithdrawals = pendingData.reduce(
-      (acc, row: any) => {
-        const amt = parseFloat(row.amount) || 0;
-        const fee = parseFloat(row.fee) || parseFloat(row.metadata?.fee) || 0;
-        return acc + amt + fee;
-      },
-      0
-    );
-  } else {
-    const { data: fallbackPending } = await supabaseAdmin
-      .from('onchain_withdrawals')
-      .select('amount, metadata')
-      .in('status', ['PENDING', 'PROCESSING', 'NEEDS_APPROVAL']);
-
-    totalPendingWithdrawals = (fallbackPending || []).reduce(
-      (acc, row: any) => {
-        const amt = parseFloat(row.amount) || 0;
-        const fee = parseFloat(row.metadata?.fee) || 0;
-        return acc + amt + fee;
-      },
-      0
-    );
+  if (pendingErr || !pendingData) {
+    const reason = pendingErr?.message || 'Pending withdrawal query returned no data';
+    console.error('[Reconciliation] Unable to calculate pending withdrawal liabilities:', reason);
+    throw new Error(`Reconciliation aborted: unable to calculate pending withdrawal liabilities: ${reason}`);
   }
+
+  totalPendingWithdrawals = pendingData.reduce((acc, row: any) => {
+    const amt = Number(row.amount);
+    const fee = Number(row.fee ?? row.metadata?.fee ?? 0);
+    if (!Number.isFinite(amt) || amt < 0 || !Number.isFinite(fee) || fee < 0) {
+      throw new Error('Reconciliation aborted: invalid pending withdrawal amount or fee');
+    }
+    return acc + amt + fee;
+  }, 0);
 
   const totalDbLiability = totalDbUserBalance + totalPendingWithdrawals;
 
   // 3. Query total multi-chain USDT on-chain reserves held in Hot Wallet
   let totalOnChainBalance = 0;
+  const failedNetworks: string[] = [];
   const networkConfigs = [
     { net: 'ERC20', chainId: 1, rpc: process.env.ETH_RPC_URL || process.env.EVM_RPC_URL || 'https://cloudflare-eth.com' },
     { net: 'BEP20', chainId: 56, rpc: process.env.BSC_RPC_URL || 'https://bsc-dataseed.binance.org' },
@@ -221,14 +216,15 @@ export async function reconcileLedgerVsChain(assetSymbol = 'USDT'): Promise<Reco
       const formatted = parseFloat(ethers.formatUnits(balanceRaw, config.decimals));
       totalOnChainBalance += formatted;
     } catch (err: any) {
+      failedNetworks.push(item.net);
       console.error(`[Reconciliation Error] Failed fetching ${item.net} on-chain balance:`, err.message);
     }
   }
 
   // 4. Calculate discrepancy
   const discrepancy = totalOnChainBalance - totalDbLiability;
-  // A slight positive variance can exist due to accumulated fee revenue; negative variance indicates potential issue
-  const isBalanced = discrepancy >= 0;
+  // A partial chain snapshot must never be reported as balanced.
+  const isBalanced = failedNetworks.length === 0 && discrepancy >= 0;
 
   const gasStatuses = await checkHotWalletGasLevels();
 
@@ -247,8 +243,16 @@ export async function reconcileLedgerVsChain(assetSymbol = 'USDT'): Promise<Reco
   }
 
   // 6. Alert Logging
-  // 1. Log Under-Collateralization Alert if DB liabilities exceed on-chain assets
-  if (!isBalanced) {
+  // Do not label a partial chain snapshot as proven under-collateralization.
+  if (failedNetworks.length > 0) {
+    await createSystemAlert(
+      'WORKER_ERROR',
+      'CRITICAL',
+      'Reconciliation Incomplete',
+      `Unable to verify hot-wallet reserves on: ${failedNetworks.join(', ')}. Balance status is unknown; investigate RPC/provider availability before any launch decision.`,
+      { totalDbLiability, totalOnChainBalance, discrepancy, failedNetworks }
+    );
+  } else if (discrepancy < 0) {
     await createSystemAlert(
       'UNDER_COLLATERALIZED',
       'CRITICAL',
