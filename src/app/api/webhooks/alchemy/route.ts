@@ -22,12 +22,17 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     const rawBody = await req.text();
     const signature = req.headers.get('x-alchemy-signature') ?? '';
 
-    if (SYSTEM_CONFIG.secrets.webhook && !verifySignature(rawBody, signature, SYSTEM_CONFIG.secrets.webhook)) {
+    const webhookSecret = SYSTEM_CONFIG.secrets.webhook;
+    if (!webhookSecret) {
+      console.error('[Alchemy Webhook] Signing secret is not configured; rejecting webhook.');
+      return NextResponse.json({ error: 'Webhook verification is not configured.' }, { status: 503 });
+    }
+    if (!verifySignature(rawBody, signature, webhookSecret)) {
       return NextResponse.json({ error: 'Invalid HMAC signature' }, { status: 401 });
     }
 
     const payload = JSON.parse(rawBody) as {
-      event?: { activity?: Array<{ toAddress: string; fromAddress?: string; value: number; asset: string; hash: string; blockNum?: string }> };
+      event?: { activity?: Array<{ toAddress: string; fromAddress?: string; value: number; asset: string; hash: string; blockNum?: string; rawContract?: { address?: string } }> };
     };
     
     const activity = payload.event?.activity?.[0];
@@ -50,7 +55,13 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     const supabaseAdmin = getSupabaseAdminClient();
     const normNet = rawAsset === 'ETH' ? 'ETH' : 'ERC20';
     const assetSymbol = rawAsset === 'ETH' ? 'ETH' : 'USDT';
-    const tokenContract = CANONICAL_USDT_CONTRACTS[normNet] || null;
+    const expectedTokenContract = CANONICAL_USDT_CONTRACTS[normNet] || null;
+    const observedTokenContract = activity.rawContract?.address?.trim() || null;
+    if (assetSymbol === 'USDT' && (!observedTokenContract || !expectedTokenContract || observedTokenContract.toLowerCase() !== expectedTokenContract.toLowerCase())) {
+      console.warn('[Alchemy Webhook] Rejecting token transfer with missing or non-canonical contract.');
+      return NextResponse.json({ error: 'Unsupported or unverified token contract.' }, { status: 400 });
+    }
+    const tokenContract = assetSymbol === 'USDT' ? observedTokenContract : null;
 
     // Process deposit via canonical atomic RPC
     const { data: rpcData, error: creditError } = await supabaseAdmin.rpc('process_deposit_atomic', {

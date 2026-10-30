@@ -21,4 +21,10 @@ assert.ok(!forgotPassword.includes("req.headers.get('origin')"), 'Password recov
 assert.ok(!forgotPassword.includes("req.headers.get('host')"), 'Password recovery redirect must not trust request Host');
 assert.ok(forgotPassword.includes("new URL('/auth/callback?next=/reset-password', appOrigin)"), 'Password recovery redirect must be built from configured application origin');
 
-console.log('Auth hardening source guards passed.');
+const blockcypherWebhook = readFileSync(resolve(process.cwd(), 'src/app/api/webhooks/blockcypher/route.ts'), 'utf8');
+assert.ok(blockcypherWebhook.includes('process.env.BLOCKCYPHER_WEBHOOK_TOKEN'), 'BlockCypher webhook must require a configured secret token');
+assert.ok(blockcypherWebhook.includes("status: 503"), 'BlockCypher webhook must fail closed if token configuration is missing');
+assert.ok(blockcypherWebhook.includes('crypto.timingSafeEqual'), 'BlockCypher webhook token comparison must be timing-safe');
+assert.ok(blockcypherWebhook.indexOf('Unauthorized webhook.') < blockcypherWebhook.indexOf('await req.json()'), 'BlockCypher webhook must authenticate before parsing or processing its payload');
+
+console.log('Auth and webhook hardening source guards passed.');
