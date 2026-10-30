@@ -5,10 +5,14 @@ import { createClient } from '@supabase/supabase-js';
 export const dynamic = 'force-dynamic';
 
 function getSupabaseClient() {
-  return createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://placeholder.supabase.co',
-    process.env.SUPABASE_SERVICE_ROLE_KEY || 'placeholder-key'
-  );
+  const url = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!url || !serviceRoleKey) {
+    throw new Error('Supabase service configuration is missing; refusing to process KYC webhooks.');
+  }
+  return createClient(url, serviceRoleKey, {
+    auth: { persistSession: false, autoRefreshToken: false },
+  });
 }
 
 function shortenFloats(v: unknown): unknown {
@@ -48,11 +52,12 @@ export async function POST(req: NextRequest) {
     const sigV1 = req.headers.get('x-signature');
     const sig = sigV2 || sigV1 || '';
     const tsHeader = req.headers.get('x-timestamp');
-    const ts = tsHeader ? Number(tsHeader) : null;
+    const ts = tsHeader === null ? NaN : Number(tsHeader);
 
-    // 1. Replay attack freshness check (900 seconds / 15 mins for webhook clock skew)
-    if (ts && Math.abs(Date.now() / 1000 - ts) > 900) {
-      return new NextResponse('Stale timestamp', { status: 401 });
+    // Require a valid, fresh provider timestamp. Missing, zero, malformed, or
+    // stale timestamps must not bypass the replay-freshness check.
+    if (!Number.isFinite(ts) || ts <= 0 || Math.abs(Date.now() / 1000 - ts) > 900) {
+      return new NextResponse('Missing, invalid, or stale timestamp', { status: 401 });
     }
 
     const webhookSecret = process.env.DIDIT_WEBHOOK_SECRET;
