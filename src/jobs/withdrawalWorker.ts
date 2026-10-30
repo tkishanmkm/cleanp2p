@@ -42,7 +42,8 @@ export async function checkCircuitBreakers(): Promise<{ allowed: boolean; reason
       .maybeSingle();
 
     if (error || !settings) {
-      return { allowed: true };
+      console.error('[Withdrawal Worker] Cannot verify platform withdrawal controls; dispatch fails closed.', error);
+      return { allowed: false, reason: 'Unable to verify platform withdrawal controls' };
     }
     if (settings.global_kill_switch_active) {
       return { allowed: false, reason: 'Global emergency kill switch is currently active' };
@@ -52,7 +53,8 @@ export async function checkCircuitBreakers(): Promise<{ allowed: boolean; reason
     }
     return { allowed: true };
   } catch (err) {
-    return { allowed: true };
+    console.error('[Withdrawal Worker] Platform control lookup failed; dispatch fails closed.', err);
+    return { allowed: false, reason: 'Unable to verify platform withdrawal controls' };
   }
 }
 
@@ -82,6 +84,50 @@ export async function allocateEvmNonce(
 }
 
 /**
+ * Persist a broadcast transaction without finalizing the withdrawal. Final
+ * completion must wait for the network-specific confirmation threshold.
+ */
+async function persistBroadcast(withdrawalId: string, txHash: string, nonce?: number): Promise<void> {
+  const now = new Date().toISOString();
+  const onchainUpdate: Record<string, any> = {
+    status: 'BROADCASTED',
+    tx_hash: txHash,
+    error_message: null,
+    updated_at: now,
+  };
+  if (nonce !== undefined) onchainUpdate.nonce = nonce;
+
+  const { data: onchainRow, error: onchainError } = await supabaseAdmin
+    .from('onchain_withdrawals')
+    .update(onchainUpdate)
+    .eq('id', withdrawalId)
+    .select('id')
+    .maybeSingle();
+
+  if (onchainError || !onchainRow) {
+    throw new Error(`Transaction ${txHash} was broadcast, but its on-chain record could not be persisted: ${onchainError?.message || 'row not found'}`);
+  }
+
+  const { data: withdrawalRow, error: withdrawalError } = await supabaseAdmin
+    .from('withdrawals')
+    .update({
+      status: 'processing',
+      tx_hash: txHash,
+      txid: txHash,
+      broadcasted_at: now,
+      broadcast_error: null,
+      updated_at: now,
+    })
+    .eq('id', withdrawalId)
+    .select('id')
+    .maybeSingle();
+
+  if (withdrawalError || !withdrawalRow) {
+    throw new Error(`Transaction ${txHash} was broadcast, but the canonical withdrawal record could not be persisted: ${withdrawalError?.message || 'row not found'}`);
+  }
+}
+
+/**
  * Processes a single pending withdrawal from the onchain_withdrawals queue
  */
 export async function processWithdrawalQueue(): Promise<WithdrawalProcessResult> {
@@ -96,7 +142,11 @@ export async function processWithdrawalQueue(): Promise<WithdrawalProcessResult>
     p_limit: 1,
   });
 
-  if (error || !queue || queue.length === 0) {
+  if (error) {
+    console.error('[Withdrawal Worker] Failed to claim withdrawal queue; no dispatch attempted.', error);
+    return { processed: false, error: 'Unable to claim withdrawal queue safely' };
+  }
+  if (!queue || queue.length === 0) {
     return { processed: false };
   }
 
@@ -106,6 +156,8 @@ export async function processWithdrawalQueue(): Promise<WithdrawalProcessResult>
   const amountStr = withdrawal.amount.toString();
   const destination = withdrawal.to_address.trim();
   let isLocalCheckStage = true;
+  let broadcastTxHash: string | undefined;
+  let broadcastNonce: number | undefined;
 
   try {
     // BRANCH A: TRON Network (TRC-20 USDT)
@@ -125,18 +177,15 @@ export async function processWithdrawalQueue(): Promise<WithdrawalProcessResult>
         amount: amountStr,
       });
       const txHash = res.txHash;
+      broadcastTxHash = txHash;
+      await persistBroadcast(withdrawal.id, txHash);
 
-      await supabaseAdmin.rpc('complete_onchain_withdrawal', {
-        p_withdrawal_id: withdrawal.id,
-        p_tx_hash: txHash,
-      });
-
-      console.log(`[Withdrawal Worker] Dispatched TRON payout ${withdrawal.id} (tx: ${txHash})`);
+      console.log(`[Withdrawal Worker] Broadcasted TRON payout ${withdrawal.id} (tx: ${txHash}); awaiting confirmations`);
       return {
         processed: true,
         withdrawalId: withdrawal.id,
         txHash,
-        status: 'COMPLETED',
+        status: 'BROADCASTED',
       };
     }
 
@@ -180,18 +229,17 @@ export async function processWithdrawalQueue(): Promise<WithdrawalProcessResult>
       });
     }
 
-    await supabaseAdmin.rpc('complete_onchain_withdrawal', {
-      p_withdrawal_id: withdrawal.id,
-      p_tx_hash: tx.hash,
-    });
+    broadcastTxHash = tx.hash;
+    broadcastNonce = nonce;
+    await persistBroadcast(withdrawal.id, tx.hash, nonce);
 
-    console.log(`[Withdrawal Worker] Broadcasted EVM payout ${withdrawal.id} on ${network} (tx: ${tx.hash}, nonce: ${nonce})`);
+    console.log(`[Withdrawal Worker] Broadcasted EVM payout ${withdrawal.id} on ${network} (tx: ${tx.hash}, nonce: ${nonce}); awaiting confirmations`);
     return {
       processed: true,
       withdrawalId: withdrawal.id,
       txHash: tx.hash,
       nonce,
-      status: 'COMPLETED',
+      status: 'BROADCASTED',
     };
 
   } catch (err: any) {
@@ -200,11 +248,12 @@ export async function processWithdrawalQueue(): Promise<WithdrawalProcessResult>
     if (isLocalCheckStage) {
       console.warn(`[Withdrawal Worker] Pre-broadcast validation failure: refunding withdrawal ${withdrawal.id}`);
       try {
-        await supabaseAdmin.rpc('process_failed_withdrawal', {
+        const { error: refundError } = await supabaseAdmin.rpc('process_failed_withdrawal', {
           p_withdrawal_id: withdrawal.id,
           p_error_reason: err.message || 'Transaction pre-broadcast validation failure',
           p_is_verified_unbroadcast: true,
         });
+        if (refundError) throw new Error(`Refund RPC returned an error: ${refundError.message}`);
         return {
           processed: true,
           withdrawalId: withdrawal.id,
@@ -227,6 +276,8 @@ export async function processWithdrawalQueue(): Promise<WithdrawalProcessResult>
           .from('onchain_withdrawals')
           .update({
             status: 'AMBIGUOUS_BROADCAST',
+            ...(broadcastTxHash ? { tx_hash: broadcastTxHash } : {}),
+            ...(broadcastNonce !== undefined ? { nonce: broadcastNonce } : {}),
             error_message: `Ambiguous broadcast error: ${err.message}`,
             updated_at: new Date().toISOString(),
           })
@@ -236,6 +287,8 @@ export async function processWithdrawalQueue(): Promise<WithdrawalProcessResult>
           .from('withdrawals')
           .update({
             status: 'AMBIGUOUS_BROADCAST',
+            ...(broadcastTxHash ? { tx_hash: broadcastTxHash, txid: broadcastTxHash, broadcasted_at: new Date().toISOString() } : {}),
+            ...(broadcastNonce !== undefined ? { broadcast_attempts: 1 } : {}),
             broadcast_error: `Ambiguous broadcast error: ${err.message}`,
             updated_at: new Date().toISOString(),
           })
@@ -336,8 +389,10 @@ export async function checkSubmittedWithdrawals(): Promise<{
                 const fraction = (feeSat % 100000000n).toString().padStart(8, '0');
                 actualFeeBtc = `${whole}.${fraction}`;
               } else if (Array.isArray(txData.vin) && Array.isArray(txData.vout)) {
-                const inputSumSat = txData.vin.reduce((acc: bigint, v: any) => acc + BigInt(v.prevout?.value || 0), 0n);
-                const outputSumSat = txData.vout.reduce((acc: bigint, v: any) => acc + BigInt(v.value || 0), 0n);
+                const btcInputs: any[] = txData.vin;
+                const btcOutputs: any[] = txData.vout;
+                const inputSumSat = btcInputs.reduce((acc: bigint, v: any): bigint => acc + BigInt(v.prevout?.value || 0), 0n);
+                const outputSumSat = btcOutputs.reduce((acc: bigint, v: any): bigint => acc + BigInt(v.value || 0), 0n);
                 if (inputSumSat >= outputSumSat) {
                   const feeSat = inputSumSat - outputSumSat;
                   const whole = feeSat / 100000000n;
@@ -372,8 +427,10 @@ export async function checkSubmittedWithdrawals(): Promise<{
                 const fraction = (feeLit % 100000000n).toString().padStart(8, '0');
                 actualFeeLtc = `${whole}.${fraction}`;
               } else if (Array.isArray(txData.vin) && Array.isArray(txData.vout)) {
-                const inputSumLit = txData.vin.reduce((acc: bigint, v: any) => acc + BigInt(v.prevout?.value || 0), 0n);
-                const outputSumLit = txData.vout.reduce((acc: bigint, v: any) => acc + BigInt(v.value || 0), 0n);
+                const ltcInputs: any[] = txData.vin;
+                const ltcOutputs: any[] = txData.vout;
+                const inputSumLit = ltcInputs.reduce((acc: bigint, v: any): bigint => acc + BigInt(v.prevout?.value || 0), 0n);
+                const outputSumLit = ltcOutputs.reduce((acc: bigint, v: any): bigint => acc + BigInt(v.value || 0), 0n);
                 if (inputSumLit >= outputSumLit) {
                   const feeLit = inputSumLit - outputSumLit;
                   const whole = feeLit / 100000000n;
