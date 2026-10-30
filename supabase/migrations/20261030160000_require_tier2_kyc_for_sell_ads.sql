@@ -11,12 +11,7 @@ AS $function$
     SELECT 1
     FROM public.profiles AS p
     WHERE p.id = auth.uid()
-      AND (
-        COALESCE(p.is_verified, false) = true
-        OR COALESCE(p.id_verified, false) = true
-        OR LOWER(COALESCE(p.kyc_status, '')) IN ('approved', 'verified', 'passed')
-        OR LOWER(COALESCE(p.verification_tier, '')) IN ('2', 'tier_2', 'tier2')
-      )
+      AND LOWER(COALESCE(p.kyc_status, '')) IN ('approved', 'verified')
   );
 $function$;
 
