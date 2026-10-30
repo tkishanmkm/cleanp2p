@@ -8,8 +8,12 @@ export async function createClient() {
   const cookieHeader = cookies();
   const cookieStore = typeof (cookieHeader as any)?.then === 'function' ? await cookieHeader : cookieHeader;
 
-  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL || 'https://placeholder.supabase.co';
-  const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'placeholder-key';
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL?.trim() || process.env.SUPABASE_URL?.trim();
+  const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY?.trim();
+
+  if (!supabaseUrl || supabaseUrl.includes('placeholder') || !supabaseAnonKey || supabaseAnonKey.includes('placeholder')) {
+    throw new Error('Supabase URL and anon key must be configured for authenticated server access.');
+  }
 
   return createServerClient(
     supabaseUrl,
@@ -45,7 +49,11 @@ export function getSupabaseAdminClient(): SupabaseClient {
   }
 
   if (!serverAdminClient) {
-    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL || 'https://placeholder.supabase.co';
+    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL?.trim() || process.env.SUPABASE_URL?.trim();
+
+    if (!supabaseUrl || supabaseUrl.includes('placeholder')) {
+      throw new Error('Supabase URL must be configured for privileged admin operations.');
+    }
 
     serverAdminClient = createSupabaseClient(supabaseUrl, serviceKey, {
       auth: {
