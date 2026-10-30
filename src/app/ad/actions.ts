@@ -588,7 +588,7 @@ export async function createTradeOrderWithEscrow(input: {
     }
 
     // Rule: Users cannot open trades on their own ads (unless it is a system/demo ad)
-    if (ad.user_id === user.id && ad.user_id !== 'trader_verified_1') {
+    if (ad.user_id === user.id) {
       return {
         data: null,
         error: {
