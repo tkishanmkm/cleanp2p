@@ -21,6 +21,43 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Invalid resolution parameters' }, { status: 400 });
     }
 
+    // Bind the dispute to the requested trade before any escrow mutation.
+    // The previous route accepted disputeId and tradeId independently, so an
+    // admin request could settle one trade while resolving a different dispute.
+    const { data: dispute, error: disputeLookupError } = await supabase
+      .from('disputes')
+      .select('id, trade_id, status')
+      .eq('id', disputeId)
+      .maybeSingle();
+
+    if (disputeLookupError) {
+      console.error('[Dispute Resolution] Failed to load dispute:', disputeLookupError.message);
+      return NextResponse.json({ error: 'Unable to verify dispute' }, { status: 500 });
+    }
+
+    if (!dispute || String(dispute.trade_id) !== String(tradeId)) {
+      return NextResponse.json({ error: 'Dispute does not belong to the specified trade' }, { status: 404 });
+    }
+
+    if (String(dispute.status).toLowerCase() !== 'open') {
+      return NextResponse.json({ error: 'Dispute is not open' }, { status: 409 });
+    }
+
+    const { data: trade, error: tradeLookupError } = await supabase
+      .from('trades')
+      .select('id, buyer_id, seller_id')
+      .eq('id', tradeId)
+      .maybeSingle();
+
+    if (tradeLookupError) {
+      console.error('[Dispute Resolution] Failed to load trade:', tradeLookupError.message);
+      return NextResponse.json({ error: 'Unable to verify trade' }, { status: 500 });
+    }
+
+    if (!trade) {
+      return NextResponse.json({ error: 'Trade not found' }, { status: 404 });
+    }
+
     let rpcResult;
     if (resolution === 'RELEASE') {
       rpcResult = await supabase.rpc('release_trade_escrow', {
@@ -39,17 +76,13 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: errMsg }, { status: 400 });
     }
 
-    // Fetch trade to resolve counterparty winner ID
-    const { data: trade } = await supabase
-      .from('trades')
-      .select('id, buyer_id, seller_id')
-      .eq('id', tradeId)
-      .maybeSingle();
+    const winnerId = resolution === 'RELEASE' ? trade.buyer_id : trade.seller_id;
 
-    const winnerId = resolution === 'RELEASE' ? trade?.buyer_id : trade?.seller_id;
-
-    // Update dispute record
-    await supabase
+    // Update only the still-open dispute tied to this trade. Check errors and
+    // affected-row count; an unchecked write previously reported success even
+    // when the dispute row was not updated. Escrow settlement and this update
+    // are still separate operations; atomic settlement is a follow-up blocker.
+    const { data: updatedDisputes, error: disputeUpdateError } = await supabase
       .from('disputes')
       .update({
         status: 'resolved',
@@ -61,16 +94,38 @@ export async function POST(req: NextRequest) {
         resolved_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
       })
-      .eq('id', disputeId);
+      .eq('id', disputeId)
+      .eq('trade_id', tradeId)
+      .eq('status', 'open')
+      .select('id');
+
+    if (disputeUpdateError || !updatedDisputes || updatedDisputes.length !== 1) {
+      console.error('[Dispute Resolution] Dispute update failed after settlement:', disputeUpdateError?.message || 'No matching open dispute row');
+      return NextResponse.json({
+        error: 'Escrow settlement completed, but dispute status update failed; manual reconciliation is required.',
+        settlementCompleted: true,
+        reconciliationRequired: true,
+      }, { status: 500 });
+    }
 
     // Audit log
-    await supabase.from('admin_audit_logs').insert({
+    const { error: auditError } = await supabase.from('admin_audit_logs').insert({
       admin_id: adminId,
       admin_email: adminEmail,
       action: 'RESOLVE_DISPUTE',
       target_id: tradeId,
       details: { disputeId, tradeId, resolution, notes },
     });
+
+    if (auditError) {
+      console.error('[Dispute Resolution] Audit log insert failed:', auditError.message);
+      return NextResponse.json({
+        success: true,
+        data: rpcResult.data,
+        warning: 'Settlement and dispute update completed, but audit log insertion failed.',
+        auditLogFailed: true,
+      }, { status: 200 });
+    }
 
     return NextResponse.json({ success: true, data: rpcResult.data });
   } catch (err: any) {
