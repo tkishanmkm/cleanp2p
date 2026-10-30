@@ -42,7 +42,8 @@ export async function checkCircuitBreakers(): Promise<{ allowed: boolean; reason
       .maybeSingle();
 
     if (error || !settings) {
-      return { allowed: true };
+      console.error('[Withdrawal Worker] Cannot verify platform settings; failing closed', error);
+      return { allowed: false, reason: 'Platform withdrawal settings are unavailable' };
     }
     if (settings.global_kill_switch_active) {
       return { allowed: false, reason: 'Global emergency kill switch is currently active' };
@@ -52,7 +53,8 @@ export async function checkCircuitBreakers(): Promise<{ allowed: boolean; reason
     }
     return { allowed: true };
   } catch (err) {
-    return { allowed: true };
+    console.error('[Withdrawal Worker] Failed to verify platform settings; failing closed', err);
+    return { allowed: false, reason: 'Platform withdrawal settings could not be verified' };
   }
 }
 
@@ -126,10 +128,13 @@ export async function processWithdrawalQueue(): Promise<WithdrawalProcessResult>
       });
       const txHash = res.txHash;
 
-      await supabaseAdmin.rpc('complete_onchain_withdrawal', {
+      const { data: completion, error: completionError } = await supabaseAdmin.rpc('complete_onchain_withdrawal', {
         p_withdrawal_id: withdrawal.id,
         p_tx_hash: txHash,
       });
+      if (completionError || completion?.success !== true) {
+        throw new Error(`TRON transaction broadcast, but database settlement failed: ${completionError?.message || completion?.message || 'RPC did not confirm success'}`);
+      }
 
       console.log(`[Withdrawal Worker] Dispatched TRON payout ${withdrawal.id} (tx: ${txHash})`);
       return {
@@ -180,10 +185,13 @@ export async function processWithdrawalQueue(): Promise<WithdrawalProcessResult>
       });
     }
 
-    await supabaseAdmin.rpc('complete_onchain_withdrawal', {
+    const { data: completion, error: completionError } = await supabaseAdmin.rpc('complete_onchain_withdrawal', {
       p_withdrawal_id: withdrawal.id,
       p_tx_hash: tx.hash,
     });
+    if (completionError || completion?.success !== true) {
+      throw new Error(`EVM transaction broadcast, but database settlement failed: ${completionError?.message || completion?.message || 'RPC did not confirm success'}`);
+    }
 
     console.log(`[Withdrawal Worker] Broadcasted EVM payout ${withdrawal.id} on ${network} (tx: ${tx.hash}, nonce: ${nonce})`);
     return {
@@ -416,15 +424,18 @@ export async function processAllPendingWithdrawals(maxBatch: number = 20): Promi
   let hasLock = false;
   try {
     const { data: lockAcquired, error: lockErr } = await supabaseAdmin.rpc('acquire_withdrawal_worker_lock');
-    if (!lockErr && lockAcquired === true) {
-      hasLock = true;
-    } else if (!lockErr && lockAcquired === false) {
-      console.warn('[Withdrawal Worker Singleton] Another worker instance is currently holding the dispatch lease. Exiting batch run.');
+    if (lockErr) {
+      console.error('[Withdrawal Worker Singleton] Cannot verify dispatch lock; refusing to process withdrawals', lockErr);
       return { totalProcessed: 0, results: [], locked: true };
     }
+    if (lockAcquired !== true) {
+      console.warn('[Withdrawal Worker Singleton] Lock not acquired; refusing to process withdrawals.');
+      return { totalProcessed: 0, results: [], locked: true };
+    }
+    hasLock = true;
   } catch (lockRpcErr) {
-    // If RPC is unavailable, proceed defensively
-    hasLock = false;
+    console.error('[Withdrawal Worker Singleton] Lock RPC failed; refusing to process withdrawals', lockRpcErr);
+    return { totalProcessed: 0, results: [], locked: true };
   }
 
   const results: WithdrawalProcessResult[] = [];
@@ -442,9 +453,10 @@ export async function processAllPendingWithdrawals(maxBatch: number = 20): Promi
   } finally {
     if (hasLock) {
       try {
-        await supabaseAdmin.rpc('release_withdrawal_worker_lock');
+        const { error: unlockErr } = await supabaseAdmin.rpc('release_withdrawal_worker_lock');
+        if (unlockErr) console.error('[Withdrawal Worker Singleton] Lock release failed:', unlockErr);
       } catch (unlockErr) {
-        console.warn('[Withdrawal Worker Singleton] Notice on lock release:', unlockErr);
+        console.error('[Withdrawal Worker Singleton] Lock release failed:', unlockErr);
       }
     }
   }

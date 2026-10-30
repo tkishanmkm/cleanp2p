@@ -9,7 +9,13 @@ export async function POST(req: Request) {
     const authHeader = req.headers.get('authorization');
     const webhookSecret = process.env.BLOCKCHAIN_WEBHOOK_SECRET;
 
-    if (webhookSecret && authHeader !== `Bearer ${webhookSecret}`) {
+    // This endpoint credits funds through a privileged RPC. Never allow it to
+    // become unauthenticated when a secret is missing from the environment.
+    if (!webhookSecret) {
+      console.error('[Deposit API] BLOCKCHAIN_WEBHOOK_SECRET is not configured');
+      return NextResponse.json({ error: 'Deposit ingestion is temporarily unavailable' }, { status: 503 });
+    }
+    if (!authHeader || authHeader !== `Bearer ${webhookSecret}`) {
       return NextResponse.json({ error: 'Unauthorized webhook' }, { status: 401 });
     }
 
