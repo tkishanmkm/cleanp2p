@@ -45,13 +45,15 @@ const defaultBalances: WalletBalancesMap = {
   ETH: { available: 0, inEscrow: 0, inWithdrawal: 0, total: 0, fiatValue: 0 },
   LTC: { available: 0, inEscrow: 0, inWithdrawal: 0, total: 0, fiatValue: 0 },
   USDT: { available: 0, inEscrow: 0, inWithdrawal: 0, total: 0, fiatValue: 0 },
+  BNB: { available: 0, inEscrow: 0, inWithdrawal: 0, total: 0, fiatValue: 0 },
+  TRX: { available: 0, inEscrow: 0, inWithdrawal: 0, total: 0, fiatValue: 0 },
 };
 
 const WalletContext = createContext<WalletContextType | undefined>(undefined);
 
 export function WalletProvider({ children }: { children: React.ReactNode }) {
   const { user, profile } = useAuth();
-  const { prices = { BTC: 0, ETH: 0, LTC: 0, USDT: 1 }, fiatRates = { USD: 1 } } = usePrices();
+  const { prices = { BTC: 0, ETH: 0, LTC: 0, USDT: 1, BNB: 0, TRX: 0 }, fiatRates = { USD: 1 } } = usePrices();
 
   const [rawBalances, setRawBalances] = useState<{
     [key in CryptoCurrency]: { available: number; inEscrow: number; inWithdrawal: number };
@@ -60,6 +62,8 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
     ETH: { available: 0, inEscrow: 0, inWithdrawal: 0 },
     LTC: { available: 0, inEscrow: 0, inWithdrawal: 0 },
     USDT: { available: 0, inEscrow: 0, inWithdrawal: 0 },
+    BNB: { available: 0, inEscrow: 0, inWithdrawal: 0 },
+    TRX: { available: 0, inEscrow: 0, inWithdrawal: 0 },
   });
 
   const [isLoading, setIsLoading] = useState<boolean>(true);
