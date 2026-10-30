@@ -35,7 +35,7 @@ export async function hasPendingWithdrawalApproval(userId: string): Promise<bool
     if (error) {
       console.warn('[WithdrawalSecurity] Error checking pending withdrawal approval:', error.message);
       // Fail-safe: query onchain_withdrawals
-      const { data: onchainData } = await supabaseAdmin
+      const { data: onchainData, error: onchainError } = await supabaseAdmin
         .from('onchain_withdrawals')
         .select('id')
         .eq('user_id', userId)
@@ -43,13 +43,17 @@ export async function hasPendingWithdrawalApproval(userId: string): Promise<bool
         .limit(1)
         .maybeSingle();
 
+      if (onchainError) {
+        console.error('[WithdrawalSecurity] Fallback approval check failed; rejecting request', onchainError);
+        throw new Error('Cannot verify pending withdrawal approval; fail closed');
+      }
       return Boolean(onchainData?.id);
     }
 
     return Boolean(data?.id);
   } catch (err) {
-    console.error('[WithdrawalSecurity] Unexpected error in hasPendingWithdrawalApproval:', err);
-    return false;
+    console.error('[WithdrawalSecurity] Cannot verify pending withdrawal approval; fail closed:', err);
+    throw new Error('Cannot verify pending withdrawal approval; fail closed');
   }
 }
 
