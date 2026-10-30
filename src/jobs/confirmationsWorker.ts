@@ -1,18 +1,9 @@
-import { createClient } from '@supabase/supabase-js';
+import { supabaseAdmin } from '@/lib/supabaseAdmin';
 import { ethers } from 'ethers';
 import { normalizeDepositNetwork } from '@/lib/hd-derivation-engine';
 import { CANONICAL_USDT_CONTRACTS } from '@/jobs/depositIngestion';
 
-// Initialize Supabase admin client with service role key
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL || 'https://placeholder.supabase.co';
-const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'placeholder-key';
 
-const supabaseAdmin = createClient(supabaseUrl, supabaseKey, {
-  auth: {
-    persistSession: false,
-    autoRefreshToken: false,
-  },
-});
 
 export interface ConfirmationWorkerResult {
   totalScanned: number;
@@ -84,12 +75,13 @@ async function fetchOnChainConfirmations(
       const nowData = await nowRes.json();
       const currentBlock = nowData?.block_header?.raw_data?.number;
 
-      if (currentBlock && data.blockNumber) {
-        const confs = Math.max(1, currentBlock - data.blockNumber + 1);
+      if (Number.isSafeInteger(currentBlock) && Number.isSafeInteger(data.blockNumber) && currentBlock >= data.blockNumber) {
+        const confs = currentBlock - data.blockNumber + 1;
         return { confirmations: confs, blockNumber: data.blockNumber };
       }
 
-      return { confirmations: 19, blockNumber: data.blockNumber };
+      // Never invent the required confirmation count when the chain tip is unavailable.
+      return null;
     } catch (tronErr) {
       console.warn(`Tron confirmation query error for ${txHash}:`, tronErr);
       return null;
@@ -103,8 +95,14 @@ async function fetchOnChainConfirmations(
       const res = await fetch(`${btcApiBase}/tx/${txHash}/status`);
       if (!res.ok) return null;
       const statusData = await res.json();
-      const confs = statusData.confirmed ? 2 : 0;
-      return { confirmations: confs, blockNumber: statusData.block_height };
+      if (!statusData?.confirmed || !Number.isSafeInteger(statusData.block_height)) {
+        return { confirmations: 0 };
+      }
+      const tipRes = await fetch(`${btcApiBase}/blocks/tip/height`);
+      if (!tipRes.ok) return null;
+      const tipHeight = Number((await tipRes.text()).trim());
+      if (!Number.isSafeInteger(tipHeight) || tipHeight < statusData.block_height) return null;
+      return { confirmations: tipHeight - statusData.block_height + 1, blockNumber: statusData.block_height };
     } catch (btcErr) {
       console.warn(`BTC confirmation query error for ${txHash}:`, btcErr);
       return null;
@@ -118,8 +116,14 @@ async function fetchOnChainConfirmations(
       const res = await fetch(`${ltcApiBase}/tx/${txHash}/status`);
       if (!res.ok) return null;
       const statusData = await res.json();
-      const confs = statusData.confirmed ? 6 : 0;
-      return { confirmations: confs, blockNumber: statusData.block_height };
+      if (!statusData?.confirmed || !Number.isSafeInteger(statusData.block_height)) {
+        return { confirmations: 0 };
+      }
+      const tipRes = await fetch(`${ltcApiBase}/blocks/tip/height`);
+      if (!tipRes.ok) return null;
+      const tipHeight = Number((await tipRes.text()).trim());
+      if (!Number.isSafeInteger(tipHeight) || tipHeight < statusData.block_height) return null;
+      return { confirmations: tipHeight - statusData.block_height + 1, blockNumber: statusData.block_height };
     } catch (ltcErr) {
       console.warn(`LTC confirmation query error for ${txHash}:`, ltcErr);
       return null;
