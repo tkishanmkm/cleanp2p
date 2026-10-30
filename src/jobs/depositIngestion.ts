@@ -8,9 +8,15 @@ import {
 import { TRON_CONFIG, getTronWeb, isValidTronAddress } from '@/lib/blockchain/tron';
 import { normalizeDepositNetwork } from '@/lib/hd-derivation-engine';
 
-// Initialize Supabase admin client with service role
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL || 'https://eaiwgfxoiwxepinvcykg.supabase.co';
-const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'placeholder-key';
+// Financial ingestion must never fall back to a public/anonymous or placeholder credential.
+const supabaseUrl = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL;
+const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+
+if (!supabaseUrl || !supabaseKey) {
+  throw new Error(
+    'Deposit ingestion configuration error: SUPABASE_URL (or NEXT_PUBLIC_SUPABASE_URL) and SUPABASE_SERVICE_ROLE_KEY are required.'
+  );
+}
 
 export const supabaseAdmin = createClient(supabaseUrl, supabaseKey, {
   auth: {
