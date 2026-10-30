@@ -51,14 +51,17 @@ export async function pauseAllAds(adminId: string, adminEmail: string): Promise<
     }
 
     // Also update advertisements table if any active
-    await supabase
+    const { error: legacyAdsError } = await supabase
       .from("advertisements")
       .update({
         status: "GLOBAL_PAUSED",
         is_active: false,
       })
-      .eq("is_active", true)
-      .catch(() => {});
+      .eq("is_active", true);
+
+    if (legacyAdsError && legacyAdsError.code !== 'PGRST205') {
+      throw new Error(`Failed to pause legacy advertisements: ${legacyAdsError.message}`);
+    }
 
     // Save timestamp in system_settings
     await supabase
