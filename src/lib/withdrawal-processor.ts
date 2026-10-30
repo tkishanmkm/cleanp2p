@@ -450,7 +450,8 @@ export async function processEvmWithdrawalOnChain(
 
   // Settle via authoritative complete_onchain_withdrawal RPC
   try {
-    const gasAsset = (withdrawal.network_code || '').toUpperCase().includes('BEP') || (withdrawal.network_code || '').toUpperCase().includes('BSC') ? 'BNB' : 'ETH';
+    const networkCode = String(withdrawal.network || '').toUpperCase();
+    const gasAsset = networkCode.includes('BEP') || networkCode.includes('BSC') ? 'BNB' : 'ETH';
     await supabase.rpc('complete_onchain_withdrawal', {
       p_withdrawal_id: withdrawal.id,
       p_tx_hash: txResponse.hash,
@@ -504,7 +505,12 @@ export async function signAndBroadcast(withdrawal: WithdrawalRecord): Promise<st
 /**
  * Batch processor for pending approved withdrawals
  */
-export async function processPendingWithdrawals(limit: number = 20): Promise<ProcessWithdrawalsSummary> {
+export async function processPendingWithdrawals(_limit: number = 20): Promise<ProcessWithdrawalsSummary> {
+  // This legacy dispatcher re-queries already-processing rows and finalizes
+  // withdrawals immediately after broadcast. Disable it until it uses the same
+  // atomic claim + confirmation-aware state machine as src/jobs/withdrawalWorker.ts.
+  throw new Error('Legacy withdrawal processor is disabled. Use the confirmation-aware withdrawal worker.');
+  
   const supabaseAdmin = getSupabaseAdminClient();
 
   const { data: withdrawals, error: fetchError } = await supabaseAdmin
