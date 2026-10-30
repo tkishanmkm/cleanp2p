@@ -5,12 +5,6 @@ import { verifyServerAdmin } from '@/lib/server-admin-auth';
 
 export const dynamic = 'force-dynamic';
 
-function isApprovedText(val: any): boolean {
-  if (!val) return false;
-  const s = String(val).toLowerCase();
-  return s === 'approved' || s === 'passed' || s === 'completed' || s === 'true' || s === 'verified';
-}
-
 export async function GET(req: NextRequest) {
   return handleSync(req);
 }
