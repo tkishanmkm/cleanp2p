@@ -109,21 +109,46 @@ REVOKE UPDATE, DELETE
 -- Reputation counters are derived from canonical feedback rows. Update the
 -- profile as part of the same transaction as feedback insertion so the row and
 -- its aggregate cannot diverge after a partial API failure.
-CREATE OR REPLACE FUNCTION public.recalculate_feedback_reputation_after_insert()
+CREATE OR REPLACE FUNCTION public.recalculate_feedback_reputation()
 RETURNS trigger
 LANGUAGE plpgsql
 SECURITY DEFINER
 SET search_path = ''
 AS $function$
 DECLARE
+    v_reviewee_id uuid;
     v_positive integer;
     v_negative integer;
     v_total integer;
     v_score integer;
 BEGIN
-    IF NEW.reviewee_id IS NULL THEN
+    IF TG_OP = 'DELETE' THEN
+        v_reviewee_id := OLD.reviewee_id;
+    ELSE
+        v_reviewee_id := NEW.reviewee_id;
+    END IF;
+
+    IF v_reviewee_id IS NULL THEN
         RAISE EXCEPTION 'Feedback recipient is required.'
             USING ERRCODE = '23502';
+    END IF;
+
+    -- Serialize aggregate recalculation per recipient. Without this row lock,
+    -- concurrent inserts/deletes could each count a snapshot that excludes
+    -- another transaction and later overwrite the correct aggregate.
+    PERFORM 1
+    FROM public.profiles AS p
+    WHERE p.id = v_reviewee_id
+    FOR UPDATE;
+
+    IF NOT FOUND THEN
+        -- Deleting the recipient profile itself also cascades its feedback.
+        -- No aggregate remains to maintain once that profile is gone.
+        IF TG_OP = 'DELETE' THEN
+            RETURN OLD;
+        END IF;
+        RAISE EXCEPTION 'Feedback recipient profile is missing.'
+            USING ERRCODE = '23503';
     END IF;
 
     SELECT
@@ -131,7 +156,7 @@ BEGIN
         count(*) FILTER (WHERE f.is_positive IS FALSE)::integer
     INTO v_positive, v_negative
     FROM public.feedbacks AS f
-    WHERE f.reviewee_id = NEW.reviewee_id;
+    WHERE f.reviewee_id = v_reviewee_id;
 
     v_total := coalesce(v_positive, 0) + coalesce(v_negative, 0);
     v_score := CASE
@@ -144,26 +169,30 @@ BEGIN
         negative_feedback = coalesce(v_negative, 0),
         feedback_score = v_score,
         updated_at = pg_catalog.clock_timestamp()
-    WHERE id = NEW.reviewee_id;
+    WHERE id = v_reviewee_id;
 
-    IF NOT FOUND THEN
-        RAISE EXCEPTION 'Feedback recipient profile is missing.'
-            USING ERRCODE = '23503';
+    IF TG_OP = 'DELETE' THEN
+        RETURN OLD;
     END IF;
-
     RETURN NEW;
 END;
 $function$;
 
-ALTER FUNCTION public.recalculate_feedback_reputation_after_insert() OWNER TO postgres;
-REVOKE ALL ON FUNCTION public.recalculate_feedback_reputation_after_insert()
+ALTER FUNCTION public.recalculate_feedback_reputation() OWNER TO postgres;
+REVOKE ALL ON FUNCTION public.recalculate_feedback_reputation()
     FROM PUBLIC, anon, authenticated, service_role;
 
 DROP TRIGGER IF EXISTS feedbacks_recalculate_reputation_after_insert ON public.feedbacks;
 CREATE TRIGGER feedbacks_recalculate_reputation_after_insert
     AFTER INSERT ON public.feedbacks
     FOR EACH ROW
-    EXECUTE FUNCTION public.recalculate_feedback_reputation_after_insert();
+    EXECUTE FUNCTION public.recalculate_feedback_reputation();
+
+DROP TRIGGER IF EXISTS feedbacks_recalculate_reputation_after_delete ON public.feedbacks;
+CREATE TRIGGER feedbacks_recalculate_reputation_after_delete
+    AFTER DELETE ON public.feedbacks
+    FOR EACH ROW
+    EXECUTE FUNCTION public.recalculate_feedback_reputation();
 
 -- This legacy table has no application readers or writers. Retain the data for
 -- audit/history, but withdraw direct access until it is formally migrated.

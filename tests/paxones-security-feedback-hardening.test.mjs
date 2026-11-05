@@ -11,6 +11,9 @@ const newFeedbackApi = read('src/app/api/trades/[tradeId]/feedback/route.ts');
 const legacyFeedbackApi = read('src/app/api/trade/feedback/route.ts');
 const profile = read('src/app/profile/page.tsx');
 const tradeDetails = read('src/components/trade/trade-details.tsx');
+const tradeDisputeApi = read('src/app/api/trades/[tradeId]/dispute/route.ts');
+const adminHelpers = read('src/lib/admin.ts');
+const withdrawalsPage = read('src/app/adminnarayan/withdrawals/page.tsx');
 const moderatorPage = read('src/app/adminnarayan/trades/[tradeId]/page.tsx');
 
 test('SELL ads fail closed before the atomic BUY-ad RPC and never write marketplace rows directly', () => {
@@ -59,6 +62,21 @@ test('feedback UI uses the authenticated compatibility API and never reads or wr
   assert.doesNotMatch(tradeDetails, /\/api\/trade\/feedback\?[^'"]*userId=/);
 });
 
+test('participant dispute creation uses the verified server route, not browser table DML', () => {
+  assert.match(tradeDetails, /fetch\(\x60\/api\/trades\/\$\{encodeURIComponent\(trade\.id\)\}\/dispute\x60/);
+  assert.doesNotMatch(tradeDetails, /\.from\(['"]disputes['"]\)\s*\.insert/);
+  assert.match(tradeDisputeApi, /rpc\('raise_trade_dispute'/);
+  assert.match(tradeDisputeApi, /trade\.buyer_id !== user\.id && trade\.seller_id !== user\.id/);
+  assert.match(feedbackMigration, /REVOKE INSERT, UPDATE, DELETE[\s\S]+?ON TABLE public\.disputes[\s\S]+?FROM PUBLIC, anon, authenticated/);
+});
+
+test('revoked deposit table writes have no remaining legacy browser helpers', () => {
+  assert.doesNotMatch(adminHelpers, /\.from\(['"]deposits['"]\)\s*\.update/);
+  assert.doesNotMatch(adminHelpers, /function (approveDeposit|declineDeposit|approveWithdrawal|declineWithdrawal)\s*\(/);
+  assert.doesNotMatch(withdrawalsPage, /approveWithdrawal|declineWithdrawal/);
+  assert.match(feedbackMigration, /public\.deposits[\s\S]+?FROM PUBLIC, anon, authenticated/);
+});
+
 test('moderator chat reads and writes go through the verified server API only', () => {
   assert.match(moderatorPage, /\/api\/admin\/trades\//);
   assert.doesNotMatch(moderatorPage, /\.from\(["']trade_chat_messages["']\)/);
@@ -85,7 +103,10 @@ test('feedback INSERT is limited to a completed counterparty review; UPDATE and 
   assert.match(feedbackMigration, /GRANT INSERT ON TABLE public\.feedbacks TO authenticated/);
   assert.match(feedbackMigration, /REVOKE UPDATE, DELETE[\s\S]+?public\.feedbacks[\s\S]+?FROM PUBLIC, anon, authenticated/);
   assert.match(feedbackMigration, /REVOKE ALL PRIVILEGES[\s\S]+?public\.user_feedbacks[\s\S]+?FROM PUBLIC, anon, authenticated/);
-  assert.match(feedbackMigration, /recalculate_feedback_reputation_after_insert/);
+  assert.match(feedbackMigration, /recalculate_feedback_reputation\(\)/);
+  assert.match(feedbackMigration, /FROM public\.profiles AS p[\s\S]+?FOR UPDATE/);
+  assert.match(feedbackMigration, /TG_OP = 'DELETE'/);
   assert.match(feedbackMigration, /CREATE TRIGGER feedbacks_recalculate_reputation_after_insert/);
+  assert.match(feedbackMigration, /CREATE TRIGGER feedbacks_recalculate_reputation_after_delete/);
   assert.doesNotMatch(feedbackMigration, /GRANT (UPDATE|DELETE|ALL)[^;]*public\.feedbacks/i);
 });

@@ -165,7 +165,3 @@ END;
 $migration$;
 
 COMMIT;
-
-[executed on device: Kishan (c4aa9a86-57f1-4320-a86d-0513b6434d61)]
-
-[executed on device: Kishan (c4aa9a86-57f1-4320-a86d-0513b6434d61)]

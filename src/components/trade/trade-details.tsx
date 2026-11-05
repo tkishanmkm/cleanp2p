@@ -309,40 +309,20 @@ export function ReportIssueDialog({
 
     setIsSubmitting(true);
     try {
-      // 1. Insert into disputes/support table
-      await supabase.from('disputes').insert([
-        {
-          trade_id: trade.id,
-          opened_by: currentUserId,
-          reason: selectedIssue,
-          explanation: details.trim(),
-          status: 'open',
-          created_at: new Date().toISOString()
-        }
-      ]);
-
-      // 2. Post as system message into trade_messages
-      await insertPaxonesSystemMessage(supabase, {
-        tradeId: trade.id,
-        type: 'ISSUE_REPORTED',
-        openerUsername: currentUsername || 'Trader',
-        issueCategory: selectedIssue,
-        issueDetails: details.trim()
+      // Disputes are created by the canonical server route, which verifies
+      // trade participation and calls the actor-bound raise_trade_dispute RPC.
+      // Do not write to public.disputes or notifications from the browser.
+      const response = await fetch(`/api/trades/${encodeURIComponent(trade.id)}/dispute`, {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          reason: `${selectedIssue}\n\n${details.trim()}`,
+        }),
       });
-
-      // 3. Create notification for opponent
-      if (counterpartId) {
-        await supabase.from('notifications').insert([
-          {
-            user_id: counterpartId,
-            title: 'Issue Reported',
-            message: `@${currentUsername} filed an issue report for trade ${formatTradeId(trade.id)}: ${selectedIssue}`,
-            type: 'report',
-            metadata: { link: `/trade/${trade.id}` },
-            is_read: false,
-            created_at: new Date().toISOString()
-          }
-        ]);
+      const result = await response.json().catch(() => null);
+      if (!response.ok || result?.success !== true) {
+        throw new Error(result?.error || 'The dispute was not confirmed by the server.');
       }
 
       toast({
