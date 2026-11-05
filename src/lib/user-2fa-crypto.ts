@@ -1,3 +1,5 @@
+import 'server-only';
+
 import crypto from 'crypto';
 
 /**
@@ -22,9 +24,14 @@ function getUserEncryptionKey(): Buffer {
   } else if (cleanKey.length === 32) {
     // 32-character raw string (32 bytes)
     keyBuffer = Buffer.from(cleanKey, 'utf8');
-  } else {
-    // Base64 string
+  } else if (/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(cleanKey)) {
+    // Strict canonical Base64; Buffer.from accepts malformed input permissively.
     keyBuffer = Buffer.from(cleanKey, 'base64');
+    if (keyBuffer.toString('base64') !== cleanKey) {
+      throw new Error('USER_2FA_ENCRYPTION_KEY must be canonical Base64.');
+    }
+  } else {
+    throw new Error('USER_2FA_ENCRYPTION_KEY must be 64 hex characters, 32 UTF-8 bytes, or canonical Base64.');
   }
 
   if (keyBuffer.length !== 32) {
@@ -43,7 +50,12 @@ function getUserEncryptionKey(): Buffer {
 export function isEncryptedUserTOTPSecret(secret: string | null | undefined): boolean {
   if (!secret || typeof secret !== 'string') return false;
   const parts = secret.trim().split(':');
-  return parts.length === 5 && parts[0] === 'v1' && parts[1] === 'enc';
+  return parts.length === 5
+    && parts[0] === 'v1'
+    && parts[1] === 'enc'
+    && /^[0-9a-f]{24}$/i.test(parts[2])
+    && /^[0-9a-f]{32}$/i.test(parts[3])
+    && /^(?:[0-9a-f]{2})+$/i.test(parts[4]);
 }
 
 /**
@@ -54,9 +66,13 @@ export function encryptUserTOTPSecret(secret: string): string {
   if (!secret) return '';
   const cleanSecret = secret.trim();
 
-  // If already encrypted, return as is
-  if (isEncryptedUserTOTPSecret(cleanSecret)) {
-    return cleanSecret;
+  // Never re-encrypt malformed ciphertext-looking values as if they were plaintext.
+  if (cleanSecret.startsWith('v1:enc:')) {
+    if (isEncryptedUserTOTPSecret(cleanSecret)) return cleanSecret;
+    throw new Error('Stored user TOTP ciphertext has an invalid format.');
+  }
+  if (!/^[A-Z2-7]{16,128}={0,6}$/i.test(cleanSecret)) {
+    throw new Error('User TOTP secret is not a valid Base32 value.');
   }
 
   const key = getUserEncryptionKey();
@@ -79,8 +95,11 @@ export function decryptUserTOTPSecret(encryptedOrPlainSecret: string | null | un
   const cleanStr = encryptedOrPlainSecret.trim();
 
   if (!isEncryptedUserTOTPSecret(cleanStr)) {
-    // Legacy unencrypted Base32 secret string
-    return cleanStr;
+    // Retain compatibility with legacy plaintext Base32 secrets, but never
+    // reinterpret malformed ciphertext as plaintext and never pass arbitrary
+    // database text into the TOTP verifier.
+    if (cleanStr.startsWith('v1:enc:')) return '';
+    return /^[A-Z2-7]{16,128}={0,6}$/i.test(cleanStr) ? cleanStr.toUpperCase() : '';
   }
 
   try {
@@ -100,11 +119,95 @@ export function decryptUserTOTPSecret(encryptedOrPlainSecret: string | null | un
     let decrypted = decipher.update(ciphertext, 'hex', 'utf8');
     decrypted += decipher.final('utf8');
 
-    return decrypted;
-  } catch (err) {
-    console.error('Failed to decrypt User TOTP secret:', err);
+    if (!/^[A-Z2-7]{16,128}={0,6}$/i.test(decrypted)) return '';
+    return decrypted.toUpperCase();
+  } catch {
+    // Never log decrypted material or low-level crypto errors.
     return '';
   }
+}
+
+/**
+ * Ensures legacy user TOTP secrets are migrated to AES-256-GCM before use.
+ * The conditional UPDATE protects against overwriting a concurrent rotation;
+ * if another request wins, the current database value is re-read and verified.
+ */
+export async function ensureUserTOTPSecretEncrypted(
+  adminClient: any,
+  userId: string,
+  profile: { totp_secret?: string | null; two_factor_secret?: string | null; role?: string | null; is_admin?: boolean | null; is_admin_account?: boolean | null; admin_2fa_enabled?: boolean | null; admin_2fa_secret?: string | null },
+): Promise<string> {
+  if (!adminClient || !userId) throw new Error('User 2FA storage is unavailable.');
+
+  const currentSecret = profile.totp_secret || profile.two_factor_secret || '';
+  if (!currentSecret) return '';
+
+  const isAdminProfile = Boolean(
+    profile.is_admin ||
+    profile.is_admin_account ||
+    String(profile.role || '').toLowerCase() === 'admin' ||
+    profile.admin_2fa_enabled ||
+    Boolean(profile.admin_2fa_secret)
+  );
+  const mirrorLegacyColumn = !isAdminProfile;
+
+  const alreadyEncrypted = isEncryptedUserTOTPSecret(currentSecret);
+  if (currentSecret.startsWith('v1:enc:') && !alreadyEncrypted) {
+    throw new Error('Stored user TOTP ciphertext is malformed.');
+  }
+
+  const encryptedSecret = alreadyEncrypted ? currentSecret : encryptUserTOTPSecret(currentSecret);
+  if (!decryptUserTOTPSecret(encryptedSecret)) {
+    throw new Error('User TOTP secret could not be authenticated with the server encryption key.');
+  }
+
+  if (profile.totp_secret === encryptedSecret && (!mirrorLegacyColumn || profile.two_factor_secret === encryptedSecret)) {
+    return encryptedSecret;
+  }
+
+  const updateValues: Record<string, string> = { totp_secret: encryptedSecret };
+  if (mirrorLegacyColumn) updateValues.two_factor_secret = encryptedSecret;
+
+  let update = adminClient
+    .from('profiles')
+    .update(updateValues)
+    .eq('id', userId);
+
+  update = profile.totp_secret == null
+    ? update.is('totp_secret', null)
+    : update.eq('totp_secret', profile.totp_secret);
+  update = profile.two_factor_secret == null
+    ? update.is('two_factor_secret', null)
+    : update.eq('two_factor_secret', profile.two_factor_secret);
+
+  const { data: updatedRows, error: updateError } = await update.select('id');
+  if (updateError) {
+    console.error('[User 2FA] Legacy TOTP encryption migration failed:', updateError.code || 'database_error');
+    throw new Error('User 2FA secret could not be encrypted and saved.');
+  }
+  if (Array.isArray(updatedRows) && updatedRows.length === 1) return encryptedSecret;
+
+  // A concurrent rotation may have changed the row. Never use the stale value:
+  // read the latest encrypted secret and fail closed if it is missing or invalid.
+  const { data: latestProfile, error: latestError } = await adminClient
+    .from('profiles')
+    .select('totp_secret, two_factor_secret')
+    .eq('id', userId)
+    .maybeSingle();
+  if (latestError || !latestProfile) {
+    throw new Error('Current user 2FA secret could not be verified.');
+  }
+
+  const latestSecret = latestProfile.totp_secret || '';
+  if (
+    !latestSecret ||
+    (mirrorLegacyColumn && latestProfile.two_factor_secret !== latestSecret) ||
+    !isEncryptedUserTOTPSecret(latestSecret) ||
+    !decryptUserTOTPSecret(latestSecret)
+  ) {
+    throw new Error('User 2FA secret changed and could not be safely migrated.');
+  }
+  return latestSecret;
 }
 
 /**
@@ -129,24 +232,43 @@ export function generateUserRecoveryCodes(count: number = 8): string[] {
 }
 
 /**
- * Generates a SHA-256 hash of a normalized recovery code for secure database storage.
+ * Purpose-separated HMAC-SHA256 hash. Recovery codes are generated with
+ * cryptographic randomness; using a server-only pepper prevents offline
+ * verification after a recovery-code table dump.
  */
 export function hashUserRecoveryCode(code: string): string {
   const cleanCode = code.replace(/[\s-]+/g, '').toUpperCase().trim();
+  if (!/^[A-Z2-9]{8,64}$/.test(cleanCode)) {
+    throw new Error('Invalid user 2FA recovery code format.');
+  }
+  const key = Buffer.from(crypto.hkdfSync(
+    'sha256',
+    getUserEncryptionKey(),
+    Buffer.from('PAXONES_2FA_HKDF_SALT_V1', 'utf8'),
+    Buffer.from('PAXONES_USER_2FA_RECOVERY_HMAC_V1', 'utf8'),
+    32,
+  ));
+  return crypto.createHmac('sha256', key).update(cleanCode).digest('hex');
+}
+
+/** Legacy SHA-256 compatibility only; new code must never persist this form. */
+export function hashLegacyUserRecoveryCode(code: string): string {
+  const cleanCode = code.replace(/[\s-]+/g, '').toUpperCase().trim();
+  if (!/^[A-Z2-9]{8,64}$/.test(cleanCode)) return '';
   return crypto.createHash('sha256').update(cleanCode).digest('hex');
 }
 
-/**
- * Constant-time verification of a supplied recovery code against stored SHA-256 hash.
- */
+/** Constant-time verification supports legacy SHA-256 hashes during migration. */
 export function verifyUserRecoveryCode(inputCode: string, storedHash: string): boolean {
-  if (!inputCode || !storedHash) return false;
+  if (!inputCode || !/^[0-9a-f]{64}$/i.test(storedHash || '')) return false;
   try {
-    const inputHash = hashUserRecoveryCode(inputCode);
-    const bufA = Buffer.from(inputHash, 'hex');
-    const bufB = Buffer.from(storedHash.trim(), 'hex');
-    if (bufA.length !== bufB.length) return false;
-    return crypto.timingSafeEqual(bufA, bufB);
+    const normalized = inputCode.replace(/[\s-]+/g, '').toUpperCase().trim();
+    const candidates = [hashUserRecoveryCode(normalized), hashLegacyUserRecoveryCode(normalized)];
+    const stored = Buffer.from(storedHash, 'hex');
+    return candidates.some((hash) => {
+      const candidate = Buffer.from(hash, 'hex');
+      return candidate.length === stored.length && crypto.timingSafeEqual(candidate, stored);
+    });
   } catch {
     return false;
   }
@@ -159,52 +281,34 @@ export function verifyUserRecoveryCode(inputCode: string, storedHash: string): b
 export async function consumeUserRecoveryCodeAtomic(
   adminClient: any,
   userId: string,
-  rawCandidateCode: string
+  rawCandidateCode: string,
+  context = '2fa_verification'
 ): Promise<boolean> {
   if (!userId || !rawCandidateCode || typeof rawCandidateCode !== 'string') {
     return false;
   }
 
   const cleanCode = rawCandidateCode.replace(/[\s-]+/g, '').toUpperCase().trim();
-  if (cleanCode.length < 8) {
+  if (cleanCode.length < 8 || cleanCode.length > 64 || !/^[A-Z2-9]+$/.test(cleanCode)) {
     return false;
   }
 
   const codeHash = hashUserRecoveryCode(cleanCode);
+  const legacyCodeHash = hashLegacyUserRecoveryCode(cleanCode);
 
-  try {
-    // Primary: Call the atomic SECURITY DEFINER database function
-    const { data: rpcResult, error: rpcError } = await adminClient.rpc(
-      'consume_user_2fa_recovery_code',
-      {
-        p_user_id: userId,
-        p_code_hash: codeHash,
-      }
-    );
-
-    if (!rpcError && typeof rpcResult === 'boolean') {
-      return rpcResult;
-    }
-
-    // Fallback: Atomic conditional update if RPC is pending deployment
-    const now = new Date().toISOString();
-    const { data: updatedRows, error: updateErr } = await adminClient
-      .from('user_2fa_recovery_codes')
-      .update({ used_at: now })
-      .eq('user_id', userId)
-      .eq('code_hash', codeHash)
-      .is('used_at', null)
-      .is('invalidated_at', null)
-      .select('id');
-
-    if (updateErr || !updatedRows || updatedRows.length !== 1) {
-      return false;
-    }
-
-    return true;
-  } catch (err) {
-    console.error('Error during atomic recovery code consumption:', err);
-    return false;
+  const { data, error } = await adminClient.rpc('consume_user_2fa_recovery_code_with_audit', {
+    p_user_id: userId,
+    p_code_hash: codeHash,
+    p_legacy_code_hash: legacyCodeHash,
+    p_context: context,
+  });
+  if (error) {
+    console.error('[User 2FA] Atomic recovery-code consumption failed:', error.code || 'unknown');
+    throw new Error('Recovery-code verification is temporarily unavailable.');
   }
+  if (typeof data !== 'boolean') {
+    throw new Error('Recovery-code verification returned an invalid database response.');
+  }
+  return data;
 }
 

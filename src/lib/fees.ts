@@ -45,13 +45,16 @@ export async function getAuthoritativeAssetUsdPrice(cryptoCode: string): Promise
     const admin = getSupabaseAdminClient();
     const { data } = await admin
       .from('crypto_market_prices')
-      .select('price_in_fiat')
+      .select('price_in_fiat, updated_at')
       .eq('asset_symbol', asset)
       .eq('fiat_symbol', 'USD')
       .maybeSingle();
 
-    if (data && typeof data.price_in_fiat === 'number' && data.price_in_fiat > 0) {
-      return data.price_in_fiat;
+    const price = Number(data?.price_in_fiat);
+    const updatedAt = data?.updated_at ? Date.parse(data.updated_at) : NaN;
+    const ageMs = Date.now() - updatedAt;
+    if (Number.isFinite(price) && price > 0 && Number.isFinite(updatedAt) && ageMs >= -60_000 && ageMs <= 10 * 60_000) {
+      return price;
     }
   } catch {
     // Continue to live API
@@ -94,8 +97,9 @@ export async function getAuthoritativeAssetUsdPrice(cryptoCode: string): Promise
     }
   } catch {}
 
-  // Default fallback if unavailable
-  return 1.0;
+  // Never invent a $1 price for a volatile asset: that can understate withdrawal
+  // value and bypass server-side single/daily USD limits. Callers must fail closed.
+  throw new Error(`Authoritative USD price unavailable for ${asset}`);
 }
 
 /**
@@ -111,24 +115,23 @@ export async function calculateWithdrawalUsdEquivalent(asset: string, amount: nu
  * Fetches admin-configured withdrawal fee multiplier from platform_settings
  */
 export async function getAdminFeeMultiplier(): Promise<number> {
-  try {
-    const admin = getSupabaseAdminClient();
-    const { data: settings } = await admin
-      .from('platform_settings')
-      .select('withdrawal_fee_multiplier')
-      .eq('id', 1)
-      .maybeSingle();
+  const admin = getSupabaseAdminClient();
+  const { data: settings, error } = await admin
+    .from('platform_settings')
+    .select('withdrawal_fee_multiplier')
+    .eq('id', 1)
+    .maybeSingle();
 
-    if (settings?.withdrawal_fee_multiplier) {
-      const multiplier = Number(settings.withdrawal_fee_multiplier);
-      if (!isNaN(multiplier) && multiplier > 0) {
-        return multiplier;
-      }
-    }
-  } catch {
-    // Default fallback
+  if (error || !settings) {
+    throw new Error('Authoritative withdrawal fee multiplier is unavailable.');
   }
-  return 2.0;
+
+  const multiplier = Number(settings.withdrawal_fee_multiplier);
+  if (!Number.isFinite(multiplier) || multiplier < 1 || multiplier > 10) {
+    throw new Error('Configured withdrawal fee multiplier is invalid.');
+  }
+
+  return multiplier;
 }
 
 /**
@@ -145,7 +148,11 @@ export async function resolveAuthoritativeWithdrawalFee(
   const normAsset = (asset || 'USDT').toUpperCase().trim();
   const normNet = (network || '').toUpperCase().trim();
 
-  const multiplier = explicitMultiplier !== undefined && explicitMultiplier > 0
+  if (explicitMultiplier !== undefined &&
+      (!Number.isFinite(explicitMultiplier) || explicitMultiplier < 1 || explicitMultiplier > 10)) {
+    throw new Error('Explicit withdrawal fee multiplier is invalid.');
+  }
+  const multiplier = explicitMultiplier !== undefined
     ? explicitMultiplier
     : await getAdminFeeMultiplier();
 
@@ -155,14 +162,21 @@ export async function resolveAuthoritativeWithdrawalFee(
 
   let baseNetworkFeeCrypto = 0;
 
-  if (gasMetric && gasMetric.estimated_fee_native > 0) {
+  if (
+    gasMetric &&
+    Number.isFinite(gasMetric.estimated_fee_native) && gasMetric.estimated_fee_native > 0 &&
+    Number.isFinite(gasMetric.estimated_fee_usd) && gasMetric.estimated_fee_usd > 0
+  ) {
     if (normAsset === 'USDT') {
       // For token withdrawals, convert native gas expense to USDT units
       // E.g., TRC20 consumes TRX, ERC20 consumes ETH, BEP20 consumes BNB
-      const feeUsd = gasMetric.estimated_fee_usd || 1.5;
-      baseNetworkFeeCrypto = feeUsd; // 1 USDT = $1 USD
+      const feeUsd = gasMetric.estimated_fee_usd;
+      // gas-oracle estimates already include a 2x buffer for display. Remove that
+      // buffer here so the configured multiplier is applied exactly once below.
+      baseNetworkFeeCrypto = feeUsd / 2.0; // 1 USDT = $1 USD
     } else {
-      baseNetworkFeeCrypto = gasMetric.estimated_fee_native;
+      // Native gas-oracle estimates also already include a 2x buffer.
+      baseNetworkFeeCrypto = gasMetric.estimated_fee_native / 2.0;
     }
   } else {
     // Canonical baseline gas costs per network if oracle unreachable

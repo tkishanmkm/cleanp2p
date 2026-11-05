@@ -3,34 +3,38 @@ import { cookies } from 'next/headers';
 import { createServerClient } from '@supabase/ssr';
 import { createClient as createSupabaseClient } from '@supabase/supabase-js';
 import { getOrDeriveUserDepositAddresses } from '@/lib/hd-derivation-engine';
+import { getSupabaseAdminClient } from '@/lib/supabase/server';
 
 export const dynamic = 'force-dynamic';
 
-function getAdminClient() {
-  const supabaseUrl =
-    process.env.NEXT_PUBLIC_SUPABASE_URL ||
-    process.env.SUPABASE_URL ||
-    'https://eaiwgfxoiwxepinvcykg.supabase.co';
+function getAuthClient() {
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL;
+  if (!supabaseUrl || !supabaseUrl.startsWith('https://') || supabaseUrl.includes('placeholder')) {
+    throw new Error('A valid Supabase HTTPS URL is required');
+  }
 
-  const serviceRoleKey =
-    process.env.SUPABASE_SERVICE_ROLE_KEY ||
+  const anonKey =
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ||
-    'placeholder-key';
+    process.env.SUPABASE_ANON_KEY;
 
-  return createSupabaseClient(supabaseUrl, serviceRoleKey, {
-    auth: { persistSession: false, autoRefreshToken: false },
+  if (!anonKey) {
+    throw new Error('Supabase public authentication key is not configured');
+  }
+
+  return createSupabaseClient(supabaseUrl, anonKey, {
+    auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
   });
 }
 
 async function resolveAuthenticatedUserId(req: NextRequest): Promise<string | null> {
-  const adminClient = getAdminClient();
+  const authClient = getAuthClient();
 
   // 1. Check Bearer Authorization Header
   const authHeader = req.headers.get('authorization');
   if (authHeader && authHeader.startsWith('Bearer ')) {
     const token = authHeader.replace(/^Bearer\s+/i, '').trim();
     try {
-      const { data, error } = await adminClient.auth.getUser(token);
+      const { data, error } = await authClient.auth.getUser(token);
       if (!error && data?.user?.id) {
         return data.user.id;
       }
@@ -43,8 +47,8 @@ async function resolveAuthenticatedUserId(req: NextRequest): Promise<string | nu
   const supabaseUrl =
     process.env.NEXT_PUBLIC_SUPABASE_URL ||
     process.env.SUPABASE_URL ||
-    'https://eaiwgfxoiwxepinvcykg.supabase.co';
-  const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
+    '';
+  const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY || '';
 
   if (supabaseUrl && supabaseAnonKey) {
     try {
@@ -98,7 +102,7 @@ export async function POST(req: NextRequest) {
     }
 
     const targetUserId = authenticatedUserId;
-    const adminClient = getAdminClient();
+    const adminClient = getSupabaseAdminClient();
 
     // 3. Inspect existing profile to verify wallet_index presence (Task 4)
     const { data: profile, error: profileErr } = await adminClient

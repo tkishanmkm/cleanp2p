@@ -1,6 +1,12 @@
 {
   "extends": "next/core-web-vitals",
+  "plugins": ["security"],
   "rules": {
-    "react/no-unescaped-entities": "off"
+    "react/no-unescaped-entities": "off",
+    "security/detect-eval-with-expression": "error",
+    "security/detect-unsafe-regex": "warn",
+    "security/detect-child-process": "warn",
+    "security/detect-non-literal-fs-filename": "warn",
+    "security/detect-object-injection": "warn"
   }
 }

@@ -264,7 +264,7 @@ export default function AdminAdsPage() {
                   <CardContent className="text-sm space-y-2">
                     <div className="flex justify-between">
                       <span className="text-muted-foreground">User</span>
-                      <span className="font-medium">{ad.user.username}</span>
+                      <span className="font-medium">{ad.user?.username || 'Unknown user'}</span>
                     </div>
                     <div className="flex justify-between">
                       <span className="text-muted-foreground">Price</span>

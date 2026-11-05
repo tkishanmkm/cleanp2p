@@ -35,22 +35,25 @@ export async function POST(req: NextRequest) {
     const authHeader = req.headers.get('authorization');
 
     let isAuthorized = false;
+    let authenticatedUserId: string | null = null;
 
     if (configuredSecret && providedSecret === configuredSecret) {
       isAuthorized = true;
     } else if (authHeader && authHeader.startsWith('Bearer ')) {
-      const token = authHeader.replace('Bearer ', '').trim();
+      const token = authHeader.slice('Bearer '.length).trim();
       try {
         const supabaseAdmin = getSupabaseAdminClient();
         const { data: userData, error: authError } = await supabaseAdmin.auth.getUser(token);
-        if (!authError && userData?.user) {
+        if (!authError && userData?.user?.id) {
+          authenticatedUserId = userData.user.id;
           isAuthorized = true;
         }
       } catch {
         isAuthorized = false;
       }
-    } else if (process.env.NODE_ENV === 'development' || !configuredSecret) {
-      // In local dev without configured secrets, allow standard internal calls
+    } else if (process.env.NODE_ENV === 'development' && !configuredSecret) {
+      // Local development only. Production requests must present a service key
+      // or a valid user session that is bound to its own userId below.
       isAuthorized = true;
     }
 
@@ -64,6 +67,16 @@ export async function POST(req: NextRequest) {
     // 2. Parse request payload
     const body = await req.json().catch(() => ({}));
     const userId = body?.userId || body?.user_id;
+
+    // A user session may provision only that same user's address. Queue/batch
+    // processing is service-only; a normal authenticated account is not a worker.
+    if (authenticatedUserId && (!userId || String(userId) !== authenticatedUserId)) {
+      return NextResponse.json(
+        { error: 'Forbidden: user sessions may provision addresses only for their own account.' },
+        { status: 403 }
+      );
+    }
+
     const crypto = (body?.crypto || body?.asset || body?.asset_code || body?.cryptoCode || '')
       .toString()
       .trim()

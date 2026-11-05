@@ -33,6 +33,7 @@ import { createClient } from '@/lib/supabase/client';
 import { formatDistanceToNow } from 'date-fns';
 import { cn } from '@/lib/utils';
 import { BtcLogo, EthLogo, LtcLogo, UsdtLogo } from '@/components/icons';
+import { useI18n } from '@/context/i18n-context';
 
 export function MiniCoinIcon({ symbol, className }: { symbol: string; className?: string }) {
   const s = (symbol || '').toUpperCase();
@@ -118,6 +119,7 @@ function parseActivityMeta(title?: string, message?: string) {
 }
 
 export function NotificationBell() {
+  const { t } = useI18n();
   const { notifications, unreadCount, markAsRead, markAllAsRead } = useNotifications();
   const { user } = useAuth();
   const [activeTab, setActiveTab] = useState<'activity' | 'recent_trades'>('activity');
@@ -152,7 +154,7 @@ export function NotificationBell() {
           let profileMap: Record<string, any> = {};
           if (partnerIds.length > 0) {
             const { data: profiles } = await supabase
-              .from('profiles')
+              .from('public_profiles')
               .select('id, username, display_name, avatar_url, photo_url')
               .in('id', partnerIds);
 
@@ -507,7 +509,14 @@ export function NotificationBell() {
               </div>
             ) : (
               notifications.map((n) => {
-                const meta = parseActivityMeta(n.title, n.message);
+                const notificationCode = String((n as any)?.metadata?.code || '');
+                const localizedTitle = notificationCode === 'AD_AUTO_PAUSED_OFFLINE'
+                  ? t('tradeChat.adAutoPausedOfflineTitle')
+                  : n.title;
+                const localizedMessage = notificationCode === 'AD_AUTO_PAUSED_OFFLINE'
+                  ? t('tradeChat.adAutoPausedOffline')
+                  : n.message;
+                const meta = parseActivityMeta(localizedTitle, localizedMessage);
                 let timeAgo = '';
                 try {
                   timeAgo = formatDistanceToNow(new Date(n.createdAt), { addSuffix: true });
@@ -537,7 +546,7 @@ export function NotificationBell() {
                       <div className="flex items-center justify-between gap-1">
                         <div className="flex items-center gap-1.5 flex-wrap">
                           <span className="font-semibold text-xs text-slate-900 dark:text-white">
-                            {n.title || 'System Notification'}
+                            {localizedTitle || 'System Notification'}
                           </span>
                           {meta.coinSymbol && (
                             <span className={cn('text-[10px] font-bold px-1.5 py-0.2 rounded border flex items-center gap-1', meta.badgeColor)}>
@@ -549,7 +558,7 @@ export function NotificationBell() {
                         <span className="text-[10px] text-slate-400 dark:text-slate-500 whitespace-nowrap">{timeAgo}</span>
                       </div>
                       <p className="text-xs text-slate-600 dark:text-slate-300 mt-0.5 leading-relaxed line-clamp-2">
-                        {n.message}
+                        {localizedMessage}
                       </p>
                     </div>
 

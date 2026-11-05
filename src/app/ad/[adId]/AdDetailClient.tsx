@@ -4,8 +4,10 @@ import React, { useState, useEffect } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import UserAvatar from '@/components/common/UserAvatar'
-import { getPresenceStatus, formatJoinedDate, usePresenceStatus, resolveUserLastSeen } from '@/lib/presence'
+import { usePresenceStatus } from '@/lib/presence'
+import { useI18n } from '@/context/i18n-context'
 import { createTradeOrderWithEscrow } from '@/app/ad/actions'
+import { usePlatformFeeSettings } from '@/hooks/use-platform-fees'
 
 interface AdDetailClientProps {
   ad: any
@@ -82,29 +84,19 @@ const getFiatFlagUrl = (fiat: string): string => {
 
 export default function AdDetailClient({ ad, advertiser, stats }: AdDetailClientProps) {
   const router = useRouter()
+  const { t, language } = useI18n()
   const [fiatInput, setFiatInput] = useState<string>('')
   const [cryptoInput, setCryptoInput] = useState<string>('')
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false)
   const [errorMsg, setErrorMsg] = useState<string | null>(null)
-  const [idempotencyKey, setIdempotencyKey] = useState<string>(() => {
-    if (typeof window !== 'undefined' && window.sessionStorage) {
-      const cleanAdId = String(ad.public_ad_id || ad.public_id || ad.id || '').replace(/^#/, '').trim();
-      const existing = window.sessionStorage.getItem(`pax_p2p_idemp_${cleanAdId}`);
-      if (existing && existing.length >= 8) return existing;
-      const fresh = (typeof crypto !== 'undefined' && crypto.randomUUID) ? crypto.randomUUID() : 'idemp_' + Math.random().toString(36).substring(2);
-      window.sessionStorage.setItem(`pax_p2p_idemp_${cleanAdId}`, fresh);
-      return fresh;
-    }
-    return (typeof crypto !== 'undefined' && crypto.randomUUID) ? crypto.randomUUID() : 'idemp_' + Math.random().toString(36).substring(2);
-  })
-
+  const { fees: platformFees, isLoading: isFeeSettingsLoading, error: feeSettingsError } = usePlatformFeeSettings()
   // Asset & Currency Normalization
   const asset = (ad.asset_symbol || ad.asset || ad.crypto || ad.crypto_symbol || ad.cryptoSymbol || ad.coin || ad.crypto_currency || 'BTC').toUpperCase()
   const fiatCurrency = (ad.fiat_symbol || ad.fiat_currency || ad.fiatCurrency || ad.fiat || ad.currency || 'USD').toUpperCase()
   const unitPrice = parseFloat(ad.price || ad.unit_price || ad.fixed_rate || ad.fixedRate || '0')
   const rawSide = String(ad.trade_type || ad.type || ad.side || ad.ad_type || ad.adType || '').toUpperCase()
   const isAdvertiserBuyer = rawSide === 'BUY' || rawSide === 'ONLINE_BUY' || rawSide.includes('BUY')
-  const ESCROW_FEE_RATE = 0.015 // 1.5% Escrow Fee
+  const ESCROW_FEE_RATE = platformFees ? platformFees.escrowFeePercent / 100 : 0
 
   const presence = usePresenceStatus(advertiser, 15000)
 
@@ -150,39 +142,100 @@ export default function AdDetailClient({ ad, advertiser, stats }: AdDetailClient
   }
 
   const formatSeconds = (seconds?: number) => {
-    if (!seconds || seconds === 0) return 'N/A'
-    if (seconds < 60) return `${Math.round(seconds)} sec`
-    return `${(seconds / 60).toFixed(1)} min`
+    if (!seconds || seconds === 0) return t('adDetailPage.notAvailable')
+    if (seconds < 60) return t('adDetailPage.seconds').replace('{count}', String(Math.round(seconds)))
+    return t('adDetailPage.minutesShort').replace('{count}', (seconds / 60).toFixed(1))
+  }
+
+  const localizedPresenceLabel = presence.isOnline
+    ? t('p2pAdCard.online')
+    : presence.label === 'Offline'
+      ? t('p2pAdCard.offline')
+      : (() => {
+          const match = presence.label.match(/^Last seen (\d+)(m|h|d) ago$/)
+          if (!match) return presence.label
+          const key = match[2] === 'm' ? 'lastSeenMinutes' : match[2] === 'h' ? 'lastSeenHours' : 'lastSeenDays'
+          return t('p2pAdCard.' + key).replace('{count}', match[1])
+        })()
+
+  const localizedJoinedDate = (createdAt?: string | null) => {
+    if (!createdAt) return t('p2pAdCard.joinedRecently')
+    const created = new Date(createdAt)
+    if (Number.isNaN(created.getTime())) return t('p2pAdCard.joinedRecently')
+    const diffInDays = Math.floor((Date.now() - created.getTime()) / (1000 * 3600 * 24))
+    if (diffInDays < 1) return t('p2pAdCard.joinedToday')
+    if (diffInDays === 1) return t('p2pAdCard.joinedDays').replace('{count}', '1')
+    if (diffInDays < 30) return t('p2pAdCard.joinedDays').replace('{count}', diffInDays.toLocaleString(language))
+    const diffInMonths = Math.floor(diffInDays / 30)
+    if (diffInMonths < 12) return t('p2pAdCard.joinedMonths').replace('{count}', diffInMonths.toLocaleString(language))
+    const diffInYears = Math.floor(diffInDays / 365)
+    return t('p2pAdCard.joinedYears').replace('{count}', diffInYears.toLocaleString(language))
   }
 
   const handleInitiateTrade = async () => {
     setErrorMsg(null)
+    if (isFeeSettingsLoading || !platformFees) {
+      setErrorMsg(feeSettingsError || t('adDetailPage.feeSettingsUnavailable'))
+      return
+    }
+    if (!Number.isFinite(unitPrice) || unitPrice <= 0) {
+      setErrorMsg(t('adDetailPage.invalidPrice'))
+      return
+    }
     const fiatVal = parseFloat(fiatInput)
-    const minLimit = Number(ad.min_limit || 0)
-    const maxLimit = Number(ad.max_limit || 99999999)
+    const minLimit = Number(ad.min_limit ?? ad.min_amount ?? 0)
+    const maxLimit = Number(ad.max_limit ?? ad.max_amount ?? 0)
+
+    if (isNaN(minLimit) || minLimit <= 0 || isNaN(maxLimit) || maxLimit < minLimit) {
+      setErrorMsg(t('adDetailPage.invalidLimits'))
+      return
+    }
 
     if (isNaN(fiatVal) || fiatVal <= 0) {
-      setErrorMsg('Please enter a valid trade amount.')
+      setErrorMsg(t('adDetailPage.invalidAmount'))
+      return
+    }
+
+    if (fiatCurrency === 'USD' && fiatVal < platformFees.minTradeAmount) {
+      setErrorMsg(t('adDetailPage.minimumTrade').replace('{amount}', platformFees.minTradeAmount.toLocaleString(language)))
       return
     }
 
     if (fiatVal < minLimit || fiatVal > maxLimit) {
-      setErrorMsg(`Amount must be between ${minLimit.toLocaleString()} and ${maxLimit.toLocaleString()} ${fiatCurrency}.`)
+      setErrorMsg(t('adDetailPage.amountRange').replace('{min}', minLimit.toLocaleString(language)).replace('{max}', maxLimit.toLocaleString(language)).replace('{currency}', fiatCurrency))
       return
     }
 
     if (paymentMethods.length > 1 && !selectedPaymentMethod) {
-      setErrorMsg('Please select a payment method for this trade.')
+      setErrorMsg(t('adDetailPage.selectPaymentMethodError'))
       return
     }
 
     setIsSubmitting(true)
     try {
       const cleanAdId = String(ad.public_ad_id || ad.public_id || ad.id || '').replace(/^#/, '').trim()
+      const paymentMethod = selectedPaymentMethod || paymentMethods[0] || 'Bank Transfer'
+      // Reuse the same key for retries of the same request, but generate a
+      // different key when the amount or payment method changes.
+      const idempotencyStorageKey = `pax_p2p_idemp_${cleanAdId}_${encodeURIComponent(String(fiatVal))}_${encodeURIComponent(paymentMethod)}`
+      let idempotencyKey = ''
+      if (typeof window !== 'undefined' && window.sessionStorage) {
+        idempotencyKey = window.sessionStorage.getItem(idempotencyStorageKey) || ''
+        if (!idempotencyKey || idempotencyKey.length < 8) {
+          idempotencyKey = (typeof crypto !== 'undefined' && crypto.randomUUID)
+            ? crypto.randomUUID()
+            : 'idemp_' + Math.random().toString(36).substring(2)
+          window.sessionStorage.setItem(idempotencyStorageKey, idempotencyKey)
+        }
+      } else {
+        idempotencyKey = (typeof crypto !== 'undefined' && crypto.randomUUID)
+          ? crypto.randomUUID()
+          : 'idemp_' + Math.random().toString(36).substring(2)
+      }
       const res = await createTradeOrderWithEscrow({
         adId: cleanAdId,
         fiatAmount: fiatVal,
-        paymentMethod: selectedPaymentMethod || paymentMethods[0] || 'Bank Transfer',
+        paymentMethod,
         idempotencyKey,
       })
       if (res.error) {
@@ -192,17 +245,17 @@ export default function AdDetailClient({ ad, advertiser, stats }: AdDetailClient
       }
       if (res.data?.orderId) {
         if (typeof window !== 'undefined' && window.sessionStorage) {
-          window.sessionStorage.removeItem(`pax_p2p_idemp_${cleanAdId}`);
+          window.sessionStorage.removeItem(idempotencyStorageKey);
         }
         router.push(`/trade/${res.data.orderId}`)
       } else {
         if (typeof window !== 'undefined' && window.sessionStorage) {
-          window.sessionStorage.removeItem(`pax_p2p_idemp_${cleanAdId}`);
+          window.sessionStorage.removeItem(idempotencyStorageKey);
         }
         router.push('/trade')
       }
     } catch (err: any) {
-      setErrorMsg(err?.message || 'An unexpected error occurred.')
+      setErrorMsg(err?.message || t('adDetailPage.unexpectedError'))
       setIsSubmitting(false)
     }
   }
@@ -216,7 +269,7 @@ export default function AdDetailClient({ ad, advertiser, stats }: AdDetailClient
             href="/buy" 
             className="text-xs text-neutral-500 hover:text-neutral-800 dark:hover:text-neutral-200 flex items-center gap-1 transition-colors"
           >
-            ← Back to Marketplace
+            ← {t('adDetailPage.backToMarketplace')}
           </Link>
           <div className="flex items-center gap-3 mt-2">
             <UserAvatar 
@@ -235,19 +288,19 @@ export default function AdDetailClient({ ad, advertiser, stats }: AdDetailClient
               />
               <h1 className="text-xl sm:text-2xl font-bold tracking-tight">
                 {isAdvertiserBuyer 
-                  ? `Sell ${asset} to `
-                  : `Buy ${asset} from `}
+                  ? `${t('adDetailPage.headerSellTo').replace('{asset}', asset)} `
+                  : `${t('adDetailPage.headerBuyFrom').replace('{asset}', asset)} `}
                 <Link
-                  href={`/users/${advertiser?.username || 'Trader'}`}
+                  href={`/users/${advertiser?.username || t('counterpartyPanel.fallbackTrader')}`}
                   className="hover:underline text-primary"
                 >
-                  @{advertiser?.username || 'Trader'}
+                  @{advertiser?.username || t('counterpartyPanel.fallbackTrader')}
                 </Link>
               </h1>
             </div>
           </div>
           <p className="text-xs text-neutral-500 dark:text-neutral-400 mt-1">
-            Ad ID: <span className="font-mono">{ad.id}</span> • Protected by PaxOnes Escrow
+            {t('tradeInitiation.adId')} <span className="font-mono">{ad.id}</span> • {t('adDetailPage.escrowProtected')}
           </p>
         </div>
 
@@ -259,10 +312,10 @@ export default function AdDetailClient({ ad, advertiser, stats }: AdDetailClient
               alt={fiatCurrency}
               className="w-4 h-3 object-cover rounded-xs border border-neutral-300 dark:border-neutral-600 shadow-xs"
             />
-            <span>{fiatCurrency} Unit Price</span>
+            <span>{fiatCurrency} {t('adDetailPage.unitPrice')}</span>
           </div>
           <span className="text-2xl font-extrabold text-blue-600 dark:text-blue-400 tracking-tight">
-            {unitPrice.toLocaleString()} {fiatCurrency}/{asset}
+            {unitPrice.toLocaleString(language)} {fiatCurrency}/{asset}
           </span>
         </div>
       </div>
@@ -272,7 +325,7 @@ export default function AdDetailClient({ ad, advertiser, stats }: AdDetailClient
         <div className="lg:col-span-2 space-y-6">
           <div className="p-5 sm:p-6 rounded-2xl border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 shadow-sm space-y-4">
             <h2 className="text-base font-semibold text-neutral-800 dark:text-neutral-200">
-              Enter Trade Amount
+              {t('adDetailPage.amountHeading')}
             </h2>
 
             {errorMsg && (
@@ -285,7 +338,7 @@ export default function AdDetailClient({ ad, advertiser, stats }: AdDetailClient
               {/* Pay/Sell Input */}
               <div>
                 <label className="block text-xs font-medium text-neutral-500 dark:text-neutral-400 mb-1">
-                  {isAdvertiserBuyer ? `I Want to Sell (${asset})` : `I Want to Pay (${fiatCurrency})`}
+                  {isAdvertiserBuyer ? t('adDetailPage.sellAmount').replace('{asset}', asset) : t('adDetailPage.payAmount').replace('{fiat}', fiatCurrency)}
                 </label>
                 <div className="relative flex items-center">
                   <input
@@ -318,7 +371,7 @@ export default function AdDetailClient({ ad, advertiser, stats }: AdDetailClient
               {/* Receive Input */}
               <div>
                 <label className="block text-xs font-medium text-neutral-500 dark:text-neutral-400 mb-1">
-                  {isAdvertiserBuyer ? `I Will Receive (${fiatCurrency})` : `I Will Receive (${asset})`}
+                  {t('adDetailPage.receiveAmount').replace('{currency}', isAdvertiserBuyer ? fiatCurrency : asset)}
                 </label>
                 <div className="relative flex items-center">
                   <input
@@ -352,7 +405,7 @@ export default function AdDetailClient({ ad, advertiser, stats }: AdDetailClient
               {paymentMethods.length > 1 && (
                 <div>
                   <label className="block text-xs font-medium text-neutral-500 dark:text-neutral-400 mb-1">
-                    Select Payment Method <span className="text-red-500">*</span>
+                    {t('adDetailPage.selectPaymentMethod')} <span className="text-red-500">*</span>
                   </label>
                   <select
                     value={selectedPaymentMethod}
@@ -371,35 +424,35 @@ export default function AdDetailClient({ ad, advertiser, stats }: AdDetailClient
               {/* Escrow Fee Breakdown */}
               <div className="p-4 bg-blue-50/60 dark:bg-blue-950/30 border border-blue-200/60 dark:border-blue-900/40 rounded-xl text-xs space-y-2 font-mono">
                 <div className="flex justify-between text-neutral-700 dark:text-neutral-300">
-                  <span>Trade Amount:</span>
-                  <span className="font-bold">{cryptoNum.toFixed(4)} {asset}</span>
+                  <span>{t('adDetailPage.tradeAmount')}</span>
+                  <span className="font-bold">{cryptoNum.toLocaleString(language, { minimumFractionDigits: 4, maximumFractionDigits: 4 })} {asset}</span>
                 </div>
                 <div className="flex justify-between text-neutral-700 dark:text-neutral-300">
-                  <span>Escrow Fee (1.5%):</span>
-                  <span className="font-bold">{escrowFeeCrypto.toFixed(4)} {asset}</span>
+                  <span>{t('adDetailPage.escrowFee').replace('{rate}', platformFees ? platformFees.escrowFeePercent.toFixed(2) : '—')}</span>
+                  <span className="font-bold">{escrowFeeCrypto.toLocaleString(language, { minimumFractionDigits: 4, maximumFractionDigits: 4 })} {asset}</span>
                 </div>
                 <div className="flex justify-between font-semibold text-blue-900 dark:text-blue-300 border-t pt-1">
-                  <span>Total Locked from Wallet:</span>
-                  <span className="font-bold">{totalSellerLock.toFixed(4)} {asset}</span>
+                  <span>{t('adDetailPage.totalLockedWallet')}</span>
+                  <span className="font-bold">{totalSellerLock.toLocaleString(language, { minimumFractionDigits: 4, maximumFractionDigits: 4 })} {asset}</span>
                 </div>
                 <div className="flex justify-between text-emerald-600 dark:text-emerald-400 font-medium pt-0.5">
-                  <span>Net Received by Buyer:</span>
-                  <span className="font-bold">{netReceivedCrypto.toFixed(4)} {asset}</span>
+                  <span>{t('adDetailPage.netReceivedBuyer')}</span>
+                  <span className="font-bold">{netReceivedCrypto.toLocaleString(language, { minimumFractionDigits: 4, maximumFractionDigits: 4 })} {asset}</span>
                 </div>
               </div>
 
               <div className="flex flex-wrap justify-between text-xs text-neutral-500 dark:text-neutral-400 px-1 gap-2">
-                <span>Order Limits: <strong>{ad.min_limit} – {ad.max_limit} {fiatCurrency}</strong></span>
-                <span>Payment Window: <strong>{ad.payment_window_minutes || ad.payment_window || 30} Mins</strong></span>
+                <span>{t('adDetailPage.orderLimits')} <strong>{Number(ad.min_limit).toLocaleString(language)} – {Number(ad.max_limit).toLocaleString(language)} {fiatCurrency}</strong></span>
+                <span>{t('adDetailPage.paymentWindow')} <strong>{ad.payment_window_minutes || ad.payment_window || 30} {t('adDetailPage.minutes')}</strong></span>
               </div>
 
               <button
                 type="button"
                 onClick={handleInitiateTrade}
-                disabled={isSubmitting}
+                disabled={isSubmitting || isFeeSettingsLoading || !platformFees || unitPrice <= 0}
                 className="w-full py-3.5 px-4 bg-blue-600 hover:bg-blue-700 active:bg-blue-800 disabled:opacity-50 text-white font-bold rounded-xl shadow-md transition-all active:scale-[0.99] cursor-pointer"
               >
-                {isSubmitting ? 'Initiating Escrow Trade...' : (isAdvertiserBuyer ? `Sell ${asset} Now` : `Buy ${asset} Now`)}
+                {isSubmitting ? t('adDetailPage.initiatingTrade') : isFeeSettingsLoading ? t('adDetailPage.loadingFees') : (isAdvertiserBuyer ? t('adDetailPage.sellNow').replace('{asset}', asset) : t('adDetailPage.buyNow').replace('{asset}', asset))}
               </button>
             </div>
           </div>
@@ -408,7 +461,7 @@ export default function AdDetailClient({ ad, advertiser, stats }: AdDetailClient
           <div className="p-5 sm:p-6 rounded-2xl border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 shadow-sm space-y-4">
             <div className="flex items-center justify-between">
               <h3 className="font-semibold text-base text-neutral-800 dark:text-neutral-200">
-                Offer Terms & Methods
+                {t('adDetailPage.offerTermsMethods')}
               </h3>
               {(ad.offer_label || ad.label) && (
                 <span className="text-xs px-2.5 py-0.5 rounded-md font-medium bg-blue-500/10 text-blue-600 dark:text-blue-400 border border-blue-500/20">
@@ -418,7 +471,7 @@ export default function AdDetailClient({ ad, advertiser, stats }: AdDetailClient
             </div>
             
             <div>
-              <span className="text-xs text-neutral-500 dark:text-neutral-400 block mb-2">Accepted Payment Methods</span>
+              <span className="text-xs text-neutral-500 dark:text-neutral-400 block mb-2">{t('adDetailPage.acceptedPaymentMethods')}</span>
               <div className="flex flex-wrap gap-2">
                 {paymentMethods.length > 0 ? (
                   paymentMethods.map((pm, idx) => (
@@ -427,15 +480,15 @@ export default function AdDetailClient({ ad, advertiser, stats }: AdDetailClient
                     </span>
                   ))
                 ) : (
-                  <span className="text-xs text-neutral-400">No specific methods defined</span>
+                  <span className="text-xs text-neutral-400">{t('adDetailPage.noMethodsDefined')}</span>
                 )}
               </div>
             </div>
 
             <div>
-              <span className="text-xs text-neutral-500 dark:text-neutral-400 block mb-1.5">Advertiser Terms</span>
+              <span className="text-xs text-neutral-500 dark:text-neutral-400 block mb-1.5">{t('adDetailPage.advertiserTerms')}</span>
               <div className="p-3.5 bg-neutral-50 dark:bg-neutral-800/50 rounded-xl text-xs leading-relaxed text-neutral-700 dark:text-neutral-300 border border-neutral-200/60 dark:border-neutral-800 whitespace-pre-wrap">
-                {ad.terms || ad.terms_conditions || ad.termsAndConditions || 'No custom terms provided by advertiser. Please pay from your own verified account.'}
+                {ad.terms || ad.terms_conditions || ad.termsAndConditions || t('adDetailPage.noCustomTerms')}
               </div>
             </div>
           </div>
@@ -444,7 +497,7 @@ export default function AdDetailClient({ ad, advertiser, stats }: AdDetailClient
         {/* Right Column: Trader Info */}
         <div className="p-5 sm:p-6 rounded-2xl border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 shadow-sm h-fit space-y-5">
           <h3 className="font-semibold text-base border-b pb-3 dark:border-neutral-800 text-neutral-800 dark:text-neutral-200">
-            Trader Information
+            {t('adDetailPage.traderInformation')}
           </h3>
 
           <div className="flex items-center space-x-3">
@@ -457,55 +510,55 @@ export default function AdDetailClient({ ad, advertiser, stats }: AdDetailClient
             />
             <div>
               <Link 
-                href={`/users/${advertiser?.username || 'Trader'}`}
+                href={`/users/${advertiser?.username || t('counterpartyPanel.fallbackTrader')}`}
                 className="font-bold text-base text-neutral-900 dark:text-neutral-100 hover:text-primary hover:underline transition-colors block"
               >
-                @{advertiser?.username || 'Trader'}
+                @{advertiser?.username || t('counterpartyPanel.fallbackTrader')}
               </Link>
               <div className="flex items-center space-x-1.5 text-xs mt-0.5">
                 <span className={`w-2 h-2 rounded-full ${presence.isOnline ? 'bg-green-500' : 'bg-neutral-400'}`}></span>
-                <span className="text-neutral-500 dark:text-neutral-400">{presence.label}</span>
+                <span className="text-neutral-500 dark:text-neutral-400">{localizedPresenceLabel}</span>
                 <span className="text-neutral-400 dark:text-neutral-600">•</span>
-                <span className="text-neutral-500 dark:text-neutral-400">{formatJoinedDate(advertiser?.created_at)}</span>
+                <span className="text-neutral-500 dark:text-neutral-400">{localizedJoinedDate(advertiser?.created_at)}</span>
               </div>
             </div>
           </div>
 
           <div className="grid grid-cols-2 gap-2.5 text-xs">
             <div className="p-3 bg-neutral-50 dark:bg-neutral-800/60 rounded-xl border border-neutral-200/50 dark:border-neutral-800">
-              <span className="text-neutral-500 dark:text-neutral-400 block mb-0.5">Positive</span>
-              <span className="font-bold text-sm text-green-600 dark:text-green-400">{stats.positiveFeedbacks || 0}</span>
-              <span className="text-[11px] text-neutral-400 block mt-0.5">{positivePercentage}% positive</span>
+              <span className="text-neutral-500 dark:text-neutral-400 block mb-0.5">{t('adDetailPage.positive')}</span>
+              <span className="font-bold text-sm text-green-600 dark:text-green-400">{(stats.positiveFeedbacks || 0).toLocaleString(language)}</span>
+              <span className="text-[11px] text-neutral-400 block mt-0.5">{t('adDetailPage.positivePercent').replace('{percent}', Number(positivePercentage).toLocaleString(language, { minimumFractionDigits: 1, maximumFractionDigits: 1 }))}</span>
             </div>
 
             <div className="p-3 bg-neutral-50 dark:bg-neutral-800/60 rounded-xl border border-neutral-200/50 dark:border-neutral-800">
-              <span className="text-neutral-500 dark:text-neutral-400 block mb-0.5">Negative</span>
-              <span className="font-bold text-sm text-red-600 dark:text-red-400">{stats.negativeFeedbacks || 0}</span>
-              <span className="text-[11px] text-neutral-400 block mt-0.5">{stats.totalTrades || 0} total trades</span>
+              <span className="text-neutral-500 dark:text-neutral-400 block mb-0.5">{t('adDetailPage.negative')}</span>
+              <span className="font-bold text-sm text-red-600 dark:text-red-400">{(stats.negativeFeedbacks || 0).toLocaleString(language)}</span>
+              <span className="text-[11px] text-neutral-400 block mt-0.5">{t('adDetailPage.totalTrades').replace('{count}', (stats.totalTrades || 0).toLocaleString(language))}</span>
             </div>
 
             <div className="p-3 bg-neutral-50 dark:bg-neutral-800/60 rounded-xl border border-neutral-200/50 dark:border-neutral-800">
-              <span className="text-neutral-500 dark:text-neutral-400 block mb-0.5">Avg Pay Time</span>
+              <span className="text-neutral-500 dark:text-neutral-400 block mb-0.5">{t('adDetailPage.avgPayTime')}</span>
               <span className="font-bold text-sm">{formatSeconds(stats.avgPaySeconds)}</span>
-              <span className="text-[11px] text-neutral-400 block mt-0.5">Buyer speed metric</span>
+              <span className="text-[11px] text-neutral-400 block mt-0.5">{t('adDetailPage.buyerSpeedMetric')}</span>
             </div>
 
             <div className="p-3 bg-neutral-50 dark:bg-neutral-800/60 rounded-xl border border-neutral-200/50 dark:border-neutral-800">
-              <span className="text-neutral-500 dark:text-neutral-400 block mb-0.5">Avg Release</span>
+              <span className="text-neutral-500 dark:text-neutral-400 block mb-0.5">{t('adDetailPage.avgRelease')}</span>
               <span className="font-bold text-sm">{formatSeconds(stats.avgReleaseSeconds)}</span>
-              <span className="text-[11px] text-neutral-400 block mt-0.5">Seller release speed</span>
+              <span className="text-[11px] text-neutral-400 block mt-0.5">{t('adDetailPage.sellerReleaseSpeed')}</span>
             </div>
 
             <div className="p-3 bg-neutral-50 dark:bg-neutral-800/60 rounded-xl border border-neutral-200/50 dark:border-neutral-800">
-              <span className="text-neutral-500 dark:text-neutral-400 block mb-0.5">Blocked By</span>
-              <span className="font-bold text-sm">{stats.blockedBy || 0}</span>
-              <span className="text-[11px] text-neutral-400 block mt-0.5">traders</span>
+              <span className="text-neutral-500 dark:text-neutral-400 block mb-0.5">{t('adDetailPage.blockedBy')}</span>
+              <span className="font-bold text-sm">{(stats.blockedBy || 0).toLocaleString(language)}</span>
+              <span className="text-[11px] text-neutral-400 block mt-0.5">{t('adDetailPage.traders')}</span>
             </div>
 
             <div className="p-3 bg-neutral-50 dark:bg-neutral-800/60 rounded-xl border border-neutral-200/50 dark:border-neutral-800">
-              <span className="text-neutral-500 dark:text-neutral-400 block mb-0.5">Has Blocked</span>
-              <span className="font-bold text-sm">{stats.hasBlocked || 0}</span>
-              <span className="text-[11px] text-neutral-400 block mt-0.5">traders</span>
+              <span className="text-neutral-500 dark:text-neutral-400 block mb-0.5">{t('adDetailPage.hasBlocked')}</span>
+              <span className="font-bold text-sm">{(stats.hasBlocked || 0).toLocaleString(language)}</span>
+              <span className="text-[11px] text-neutral-400 block mt-0.5">{t('adDetailPage.traders')}</span>
             </div>
           </div>
         </div>

@@ -4,6 +4,7 @@ import { revalidatePath } from 'next/cache';
 import { findAdById, resolveBothTargetRows } from '@/lib/ad-lookup';
 import { resolveTradeType } from '@/utils/p2p-helpers';
 import { verifyServerAdmin } from '@/lib/server-admin-auth';
+import { checkNewTradeEligibility } from '@/lib/account-action-guard';
 import { FIAT_CURRENCIES } from '@/lib/currencies';
 
 export const dynamic = 'force-dynamic';
@@ -23,7 +24,7 @@ function formatPresence(lastActive?: string | null): string {
 
 export async function GET(
   request: NextRequest,
-  context: { params: { adId: string } | Promise<{ adId: string }> }
+  context: { params: Promise<{ adId: string }> }
 ) {
   try {
     const rawParams = await Promise.resolve(context.params);
@@ -36,6 +37,33 @@ export async function GET(
       return NextResponse.json({ error: 'Advertisement not found.' }, { status: 404 });
     }
 
+    const adStatus = String(ad.status || '').trim().toUpperCase();
+    const isPubliclyActive =
+      ad.active === true &&
+      ad.is_active === true &&
+      ad.is_deleted !== true &&
+      adStatus === 'ACTIVE';
+
+    if (!isPubliclyActive) {
+      const supabase = await createClient();
+      const authHeader = request.headers.get('Authorization') || request.headers.get('authorization');
+      const bearerToken = authHeader?.startsWith('Bearer ') ? authHeader.substring(7).trim() : null;
+      let viewer: any = null;
+      if (bearerToken) {
+        const tokenAuth = await supabase.auth.getUser(bearerToken);
+        viewer = tokenAuth.data?.user || null;
+      }
+      if (!viewer) {
+        const cookieAuth = await supabase.auth.getUser();
+        viewer = cookieAuth.data?.user || null;
+      }
+      const isOwner = Boolean(viewer?.id && viewer.id === (ad.user_id || ad.userId));
+      const adminAuth = await verifyServerAdmin(request);
+      if (!isOwner && !adminAuth.authorized) {
+        return NextResponse.json({ error: 'Advertisement not found.' }, { status: 404 });
+      }
+    }
+
     // Fetch user profile for presence and trader info using admin client
     const admin = getSupabaseAdminClient();
     let presence = 'Online';
@@ -45,12 +73,12 @@ export async function GET(
       try {
         const { data: profile } = await admin
           .from('profiles')
-          .select('*')
+          .select('id, username, display_name, full_name, avatar_url, photo_url, country, feedback_score, positive_feedback, negative_feedback, completed_trades, avg_release_minutes, avg_release_time, avg_payment_minutes, avg_pay_time, created_at, is_verified, kyc_status, merchant_tier, is_online, last_seen, last_seen_at, updated_at')
           .eq('id', adOwnerUserId)
           .maybeSingle();
         if (profile) {
           profileData = profile;
-          const lastSeen = profile.last_seen || profile.last_seen_at || profile.last_active;
+          const lastSeen = profile.last_seen || profile.last_seen_at;
           if (lastSeen) {
             presence = formatPresence(lastSeen);
           }
@@ -60,7 +88,16 @@ export async function GET(
       }
     }
 
-    const priceVal = Number(ad.price ?? ad.unit_price ?? ad.fixed_rate ?? 0);
+    const priceCandidates = [ad.price, ad.unit_price, ad.fixed_rate, ad.fixed_price, ad.rate]
+      .map((value: unknown) => Number(value))
+      .filter((value: number) => Number.isFinite(value) && value > 0);
+    const priceVal = priceCandidates[0] ?? 0;
+    if (!Number.isFinite(priceVal) || priceVal <= 0) {
+      return NextResponse.json(
+        { error: 'Advertisement unit price is invalid or unavailable.' },
+        { status: 503 }
+      );
+    }
     const paymentMethods = Array.isArray(ad.payment_methods)
       ? ad.payment_methods
       : typeof ad.payment_methods === 'string'
@@ -117,19 +154,20 @@ export async function GET(
       fiatCurrency: fiatSym,
       fiat: fiatSym,
       currency: fiatSym,
-      price: priceVal || 1000,
+      price: priceVal,
       pricing_type: (ad.rate_type === 'fixed' || ad.pricing_type === 'FIXED' || ad.is_fixed) ? 'FIXED' : 'FLOAT',
       rate_type: (ad.rate_type === 'fixed' || ad.pricing_type === 'FIXED' || ad.is_fixed) ? 'fixed' : 'market',
       is_fixed: Boolean(ad.rate_type === 'fixed' || ad.pricing_type === 'FIXED' || ad.is_fixed),
       margin_percent: Number(ad.rate_percent ?? ad.margin_percent ?? ad.margin ?? 0),
       rate_percent: Number(ad.rate_percent ?? ad.margin_percent ?? ad.margin ?? 0),
       margin: Number(ad.rate_percent ?? ad.margin_percent ?? ad.margin ?? 0),
-      status: (ad.active !== false && ad.status !== 'INACTIVE') ? 'ACTIVE' : 'INACTIVE',
+      status: adStatus || (isPubliclyActive ? 'ACTIVE' : 'INACTIVE'),
       min_limit: Number(ad.min_limit ?? ad.min_amount ?? 10),
       max_limit: Number(ad.max_limit ?? ad.max_amount ?? 1000),
       min_amount: Number(ad.min_amount ?? ad.min_limit ?? 10),
       max_amount: Number(ad.max_amount ?? ad.max_limit ?? 1000),
-      available_amount: Number(ad.available_amount ?? ad.total_amount ?? ad.max_amount ?? 1),
+      // available_amount is crypto inventory, never the fiat max trade limit.
+      available_amount: Number(ad.available_amount ?? ad.available_crypto ?? 0),
       payment_methods: paymentMethods,
       offer_tags: tags,
       tags: tags,
@@ -192,7 +230,7 @@ export async function GET(
 
 export async function DELETE(
   request: NextRequest,
-  context: { params: { adId: string } | Promise<{ adId: string }> }
+  context: { params: Promise<{ adId: string }> }
 ) {
   try {
     const rawParams = await Promise.resolve(context.params);
@@ -262,7 +300,7 @@ export async function DELETE(
       try {
         await admin
           .from('p2p_ads')
-          .update({ status: 'DELETED', active: false, updated_at: new Date().toISOString() })
+          .update({ status: 'DELETED', active: false, is_active: false, is_deleted: true })
           .eq('id', p2pAdsRow.id);
       } catch (softErr: any) {
         console.warn('[DELETE /api/ads/[adId]] p2p_ads soft-delete warning:', softErr?.message);
@@ -292,7 +330,7 @@ export async function DELETE(
       try {
         await admin
           .from('ads')
-          .update({ status: 'DELETED', is_active: false, updated_at: new Date().toISOString() })
+          .update({ status: 'DELETED', active: false, is_active: false, is_deleted: true, updated_at: new Date().toISOString() })
           .eq('id', adsRow.id);
       } catch (softErr: any) {
         console.warn('[DELETE /api/ads/[adId]] Legacy ads soft-delete warning:', softErr?.message);
@@ -346,7 +384,7 @@ export async function DELETE(
 
 export async function PATCH(
   request: NextRequest,
-  context: { params: { adId: string } | Promise<{ adId: string }> }
+  context: { params: Promise<{ adId: string }> }
 ) {
   try {
     const rawParams = await Promise.resolve(context.params);
@@ -423,7 +461,13 @@ export async function PATCH(
     let newStatus: string;
 
     if (body.active !== undefined) {
-      isActive = Boolean(body.active);
+      if (typeof body.active !== 'boolean') {
+        return NextResponse.json(
+          { error: 'The active field must be a boolean.' },
+          { status: 400 }
+        );
+      }
+      isActive = body.active;
       newStatus = isActive ? 'ACTIVE' : 'INACTIVE';
     } else if (body.status !== undefined) {
       const requestedStatus = String(body.status).toUpperCase().trim();
@@ -444,6 +488,25 @@ export async function PATCH(
       );
     }
 
+    const existingDirection = String(existingAd.trade_type || existingAd.ad_type || existingAd.type || '').toUpperCase();
+    if (isActive && existingDirection === 'SELL') {
+      return NextResponse.json(
+        {
+          success: false,
+          error: 'SELL advertisements cannot be activated until their crypto inventory is reserved atomically.',
+          code: 'SELL_AD_INVENTORY_RESERVATION_UNVERIFIED',
+        },
+        { status: 503 }
+      );
+    }
+
+    if (isOwner && isActive && !isAdmin) {
+      const eligibility = await checkNewTradeEligibility(user.id);
+      if (!eligibility.allowed) {
+        return NextResponse.json({ error: "Restricted accounts cannot activate advertisements.", code: eligibility.code }, { status: eligibility.statusCode });
+      }
+    }
+
     // 5. Independently resolve both target rows
     const { p2pAdsRow, adsRow } = await resolveBothTargetRows(existingAd, adId, admin);
 
@@ -455,8 +518,8 @@ export async function PATCH(
         .from('p2p_ads')
         .update({
           active: isActive,
+          is_active: isActive,
           status: newStatus,
-          updated_at: new Date().toISOString(),
         })
         .eq('id', p2pAdsRow.id)
         .select('id');
@@ -521,7 +584,7 @@ export async function PATCH(
 
 export async function PUT(
   request: NextRequest,
-  context: { params: { adId: string } | Promise<{ adId: string }> }
+  context: { params: Promise<{ adId: string }> }
 ) {
   try {
     const rawParams = await Promise.resolve(context.params);
@@ -608,20 +671,28 @@ export async function PUT(
       ? Number(body.margin) 
       : (body.rate_percent !== undefined && body.rate_percent !== null && body.rate_percent !== '' ? Number(body.rate_percent) : undefined);
 
-    if (price !== undefined && price <= 0) {
-      return NextResponse.json({ error: 'Price must be greater than 0.' }, { status: 400 });
+    if (price !== undefined && (!Number.isFinite(price) || price <= 0)) {
+      return NextResponse.json({ error: 'Price must be a finite number greater than 0.' }, { status: 400 });
     }
-    if (minAmount !== undefined && minAmount <= 0) {
-      return NextResponse.json({ error: 'Minimum limit must be greater than 0.' }, { status: 400 });
+    if (unitPrice !== undefined && (!Number.isFinite(unitPrice) || unitPrice <= 0)) {
+      return NextResponse.json({ error: 'Unit price must be a finite number greater than 0.' }, { status: 400 });
+    }
+    if (minAmount !== undefined && (!Number.isFinite(minAmount) || minAmount <= 0)) {
+      return NextResponse.json({ error: 'Minimum limit must be a finite number greater than 0.' }, { status: 400 });
+    }
+    if (maxAmount !== undefined && (!Number.isFinite(maxAmount) || maxAmount <= 0)) {
+      return NextResponse.json({ error: 'Maximum limit must be a finite number greater than 0.' }, { status: 400 });
     }
     if (minAmount !== undefined && maxAmount !== undefined && maxAmount < minAmount) {
       return NextResponse.json({ error: 'Maximum limit must be greater than or equal to minimum limit.' }, { status: 400 });
     }
 
-    const paymentMethods = Array.isArray(body.payment_methods) 
-      ? body.payment_methods 
+    const paymentMethods = Array.isArray(body.payment_methods)
+      ? body.payment_methods
       : (Array.isArray(body.paymentMethods) ? body.paymentMethods : undefined);
-    const paymentWindow = body.payment_window ? Math.max(30, parseInt(String(body.payment_window), 10) || 30) : 30;
+    const paymentWindow = body.payment_window !== undefined && body.payment_window !== null && body.payment_window !== ''
+      ? Math.max(30, parseInt(String(body.payment_window), 10) || 30)
+      : undefined;
 
     const termsText = body.terms !== undefined 
       ? String(body.terms) 
@@ -638,6 +709,17 @@ export async function PUT(
     const rateType = isFixed ? 'fixed' : 'market';
 
     const directionFromPayload = resolveTradeType(body);
+    const currentDirection = String(existingAd.trade_type || existingAd.ad_type || existingAd.type || '').toUpperCase();
+    if (currentDirection === 'SELL' || directionFromPayload === 'SELL') {
+      return NextResponse.json(
+        {
+          success: false,
+          error: 'SELL advertisements cannot be edited or converted until atomic crypto inventory reservation is enabled.',
+          code: 'SELL_AD_INVENTORY_RESERVATION_UNVERIFIED',
+        },
+        { status: 503 }
+      );
+    }
 
     const timestamp = new Date().toISOString();
 
@@ -672,41 +754,58 @@ export async function PUT(
     const effectiveFiat = String(updatedFiat || existingAd.fiat_symbol || existingAd.fiat_currency || existingAd.fiat || 'USD').toUpperCase().trim();
 
     if (isFixed) {
-      const effectiveEditPrice = price !== undefined ? price : Number(existingAd.price ?? existingAd.unit_price ?? 0);
-      if (effectiveEditPrice <= 0) {
+      const effectiveEditPrice = price !== undefined
+        ? price
+        : unitPrice !== undefined
+          ? unitPrice
+          : Number(existingAd.price ?? existingAd.unit_price ?? existingAd.fixed_rate ?? 0);
+      if (!Number.isFinite(effectiveEditPrice) || effectiveEditPrice <= 0) {
         return NextResponse.json({ error: 'Valid fixed price is required for fixed-rate ads.' }, { status: 400 });
       }
 
-      const { data: marketRow, error: marketError } = await admin
-        .from('crypto_market_prices')
-        .select('price_in_fiat, updated_at')
-        .eq('asset_symbol', effectiveAsset)
-        .eq('fiat_symbol', effectiveFiat)
-        .maybeSingle();
+      const existingAsset = String(existingAd.asset_symbol || existingAd.asset || existingAd.crypto || existingAd.coin || 'USDT').toUpperCase().trim();
+      const existingFiat = String(existingAd.fiat_symbol || existingAd.fiat_currency || existingAd.fiat || existingAd.currency || 'USD').toUpperCase().trim();
+      const existingWasFixed = existingAd.rate_type === 'fixed' || existingAd.pricing_type === 'FIXED' || Boolean(existingAd.is_fixed);
+      const existingPrice = Number(existingAd.price ?? existingAd.unit_price ?? existingAd.fixed_rate ?? 0);
+      const fixedPricingChanged = !existingWasFixed
+        || Math.abs(effectiveEditPrice - existingPrice) > 1e-8
+        || effectiveAsset !== existingAsset
+        || effectiveFiat !== existingFiat;
 
-      if (marketError || !marketRow || !marketRow.price_in_fiat || Number(marketRow.price_in_fiat) <= 0) {
-        return NextResponse.json(
-          { error: `Market reference price is currently unavailable for ${effectiveAsset}/${effectiveFiat}. Please try again later.` },
-          { status: 400 }
-        );
-      }
+      // Editing terms, payment methods, or limits must not be blocked by a stale/missing
+      // market quote when the existing fixed price and trading pair are unchanged.
+      if (fixedPricingChanged) {
+        const { data: marketRow, error: marketError } = await admin
+          .from('crypto_market_prices')
+          .select('price_in_fiat, updated_at')
+          .eq('asset_symbol', effectiveAsset)
+          .eq('fiat_symbol', effectiveFiat)
+          .maybeSingle();
 
-      const refPrice = Number(marketRow.price_in_fiat);
-      const minAllowedPrice = refPrice * 0.50;
-      const maxAllowedPrice = refPrice * 1.50;
+        if (marketError || !marketRow || !marketRow.price_in_fiat || Number(marketRow.price_in_fiat) <= 0) {
+          return NextResponse.json(
+            { error: `Market reference price is currently unavailable for ${effectiveAsset}/${effectiveFiat}. Please try again later.` },
+            { status: 400 }
+          );
+        }
 
-      if (effectiveEditPrice < minAllowedPrice || effectiveEditPrice > maxAllowedPrice) {
-        return NextResponse.json(
-          {
-            error: `Fixed price must be within ±50% of the reference market price (${minAllowedPrice.toFixed(2)} - ${maxAllowedPrice.toFixed(2)} ${effectiveFiat}).`,
-          },
-          { status: 400 }
-        );
+        const refPrice = Number(marketRow.price_in_fiat);
+        const minAllowedPrice = refPrice * 0.50;
+        const maxAllowedPrice = refPrice * 1.50;
+
+        if (effectiveEditPrice < minAllowedPrice || effectiveEditPrice > maxAllowedPrice) {
+          return NextResponse.json(
+            {
+              error: `Fixed price must be within ±50% of the reference market price (${minAllowedPrice.toFixed(2)} - ${maxAllowedPrice.toFixed(2)} ${effectiveFiat}).`,
+            },
+            { status: 400 }
+          );
+        }
       }
     } else if (margin !== undefined) {
-      if (margin < -50 || margin > 50) {
+      if (!Number.isFinite(margin) || margin < -50 || margin > 50) {
         return NextResponse.json(
-          { error: 'Margin percentage for dynamic pricing must be between -50% and +50%.' },
+          { error: 'Margin percentage for dynamic pricing must be a finite number between -50% and +50%.' },
           { status: 400 }
         );
       }
@@ -721,55 +820,37 @@ export async function PUT(
 
     // 5a. Update Canonical p2p_ads Table (Authoritative)
     if (p2pAdsRow) {
-      const p2pPayload: Record<string, any> = {
-        updated_at: timestamp,
-      };
+      // Keep this payload aligned with the deployed canonical p2p_ads schema.
+      // Legacy-only fields are written to the ads mirror below, never to p2p_ads.
+      const p2pPayload: Record<string, any> = {};
       if (updatedAsset) {
-        p2pPayload.asset = String(updatedAsset).toUpperCase();
-        p2pPayload.asset_symbol = String(updatedAsset).toUpperCase();
-        p2pPayload.crypto = String(updatedAsset).toUpperCase();
+        const asset = String(updatedAsset).toUpperCase();
+        p2pPayload.asset_symbol = asset;
+        p2pPayload.crypto_currency = asset;
+        p2pPayload.coin = asset;
       }
       if (updatedFiat) {
-        p2pPayload.fiat = String(updatedFiat).toUpperCase();
-        p2pPayload.fiat_symbol = String(updatedFiat).toUpperCase();
-        p2pPayload.fiat_currency = String(updatedFiat).toUpperCase();
+        const fiat = String(updatedFiat).toUpperCase();
+        p2pPayload.fiat_symbol = fiat;
+        p2pPayload.fiat_currency = fiat;
       }
-      if (price !== undefined) {
-        p2pPayload.price = price;
-        p2pPayload.unit_price = unitPrice ?? price;
-        if (isFixed) p2pPayload.fixed_rate = price;
-      }
-      if (minAmount !== undefined) {
-        p2pPayload.min_amount = minAmount;
-        p2pPayload.min_limit = minAmount;
-      }
-      if (maxAmount !== undefined) {
-        p2pPayload.max_amount = maxAmount;
-        p2pPayload.max_limit = maxAmount;
-        p2pPayload.available_amount = maxAmount;
-      }
-      if (margin !== undefined) {
-        p2pPayload.rate_percent = margin;
-        p2pPayload.price_margin = margin;
-        p2pPayload.price_margin_percent = margin;
-      }
+      if (price !== undefined) p2pPayload.price = price;
+      if (minAmount !== undefined) p2pPayload.min_limit = minAmount;
+      if (maxAmount !== undefined) p2pPayload.max_limit = maxAmount;
+      if (margin !== undefined) p2pPayload.margin = margin;
       p2pPayload.pricing_type = pricingType;
-      p2pPayload.rate_type = rateType;
-      if (paymentMethods !== undefined) p2pPayload.payment_methods = paymentMethods;
-      if (termsText !== undefined) p2pPayload.terms_conditions = termsText;
-      if (offerLabel !== undefined) p2pPayload.offer_label = offerLabel;
-      if (rawTags !== undefined) p2pPayload.offer_tags = rawTags;
-      if (directionFromPayload) {
-        p2pPayload.trade_type = directionFromPayload;
-        p2pPayload.type = directionFromPayload;
+      if (paymentMethods !== undefined) {
+        p2pPayload.payment_methods = paymentMethods;
+        p2pPayload.payment_method = paymentMethods.map((method: unknown) => String(method)).join(', ');
       }
-      if (body.require_full_name_verified !== undefined) p2pPayload.require_full_name_verified = Boolean(body.require_full_name_verified);
-      if (body.require_verified_users !== undefined) p2pPayload.require_verified_users = Boolean(body.require_verified_users);
-      if (body.min_completed_trades !== undefined) p2pPayload.min_completed_trades = parseInt(String(body.min_completed_trades), 10) || 0;
-      p2pPayload.payment_window = paymentWindow;
-      p2pPayload.payment_window_minutes = paymentWindow;
-      p2pPayload.payment_time_limit = paymentWindow;
-
+      if (termsText !== undefined) p2pPayload.terms = termsText;
+      if (directionFromPayload) {
+        p2pPayload.type = directionFromPayload;
+        p2pPayload.ad_type = directionFromPayload;
+      }
+      if (body.min_completed_trades !== undefined) {
+        p2pPayload.min_completed_trades_req = parseInt(String(body.min_completed_trades), 10) || 0;
+      }
       const { data, error } = await admin
         .from('p2p_ads')
         .update(p2pPayload)
@@ -790,13 +871,82 @@ export async function PUT(
         const adsPayload: Record<string, any> = {
           updated_at: timestamp,
         };
-        if (price !== undefined) adsPayload.price = price;
-        if (minAmount !== undefined) adsPayload.min_limit = minAmount;
-        if (maxAmount !== undefined) adsPayload.max_limit = maxAmount;
+        if (updatedAsset) {
+          const asset = String(updatedAsset).toUpperCase();
+          adsPayload.asset_symbol = asset;
+          adsPayload.asset = asset;
+          adsPayload.coin = asset;
+          adsPayload.crypto_currency = asset;
+          adsPayload.token_symbol = asset;
+        }
+        if (updatedFiat) {
+          const fiat = String(updatedFiat).toUpperCase();
+          adsPayload.fiat_symbol = fiat;
+          adsPayload.fiat_currency = fiat;
+          adsPayload.currency = fiat;
+        }
+        if (price !== undefined) {
+          adsPayload.price = price;
+          adsPayload.unit_price = unitPrice;
+          if (isFixed) {
+            adsPayload.fixed_rate = unitPrice;
+            adsPayload.fixed_price = unitPrice;
+          }
+        }
+        if (minAmount !== undefined) {
+          adsPayload.min_limit = minAmount;
+          adsPayload.min_amount = minAmount;
+        }
+        if (maxAmount !== undefined) {
+          adsPayload.max_limit = maxAmount;
+          adsPayload.max_amount = maxAmount;
+        }
+        if (margin !== undefined) {
+          adsPayload.margin = margin;
+          adsPayload.margin_percentage = margin;
+          adsPayload.rate_percent = margin;
+          adsPayload.rate_adjustment = margin;
+          adsPayload.price_margin = margin;
+          adsPayload.margin_rate = margin;
+        }
+        adsPayload.pricing_type = pricingType;
+        adsPayload.price_type = pricingType;
+        adsPayload.rate_type = rateType;
+        adsPayload.is_fixed = isFixed;
         if (paymentMethods !== undefined) adsPayload.payment_methods = paymentMethods;
         if (termsText !== undefined) adsPayload.terms = termsText;
-        if (directionFromPayload) adsPayload.type = directionFromPayload;
-        adsPayload.payment_window = paymentWindow;
+        if (directionFromPayload) {
+          adsPayload.type = directionFromPayload;
+          adsPayload.trade_type = directionFromPayload;
+        }
+        if (paymentWindow !== undefined) {
+          adsPayload.payment_window = paymentWindow;
+          adsPayload.payment_window_minutes = paymentWindow;
+          adsPayload.payment_time_limit = paymentWindow;
+        }
+        if (rawTags !== undefined) {
+          adsPayload.tags = rawTags;
+          adsPayload.ad_tags = rawTags;
+        }
+        if (body.targeted_countries !== undefined && Array.isArray(body.targeted_countries)) {
+          adsPayload.targeted_countries = body.targeted_countries;
+        }
+        if (body.blocked_countries !== undefined && Array.isArray(body.blocked_countries)) {
+          adsPayload.blocked_countries = body.blocked_countries;
+        }
+        if (offerLabel !== undefined) {
+          adsPayload.offer_label = offerLabel;
+          adsPayload.label = offerLabel;
+        }
+        if (body.require_full_name_verified !== undefined) {
+          adsPayload.require_full_name_verified = Boolean(body.require_full_name_verified);
+        }
+        if (body.require_verified_users !== undefined) {
+          adsPayload.require_verified_users = Boolean(body.require_verified_users);
+        }
+        if (body.min_completed_trades !== undefined) {
+          adsPayload.min_completed_trades = parseInt(String(body.min_completed_trades), 10) || 0;
+        }
 
         const { data, error } = await admin
           .from('ads')

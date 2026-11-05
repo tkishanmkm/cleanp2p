@@ -1,108 +1,82 @@
-/**
- * Admin 2FA In-Memory Rate Limiter
- * Enforces maximum 5 failed attempts per 15 minutes per administrator.
- */
+import 'server-only';
 
-interface RateLimitRecord {
-  failures: number;
-  firstFailureTime: number;
-  lastFailureTime: number;
-}
+import { createAdminClient } from '@/lib/supabase/server';
 
-const MAX_FAILURES = 5;
-const WINDOW_MS = 15 * 60 * 1000; // 15 minutes
-
-// Global map in Node.js runtime process
-const failureStore = new Map<string, RateLimitRecord>();
-
-/**
- * Periodically purge stale records
- */
-function cleanupStaleRecords() {
-  const now = Date.now();
-  for (const [key, record] of failureStore.entries()) {
-    if (now - record.lastFailureTime > WINDOW_MS) {
-      failureStore.delete(key);
-    }
-  }
-}
-
-/**
- * Checks if the given admin is currently rate-limited from 2FA attempts.
- */
-export function checkAdmin2FARateLimit(adminId: string): {
+export interface AdminTwoFactorRateLimit {
   allowed: boolean;
   remainingAttempts: number;
   retryAfterSeconds: number;
-} {
-  if (!adminId) return { allowed: true, remainingAttempts: MAX_FAILURES, retryAfterSeconds: 0 };
+}
 
-  cleanupStaleRecords();
+type RpcRateLimitResult = {
+  allowed?: unknown;
+  remaining_attempts?: unknown;
+  retry_after_seconds?: unknown;
+};
 
-  const now = Date.now();
-  const record = failureStore.get(adminId);
-
-  if (!record) {
-    return { allowed: true, remainingAttempts: MAX_FAILURES, retryAfterSeconds: 0 };
+function normalizeResult(data: unknown): AdminTwoFactorRateLimit {
+  if (!data || typeof data !== 'object' || Array.isArray(data)) {
+    throw new Error('Admin 2FA rate-limit service returned an invalid response.');
   }
 
-  // If window expired, reset record
-  if (now - record.firstFailureTime > WINDOW_MS) {
-    failureStore.delete(adminId);
-    return { allowed: true, remainingAttempts: MAX_FAILURES, retryAfterSeconds: 0 };
-  }
-
-  if (record.failures >= MAX_FAILURES) {
-    const retryAfterMs = record.firstFailureTime + WINDOW_MS - now;
-    const retryAfterSeconds = Math.max(1, Math.ceil(retryAfterMs / 1000));
-    return {
-      allowed: false,
-      remainingAttempts: 0,
-      retryAfterSeconds,
-    };
+  const value = data as RpcRateLimitResult;
+  if (
+    typeof value.allowed !== 'boolean' ||
+    !Number.isInteger(value.remaining_attempts) ||
+    !Number.isInteger(value.retry_after_seconds) ||
+    Number(value.remaining_attempts) < 0 ||
+    Number(value.remaining_attempts) > 5 ||
+    Number(value.retry_after_seconds) < 0 ||
+    Number(value.retry_after_seconds) > 900
+  ) {
+    throw new Error('Admin 2FA rate-limit service returned an invalid response.');
   }
 
   return {
-    allowed: true,
-    remainingAttempts: Math.max(0, MAX_FAILURES - record.failures),
-    retryAfterSeconds: 0,
+    allowed: value.allowed,
+    remainingAttempts: Number(value.remaining_attempts),
+    retryAfterSeconds: Number(value.retry_after_seconds),
   };
 }
 
-/**
- * Records a failed 2FA verification attempt.
- */
-export function recordAdmin2FAFailure(adminId: string): {
-  allowed: boolean;
-  remainingAttempts: number;
-  retryAfterSeconds: number;
-} {
-  if (!adminId) return { allowed: true, remainingAttempts: MAX_FAILURES, retryAfterSeconds: 0 };
-
-  const now = Date.now();
-  let record = failureStore.get(adminId);
-
-  if (!record || now - record.firstFailureTime > WINDOW_MS) {
-    record = {
-      failures: 1,
-      firstFailureTime: now,
-      lastFailureTime: now,
-    };
-  } else {
-    record.failures += 1;
-    record.lastFailureTime = now;
+function assertAdminId(adminId: string): void {
+  if (
+    typeof adminId !== 'string' ||
+    !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(adminId)
+  ) {
+    throw new Error('A valid administrator ID is required for 2FA rate limiting.');
   }
-
-  failureStore.set(adminId, record);
-
-  return checkAdmin2FARateLimit(adminId);
 }
 
 /**
- * Resets failures on successful 2FA verification.
+ * Database-backed, atomic administrator 2FA throttling.
+ *
+ * Keeping attempt state in Postgres means the lock survives application
+ * restarts and applies consistently across every running web instance.
+ * A database failure is propagated to the caller so the challenge route
+ * can fail closed instead of silently bypassing brute-force protection.
  */
-export function resetAdmin2FAFailures(adminId: string) {
-  if (adminId) {
-    failureStore.delete(adminId);
+export async function checkAdmin2FARateLimit(adminId: string): Promise<AdminTwoFactorRateLimit> {
+  assertAdminId(adminId);
+  const supabase = createAdminClient();
+  const { data, error } = await supabase.rpc('check_admin_2fa_rate_limit', {
+    p_admin_id: adminId,
+  });
+  if (error) {
+    console.error('[Admin 2FA] Rate-limit check failed:', error.code || 'unknown');
+    throw new Error('Administrator 2FA protection is temporarily unavailable.');
+  }
+  return normalizeResult(data);
+}
+
+export async function resetAdmin2FAFailures(adminId: string): Promise<void> {
+  assertAdminId(adminId);
+  const supabase = createAdminClient();
+  const { data, error } = await supabase.rpc('reset_admin_2fa_rate_limit', {
+    p_admin_id: adminId,
+  });
+  if (error || data !== true) {
+    console.error('[Admin 2FA] Could not reset persistent rate limit:', error?.code || null);
+    throw new Error('Administrator 2FA protection could not be reset.');
   }
 }

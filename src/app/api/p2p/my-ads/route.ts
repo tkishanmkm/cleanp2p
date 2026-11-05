@@ -7,11 +7,13 @@ export const dynamic = 'force-dynamic';
 
 export async function GET(request: NextRequest) {
   try {
-    const cookieHeader = cookies();
-    const cookieStore = typeof (cookieHeader as any)?.then === 'function' ? await cookieHeader : cookieHeader;
+    const cookieStore = await cookies();
 
-    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL || 'https://placeholder.supabase.co';
-    const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'placeholder-anon-key';
+    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL;
+    const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+    if (!supabaseUrl || !supabaseAnonKey || /placeholder|your[_-]?project|your[_-]?anon[_-]?key/i.test(`${supabaseUrl} ${supabaseAnonKey}`)) {
+      return NextResponse.json({ error: 'Authentication service is not configured.' }, { status: 503 });
+    }
 
     const supabase = createServerClient(
       supabaseUrl,
@@ -66,7 +68,8 @@ export async function GET(request: NextRequest) {
       .select('*')
       .eq('user_id', user.id)
       .neq('status', 'DELETED')
-      .order('created_at', { ascending: false });
+      .order('created_at', { ascending: false })
+      .limit(20);
 
     if (!viewError && Array.isArray(viewAds)) {
       ads = viewAds;
@@ -79,7 +82,8 @@ export async function GET(request: NextRequest) {
         .select('*')
         .eq('user_id', user.id)
         .neq('status', 'DELETED')
-        .order('created_at', { ascending: false });
+        .order('created_at', { ascending: false })
+        .limit(20);
 
       if (!tableError && Array.isArray(tableAds)) {
         ads = tableAds;
@@ -90,14 +94,15 @@ export async function GET(request: NextRequest) {
     }
 
     // 3. Fallback to admin client if RLS is preventing read
-    if (ads.length === 0) {
+    if (ads.length === 0 && queryError) {
       try {
         const { data: adminAds, error: adminErr } = await admin
           .from('ads')
           .select('*')
           .eq('user_id', user.id)
           .neq('status', 'DELETED')
-          .order('created_at', { ascending: false });
+          .order('created_at', { ascending: false })
+          .limit(20);
 
         if (!adminErr && Array.isArray(adminAds) && adminAds.length > 0) {
           ads = adminAds;

@@ -255,13 +255,28 @@ export async function getUserDeposits(userId: string): Promise<RpcResponse<Depos
       supabase.from('deposits').select('*').eq('user_id', userId).order('created_at', { ascending: false })
     ]);
 
+    if (onchainRes.error || depositsRes.error) {
+      return {
+        data: null,
+        error: new Error('Unable to load canonical deposit history.'),
+      };
+    }
+
     const combined: DepositRecord[] = [];
-    const seenHashes = new Set<string>();
+    const seenDepositIdentities = new Set<string>();
+    const getDepositIdentity = (row: any, source: 'onchain' | 'legacy'): string => {
+      const tx = String(row.tx_hash || row.txid || '').trim().toLowerCase();
+      if (!tx) return source + ':' + String(row.id || '');
+      const network = String(row.network || row.network_code || row.chain || '').trim().toUpperCase();
+      const outputIndex = Number.isSafeInteger(Number(row.output_index)) ? Number(row.output_index) : 0;
+      return [network, tx, String(outputIndex)].join(':');
+    };
 
     if (onchainRes.data) {
       for (const d of onchainRes.data) {
-        const tx = d.tx_hash || d.txid || d.id;
-        seenHashes.add(tx);
+        const identity = getDepositIdentity(d, 'onchain');
+        if (seenDepositIdentities.has(identity)) continue;
+        seenDepositIdentities.add(identity);
         combined.push({
           id: d.id,
           user_id: d.user_id,
@@ -284,9 +299,9 @@ export async function getUserDeposits(userId: string): Promise<RpcResponse<Depos
 
     if (depositsRes.data) {
       for (const d of depositsRes.data) {
-        const tx = d.tx_hash || d.txid || d.id;
-        if (!seenHashes.has(tx)) {
-          seenHashes.add(tx);
+        const identity = getDepositIdentity(d, 'legacy');
+        if (!seenDepositIdentities.has(identity)) {
+          seenDepositIdentities.add(identity);
           combined.push({
             id: d.id,
             user_id: d.user_id,
@@ -297,7 +312,7 @@ export async function getUserDeposits(userId: string): Promise<RpcResponse<Depos
             amount: Number(d.amount || 0),
             txid: d.tx_hash || d.txid || '',
             output_index: d.output_index || 0,
-            confirmations: 12,
+            confirmations: 0,
             status: (d.status || 'confirmed').toLowerCase() as any,
             credited_at: d.created_at || null,
             idempotency_key: d.idempotency_key || '',
@@ -366,16 +381,12 @@ export async function getActiveDepositAddress(
   }
 }
 
-export interface PlatformWalletRecord {
+export interface PlatformCustodyBalanceRecord {
   id: string;
-  asset_code: string;
-  network_code: string;
-  wallet_type: 'hot' | 'warm' | 'cold';
-  public_address: string;
-  current_balance: number;
-  status: 'active' | 'maintenance' | 'deprecated';
-  created_at: string;
-  updated_at: string;
+  currency: string;
+  balance: number;
+  updated_at: string | null;
+  type: string;
 }
 
 export interface ProvisioningQueueMetrics {
@@ -391,82 +402,65 @@ export interface AdminWalletMetrics {
   totalWallets: number;
   totalBalances: Record<string, { available: number; locked_escrow: number; locked_withdrawal: number }>;
   provisioningQueue: ProvisioningQueueMetrics;
-  platformWallets: PlatformWalletRecord[];
+  platformWallets: PlatformCustodyBalanceRecord[];
+  totalDeposits?: { totalCount: number; byCurrency: Record<string, { count: number; volume: number }> };
+  totalWithdrawals?: { totalCount: number; byCurrency: Record<string, { count: number; volume: number }> };
+  totalUsers?: number;
+  totalDepositAddresses?: number;
+  custodyAvailable?: boolean;
 }
 
 /**
- * Fetches admin system metrics: user wallet counts, multi-currency aggregated balances,
- * address provisioning queue statuses, and active platform custody addresses.
+ * Loads the full-admin wallet summary from the server-only financial API.
+ * No browser-side service role or cross-user table fallback is permitted.
  */
 export async function getAdminWalletOverview(): Promise<RpcResponse<AdminWalletMetrics>> {
   try {
-    // 1. Query wallets
-    const { data: walletsData } = await supabase
-      .from('wallets')
-      .select('id, user_id, status');
-
-    const totalWallets = (walletsData || []).length;
-
-    // 2. Query aggregate asset balances
-    const { data: assetsData, error: assetsError } = await supabase
-      .from('wallet_assets')
-      .select('asset_code, available, locked_escrow, locked_withdrawal');
-
-    const totalBalances: Record<string, { available: number; locked_escrow: number; locked_withdrawal: number }> = {
-      BTC: { available: 0, locked_escrow: 0, locked_withdrawal: 0 },
-      ETH: { available: 0, locked_escrow: 0, locked_withdrawal: 0 },
-      LTC: { available: 0, locked_escrow: 0, locked_withdrawal: 0 },
-      USDT: { available: 0, locked_escrow: 0, locked_withdrawal: 0 },
-    };
-
-    if (!assetsError && assetsData) {
-      assetsData.forEach((row: { asset_code: string; available: number; locked_escrow: number; locked_withdrawal: number }) => {
-        const code = row.asset_code?.toUpperCase();
-        if (!totalBalances[code]) {
-          totalBalances[code] = { available: 0, locked_escrow: 0, locked_withdrawal: 0 };
-        }
-        totalBalances[code].available += Number(row.available || 0);
-        totalBalances[code].locked_escrow += Number(row.locked_escrow || 0);
-        totalBalances[code].locked_withdrawal += Number(row.locked_withdrawal || 0);
-      });
+    const response = await fetch('/api/admin/wallets', {
+      method: 'GET',
+      credentials: 'include',
+      cache: 'no-store',
+      headers: { Accept: 'application/json' },
+    });
+    const payload = await response.json().catch(() => null);
+    if (!response.ok || !payload?.success || !payload?.metrics || !Array.isArray(payload.systemBalances)) {
+      return {
+        data: null,
+        error: new Error(payload?.error || 'Platform wallet metrics could not be verified.'),
+      };
     }
 
-    // 3. Provisioning queue stats
-    const queueStats: ProvisioningQueueMetrics = {
+    const totalBalances: AdminWalletMetrics['totalBalances'] = {};
+    for (const row of payload.systemBalances) {
+      const currency = String(row.currency || '').trim().toUpperCase();
+      if (!currency) continue;
+      totalBalances[currency] = {
+        available: Number(row.available || 0),
+        locked_escrow: Number(row.escrow || 0),
+        locked_withdrawal: Number(row.pendingWithdrawal || 0),
+      };
+    }
+
+    const provisioningQueue: ProvisioningQueueMetrics = {
       queued: 0,
       processing: 0,
-      completed: 0,
+      completed: Number(payload.metrics.totalDepositAddresses || 0),
       failed: 0,
-      total_users: totalWallets,
-      provisioned_wallets: 0,
+      total_users: Number(payload.metrics.totalUsers || 0),
+      provisioned_wallets: Number(payload.metrics.totalDepositAddresses || 0),
     };
-
-    (walletsData || []).forEach((w: any) => {
-      const status = w.status || 'completed';
-      if (status === 'pending') queueStats.queued++;
-      else if (status === 'in_progress') queueStats.processing++;
-      else if (status === 'active' || status === 'completed') {
-        queueStats.completed++;
-        queueStats.provisioned_wallets++;
-      } else if (status === 'failed') queueStats.failed++;
-    });
-
-    // 4. Platform custody wallets
-    const { data: platformWalletsData, error: platformError } = await supabase
-      .from('platform_wallets')
-      .select('*')
-      .order('asset_code', { ascending: true });
-
-    if (platformError) {
-      return { data: null, error: new Error(platformError.message) };
-    }
 
     return {
       data: {
-        totalWallets,
+        totalWallets: Number(payload.metrics.totalUserWallets || 0),
         totalBalances,
-        provisioningQueue: queueStats,
-        platformWallets: platformWalletsData || [],
+        provisioningQueue,
+        platformWallets: Array.isArray(payload.platformCustody) ? payload.platformCustody : [],
+        totalDeposits: payload.totalDeposits,
+        totalWithdrawals: payload.totalWithdrawals,
+        totalUsers: Number(payload.metrics.totalUsers || 0),
+        totalDepositAddresses: Number(payload.metrics.totalDepositAddresses || 0),
+        custodyAvailable: payload.custodyAvailable === true,
       },
       error: null,
     };

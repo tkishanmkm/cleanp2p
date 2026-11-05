@@ -1,0 +1,30 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
+
+const migrationPath = resolve(
+  process.cwd(),
+  "supabase/migrations/20261025080000_bind_verify_admin_login_to_session.sql",
+);
+const sql = readFileSync(migrationPath, "utf8");
+
+test("verify_admin_login migration fails closed on function-definition drift", () => {
+  assert.match(sql, /to_regprocedure\(v_signature\)/);
+  assert.match(sql, /regexp_count\(v_definition, v_declaration_pattern\) <> 1/);
+  assert.match(sql, /regexp_count\(v_definition, v_begin_pattern\) <> 1/);
+  assert.match(sql, /refusing to patch/);
+});
+
+test("authenticated verify_admin_login callers are bound to auth.uid()", () => {
+  assert.match(sql, /p_user_uuid IS NOT NULL AND p_user_uuid IS DISTINCT FROM auth\.uid\(\)/);
+  assert.match(sql, /user_uuid IS NOT NULL AND user_uuid IS DISTINCT FROM auth\.uid\(\)/);
+  assert.match(sql, /v_uid := auth\.uid\(\)/);
+  assert.match(sql, /Authenticated user ID mismatch/);
+});
+
+test("unauthenticated execution requires service_role and uses explicit server identity", () => {
+  assert.match(sql, /COALESCE\(auth\.role\(\), ''\) <> 'service_role'/);
+  assert.match(sql, /v_uid := COALESCE\(p_user_uuid, user_uuid\)/);
+  assert.match(sql, /USING ERRCODE = '42501'/);
+});

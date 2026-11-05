@@ -3,13 +3,31 @@
 import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { createClient } from '@/utils/supabase/client';
-import { getPublicHandle, formatCurrencyValue, parsePaymentMethods, getUserStatusText } from '@/utils/userPrivacy';
+import { useI18n } from '@/context/i18n-context';
+import { getPublicHandle, parsePaymentMethods, getUserStatusText } from '@/utils/userPrivacy';
 import { Loader2, ArrowRight } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 
 export default function AdsListPage() {
+  const { t, language } = useI18n();
   const [ads, setAds] = useState<any[]>([]);
+  const formatPublicCurrency = (amount: number, currency?: string | null) => {
+    const code = (currency || 'USD').toUpperCase();
+    try {
+      return new Intl.NumberFormat(language, { style: 'currency', currency: code, minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(amount);
+    } catch {
+      return code + ' ' + Number(amount || 0).toLocaleString(language, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    }
+  };
+  const localizePresence = (raw: string) => {
+    if (raw === 'Online') return t('p2pAdCard.online');
+    if (raw === 'Offline') return t('p2pAdCard.offline');
+    const match = raw.match(/^Last seen (\d+)(m|h|d) ago$/);
+    if (!match) return raw;
+    const key = match[2] === 'm' ? 'lastSeenMinutes' : match[2] === 'h' ? 'lastSeenHours' : 'lastSeenDays';
+    return t('p2pAdCard.' + key).replace('{count}', match[1]);
+  };
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -83,29 +101,29 @@ export default function AdsListPage() {
     <div className="max-w-5xl mx-auto p-6 space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-foreground">Active P2P Offers</h1>
-          <p className="text-sm text-muted-foreground">Browse all buy and sell offers on the platform</p>
+          <h1 className="text-2xl font-bold text-foreground">{t('publicAdsPage.title')}</h1>
+          <p className="text-sm text-muted-foreground">{t('publicAdsPage.description')}</p>
         </div>
         <Button asChild>
-          <Link href="/ads/create">Create Ad</Link>
+          <Link href="/ads/create">{t('publicAdsPage.createAd')}</Link>
         </Button>
       </div>
 
       {loading ? (
         <div className="p-12 text-center">
           <Loader2 className="h-8 w-8 animate-spin mx-auto text-primary" />
-          <span className="text-xs text-muted-foreground mt-2 block">Loading offers...</span>
+          <span className="text-xs text-muted-foreground mt-2 block">{t('publicAdsPage.loadingOffers')}</span>
         </div>
       ) : ads.length === 0 ? (
         <div className="p-12 text-center border border-dashed rounded-2xl bg-card">
-          <p className="text-sm text-muted-foreground">No active advertisements found.</p>
+          <p className="text-sm text-muted-foreground">{t('publicAdsPage.noActiveAds')}</p>
         </div>
       ) : (
         <div className="space-y-4">
           {ads.map((ad) => {
-            const displayUsername = getPublicHandle(ad.profiles);
+            const displayUsername = ad.profiles?.username ? getPublicHandle(ad.profiles) : '@' + t('counterpartyPanel.fallbackTrader');
             const methods = parsePaymentMethods(ad.payment_methods);
-            const status = getUserStatusText(ad.profiles?.is_online, ad.profiles?.last_seen);
+            const status = localizePresence(getUserStatusText(ad.profiles?.is_online, ad.profiles?.last_seen));
 
             return (
               <div
@@ -121,18 +139,18 @@ export default function AdsListPage() {
                       ({status})
                     </span>
                     <Badge variant={ad.type?.toLowerCase() === 'sell' ? 'default' : 'secondary'}>
-                      {ad.type?.toUpperCase()} {ad.asset_symbol}
+                      {ad.type?.toLowerCase() === 'sell' ? t('publicAdsPage.sell') : t('publicAdsPage.buy')} {ad.asset_symbol}
                     </Badge>
                   </div>
 
                   <div className="text-xs text-muted-foreground space-x-2">
                     <span>
-                      Limits: {formatCurrencyValue(Number(ad.min_limit), ad.fiat_symbol)} -{' '}
-                      {formatCurrencyValue(Number(ad.max_limit), ad.fiat_symbol)}
+                      {t('publicAdsPage.limits')} {formatPublicCurrency(Number(ad.min_limit), ad.fiat_symbol)} -{' '}
+                      {formatPublicCurrency(Number(ad.max_limit), ad.fiat_symbol)}
                     </span>
                     <span>•</span>
                     <span>
-                      Available: {Number(ad.total_amount || 0).toFixed(4)} {ad.asset_symbol}
+                      {t('publicAdsPage.available')} {Number(ad.total_amount || 0).toLocaleString(language, { minimumFractionDigits: 4, maximumFractionDigits: 4 })} {ad.asset_symbol}
                     </span>
                   </div>
 
@@ -147,15 +165,15 @@ export default function AdsListPage() {
 
                 <div className="flex items-center justify-between md:flex-col md:items-end gap-2">
                   <div className="text-right">
-                    <span className="text-xs text-muted-foreground uppercase block font-medium">Price</span>
+                    <span className="text-xs text-muted-foreground uppercase block font-medium">{t('publicAdsPage.price')}</span>
                     <span className="text-xl font-bold text-foreground">
-                      {formatCurrencyValue(Number(ad.price), ad.fiat_symbol)}
+                      {formatPublicCurrency(Number(ad.price), ad.fiat_symbol)}
                     </span>
                   </div>
 
                   <Button asChild size="sm">
                     <Link href={`/ad/${ad.id}`}>
-                      {ad.type?.toLowerCase() === 'sell' ? 'Buy' : 'Sell'} <ArrowRight className="ml-1.5 h-3.5 w-3.5" />
+                      {ad.type?.toLowerCase() === 'sell' ? t('publicAdsPage.buy') : t('publicAdsPage.sell')} <ArrowRight className="ml-1.5 h-3.5 w-3.5" />
                     </Link>
                   </Button>
                 </div>

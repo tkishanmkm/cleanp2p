@@ -178,44 +178,30 @@ export default function TradeRoom({
     }
   };
 
-  // Buyer: Mark as paid
+  // Buyer: mark payment through the canonical, participant-verified escrow RPC.
   const handleMarkAsPaid = async () => {
     setIsActionLoading(true);
     try {
-      const response = await fetch('/api/trades/payment-sent', {
+      const response = await fetch('/api/p2p/trade/pay', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
         body: JSON.stringify({ trade_id: tradeId }),
       });
-
-      if (response.ok) {
-        setStatus('payment_sent');
-        toast({
-          title: 'Payment Confirmed',
-          description: 'Seller has been notified that payment was transmitted.',
-        });
-      } else {
-        // Direct fallback update
-        const isTradeUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(tradeId);
-        let updateQuery = supabase
-          .from('trades')
-          .update({ status: 'payment_sent', paid_at: new Date().toISOString() });
-        if (isTradeUuid) {
-          updateQuery = updateQuery.or(`trade_id.eq.${tradeId},id.eq.${tradeId}`);
-        } else {
-          updateQuery = updateQuery.eq('trade_id', tradeId);
-        }
-        await updateQuery;
-        setStatus('payment_sent');
-        toast({
-          title: 'Payment Confirmed',
-          description: 'Trade marked as paid.',
-        });
+      const result = await response.json().catch(() => null);
+      if (!response.ok || !result?.success) {
+        throw new Error(result?.error || 'Payment status could not be confirmed.');
       }
-    } catch (err: any) {
+
+      setStatus(result.status || 'payment_sent');
+      toast({
+        title: 'Payment Confirmed',
+        description: 'The payment status was recorded and the seller has been notified.',
+      });
+    } catch (err: unknown) {
       toast({
         title: 'Action Error',
-        description: err.message || 'Could not update payment status.',
+        description: err instanceof Error ? err.message : 'Could not update payment status.',
         variant: 'destructive',
       });
     } finally {
@@ -223,7 +209,7 @@ export default function TradeRoom({
     }
   };
 
-  // Seller: Release escrow
+  // Seller: release escrow through the canonical, participant-verified RPC.
   const handleReleaseEscrow = async () => {
     if (!confirm('Are you certain you have received the exact fiat payment into your account? This action will release the crypto escrow immediately.')) {
       return;
@@ -231,39 +217,41 @@ export default function TradeRoom({
 
     setIsActionLoading(true);
     try {
-      const response = await fetch('/api/trades/release', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ trade_id: tradeId }),
-      });
+      const submitRelease = async (totpCode?: string) => {
+        const response = await fetch('/api/p2p/trade/release', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify({ trade_id: tradeId, ...(totpCode ? { totpCode } : {}) }),
+        });
+        const result = await response.json().catch(() => null);
+        return { response, result };
+      };
 
-      if (response.ok) {
-        setStatus('completed');
-        toast({
-          title: 'Escrow Released',
-          description: 'Crypto has been transferred to the buyer.',
-        });
-      } else {
-        const isTradeUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(tradeId);
-        let updateQuery = supabase
-          .from('trades')
-          .update({ status: 'completed', released_at: new Date().toISOString() });
-        if (isTradeUuid) {
-          updateQuery = updateQuery.or(`trade_id.eq.${tradeId},id.eq.${tradeId}`);
-        } else {
-          updateQuery = updateQuery.eq('trade_id', tradeId);
+      let { response, result } = await submitRelease();
+      if (!response.ok && response.status === 403 &&
+          typeof result?.error === 'string' &&
+          result.error.includes('TWO_FACTOR_REQUIRED')) {
+        const code = window.prompt('Enter your 6-digit authenticator code to release escrow.');
+        if (!code) {
+          throw new Error('Authenticator verification is required to release escrow.');
         }
-        await updateQuery;
-        setStatus('completed');
-        toast({
-          title: 'Escrow Released',
-          description: 'Trade marked as completed.',
-        });
+        ({ response, result } = await submitRelease(code.trim()));
       }
-    } catch (err: any) {
+
+      if (!response.ok || !result?.success) {
+        throw new Error(result?.error || 'Escrow release was not confirmed.');
+      }
+
+      setStatus('completed');
+      toast({
+        title: 'Escrow Released',
+        description: 'The database confirmed release and credited the buyer.',
+      });
+    } catch (err: unknown) {
       toast({
         title: 'Release Failed',
-        description: err.message || 'Could not release escrow.',
+        description: err instanceof Error ? err.message : 'Could not release escrow.',
         variant: 'destructive',
       });
     } finally {
@@ -271,30 +259,31 @@ export default function TradeRoom({
     }
   };
 
-  // Cancel Trade
+  // Cancel trade through the canonical refund-and-status transition RPC.
   const handleCancelTrade = async () => {
     if (!confirm('Are you sure you want to cancel this trade?')) return;
     setIsActionLoading(true);
     try {
-      const isTradeUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(tradeId);
-      let updateQuery = supabase
-        .from('trades')
-        .update({ status: 'cancelled', cancelled_at: new Date().toISOString() });
-      if (isTradeUuid) {
-        updateQuery = updateQuery.or(`trade_id.eq.${tradeId},id.eq.${tradeId}`);
-      } else {
-        updateQuery = updateQuery.eq('trade_id', tradeId);
+      const response = await fetch('/api/p2p/trade/cancel', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ trade_id: tradeId, reason: 'User requested cancellation' }),
+      });
+      const result = await response.json().catch(() => null);
+      if (!response.ok || !result?.success) {
+        throw new Error(result?.error || 'Trade cancellation was not confirmed.');
       }
-      await updateQuery;
-      setStatus('cancelled');
+
+      setStatus(result.result?.status || 'cancelled');
       toast({
         title: 'Trade Cancelled',
-        description: 'This trade session has been closed.',
+        description: 'The database confirmed cancellation and returned escrow to the seller.',
       });
-    } catch (err: any) {
+    } catch (err: unknown) {
       toast({
         title: 'Cancellation Error',
-        description: err.message,
+        description: err instanceof Error ? err.message : 'Could not cancel this trade.',
         variant: 'destructive',
       });
     } finally {

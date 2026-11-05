@@ -1,80 +1,75 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getSupabaseAdminClient } from '@/lib/supabase/server';
 import { verifyServerAdmin } from '@/lib/server-admin-auth';
+import {
+  AdminDisputeSettlementError,
+  resolveDisputeAtomically,
+  type DisputeResolution,
+} from '@/lib/admin-dispute-settlement';
 
 export const dynamic = 'force-dynamic';
 
 export async function POST(req: NextRequest) {
   try {
     const auth = await verifyServerAdmin(req);
-    if (!auth.authorized) {
-      return auth.response!;
+    if (!auth.authorized || !auth.adminId) {
+      return auth.response || NextResponse.json(
+        { success: false, error: 'Administrator authentication is required.' },
+        { status: 401 },
+      );
     }
 
-    const adminId = auth.adminId || auth.user.id;
-    const adminEmail = auth.adminEmail || 'admin@paxones.com';
-    const supabase = getSupabaseAdminClient();
-
-    const { disputeId, tradeId, resolution, notes } = await req.json();
-
-    if (!disputeId || !tradeId || !['RELEASE', 'CANCEL'].includes(resolution)) {
-      return NextResponse.json({ error: 'Invalid resolution parameters' }, { status: 400 });
+    if (auth.supportAdmin === true) {
+      return NextResponse.json(
+        { success: false, error: 'Support administrators cannot resolve disputes or settle escrow.' },
+        { status: 403 },
+      );
     }
 
-    let rpcResult;
-    if (resolution === 'RELEASE') {
-      rpcResult = await supabase.rpc('release_trade_escrow', {
-        p_trade_id: tradeId,
-        p_caller_id: adminId,
-      });
-    } else {
-      rpcResult = await supabase.rpc('cancel_p2p_trade', {
-        p_trade_id: tradeId,
-        p_caller_id: adminId,
-      });
+    const body = await req.json().catch(() => null);
+    if (!body || typeof body !== 'object' || Array.isArray(body)) {
+      return NextResponse.json({ success: false, error: 'A valid JSON object is required.' }, { status: 400 });
     }
 
-    if (rpcResult.error || (rpcResult.data && !rpcResult.data.success)) {
-      const errMsg = rpcResult.error?.message || rpcResult.data?.message || 'Escrow settlement RPC failed';
-      return NextResponse.json({ error: errMsg }, { status: 400 });
+    const requestedResolution = typeof body.resolution === 'string'
+      ? body.resolution.trim().toUpperCase()
+      : undefined;
+    if (requestedResolution && requestedResolution !== 'RELEASE' && requestedResolution !== 'CANCEL') {
+      return NextResponse.json({ success: false, error: 'Resolution must be RELEASE or CANCEL.' }, { status: 400 });
     }
 
-    // Fetch trade to resolve counterparty winner ID
-    const { data: trade } = await supabase
-      .from('trades')
-      .select('id, buyer_id, seller_id')
-      .eq('id', tradeId)
-      .maybeSingle();
+    const reason = typeof body.reason === 'string'
+      ? body.reason
+      : typeof body.notes === 'string'
+        ? body.notes
+        : '';
 
-    const winnerId = resolution === 'RELEASE' ? trade?.buyer_id : trade?.seller_id;
-
-    // Update dispute record
-    await supabase
-      .from('disputes')
-      .update({
-        status: 'resolved',
-        winner_id: winnerId,
-        resolution: resolution === 'RELEASE' ? 'RELEASE_TO_BUYER' : 'REFUND_TO_SELLER',
-        resolution_reason: notes || (resolution === 'RELEASE' ? 'Dispute awarded to Buyer' : 'Dispute refunded to Seller'),
-        resolution_note: notes || (resolution === 'RELEASE' ? 'Dispute awarded to Buyer' : 'Dispute refunded to Seller'),
-        resolved_by: adminId,
-        resolved_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-      })
-      .eq('id', disputeId);
-
-    // Audit log
-    await supabase.from('admin_audit_logs').insert({
-      admin_id: adminId,
-      admin_email: adminEmail,
-      action: 'RESOLVE_DISPUTE',
-      target_id: tradeId,
-      details: { disputeId, tradeId, resolution, notes },
+    const result = await resolveDisputeAtomically({
+      disputeId: typeof body.disputeId === 'string' ? body.disputeId : undefined,
+      tradeId: typeof body.tradeId === 'string' ? body.tradeId : '',
+      winnerId: typeof body.winnerId === 'string' ? body.winnerId : undefined,
+      resolution: requestedResolution as DisputeResolution | undefined,
+      reason,
+      actorId: auth.adminId,
+      actorEmail: auth.adminEmail || auth.user?.email || null,
     });
 
-    return NextResponse.json({ success: true, data: rpcResult.data });
-  } catch (err: any) {
-    return NextResponse.json({ error: err.message }, { status: 500 });
+    return NextResponse.json({
+      success: true,
+      settlementSucceeded: result.settlementSucceeded,
+      audit_logged: result.audit_logged,
+      data: result,
+    });
+  } catch (error) {
+    if (error instanceof AdminDisputeSettlementError) {
+      return NextResponse.json(
+        { success: false, error: error.message, code: error.code },
+        { status: error.statusCode },
+      );
+    }
+    console.error('[API/ADMIN/DISPUTES/RESOLVE] Unexpected settlement error.');
+    return NextResponse.json(
+      { success: false, error: 'Unable to verify or complete the atomic dispute settlement.' },
+      { status: 500 },
+    );
   }
 }
-

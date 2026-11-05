@@ -4,56 +4,46 @@ import { useEffect } from 'react';
 import { createClient } from '@/lib/supabase/client';
 
 export function usePresence(userId?: string) {
-  const supabase = createClient();
-
   useEffect(() => {
     if (!userId) return;
 
-    const sendHeartbeat = async () => {
+    const supabase = createClient();
+    const sendHeartbeat = async (isOnline: boolean) => {
       try {
-        const { error } = await supabase.rpc('update_user_presence', { user_id: userId });
-        if (error) {
-          await supabase
-            .from('profiles')
-            .update({ 
-              last_seen_at: new Date().toISOString(),
-              is_online: true 
-            })
-            .eq('id', userId);
+        const { error } = await supabase.rpc('set_my_presence', {
+          p_is_online: isOnline,
+        });
+        if (error && process.env.NODE_ENV !== 'production') {
+          console.warn('Presence update was not accepted:', error.code);
         }
       } catch {
-        try {
-          await supabase
-            .from('profiles')
-            .update({ 
-              last_seen_at: new Date().toISOString(),
-              is_online: true 
-            })
-            .eq('id', userId);
-        } catch {}
+        if (process.env.NODE_ENV !== 'production') {
+          console.warn('Presence update failed.');
+        }
       }
     };
 
-    // Send initial heartbeat on mount
-    sendHeartbeat();
+    void sendHeartbeat(true);
+    const interval = window.setInterval(() => void sendHeartbeat(true), 60_000);
 
-    // Pulse presence every 60 seconds (1 minute)
-    const interval = setInterval(sendHeartbeat, 60000);
+    const handlePageHide = () => {
+      void sendHeartbeat(false);
+    };
+    window.addEventListener('pagehide', handlePageHide);
 
-    return () => clearInterval(interval);
-  }, [userId, supabase]);
+    return () => {
+      window.clearInterval(interval);
+      window.removeEventListener('pagehide', handlePageHide);
+      void sendHeartbeat(false);
+    };
+  }, [userId]);
 }
 
-/**
- * Utility to check online status based on last_seen timestamp
- */
 export function isUserOnline(lastSeenTimestamp?: string | Date | null): boolean {
   if (!lastSeenTimestamp) return false;
   const lastSeen = new Date(lastSeenTimestamp).getTime();
   const now = Date.now();
-  // Marked as Online if last seen within the last 2 minutes (120,000 ms)
-  return now - lastSeen < 120000;
+  return Number.isFinite(lastSeen) && now >= lastSeen && now - lastSeen < 120_000;
 }
 
 export default usePresence;
-

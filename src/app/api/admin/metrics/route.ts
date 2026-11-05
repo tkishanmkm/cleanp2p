@@ -2,52 +2,92 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseAdminClient } from '@/lib/supabase/server';
 import { verifyServerAdmin } from '@/lib/server-admin-auth';
 import { getHotWalletOnchainBalance } from '@/lib/security/reconciliation';
+import { normalizePrimaryWalletAssetBalance } from '@/lib/wallet-balance-normalization';
+import { fetchAllSupabaseRows } from '@/lib/supabase/fetch-all-pages';
 
 export const dynamic = 'force-dynamic';
 
 export async function GET(req: NextRequest) {
   try {
-    const auth = await verifyServerAdmin(req);
-    if (!auth.authorized) {
-      return auth.response!;
+    const auth = await verifyServerAdmin(req, { allowSupportReadOnly: true });
+    if (!auth.authorized) return auth.response!;
+    if (auth.supportAdmin === true || auth.supportReadOnly === true) {
+      return NextResponse.json(
+        { success: false, error: 'Full administrator access is required for platform-wide financial metrics.' },
+        { status: 403 }
+      );
     }
 
     const supabaseAdmin = getSupabaseAdminClient();
 
-    // 1. Total Platform Volume (Completed P2P Trades)
-    let totalVolumeUsdt = 0;
-    let completedTradesCount = 0;
-    try {
-      const { data: completedTrades } = await supabaseAdmin
+    // 1. P2P trade volume uses the immutable USD-equivalent snapshot captured
+    // at trade initiation. Never sum BTC/ETH quantities and label them USDT.
+    const completedTradesResult = await fetchAllSupabaseRows<any>(
+      (from, to) => supabaseAdmin
         .from('trades')
-        .select('*')
-        .or('status.eq.COMPLETED,status.eq.completed,status.eq.RELEASED,status.eq.released');
+        .select('usd_value_at_trade', { count: 'exact' })
+        .in('status', ['released', 'RELEASED', 'completed', 'COMPLETED'])
+        .range(from, to),
+      { pageSize: 1000, maxRows: 20000 }
+    );
+    if (completedTradesResult.error || completedTradesResult.truncated) {
+      console.error('[ADMIN_METRICS] Completed-trade volume read failed or exceeded the safe cap.');
+      return NextResponse.json({ success: false, error: 'Completed trade metrics could not be fully verified.' }, { status: 503 });
+    }
+    const completedTrades = completedTradesResult.rows;
 
-      if (completedTrades) {
-        completedTradesCount = completedTrades.length;
-        totalVolumeUsdt = completedTrades.reduce((acc: number, t: any) => acc + Number(t.amount ?? t.crypto_amount ?? t.amount_usd ?? t.fiat_amount ?? 0), 0);
+    let completedTradesCount = completedTrades.length;
+    let totalVolumeUsdt = 0;
+    let unpricedCompletedTradesCount = 0;
+    for (const trade of completedTrades) {
+      const usdValue = Number(trade.usd_value_at_trade);
+      if (!Number.isFinite(usdValue) || usdValue < 0) {
+        unpricedCompletedTradesCount += 1;
+        continue;
       }
-    } catch (_) {}
+      totalVolumeUsdt += usdValue;
+    }
 
-    // 2. Locked Escrow & Withdrawal Totals
+    // 2. Canonical wallet-asset liabilities. balance is already spendable;
+    // escrow/withdrawal columns are separate liability buckets and must not be
+    // subtracted from balance a second time. Alias columns are normalized with
+    // the same max-not-sum rule used by the customer wallet balance layer.
     let totalLockedEscrow = 0;
     let totalLockedWithdrawal = 0;
     let totalAvailable = 0;
-    try {
-      const { data: assets } = await supabaseAdmin
-        .from('wallet_assets')
-        .select('asset_code, available, locked_escrow, locked_withdrawal');
 
-      if (assets) {
-        for (const a of assets) {
-          if (a.asset_code === 'USDT') {
-            totalAvailable += Number(a.available || 0);
-            totalLockedEscrow += Number(a.locked_escrow || 0);
-            totalLockedWithdrawal += Number(a.locked_withdrawal || 0);
-          }
-        }
+    const assetsResult = await fetchAllSupabaseRows<any>(
+      (from, to) => supabaseAdmin
+        .from('wallet_assets')
+        .select('asset_symbol,balance,locked_balance,reserved_balance,in_escrow,in_withdrawal', { count: 'exact' })
+        .range(from, to),
+      { pageSize: 1000, maxRows: 20000 }
+    );
+    if (assetsResult.error || assetsResult.truncated) {
+      console.error('[ADMIN_METRICS] Canonical wallet liability read failed or exceeded the safe cap.');
+      return NextResponse.json({ success: false, error: 'Wallet liability metrics could not be fully verified.' }, { status: 503 });
+    }
+    const assets = assetsResult.rows;
+
+    for (const asset of assets) {
+      if (String(asset.asset_symbol || '').trim().toUpperCase() !== 'USDT') continue;
+      const numericValues = [
+        asset.balance,
+        asset.locked_balance,
+        asset.reserved_balance,
+        asset.in_escrow,
+        asset.in_withdrawal,
+      ];
+      if (numericValues.some((value) => value !== null && value !== undefined &&
+          (!Number.isFinite(Number(value)) || Number(value) < 0))) {
+        console.error('[ADMIN_METRICS] Invalid wallet liability row encountered.');
+        return NextResponse.json({ success: false, error: 'Wallet liability reconciliation is required.' }, { status: 503 });
       }
-    } catch (_) {}
+      const normalized = normalizePrimaryWalletAssetBalance(asset);
+      totalAvailable += normalized.available;
+      totalLockedEscrow += normalized.inEscrow;
+      totalLockedWithdrawal += normalized.inWithdrawal;
+    }
 
     // 3. Hot Wallet Reserves & Status (Primary: BSC, Optional: others)
     const hotWallets = [];
@@ -64,28 +104,31 @@ export async function GET(req: NextRequest) {
     let openDisputes = 0;
     let resolvedDisputes = 0;
     let totalDisputes = 0;
-    try {
-      const { data: disputes } = await supabaseAdmin
+    const disputesResult = await fetchAllSupabaseRows<any>(
+      (from, to) => supabaseAdmin
         .from('disputes')
-        .select('id, status, created_at, resolved_at');
-
-      if (disputes) {
-        totalDisputes = disputes.length;
-        for (const d of disputes) {
-          if (['OPEN', 'INVESTIGATING', 'IN_REVIEW'].includes(d.status)) {
-            openDisputes++;
-          } else {
-            resolvedDisputes++;
-          }
-        }
+        .select('id,status', { count: 'exact' })
+        .range(from, to),
+      { pageSize: 1000, maxRows: 20000 }
+    );
+    if (disputesResult.error || disputesResult.truncated) {
+      console.error('[ADMIN_METRICS] Dispute metrics read failed or exceeded the safe cap.');
+      return NextResponse.json({ success: false, error: 'Dispute metrics could not be fully verified.' }, { status: 503 });
+    }
+    for (const dispute of disputesResult.rows) {
+      totalDisputes++;
+      if (['OPEN', 'INVESTIGATING', 'IN_REVIEW'].includes(String(dispute.status || '').toUpperCase())) {
+        openDisputes++;
+      } else {
+        resolvedDisputes++;
       }
-    } catch (_) {}
+    }
 
     // 5. Active Security Alerts Count
     let activeAlertsCount = 0;
     try {
       const { count } = await supabaseAdmin
-        .from('security_alerts')
+        .from('system_alerts')
         .select('*', { count: 'exact', head: true })
         .eq('is_resolved', false);
       activeAlertsCount = count || 0;
@@ -97,8 +140,11 @@ export async function GET(req: NextRequest) {
       await supabaseAdmin.from('admin_audit_logs').insert({
         admin_id: auth.adminId || auth.user.id,
         action: 'VIEW_METRICS',
-        details: { path: '/api/admin/metrics' },
-        ip_address: ip,
+        details: {
+          path: '/api/admin/metrics',
+          ip_address_hint: ip,
+          ip_address_trust: 'forwarded_header_unverified',
+        },
       });
     } catch (_) {}
 
@@ -109,6 +155,7 @@ export async function GET(req: NextRequest) {
         trading: {
           totalVolumeUsdt,
           completedTradesCount,
+          unpricedCompletedTradesCount,
         },
         liabilities: {
           totalAvailableUsdt: totalAvailable,

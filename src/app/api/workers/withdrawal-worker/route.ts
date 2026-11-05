@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { processWithdrawalQueue } from '@/jobs/withdrawalWorker';
+import { processAllPendingWithdrawals } from '@/jobs/withdrawalWorker';
 import { verifyWorkerAuth } from '@/lib/security/worker-auth';
 
 export const dynamic = 'force-dynamic';
@@ -18,7 +18,8 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: 'Unauthorized worker invocation' }, { status: 401 });
     }
 
-    const result = await processWithdrawalQueue();
+    // Never dispatch directly: even one-item runs must pass through the singleton guard.
+    const result = await processAllPendingWithdrawals(1);
 
     return NextResponse.json({
       success: true,

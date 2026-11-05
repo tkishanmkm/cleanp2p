@@ -114,26 +114,9 @@ export default function OnboardingForm({ user }: OnboardingProps) {
         return;
       }
 
-      // 2. Direct client verification ensuring display_name = username mapping rule
-      try {
-        await supabase
-          .from('profiles')
-          .update({
-            full_name: fullName.trim(),
-            name: fullName.trim(),
-            date_of_birth: dateOfBirth,
-            dob: dateOfBirth,
-            security_question: securityQuestion,
-            security_answer: securityAnswer.trim().toLowerCase(),
-            onboarding_completed: true,
-            display_name: user.username,
-            username: user.username,
-            updated_at: new Date().toISOString(),
-          })
-          .eq('id', user.id);
-      } catch (dbErr) {
-        console.warn('Direct profile sync note:', dbErr);
-      }
+      // The server endpoint is the sole profile writer. Do not repeat the
+      // profile update from the browser: that used to overwrite the securely
+      // hashed answer with plaintext and could bypass server-side invariants.
 
       setSuccess(true);
       toast({

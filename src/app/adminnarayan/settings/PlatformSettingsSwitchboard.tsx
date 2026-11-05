@@ -59,6 +59,7 @@ interface Props {
   initialSettings: PlatformSettingsState;
   appSettings: {
     platform_fee_percent: number;
+    escrow_fee_percent: number;
     min_trade_amount: number;
   };
   withdrawalGovernance?: {
@@ -66,6 +67,7 @@ interface Props {
     withdrawal_approval_threshold_usd: number;
     daily_withdrawal_limit_usd: number;
     password_change_withdrawal_hold_hours: number;
+    withdrawal_fee_multiplier: number;
   };
 }
 
@@ -162,10 +164,13 @@ export default function PlatformSettingsSwitchboard({
     withdrawal_approval_threshold_usd: 2000.0,
     daily_withdrawal_limit_usd: 10000.0,
     password_change_withdrawal_hold_hours: 24.0,
+    withdrawal_fee_multiplier: 2.0,
   },
 }: Props) {
   const [settings, setSettings] = useState<PlatformSettingsState>(initialSettings);
   const [loading, setLoading] = useState(false);
+  const [isSavingAppSettings, setIsSavingAppSettings] = useState(false);
+  const [isSavingWithdrawalGovernance, setIsSavingWithdrawalGovernance] = useState(false);
   const [feedback, setFeedback] = useState<{ type: "success" | "error" | "info"; message: string } | null>(null);
 
   // Confirmation Modal state
@@ -771,19 +776,46 @@ export default function PlatformSettingsSwitchboard({
           </CardDescription>
         </CardHeader>
         <CardContent className="p-4 sm:p-6">
-          <form action={async (formData) => { await updateAppSettingsAction(formData); }} className="space-y-4">
+          <form
+            onSubmit={async (event) => {
+              event.preventDefault();
+              setIsSavingAppSettings(true);
+              setFeedback(null);
+              const result = await updateAppSettingsAction(new FormData(event.currentTarget));
+              setFeedback(result.success
+                ? { type: "success", message: "Marketplace fee and minimum trade settings saved." }
+                : { type: "error", message: result.error || "Unable to save marketplace fee settings." });
+              setIsSavingAppSettings(false);
+            }}
+            className="space-y-4"
+          >
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div className="space-y-2">
                 <label className="text-xs font-semibold text-slate-300 uppercase flex items-center gap-1.5">
-                  <Percent className="w-3.5 h-3.5 text-emerald-400" /> Platform Fee Percentage (%)
+                  <Percent className="w-3.5 h-3.5 text-emerald-400" /> Internal Transfer Fee Percentage (%)
                 </label>
                 <input
                   type="number"
                   step="0.01"
                   min="0"
-                  max="100"
+                  max="10"
                   name="platform_fee_percent"
                   defaultValue={appSettings.platform_fee_percent ?? 1.5}
+                  className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-lg text-white font-mono focus:outline-none focus:border-blue-500 text-sm"
+                />
+              </div>
+
+              <div className="space-y-2">
+                <label className="text-xs font-semibold text-slate-300 uppercase flex items-center gap-1.5">
+                  <Percent className="w-3.5 h-3.5 text-emerald-400" /> P2P Escrow Fee Percentage (%)
+                </label>
+                <input
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  max="10"
+                  name="escrow_fee_percent"
+                  defaultValue={appSettings.escrow_fee_percent ?? 1.5}
                   className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-lg text-white font-mono focus:outline-none focus:border-blue-500 text-sm"
                 />
               </div>
@@ -795,7 +827,7 @@ export default function PlatformSettingsSwitchboard({
                 <input
                   type="number"
                   step="0.01"
-                  min="0"
+                  min="0.01"
                   name="min_trade_amount"
                   defaultValue={appSettings.min_trade_amount ?? 10.0}
                   className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-lg text-white font-mono focus:outline-none focus:border-blue-500 text-sm"
@@ -806,10 +838,11 @@ export default function PlatformSettingsSwitchboard({
             <div className="flex justify-end pt-2">
               <button
                 type="submit"
-                className="flex items-center gap-2 px-5 py-2 bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold rounded-lg shadow-md transition-colors"
+                disabled={isSavingAppSettings}
+                className="flex items-center gap-2 px-5 py-2 bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold rounded-lg shadow-md transition-colors disabled:opacity-50"
               >
                 <Save className="w-4 h-4" />
-                Save Fee Thresholds
+                {isSavingAppSettings ? "Saving..." : "Save Fee Thresholds"}
               </button>
             </div>
           </form>
@@ -827,7 +860,19 @@ export default function PlatformSettingsSwitchboard({
           </CardDescription>
         </CardHeader>
         <CardContent className="p-4 sm:p-6">
-          <form action={async (formData) => { await updateWithdrawalGovernanceAction(formData); }} className="space-y-4">
+          <form
+            onSubmit={async (event) => {
+              event.preventDefault();
+              setIsSavingWithdrawalGovernance(true);
+              setFeedback(null);
+              const result = await updateWithdrawalGovernanceAction(new FormData(event.currentTarget));
+              setFeedback(result.success
+                ? { type: "success", message: "Withdrawal governance and gas fee multiplier saved." }
+                : { type: "error", message: result.error || "Unable to save withdrawal governance settings." });
+              setIsSavingWithdrawalGovernance(false);
+            }}
+            className="space-y-4"
+          >
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div className="space-y-2">
                 <label className="text-xs font-semibold text-slate-300 uppercase flex items-center gap-1.5">
@@ -876,6 +921,22 @@ export default function PlatformSettingsSwitchboard({
 
               <div className="space-y-2">
                 <label className="text-xs font-semibold text-slate-300 uppercase flex items-center gap-1.5">
+                  <Percent className="w-3.5 h-3.5 text-amber-400" /> Withdrawal Network Gas Multiplier (×)
+                </label>
+                <input
+                  type="number"
+                  step="0.1"
+                  min="1"
+                  max="10"
+                  name="withdrawal_fee_multiplier"
+                  defaultValue={withdrawalGovernance.withdrawal_fee_multiplier}
+                  className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-lg text-white font-mono focus:outline-none focus:border-amber-500 text-sm"
+                />
+                <p className="text-[11px] text-slate-500">User withdrawal fee = estimated network gas × this multiplier. Default: 2×.</p>
+              </div>
+
+              <div className="space-y-2">
+                <label className="text-xs font-semibold text-slate-300 uppercase flex items-center gap-1.5">
                   <Clock className="w-3.5 h-3.5 text-amber-400" /> Password Change Hold (Hours)
                 </label>
                 <input
@@ -894,10 +955,11 @@ export default function PlatformSettingsSwitchboard({
             <div className="flex justify-end pt-2">
               <button
                 type="submit"
-                className="flex items-center gap-2 px-5 py-2 bg-amber-600 hover:bg-amber-500 text-white text-xs font-semibold rounded-lg shadow-md transition-colors cursor-pointer"
+                disabled={isSavingWithdrawalGovernance}
+                className="flex items-center gap-2 px-5 py-2 bg-amber-600 hover:bg-amber-500 text-white text-xs font-semibold rounded-lg shadow-md transition-colors cursor-pointer disabled:opacity-50"
               >
                 <Save className="w-4 h-4" />
-                Save Withdrawal Governance
+                {isSavingWithdrawalGovernance ? "Saving..." : "Save Withdrawal Governance"}
               </button>
             </div>
           </form>

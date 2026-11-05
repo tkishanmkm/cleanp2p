@@ -1,47 +1,65 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createClient, createAdminClient } from '@/lib/supabase/server';
+import { verifyServerAdmin } from '@/lib/server-admin-auth';
+import { getSupabaseAdminClient } from '@/lib/supabase/server';
 import { logAdminSecurityAudit } from '@/lib/admin-security';
+
+export const dynamic = 'force-dynamic';
 
 export async function POST(req: NextRequest) {
   try {
-    const supabase = await createClient();
-    const { data: { session } } = await supabase.auth.getSession();
-    if (!session?.user) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    const auth = await verifyServerAdmin(req);
+    if (!auth.authorized) return auth.response!;
+    if (auth.supportAdmin === true) {
+      return NextResponse.json({ success: false, error: 'Support administrators cannot change full-admin security preferences.' }, { status: 403 });
     }
 
-    const { theme } = await req.json();
-    if (!theme || !['light', 'dark', 'system'].includes(theme)) {
-      return NextResponse.json({ error: 'Invalid theme choice' }, { status: 400 });
+    const body = await req.json().catch(() => null);
+    if (!body || typeof body !== 'object' || Array.isArray(body) ||
+        Object.keys(body).some((key) => key !== 'theme')) {
+      return NextResponse.json({ success: false, error: 'A valid theme request is required.' }, { status: 400 });
     }
 
-    const adminId = session.user.id;
-    const adminEmail = session.user.email || 'admin';
-    const adminDb = createAdminClient();
+    const theme = (body as Record<string, unknown>).theme;
+    if (theme !== 'light' && theme !== 'dark' && theme !== 'system') {
+      return NextResponse.json({ success: false, error: 'Invalid theme choice.' }, { status: 400 });
+    }
 
-    await adminDb
+    const adminId = auth.user.id;
+    const adminEmail = auth.adminEmail || auth.user.email || 'admin';
+    const adminDb = getSupabaseAdminClient();
+    const { data: updatedRows, error: updateError } = await adminDb
       .from('profiles')
-      .update({
-        admin_theme_preference: theme,
-      })
-      .eq('id', adminId);
+      .update({ admin_theme_preference: theme, updated_at: new Date().toISOString() })
+      .eq('id', adminId)
+      .select('id');
 
-    const clientIp = req.headers.get('x-forwarded-for') || req.headers.get('x-real-ip') || 'unknown';
-    await logAdminSecurityAudit({
+    if (updateError || !Array.isArray(updatedRows) || updatedRows.length !== 1) {
+      console.error('[ADMIN_THEME] Preference update failed:', updateError?.code || 'no_row_updated');
+      return NextResponse.json({ success: false, error: 'Administrator theme preference could not be saved.' }, { status: 503 });
+    }
+
+    const auditSaved = await logAdminSecurityAudit({
       adminId,
       adminEmail,
       action: 'ADMIN_THEME_CHANGED',
       details: { new_theme: theme },
-      ipAddress: clientIp,
+      ipAddress: 'server-observed',
     });
+    if (!auditSaved) {
+      return NextResponse.json({
+        success: false,
+        saved: true,
+        error: 'The theme preference was saved, but the security audit could not be recorded. Contact an administrator.',
+      }, { status: 503 });
+    }
 
     return NextResponse.json({
       success: true,
       theme,
       message: `Admin theme set to ${theme}`,
-    });
-  } catch (error: any) {
-    console.error('Theme Update Error:', error);
-    return NextResponse.json({ error: error.message || 'Theme update failed' }, { status: 500 });
+    }, { headers: { 'Cache-Control': 'no-store, max-age=0' } });
+  } catch (error: unknown) {
+    console.error('[ADMIN_THEME] Update failed:', error instanceof Error ? error.name : 'UnknownError');
+    return NextResponse.json({ success: false, error: 'Theme preference could not be updated.' }, { status: 500 });
   }
 }

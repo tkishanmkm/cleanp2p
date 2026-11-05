@@ -1,7 +1,7 @@
 'use client';
 
 import React, { createContext, useContext, ReactNode, useState, useEffect } from 'react';
-import { createClient } from '@/lib/supabase';
+
 
 export interface BrandingConfig {
   appLogo?: string;
@@ -40,8 +40,6 @@ export function BrandingProvider({ children }: { children: ReactNode }) {
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
-    const supabase = createClient();
-
     // 1. Initial check from localStorage for fast local persistence
     try {
       const cached = localStorage.getItem('app_branding_config');
@@ -53,20 +51,17 @@ export function BrandingProvider({ children }: { children: ReactNode }) {
       console.warn('Could not read cached branding from localStorage');
     }
 
-    // 2. Fetch branding configuration from Supabase
+    // 2. Fetch the public branding payload through the server API.
     async function fetchBranding() {
       try {
-        const { data, error } = await supabase
-          .from('app_config')
-          .select('*')
-          .eq('key', 'branding')
-          .single();
-
-        if (data && !error && data.value) {
-          setBranding((prev) => ({ ...prev, ...data.value }));
+        const response = await fetch('/api/admin/branding', { cache: 'no-store' });
+        if (!response.ok) throw new Error(`Branding request failed (${response.status})`);
+        const result = await response.json();
+        if (result?.success && result.branding && typeof result.branding === 'object') {
+          setBranding((prev) => ({ ...prev, ...result.branding }));
         }
       } catch (err) {
-        console.warn('Notice loading branding config from Supabase:', err);
+        console.warn('Notice loading branding config from server:', err);
       } finally {
         setIsLoading(false);
       }
@@ -82,28 +77,8 @@ export function BrandingProvider({ children }: { children: ReactNode }) {
     };
     window.addEventListener('branding_updated', handleCustomBranding);
 
-    // 4. Subscribe to real-time branding updates via Supabase Realtime if table exists
-    const channel = supabase
-      .channel('branding-changes')
-      .on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'app_config',
-          filter: 'key=eq.branding',
-        },
-        (payload) => {
-          if (payload.new && 'value' in payload.new) {
-            setBranding((prev) => ({ ...prev, ...(payload.new as any).value }));
-          }
-        }
-      )
-      .subscribe();
-
     return () => {
       window.removeEventListener('branding_updated', handleCustomBranding);
-      supabase.removeChannel(channel);
     };
   }, []);
 

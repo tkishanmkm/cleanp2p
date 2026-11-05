@@ -62,10 +62,10 @@ export function KYCVerifyButton({
         }
       }
 
-      const response = await fetch('/api/verify', {
+      const response = await fetch('/api/kyc/initiate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ userId: activeUserId, vendorData: activeUserId }),
+        body: JSON.stringify({ userId: activeUserId }),
       });
 
       const data = await response.json();

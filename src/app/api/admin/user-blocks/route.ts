@@ -7,9 +7,13 @@ export const dynamic = "force-dynamic";
 
 export async function GET(req: NextRequest) {
   try {
-    const auth = await verifyServerAdmin(req);
-    if (!auth.authorized) {
-      return auth.response!;
+    const auth = await verifyServerAdmin(req, { allowSupportReadOnly: true });
+    if (!auth.authorized) return auth.response!;
+    if (auth.supportAdmin === true || auth.supportReadOnly === true) {
+      return NextResponse.json(
+        { success: false, error: 'Full administrator access is required to view platform-wide user block records.', blocks: [] },
+        { status: 403 }
+      );
     }
 
     const supabase = getSupabaseAdminClient();

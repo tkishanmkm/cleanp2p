@@ -183,7 +183,7 @@ async function getAuthenticatedUser(req: NextRequest) {
 
   // 2. Use @supabase/ssr with request cookies
   try {
-    const cookieStore = cookies();
+    const cookieStore = await cookies();
     const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL || '';
     const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY || '';
 
@@ -216,7 +216,7 @@ async function getAuthenticatedUser(req: NextRequest) {
 
   // 3. Fallback: Parse Supabase session tokens stored in cookies
   try {
-    const cookieStore = cookies();
+    const cookieStore = await cookies();
     const allCookies = cookieStore.getAll();
     for (const c of allCookies) {
       if (c.name.includes('auth-token') || c.name.startsWith('sb-')) {

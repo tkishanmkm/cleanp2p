@@ -1,0 +1,1 @@
+ALTER TABLE public.kyc_verifications ADD COLUMN IF NOT EXISTS last_webhook_event_id TEXT, ADD COLUMN IF NOT EXISTS last_webhook_created_at BIGINT;

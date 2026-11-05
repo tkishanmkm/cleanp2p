@@ -78,12 +78,12 @@ const adFormSchema = z.object({
   paymentMethods: z.array(z.string()).min(1, "Select at least one payment method.").max(5, "You can select up to 5 payment methods."),
   rateType: z.enum(["market", "fixed"]),
   ratePercent: z.coerce.number({
-    invalid_type_error: "A valid percentage is required.",
+    message: "A valid percentage is required.",
   })
     .min(-50, { message: "Please enter a value from -50 to 50." })
     .max(50, { message: "Please enter a value from -50 to 50." })
     .optional(),
-  fixedRate: z.coerce.number({ invalid_type_error: "A valid number is required." }).positive({ message: "Fixed rate must be a positive number." }).optional(),
+  fixedRate: z.coerce.number({ message: "A valid number is required." }).positive({ message: "Fixed rate must be a positive number." }).optional(),
   minAmount: z.coerce.number().min(1, "Minimum amount is required."),
   maxAmount: z.coerce.number().min(1, "Maximum amount is required."),
   paymentTimeLimit: z.coerce.number().min(30).default(30),
@@ -231,9 +231,10 @@ export function CreateAdForm({ ad }: CreateAdFormProps) {
   useEffect(() => {
     if (!adCreatorId) return;
     let isMounted = true;
+    const creatorId = adCreatorId;
     async function loadBalances() {
       try {
-        const balances = await getUserWalletBalances(adCreatorId);
+        const balances = await getUserWalletBalances(creatorId);
         if (isMounted && balances) {
           setUserBalances(balances);
         }
@@ -439,14 +440,13 @@ export function CreateAdForm({ ad }: CreateAdFormProps) {
         await createP2PAd(null, adData, {
           id: user.uid,
           username: profile.username || 'User',
-          country: profile.country,
+          country: profile.country ?? undefined,
           feedbackScore: profile.feedbackScore ?? 100,
           positiveFeedback: profile.positiveFeedback ?? 0,
           negativeFeedback: profile.negativeFeedback ?? 0,
           completedTrades: profile.completedTrades ?? 0,
-          photoURL: profile.photoURL,
-          badges: profile.badges,
-          lastActive: profile.lastActive,
+          photoURL: profile.photo_url ?? undefined,
+          lastActive: profile.last_active ?? undefined,
         });
         toast({ title: "Ad Created", description: "Your ad has been successfully posted." });
         router.push(data.adType === 'sell' ? '/buy' : '/sell');

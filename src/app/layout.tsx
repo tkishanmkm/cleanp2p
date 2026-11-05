@@ -1,5 +1,4 @@
 import type { Metadata } from 'next';
-import { Inter, Source_Code_Pro } from 'next/font/google';
 import './globals.css';
 import { Toaster as RadixToaster } from "@/components/ui/toaster";
 import { Toaster as SonnerToaster } from 'sonner';
@@ -12,18 +11,6 @@ import { I18nProvider } from '@/context/i18n-context';
 import { WalletProvider } from '@/context/wallet-context';
 import UserPresenceProvider from '@/components/providers/UserPresenceProvider';
 import { OnboardingModal } from '@/components/OnboardingModal';
-
-const inter = Inter({
-  subsets: ['latin'],
-  display: 'swap',
-  variable: '--font-inter',
-});
-
-const sourceCodePro = Source_Code_Pro({
-  subsets: ['latin'],
-  display: 'swap',
-  variable: '--font-mono',
-});
 
 export const dynamic = 'force-dynamic';
 
@@ -48,8 +35,8 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en" className={`dark ${inter.variable} ${sourceCodePro.variable}`} suppressHydrationWarning>
-      <body className={`font-body antialiased ${inter.className}`} suppressHydrationWarning>
+    <html lang="en" className="dark" suppressHydrationWarning>
+      <body className="font-body antialiased" suppressHydrationWarning>
         <ThemeProvider
           attribute="class"
           defaultTheme="dark"
@@ -57,9 +44,9 @@ export default function RootLayout({
           disableTransitionOnChange
         >
           <AuthProvider>
-            <NotificationsProvider>
-              <PriceProvider>
-                <I18nProvider>
+            <I18nProvider>
+              <NotificationsProvider>
+                <PriceProvider>
                   <BrandingProvider>
                     <WalletProvider>
                       <UserPresenceProvider>
@@ -68,9 +55,9 @@ export default function RootLayout({
                       </UserPresenceProvider>
                     </WalletProvider>
                   </BrandingProvider>
-                </I18nProvider>
-              </PriceProvider>
-            </NotificationsProvider>
+                </PriceProvider>
+              </NotificationsProvider>
+            </I18nProvider>
           </AuthProvider>
           <RadixToaster />
           <SonnerToaster position="top-right" richColors />

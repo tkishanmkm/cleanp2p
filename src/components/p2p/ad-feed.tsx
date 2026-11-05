@@ -46,7 +46,8 @@ export function AdFeed({ type }: { type?: "BUY" | "SELL" }) {
             )
           `)
           .eq("is_active", true)
-          .order("created_at", { ascending: false });
+          .order("created_at", { ascending: false })
+          .limit(100);
 
         if (type) {
           query = query.eq("type", type);
@@ -70,6 +71,7 @@ export function AdFeed({ type }: { type?: "BUY" | "SELL" }) {
               created_at,
               user_id
             `)
+            .eq("is_active", true)
             .order("created_at", { ascending: false });
 
           if (type) {

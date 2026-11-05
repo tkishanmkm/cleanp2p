@@ -1,0 +1,12 @@
+import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+const migration = readFileSync(join(process.cwd(), "supabase/migrations/20261026141000_fail_closed_withdrawal_refunds.sql"), "utf8");
+assert.ok(migration.includes("AND in_withdrawal >= v_total_refund"), "refund must require enough reserved liability");
+assert.ok(migration.includes("IF NOT FOUND THEN"), "missing wallet asset row must fail closed");
+assert.ok(migration.includes("WITHDRAWAL_REFUND_RECONCILIATION_REQUIRED"));
+assert.ok(migration.includes("in_withdrawal = in_withdrawal - v_total_refund"), "do not silently clamp the liability below zero");
+assert.ok(migration.includes("REVOKE ALL ON FUNCTION public.process_failed_withdrawal"));
+assert.ok(migration.includes("TO service_role, postgres"));
+console.log("PASS: refund candidate requires a wallet row with sufficient reserved liability and preserves trusted-role-only RPC grants.");
+console.log("NOTE: static only; confirm the deployed function body, column types, and refund invariants on a schema-matched disposable database.");

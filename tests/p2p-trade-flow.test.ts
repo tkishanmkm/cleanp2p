@@ -1,12 +1,4 @@
-import { createClient } from '@supabase/supabase-js';
-
-// Initialize Supabase admin client
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL || 'https://placeholder.supabase.co';
-const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'placeholder-key';
-
-const supabase = createClient(supabaseUrl, supabaseKey, {
-  auth: { persistSession: false, autoRefreshToken: false },
-});
+import { testSupabase as supabase } from './helpers/test-supabase';
 
 // Color helpers for clean terminal reporting
 const green = (s: string) => `\x1b[32m${s}\x1b[0m`;
@@ -255,8 +247,13 @@ async function runP2PTradeFlowTests() {
     console.log(bold(cyan('------------------------------------------------------\n')));
     if (passedTests === totalTests) {
       console.log(green(bold('ALL P2P ESCROW STATE MACHINE TESTS PASSED SUCCESSFULLY!')));
+    } else {
+      process.exitCode = 1;
     }
   }
 }
 
-runP2PTradeFlowTests();
+runP2PTradeFlowTests().catch((error) => {
+  console.error(error);
+  process.exitCode = 1;
+});

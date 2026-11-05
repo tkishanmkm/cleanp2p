@@ -10,6 +10,12 @@ export async function POST(req: NextRequest) {
     if (!auth.authorized) {
       return auth.response!;
     }
+    if (auth.supportAdmin === true) {
+      return NextResponse.json(
+        { success: false, error: 'Support administrators cannot approve withdrawals.' },
+        { status: 403 }
+      );
+    }
 
     const callerId = auth.adminId || auth.user.id;
     const supabaseAdmin = getSupabaseAdminClient();
@@ -32,15 +38,33 @@ export async function POST(req: NextRequest) {
     });
 
     if (rpcError) {
+      console.error('[Admin Withdrawal Approval] RPC failed:', rpcError.message);
       return NextResponse.json(
-        { error: rpcError.message || 'Failed to approve withdrawal' },
-        { status: 400 }
+        { error: 'Withdrawal approval failed; verify the withdrawal status before retrying.' },
+        { status: 500 }
+      );
+    }
+
+    // A successful HTTP/RPC transport does not mean the database transition succeeded.
+    // Only report QUEUED when the authoritative RPC explicitly confirms success.
+    const parsedResult = typeof approvalResult === 'string'
+      ? (() => {
+          try { return JSON.parse(approvalResult); } catch { return null; }
+        })()
+      : approvalResult;
+
+    if (!parsedResult || parsedResult.success !== true) {
+      console.error('[Admin Withdrawal Approval] RPC returned an unconfirmed result.');
+      return NextResponse.json(
+        { error: 'Withdrawal approval was not confirmed; review the withdrawal status before retrying.' },
+        { status: 409 }
       );
     }
 
     return NextResponse.json({
       success: true,
-      status: 'QUEUED',
+      data: parsedResult,
+      status: parsedResult.status || 'QUEUED',
       withdrawalId,
       approvedBy: callerId,
       message: 'Withdrawal approved and queued for broadcast.',

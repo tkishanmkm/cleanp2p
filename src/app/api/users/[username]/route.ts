@@ -1,12 +1,11 @@
 import { NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabase';
-import { isTier2User } from '@/lib/kyc';
 
 export const dynamic = 'force-dynamic';
 
 export async function GET(
   req: Request,
-  context: { params: Promise<{ username: string }> | { username: string } }
+  context: { params: Promise<{ username: string }> }
 ) {
   try {
     const rawParams = await Promise.resolve(context.params);
@@ -17,10 +16,12 @@ export async function GET(
 
     // 1. Query public profile / profiles table
     let profile: any = null;
-    const PUBLIC_PROFILE_COLUMNS = 'id, username, display_name, avatar_url, photo_url, country, is_verified, id_verified, kyc_status, is_online, last_seen_at, created_at, total_completed_trades, completed_trades, trade_volume, positive_feedback, negative_feedback, feedback_score';
-    let query = supabaseAdmin.from('profiles').select(PUBLIC_PROFILE_COLUMNS);
+    const PUBLIC_PROFILE_COLUMNS = 'id, username, display_name, avatar_url, photo_url, country, is_verified, is_online, is_trading_eligible, created_at, total_completed_trades, completed_trades, trade_volume, total_volume_usd, avg_payment_minutes, avg_release_minutes, positive_feedback, negative_feedback, feedback_score, merchant_tier';
+    let query = supabaseAdmin.from('public_profiles').select(PUBLIC_PROFILE_COLUMNS);
     if (isUuid) {
-      query = query.or(`id.eq.${cleanUsername},username.ilike.${cleanUsername}`);
+      // Treat UUID-shaped input strictly as an ID; do not interpolate it into
+      // a PostgREST OR filter where user-controlled syntax could alter the query.
+      query = query.eq('id', cleanUsername);
     } else {
       query = query.ilike('username', cleanUsername);
     }
@@ -28,52 +29,63 @@ export async function GET(
 
     if (directProfile && !error) {
       profile = directProfile;
-    } else {
-      const { data: pubProfile } = await supabaseAdmin
-        .from('public_profiles')
-        .select('*')
-        .or(isUuid ? `id.eq.${cleanUsername},username.ilike.${cleanUsername}` : `username.ilike.${cleanUsername}`)
-        .maybeSingle();
-
-      if (pubProfile) {
-        profile = pubProfile;
-      }
+    } else if (error) {
+      console.error('[PUBLIC_PROFILE] Public profile lookup failed:', error.code || 'unknown');
+      return NextResponse.json({ error: 'Unable to load public profile' }, { status: 503 });
     }
 
     if (!profile) {
       return NextResponse.json({ error: 'User not found' }, { status: 404 });
     }
 
-    // 2. Verification flags
-    const isEmailVerified = Boolean(
-      profile.is_email_verified ||
-      profile.email_verified ||
-      profile.email_confirmed_at ||
-      (profile.email && !profile.email.includes('placeholder'))
-    );
+    // Public profile data may expose public badges only, never internal KYC workflow state.
+    // A public verification badge is a single, explicitly approved boolean.
+    // Do not expose internal email/KYC workflow columns in public profile responses.
+    const isEmailVerified = false;
+    const isIdVerified = profile.is_verified === true;
 
-    const isIdVerified = isTier2User(profile);
-    const kycStatus = profile.kyc_status || (isIdVerified ? 'VERIFIED' : 'UNVERIFIED');
-
-    // 3. Feedback statistics
+    // 3. Feedback statistics from both deployed review stores. The obsolete
+    // trade_feedback relation is not present in production.
     let feedbacks: any[] = [];
     try {
-      const { data: fb1 } = await supabaseAdmin
-        .from('feedbacks')
-        .select('*')
-        .eq('to_user_id', profile.id);
-      if (Array.isArray(fb1) && fb1.length > 0) {
-        feedbacks = fb1;
-      } else {
-        const { data: fb2 } = await supabaseAdmin
-          .from('trade_feedback')
-          .select('*')
-          .eq('reviewee_id', profile.id);
-        if (Array.isArray(fb2)) {
-          feedbacks = fb2;
+      const [canonicalResult, legacyResult] = await Promise.all([
+        supabaseAdmin
+          .from('feedbacks')
+          .select('id, trade_id, reviewer_id, reviewee_id, is_positive')
+          .eq('reviewee_id', profile.id)
+          .limit(500),
+        supabaseAdmin
+          .from('feedback')
+          .select('id, trade_id, from_user, to_user, rating, is_positive')
+          .eq('to_user', profile.id)
+          .limit(500),
+      ]);
+
+      const canonicalRows = Array.isArray(canonicalResult.data) ? canonicalResult.data : [];
+      const legacyRows = Array.isArray(legacyResult.data) ? legacyResult.data : [];
+      const uniqueReviews = new Map<string, any>();
+      for (const row of canonicalRows) {
+        const key = row.trade_id && row.reviewer_id ? `${row.trade_id}:${row.reviewer_id}` : `feedbacks:${row.id}`;
+        uniqueReviews.set(key, row);
+      }
+      for (const row of legacyRows) {
+        const key = row.trade_id && row.from_user ? `${row.trade_id}:${row.from_user}` : `feedback:${row.id}`;
+        if (!uniqueReviews.has(key)) {
+          uniqueReviews.set(key, {
+            ...row,
+            is_positive: row.is_positive ?? String(row.rating || '').toLowerCase() === 'positive',
+          });
         }
       }
-    } catch {
+      feedbacks = Array.from(uniqueReviews.values());
+      if (canonicalResult.error || legacyResult.error) {
+        console.warn('[PUBLIC_PROFILE] A feedback source was unavailable.', {
+          canonicalCode: canonicalResult.error?.code || null,
+          legacyCode: legacyResult.error?.code || null,
+        });
+      }
+    } catch (feedbackError) {
+      console.warn('[PUBLIC_PROFILE] Feedback statistics could not be loaded.', feedbackError);
       feedbacks = [];
     }
 
@@ -85,11 +97,12 @@ export async function GET(
     return NextResponse.json({
       id: profile.id,
       username: `@${(profile.username || cleanUsername).replace(/^@/, '')}`,
-      avatar_url: profile.avatar_url || null,
+      display_name: profile.display_name || null,
+      avatar_url: profile.avatar_url || profile.photo_url || null,
+      photo_url: profile.photo_url || profile.avatar_url || null,
       country: profile.country || 'US',
       is_email_verified: isEmailVerified,
       is_id_verified: isIdVerified,
-      kyc_status: kycStatus || (isIdVerified ? 'VERIFIED' : 'UNVERIFIED'),
       last_seen: profile.last_seen || profile.last_seen_at || profile.last_active || profile.updated_at || null,
       last_seen_at: profile.last_seen || profile.last_seen_at || profile.last_active || profile.updated_at || null,
       last_active: profile.last_seen || profile.last_seen_at || profile.last_active || profile.updated_at || null,

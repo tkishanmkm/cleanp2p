@@ -22,9 +22,9 @@ export default function TradeChatFileUploader({
     setErrorMessage(null);
     setWarningMessage(null);
 
-    // Client-side video check
-    if (file.type.startsWith('video/') && file.size > 30 * 1024 * 1024) {
-      setErrorMessage('Video exceeds 30 MB limit. Share via Google Drive or Dropbox link.');
+    // Match the server limit for every media type.
+    if (file.size > 32 * 1024 * 1024) {
+      setErrorMessage('Each file can be up to 32 MB. Share larger files through Google Drive or Dropbox.');
       setShowLinkInput(true);
       return;
     }
@@ -43,11 +43,12 @@ export default function TradeChatFileUploader({
       setUploading(false);
 
       if (!res.ok) {
-        if (result.error === 'LIMIT_REACHED') {
-          setErrorMessage(result.message);
+        if (result.error === 'LIMIT_REACHED' || result.error === 'TRADE_MEDIA_LIMIT_REACHED' ||
+            result.error === 'FILE_SIZE_LIMIT_EXCEEDED' || res.status === 413) {
+          setErrorMessage(result.message || 'The attachment limit has been reached. Share additional files through Google Drive or Dropbox.');
           setShowLinkInput(true);
         } else {
-          setErrorMessage(result.error || result.message || 'Upload failed');
+          setErrorMessage(result.message || result.error || 'Upload failed');
         }
       } else {
         if (result.warning) {
@@ -165,7 +166,7 @@ export default function TradeChatFileUploader({
               Share cloud link
             </button>
           </div>
-          <span className="text-[10px] text-slate-500">Max 3 images, 3 docs, 3 videos (≤30MB)</span>
+          <span className="text-[10px] text-slate-500">Per trade: 3 images, 3 documents, 3 videos · 32 MB per file</span>
         </div>
       )}
     </div>

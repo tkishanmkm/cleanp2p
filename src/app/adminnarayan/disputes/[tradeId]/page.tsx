@@ -27,7 +27,7 @@ import Image from "next/image";
 export default function AdminDisputeModeratorPage({
   params,
 }: {
-  params?: Promise<{ tradeId: string }> | { tradeId: string };
+  params?: Promise<{ tradeId: string }>;
 }) {
   const router = useRouter();
   const routeParams = useParams();
@@ -229,19 +229,26 @@ export default function AdminDisputeModeratorPage({
     setFeedback(null);
 
     try {
-      const res = await fetch(`/api/admin/trades/${encodeURIComponent(tradeId)}`, {
+      const disputeId = typeof trade?.dispute?.id === "string" ? trade.dispute.id : "";
+      const internalTradeId = typeof trade?.id === "string" ? trade.id : "";
+      if (!disputeId || !internalTradeId) {
+        throw new Error("The open dispute could not be verified. Refresh the trade before resolving it.");
+      }
+
+      const res = await fetch("/api/admin/disputes/resolve", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          action: "intervene",
-          interveneAction: resolveModal.action,
+          disputeId,
+          tradeId: internalTradeId,
+          resolution: resolveModal.action === "release" ? "RELEASE" : "CANCEL",
           reason: resolutionReason.trim(),
         }),
       });
 
       const data = await res.json();
-      if (!res.ok || !data.success) {
-        throw new Error(data.error || "Failed to execute dispute resolution settlement.");
+      if (!res.ok || data.success !== true || data.settlementSucceeded !== true || data.audit_logged !== true) {
+        throw new Error(data.error || "Atomic dispute settlement and audit were not confirmed.");
       }
 
       setFeedback({

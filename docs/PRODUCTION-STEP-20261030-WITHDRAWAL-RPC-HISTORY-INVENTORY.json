@@ -1,0 +1,1418 @@
+{
+  "generatedAt": "2026-10-30T10:08:56.254Z",
+  "source": "C:\\Users\\theki\\cleanp2p\\supabase\\migrations",
+  "limitation": "Static migration-history inventory only. It does not prove which migrations ran or which overloads/grants exist in a deployed database.",
+  "eventCount": 105,
+  "functions": {
+    "request_withdrawal": [
+      {
+        "file": "20260831000000_init_schema.sql",
+        "kind": "CREATE OR REPLACE FUNCTION",
+        "name": "request_withdrawal",
+        "signature": "p_asset_code text, p_network_code text, p_destination_address text, p_amount numeric(36, 18"
+      },
+      {
+        "file": "20260903000002_withdrawal_rpcs.sql",
+        "kind": "CREATE OR REPLACE FUNCTION",
+        "name": "request_withdrawal",
+        "signature": "p_user_id uuid, p_network text, p_to_address text, p_amount numeric(36, 18"
+      },
+      {
+        "file": "20260907000001_fix_withdrawal_escrow_separation.sql",
+        "kind": "CREATE OR REPLACE FUNCTION",
+        "name": "request_withdrawal",
+        "signature": "p_user_id uuid, p_network text, p_to_address text, p_amount numeric(36, 18"
+      },
+      {
+        "file": "20260907000001_fix_withdrawal_escrow_separation.sql",
+        "kind": "CREATE OR REPLACE FUNCTION",
+        "name": "request_withdrawal",
+        "signature": "p_asset_code text, p_network_code text, p_destination_address text, p_amount numeric(36, 18"
+      },
+      {
+        "file": "20260928000000_platform_ledger_entries.sql",
+        "kind": "CREATE OR REPLACE FUNCTION",
+        "name": "request_withdrawal",
+        "signature": "p_user_id uuid, p_network text, p_to_address text, p_amount numeric(36, 18"
+      },
+      {
+        "file": "20260928000000_platform_ledger_entries.sql",
+        "kind": "REVOKE",
+        "name": "request_withdrawal",
+        "signature": "uuid, text, text, numeric, numeric, text",
+        "roles": "public, authenticated, anon"
+      },
+      {
+        "file": "20260928000000_platform_ledger_entries.sql",
+        "kind": "GRANT",
+        "name": "request_withdrawal",
+        "signature": "uuid, text, text, numeric, numeric, text",
+        "roles": "service_role"
+      },
+      {
+        "file": "20260928020000_withdrawal_hardened_rpcs.sql",
+        "kind": "CREATE OR REPLACE FUNCTION",
+        "name": "request_withdrawal",
+        "signature": "p_user_id uuid, p_network text, p_to_address text, p_amount numeric(36, 18"
+      },
+      {
+        "file": "20260928020000_withdrawal_hardened_rpcs.sql",
+        "kind": "REVOKE",
+        "name": "request_withdrawal",
+        "signature": "uuid, text, text, numeric, numeric, text",
+        "roles": "public, anon, authenticated"
+      },
+      {
+        "file": "20260928020000_withdrawal_hardened_rpcs.sql",
+        "kind": "GRANT",
+        "name": "request_withdrawal",
+        "signature": "uuid, text, text, numeric, numeric, text",
+        "roles": "service_role, postgres"
+      },
+      {
+        "file": "20260928030000_withdrawal_governance_and_limits.sql",
+        "kind": "CREATE OR REPLACE FUNCTION",
+        "name": "request_withdrawal",
+        "signature": "p_user_id uuid, p_network text, p_to_address text, p_amount numeric(36, 18"
+      },
+      {
+        "file": "20260928030000_withdrawal_governance_and_limits.sql",
+        "kind": "REVOKE",
+        "name": "request_withdrawal",
+        "signature": "uuid, text, text, numeric, numeric, text, numeric",
+        "roles": "public, anon"
+      },
+      {
+        "file": "20260928030000_withdrawal_governance_and_limits.sql",
+        "kind": "GRANT",
+        "name": "request_withdrawal",
+        "signature": "uuid, text, text, numeric, numeric, text, numeric",
+        "roles": "authenticated, service_role, postgres"
+      },
+      {
+        "file": "20260928040000_withdrawal_security_boundary_hardening.sql",
+        "kind": "CREATE OR REPLACE FUNCTION",
+        "name": "request_withdrawal",
+        "signature": "p_user_id uuid, p_network text, p_to_address text, p_amount numeric(36, 18"
+      },
+      {
+        "file": "20260928040000_withdrawal_security_boundary_hardening.sql",
+        "kind": "REVOKE",
+        "name": "request_withdrawal",
+        "signature": "uuid, text, text, numeric, numeric, text, numeric",
+        "roles": "public, anon, authenticated"
+      },
+      {
+        "file": "20260928040000_withdrawal_security_boundary_hardening.sql",
+        "kind": "GRANT",
+        "name": "request_withdrawal",
+        "signature": "uuid, text, text, numeric, numeric, text, numeric",
+        "roles": "service_role, postgres"
+      },
+      {
+        "file": "20261005000000_withdrawal_security_holds_and_approval_lockout.sql",
+        "kind": "CREATE OR REPLACE FUNCTION",
+        "name": "request_withdrawal",
+        "signature": "p_user_id uuid, p_network text, p_to_address text, p_amount numeric(36, 18"
+      },
+      {
+        "file": "20261005000000_withdrawal_security_holds_and_approval_lockout.sql",
+        "kind": "REVOKE",
+        "name": "request_withdrawal",
+        "signature": "uuid, text, text, numeric, numeric, text, numeric",
+        "roles": "public, anon, authenticated"
+      },
+      {
+        "file": "20261005000000_withdrawal_security_holds_and_approval_lockout.sql",
+        "kind": "GRANT",
+        "name": "request_withdrawal",
+        "signature": "uuid, text, text, numeric, numeric, text, numeric",
+        "roles": "service_role, postgres"
+      },
+      {
+        "file": "20261005030000_enforce_individual_emergency_freeze_financial_rpcs.sql",
+        "kind": "CREATE OR REPLACE FUNCTION",
+        "name": "request_withdrawal",
+        "signature": "p_user_id uuid, p_network text, p_to_address text, p_amount numeric(36, 18"
+      },
+      {
+        "file": "20261005030000_enforce_individual_emergency_freeze_financial_rpcs.sql",
+        "kind": "REVOKE",
+        "name": "request_withdrawal",
+        "signature": "uuid, text, text, numeric, numeric, text, numeric",
+        "roles": "public, anon, authenticated"
+      },
+      {
+        "file": "20261005030000_enforce_individual_emergency_freeze_financial_rpcs.sql",
+        "kind": "GRANT",
+        "name": "request_withdrawal",
+        "signature": "uuid, text, text, numeric, numeric, text, numeric",
+        "roles": "service_role, postgres"
+      },
+      {
+        "file": "20261005040000_canonical_global_emergency_mode.sql",
+        "kind": "CREATE OR REPLACE FUNCTION",
+        "name": "request_withdrawal",
+        "signature": "p_user_id uuid, p_network text, p_to_address text, p_amount numeric(36, 18"
+      },
+      {
+        "file": "20261005040000_canonical_global_emergency_mode.sql",
+        "kind": "REVOKE",
+        "name": "request_withdrawal",
+        "signature": "uuid, text, text, numeric, numeric, text, numeric",
+        "roles": "public, anon, authenticated"
+      },
+      {
+        "file": "20261005040000_canonical_global_emergency_mode.sql",
+        "kind": "GRANT",
+        "name": "request_withdrawal",
+        "signature": "uuid, text, text, numeric, numeric, text, numeric",
+        "roles": "service_role, postgres"
+      },
+      {
+        "file": "20261008010000_canonical_kyc_tier_and_privilege_lockdown.sql",
+        "kind": "CREATE OR REPLACE FUNCTION",
+        "name": "request_withdrawal",
+        "signature": "p_user_id uuid, p_network text, p_to_address text, p_amount numeric(36, 18"
+      },
+      {
+        "file": "20261008010000_canonical_kyc_tier_and_privilege_lockdown.sql",
+        "kind": "REVOKE",
+        "name": "request_withdrawal",
+        "signature": "uuid, text, text, numeric, numeric, text, numeric",
+        "roles": "public, anon, authenticated"
+      },
+      {
+        "file": "20261008010000_canonical_kyc_tier_and_privilege_lockdown.sql",
+        "kind": "GRANT",
+        "name": "request_withdrawal",
+        "signature": "uuid, text, text, numeric, numeric, text, numeric",
+        "roles": "service_role, postgres"
+      },
+      {
+        "file": "20261020120000_fail_closed_withdrawal_usd_valuation.sql",
+        "kind": "CREATE OR REPLACE FUNCTION",
+        "name": "request_withdrawal",
+        "signature": "p_user_id uuid, p_network text, p_to_address text, p_amount numeric(36, 18"
+      },
+      {
+        "file": "20261020120000_fail_closed_withdrawal_usd_valuation.sql",
+        "kind": "REVOKE",
+        "name": "request_withdrawal",
+        "signature": "uuid, text, text, numeric, numeric, text, numeric",
+        "roles": "public, anon, authenticated"
+      },
+      {
+        "file": "20261020120000_fail_closed_withdrawal_usd_valuation.sql",
+        "kind": "GRANT",
+        "name": "request_withdrawal",
+        "signature": "uuid, text, text, numeric, numeric, text, numeric",
+        "roles": "service_role, postgres"
+      }
+    ],
+    "request_withdrawal_idempotent": [
+      {
+        "file": "20261019180000_add_idempotent_withdrawal_wrapper.sql",
+        "kind": "CREATE OR REPLACE FUNCTION",
+        "name": "request_withdrawal_idempotent",
+        "signature": "p_user_id uuid, p_network text, p_to_address text, p_amount numeric(36, 18"
+      },
+      {
+        "file": "20261019180000_add_idempotent_withdrawal_wrapper.sql",
+        "kind": "REVOKE",
+        "name": "request_withdrawal_idempotent",
+        "signature": "uuid, text, text, numeric, numeric, text, numeric, text",
+        "roles": "public, anon, authenticated"
+      },
+      {
+        "file": "20261019180000_add_idempotent_withdrawal_wrapper.sql",
+        "kind": "GRANT",
+        "name": "request_withdrawal_idempotent",
+        "signature": "uuid, text, text, numeric, numeric, text, numeric, text",
+        "roles": "service_role, postgres"
+      }
+    ],
+    "lookup_withdrawal_idempotency_replay": [
+      {
+        "file": "20261020200000_withdrawal_idempotency_replay_lookup.sql",
+        "kind": "CREATE OR REPLACE FUNCTION",
+        "name": "lookup_withdrawal_idempotency_replay",
+        "signature": "p_user_id uuid, p_idempotency_key text, p_network text, p_to_address text, p_amount numeric(36,18"
+      },
+      {
+        "file": "20261020200000_withdrawal_idempotency_replay_lookup.sql",
+        "kind": "REVOKE",
+        "name": "lookup_withdrawal_idempotency_replay",
+        "signature": "uuid, text, text, text, numeric, text",
+        "roles": "public, anon, authenticated"
+      },
+      {
+        "file": "20261020200000_withdrawal_idempotency_replay_lookup.sql",
+        "kind": "GRANT",
+        "name": "lookup_withdrawal_idempotency_replay",
+        "signature": "uuid, text, text, text, numeric, text",
+        "roles": "service_role, postgres"
+      }
+    ],
+    "process_failed_withdrawal": [
+      {
+        "file": "20260903000002_withdrawal_rpcs.sql",
+        "kind": "CREATE OR REPLACE FUNCTION",
+        "name": "process_failed_withdrawal",
+        "signature": "p_withdrawal_id uuid, p_error_reason text"
+      },
+      {
+        "file": "20260928000000_platform_ledger_entries.sql",
+        "kind": "DROP FUNCTION IF EXISTS",
+        "name": "process_failed_withdrawal",
+        "signature": "uuid, text"
+      },
+      {
+        "file": "20260928000000_platform_ledger_entries.sql",
+        "kind": "CREATE OR REPLACE FUNCTION",
+        "name": "process_failed_withdrawal",
+        "signature": "p_withdrawal_id uuid, p_error_reason text, p_actual_gas_amount numeric(36, 18"
+      },
+      {
+        "file": "20260928000000_platform_ledger_entries.sql",
+        "kind": "REVOKE",
+        "name": "process_failed_withdrawal",
+        "signature": "uuid, text, numeric, text, boolean",
+        "roles": "public, authenticated, anon"
+      },
+      {
+        "file": "20260928000000_platform_ledger_entries.sql",
+        "kind": "GRANT",
+        "name": "process_failed_withdrawal",
+        "signature": "uuid, text, numeric, text, boolean",
+        "roles": "service_role"
+      },
+      {
+        "file": "20260928020000_withdrawal_hardened_rpcs.sql",
+        "kind": "CREATE OR REPLACE FUNCTION",
+        "name": "process_failed_withdrawal",
+        "signature": "p_withdrawal_id uuid, p_error_reason text, p_actual_gas_amount numeric default 0, p_gas_asset text default null, p_is_verified_revert boolean default false, p_is_verified_unbroadcast boolean default false"
+      },
+      {
+        "file": "20260928020000_withdrawal_hardened_rpcs.sql",
+        "kind": "REVOKE",
+        "name": "process_failed_withdrawal",
+        "signature": "uuid, text, numeric, text, boolean, boolean",
+        "roles": "public, anon, authenticated"
+      },
+      {
+        "file": "20260928020000_withdrawal_hardened_rpcs.sql",
+        "kind": "GRANT",
+        "name": "process_failed_withdrawal",
+        "signature": "uuid, text, numeric, text, boolean, boolean",
+        "roles": "service_role, postgres"
+      },
+      {
+        "file": "20260928040000_withdrawal_security_boundary_hardening.sql",
+        "kind": "CREATE OR REPLACE FUNCTION",
+        "name": "process_failed_withdrawal",
+        "signature": "p_withdrawal_id uuid, p_error_reason text, p_actual_gas_amount numeric default 0, p_gas_asset text default null, p_is_verified_revert boolean default false"
+      },
+      {
+        "file": "20260928040000_withdrawal_security_boundary_hardening.sql",
+        "kind": "REVOKE",
+        "name": "process_failed_withdrawal",
+        "signature": "uuid, text, numeric, text, boolean",
+        "roles": "public, anon, authenticated"
+      },
+      {
+        "file": "20260928040000_withdrawal_security_boundary_hardening.sql",
+        "kind": "GRANT",
+        "name": "process_failed_withdrawal",
+        "signature": "uuid, text, numeric, text, boolean",
+        "roles": "service_role, postgres"
+      },
+      {
+        "file": "20260929000000_withdrawal_double_payout_and_state_hardening.sql",
+        "kind": "DROP FUNCTION IF EXISTS",
+        "name": "process_failed_withdrawal",
+        "signature": "uuid, text, numeric, text, boolean"
+      },
+      {
+        "file": "20260929000000_withdrawal_double_payout_and_state_hardening.sql",
+        "kind": "DROP FUNCTION IF EXISTS",
+        "name": "process_failed_withdrawal",
+        "signature": "uuid, text"
+      },
+      {
+        "file": "20260929000000_withdrawal_double_payout_and_state_hardening.sql",
+        "kind": "CREATE OR REPLACE FUNCTION",
+        "name": "process_failed_withdrawal",
+        "signature": "p_withdrawal_id uuid, p_error_reason text, p_actual_gas_amount numeric default 0, p_gas_asset text default null, p_is_verified_unbroadcast boolean default false"
+      },
+      {
+        "file": "20260929000000_withdrawal_double_payout_and_state_hardening.sql",
+        "kind": "REVOKE",
+        "name": "process_failed_withdrawal",
+        "signature": "uuid, text, numeric, text, boolean",
+        "roles": "public, anon, authenticated"
+      },
+      {
+        "file": "20260929000000_withdrawal_double_payout_and_state_hardening.sql",
+        "kind": "GRANT",
+        "name": "process_failed_withdrawal",
+        "signature": "uuid, text, numeric, text, boolean",
+        "roles": "service_role, postgres"
+      },
+      {
+        "file": "20261024100000_withdrawal_refund_rpc_forward_hardening.sql",
+        "kind": "DROP FUNCTION IF EXISTS",
+        "name": "process_failed_withdrawal",
+        "signature": "uuid, text"
+      },
+      {
+        "file": "20261024100000_withdrawal_refund_rpc_forward_hardening.sql",
+        "kind": "DROP FUNCTION IF EXISTS",
+        "name": "process_failed_withdrawal",
+        "signature": "uuid, text, numeric, text, boolean"
+      },
+      {
+        "file": "20261024100000_withdrawal_refund_rpc_forward_hardening.sql",
+        "kind": "DROP FUNCTION IF EXISTS",
+        "name": "process_failed_withdrawal",
+        "signature": "uuid, text, numeric, text, boolean, boolean"
+      },
+      {
+        "file": "20261024100000_withdrawal_refund_rpc_forward_hardening.sql",
+        "kind": "CREATE FUNCTION",
+        "name": "process_failed_withdrawal",
+        "signature": "p_withdrawal_id uuid, p_error_reason text, p_actual_gas_amount numeric default 0, p_gas_asset text default null, p_is_verified_revert boolean default false, p_is_verified_unbroadcast boolean default false"
+      },
+      {
+        "file": "20261024100000_withdrawal_refund_rpc_forward_hardening.sql",
+        "kind": "REVOKE",
+        "name": "process_failed_withdrawal",
+        "signature": "uuid, text, numeric, text, boolean, boolean",
+        "roles": "public, anon, authenticated"
+      },
+      {
+        "file": "20261024100000_withdrawal_refund_rpc_forward_hardening.sql",
+        "kind": "GRANT",
+        "name": "process_failed_withdrawal",
+        "signature": "uuid, text, numeric, text, boolean, boolean",
+        "roles": "service_role, postgres"
+      }
+    ],
+    "claim_pending_withdrawals": [
+      {
+        "file": "20260910000001_add_process_user_deposit_rpc.sql",
+        "kind": "CREATE OR REPLACE FUNCTION",
+        "name": "claim_pending_withdrawals",
+        "signature": "p_limit integer default 10"
+      },
+      {
+        "file": "20260910000001_add_process_user_deposit_rpc.sql",
+        "kind": "GRANT",
+        "name": "claim_pending_withdrawals",
+        "signature": "integer",
+        "roles": "authenticated, anon, service_role"
+      },
+      {
+        "file": "20260928020000_withdrawal_hardened_rpcs.sql",
+        "kind": "CREATE OR REPLACE FUNCTION",
+        "name": "claim_pending_withdrawals",
+        "signature": "p_limit integer default 10"
+      },
+      {
+        "file": "20260928020000_withdrawal_hardened_rpcs.sql",
+        "kind": "REVOKE",
+        "name": "claim_pending_withdrawals",
+        "signature": "integer",
+        "roles": "public, anon"
+      },
+      {
+        "file": "20260928020000_withdrawal_hardened_rpcs.sql",
+        "kind": "GRANT",
+        "name": "claim_pending_withdrawals",
+        "signature": "integer",
+        "roles": "service_role, postgres"
+      },
+      {
+        "file": "20260928030000_withdrawal_governance_and_limits.sql",
+        "kind": "CREATE OR REPLACE FUNCTION",
+        "name": "claim_pending_withdrawals",
+        "signature": "p_limit integer default 10"
+      },
+      {
+        "file": "20260928030000_withdrawal_governance_and_limits.sql",
+        "kind": "REVOKE",
+        "name": "claim_pending_withdrawals",
+        "signature": "integer",
+        "roles": "public, anon"
+      },
+      {
+        "file": "20260928030000_withdrawal_governance_and_limits.sql",
+        "kind": "GRANT",
+        "name": "claim_pending_withdrawals",
+        "signature": "integer",
+        "roles": "service_role, postgres"
+      },
+      {
+        "file": "20260928040000_withdrawal_security_boundary_hardening.sql",
+        "kind": "CREATE OR REPLACE FUNCTION",
+        "name": "claim_pending_withdrawals",
+        "signature": "p_limit integer default 10"
+      },
+      {
+        "file": "20260928040000_withdrawal_security_boundary_hardening.sql",
+        "kind": "REVOKE",
+        "name": "claim_pending_withdrawals",
+        "signature": "integer",
+        "roles": "public, anon, authenticated"
+      },
+      {
+        "file": "20260928040000_withdrawal_security_boundary_hardening.sql",
+        "kind": "GRANT",
+        "name": "claim_pending_withdrawals",
+        "signature": "integer",
+        "roles": "service_role, postgres"
+      },
+      {
+        "file": "20261020170000_restrict_withdrawal_queue_claim_rpc.sql",
+        "kind": "REVOKE",
+        "name": "claim_pending_withdrawals",
+        "signature": "integer",
+        "roles": "public, anon, authenticated"
+      },
+      {
+        "file": "20261020170000_restrict_withdrawal_queue_claim_rpc.sql",
+        "kind": "GRANT",
+        "name": "claim_pending_withdrawals",
+        "signature": "integer",
+        "roles": "service_role, postgres"
+      },
+      {
+        "file": "20261028140000_withdrawal_worker_database_fencing.sql",
+        "kind": "CREATE OR REPLACE FUNCTION",
+        "name": "claim_pending_withdrawals",
+        "signature": "p_owner_token uuid, p_limit integer default 10"
+      },
+      {
+        "file": "20261028140000_withdrawal_worker_database_fencing.sql",
+        "kind": "REVOKE",
+        "name": "claim_pending_withdrawals",
+        "signature": "integer",
+        "roles": "public, anon, authenticated, service_role"
+      },
+      {
+        "file": "20261028140000_withdrawal_worker_database_fencing.sql",
+        "kind": "GRANT",
+        "name": "claim_pending_withdrawals",
+        "signature": "integer",
+        "roles": "postgres"
+      },
+      {
+        "file": "20261028140000_withdrawal_worker_database_fencing.sql",
+        "kind": "REVOKE",
+        "name": "claim_pending_withdrawals",
+        "signature": "uuid, integer",
+        "roles": "public, anon, authenticated"
+      },
+      {
+        "file": "20261028140000_withdrawal_worker_database_fencing.sql",
+        "kind": "GRANT",
+        "name": "claim_pending_withdrawals",
+        "signature": "uuid, integer",
+        "roles": "service_role, postgres"
+      }
+    ],
+    "record_withdrawal_broadcast": [
+      {
+        "file": "20261020150000_atomic_withdrawal_broadcast_state.sql",
+        "kind": "CREATE OR REPLACE FUNCTION",
+        "name": "record_withdrawal_broadcast",
+        "signature": "p_withdrawal_id uuid, p_tx_hash text"
+      },
+      {
+        "file": "20261020150000_atomic_withdrawal_broadcast_state.sql",
+        "kind": "REVOKE",
+        "name": "record_withdrawal_broadcast",
+        "signature": "uuid, text",
+        "roles": "public, anon, authenticated"
+      },
+      {
+        "file": "20261020150000_atomic_withdrawal_broadcast_state.sql",
+        "kind": "GRANT",
+        "name": "record_withdrawal_broadcast",
+        "signature": "uuid, text",
+        "roles": "service_role, postgres"
+      },
+      {
+        "file": "20261028140000_withdrawal_worker_database_fencing.sql",
+        "kind": "CREATE OR REPLACE FUNCTION",
+        "name": "record_withdrawal_broadcast",
+        "signature": "p_withdrawal_id uuid, p_tx_hash text, p_owner_token uuid"
+      },
+      {
+        "file": "20261028140000_withdrawal_worker_database_fencing.sql",
+        "kind": "REVOKE",
+        "name": "record_withdrawal_broadcast",
+        "signature": "uuid, text",
+        "roles": "public, anon, authenticated, service_role"
+      },
+      {
+        "file": "20261028140000_withdrawal_worker_database_fencing.sql",
+        "kind": "GRANT",
+        "name": "record_withdrawal_broadcast",
+        "signature": "uuid, text",
+        "roles": "postgres"
+      },
+      {
+        "file": "20261028140000_withdrawal_worker_database_fencing.sql",
+        "kind": "REVOKE",
+        "name": "record_withdrawal_broadcast",
+        "signature": "uuid, text, uuid",
+        "roles": "public, anon, authenticated"
+      },
+      {
+        "file": "20261028140000_withdrawal_worker_database_fencing.sql",
+        "kind": "GRANT",
+        "name": "record_withdrawal_broadcast",
+        "signature": "uuid, text, uuid",
+        "roles": "service_role, postgres"
+      }
+    ],
+    "record_ambiguous_withdrawal_broadcast": [
+      {
+        "file": "20261020150000_atomic_withdrawal_broadcast_state.sql",
+        "kind": "CREATE OR REPLACE FUNCTION",
+        "name": "record_ambiguous_withdrawal_broadcast",
+        "signature": "p_withdrawal_id uuid, p_tx_hash text default null, p_error text default 'broadcast outcome is uncertain'"
+      },
+      {
+        "file": "20261020150000_atomic_withdrawal_broadcast_state.sql",
+        "kind": "REVOKE",
+        "name": "record_ambiguous_withdrawal_broadcast",
+        "signature": "uuid, text, text",
+        "roles": "public, anon, authenticated"
+      },
+      {
+        "file": "20261020150000_atomic_withdrawal_broadcast_state.sql",
+        "kind": "GRANT",
+        "name": "record_ambiguous_withdrawal_broadcast",
+        "signature": "uuid, text, text",
+        "roles": "service_role, postgres"
+      },
+      {
+        "file": "20261028140000_withdrawal_worker_database_fencing.sql",
+        "kind": "CREATE OR REPLACE FUNCTION",
+        "name": "record_ambiguous_withdrawal_broadcast",
+        "signature": "p_withdrawal_id uuid, p_tx_hash text, p_error text, p_owner_token uuid"
+      },
+      {
+        "file": "20261028140000_withdrawal_worker_database_fencing.sql",
+        "kind": "REVOKE",
+        "name": "record_ambiguous_withdrawal_broadcast",
+        "signature": "uuid, text, text",
+        "roles": "public, anon, authenticated, service_role"
+      },
+      {
+        "file": "20261028140000_withdrawal_worker_database_fencing.sql",
+        "kind": "GRANT",
+        "name": "record_ambiguous_withdrawal_broadcast",
+        "signature": "uuid, text, text",
+        "roles": "postgres"
+      },
+      {
+        "file": "20261028140000_withdrawal_worker_database_fencing.sql",
+        "kind": "REVOKE",
+        "name": "record_ambiguous_withdrawal_broadcast",
+        "signature": "uuid, text, text, uuid",
+        "roles": "public, anon, authenticated"
+      },
+      {
+        "file": "20261028140000_withdrawal_worker_database_fencing.sql",
+        "kind": "GRANT",
+        "name": "record_ambiguous_withdrawal_broadcast",
+        "signature": "uuid, text, text, uuid",
+        "roles": "service_role, postgres"
+      }
+    ],
+    "approve_withdrawal": [
+      {
+        "file": "20260928030000_withdrawal_governance_and_limits.sql",
+        "kind": "CREATE OR REPLACE FUNCTION",
+        "name": "approve_withdrawal",
+        "signature": "p_withdrawal_id uuid, p_admin_id uuid"
+      },
+      {
+        "file": "20260928030000_withdrawal_governance_and_limits.sql",
+        "kind": "REVOKE",
+        "name": "approve_withdrawal",
+        "signature": "uuid, uuid",
+        "roles": "public, anon"
+      },
+      {
+        "file": "20260928030000_withdrawal_governance_and_limits.sql",
+        "kind": "GRANT",
+        "name": "approve_withdrawal",
+        "signature": "uuid, uuid",
+        "roles": "authenticated, service_role, postgres"
+      },
+      {
+        "file": "20260928040000_withdrawal_security_boundary_hardening.sql",
+        "kind": "CREATE OR REPLACE FUNCTION",
+        "name": "approve_withdrawal",
+        "signature": "p_withdrawal_id uuid, p_admin_id uuid"
+      },
+      {
+        "file": "20260928040000_withdrawal_security_boundary_hardening.sql",
+        "kind": "REVOKE",
+        "name": "approve_withdrawal",
+        "signature": "uuid, uuid",
+        "roles": "public, anon, authenticated"
+      },
+      {
+        "file": "20260928040000_withdrawal_security_boundary_hardening.sql",
+        "kind": "GRANT",
+        "name": "approve_withdrawal",
+        "signature": "uuid, uuid",
+        "roles": "service_role, postgres"
+      },
+      {
+        "file": "20261024110000_withdrawal_approval_rpc_forward_hardening.sql",
+        "kind": "CREATE OR REPLACE FUNCTION",
+        "name": "approve_withdrawal",
+        "signature": "p_withdrawal_id uuid, p_admin_id uuid"
+      },
+      {
+        "file": "20261024110000_withdrawal_approval_rpc_forward_hardening.sql",
+        "kind": "REVOKE",
+        "name": "approve_withdrawal",
+        "signature": "uuid, uuid",
+        "roles": "public, anon, authenticated"
+      },
+      {
+        "file": "20261024110000_withdrawal_approval_rpc_forward_hardening.sql",
+        "kind": "GRANT",
+        "name": "approve_withdrawal",
+        "signature": "uuid, uuid",
+        "roles": "service_role, postgres"
+      }
+    ],
+    "admin_reject_withdrawal": [
+      {
+        "file": "20261026134500_atomic_admin_withdrawal_rejection.sql",
+        "kind": "CREATE OR REPLACE FUNCTION",
+        "name": "admin_reject_withdrawal",
+        "signature": "p_withdrawal_id uuid, p_admin_id uuid, p_rejection_reason text"
+      },
+      {
+        "file": "20261026134500_atomic_admin_withdrawal_rejection.sql",
+        "kind": "REVOKE",
+        "name": "admin_reject_withdrawal",
+        "signature": "uuid, uuid, text",
+        "roles": "public, anon, authenticated"
+      },
+      {
+        "file": "20261026134500_atomic_admin_withdrawal_rejection.sql",
+        "kind": "GRANT",
+        "name": "admin_reject_withdrawal",
+        "signature": "uuid, uuid, text",
+        "roles": "service_role, postgres"
+      }
+    ]
+  },
+  "events": [
+    {
+      "file": "20260831000000_init_schema.sql",
+      "kind": "CREATE OR REPLACE FUNCTION",
+      "name": "request_withdrawal",
+      "signature": "p_asset_code text, p_network_code text, p_destination_address text, p_amount numeric(36, 18"
+    },
+    {
+      "file": "20260903000002_withdrawal_rpcs.sql",
+      "kind": "CREATE OR REPLACE FUNCTION",
+      "name": "request_withdrawal",
+      "signature": "p_user_id uuid, p_network text, p_to_address text, p_amount numeric(36, 18"
+    },
+    {
+      "file": "20260903000002_withdrawal_rpcs.sql",
+      "kind": "CREATE OR REPLACE FUNCTION",
+      "name": "process_failed_withdrawal",
+      "signature": "p_withdrawal_id uuid, p_error_reason text"
+    },
+    {
+      "file": "20260907000001_fix_withdrawal_escrow_separation.sql",
+      "kind": "CREATE OR REPLACE FUNCTION",
+      "name": "request_withdrawal",
+      "signature": "p_user_id uuid, p_network text, p_to_address text, p_amount numeric(36, 18"
+    },
+    {
+      "file": "20260907000001_fix_withdrawal_escrow_separation.sql",
+      "kind": "CREATE OR REPLACE FUNCTION",
+      "name": "request_withdrawal",
+      "signature": "p_asset_code text, p_network_code text, p_destination_address text, p_amount numeric(36, 18"
+    },
+    {
+      "file": "20260910000001_add_process_user_deposit_rpc.sql",
+      "kind": "CREATE OR REPLACE FUNCTION",
+      "name": "claim_pending_withdrawals",
+      "signature": "p_limit integer default 10"
+    },
+    {
+      "file": "20260910000001_add_process_user_deposit_rpc.sql",
+      "kind": "GRANT",
+      "name": "claim_pending_withdrawals",
+      "signature": "integer",
+      "roles": "authenticated, anon, service_role"
+    },
+    {
+      "file": "20260928000000_platform_ledger_entries.sql",
+      "kind": "CREATE OR REPLACE FUNCTION",
+      "name": "request_withdrawal",
+      "signature": "p_user_id uuid, p_network text, p_to_address text, p_amount numeric(36, 18"
+    },
+    {
+      "file": "20260928000000_platform_ledger_entries.sql",
+      "kind": "DROP FUNCTION IF EXISTS",
+      "name": "process_failed_withdrawal",
+      "signature": "uuid, text"
+    },
+    {
+      "file": "20260928000000_platform_ledger_entries.sql",
+      "kind": "CREATE OR REPLACE FUNCTION",
+      "name": "process_failed_withdrawal",
+      "signature": "p_withdrawal_id uuid, p_error_reason text, p_actual_gas_amount numeric(36, 18"
+    },
+    {
+      "file": "20260928000000_platform_ledger_entries.sql",
+      "kind": "REVOKE",
+      "name": "request_withdrawal",
+      "signature": "uuid, text, text, numeric, numeric, text",
+      "roles": "public, authenticated, anon"
+    },
+    {
+      "file": "20260928000000_platform_ledger_entries.sql",
+      "kind": "REVOKE",
+      "name": "process_failed_withdrawal",
+      "signature": "uuid, text, numeric, text, boolean",
+      "roles": "public, authenticated, anon"
+    },
+    {
+      "file": "20260928000000_platform_ledger_entries.sql",
+      "kind": "GRANT",
+      "name": "request_withdrawal",
+      "signature": "uuid, text, text, numeric, numeric, text",
+      "roles": "service_role"
+    },
+    {
+      "file": "20260928000000_platform_ledger_entries.sql",
+      "kind": "GRANT",
+      "name": "process_failed_withdrawal",
+      "signature": "uuid, text, numeric, text, boolean",
+      "roles": "service_role"
+    },
+    {
+      "file": "20260928020000_withdrawal_hardened_rpcs.sql",
+      "kind": "CREATE OR REPLACE FUNCTION",
+      "name": "request_withdrawal",
+      "signature": "p_user_id uuid, p_network text, p_to_address text, p_amount numeric(36, 18"
+    },
+    {
+      "file": "20260928020000_withdrawal_hardened_rpcs.sql",
+      "kind": "CREATE OR REPLACE FUNCTION",
+      "name": "process_failed_withdrawal",
+      "signature": "p_withdrawal_id uuid, p_error_reason text, p_actual_gas_amount numeric default 0, p_gas_asset text default null, p_is_verified_revert boolean default false, p_is_verified_unbroadcast boolean default false"
+    },
+    {
+      "file": "20260928020000_withdrawal_hardened_rpcs.sql",
+      "kind": "CREATE OR REPLACE FUNCTION",
+      "name": "claim_pending_withdrawals",
+      "signature": "p_limit integer default 10"
+    },
+    {
+      "file": "20260928020000_withdrawal_hardened_rpcs.sql",
+      "kind": "REVOKE",
+      "name": "request_withdrawal",
+      "signature": "uuid, text, text, numeric, numeric, text",
+      "roles": "public, anon, authenticated"
+    },
+    {
+      "file": "20260928020000_withdrawal_hardened_rpcs.sql",
+      "kind": "GRANT",
+      "name": "request_withdrawal",
+      "signature": "uuid, text, text, numeric, numeric, text",
+      "roles": "service_role, postgres"
+    },
+    {
+      "file": "20260928020000_withdrawal_hardened_rpcs.sql",
+      "kind": "REVOKE",
+      "name": "process_failed_withdrawal",
+      "signature": "uuid, text, numeric, text, boolean, boolean",
+      "roles": "public, anon, authenticated"
+    },
+    {
+      "file": "20260928020000_withdrawal_hardened_rpcs.sql",
+      "kind": "GRANT",
+      "name": "process_failed_withdrawal",
+      "signature": "uuid, text, numeric, text, boolean, boolean",
+      "roles": "service_role, postgres"
+    },
+    {
+      "file": "20260928020000_withdrawal_hardened_rpcs.sql",
+      "kind": "REVOKE",
+      "name": "claim_pending_withdrawals",
+      "signature": "integer",
+      "roles": "public, anon"
+    },
+    {
+      "file": "20260928020000_withdrawal_hardened_rpcs.sql",
+      "kind": "GRANT",
+      "name": "claim_pending_withdrawals",
+      "signature": "integer",
+      "roles": "service_role, postgres"
+    },
+    {
+      "file": "20260928030000_withdrawal_governance_and_limits.sql",
+      "kind": "CREATE OR REPLACE FUNCTION",
+      "name": "request_withdrawal",
+      "signature": "p_user_id uuid, p_network text, p_to_address text, p_amount numeric(36, 18"
+    },
+    {
+      "file": "20260928030000_withdrawal_governance_and_limits.sql",
+      "kind": "CREATE OR REPLACE FUNCTION",
+      "name": "approve_withdrawal",
+      "signature": "p_withdrawal_id uuid, p_admin_id uuid"
+    },
+    {
+      "file": "20260928030000_withdrawal_governance_and_limits.sql",
+      "kind": "CREATE OR REPLACE FUNCTION",
+      "name": "claim_pending_withdrawals",
+      "signature": "p_limit integer default 10"
+    },
+    {
+      "file": "20260928030000_withdrawal_governance_and_limits.sql",
+      "kind": "REVOKE",
+      "name": "request_withdrawal",
+      "signature": "uuid, text, text, numeric, numeric, text, numeric",
+      "roles": "public, anon"
+    },
+    {
+      "file": "20260928030000_withdrawal_governance_and_limits.sql",
+      "kind": "GRANT",
+      "name": "request_withdrawal",
+      "signature": "uuid, text, text, numeric, numeric, text, numeric",
+      "roles": "authenticated, service_role, postgres"
+    },
+    {
+      "file": "20260928030000_withdrawal_governance_and_limits.sql",
+      "kind": "REVOKE",
+      "name": "approve_withdrawal",
+      "signature": "uuid, uuid",
+      "roles": "public, anon"
+    },
+    {
+      "file": "20260928030000_withdrawal_governance_and_limits.sql",
+      "kind": "GRANT",
+      "name": "approve_withdrawal",
+      "signature": "uuid, uuid",
+      "roles": "authenticated, service_role, postgres"
+    },
+    {
+      "file": "20260928030000_withdrawal_governance_and_limits.sql",
+      "kind": "REVOKE",
+      "name": "claim_pending_withdrawals",
+      "signature": "integer",
+      "roles": "public, anon"
+    },
+    {
+      "file": "20260928030000_withdrawal_governance_and_limits.sql",
+      "kind": "GRANT",
+      "name": "claim_pending_withdrawals",
+      "signature": "integer",
+      "roles": "service_role, postgres"
+    },
+    {
+      "file": "20260928040000_withdrawal_security_boundary_hardening.sql",
+      "kind": "CREATE OR REPLACE FUNCTION",
+      "name": "request_withdrawal",
+      "signature": "p_user_id uuid, p_network text, p_to_address text, p_amount numeric(36, 18"
+    },
+    {
+      "file": "20260928040000_withdrawal_security_boundary_hardening.sql",
+      "kind": "CREATE OR REPLACE FUNCTION",
+      "name": "approve_withdrawal",
+      "signature": "p_withdrawal_id uuid, p_admin_id uuid"
+    },
+    {
+      "file": "20260928040000_withdrawal_security_boundary_hardening.sql",
+      "kind": "CREATE OR REPLACE FUNCTION",
+      "name": "process_failed_withdrawal",
+      "signature": "p_withdrawal_id uuid, p_error_reason text, p_actual_gas_amount numeric default 0, p_gas_asset text default null, p_is_verified_revert boolean default false"
+    },
+    {
+      "file": "20260928040000_withdrawal_security_boundary_hardening.sql",
+      "kind": "CREATE OR REPLACE FUNCTION",
+      "name": "claim_pending_withdrawals",
+      "signature": "p_limit integer default 10"
+    },
+    {
+      "file": "20260928040000_withdrawal_security_boundary_hardening.sql",
+      "kind": "REVOKE",
+      "name": "request_withdrawal",
+      "signature": "uuid, text, text, numeric, numeric, text, numeric",
+      "roles": "public, anon, authenticated"
+    },
+    {
+      "file": "20260928040000_withdrawal_security_boundary_hardening.sql",
+      "kind": "GRANT",
+      "name": "request_withdrawal",
+      "signature": "uuid, text, text, numeric, numeric, text, numeric",
+      "roles": "service_role, postgres"
+    },
+    {
+      "file": "20260928040000_withdrawal_security_boundary_hardening.sql",
+      "kind": "REVOKE",
+      "name": "approve_withdrawal",
+      "signature": "uuid, uuid",
+      "roles": "public, anon, authenticated"
+    },
+    {
+      "file": "20260928040000_withdrawal_security_boundary_hardening.sql",
+      "kind": "GRANT",
+      "name": "approve_withdrawal",
+      "signature": "uuid, uuid",
+      "roles": "service_role, postgres"
+    },
+    {
+      "file": "20260928040000_withdrawal_security_boundary_hardening.sql",
+      "kind": "REVOKE",
+      "name": "process_failed_withdrawal",
+      "signature": "uuid, text, numeric, text, boolean",
+      "roles": "public, anon, authenticated"
+    },
+    {
+      "file": "20260928040000_withdrawal_security_boundary_hardening.sql",
+      "kind": "GRANT",
+      "name": "process_failed_withdrawal",
+      "signature": "uuid, text, numeric, text, boolean",
+      "roles": "service_role, postgres"
+    },
+    {
+      "file": "20260928040000_withdrawal_security_boundary_hardening.sql",
+      "kind": "REVOKE",
+      "name": "claim_pending_withdrawals",
+      "signature": "integer",
+      "roles": "public, anon, authenticated"
+    },
+    {
+      "file": "20260928040000_withdrawal_security_boundary_hardening.sql",
+      "kind": "GRANT",
+      "name": "claim_pending_withdrawals",
+      "signature": "integer",
+      "roles": "service_role, postgres"
+    },
+    {
+      "file": "20260929000000_withdrawal_double_payout_and_state_hardening.sql",
+      "kind": "DROP FUNCTION IF EXISTS",
+      "name": "process_failed_withdrawal",
+      "signature": "uuid, text, numeric, text, boolean"
+    },
+    {
+      "file": "20260929000000_withdrawal_double_payout_and_state_hardening.sql",
+      "kind": "DROP FUNCTION IF EXISTS",
+      "name": "process_failed_withdrawal",
+      "signature": "uuid, text"
+    },
+    {
+      "file": "20260929000000_withdrawal_double_payout_and_state_hardening.sql",
+      "kind": "CREATE OR REPLACE FUNCTION",
+      "name": "process_failed_withdrawal",
+      "signature": "p_withdrawal_id uuid, p_error_reason text, p_actual_gas_amount numeric default 0, p_gas_asset text default null, p_is_verified_unbroadcast boolean default false"
+    },
+    {
+      "file": "20260929000000_withdrawal_double_payout_and_state_hardening.sql",
+      "kind": "REVOKE",
+      "name": "process_failed_withdrawal",
+      "signature": "uuid, text, numeric, text, boolean",
+      "roles": "public, anon, authenticated"
+    },
+    {
+      "file": "20260929000000_withdrawal_double_payout_and_state_hardening.sql",
+      "kind": "GRANT",
+      "name": "process_failed_withdrawal",
+      "signature": "uuid, text, numeric, text, boolean",
+      "roles": "service_role, postgres"
+    },
+    {
+      "file": "20261005000000_withdrawal_security_holds_and_approval_lockout.sql",
+      "kind": "CREATE OR REPLACE FUNCTION",
+      "name": "request_withdrawal",
+      "signature": "p_user_id uuid, p_network text, p_to_address text, p_amount numeric(36, 18"
+    },
+    {
+      "file": "20261005000000_withdrawal_security_holds_and_approval_lockout.sql",
+      "kind": "REVOKE",
+      "name": "request_withdrawal",
+      "signature": "uuid, text, text, numeric, numeric, text, numeric",
+      "roles": "public, anon, authenticated"
+    },
+    {
+      "file": "20261005000000_withdrawal_security_holds_and_approval_lockout.sql",
+      "kind": "GRANT",
+      "name": "request_withdrawal",
+      "signature": "uuid, text, text, numeric, numeric, text, numeric",
+      "roles": "service_role, postgres"
+    },
+    {
+      "file": "20261005030000_enforce_individual_emergency_freeze_financial_rpcs.sql",
+      "kind": "CREATE OR REPLACE FUNCTION",
+      "name": "request_withdrawal",
+      "signature": "p_user_id uuid, p_network text, p_to_address text, p_amount numeric(36, 18"
+    },
+    {
+      "file": "20261005030000_enforce_individual_emergency_freeze_financial_rpcs.sql",
+      "kind": "REVOKE",
+      "name": "request_withdrawal",
+      "signature": "uuid, text, text, numeric, numeric, text, numeric",
+      "roles": "public, anon, authenticated"
+    },
+    {
+      "file": "20261005030000_enforce_individual_emergency_freeze_financial_rpcs.sql",
+      "kind": "GRANT",
+      "name": "request_withdrawal",
+      "signature": "uuid, text, text, numeric, numeric, text, numeric",
+      "roles": "service_role, postgres"
+    },
+    {
+      "file": "20261005040000_canonical_global_emergency_mode.sql",
+      "kind": "CREATE OR REPLACE FUNCTION",
+      "name": "request_withdrawal",
+      "signature": "p_user_id uuid, p_network text, p_to_address text, p_amount numeric(36, 18"
+    },
+    {
+      "file": "20261005040000_canonical_global_emergency_mode.sql",
+      "kind": "REVOKE",
+      "name": "request_withdrawal",
+      "signature": "uuid, text, text, numeric, numeric, text, numeric",
+      "roles": "public, anon, authenticated"
+    },
+    {
+      "file": "20261005040000_canonical_global_emergency_mode.sql",
+      "kind": "GRANT",
+      "name": "request_withdrawal",
+      "signature": "uuid, text, text, numeric, numeric, text, numeric",
+      "roles": "service_role, postgres"
+    },
+    {
+      "file": "20261008010000_canonical_kyc_tier_and_privilege_lockdown.sql",
+      "kind": "CREATE OR REPLACE FUNCTION",
+      "name": "request_withdrawal",
+      "signature": "p_user_id uuid, p_network text, p_to_address text, p_amount numeric(36, 18"
+    },
+    {
+      "file": "20261008010000_canonical_kyc_tier_and_privilege_lockdown.sql",
+      "kind": "REVOKE",
+      "name": "request_withdrawal",
+      "signature": "uuid, text, text, numeric, numeric, text, numeric",
+      "roles": "public, anon, authenticated"
+    },
+    {
+      "file": "20261008010000_canonical_kyc_tier_and_privilege_lockdown.sql",
+      "kind": "GRANT",
+      "name": "request_withdrawal",
+      "signature": "uuid, text, text, numeric, numeric, text, numeric",
+      "roles": "service_role, postgres"
+    },
+    {
+      "file": "20261019180000_add_idempotent_withdrawal_wrapper.sql",
+      "kind": "CREATE OR REPLACE FUNCTION",
+      "name": "request_withdrawal_idempotent",
+      "signature": "p_user_id uuid, p_network text, p_to_address text, p_amount numeric(36, 18"
+    },
+    {
+      "file": "20261019180000_add_idempotent_withdrawal_wrapper.sql",
+      "kind": "REVOKE",
+      "name": "request_withdrawal_idempotent",
+      "signature": "uuid, text, text, numeric, numeric, text, numeric, text",
+      "roles": "public, anon, authenticated"
+    },
+    {
+      "file": "20261019180000_add_idempotent_withdrawal_wrapper.sql",
+      "kind": "GRANT",
+      "name": "request_withdrawal_idempotent",
+      "signature": "uuid, text, text, numeric, numeric, text, numeric, text",
+      "roles": "service_role, postgres"
+    },
+    {
+      "file": "20261020120000_fail_closed_withdrawal_usd_valuation.sql",
+      "kind": "CREATE OR REPLACE FUNCTION",
+      "name": "request_withdrawal",
+      "signature": "p_user_id uuid, p_network text, p_to_address text, p_amount numeric(36, 18"
+    },
+    {
+      "file": "20261020120000_fail_closed_withdrawal_usd_valuation.sql",
+      "kind": "REVOKE",
+      "name": "request_withdrawal",
+      "signature": "uuid, text, text, numeric, numeric, text, numeric",
+      "roles": "public, anon, authenticated"
+    },
+    {
+      "file": "20261020120000_fail_closed_withdrawal_usd_valuation.sql",
+      "kind": "GRANT",
+      "name": "request_withdrawal",
+      "signature": "uuid, text, text, numeric, numeric, text, numeric",
+      "roles": "service_role, postgres"
+    },
+    {
+      "file": "20261020150000_atomic_withdrawal_broadcast_state.sql",
+      "kind": "CREATE OR REPLACE FUNCTION",
+      "name": "record_withdrawal_broadcast",
+      "signature": "p_withdrawal_id uuid, p_tx_hash text"
+    },
+    {
+      "file": "20261020150000_atomic_withdrawal_broadcast_state.sql",
+      "kind": "CREATE OR REPLACE FUNCTION",
+      "name": "record_ambiguous_withdrawal_broadcast",
+      "signature": "p_withdrawal_id uuid, p_tx_hash text default null, p_error text default 'broadcast outcome is uncertain'"
+    },
+    {
+      "file": "20261020150000_atomic_withdrawal_broadcast_state.sql",
+      "kind": "REVOKE",
+      "name": "record_withdrawal_broadcast",
+      "signature": "uuid, text",
+      "roles": "public, anon, authenticated"
+    },
+    {
+      "file": "20261020150000_atomic_withdrawal_broadcast_state.sql",
+      "kind": "GRANT",
+      "name": "record_withdrawal_broadcast",
+      "signature": "uuid, text",
+      "roles": "service_role, postgres"
+    },
+    {
+      "file": "20261020150000_atomic_withdrawal_broadcast_state.sql",
+      "kind": "REVOKE",
+      "name": "record_ambiguous_withdrawal_broadcast",
+      "signature": "uuid, text, text",
+      "roles": "public, anon, authenticated"
+    },
+    {
+      "file": "20261020150000_atomic_withdrawal_broadcast_state.sql",
+      "kind": "GRANT",
+      "name": "record_ambiguous_withdrawal_broadcast",
+      "signature": "uuid, text, text",
+      "roles": "service_role, postgres"
+    },
+    {
+      "file": "20261020170000_restrict_withdrawal_queue_claim_rpc.sql",
+      "kind": "REVOKE",
+      "name": "claim_pending_withdrawals",
+      "signature": "integer",
+      "roles": "public, anon, authenticated"
+    },
+    {
+      "file": "20261020170000_restrict_withdrawal_queue_claim_rpc.sql",
+      "kind": "GRANT",
+      "name": "claim_pending_withdrawals",
+      "signature": "integer",
+      "roles": "service_role, postgres"
+    },
+    {
+      "file": "20261020200000_withdrawal_idempotency_replay_lookup.sql",
+      "kind": "CREATE OR REPLACE FUNCTION",
+      "name": "lookup_withdrawal_idempotency_replay",
+      "signature": "p_user_id uuid, p_idempotency_key text, p_network text, p_to_address text, p_amount numeric(36,18"
+    },
+    {
+      "file": "20261020200000_withdrawal_idempotency_replay_lookup.sql",
+      "kind": "REVOKE",
+      "name": "lookup_withdrawal_idempotency_replay",
+      "signature": "uuid, text, text, text, numeric, text",
+      "roles": "public, anon, authenticated"
+    },
+    {
+      "file": "20261020200000_withdrawal_idempotency_replay_lookup.sql",
+      "kind": "GRANT",
+      "name": "lookup_withdrawal_idempotency_replay",
+      "signature": "uuid, text, text, text, numeric, text",
+      "roles": "service_role, postgres"
+    },
+    {
+      "file": "20261024100000_withdrawal_refund_rpc_forward_hardening.sql",
+      "kind": "DROP FUNCTION IF EXISTS",
+      "name": "process_failed_withdrawal",
+      "signature": "uuid, text"
+    },
+    {
+      "file": "20261024100000_withdrawal_refund_rpc_forward_hardening.sql",
+      "kind": "DROP FUNCTION IF EXISTS",
+      "name": "process_failed_withdrawal",
+      "signature": "uuid, text, numeric, text, boolean"
+    },
+    {
+      "file": "20261024100000_withdrawal_refund_rpc_forward_hardening.sql",
+      "kind": "DROP FUNCTION IF EXISTS",
+      "name": "process_failed_withdrawal",
+      "signature": "uuid, text, numeric, text, boolean, boolean"
+    },
+    {
+      "file": "20261024100000_withdrawal_refund_rpc_forward_hardening.sql",
+      "kind": "CREATE FUNCTION",
+      "name": "process_failed_withdrawal",
+      "signature": "p_withdrawal_id uuid, p_error_reason text, p_actual_gas_amount numeric default 0, p_gas_asset text default null, p_is_verified_revert boolean default false, p_is_verified_unbroadcast boolean default false"
+    },
+    {
+      "file": "20261024100000_withdrawal_refund_rpc_forward_hardening.sql",
+      "kind": "REVOKE",
+      "name": "process_failed_withdrawal",
+      "signature": "uuid, text, numeric, text, boolean, boolean",
+      "roles": "public, anon, authenticated"
+    },
+    {
+      "file": "20261024100000_withdrawal_refund_rpc_forward_hardening.sql",
+      "kind": "GRANT",
+      "name": "process_failed_withdrawal",
+      "signature": "uuid, text, numeric, text, boolean, boolean",
+      "roles": "service_role, postgres"
+    },
+    {
+      "file": "20261024110000_withdrawal_approval_rpc_forward_hardening.sql",
+      "kind": "CREATE OR REPLACE FUNCTION",
+      "name": "approve_withdrawal",
+      "signature": "p_withdrawal_id uuid, p_admin_id uuid"
+    },
+    {
+      "file": "20261024110000_withdrawal_approval_rpc_forward_hardening.sql",
+      "kind": "REVOKE",
+      "name": "approve_withdrawal",
+      "signature": "uuid, uuid",
+      "roles": "public, anon, authenticated"
+    },
+    {
+      "file": "20261024110000_withdrawal_approval_rpc_forward_hardening.sql",
+      "kind": "GRANT",
+      "name": "approve_withdrawal",
+      "signature": "uuid, uuid",
+      "roles": "service_role, postgres"
+    },
+    {
+      "file": "20261026134500_atomic_admin_withdrawal_rejection.sql",
+      "kind": "CREATE OR REPLACE FUNCTION",
+      "name": "admin_reject_withdrawal",
+      "signature": "p_withdrawal_id uuid, p_admin_id uuid, p_rejection_reason text"
+    },
+    {
+      "file": "20261026134500_atomic_admin_withdrawal_rejection.sql",
+      "kind": "REVOKE",
+      "name": "admin_reject_withdrawal",
+      "signature": "uuid, uuid, text",
+      "roles": "public, anon, authenticated"
+    },
+    {
+      "file": "20261026134500_atomic_admin_withdrawal_rejection.sql",
+      "kind": "GRANT",
+      "name": "admin_reject_withdrawal",
+      "signature": "uuid, uuid, text",
+      "roles": "service_role, postgres"
+    },
+    {
+      "file": "20261028140000_withdrawal_worker_database_fencing.sql",
+      "kind": "CREATE OR REPLACE FUNCTION",
+      "name": "claim_pending_withdrawals",
+      "signature": "p_owner_token uuid, p_limit integer default 10"
+    },
+    {
+      "file": "20261028140000_withdrawal_worker_database_fencing.sql",
+      "kind": "CREATE OR REPLACE FUNCTION",
+      "name": "record_withdrawal_broadcast",
+      "signature": "p_withdrawal_id uuid, p_tx_hash text, p_owner_token uuid"
+    },
+    {
+      "file": "20261028140000_withdrawal_worker_database_fencing.sql",
+      "kind": "CREATE OR REPLACE FUNCTION",
+      "name": "record_ambiguous_withdrawal_broadcast",
+      "signature": "p_withdrawal_id uuid, p_tx_hash text, p_error text, p_owner_token uuid"
+    },
+    {
+      "file": "20261028140000_withdrawal_worker_database_fencing.sql",
+      "kind": "REVOKE",
+      "name": "claim_pending_withdrawals",
+      "signature": "integer",
+      "roles": "public, anon, authenticated, service_role"
+    },
+    {
+      "file": "20261028140000_withdrawal_worker_database_fencing.sql",
+      "kind": "GRANT",
+      "name": "claim_pending_withdrawals",
+      "signature": "integer",
+      "roles": "postgres"
+    },
+    {
+      "file": "20261028140000_withdrawal_worker_database_fencing.sql",
+      "kind": "REVOKE",
+      "name": "claim_pending_withdrawals",
+      "signature": "uuid, integer",
+      "roles": "public, anon, authenticated"
+    },
+    {
+      "file": "20261028140000_withdrawal_worker_database_fencing.sql",
+      "kind": "GRANT",
+      "name": "claim_pending_withdrawals",
+      "signature": "uuid, integer",
+      "roles": "service_role, postgres"
+    },
+    {
+      "file": "20261028140000_withdrawal_worker_database_fencing.sql",
+      "kind": "REVOKE",
+      "name": "record_withdrawal_broadcast",
+      "signature": "uuid, text",
+      "roles": "public, anon, authenticated, service_role"
+    },
+    {
+      "file": "20261028140000_withdrawal_worker_database_fencing.sql",
+      "kind": "GRANT",
+      "name": "record_withdrawal_broadcast",
+      "signature": "uuid, text",
+      "roles": "postgres"
+    },
+    {
+      "file": "20261028140000_withdrawal_worker_database_fencing.sql",
+      "kind": "REVOKE",
+      "name": "record_withdrawal_broadcast",
+      "signature": "uuid, text, uuid",
+      "roles": "public, anon, authenticated"
+    },
+    {
+      "file": "20261028140000_withdrawal_worker_database_fencing.sql",
+      "kind": "GRANT",
+      "name": "record_withdrawal_broadcast",
+      "signature": "uuid, text, uuid",
+      "roles": "service_role, postgres"
+    },
+    {
+      "file": "20261028140000_withdrawal_worker_database_fencing.sql",
+      "kind": "REVOKE",
+      "name": "record_ambiguous_withdrawal_broadcast",
+      "signature": "uuid, text, text",
+      "roles": "public, anon, authenticated, service_role"
+    },
+    {
+      "file": "20261028140000_withdrawal_worker_database_fencing.sql",
+      "kind": "GRANT",
+      "name": "record_ambiguous_withdrawal_broadcast",
+      "signature": "uuid, text, text",
+      "roles": "postgres"
+    },
+    {
+      "file": "20261028140000_withdrawal_worker_database_fencing.sql",
+      "kind": "REVOKE",
+      "name": "record_ambiguous_withdrawal_broadcast",
+      "signature": "uuid, text, text, uuid",
+      "roles": "public, anon, authenticated"
+    },
+    {
+      "file": "20261028140000_withdrawal_worker_database_fencing.sql",
+      "kind": "GRANT",
+      "name": "record_ambiguous_withdrawal_broadcast",
+      "signature": "uuid, text, text, uuid",
+      "roles": "service_role, postgres"
+    }
+  ]
+}

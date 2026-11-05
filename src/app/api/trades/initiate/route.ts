@@ -1,10 +1,13 @@
 import { NextResponse } from 'next/server';
-import { createClient, getSupabaseAdminClient } from '@/utils/supabase/server';
+import { createClient } from '@/utils/supabase/server';
 import { createClient as createSupabaseClient } from '@supabase/supabase-js';
 import { generateTradeId } from '@/lib/id-generator';
 import { sendNewTradeNotificationEmail } from '@/lib/email/tradeEmailService';
 import { assertPlatformControlAllowed } from '@/lib/platform-guard';
 import { hasPendingWithdrawalApproval } from '@/lib/withdrawal-security';
+import { checkAdOwnerAvailability } from '@/lib/ad-owner-availability';
+import { checkNewTradeEligibility } from '@/lib/account-action-guard';
+import { validateAdFiatLimits } from '@/lib/trade-ad-limits';
 
 export const dynamic = 'force-dynamic';
 
@@ -18,10 +21,15 @@ export async function POST(req: Request) {
     let supabase = await createClient();
     const authHeader = req.headers.get('Authorization');
     if (authHeader && authHeader.startsWith('Bearer ')) {
-      const token = authHeader.substring(7);
+      const token = authHeader.substring(7).trim();
+      const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+      const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+      if (!token || !supabaseUrl || !supabaseAnonKey) {
+        return NextResponse.json({ error: 'Authentication service is not configured.' }, { status: 503 });
+      }
       supabase = createSupabaseClient(
-        process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://placeholder.supabase.co',
-        process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'placeholder-key',
+        supabaseUrl,
+        supabaseAnonKey,
         { global: { headers: { Authorization: `Bearer ${token}` } } }
       );
     }
@@ -29,13 +37,16 @@ export async function POST(req: Request) {
       data: { user },
       error: authError,
     } = await supabase.auth.getUser();
-    console.log('[DEBUG] Auth getUser result:', { user: user?.id, error: authError });
-
     if (authError || !user) {
-      return NextResponse.json({ 
-        error: 'Unauthorized. Please sign in.',
-        debug: { authError, userId: user?.id }
-      }, { status: 401 });
+      return NextResponse.json(
+        { error: 'Unauthorized. Please sign in.' },
+        { status: 401 }
+      );
+    }
+
+    const eligibility = await checkNewTradeEligibility(user.id);
+    if (!eligibility.allowed) {
+      return NextResponse.json({ error: eligibility.message, code: eligibility.code }, { status: eligibility.statusCode });
     }
 
     // Pending Withdrawal Approval Lockout Check
@@ -57,20 +68,33 @@ export async function POST(req: Request) {
       );
     }
 
-    const body = await req.json();
+    const contentLength = Number(req.headers.get('content-length') || 0);
+    if (Number.isFinite(contentLength) && contentLength > 16 * 1024) {
+      return NextResponse.json({ error: 'Trade request is too large.' }, { status: 413 });
+    }
+
+    let body: any;
+    try {
+      body = await req.json();
+    } catch {
+      return NextResponse.json({ error: 'Request body must be valid JSON.' }, { status: 400 });
+    }
+    if (!body || typeof body !== 'object' || Array.isArray(body)) {
+      return NextResponse.json({ error: 'Request body must be a JSON object.' }, { status: 400 });
+    }
+
     const adId = body.adId || body.ad_id;
     const rawFiat = body.fiatAmount ?? body.fiat_amount;
     const rawCrypto = body.cryptoAmount ?? body.crypto_amount;
     const customPaymentMethod = body.paymentMethod || body.payment_method;
-    const customPrice = body.price || body.rate;
-    const customFiatCurrency = body.fiatCurrency || body.fiat_currency;
     const tradeRef = body.tradeRef || body.trade_ref || generateTradeId();
-    const idempotencyKey =
-      (body.idempotencyKey ||
-      body.idempotency_key ||
-      req.headers.get('x-idempotency-key') ||
-      req.headers.get('idempotency-key') ||
-      '').trim();
+    const rawIdempotencyKey =
+      body.idempotencyKey ??
+      body.idempotency_key ??
+      req.headers.get('x-idempotency-key') ??
+      req.headers.get('idempotency-key') ??
+      '';
+    const idempotencyKey = typeof rawIdempotencyKey === 'string' ? rawIdempotencyKey.trim() : '';
 
     if (!idempotencyKey) {
       return NextResponse.json({
@@ -78,6 +102,13 @@ export async function POST(req: Request) {
         code: 'IDEMPOTENCY_KEY_REQUIRED',
       }, { status: 400 });
     }
+    if (idempotencyKey.length > 128 || !/^[A-Za-z0-9._:-]{8,128}$/.test(idempotencyKey)) {
+      return NextResponse.json({ error: 'Invalid idempotency key format.', code: 'INVALID_IDEMPOTENCY_KEY' }, { status: 400 });
+    }
+    if (typeof tradeRef !== 'string' || tradeRef.length > 128) {
+      return NextResponse.json({ error: 'Trade reference is invalid.' }, { status: 400 });
+    }
+    // The idempotency key and trade reference are validated above.
 
     if (!adId) {
       return NextResponse.json({ error: 'Advertisement ID is required' }, { status: 400 });
@@ -87,8 +118,6 @@ export async function POST(req: Request) {
 
     // 1. Fetch Ad safely to read metadata
     let ad: any = null;
-    console.log('[DEBUG] Auth User ID:', user?.id);
-    
     let p2pQuery = supabase.from('p2p_ads').select('*');
     if (isIdUUID) {
       p2pQuery = p2pQuery.or(`id.eq.${adId},public_ad_id.eq.${adId}`);
@@ -122,7 +151,8 @@ export async function POST(req: Request) {
     }
 
     // 3. Resolve numerical amounts with exact precision
-    const rawPrice = customPrice ?? ad.fixed_rate ?? ad.price;
+    // Pricing is authoritative on the server; never accept a client-supplied rate.
+    const rawPrice = ad.fixed_rate ?? ad.price;
     const unitPrice = Number(rawPrice);
     if (!rawPrice || isNaN(unitPrice) || unitPrice <= 0) {
       return NextResponse.json(
@@ -130,21 +160,32 @@ export async function POST(req: Request) {
         { status: 400 }
       );
     }
-    let calculatedCrypto = parseFloat(rawCrypto);
-    let numericFiat = parseFloat(rawFiat);
+    const parseAmount = (value: unknown): number => {
+      if (typeof value !== 'number' && typeof value !== 'string') return Number.NaN;
+      if (typeof value === 'string' && value.trim() === '') return Number.NaN;
+      const parsed = Number(value);
+      return Number.isFinite(parsed) ? parsed : Number.NaN;
+    };
+    let calculatedCrypto = parseAmount(rawCrypto);
+    let numericFiat = parseAmount(rawFiat);
 
-    if (isNaN(calculatedCrypto) || calculatedCrypto <= 0) {
-      if (!isNaN(numericFiat) && numericFiat > 0 && unitPrice > 0) {
-        calculatedCrypto = numericFiat / unitPrice;
-      }
+    if ((!Number.isFinite(calculatedCrypto) || calculatedCrypto <= 0) && Number.isFinite(numericFiat) && numericFiat > 0 && unitPrice > 0) {
+      calculatedCrypto = numericFiat / unitPrice;
     }
 
-    if (isNaN(calculatedCrypto) || calculatedCrypto <= 0) {
+    if (!Number.isFinite(calculatedCrypto) || calculatedCrypto <= 0) {
       return NextResponse.json({ error: 'Invalid crypto amount.' }, { status: 400 });
     }
 
     calculatedCrypto = Number(calculatedCrypto.toFixed(8));
     numericFiat = Number((calculatedCrypto * unitPrice).toFixed(2));
+    if (!Number.isFinite(calculatedCrypto) || calculatedCrypto <= 0 || !Number.isFinite(numericFiat) || numericFiat <= 0) {
+      return NextResponse.json({ error: 'Trade amount is outside the supported numeric range.' }, { status: 400 });
+    }
+
+    // Enforce the stored advertisement's fiat limits consistently with other entry points.
+    const limitError = validateAdFiatLimits(ad, numericFiat);
+    if (limitError) return NextResponse.json({ error: limitError }, { status: 400 });
 
     // 4. Resolve Payment Method & Currency
     let rawPaymentMethods: any[] = [];
@@ -159,11 +200,12 @@ export async function POST(req: Request) {
       }
     } else if (ad.payment_method) {
       rawPaymentMethods = [ad.payment_method];
-    } else {
-      rawPaymentMethods = ['Bank Transfer'];
     }
 
     const paymentMethods: string[] = rawPaymentMethods.filter((m: any) => typeof m === 'string' && m.trim().length > 0);
+    if (paymentMethods.length === 0) {
+      return NextResponse.json({ error: 'This advertisement has no valid payment method configured.' }, { status: 400 });
+    }
 
     let resolvedPaymentMethod = '';
     const trimmedCustom = typeof customPaymentMethod === 'string' ? customPaymentMethod.trim() : '';
@@ -188,14 +230,16 @@ export async function POST(req: Request) {
         resolvedPaymentMethod = paymentMethods[0];
       }
     } else {
-      resolvedPaymentMethod = trimmedCustom || 'Bank Transfer';
+      return NextResponse.json({ error: 'This advertisement has no valid payment method configured.' }, { status: 400 });
     }
 
-    const resolvedFiatCurrency = customFiatCurrency || ad.fiat_currency || ad.fiat || 'USD';
+    // Fiat currency also comes from the stored advertisement, not request input.
+    const resolvedFiatCurrency = ad.fiat_currency || ad.fiat || 'USD';
     const adIdentifier = String(ad.id || ad.public_ad_id || adId);
+    const availabilityResponse = await checkAdOwnerAvailability(supabase, adIdentifier, idempotencyKey);
+    if (availabilityResponse) return availabilityResponse;
 
     // 5. Call Canonical Atomic Database RPC
-    console.log('[DEBUG] Calling initiate_trade_with_escrow RPC with user ID:', user?.id);
     const { data: rpcResult, error: rpcError } = await supabase.rpc('initiate_trade_with_escrow', {
       p_ad_id: adIdentifier,
       p_crypto_amount: calculatedCrypto,
@@ -209,39 +253,65 @@ export async function POST(req: Request) {
     });
 
     if (rpcError) {
-      console.error('[trades/initiate] RPC initiate_trade_with_escrow error:', rpcError);
+      // Keep database details in server logs only; never expose SQL/RPC messages to clients.
+      console.error('[trades/initiate] Escrow RPC failed:', { code: rpcError.code || 'UNKNOWN' });
       return NextResponse.json(
         {
           success: false,
           code: rpcError.code === 'P0001' ? 'ESCROW_ERROR' : 'RPC_ERROR',
-          error: rpcError.message || 'Failed to initiate trade with escrow.',
+          error: 'Unable to initiate this trade. Please review the trade details and try again.',
         },
         { status: 400 }
       );
     }
 
-    if (!rpcResult || rpcResult.success === false) {
+    if (!rpcResult || rpcResult.success !== true) {
+      console.error('[trades/initiate] Escrow RPC did not return explicit success.');
       return NextResponse.json(
         {
           success: false,
           code: 'ESCROW_FAILED',
-          error: rpcResult?.message || 'Failed to initiate trade with escrow.',
+          error: 'Unable to confirm trade initiation. Check your trade list before retrying.',
         },
-        { status: 400 }
+        { status: 502 }
       );
     }
 
-    const tradeId = rpcResult.trade_id;
-    const publicId = rpcResult.public_id || tradeRef;
-    const sellerId = rpcResult.seller_id || ad.user_id;
-    const buyerId = rpcResult.buyer_id || user.id;
+    const tradeId = typeof rpcResult.trade_id === 'string' ? rpcResult.trade_id : '';
+    const publicId = typeof rpcResult.public_id === 'string' && rpcResult.public_id.trim()
+      ? rpcResult.public_id
+      : tradeRef;
+    const sellerId = typeof rpcResult.seller_id === 'string' ? rpcResult.seller_id : '';
+    const buyerId = typeof rpcResult.buyer_id === 'string' ? rpcResult.buyer_id : '';
+    const adType = String(ad.type || ad.ad_type || 'SELL').trim().toUpperCase();
+    const expectedBuyerId = adType === 'BUY' ? String(ad.user_id || '') : user.id;
+    const expectedSellerId = adType === 'BUY' ? user.id : String(ad.user_id || '');
+    const responseCryptoAmount = Number(rpcResult.crypto_amount);
+    const responseFiatAmount = Number(rpcResult.fiat_amount);
+    const responseMatchesRequest =
+      Number.isFinite(responseCryptoAmount) && responseCryptoAmount > 0 &&
+      Number.isFinite(responseFiatAmount) && responseFiatAmount > 0 &&
+      responseCryptoAmount === calculatedCrypto && responseFiatAmount === numericFiat;
 
-    if (tradeId && resolvedPaymentMethod) {
-      const adminClient = getSupabaseAdminClient();
-      await adminClient
-        .from('trades')
-        .update({ payment_method: resolvedPaymentMethod })
-        .eq('id', tradeId);
+    if (
+      !isValidUUID(tradeId) ||
+      !publicId ||
+      !expectedBuyerId ||
+      !expectedSellerId ||
+      buyerId !== expectedBuyerId ||
+      sellerId !== expectedSellerId ||
+      buyerId === sellerId ||
+      !responseMatchesRequest
+    ) {
+      console.error('[trades/initiate] Escrow RPC returned an invalid trade payload.');
+      return NextResponse.json(
+        {
+          success: false,
+          code: 'ESCROW_RESPONSE_INVALID',
+          error: 'Unable to confirm trade initiation. Check your trade list before retrying.',
+        },
+        { status: 502 }
+      );
     }
 
     // Send Email Notification to Seller (Non-blocking & Duplicate-Protected)

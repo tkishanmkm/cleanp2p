@@ -220,79 +220,54 @@ export async function resolveDispute(
   trade: Trade,
   dispute: Dispute,
   winnerId: string,
-  adminId: string,
+  _adminId: string,
   fiatAmountInUSD: number
-) {
-  const winnerUsername = winnerId === trade.buyerId ? trade.buyer?.username || 'Buyer' : trade.seller?.username || 'Seller';
-  const isSellerWinner = winnerId === trade.sellerId;
-
-  if (isSellerWinner) {
-    const { data: rpcData, error: rpcError } = await supabase.rpc('cancel_p2p_trade', {
-      p_trade_id: trade.id,
-      p_caller_id: adminId,
-    });
-
-    if (rpcError || (rpcData && !rpcData.success)) {
-      const errorMsg = rpcError?.message || rpcData?.message || 'Dispute seller cancellation settlement failed.';
-      console.error('resolveDispute seller cancel_p2p_trade RPC failed:', errorMsg);
-      throw new Error(errorMsg);
-    }
-  } else {
-    const { data: rpcData, error: rpcError } = await supabase.rpc('release_trade_escrow', {
-      p_trade_id: trade.id,
-      p_caller_id: adminId,
-    });
-
-    if (rpcError || (rpcData && !rpcData.success)) {
-      const errorMsg = rpcError?.message || rpcData?.message || 'Dispute buyer release_trade_escrow RPC failed.';
-      console.error('resolveDispute buyer release_trade_escrow RPC failed:', errorMsg);
-      throw new Error(errorMsg);
-    }
+): Promise<void> {
+  // Never settle escrow or mutate dispute/reputation rows from a browser client.
+  // The server endpoint is the only supported boundary; it currently fails closed
+  // until its atomic settlement + audit RPC has passed PostgreSQL rehearsal.
+  if (!trade?.id || !dispute?.id || !winnerId) {
+    throw new Error('A valid trade, dispute, and winner are required.');
   }
 
-  await supabase
-    .from('disputes')
-    .update({
-      status: 'resolved',
-      winner_id: winnerId,
-      resolved_by: adminId,
-      resolution_note: `Dispute awarded to ${winnerUsername} by moderator.`,
-    })
-    .eq('id', dispute.id);
+  const buyerId = String(trade.buyerId || '');
+  const sellerId = String(trade.sellerId || '');
+  if (winnerId !== buyerId && winnerId !== sellerId) {
+    throw new Error('Dispute winner must be a participant in this trade.');
+  }
+  if (!Number.isFinite(fiatAmountInUSD) || fiatAmountInUSD < 0) {
+    throw new Error('Dispute amount is invalid.');
+  }
 
-  await supabase.from('trade_messages').insert([
-    {
-      trade_id: trade.id,
-      sender_id: '00000000-0000-0000-0000-000000000000',
-      sender_username: 'Paxones System',
-      message: `Dispute resolved. The trade has been awarded to ${winnerUsername}.`,
-      is_moderator: true,
-      created_at: new Date().toISOString(),
-    },
-  ]);
+  const winnerUsername = winnerId === buyerId
+    ? trade.buyer?.username || 'Buyer'
+    : trade.seller?.username || 'Seller';
+  const resolutionReason = `Dispute awarded to ${winnerUsername} by moderator.`;
 
-  // Notifications
-  const loserId = winnerId === trade.buyerId ? trade.sellerId : trade.buyerId;
-  await supabase.from('notifications').insert([
-    {
-      user_id: winnerId,
-      title: 'Dispute Won',
-      message: `You have won the dispute for trade ${trade.tradeId || trade.id}.`,
-      type: 'dispute',
-      metadata: { link: `/trade/${trade.id}` },
-      is_read: false,
-      created_at: new Date().toISOString(),
-    },
-    {
-      user_id: loserId,
-      title: 'Dispute Resolved',
-      message: `The dispute for trade ${trade.tradeId || trade.id} has been resolved.`,
-      type: 'dispute',
-      metadata: { link: `/trade/${trade.id}` },
-      is_read: false,
-      created_at: new Date().toISOString(),
-    },
-  ]);
+  const response = await fetch('/api/admin/disputes/resolve', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      disputeId: dispute.id,
+      tradeId: trade.id,
+      winnerId,
+      reason: resolutionReason,
+      amountUsd: fiatAmountInUSD,
+    }),
+  });
+  const result = await response.json().catch(() => null);
+
+  if (
+    !response.ok ||
+    result?.success !== true ||
+    result?.settlementSucceeded !== true ||
+    result?.audit_logged !== true
+  ) {
+    const errorMessage = typeof result?.error === 'string'
+      ? result.error
+      : 'Dispute settlement was not confirmed by the secure server workflow.';
+    throw new Error(errorMessage);
+  }
 }
 
 export async function updateSupportTicketStatus(
@@ -316,49 +291,48 @@ export async function updateSupportTicketStatus(
 
 export async function adjustUserWalletBalance(
   _db: any,
-  adminId: string,
+  _adminId: string,
   userId: string,
-  userDisplayName: string,
+  _userDisplayName: string,
   crypto: CryptoCurrency,
   action: 'add' | 'subtract',
   amount: number,
-  reason: string
+  reason: string,
+  requestId: string
 ): Promise<void> {
-  if (amount <= 0) {
-    throw new Error('Amount must be a positive number.');
+  if (!Number.isFinite(amount) || amount <= 0 || Number(amount.toFixed(8)) !== amount) {
+    throw new Error('Amount must be positive and have at most 8 decimal places.');
+  }
+  if (!requestId) {
+    throw new Error('An adjustment request ID is required for safe retries.');
   }
 
-  try {
-    await supabase.rpc('admin_adjust_balance', {
-      p_user_id: userId,
-      p_asset: crypto,
-      p_amount: amount,
-      p_action: action,
-    });
-  } catch (err) {
-    console.warn('admin_adjust_balance RPC:', err);
+  // Never call an administrator financial RPC from the browser client. The
+  // server derives the actor from its verified administrator session.
+  const response = await fetch(`/api/admin/users/${encodeURIComponent(userId)}/balance`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      asset: crypto,
+      action,
+      amount,
+      reason,
+      requestId,
+    }),
+  });
+  const result = await response.json().catch(() => null);
+
+  if (
+    !response.ok ||
+    result?.success !== true ||
+    result?.audit_logged !== true ||
+    result?.data?.success !== true
+  ) {
+    const errorMessage = typeof result?.error === 'string'
+      ? result.error
+      : 'The server did not confirm both the balance adjustment and its audit record.';
+    throw new Error(errorMessage);
   }
-
-  await supabase.from('admin_logs').insert([
-    {
-      admin_id: adminId,
-      action: `Adjusted ${userDisplayName}'s ${crypto} balance. Action: ${action}, Amount: ${amount}. Reason: ${reason}`,
-      target_id: userId,
-      created_at: new Date().toISOString(),
-    },
-  ]);
-
-  await supabase.from('notifications').insert([
-    {
-      user_id: userId,
-      title: 'Balance Adjusted',
-      message: `An admin has adjusted your ${crypto} wallet balance. Action: ${action}, Amount: ${amount}. Reason: ${reason}`,
-      type: 'admin',
-      is_read: false,
-      created_at: new Date().toISOString(),
-      metadata: { link: '/wallets' },
-    },
-  ]);
 }
 
 export async function adminUnblockUser(
@@ -379,79 +353,67 @@ export async function adminUnblockUser(
     .eq('id', ownerUserId);
 }
 
-export async function adminCancelTrade(_db: any, trade: Trade, adminId: string, reason: string) {
-  const { data: rpcData, error: rpcError } = await supabase.rpc('cancel_p2p_trade', {
-    p_trade_id: trade.id,
-    p_caller_id: adminId,
+export async function adminCancelTrade(_db: any, trade: Trade, _adminId: string, reason: string) {
+  // Cancellation refunds escrow, so route it through server-side administrator
+  // authorization instead of calling a restricted financial RPC from the browser.
+  const response = await fetch(`/api/admin/trades/${encodeURIComponent(trade.id)}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      action: 'intervene',
+      interveneAction: 'refund',
+      reason
+    })
   });
-
-  if (rpcError || (rpcData && !rpcData.success)) {
-    const errorMsg = rpcError?.message || rpcData?.message || 'Admin cancel_p2p_trade RPC failed.';
-    console.error('adminCancelTrade RPC error:', errorMsg);
+  const result = await response.json().catch(() => null);
+  if (!response.ok || result?.success !== true) {
+    const errorMsg = typeof result?.error === 'string'
+      ? result.error
+      : 'Admin trade cancellation was rejected. Verify the trade state and your permissions.';
+    console.error('adminCancelTrade request failed:', response.status);
     throw new Error(errorMsg);
   }
-
-  await supabase.from('admin_logs').insert([
-    {
-      admin_id: adminId,
-      action: `Admin cancelled trade ${trade.tradeId || trade.id}. Reason: ${reason}`,
-      target_id: trade.id,
-      created_at: new Date().toISOString(),
-    },
-  ]);
 }
 
-export async function adminMarkTradeAsPaid(_db: any, trade: Trade, adminId: string, reason: string) {
-  const { data: rpcData, error: rpcError } = await supabase.rpc('mark_p2p_trade_paid', {
-    p_trade_id: trade.id,
-    p_caller_id: adminId,
+export async function adminMarkTradeAsPaid(_db: any, trade: Trade, _adminId: string, reason: string) {
+  // Admin payment confirmation must pass the server's admin + signed 2FA gate.
+  // The actor ID/email are derived by that route and never accepted from the browser.
+  const response = await fetch(`/api/admin/trades/${encodeURIComponent(trade.id)}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      action: 'mark_paid',
+      reason,
+    }),
   });
-
-  if (rpcError || (rpcData && !rpcData.success)) {
-    const errorMsg = rpcError?.message || rpcData?.message || 'Admin mark_p2p_trade_paid RPC failed.';
-    console.error('adminMarkTradeAsPaid RPC error:', errorMsg);
+  const result = await response.json().catch(() => null);
+  if (!response.ok || result?.success !== true) {
+    const errorMsg = typeof result?.error === 'string'
+      ? result.error
+      : 'Administrative payment confirmation was rejected. Verify the trade state and your permissions.';
+    console.error('adminMarkTradeAsPaid request failed:', response.status);
     throw new Error(errorMsg);
   }
-
-  await supabase.from('admin_logs').insert([
-    {
-      admin_id: adminId,
-      action: `Admin marked trade ${trade.tradeId || trade.id} as paid. Reason: ${reason}`,
-      target_id: trade.id,
-      created_at: new Date().toISOString(),
-    },
-  ]);
 }
-
-export async function adminReleaseFunds(_db: any, trade: Trade, adminId: string, reason: string) {
-  const { data: rpcData, error: rpcError } = await supabase.rpc('release_trade_escrow', {
-    p_trade_id: trade.id,
-    p_caller_id: adminId,
+export async function adminReleaseFunds(_db: any, trade: Trade, _adminId: string, reason: string) {
+  // Escrow release is service-role-only in production. Use the server endpoint
+  // so admin identity is verified server-side; do not expose the financial RPC
+  // to authenticated browser clients.
+  const response = await fetch(`/api/admin/trades/${encodeURIComponent(trade.id)}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      action: 'intervene',
+      interveneAction: 'release',
+      reason
+    })
   });
-
-  if (rpcError || (rpcData && !rpcData.success)) {
-    const errorMsg = rpcError?.message || rpcData?.message || 'Admin release_trade_escrow RPC failed.';
-    console.error('adminReleaseFunds RPC error:', errorMsg);
+  const result = await response.json().catch(() => null);
+  if (!response.ok || result?.success !== true) {
+    const errorMsg = typeof result?.error === 'string'
+      ? result.error
+      : 'Admin escrow release was rejected. Verify the trade state and your permissions.';
+    console.error('adminReleaseFunds request failed:', response.status);
     throw new Error(errorMsg);
   }
-
-  await supabase.from('admin_logs').insert([
-    {
-      admin_id: adminId,
-      action: `Admin released funds for trade ${trade.tradeId || trade.id}. Reason: ${reason}`,
-      target_id: trade.id,
-      created_at: new Date().toISOString(),
-    },
-  ]);
-
-  await supabase.from('trade_messages').insert([
-    {
-      trade_id: trade.id,
-      sender_id: 'system',
-      sender_username: 'System',
-      message: `A moderator has released the crypto. The trade is now complete. Reason: ${reason}\nYou can now leave feedback for your partner.`,
-      is_moderator: true,
-      created_at: new Date().toISOString(),
-    },
-  ]);
 }

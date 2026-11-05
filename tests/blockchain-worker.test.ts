@@ -1,13 +1,7 @@
-import { createClient } from '@supabase/supabase-js';
+import { testSupabase as supabase } from './helpers/test-supabase';
 import { processWithdrawalQueue } from '../src/jobs/withdrawalWorker';
+import { acquireWithdrawalWorkerLease } from '../src/jobs/withdrawalWorkerLease';
 import { CANONICAL_USDT_CONTRACTS } from '../src/jobs/depositIngestion';
-
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL || 'https://placeholder.supabase.co';
-const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'placeholder-key';
-
-const supabase = createClient(supabaseUrl, supabaseKey, {
-  auth: { persistSession: false, autoRefreshToken: false },
-});
 
 // Color helpers
 const green = (s: string) => `\x1b[32m${s}\x1b[0m`;
@@ -170,8 +164,15 @@ async function runBlockchainWorkerTests() {
       { onConflict: 'id' }
     );
 
-    // Run withdrawal processor
-    const workerResult = await processWithdrawalQueue();
+    // Run withdrawal processor only while holding the database owner-token lease.
+    const withdrawalLease = await acquireWithdrawalWorkerLease();
+    if (!withdrawalLease) throw new Error('Could not acquire withdrawal worker lease for integration test');
+    let workerResult: Awaited<ReturnType<typeof processWithdrawalQueue>>;
+    try {
+      workerResult = await processWithdrawalQueue(withdrawalLease.ownerToken);
+    } finally {
+      await withdrawalLease.stop();
+    }
 
     if (!workerResult.processed) {
       console.log(red(`  ✗ Withdrawal queue did not process record: ${workerResult.error}`));
@@ -240,8 +241,13 @@ async function runBlockchainWorkerTests() {
     console.log(bold(cyan('------------------------------------------------------\n')));
     if (passedTests === totalTests) {
       console.log(green(bold('ALL BLOCKCHAIN INGESTION & WITHDRAWAL TESTS PASSED!')));
+    } else {
+      process.exitCode = 1;
     }
   }
 }
 
-runBlockchainWorkerTests();
+runBlockchainWorkerTests().catch((error) => {
+  console.error(error);
+  process.exitCode = 1;
+});

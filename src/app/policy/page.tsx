@@ -1,5 +1,6 @@
 import { Header } from "@/components/layout/header";
 import { Footer } from "@/components/layout/footer";
+import { LegalDocumentBanner } from '@/components/legal/legal-document-banner';
 import Link from "next/link";
 import { Shield, Lock, FileText, AlertTriangle, Eye, CheckCircle2 } from "lucide-react";
 
@@ -15,20 +16,11 @@ export default function PolicyPage() {
       <main className="flex-grow container mx-auto px-4 py-12 md:py-16 max-w-4xl">
         <div className="bg-white dark:bg-[#0f1423] border border-slate-200 dark:border-[#1e2640] rounded-2xl p-6 sm:p-10 shadow-sm space-y-10">
           
-          {/* Header & Date Badge */}
-          <div className="border-b border-slate-200 dark:border-[#1e2640] pb-8">
-            <div className="inline-flex items-center gap-2 px-3 py-1 bg-amber-500/10 border border-amber-500/20 text-amber-600 dark:text-amber-400 text-xs font-semibold rounded-full mb-4">
-              <Shield className="w-3.5 h-3.5" />
-              <span>Official Policy Document</span>
-            </div>
-            <h1 className="text-3xl sm:text-4xl font-extrabold tracking-tight text-slate-900 dark:text-white mb-3">
-              PRIVACY NOTICE
-            </h1>
-            <div className="flex flex-wrap gap-y-1 gap-x-6 text-xs text-slate-500 dark:text-slate-400 font-mono">
-              <span><strong>Effective Date:</strong> January 1, 2026</span>
-              <span><strong>Last Updated:</strong> September 9, 2026</span>
-            </div>
-          </div>
+          <LegalDocumentBanner
+            document="privacy"
+            effectiveDate="January 1, 2026"
+            lastUpdated="September 9, 2026"
+          />
 
           {/* Preamble */}
           <div className="space-y-4 text-sm leading-relaxed text-slate-700 dark:text-slate-300">

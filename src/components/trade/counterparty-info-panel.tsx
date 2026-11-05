@@ -21,13 +21,15 @@ import {
   UserCheck,
   Loader2
 } from 'lucide-react';
-import { format, formatDistanceToNow } from 'date-fns';
+import { formatDistanceToNow } from 'date-fns';
+import { ar, enUS, es, fr, hi, ko, ptBR, ru, vi, zhCN, zhTW } from 'date-fns/locale';
 import { toDate } from '@/lib/utils';
 import type { User } from '@/lib/types';
 import { countries } from '@/lib/countries';
 import { FlagIcon } from '@/components/ui/flag-icon';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { useToast } from '@/hooks/use-toast';
+import { useI18n } from '@/context/i18n-context';
 
 function DetailItem({
   icon,
@@ -87,6 +89,9 @@ export function CounterpartyInfoPanel({
 }) {
   const supabase = createClient();
   const { toast } = useToast();
+  const { t, language } = useI18n();
+  const dateFnsLocaleByLanguage = { en: enUS, 'zh-CN': zhCN, 'zh-TW': zhTW, 'pt-BR': ptBR, ko, fr, es, ru, vi, ar, hi };
+  const dateFnsLocale = dateFnsLocaleByLanguage[language as keyof typeof dateFnsLocaleByLanguage] || enUS;
   const [profileData, setProfileData] = useState<any>(user);
   const [blockedByCount, setBlockedByCount] = useState<number>(0);
   const [isBlockedByMe, setIsBlockedByMe] = useState(false);
@@ -108,8 +113,8 @@ export function CounterpartyInfoPanel({
 
         let targetProfileId = targetId;
 
-        const COUNTERPARTY_PROFILE_FIELDS = 'id, username, display_name, avatar_url, photo_url, is_online, last_seen_at, created_at, total_completed_trades, completed_trades, positive_feedback, negative_feedback, feedback_score';
-        let query = supabase.from('profiles').select(COUNTERPARTY_PROFILE_FIELDS);
+        const COUNTERPARTY_PROFILE_FIELDS = 'id, username, display_name, avatar_url, photo_url, is_online, created_at, total_completed_trades, completed_trades, positive_feedback, negative_feedback, feedback_score';
+        let query = supabase.from('public_profiles').select(COUNTERPARTY_PROFILE_FIELDS);
         if (targetId && targetId.includes('-')) {
           query = query.eq('id', targetId);
         } else if (targetUsername) {
@@ -121,15 +126,8 @@ export function CounterpartyInfoPanel({
           targetProfileId = prof.id;
           setProfileData((prev: any) => ({ ...prev, ...prof }));
 
-          // Check if target user blocked currentUser
-          if (currentUser) {
-            const targetBlocked: string[] = Array.isArray(prof.blocked_users) ? prof.blocked_users : [];
-            setIsBlockedByThem(
-              targetBlocked.includes(currentUser.id) ||
-              targetBlocked.includes(currentUser.user_metadata?.username) ||
-              targetBlocked.includes(currentUser.email?.split('@')[0])
-            );
-          }
+          // Block relationships are resolved by the authenticated server endpoint;
+          // never read another user's private block list from the browser.
         }
 
         // Live fetch actual completed trades count for target user from trades table
@@ -157,50 +155,25 @@ export function CounterpartyInfoPanel({
             if (typeof blockData.isBlockedByMe === 'boolean') {
               setIsBlockedByMe(blockData.isBlockedByMe);
             }
+            if (typeof blockData.theyBlockedYou === 'boolean') {
+              setIsBlockedByThem(blockData.theyBlockedYou);
+            }
             if (typeof blockData.blockedByCount === 'number') {
               setBlockedByCount(blockData.blockedByCount);
             }
           } catch {
-            const { data: myProfile } = await supabase
-              .from('profiles')
-              .select('blocked_users')
-              .eq('id', currentUser.id)
-              .maybeSingle();
-
-            const myBlocked: string[] = Array.isArray(myProfile?.blocked_users) ? myProfile.blocked_users : [];
-            setIsBlockedByMe(
-              myBlocked.includes(targetProfileId) || 
-              (targetId && myBlocked.includes(targetId)) ||
-              (targetUsername ? myBlocked.includes(targetUsername) : false)
-            );
+            // Fail closed for block-sensitive actions when the status endpoint is unavailable.
+            setIsBlockedByMe(true);
+            setIsBlockedByThem(false);
           }
         }
 
-        // Calculate how many distinct users have blocked this target user
-        if (targetProfileId || targetId) {
-          const { data: allProfiles } = await supabase
-            .from('profiles')
-            .select('id, blocked_users');
-
-          if (allProfiles) {
-            let count = 0;
-            for (const p of allProfiles) {
-              if (p.id === targetProfileId || p.id === targetId) continue;
-              const blkList: string[] = Array.isArray(p.blocked_users) ? p.blocked_users : [];
-              const isBlocking = blkList.some(
-                (item) => item === targetProfileId || item === targetId || (targetUsername && item === targetUsername)
-              );
-              if (isBlocking) {
-                count++;
-              }
-            }
-            setBlockedByCount(count);
-          }
-        }
+        // Aggregated block counts are returned by the server-only block-status
+        // endpoint; the browser never enumerates other users' private block lists.
 
         // Fetch live feedback counts for this user directly from feedback table
-        if (targetProfileId || targetId) {
-          const effectiveId = targetProfileId || targetId;
+        const effectiveId = targetProfileId || targetId;
+        if (effectiveId) {
           const { data: fbData } = await supabase
             .from('feedback')
             .select('rating, is_positive')
@@ -232,7 +205,7 @@ export function CounterpartyInfoPanel({
     setIsBlocking(true);
     try {
       const { data: { user: currentUser } } = await supabase.auth.getUser();
-      if (!currentUser) throw new Error('Please sign in first');
+      if (!currentUser) throw new Error(t('counterpartyPanel.notSignedIn'));
 
       const targetId = profileData?.id || user?.id;
       const targetUser = profileData?.username || user?.username;
@@ -250,20 +223,20 @@ export function CounterpartyInfoPanel({
 
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
-        throw new Error(data.error || 'Failed to update block state');
+        throw new Error(data.error || t('counterpartyPanel.updateBlockFailed'));
       }
 
       if (isBlockedByMe) {
         setIsBlockedByMe(false);
         setBlockedByCount((prev) => Math.max(0, prev - 1));
-        toast({ title: 'User Unblocked', description: `You have unblocked @${targetUser || 'user'}` });
+        toast({ title: t('counterpartyPanel.unblockedToast'), description: t('counterpartyPanel.unblockedDescription').replace('{username}', targetUser || 'user') });
       } else {
         setIsBlockedByMe(true);
         setBlockedByCount((prev) => prev + 1);
-        toast({ title: 'User Blocked', description: `You have blocked @${targetUser || 'user'}` });
+        toast({ title: t('counterpartyPanel.blockedToast'), description: t('counterpartyPanel.blockedDescription').replace('{username}', targetUser || 'user') });
       }
     } catch (err: any) {
-      toast({ variant: 'destructive', title: 'Error', description: err.message || 'Failed to update block status' });
+      toast({ variant: 'destructive', title: t('counterpartyPanel.errorTitle'), description: err.message || t('counterpartyPanel.updateBlockFailed') });
     } finally {
       setIsBlocking(false);
     }
@@ -272,12 +245,12 @@ export function CounterpartyInfoPanel({
   if (!user && !profileData) return null;
 
   const current = profileData || user;
-  const username = current.username || (current.userId && !current.userId.includes('-') ? current.userId : 'Trader');
-  const fullName = current.fullName || current.full_name || 'Unverified User';
+  const username = current.username || (current.userId && !current.userId.includes('-') ? current.userId : t('counterpartyPanel.fallbackTrader'));
+  const fullName = current.fullName || current.full_name || t('counterpartyPanel.fallbackUnverifiedUser');
   const photoURL = current.photoURL || current.photo_url;
   
   const createdDate = toDate(current.createdAt || current.created_at);
-  const joinedAgo = createdDate ? formatDistanceToNow(createdDate) + ' ago' : 'N/A';
+  const joinedAgo = createdDate ? formatDistanceToNow(createdDate, { addSuffix: true, locale: dateFnsLocale }) : t('counterpartyPanel.notAvailable');
   const dobDate = toDate(current.dob);
 
   const getCountryName = (code?: string) => (code ? countries.find((c) => c.code === code)?.name || code : 'N/A');
@@ -302,10 +275,10 @@ export function CounterpartyInfoPanel({
         <SheetHeader className="border-b border-border pb-4">
           <SheetTitle className="text-lg font-bold flex items-center gap-2">
             <UserIcon className="h-5 w-5 text-primary" />
-            Trader Information
+            {t('counterpartyPanel.title')}
           </SheetTitle>
           <SheetDescription className="text-xs">
-            Profile reputation and trade statistics for @{username}
+            {t('counterpartyPanel.description').replace('{username}', username)}
           </SheetDescription>
         </SheetHeader>
 
@@ -325,38 +298,37 @@ export function CounterpartyInfoPanel({
               </div>
               <div className="flex items-center gap-3 mt-1">
                 <span className="inline-flex items-center gap-1 text-xs font-semibold px-2 py-0.5 rounded-md bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">
-                  <ThumbsUp className="h-3 w-3" /> {positiveScore}% Positive
+                  <ThumbsUp className="h-3 w-3" /> {t('counterpartyPanel.positivePercent').replace('{count}', String(positiveScore))}
                 </span>
                 <span className="inline-flex items-center gap-1 text-xs font-semibold px-2 py-0.5 rounded-md bg-primary/10 text-primary border border-primary/20">
-                  <CheckCircle className="h-3 w-3" /> {completedTradesCount} Trades
+                  <CheckCircle className="h-3 w-3" /> {t('counterpartyPanel.tradesCount').replace('{count}', completedTradesCount.toLocaleString(language))}
                 </span>
               </div>
             </div>
 
             {/* Detailed Stats List */}
             <div className="space-y-1">
-              <DetailItem icon={<UserIcon size={16} />} label="Full Name" value={fullName} />
+              <DetailItem icon={<UserIcon size={16} />} label={t('counterpartyPanel.fullName')} value={fullName} />
               
               {/* Verification Badges */}
               <div className="flex items-center justify-between py-2.5 border-b border-border/50 text-sm">
                 <div className="flex items-center gap-2.5 text-muted-foreground">
                   <CheckCircle className="h-4 w-4 text-primary shrink-0" />
-                  <span>Email Verified</span>
+                  <span>{t('counterpartyPanel.emailVerified')}</span>
                 </div>
                 <div>
                   {(
                     current.email_verified === true ||
                     current.is_email_verified === true ||
                     current.emailVerified === true ||
-                    current.email_confirmed_at != null ||
-                    current.is_email_verified ?? true
+                    current.email_confirmed_at != null
                   ) ? (
                     <span className="inline-flex items-center gap-1 text-xs font-bold px-2 py-0.5 rounded-md bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">
-                      <CheckCircle className="h-3 w-3" /> Verified
+                      <CheckCircle className="h-3 w-3" /> {t('counterpartyPanel.verified')}
                     </span>
                   ) : (
                     <span className="inline-flex items-center gap-1 text-xs font-semibold px-2 py-0.5 rounded-md bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20">
-                      Unverified
+                      {t('counterpartyPanel.unverified')}
                     </span>
                   )}
                 </div>
@@ -365,7 +337,7 @@ export function CounterpartyInfoPanel({
               <div className="flex items-center justify-between py-2.5 border-b border-border/50 text-sm">
                 <div className="flex items-center gap-2.5 text-muted-foreground">
                   <ShieldCheck className="h-4 w-4 text-primary shrink-0" />
-                  <span>ID / KYC Verified</span>
+                  <span>{t('counterpartyPanel.idKycVerified')}</span>
                 </div>
                 <div>
                   {(
@@ -379,11 +351,11 @@ export function CounterpartyInfoPanel({
                     current.kyc_verified === true
                   ) ? (
                     <span className="inline-flex items-center gap-1 text-xs font-bold px-2 py-0.5 rounded-md bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">
-                      <CheckCircle className="h-3 w-3" /> Verified
+                      <CheckCircle className="h-3 w-3" /> {t('counterpartyPanel.verified')}
                     </span>
                   ) : (
                     <span className="inline-flex items-center gap-1 text-xs font-semibold px-2 py-0.5 rounded-md bg-slate-500/10 text-slate-600 dark:text-slate-400 border border-slate-500/20">
-                      Unverified
+                      {t('counterpartyPanel.unverified')}
                     </span>
                   )}
                 </div>
@@ -391,44 +363,44 @@ export function CounterpartyInfoPanel({
 
               <DetailItem
                 icon={<ArrowLeftRight size={16} />}
-                label="Completed Trades With You"
+                label={t('counterpartyPanel.completedWithYou')}
                 value={<span className="font-[Arial,Helvetica,sans-serif]">{completedTradesWithUser !== undefined ? completedTradesWithUser : 0}</span>}
                 highlight
               />
-              <DetailItem icon={<Calendar size={16} />} label="Member Since" value={joinedAgo} />
+              <DetailItem icon={<Calendar size={16} />} label={t('counterpartyPanel.memberSince')} value={joinedAgo} />
               <DetailItem
                 icon={<CheckCircle size={16} />}
-                label="All Completed Trades"
-                value={<span className="font-[Arial,Helvetica,sans-serif]">{completedTradesCount.toLocaleString()}</span>}
+                label={t('counterpartyPanel.allCompletedTrades')}
+                value={<span className="font-[Arial,Helvetica,sans-serif]">{completedTradesCount.toLocaleString(language)}</span>}
               />
               <DetailItem
                 icon={<ThumbsUp size={16} />}
-                label="Positive Feedback"
+                label={t('counterpartyPanel.positiveFeedback')}
                 value={<span className="font-[Arial,Helvetica,sans-serif] text-emerald-600 dark:text-emerald-400 font-bold">{positiveCount} (+)</span>}
               />
               <DetailItem
                 icon={<ThumbsDown size={16} />}
-                label="Negative Feedback"
+                label={t('counterpartyPanel.negativeFeedback')}
                 value={<span className="font-[Arial,Helvetica,sans-serif] text-destructive font-bold">{negativeCount} (-)</span>}
               />
               <DetailItem
                 icon={<ShieldBan size={16} />}
-                label="Users Blocked by Them"
+                label={t('counterpartyPanel.blockedByThem')}
                 value={<span className="font-[Arial,Helvetica,sans-serif]">{blockedUsersCount}</span>}
               />
               <DetailItem
                 icon={<ShieldAlert size={16} />}
-                label="Users Who Blocked Them"
+                label={t('counterpartyPanel.blockedThem')}
                 value={<span className="font-[Arial,Helvetica,sans-serif]">{blockedByCount}</span>}
               />
               <DetailItem
                 icon={<Globe size={16} />}
-                label="Country of Residence"
+                label={t('counterpartyPanel.residence')}
                 value={<CountryDisplay rawCodeOrName={countryCode || current.country_of_residence || 'India'} />}
               />
               <DetailItem
                 icon={<Globe size={16} />}
-                label="IP-Based Location"
+                label={t('counterpartyPanel.ipBasedLocation')}
                 value={<CountryDisplay rawCodeOrName={ipCountryCode || current.ip_country || 'India'} />}
               />
             </div>
@@ -447,12 +419,12 @@ export function CounterpartyInfoPanel({
                 ) : isBlockedByMe ? (
                   <>
                     <UserCheck className="h-4 w-4 text-emerald-500" />
-                    Unblock @{username}
+                    {t('counterpartyPanel.unblockAction').replace('{username}', username)}
                   </>
                 ) : (
                   <>
                     <Ban className="h-4 w-4" />
-                    Block @{username}
+                    {t('counterpartyPanel.blockAction').replace('{username}', username)}
                   </>
                 )}
               </Button>

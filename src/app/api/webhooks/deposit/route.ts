@@ -4,8 +4,54 @@ import { ethers } from 'ethers';
 import { getSupabaseAdminClient } from '@/lib/supabase/server';
 import { normalizeDepositNetwork } from '@/lib/hd-derivation-engine';
 import { CANONICAL_USDT_CONTRACTS } from '@/jobs/depositIngestion';
+import { getEvmProvider } from '@/lib/blockchain/providers';
+import { resolveUniqueEvmTransferEvidence } from '@/lib/blockchain/resolve-evm-transfer-log-index';
+import { timingSafeEqualString } from '@/lib/security/worker-auth';
 
 export const dynamic = 'force-dynamic';
+
+const MAX_DEPOSIT_WEBHOOK_BYTES = 2 * 1024 * 1024;
+const MAX_DEPOSIT_WEBHOOK_ITEMS = 100;
+
+async function readBoundedWebhookBody(req: Request): Promise<string | null> {
+  const reader = req.body?.getReader();
+  if (!reader) return '';
+  const chunks: Uint8Array[] = [];
+  let totalBytes = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (!value) continue;
+      totalBytes += value.byteLength;
+      if (totalBytes > MAX_DEPOSIT_WEBHOOK_BYTES) {
+        await reader.cancel().catch(() => undefined);
+        return null;
+      }
+      chunks.push(value);
+    }
+  } finally {
+    reader.releaseLock();
+  }
+  const bytes = new Uint8Array(totalBytes);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+}
+
+function positiveDecimalText(value: unknown): string | null {
+  if (typeof value !== 'string' && typeof value !== 'number') return null;
+  const text = String(value).trim();
+  if (!/^(?:0|[1-9]\\d*)(?:\\.\\d+)?$/.test(text)) return null;
+  try {
+    return BigInt(text.replace('.', '')) > 0n ? text : null;
+  } catch {
+    return null;
+  }
+}
 
 function verifySignature(rawBody: string, signatureHeader: string | null): boolean {
   const secret =
@@ -24,6 +70,7 @@ function verifySignature(rawBody: string, signatureHeader: string | null): boole
 
   try {
     const cleanSignature = signatureHeader.replace(/^sha256=/i, '').trim();
+    if (!/^[a-f0-9]{64}$/i.test(cleanSignature)) return false;
     const hmac = crypto.createHmac('sha256', secret);
     hmac.update(rawBody, 'utf8');
     const digest = hmac.digest('hex');
@@ -43,7 +90,10 @@ function verifySignature(rawBody: string, signatureHeader: string | null): boole
 
 export async function POST(req: Request) {
   try {
-    const rawBody = await req.text();
+    const rawBody = await readBoundedWebhookBody(req);
+    if (rawBody === null) {
+      return NextResponse.json({ error: 'Webhook payload is too large.' }, { status: 413 });
+    }
     const signature =
       req.headers.get('x-webhook-signature') ||
       req.headers.get('x-signature') ||
@@ -63,7 +113,8 @@ export async function POST(req: Request) {
     }
 
     const ingestHeader = req.headers.get('x-ingest-secret') || req.headers.get('x-api-key');
-    const isDirectHeaderValid = ingestHeader && secret && crypto.timingSafeEqual(Buffer.from(ingestHeader), Buffer.from(secret));
+    // Compare equal-length buffers only; malformed/incorrect lengths must return 401, not throw 500.
+    const isDirectHeaderValid = Boolean(ingestHeader && secret && timingSafeEqualString(ingestHeader, secret));
 
     if (!isDirectHeaderValid) {
       if (!signature || !verifySignature(rawBody, signature)) {
@@ -77,6 +128,9 @@ export async function POST(req: Request) {
     let payload: any = {};
     try {
       payload = JSON.parse(rawBody);
+      if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+        return NextResponse.json({ error: 'Invalid JSON payload' }, { status: 400 });
+      }
     } catch {
       return NextResponse.json({ error: 'Invalid JSON payload' }, { status: 400 });
     }
@@ -86,7 +140,7 @@ export async function POST(req: Request) {
     // Standardize event items across providers
     const items: Array<{
       txHash: string;
-      logIndex: number;
+      logIndex?: number;
       from?: string;
       to: string;
       value: string | number;
@@ -100,10 +154,10 @@ export async function POST(req: Request) {
       for (const ev of payload.events) {
         items.push({
           txHash: ev.txHash || ev.hash || ev.transactionHash,
-          logIndex: typeof ev.logIndex === 'number' ? ev.logIndex : parseInt(ev.logIndex || '0', 10) || 0,
+          logIndex: ev.logIndex !== undefined && ev.logIndex !== null && Number.isSafeInteger(Number(ev.logIndex)) && Number(ev.logIndex) >= 0 ? Number(ev.logIndex) : undefined,
           from: ev.from || ev.fromAddress,
           to: ev.to || ev.toAddress,
-          value: ev.value || ev.amount,
+          value: ev.value ?? ev.amount,
           assetSymbol: (ev.assetSymbol || ev.symbol || ev.asset || 'USDT').toUpperCase(),
           network: (ev.network || payload.network || 'ERC20'),
           confirmations: ev.confirmations,
@@ -114,7 +168,7 @@ export async function POST(req: Request) {
       for (const act of payload.event.activity) {
         items.push({
           txHash: act.hash,
-          logIndex: 0,
+          logIndex: undefined,
           from: act.fromAddress,
           to: act.toAddress,
           value: act.value,
@@ -126,10 +180,10 @@ export async function POST(req: Request) {
     } else if (payload.txHash || payload.hash) {
       items.push({
         txHash: payload.txHash || payload.hash,
-        logIndex: typeof payload.logIndex === 'number' ? payload.logIndex : 0,
+        logIndex: payload.logIndex !== undefined && payload.logIndex !== null && Number.isSafeInteger(Number(payload.logIndex)) && Number(payload.logIndex) >= 0 ? Number(payload.logIndex) : undefined,
         from: payload.from || payload.fromAddress,
         to: payload.to || payload.toAddress,
-        value: payload.value || payload.amount,
+        value: payload.value ?? payload.amount,
         assetSymbol: (payload.assetSymbol || payload.symbol || 'USDT').toUpperCase(),
         network: (payload.network || 'ERC20'),
         confirmations: payload.confirmations,
@@ -141,33 +195,92 @@ export async function POST(req: Request) {
       return NextResponse.json({ message: 'No transferable log items detected' }, { status: 200 });
     }
 
+    if (items.length > MAX_DEPOSIT_WEBHOOK_ITEMS) {
+      return NextResponse.json({ error: 'Too many deposit events in one webhook payload.' }, { status: 413 });
+    }
+
     const processedResults = [];
 
     for (const item of items) {
-      const destinationAddress = item.to?.trim();
-      const txHash = item.txHash;
-      const logIndex = item.logIndex;
-      const amount = typeof item.value === 'number' ? item.value : parseFloat(item.value);
+      const destinationAddress = typeof item.to === 'string' ? item.to.trim() : '';
+      const txHash = typeof item.txHash === 'string' ? item.txHash.trim() : '';
+      let outputIndex = item.logIndex;
+      const amountText = positiveDecimalText(item.value);
       const normNet = normalizeDepositNetwork(item.network);
       const assetSymbol = (item.assetSymbol || 'USDT').toUpperCase().trim();
       const tokenContract = CANONICAL_USDT_CONTRACTS[normNet] || null;
+      let verifiedAmount = amountText;
 
-      if (!destinationAddress || !txHash || isNaN(amount) || amount <= 0) {
+      if (!destinationAddress || !/^0x[a-fA-F0-9]{64}$/.test(txHash) && ['ETH','ERC20','BEP20'].includes(normNet) ||
+          !amountText) {
         continue;
       }
 
-      // Delegate credit and recording atomically to canonical process_deposit_atomic RPC
-      const { data: rpcData, error: rpcErr } = await supabaseAdmin.rpc('process_deposit_atomic', {
+      // Token amounts and log indexes come from one unique canonical receipt log,
+      // never from a floating-point indexer payload.
+      if (normNet === 'ERC20' || normNet === 'BEP20') {
+        try {
+          if (!tokenContract || assetSymbol !== 'USDT') throw new Error('Canonical token contract or asset is invalid');
+          const provider = getEvmProvider(normNet);
+          const [transaction, receipt, providerNetwork] = await Promise.all([
+            provider.getTransaction(txHash),
+            provider.getTransactionReceipt(txHash),
+            provider.getNetwork(),
+          ]);
+          const expectedChainId = normNet === 'BEP20' ? 56n : 1n;
+          if (!transaction || !receipt || receipt.status !== 1 ||
+              providerNetwork.chainId !== expectedChainId ||
+              (transaction.chainId != null && transaction.chainId !== expectedChainId) ||
+              typeof transaction.to !== 'string' || transaction.to.toLowerCase() !== tokenContract.toLowerCase() ||
+              receipt.hash.toLowerCase() !== txHash.toLowerCase()) throw new Error('On-chain receipt or transaction does not match');
+          const evidence = resolveUniqueEvmTransferEvidence({
+            receipt, txHash, tokenContract, destinationAddress,
+            decimals: normNet === 'ERC20' ? 6 : 18,
+          });
+          if (!evidence) throw new Error('No unique matching Transfer log');
+          outputIndex = evidence.index;
+          verifiedAmount = evidence.amount;
+        } catch {
+          processedResults.push({ txHash, status: 'error', error: 'Unable to verify unique on-chain token log and amount' });
+          continue;
+        }
+      } else if (normNet === 'ETH') {
+        try {
+          const provider = getEvmProvider('ETH');
+          const [transaction, receipt, providerNetwork] = await Promise.all([
+            provider.getTransaction(txHash),
+            provider.getTransactionReceipt(txHash),
+            provider.getNetwork(),
+          ]);
+          if (providerNetwork.chainId !== 1n || !transaction || !receipt || receipt.status !== 1 ||
+              receipt.hash.toLowerCase() !== txHash.toLowerCase() ||
+              !transaction.to || transaction.to.toLowerCase() !== destinationAddress.toLowerCase() ||
+              transaction.value <= 0n || assetSymbol !== 'ETH') throw new Error('Native transfer evidence mismatch');
+          verifiedAmount = ethers.formatUnits(transaction.value, 18);
+          outputIndex = 0;
+        } catch {
+          processedResults.push({ txHash, status: 'error', error: 'Unable to verify native chain transfer and amount' });
+          continue;
+        }
+      }
+
+      if (!Number.isSafeInteger(outputIndex) || (outputIndex as number) < 0) {
+        processedResults.push({ txHash, status: 'error', error: 'Missing or invalid output/event index; deposit not registered' });
+        continue;
+      }
+
+      // Delegate pending registration only; chain verification worker controls credit.
+      const { data: rpcData, error: rpcErr } = await supabaseAdmin.rpc('register_pending_deposit', {
         p_destination_address: destinationAddress,
         p_asset_symbol: assetSymbol,
         p_network_code: normNet,
-        p_amount: amount,
+        p_amount: verifiedAmount,
         p_tx_hash: txHash,
-        p_output_index: logIndex,
+        p_output_index: outputIndex,
         p_block_number: item.blockNumber ?? null,
         p_from_address: item.from || null,
         p_token_contract: tokenContract,
-        p_confirmations: item.confirmations ?? 12,
+        p_confirmations: 0, // Webhook payloads are not authoritative confirmation evidence; worker re-verifies chain state.
         p_provider: 'deposit_webhook',
       });
 
@@ -175,7 +288,7 @@ export async function POST(req: Request) {
         console.error(`[Deposit Webhook] RPC error for tx ${txHash}:`, rpcErr.message);
         processedResults.push({
           txHash,
-          logIndex,
+          logIndex: outputIndex,
           status: 'error',
           error: rpcErr.message,
         });
@@ -183,7 +296,7 @@ export async function POST(req: Request) {
         const parsed = typeof rpcData === 'string' ? JSON.parse(rpcData) : rpcData;
         processedResults.push({
           txHash,
-          logIndex,
+          logIndex: outputIndex,
           status: parsed?.status || (parsed?.already_processed ? 'already_processed' : 'success'),
           result: parsed,
         });

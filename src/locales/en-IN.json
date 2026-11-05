@@ -1,4 +1,3 @@
-
 {
   "home": {
     "heroTitle": "Buy aur sell karein coins",
@@ -65,5 +64,25 @@
     "faq": "FAQ",
     "dispute": "Dispute Resolution",
     "copyright": "All rights reserved."
+  },
+  "accountStatus": {
+    "deleted": "This account has been deleted. Sign-in is not allowed. The email remains reserved and cannot be used to create another account. Contact support@paxones.com for assistance.",
+    "deletionPending": "This account is scheduled for deletion. Sign-in is disabled. The profile will be anonymized after 20 days. Contact support@paxones.com if you believe this is an error.",
+    "banned": "This account has been banned by the moderation team. Sign-in and protected actions are disabled. If you believe this is a mistake, contact support@paxones.com to request a review.",
+    "restricted": "This account is restricted. Some actions, including trading, may be unavailable. Contact support@paxones.com for assistance.",
+    "suspended": "This account is suspended. Sign-in and protected actions are disabled. Contact support@paxones.com for assistance.",
+    "statusUnavailable": "We couldn't verify this account's status. Please try again later or contact support@paxones.com.",
+    "loginBlocked": "This account cannot sign in because it is banned or scheduled for deletion. If you requested deletion, profile details will be removed after 20 days and the email will remain reserved. Contact support@paxones.com for assistance."
+  },
+  "tradeChat": {
+    "limitReachedTitle": "Trade chat limit reached",
+    "limitReached": "This trade has reached the 100-message chat limit. Email support@paxones.com with Trade ID {tradeId} and explain what moderators should review.",
+    "adOwnerOfflineTitle": "Advertiser offline",
+    "adOwnerOffline": "The advertiser is offline. This is attempt {attempts} of 3. Try again when they are online.",
+    "adAutoPausedOfflineTitle": "Advertisement paused",
+    "adAutoPausedOffline": "Your advertisement was automatically paused after three trade-opening attempts while you were offline. You have been notified; reactivate it when available.",
+    "adNotActive": "This advertisement is not active. Choose another advertisement.",
+    "availabilityCheckFailed": "We could not verify whether the advertiser is online. Please try again.",
+    "adNotFound": "Advertisement not found or no longer available."
   }
 }

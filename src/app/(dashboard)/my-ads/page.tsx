@@ -11,12 +11,14 @@ import ManageAds, { AdItem } from "@/components/ManageAds";
 import { useEffect, useState, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { useWallet } from "@/context/wallet-context";
+import { useI18n } from "@/context/i18n-context";
 
 export default function MyAdsPage() {
   const { user, isUserLoading } = useAuth();
   const { balances: walletContextBalances } = useWallet();
   const router = useRouter();
   const { toast } = useToast();
+  const { t } = useI18n();
 
   const [ads, setAds] = useState<any[]>([]);
   const [userCoinBalances, setUserCoinBalances] = useState<Record<string, number>>({});
@@ -41,6 +43,9 @@ export default function MyAdsPage() {
 
       let rawAds: any[] = [];
       let fetchedBalances: Record<string, number> = {};
+      // A successful API response with an explicit ads array is authoritative, including [].
+      // Do not treat a legitimate empty list as a reason to resurrect stale legacy rows.
+      let hasAuthoritativeAdsResponse = false;
 
       try {
         const { data: { session } } = await supabase.auth.getSession();
@@ -54,14 +59,17 @@ export default function MyAdsPage() {
         });
         if (apiRes.ok) {
           const json = await apiRes.json();
-          if (Array.isArray(json.ads)) rawAds = json.ads;
+          if (json.success === true && Array.isArray(json.ads)) {
+            rawAds = json.ads;
+            hasAuthoritativeAdsResponse = true;
+          }
           if (json.balances) fetchedBalances = json.balances;
         }
       } catch (apiErr) {
         console.warn("API /api/p2p/my-ads error, fallback to direct query:", apiErr);
       }
 
-      if (rawAds.length === 0) {
+      if (!hasAuthoritativeAdsResponse && rawAds.length === 0) {
         const { data, error } = await supabase
           .from('p2p_ads')
           .select('*')
@@ -134,11 +142,11 @@ export default function MyAdsPage() {
         prev.map((a) => (a.id === adId ? { ...a, active: isNewStatusActive, is_active: isNewStatusActive, status: isNewStatusActive ? 'ACTIVE' : 'INACTIVE' } : a))
       );
       toast({
-        title: "Ad Updated",
-        description: `Your ad has been ${isNewStatusActive ? "activated" : "deactivated"}.`,
+        title: t('myAdsPage.updated'),
+        description: t(isNewStatusActive ? 'myAdsPage.activated' : 'myAdsPage.deactivated'),
       });
     } catch (e: any) {
-      toast({ variant: "destructive", title: "Update Failed", description: e.message || "Failed to update ad status." });
+      toast({ variant: "destructive", title: t('myAdsPage.updateFailed'), description: e.message || t('myAdsPage.updateFallback') });
       fetchMyAds();
     }
   };
@@ -148,11 +156,11 @@ export default function MyAdsPage() {
       await softDeleteAd(null, adId);
       setAds((prev) => prev.filter((a) => a.id !== adId));
       toast({
-        title: "Ad Deleted",
-        description: "Your ad has been removed from public listings.",
+        title: t('myAdsPage.deleted'),
+        description: t('myAdsPage.removed'),
       });
     } catch (e: any) {
-      toast({ variant: "destructive", title: "Delete Failed", description: e.message || "Failed to delete ad." });
+      toast({ variant: "destructive", title: t('myAdsPage.deleteFailed'), description: e.message || t('myAdsPage.deleteFallback') });
       fetchMyAds();
     }
   };
@@ -229,14 +237,14 @@ export default function MyAdsPage() {
           <div>
             <div className="flex items-center gap-2 mb-1.5">
               <span className="text-xs font-bold uppercase tracking-wider text-[#6347ea] bg-[#6347ea]/10 dark:bg-[#6347ea]/20 px-2.5 py-0.5 rounded-md">
-                Peer-to-Peer Market
+                {t('myAdsPage.badge')}
               </span>
             </div>
             <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight text-foreground">
-              My Posted Ads
+              {t('myAdsPage.title')}
             </h1>
             <p className="text-muted-foreground text-sm mt-1">
-              Manage your active P2P buy and sell offers, set limits, and adjust pricing.
+              {t('myAdsPage.description')}
             </p>
           </div>
           <Link
@@ -244,7 +252,7 @@ export default function MyAdsPage() {
             className="inline-flex items-center justify-center gap-2 px-5 py-2.5 bg-[#6347ea] hover:bg-[#5238d6] text-white font-bold text-sm rounded-xl shadow-sm transition-all active:scale-[0.98]"
           >
             <Plus className="w-4 h-4" />
-            <span>Create New Ad</span>
+            <span>{t('myAdsPage.create')}</span>
           </Link>
         </div>
       </div>
@@ -252,7 +260,7 @@ export default function MyAdsPage() {
       {isLoading ? (
         <div className="p-12 text-center rounded-2xl bg-card border border-border">
           <Loader2 className="h-8 w-8 animate-spin mx-auto text-primary" />
-          <p className="text-xs text-muted-foreground mt-2">Loading your advertisements...</p>
+          <p className="text-xs text-muted-foreground mt-2">{t('myAdsPage.loading')}</p>
         </div>
       ) : (
         <ManageAds 

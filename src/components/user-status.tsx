@@ -1,7 +1,8 @@
 "use client";
 
 import React from "react";
-import { usePresenceStatus, resolveUserLastSeen } from "@/lib/presence";
+import { usePresenceStatus } from "@/lib/presence";
+import { useI18n } from "@/context/i18n-context";
 
 export interface UserStatusProps {
   user?: any;
@@ -11,8 +12,19 @@ export interface UserStatusProps {
 }
 
 export function UserStatusIndicator({ user, lastActive, last_seen, showText = true }: UserStatusProps) {
+  const { t } = useI18n();
   const target = user || last_seen || lastActive;
   const presence = usePresenceStatus(target, 15000);
+  const presenceLabel = presence.isOnline
+    ? t('p2pAdCard.online')
+    : presence.label === 'Offline'
+      ? t('p2pAdCard.offline')
+      : (() => {
+          const match = presence.label.match(/^Last seen (\d+)(m|h|d) ago$/);
+          if (!match) return presence.label;
+          const key = match[2] === 'm' ? 'lastSeenMinutes' : match[2] === 'h' ? 'lastSeenHours' : 'lastSeenDays';
+          return t('p2pAdCard.' + key).replace('{count}', match[1]);
+        })();
 
   if (presence.isOnline) {
     return (
@@ -21,7 +33,7 @@ export function UserStatusIndicator({ user, lastActive, last_seen, showText = tr
           <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
           <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500" />
         </span>
-        {showText && <span className="text-xs font-semibold text-emerald-600 dark:text-emerald-400">Online</span>}
+        {showText && <span className="text-xs font-semibold text-emerald-600 dark:text-emerald-400">{t('p2pAdCard.online')}</span>}
       </div>
     );
   }
@@ -43,7 +55,7 @@ export function UserStatusIndicator({ user, lastActive, last_seen, showText = tr
               : 'text-muted-foreground'
           }`}
         >
-          {presence.label}
+          {presenceLabel}
         </span>
       )}
     </div>

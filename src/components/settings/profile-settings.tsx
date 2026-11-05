@@ -121,7 +121,7 @@ export function ProfileSettings({ user }: { user: User }) {
         <Avatar className="h-32 w-32 border-4 border-secondary shadow-md">
           <AvatarImage src={previewUrl || ''} alt="User Avatar" />
           <AvatarFallback className="bg-white dark:bg-slate-800 border text-muted-foreground text-4xl font-light">
-            {user?.displayName?.charAt(0).toUpperCase() || user?.userId?.charAt(0).toUpperCase() || 'U'}
+            {user?.fullName?.charAt(0).toUpperCase() || user?.username?.charAt(0).toUpperCase() || user?.userId?.charAt(0).toUpperCase() || 'U'}
           </AvatarFallback>
         </Avatar>
         <div className="text-sm text-muted-foreground">

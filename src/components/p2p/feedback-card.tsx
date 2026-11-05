@@ -18,7 +18,7 @@ export function FeedbackCard({ feedback }: { feedback: Feedback }) {
     async function fetchCountry() {
       try {
         const { data, error } = await supabase
-          .from('profiles')
+          .from('public_profiles')
           .select('country')
           .eq('id', feedback.fromUser)
           .single();

@@ -10,6 +10,7 @@ import {
   subscribeToUserNotifications,
 } from '@/lib/notifications';
 import { useToast } from '@/hooks/use-toast';
+import { useI18n } from '@/context/i18n-context';
 
 interface NotificationsContextType {
   notifications: Notification[];
@@ -30,6 +31,7 @@ const NotificationsContext = createContext<NotificationsContextType>({
 });
 
 export function NotificationsProvider({ children }: { children: React.ReactNode }) {
+  const { t } = useI18n();
   const { user } = useAuth();
   const { toast } = useToast();
   const [notifications, setNotifications] = useState<Notification[]>([]);
@@ -64,16 +66,21 @@ export function NotificationsProvider({ children }: { children: React.ReactNode 
 
     const unsubscribe = subscribeToUserNotifications(userId, (newNotif) => {
       setNotifications((prev) => [newNotif, ...prev.filter((n) => n.id !== newNotif.id)]);
+      const notificationCode = String((newNotif as any)?.metadata?.code || '');
       toast({
-        title: 'New Notification',
-        description: newNotif.message,
+        title: notificationCode === 'AD_AUTO_PAUSED_OFFLINE'
+          ? t('tradeChat.adAutoPausedOfflineTitle')
+          : 'New Notification',
+        description: notificationCode === 'AD_AUTO_PAUSED_OFFLINE'
+          ? t('tradeChat.adAutoPausedOffline')
+          : newNotif.message,
       });
     });
 
     return () => {
       unsubscribe();
     };
-  }, [userId, toast]);
+  }, [userId, toast, t]);
 
   const handleMarkAsRead = async (notificationId: string) => {
     setNotifications((prev) =>

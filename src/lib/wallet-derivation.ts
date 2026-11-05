@@ -3,7 +3,8 @@ import { HDKey } from '@scure/bip32';
 import { bech32 } from 'bech32';
 import { ethers } from 'ethers';
 import bs58 from 'bs58';
-import { createClient, SupabaseClient } from '@supabase/supabase-js';
+import type { SupabaseClient } from '@supabase/supabase-js';
+import { getSupabaseServiceClient } from '@/lib/supabase/service-role';
 import { getOrDeriveUserDepositAddresses } from '@/lib/hd-derivation-engine';
 
 // ============================================================================
@@ -57,22 +58,7 @@ export const DERIVATION_PATHS: Record<SupportedChain, string> = {
 // ============================================================================
 
 function getAdminSupabaseClient(): SupabaseClient {
-  const supabaseUrl =
-    process.env.NEXT_PUBLIC_SUPABASE_URL ||
-    process.env.SUPABASE_URL ||
-    'https://eaiwgfxoiwxepinvcykg.supabase.co';
-
-  const serviceKey =
-    process.env.SUPABASE_SERVICE_ROLE_KEY ||
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ||
-    'placeholder-key';
-
-  return createClient(supabaseUrl, serviceKey, {
-    auth: {
-      persistSession: false,
-      autoRefreshToken: false,
-    },
-  });
+  return getSupabaseServiceClient();
 }
 
 // ============================================================================
@@ -101,11 +87,8 @@ export function deriveEvmAddress(xpub: string, index: number): string {
     const addressHash = ethers.keccak256(pubBytes);
     // Last 20 bytes with EIP-55 checksum
     return ethers.getAddress(`0x${addressHash.slice(-40)}`);
-  } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : String(err);
-    // Fallback deterministic derivation if xpub is mock or malformed
-    const hash = crypto.createHash('sha256').update(`${xpub}:EVM:${index}`).digest('hex');
-    return ethers.getAddress(`0x${hash.slice(-40)}`);
+  } catch {
+    throw new Error('EVM public-key derivation failed. Check EVM_XPUB and the derivation index.');
   }
 }
 
@@ -130,12 +113,8 @@ export function deriveBtcSegwitAddress(xpub: string, index: number): string {
     words.unshift(0x00);
 
     return bech32.encode('bc', words);
-  } catch (err: unknown) {
-    const hash = crypto.createHash('sha256').update(`${xpub}:BTC:${index}`).digest();
-    const hash160 = crypto.createHash('ripemd160').update(hash).digest();
-    const words = bech32.toWords(hash160);
-    words.unshift(0x00);
-    return bech32.encode('bc', words);
+  } catch {
+    throw new Error('Bitcoin public-key derivation failed. Check BTC_XPUB and the derivation index.');
   }
 }
 
@@ -159,12 +138,8 @@ export function deriveLtcSegwitAddress(xpub: string, index: number): string {
     words.unshift(0x00);
 
     return bech32.encode('ltc', words);
-  } catch (err: unknown) {
-    const hash = crypto.createHash('sha256').update(`${xpub}:LTC:${index}`).digest();
-    const hash160 = crypto.createHash('ripemd160').update(hash).digest();
-    const words = bech32.toWords(hash160);
-    words.unshift(0x00);
-    return bech32.encode('ltc', words);
+  } catch {
+    throw new Error('Litecoin public-key derivation failed. Check LTC_XPUB and the derivation index.');
   }
 }
 
@@ -197,12 +172,8 @@ export function deriveTronAddress(xpub: string, index: number): string {
     const checksum = hash2.subarray(0, 4);
 
     return bs58.encode(Buffer.concat([tronRawAddress, checksum]));
-  } catch (err: unknown) {
-    const hash = crypto.createHash('sha256').update(`${xpub}:TRON:${index}`).digest('hex');
-    const tronRaw = Buffer.concat([Buffer.from([0x41]), Buffer.from(hash.slice(-40), 'hex')]);
-    const hash1 = crypto.createHash('sha256').update(tronRaw).digest();
-    const hash2 = crypto.createHash('sha256').update(hash1).digest();
-    return bs58.encode(Buffer.concat([tronRaw, hash2.subarray(0, 4)]));
+  } catch {
+    throw new Error('TRON public-key derivation failed. Check TRON_XPUB and the derivation index.');
   }
 }
 
@@ -216,15 +187,23 @@ export function generateAddressesForIndex(index: number): {
   tron: string;
   ltc: string;
 } {
-  const evmXpub = process.env.EVM_XPUB || process.env.PUBLIC_PLATFORM_XPUB || '';
-  const btcXpub = process.env.BTC_XPUB || process.env.PUBLIC_PLATFORM_XPUB || '';
-  const tronXpub = process.env.TRON_XPUB || process.env.PUBLIC_PLATFORM_XPUB || '';
-  const ltcXpub = process.env.LTC_XPUB || process.env.PUBLIC_PLATFORM_XPUB || '';
+  if (!Number.isSafeInteger(index) || index < 0 || index > 2_147_483_647) {
+    throw new Error('A valid non-negative wallet derivation index is required.');
+  }
 
-  const evm = deriveEvmAddress(evmXpub || 'xpub6BvBXU8MA42ghyxpLee1ZNvzHCV1JyNjuPtL8Na8sGWQWafkEU3PvabSeZrgp6dpWJiKNecxMaE3QBfBwdQL3zDPtCfLojbqtQ55exRZHNE', index);
-  const btc = deriveBtcSegwitAddress(btcXpub || 'xpub6CjbRzfZczEkAGn9SYswZ3V68NpxC3NyjQBBmoYKDUuM91dKoUmL2mQ24qTzeb7Ey3k2kVvjXgFgwTNou95eW1fwfREJBMdQi3z3YYWg821', index);
-  const tron = deriveTronAddress(tronXpub || 'xpub6BvVwYLefFK6pyX8HsYi6kwEmPVuo12yJYSEuFJxKBvn2KUP9yfQ6vmiZ3eepUh5P3GL78ECxzsRG2cMb1shtM6E93ehTJGQCodxh163mcJ', index);
-  const ltc = deriveLtcSegwitAddress(ltcXpub || 'xpub6D4SCfjbt11VocRtfCbFPkP16GtHJ29NwWgiE2AVvAHFMhfmysJGhMpq5Xv47o7H8zcVoCTwRQEBunPdknhb6qEcmDspDgfSXwp4AvhPJoG', index);
+  const evmXpub = process.env.EVM_XPUB?.trim();
+  const btcXpub = process.env.BTC_XPUB?.trim();
+  const tronXpub = process.env.TRON_XPUB?.trim();
+  const ltcXpub = process.env.LTC_XPUB?.trim();
+
+  if (!evmXpub || !btcXpub || !tronXpub || !ltcXpub) {
+    throw new Error('EVM_XPUB, BTC_XPUB, TRON_XPUB, and LTC_XPUB must all be configured. No fallback wallet keys are permitted.');
+  }
+
+  const evm = deriveEvmAddress(evmXpub, index);
+  const btc = deriveBtcSegwitAddress(btcXpub, index);
+  const tron = deriveTronAddress(tronXpub, index);
+  const ltc = deriveLtcSegwitAddress(ltcXpub, index);
 
   return { btc, evm, tron, ltc };
 }

@@ -1,9 +1,12 @@
+import 'server-only';
+
 import { createAdminClient } from '@/lib/supabase/server';
 import speakeasy from 'speakeasy';
+import crypto from 'crypto';
 import {
   encryptAdminTOTPSecret,
   decryptAdminTOTPSecret,
-  isEncryptedAdminTOTPSecret,
+  ensureAdminTOTPSecretEncrypted,
   hashRecoveryPassword,
   verifyRecoveryPasswordHash,
 } from '@/lib/admin-2fa-crypto';
@@ -31,7 +34,7 @@ export function generateRecoveryPassword(): string {
   for (let i = 0; i < 3; i++) {
     result += '-';
     for (let j = 0; j < 4; j++) {
-      result += chars.charAt(Math.floor(Math.random() * chars.length));
+      result += chars.charAt(crypto.randomInt(chars.length));
     }
   }
   return result;
@@ -67,21 +70,32 @@ export async function logAdminSecurityAudit(params: {
   targetId?: string;
   details?: Record<string, any>;
   ipAddress?: string;
-}) {
+}): Promise<boolean> {
   try {
     const supabase = createAdminClient();
-    await supabase.from('admin_audit_logs').insert({
+    const details = {
+      ...(params.details || {}),
+      target_type: params.targetType || 'admin_security',
+      // The production admin_audit_logs schema stores request context in JSONB.
+      // Do not insert target_type/ip_address as columns that do not exist.
+      ip_address: params.ipAddress || 'server-observed',
+    };
+    const { error } = await supabase.from('admin_audit_logs').insert({
       admin_id: params.adminId,
       admin_email: params.adminEmail || null,
       action: params.action,
-      target_type: params.targetType || 'admin_security',
       target_id: params.targetId || params.adminId,
-      details: params.details || {},
-      ip_address: params.ipAddress || 'client',
+      details,
       created_at: new Date().toISOString(),
     });
+    if (error) {
+      console.error('Failed to write admin security audit log:', error.code || 'database_error');
+      return false;
+    }
+    return true;
   } catch (err) {
     console.error('Failed to write admin security audit log:', err);
+    return false;
   }
 }
 
@@ -89,28 +103,23 @@ export async function getAdminSecurityState(adminId: string): Promise<AdminSecur
   const supabase = createAdminClient();
   const { data: profile, error } = await supabase
     .from('profiles')
-    .select('id, email, admin_theme_preference, admin_2fa_enabled, is_2fa_enabled, admin_2fa_secret, two_factor_secret, admin_2fa_recovery_hash, admin_2fa_recovery_updated_at')
+    .select('id, email, admin_theme_preference, admin_2fa_enabled, is_2fa_enabled, is_mfa_enabled, two_factor_enabled, totp_secret, role, is_admin, is_admin_account, admin_2fa_secret, two_factor_secret, admin_2fa_recovery_hash, admin_2fa_recovery_updated_at')
     .eq('id', adminId)
     .single();
 
   if (error || !profile) return null;
 
-  const rawSecret = profile.admin_2fa_secret || profile.two_factor_secret;
+  let encryptedSecret = '';
+  try {
+    encryptedSecret = await ensureAdminTOTPSecretEncrypted(supabase, adminId, profile);
+  } catch {
+    console.error('[Admin 2FA] TOTP secret encryption migration failed; refusing to report an unverified state.');
+    return null;
+  }
 
-  // Auto-migration: if legacy plaintext secret exists, encrypt and persist
-  if (rawSecret && !isEncryptedAdminTOTPSecret(rawSecret)) {
-    try {
-      const encryptedSecret = encryptAdminTOTPSecret(rawSecret);
-      await supabase
-        .from('profiles')
-        .update({
-          admin_2fa_secret: encryptedSecret,
-          two_factor_secret: encryptedSecret,
-        })
-        .eq('id', adminId);
-    } catch (migErr) {
-      console.warn('Transparent TOTP secret encryption auto-migration notice:', migErr);
-    }
+  if ((profile.admin_2fa_enabled || profile.is_2fa_enabled) && !encryptedSecret) {
+    console.error('[Admin 2FA] Enabled account has no usable encrypted TOTP secret.');
+    return null;
   }
 
   const is2FAEnabled = Boolean(profile.admin_2fa_enabled || profile.is_2fa_enabled);
@@ -120,7 +129,7 @@ export async function getAdminSecurityState(adminId: string): Promise<AdminSecur
     adminEmail: profile.email || '',
     themePreference: (profile.admin_theme_preference as any) || 'system',
     is2FAEnabled,
-    hasSecret: Boolean(rawSecret),
+    hasSecret: Boolean(encryptedSecret),
     hasRecoveryPassword: Boolean(profile.admin_2fa_recovery_hash),
     recoveryUpdatedAt: profile.admin_2fa_recovery_updated_at || null,
   };

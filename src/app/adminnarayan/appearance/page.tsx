@@ -11,7 +11,6 @@ import { useToast } from '@/hooks/use-toast';
 import Image from 'next/image';
 import { cn } from '@/lib/utils';
 import { Input } from '@/components/ui/input';
-import { supabase } from '@/lib/supabase/client';
 
 type LogoKey = 'appLogoDesktop' | 'appLogoMobile' | 'btcLogo' | 'ethLogo' | 'ltcLogo' | 'usdtLogo';
 
@@ -91,23 +90,21 @@ export default function AdminAppearancePage() {
         window.dispatchEvent(new CustomEvent('branding_updated', { detail: previews }));
       }
 
-      // 3. Persist to app_config table if available
-      try {
-        await supabase.from('app_config').upsert(
-          {
-            key: 'branding',
-            value: previews,
-            updated_at: new Date().toISOString(),
-          },
-          { onConflict: 'key' }
-        );
-      } catch (dbErr) {
-        console.warn('Database app_config sync notice:', dbErr);
+      // 3. Persist through a server endpoint; app_settings is service-role-only.
+      const response = await fetch('/api/admin/branding', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ branding: previews }),
+      });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(result.error || 'Could not persist branding settings.');
       }
 
       toast({
         title: 'Settings Saved',
-        description: 'Desktop, mobile, and asset branding settings have been updated.',
+        description: 'Desktop, mobile, and asset branding settings have been saved.',
       });
     } catch (error: any) {
       toast({

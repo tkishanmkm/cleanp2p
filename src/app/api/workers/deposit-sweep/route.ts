@@ -12,8 +12,7 @@ export async function GET(req: NextRequest) {
         process.env.DEPOSIT_WORKER_SECRET,
       ],
       customHeaderNames: ['x-worker-secret', 'x-service-key'],
-      checkQueryParam: true,
-    });
+      });
 
     if (!auth.authorized) {
       return NextResponse.json({ error: 'Unauthorized: Invalid worker secret' }, { status: 401 });

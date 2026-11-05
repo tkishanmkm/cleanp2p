@@ -1,24 +1,21 @@
-import { createServerClient } from '@supabase/ssr';
-import { createClient } from '@supabase/supabase-js';
-import { cookies } from 'next/headers';
+import { createClient, createBearerClient, getSupabaseAdminClient } from '@/utils/supabase/server';
 import { NextResponse, type NextRequest } from 'next/server';
 import { findAdById, resolveBothTargetRows } from '@/lib/ad-lookup';
+import { checkNewTradeEligibility } from '@/lib/account-action-guard';
+import { verifyServerAdmin } from '@/lib/server-admin-auth';
 
 export const dynamic = 'force-dynamic';
 
 // GET: Fetch ad details with creator's live profile, reputation, and wallet balance
 export async function GET(
   request: NextRequest,
-  { params }: { params: Promise<{ id: string }> | { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
     const resolvedParams = await Promise.resolve(params);
     const id = (resolvedParams.id || '').trim();
 
-    const supabaseAdmin = createClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL || 'https://placeholder.supabase.co',
-      process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'placeholder-anon-key'
-    );
+    const supabaseAdmin = getSupabaseAdminClient();
 
     // 1. Fetch ad by id, public_ad_id, public_id, or ad_id using universal resolver
     const resolved = await findAdById(id);
@@ -28,13 +25,40 @@ export async function GET(
       return NextResponse.json({ error: 'Advertisement not found' }, { status: 404 });
     }
 
+    const adStatus = String(ad.status || '').trim().toUpperCase();
+    const isPubliclyActive =
+      ad.active === true &&
+      ad.is_active === true &&
+      ad.is_deleted !== true &&
+      adStatus === 'ACTIVE';
+
+    if (!isPubliclyActive) {
+      const authHeader = request.headers.get('Authorization') || request.headers.get('authorization');
+      const bearerToken = authHeader?.startsWith('Bearer ') ? authHeader.substring(7).trim() : null;
+      const viewerClient = bearerToken ? createBearerClient(bearerToken) : await createClient();
+      let viewer: any = null;
+      if (bearerToken) {
+        const tokenAuth = await viewerClient.auth.getUser(bearerToken);
+        viewer = tokenAuth.data?.user || null;
+      }
+      if (!viewer) {
+        const cookieAuth = await viewerClient.auth.getUser();
+        viewer = cookieAuth.data?.user || null;
+      }
+      const isOwner = Boolean(viewer?.id && viewer.id === (ad.user_id || ad.userId));
+      const adminAuth = await verifyServerAdmin(request);
+      if (!isOwner && !adminAuth.authorized) {
+        return NextResponse.json({ error: 'Advertisement not found' }, { status: 404 });
+      }
+    }
+
     const creatorId = ad.user_id || ad.userId;
     let creatorProfile: any = null;
 
     if (creatorId) {
       const { data: prof } = await supabaseAdmin
         .from('profiles')
-        .select('*')
+        .select('id, username, display_name, avatar_url, photo_url, country, feedback_score, positive_feedback, negative_feedback, completed_trades, avg_release_minutes, avg_release_time, avg_payment_minutes, avg_pay_time, created_at, is_verified, kyc_status, merchant_tier, is_online, last_seen, last_seen_at, updated_at')
         .eq('id', creatorId)
         .maybeSingle();
       if (prof) {
@@ -46,7 +70,7 @@ export async function GET(
     if (!creatorProfile && ad.user_display_name) {
       const { data: prof } = await supabaseAdmin
         .from('profiles')
-        .select('*')
+        .select('id, username, display_name, avatar_url, photo_url, country, feedback_score, positive_feedback, negative_feedback, completed_trades, avg_release_minutes, avg_release_time, avg_payment_minutes, avg_pay_time, created_at, is_verified, kyc_status, merchant_tier, is_online, last_seen, last_seen_at, updated_at')
         .ilike('username', ad.user_display_name)
         .maybeSingle();
       if (prof) {
@@ -54,32 +78,8 @@ export async function GET(
       }
     }
 
-    // Fetch creator's wallet balance for the ad coin
-    let creatorBalance: number | null = null;
-    const coin = (ad.crypto || ad.coin || ad.asset || 'USDT').toUpperCase();
-
-    if (creatorId) {
-      try {
-        const { data: wallet } = await supabaseAdmin
-          .from('user_wallets')
-          .select('available_balance, balance, locked_balance')
-          .eq('user_id', creatorId)
-          .ilike('asset_symbol', coin)
-          .maybeSingle();
-
-        if (wallet) {
-          const avail = Number(wallet.available_balance ?? (Number(wallet.balance || 0) - Number(wallet.locked_balance || 0)));
-          creatorBalance = Math.max(0, avail);
-        } else if (creatorProfile) {
-          const colKey = `${coin.toLowerCase()}_balance`;
-          if (creatorProfile[colKey] !== undefined) {
-            creatorBalance = Number(creatorProfile[colKey] || 0);
-          }
-        }
-      } catch (wErr) {
-        console.warn('Wallet balance fetch error in /api/p2p/ads/[id]:', wErr);
-      }
-    }
+    // Trader wallet balances are private financial data. Public ad limits come
+    // from the persisted advertisement and are enforced again by the escrow RPC.
 
     // STRICT USERNAME ENFORCEMENT: lowercase letters, numbers, dot, underscore only
     const username = creatorProfile?.username || ad.user_display_name || 'trader';
@@ -104,7 +104,7 @@ export async function GET(
           avg_pay_time: creatorProfile?.avg_pay_time || null,
           avg_payment_minutes: creatorProfile?.avg_payment_minutes || null,
         },
-        creatorCryptoBalance: creatorBalance,
+
       },
     });
   } catch (err: any) {
@@ -116,40 +116,16 @@ export async function GET(
 // PATCH: Edit ad details or toggle status (ACTIVE / OFFLINE)
 export async function PATCH(
   request: NextRequest,
-  { params }: { params: Promise<{ id: string }> | { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
     const resolvedParams = await Promise.resolve(params);
     const { id } = resolvedParams;
 
-    const cookieHeader = cookies();
-    const cookieStore = typeof (cookieHeader as any)?.then === 'function' ? await cookieHeader : cookieHeader;
-
-    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL || 'https://placeholder.supabase.co';
-    const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'placeholder-anon-key';
-
-    const supabase = createServerClient(
-      supabaseUrl,
-      supabaseAnonKey,
-      {
-        cookies: {
-          getAll() {
-            return cookieStore.getAll();
-          },
-          setAll(cookiesToSet: Array<{ name: string; value: string; options?: any }>) {
-            try {
-              cookiesToSet.forEach(({ name, value, options }) =>
-                cookieStore.set(name, value, options)
-              );
-            } catch {}
-          },
-        },
-      }
-    );
-
-    // Support Bearer token header if provided by frontend
+    // Use a verified request cookie session or an explicitly supplied bearer token.
     const authHeader = request.headers.get('Authorization') || request.headers.get('authorization');
     const bearerToken = authHeader?.startsWith('Bearer ') ? authHeader.substring(7).trim() : null;
+    const supabase = bearerToken ? createBearerClient(bearerToken) : await createClient();
 
     let user = null;
     let authError: any = null;
@@ -211,10 +187,7 @@ export async function PATCH(
     if (body.min_limit !== undefined && body.min_limit !== null && body.min_limit !== '') body.min_limit = Number(body.min_limit);
     if (body.max_limit !== undefined && body.max_limit !== null && body.max_limit !== '') body.max_limit = Number(body.max_limit);
 
-    const supabaseAdmin = createClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL || 'https://placeholder.supabase.co',
-      process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'placeholder-anon-key'
-    );
+    const supabaseAdmin = getSupabaseAdminClient();
 
     const { p2pAdsRow, adsRow } = await resolveBothTargetRows(existingAd, id, supabaseAdmin);
 
@@ -236,6 +209,34 @@ export async function PATCH(
       } else if (body.status !== undefined) {
         newStatus = String(body.status).toUpperCase().trim();
         isActive = newStatus === 'ACTIVE';
+      }
+    }
+
+    const existingDirection = String(existingAd.trade_type || existingAd.ad_type || existingAd.type || '').toUpperCase();
+    const requestedDirection = [body.trade_type, body.ad_type, body.type, body.side]
+      .find((value) => typeof value === 'string' && value.trim())?.trim().toUpperCase();
+    const hasNonStatusEdits = Object.keys(body).some(
+      (key) => !['status', 'active', 'is_active'].includes(key)
+    );
+
+    if (
+      requestedDirection === 'SELL' ||
+      (existingDirection === 'SELL' && (isActive === true || hasNonStatusEdits))
+    ) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: 'SELL advertisements cannot be activated, edited or converted until atomic crypto inventory reservation is enabled.',
+          code: 'SELL_AD_INVENTORY_RESERVATION_UNVERIFIED',
+        },
+        { status: 503 }
+      );
+    }
+
+    if (isActive === true) {
+      const eligibility = await checkNewTradeEligibility(user.id);
+      if (!eligibility.allowed) {
+        return NextResponse.json({ error: "Restricted accounts cannot activate advertisements.", code: eligibility.code }, { status: eligibility.statusCode });
       }
     }
 
@@ -360,40 +361,16 @@ export async function PATCH(
 // DELETE: Remove an ad
 export async function DELETE(
   request: NextRequest,
-  { params }: { params: Promise<{ id: string }> | { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
     const resolvedParams = await Promise.resolve(params);
     const { id } = resolvedParams;
 
-    const cookieHeader = cookies();
-    const cookieStore = typeof (cookieHeader as any)?.then === 'function' ? await cookieHeader : cookieHeader;
-
-    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL || 'https://placeholder.supabase.co';
-    const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'placeholder-anon-key';
-
-    const supabase = createServerClient(
-      supabaseUrl,
-      supabaseAnonKey,
-      {
-        cookies: {
-          getAll() {
-            return cookieStore.getAll();
-          },
-          setAll(cookiesToSet: Array<{ name: string; value: string; options?: any }>) {
-            try {
-              cookiesToSet.forEach(({ name, value, options }) =>
-                cookieStore.set(name, value, options)
-              );
-            } catch {}
-          },
-        },
-      }
-    );
-
-    // Support Bearer token header if provided by frontend
+    // Use a verified request cookie session or an explicitly supplied bearer token.
     const authHeader = request.headers.get('Authorization') || request.headers.get('authorization');
     const bearerToken = authHeader?.startsWith('Bearer ') ? authHeader.substring(7).trim() : null;
+    const supabase = bearerToken ? createBearerClient(bearerToken) : await createClient();
 
     let user = null;
     let authError: any = null;
@@ -427,10 +404,7 @@ export async function DELETE(
       return NextResponse.json({ error: 'Forbidden. You do not own this advertisement.' }, { status: 403 });
     }
 
-    const supabaseAdmin = createClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL || 'https://placeholder.supabase.co',
-      process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'placeholder-anon-key'
-    );
+    const supabaseAdmin = getSupabaseAdminClient();
 
     const { p2pAdsRow, adsRow } = await resolveBothTargetRows(existingAd, id, supabaseAdmin);
 

@@ -15,29 +15,29 @@ export interface AppNotification {
 
 /**
  * Fetch all notifications for a specific user from Supabase.
- * Automatically prunes/deletes notification records older than 10 days.
+ * Automatically prunes/deletes notification records older than 30 days.
  */
 export async function getUserNotifications(userId: string): Promise<Notification[]> {
   try {
-    const tenDaysAgo = new Date(Date.now() - 10 * 24 * 60 * 60 * 1000).toISOString();
+    const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
 
-    // 1. Auto-delete activity logs older than 10 days from database
+    // 1. Auto-delete activity logs older than 30 days from database
     try {
       await supabase
         .from('notifications')
         .delete()
         .eq('user_id', userId)
-        .lt('created_at', tenDaysAgo);
+        .lt('created_at', thirtyDaysAgo);
     } catch (cleanupErr) {
       console.warn('Notification auto-clean notice:', cleanupErr);
     }
 
-    // 2. Fetch current 10-day notifications
+    // 2. Fetch current 30-day notifications
     const { data, error } = await supabase
       .from('notifications')
       .select('*')
       .eq('user_id', userId)
-      .gte('created_at', tenDaysAgo)
+      .gte('created_at', thirtyDaysAgo)
       .order('created_at', { ascending: false });
 
     if (error) {
@@ -56,6 +56,7 @@ export async function getUserNotifications(userId: string): Promise<Notification
         isRead: n.is_read ?? n.read ?? false,
         senderPhotoURL: meta.sender_photo_url || n.sender_photo_url || undefined,
         senderUsername: meta.sender_username || n.sender_username || undefined,
+        metadata: meta,
         createdAt: n.created_at,
       };
     });
@@ -211,6 +212,7 @@ export function subscribeToUserNotifications(
           isRead: newRecord.is_read ?? newRecord.read ?? false,
           senderPhotoURL: meta.sender_photo_url || newRecord.sender_photo_url || undefined,
           senderUsername: meta.sender_username || newRecord.sender_username || undefined,
+          metadata: meta,
           createdAt: newRecord.created_at,
         });
       }

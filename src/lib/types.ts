@@ -2,6 +2,15 @@
 
 export type CryptoCurrency = 'BTC' | 'ETH' | 'LTC' | 'USDT' | 'BNB' | 'TRX';
 
+/** UI wallet balance for one asset/network combination. */
+export interface UserWallet {
+  id?: string;
+  crypto: CryptoCurrency;
+  chain: string;
+  balance: number;
+  lockedBalance: number;
+}
+
 export interface CurrencyConfig {
   code: string;
   name: string;
@@ -31,7 +40,6 @@ export interface UserProfile {
   last_seen?: string | null;
   last_seen_at?: string | null;
   last_active?: string | null;
-  avgReleaseTime?: number;
   avgPayTime?: number;
   avg_payment_minutes?: number;
   avg_release_minutes?: number;
@@ -66,6 +74,10 @@ export interface P2PAd {
     id?: string;
     username: string;
     country?: string;
+    photo_url?: string;
+    created_at?: string;
+    createdAt?: string;
+    last_seen?: string | null;
     feedbackScore: number;
     positiveFeedback?: number;
     negativeFeedback?: number;
@@ -346,5 +358,6 @@ export type Notification = {
   isRead: boolean;
   senderPhotoURL?: string;
   senderUsername?: string;
+  metadata?: Record<string, unknown>;
   createdAt: string;
 };

@@ -8,7 +8,7 @@ export const dynamic = 'force-dynamic';
 
 export async function PATCH(
   request: NextRequest,
-  context: { params: { adId: string } | Promise<{ adId: string }> }
+  context: { params: Promise<{ adId: string }> }
 ) {
   try {
     const rawParams = await Promise.resolve(context.params);
@@ -72,9 +72,45 @@ export async function PATCH(
       await assertPlatformControlAllowed('new_ad', { userId: user.id });
     }
 
-    const body = await request.json();
-    const newStatus = body.status ? String(body.status).toUpperCase().trim() : (body.active ? 'ACTIVE' : 'INACTIVE');
+    const body = await request.json().catch(() => null);
+    if (!body || typeof body !== 'object' || Array.isArray(body)) {
+      return NextResponse.json({ error: 'Invalid advertisement status payload.' }, { status: 400 });
+    }
+    const newStatus = body.status ? String(body.status).toUpperCase().trim() : (body.active === true ? 'ACTIVE' : 'INACTIVE');
     const isActive = newStatus === 'ACTIVE';
+    if (!['ACTIVE', 'INACTIVE', 'PAUSED', 'HIDDEN', 'DRAFT'].includes(newStatus)) {
+      return NextResponse.json({ error: 'Invalid advertisement status.' }, { status: 400 });
+    }
+
+    const existingDirection = String(existingAd.trade_type || existingAd.ad_type || existingAd.type || '').toUpperCase();
+    if (isActive && existingDirection === 'SELL') {
+      return NextResponse.json(
+        {
+          success: false,
+          error: 'SELL advertisements cannot be activated until their crypto inventory is reserved atomically.',
+          code: 'SELL_AD_INVENTORY_RESERVATION_UNVERIFIED',
+        },
+        { status: 503 }
+      );
+    }
+
+    if (isOwner && isActive) {
+      const { data: ownerProfile, error: ownerProfileError } = await admin
+        .from('profiles')
+        .select('is_banned, is_restricted, is_suspended, status, account_status')
+        .eq('id', user.id)
+        .maybeSingle();
+      if (ownerProfileError || !ownerProfile) {
+        return NextResponse.json({ error: 'Account eligibility could not be verified.' }, { status: 503 });
+      }
+      const profileStatus = String(ownerProfile.status || '').trim().toLowerCase();
+      const accountStatus = String(ownerProfile.account_status || '').trim().toUpperCase();
+      if (ownerProfile.is_banned === true || ownerProfile.is_restricted === true || ownerProfile.is_suspended === true ||
+          ['banned', 'restricted', 'suspended', 'deleted', 'on_hold', 'hold'].includes(profileStatus) ||
+          ['BANNED', 'RESTRICTED', 'SUSPENDED', 'ON_HOLD', 'HOLD', 'BLOCKED', 'DELETION_PENDING', 'DELETED'].includes(accountStatus)) {
+        return NextResponse.json({ error: 'Restricted accounts cannot activate advertisements.', code: 'ACCOUNT_AD_ACCESS_BLOCKED' }, { status: 403 });
+      }
+    }
 
     // 4. Independently resolve both target rows
     const { p2pAdsRow, adsRow } = await resolveBothTargetRows(existingAd, adId, admin);
@@ -87,8 +123,8 @@ export async function PATCH(
         .from('p2p_ads')
         .update({
           active: isActive,
+          is_active: isActive,
           status: newStatus,
-          updated_at: new Date().toISOString(),
         })
         .eq('id', p2pAdsRow.id)
         .select('id');

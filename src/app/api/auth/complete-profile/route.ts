@@ -2,73 +2,164 @@ import { NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { extractClientTelemetry, logSecurityEvent } from '@/lib/telemetry';
-import crypto from 'crypto';
+import { hashSecurityAnswer } from '@/lib/security-answer';
+
+export const dynamic = 'force-dynamic';
+
+const MAX_PROFILE_BODY_BYTES = 16 * 1024;
+
+async function readBoundedBody(req: Request): Promise<string | null> {
+  const reader = req.body?.getReader();
+  if (!reader) return '';
+
+  const chunks: Uint8Array[] = [];
+  let totalBytes = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (!value) continue;
+      totalBytes += value.byteLength;
+      if (totalBytes > MAX_PROFILE_BODY_BYTES) {
+        await reader.cancel().catch(() => undefined);
+        return null;
+      }
+      chunks.push(value);
+    }
+  } finally {
+    reader.releaseLock();
+  }
+
+  const bytes = new Uint8Array(totalBytes);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+}
 
 export async function POST(req: Request) {
   try {
     const supabase = await createClient();
-    const { data: { session }, error: sessionError } = await supabase.auth.getSession();
-
-    if (sessionError || !session) {
+    const { data: { user }, error: authError } = await supabase.auth.getUser();
+    if (authError || !user) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    const { name, email, dob, country, securityQuestion, securityAnswer } = await req.json();
-
-    if (!name || !dob || !securityQuestion || !securityAnswer) {
-      return NextResponse.json({ error: 'Name, Date of Birth, and Security Question & Answer are required' }, { status: 400 });
+    const contentLength = Number(req.headers.get('content-length') || 0);
+    if (Number.isFinite(contentLength) && contentLength > MAX_PROFILE_BODY_BYTES) {
+      return NextResponse.json({ error: 'Profile request body is too large.' }, { status: 413 });
     }
 
-    const cleanName = name.trim().toLowerCase();
+    const rawBody = await readBoundedBody(req);
+    if (rawBody === null) {
+      return NextResponse.json({ error: 'Profile request body is too large.' }, { status: 413 });
+    }
+
+    let body: unknown;
+    try {
+      body = JSON.parse(rawBody);
+    } catch {
+      return NextResponse.json({ error: 'Malformed profile request JSON.' }, { status: 400 });
+    }
+    if (!body || typeof body !== 'object' || Array.isArray(body)) {
+      return NextResponse.json({ error: 'A valid profile object is required.' }, { status: 400 });
+    }
+
+    const { name, dob, country, securityQuestion, securityAnswer } = body as Record<string, unknown>;
+    if (
+      typeof name !== 'string' || name.trim().length < 2 || name.trim().length > 120 ||
+      !/^[\p{L}\p{M} .'-]+$/u.test(name.trim()) ||
+      typeof dob !== 'string' ||
+      typeof securityQuestion !== 'string' ||
+      securityQuestion.trim().length < 5 || securityQuestion.trim().length > 200 ||
+      typeof securityAnswer !== 'string' ||
+      securityAnswer.trim().length < 2 || securityAnswer.length > 256
+    ) {
+      return NextResponse.json({ error: 'Name, valid date of birth, security question and answer are required.' }, { status: 400 });
+    }
+
+    const cleanName = name.trim().normalize('NFKC');
     const cleanDob = dob.trim();
-
-    // Minor child safety check (18+ required)
-    const birthDate = new Date(cleanDob);
-    if (!isNaN(birthDate.getTime())) {
-      const today = new Date();
-      let age = today.getFullYear() - birthDate.getFullYear();
-      const m = today.getMonth() - birthDate.getMonth();
-      if (m < 0 || (m === 0 && today.getDate() < birthDate.getDate())) {
-        age--;
-      }
-      if (age < 18) {
-        return NextResponse.json({
-          error: 'Child Safety Policy: You must be at least 18 years old to use Paxones.',
-          isMinor: true,
-          code: 'UNDER_18_PROHIBITED'
-        }, { status: 403 });
-      }
+    const dobMatch = /^(\d{4})-(\d{2})-(\d{2})$/.exec(cleanDob);
+    if (!dobMatch) {
+      return NextResponse.json({ error: 'Date of birth must use YYYY-MM-DD format.' }, { status: 400 });
     }
 
-    const currentUserId = session.user.id;
+    const year = Number(dobMatch[1]);
+    const month = Number(dobMatch[2]);
+    const day = Number(dobMatch[3]);
+    const birthDateUtc = new Date(Date.UTC(year, month - 1, day));
+    if (
+      birthDateUtc.getUTCFullYear() !== year ||
+      birthDateUtc.getUTCMonth() + 1 !== month ||
+      birthDateUtc.getUTCDate() !== day
+    ) {
+      return NextResponse.json({ error: 'Date of birth is not a valid calendar date.' }, { status: 400 });
+    }
+
+    const today = new Date();
+    const todayYear = today.getUTCFullYear();
+    const todayMonth = today.getUTCMonth() + 1;
+    const todayDay = today.getUTCDate();
+    if (birthDateUtc.getTime() > Date.UTC(todayYear, todayMonth - 1, todayDay)) {
+      return NextResponse.json({ error: 'Date of birth cannot be in the future.' }, { status: 400 });
+    }
+
+    let age = todayYear - year;
+    if (todayMonth < month || (todayMonth === month && todayDay < day)) age--;
+    if (age < 18) {
+      return NextResponse.json({
+        error: 'Child Safety Policy: You must be at least 18 years old to use Paxones.',
+        isMinor: true,
+        code: 'UNDER_18_PROHIBITED',
+      }, { status: 403 });
+    }
+
+    if (country !== undefined && (typeof country !== 'string' || !/^[A-Za-z]{2}$/.test(country.trim()))) {
+      return NextResponse.json({ error: 'Country must be a valid two-letter ISO code.' }, { status: 400 });
+    }
+
+    const currentUserId = user.id;
     const telemetry = extractClientTelemetry(req);
-
-    // Duplicate Identity Verification across all profiles
     const adminSupabase = createAdminClient();
-    const { data: existingProfiles } = await adminSupabase
-      .from('profiles')
-      .select('id, full_name, dob, date_of_birth, status')
-      .neq('id', currentUserId);
 
-    const duplicateProfile = (existingProfiles || []).find((p: any) => {
-      const pName = (p.full_name || '').trim().toLowerCase();
-      const pDob = (p.dob || p.date_of_birth || '').trim();
-      return pName && pDob && pName === cleanName && pDob === cleanDob;
-    });
+    const [duplicateByDob, duplicateByDateOfBirth] = await Promise.all([
+      adminSupabase.from('profiles').select('id').neq('id', currentUserId)
+        .eq('dob', cleanDob).ilike('full_name', cleanName).limit(1),
+      adminSupabase.from('profiles').select('id').neq('id', currentUserId)
+        .eq('date_of_birth', cleanDob).ilike('full_name', cleanName).limit(1),
+    ]);
 
+    if (duplicateByDob.error || duplicateByDateOfBirth.error) {
+      console.error('[PROFILE COMPLETE] Duplicate identity query failed', {
+        code: duplicateByDob.error?.code || duplicateByDateOfBirth.error?.code || null,
+      });
+      return NextResponse.json({ error: 'Identity checks are temporarily unavailable. Please retry.' }, { status: 503 });
+    }
+
+    const duplicateProfile = duplicateByDob.data?.[0] || duplicateByDateOfBirth.data?.[0] || null;
     if (duplicateProfile) {
-      // Suspend current offending account
-      await adminSupabase
+      const { data: suspendedRows, error: suspendError } = await adminSupabase
         .from('profiles')
         .update({
           status: 'suspended',
           is_suspended: true,
-          suspension_reason: `Duplicate identity violation: Profile onboarding attempted with identical name ("${name.trim()}") and date of birth ("${cleanDob}") of existing user (${duplicateProfile.id}).`,
+          suspension_reason: 'Duplicate identity review required. Contact support for assistance.',
           updated_at: new Date().toISOString(),
         })
-        .eq('id', currentUserId);
+        .eq('id', currentUserId)
+        .select('id');
 
-      // Log Security Telemetry
+      if (suspendError || !Array.isArray(suspendedRows) || suspendedRows.length !== 1) {
+        console.error('[PROFILE COMPLETE] Duplicate identity suspension could not be persisted', {
+          code: suspendError?.code || null,
+          rows: Array.isArray(suspendedRows) ? suspendedRows.length : null,
+        });
+        return NextResponse.json({ error: 'Identity review could not be completed. Please contact support.' }, { status: 503 });
+      }
+
       await logSecurityEvent({
         userId: currentUserId,
         targetId: duplicateProfile.id,
@@ -81,64 +172,64 @@ export async function POST(req: Request) {
         deviceType: telemetry.deviceType,
         language: telemetry.language,
         isSuspicious: true,
-        suspicionReason: `User attempted to set profile with duplicate legal name (${name}) and DOB (${dob}) matching existing user ${duplicateProfile.id}.`,
-        metadata: {
-          attempted_name: name.trim(),
-          attempted_dob: cleanDob,
-          matched_user_id: duplicateProfile.id,
-        },
+        suspicionReason: 'A duplicate identity record was detected during profile completion.',
+        metadata: { matched_user_id: duplicateProfile.id },
       });
 
-      return NextResponse.json(
-        {
-          error:
-            'Registration & Profile Rejected: An account with this legal name and date of birth is already registered on Paxones. In accordance with platform security and anti-fraud policies, duplicate accounts are prohibited and this account has been suspended.',
-          suspended: true,
-        },
-        { status: 403 }
-      );
+      return NextResponse.json({
+        error: 'Registration & profile completion require manual identity review. Please contact support.',
+        suspended: true,
+      }, { status: 403 });
     }
 
-    // Hash the security answer for protection
-    const securityAnswerHash = crypto.createHash('sha256').update(securityAnswer.trim().toLowerCase()).digest('hex');
-
-    // Retrieve existing profile to preserve username as display_name
-    const { data: userProfile } = await adminSupabase
+    const { data: userProfile, error: userProfileError } = await adminSupabase
       .from('profiles')
-      .select('username')
+      .select('username, onboarding_completed, kyc_status, is_verified, id_verified')
       .eq('id', currentUserId)
       .maybeSingle();
 
-    const usernameDisplayName = userProfile?.username || undefined;
+    if (userProfileError || !userProfile) {
+      return NextResponse.json({ error: 'Could not load your profile.' }, { status: 503 });
+    }
 
-    const updatePayload: Record<string, any> = {
-      name: (name || '').trim(),
-      full_name: (name || '').trim(),
+    const isKycLocked = ['approved', 'verified'].includes(String(userProfile.kyc_status || '').toLowerCase())
+      && userProfile.is_verified === true
+      && userProfile.id_verified === true;
+    if (isKycLocked) {
+      return NextResponse.json({ error: 'Your verified legal identity cannot be changed through onboarding.' }, { status: 403 });
+    }
+
+    const securityAnswerHash = await hashSecurityAnswer(securityAnswer);
+    const updatePayload: Record<string, unknown> = {
+      name: cleanName,
+      full_name: cleanName,
       date_of_birth: cleanDob,
       dob: cleanDob,
-      security_question: securityQuestion,
-      security_answer: securityAnswer.trim().toLowerCase(),
+      security_question: securityQuestion.trim(),
+      security_answer: null,
       security_answer_hash: securityAnswerHash,
       terms_accepted_at: new Date().toISOString(),
       onboarding_completed: true,
       updated_at: new Date().toISOString(),
     };
 
-    if (usernameDisplayName) {
-      updatePayload.display_name = usernameDisplayName;
-    }
+    if (userProfile.username) updatePayload.display_name = userProfile.username;
+    if (typeof country === 'string') updatePayload.country = country.trim().toUpperCase();
 
-    if (country) updatePayload.country = country;
-    if (email && email.trim()) updatePayload.email = email.trim();
-
-    const { error } = await adminSupabase
+    const { data: updatedProfiles, error: updateError } = await adminSupabase
       .from('profiles')
       .update(updatePayload)
-      .eq('id', currentUserId);
+      .eq('id', currentUserId)
+      .select('id');
 
-    if (error) throw error;
+    if (updateError || !Array.isArray(updatedProfiles) || updatedProfiles.length !== 1) {
+      console.error('[PROFILE COMPLETE] Profile update failed', {
+        code: updateError?.code || null,
+        rows: Array.isArray(updatedProfiles) ? updatedProfiles.length : null,
+      });
+      return NextResponse.json({ error: 'Could not save profile details. Please retry.' }, { status: 503 });
+    }
 
-    // Log telemetry for successful profile completion
     await logSecurityEvent({
       userId: currentUserId,
       action: 'PROFILE_COMPLETED_SUCCESSFULLY',
@@ -153,7 +244,10 @@ export async function POST(req: Request) {
     });
 
     return NextResponse.json({ success: true, message: 'Profile completed successfully' });
-  } catch (error: any) {
-    return NextResponse.json({ error: error.message || 'Server error' }, { status: 500 });
+  } catch (error) {
+    console.error('[PROFILE COMPLETE] Request failed', {
+      error: error instanceof Error ? error.name : 'UnknownError',
+    });
+    return NextResponse.json({ error: 'Could not complete your profile. Please retry.' }, { status: 500 });
   }
 }

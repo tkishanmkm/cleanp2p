@@ -1,5 +1,6 @@
+import { randomUUID } from 'node:crypto';
 import { ethers } from 'ethers';
-import { createClient } from '@supabase/supabase-js';
+import { supabaseService as supabaseAdmin } from '@/lib/supabase/service-role';
 import * as bitcoin from 'bitcoinjs-lib';
 import ECPairFactory from 'ecpair';
 import * as ecc from 'tiny-secp256k1';
@@ -21,22 +22,121 @@ const LTC_NETWORK = {
   wif: 0xb0,
 };
 
-// Supabase Admin Client
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL || 'https://placeholder.supabase.co';
-const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || 'placeholder-key';
-export const supabaseAdmin = createClient(supabaseUrl, supabaseServiceKey);
 
 // Master Hot Wallet Seed / Private Key from environment
 const MASTER_SEED_OR_PRIV_KEY = process.env.HOT_WALLET_PRIVATE_KEY || process.env.EVM_HOT_WALLET_PRIVATE_KEY || '';
-const HOT_WALLET_ADDRESS = process.env.HOT_WALLET_ADDRESS || process.env.EVM_HOT_WALLET_ADDRESS || '0x0000000000000000000000000000000000000000';
-const HOT_WALLET_TRON_ADDRESS = process.env.HOT_WALLET_TRON_ADDRESS || process.env.TRON_HOT_WALLET_ADDRESS || '';
-const HOT_WALLET_BTC_ADDRESS = process.env.HOT_WALLET_BTC_ADDRESS || 'bc1q00000000000000000000000000000000000000';
-const HOT_WALLET_LTC_ADDRESS = process.env.HOT_WALLET_LTC_ADDRESS || 'ltc1q00000000000000000000000000000000000000';
+const HOT_WALLET_ADDRESS = (process.env.HOT_WALLET_ADDRESS || process.env.EVM_HOT_WALLET_ADDRESS || '').trim();
+const HOT_WALLET_TRON_ADDRESS = (process.env.HOT_WALLET_TRON_ADDRESS || process.env.TRON_HOT_WALLET_ADDRESS || '').trim();
+const HOT_WALLET_BTC_ADDRESS = (process.env.HOT_WALLET_BTC_ADDRESS || '').trim();
+const HOT_WALLET_LTC_ADDRESS = (process.env.HOT_WALLET_LTC_ADDRESS || '').trim();
 
-// Minimum Sweep Thresholds
-const MIN_SWEEP_THRESHOLD_USDT = 1.0; // Sweeps any deposit >= 1 USDT
-const MIN_SWEEP_THRESHOLD_BTC = 0.0001; // ~10,000 sats
-const MIN_SWEEP_THRESHOLD_LTC = 0.01;
+function requireEvmHotWalletAddress(): string {
+  if (!HOT_WALLET_ADDRESS || !ethers.isAddress(HOT_WALLET_ADDRESS) || HOT_WALLET_ADDRESS.toLowerCase() === ethers.ZeroAddress.toLowerCase()) {
+    throw new Error('A valid non-zero EVM HOT_WALLET_ADDRESS must be configured before gas funding or sweeping.');
+  }
+  return ethers.getAddress(HOT_WALLET_ADDRESS);
+}
+
+function requireBitcoinHotWalletAddress(): string {
+  if (!HOT_WALLET_BTC_ADDRESS) throw new Error('HOT_WALLET_BTC_ADDRESS is not configured; BTC sweep blocked.');
+  bitcoin.address.toOutputScript(HOT_WALLET_BTC_ADDRESS, bitcoin.networks.bitcoin);
+  return HOT_WALLET_BTC_ADDRESS;
+}
+
+function requireLitecoinHotWalletAddress(): string {
+  if (!HOT_WALLET_LTC_ADDRESS) throw new Error('HOT_WALLET_LTC_ADDRESS is not configured; LTC sweep blocked.');
+  bitcoin.address.toOutputScript(HOT_WALLET_LTC_ADDRESS, LTC_NETWORK as any);
+  return HOT_WALLET_LTC_ADDRESS;
+}
+
+
+// A child deposit address is not gas-funded or swept until its confirmed balance is worth at least $5 USD.
+const MIN_SWEEP_VALUE_USD = 5.0;
+
+async function getFreshSweepUsdPrice(assetSymbol: string): Promise<number> {
+  const asset = assetSymbol.toUpperCase().trim();
+  if (asset === 'USDT' || asset === 'USDC') return 1.0;
+
+  const { data, error } = await supabaseAdmin
+    .from('crypto_market_prices')
+    .select('price_in_fiat, updated_at')
+    .eq('asset_symbol', asset)
+    .eq('fiat_symbol', 'USD')
+    .maybeSingle();
+  const dbPrice = Number(data?.price_in_fiat);
+  const updatedAt = data?.updated_at ? Date.parse(data.updated_at) : NaN;
+  const ageMs = Date.now() - updatedAt;
+  if (!error && Number.isFinite(dbPrice) && dbPrice > 0 && Number.isFinite(updatedAt) && ageMs >= -60_000 && ageMs <= 10 * 60_000) {
+    return dbPrice;
+  }
+
+  const binanceSymbol: Record<string, string> = { BTC: 'BTCUSDT', ETH: 'ETHUSDT', LTC: 'LTCUSDT' };
+  const geckoId: Record<string, string> = { BTC: 'bitcoin', ETH: 'ethereum', LTC: 'litecoin' };
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 5000);
+  try {
+    const response = await fetch(`https://api.binance.com/api/v3/ticker/price?symbol=${binanceSymbol[asset] || `${asset}USDT`}`, { cache: 'no-store', signal: controller.signal });
+    if (response.ok) {
+      const body = await response.json();
+      const price = Number(body?.price);
+      if (Number.isFinite(price) && price > 0) return price;
+    }
+  } catch {
+    // Try the secondary market provider below.
+  } finally {
+    clearTimeout(timeout);
+  }
+
+  const fallbackController = new AbortController();
+  const fallbackTimeout = setTimeout(() => fallbackController.abort(), 5000);
+  try {
+    const response = await fetch(`https://api.coingecko.com/api/v3/simple/price?ids=${geckoId[asset] || 'tether'}&vs_currencies=usd`, { cache: 'no-store', signal: fallbackController.signal });
+    if (response.ok) {
+      const body = await response.json();
+      const price = Number(body?.[geckoId[asset] || 'tether']?.usd);
+      if (Number.isFinite(price) && price > 0) return price;
+    }
+  } catch {
+    // Fail closed below: no gas funding or sweep without a reliable price.
+  } finally {
+    clearTimeout(fallbackTimeout);
+  }
+
+  throw new Error(`Fresh USD price unavailable for ${asset}; sweep was not gas-funded or broadcast.`);
+}
+
+async function meetsMinimumSweepUsdValue(assetSymbol: string, amount: number): Promise<boolean> {
+  if (!Number.isFinite(amount) || amount <= 0) return false;
+  const price = await getFreshSweepUsdPrice(assetSymbol);
+  return amount * price >= MIN_SWEEP_VALUE_USD;
+}
+
+/**
+ * An EVM receipt is not final merely because a node returned it. Require the
+ * receipt block to remain canonical and the configured confirmation depth.
+ * ETH uses 12 confirmations and BSC uses 15, matching the deposit policy.
+ */
+async function getEvmSweepReceiptFinality(
+  provider: ethers.JsonRpcProvider,
+  txHash: string,
+  network: string
+): Promise<'PENDING' | 'CONFIRMED' | 'REVERTED'> {
+  const receipt = await provider.getTransactionReceipt(txHash);
+  if (!receipt) return 'PENDING';
+
+  const canonicalBlock = await provider.getBlock(receipt.blockNumber);
+  if (!canonicalBlock || canonicalBlock.hash?.toLowerCase() !== receipt.blockHash?.toLowerCase()) {
+    return 'PENDING';
+  }
+
+  const latestBlock = await provider.getBlockNumber();
+  const confirmations = latestBlock - receipt.blockNumber + 1;
+  const normalizedNetwork = network.toUpperCase().trim();
+  const requiredConfirmations = ['BEP20', 'BSC', 'BINANCE'].includes(normalizedNetwork) ? 15 : 12;
+  if (confirmations < requiredConfirmations) return 'PENDING';
+
+  return receipt.status === 1 ? 'CONFIRMED' : 'REVERTED';
+}
 
 /**
  * Derives user child keys from DEPOSIT_HD_MNEMONIC
@@ -133,14 +233,16 @@ function getUsdtConfig(network: string): { contractAddress: string; decimals: nu
     case 'BSC':
     case 'BINANCE':
       return {
-        contractAddress: process.env.USDT_CONTRACT_BEP20 || '0x55d398326f99059fF775485246999027B3197955',
+        // Canonical BSC mainnet USDT; environment overrides could sweep a counterfeit token.
+        contractAddress: '0x55d398326f99059fF775485246999027B3197955',
         decimals: 18,
       };
     case 'ERC20':
     case 'ETH':
     case 'ETHEREUM':
       return {
-        contractAddress: process.env.USDT_CONTRACT_ERC20 || '0xdAC17F958D2ee523a2206206994597C13D831ec7',
+        // Canonical Ethereum mainnet USDT; environment overrides are not accepted.
+        contractAddress: '0xdAC17F958D2ee523a2206206994597C13D831ec7',
         decimals: 6,
       };
     default:
@@ -192,22 +294,60 @@ export function getDerivedEVMWallet(derivationIndex: number, provider: ethers.Pr
 }
 
 /**
- * Helper: Start Heartbeat interval to extend lease during long operations
+ * Helper: Start a fail-closed heartbeat for long-running sweep operations.
+ * A lost/failed renewal is sticky: the worker must not broadcast after it.
  */
-function startSweeperHeartbeat(sweepId: string, workerId: string): () => void {
-  const interval = setInterval(async () => {
+type StopSweeperHeartbeat = (() => void) & {
+  assertLease: () => Promise<void>;
+};
+
+function startSweeperHeartbeat(sweepId: string, workerId: string): StopSweeperHeartbeat {
+  let leaseFailure: string | null = null;
+  let heartbeatInFlight = false;
+
+  const renewLease = async (): Promise<void> => {
+    if (heartbeatInFlight || leaseFailure) return;
+    heartbeatInFlight = true;
     try {
-      await supabaseAdmin.rpc('extend_sweep_lease', {
+      const { data, error } = await supabaseAdmin.rpc('extend_sweep_lease', {
         p_sweep_id: sweepId,
         p_worker_id: workerId,
         p_extend_seconds: 300,
       });
-    } catch {
-      // Ignore heartbeat errors
+      if (error || !data || data.success !== true) {
+        leaseFailure = error?.message || data?.code || 'SWEEP_LEASE_RENEWAL_REJECTED';
+        console.error(`[Sweeper Lease Lost] Sweep ${sweepId}, worker ${workerId}: ${leaseFailure}`);
+      }
+    } catch (err: any) {
+      leaseFailure = err?.message || 'SWEEP_LEASE_RENEWAL_FAILED';
+      console.error(`[Sweeper Lease Lost] Sweep ${sweepId}, worker ${workerId}: ${leaseFailure}`);
+    } finally {
+      heartbeatInFlight = false;
     }
-  }, 30000); // 30 seconds
+  };
 
-  return () => clearInterval(interval);
+  const interval = setInterval(() => {
+    void renewLease();
+  }, 30000);
+
+  const stop = (() => clearInterval(interval)) as StopSweeperHeartbeat;
+  stop.assertLease = async (): Promise<void> => {
+    if (leaseFailure) {
+      throw new Error(`Sweep worker lease was lost; refusing to broadcast: ${leaseFailure}`);
+    }
+
+    const { data, error } = await supabaseAdmin.rpc('verify_sweep_ownership', {
+      p_sweep_id: sweepId,
+      p_worker_id: workerId,
+      p_expected_status: null,
+    });
+    if (error || !data || data.valid !== true) {
+      leaseFailure = error?.message || data?.reason || 'SWEEP_OWNERSHIP_VERIFICATION_FAILED';
+      throw new Error(`Sweep worker lease verification failed; refusing to broadcast: ${leaseFailure}`);
+    }
+  };
+
+  return stop;
 }
 
 /**
@@ -258,7 +398,7 @@ async function transitionSweepStatus(
 async function assertPreBroadcastOwnership(
   sweepId: string,
   workerId: string,
-  expectedStatus: string
+  expectedStatus: string | null
 ): Promise<void> {
   const { data: verifyRes, error } = await supabaseAdmin.rpc('verify_sweep_ownership', {
     p_sweep_id: sweepId,
@@ -270,6 +410,103 @@ async function assertPreBroadcastOwnership(
     const reason = verifyRes?.reason || error?.message || 'OWNERSHIP_VERIFICATION_FAILED';
     console.error(`[Pre-Broadcast Stop] Worker ${workerId} failed pre-broadcast check for sweep ${sweepId}: ${reason}`);
     throw new Error(`Pre-broadcast ownership check failed: ${reason}`);
+  }
+}
+
+/** All gas-funding status changes must pass through the lease-bound SQL state machine. */
+async function updateGasFundingStatus(
+  sweepId: string,
+  workerId: string,
+  newStatus: 'BROADCASTED' | 'CONFIRMED' | 'RECOVERY_REQUIRED' | 'FAILED',
+  errorMessage?: string | null,
+  txHash?: string | null
+): Promise<void> {
+  if (!sweepId || !workerId) {
+    throw new Error('Gas funding state transition requires a claimed sweep ID and worker lease.');
+  }
+  const { data, error } = await supabaseAdmin.rpc('update_gas_funding_operation_status', {
+    p_sweep_id: sweepId,
+    p_worker_id: workerId,
+    p_new_status: newStatus,
+    p_error_message: errorMessage ?? null,
+    p_tx_hash: txHash ?? null,
+  });
+  if (error || !data || data.success !== true) {
+    throw new Error(`Gas funding state transition to ${newStatus} failed: ${error?.message || data?.message || 'RPC did not confirm success'}`);
+  }
+}
+
+/** Persist an observation-only incident when a signed EVM gas-funding nonce goes missing. */
+async function recordEvmGasFundingNonceIncident(params: {
+  sweepId: string;
+  network: string;
+  walletAddress: string;
+  expectedNonce: number;
+  expectedTxHash: string;
+  observedLatestNonce: number;
+  observedPendingNonce: number;
+  reason: string;
+}): Promise<void> {
+  const { data, error } = await supabaseAdmin.rpc('record_evm_gas_funding_nonce_incident', {
+    p_sweep_id: params.sweepId,
+    p_network: params.network,
+    p_wallet_address: params.walletAddress,
+    p_expected_nonce: params.expectedNonce,
+    p_expected_tx_hash: params.expectedTxHash,
+    p_observed_latest_nonce: params.observedLatestNonce,
+    p_observed_pending_nonce: params.observedPendingNonce,
+    p_reason: params.reason.slice(0, 1000),
+  });
+
+  if (error || !data || data.success !== true) {
+    throw new Error(
+      `EVM gas-funding nonce incident could not be persisted: ${error?.message || data?.message || 'RPC did not confirm success'}`
+    );
+  }
+}
+
+/** Persist the actual EVM network fee and outcome from a mined gas-funding receipt. */
+async function recordEvmGasFundingReceipt(
+  sweepId: string,
+  workerId: string,
+  expectedTxHash: string,
+  receipt: ethers.TransactionReceipt
+): Promise<void> {
+  const txHash = String(receipt.hash || '').toLowerCase();
+  const blockHash = String(receipt.blockHash || '').toLowerCase();
+  const blockNumber = Number(receipt.blockNumber);
+  const gasUsed = receipt.gasUsed;
+  const effectiveGasPrice = receipt.gasPrice;
+
+  if (
+    txHash !== expectedTxHash.toLowerCase() ||
+    (receipt.status !== 0 && receipt.status !== 1) ||
+    typeof gasUsed !== 'bigint' ||
+    gasUsed <= 0n ||
+    typeof effectiveGasPrice !== 'bigint' ||
+    effectiveGasPrice <= 0n ||
+    !Number.isSafeInteger(blockNumber) ||
+    blockNumber < 0 ||
+    !/^0x[a-f0-9]{64}$/.test(blockHash)
+  ) {
+    throw new Error('Mined EVM gas-funding receipt is incomplete or does not match the persisted transaction.');
+  }
+
+  const { data, error } = await supabaseAdmin.rpc('record_evm_gas_funding_receipt', {
+    p_sweep_id: sweepId,
+    p_worker_id: workerId,
+    p_tx_hash: txHash,
+    p_receipt_status: receipt.status,
+    p_gas_used: gasUsed.toString(),
+    p_effective_gas_price: effectiveGasPrice.toString(),
+    p_block_number: blockNumber,
+    p_block_hash: blockHash,
+  });
+
+  if (error || !data || data.success !== true) {
+    throw new Error(
+      `Failed to persist actual EVM gas-funding receipt: ${error?.message || data?.message || 'RPC did not confirm success'}`
+    );
   }
 }
 
@@ -286,6 +523,10 @@ export async function fundGasForAddress(
   networkCode: string = 'ERC20',
   childSweepFeeWei?: bigint
 ) {
+  if (!sweepId || !workerId) {
+    throw new Error('EVM gas funding requires a database-claimed sweep ID and active worker lease.');
+  }
+  await assertPreBroadcastOwnership(sweepId, workerId, 'GAS_FUNDING');
   if (!MASTER_SEED_OR_PRIV_KEY) {
     throw new Error('MASTER_SEED_OR_PRIV_KEY is not configured in environment');
   }
@@ -305,12 +546,57 @@ export async function fundGasForAddress(
   } else {
     throw new Error(`Unsupported EVM network for gas funding: "${networkCode}". Production supports ERC20 (Chain ID 1) and BEP20 (Chain ID 56) only.`);
   }
+  const providerNetwork = await provider.getNetwork();
+  if (providerNetwork.chainId !== BigInt(chainId)) {
+    throw new Error(
+      `Gas-funding RPC chain mismatch: expected ${chainId}, received ${providerNetwork.chainId}`
+    );
+  }
+  if (!ethers.isAddress(targetAddress)) {
+    throw new Error('Gas-funding destination is not a valid EVM address.');
+  }
+
   const nativeSymbol = chainId === 56 ? 'BNB' : 'ETH';
 
-  // Rule 1: Never fund if child native balance is already sufficient for token sweep
+  // Never create a new funding operation when the child already has enough gas.
+  // However, a durable prior signature must still be reconciled even if the
+  // balance is now sufficient; otherwise a broadcasted top-up can be orphaned.
   const currentChildBalance = await provider.getBalance(targetAddress);
-  if (childSweepFeeWei && currentChildBalance >= childSweepFeeWei) {
-    console.log(`[Sweeper Gas] Child ${targetAddress} already has sufficient ${nativeSymbol} balance (${ethers.formatEther(currentChildBalance)} >= ${ethers.formatEther(childSweepFeeWei)}). Skipping funding.`);
+  const { data: priorGasFunding, error: priorGasFundingError } = await supabaseAdmin
+    .from('gas_funding_operations')
+    .select('status, tx_hash, signed_tx_hex, amount_allocated, nonce, funding_wallet_address')
+    .eq('sweep_id', sweepId)
+    .maybeSingle();
+
+  if (priorGasFundingError) {
+    throw new Error(`Unable to inspect prior gas-funding state: ${priorGasFundingError.message}`);
+  }
+
+  const priorGasStatus = String(priorGasFunding?.status || '').toUpperCase();
+  const hasDurableFundingToReconcile = [
+    'READY_TO_BROADCAST',
+    'BROADCASTED',
+    'RECOVERY_REQUIRED',
+  ].includes(priorGasStatus);
+  const hasAllocatedNonceWithoutSignedPayload =
+    priorGasStatus === 'PENDING' &&
+    priorGasFunding?.nonce !== null &&
+    priorGasFunding?.nonce !== undefined;
+
+  if (
+    hasDurableFundingToReconcile &&
+    (!priorGasFunding?.tx_hash || !priorGasFunding?.signed_tx_hex)
+  ) {
+    throw new Error('Prior gas-funding operation has an incomplete durable transaction; manual reconciliation is required.');
+  }
+
+  if (
+    childSweepFeeWei &&
+    currentChildBalance >= childSweepFeeWei &&
+    !hasDurableFundingToReconcile &&
+    !hasAllocatedNonceWithoutSignedPayload
+  ) {
+    console.log(`[Sweeper Gas] Child ${targetAddress} already has sufficient ${nativeSymbol} balance (${ethers.formatEther(currentChildBalance)} >= ${ethers.formatEther(childSweepFeeWei)}). No new funding is required.`);
     return;
   }
 
@@ -320,7 +606,7 @@ export async function fundGasForAddress(
       p_sweep_id: sweepId,
       p_deposit_address: targetAddress,
       p_network: normNet,
-      p_amount_allocated: Number(ethers.formatEther(amountWei)),
+      p_amount_allocated: ethers.formatEther(amountWei),
       p_worker_id: workerId,
     });
 
@@ -341,6 +627,35 @@ export async function fundGasForAddress(
     if (existingSignedTx && existingTxHash && (existingStatus === 'READY_TO_BROADCAST' || existingStatus === 'BROADCASTED' || existingStatus === 'RECOVERY_REQUIRED')) {
       console.log(`[Sweeper Gas Recovery] Found persisted signed funding tx for sweep ${sweepId}, txHash: ${existingTxHash}, status: ${existingStatus}. Reconciling...`);
 
+      // Verify the immutable signed payload before querying or rebroadcasting it.
+      let parsedFundingTx: ethers.Transaction;
+      try {
+        parsedFundingTx = ethers.Transaction.from(existingSignedTx);
+      } catch {
+        await updateGasFundingStatus(sweepId, workerId, 'RECOVERY_REQUIRED', 'Persisted EVM gas-funding signed transaction cannot be decoded', existingTxHash);
+        throw new Error('Persisted EVM gas-funding transaction is malformed; manual reconciliation is required.');
+      }
+      const claimedNonce = Number(claimRes.nonce);
+      const expectedFundingValue = ethers.parseEther(String(claimRes.amount_allocated));
+      const parsedSignedHash = ethers.keccak256(existingSignedTx);
+      if (
+        claimRes.nonce === null ||
+        claimRes.nonce === undefined ||
+        !Number.isSafeInteger(claimedNonce) ||
+        claimedNonce < 0 ||
+        !Number.isFinite(Number(claimRes.amount_allocated)) ||
+        Number(claimRes.amount_allocated) <= 0 ||
+        parsedSignedHash.toLowerCase() !== existingTxHash.toLowerCase() ||
+        parsedFundingTx.from?.toLowerCase() !== hotWalletAddress.toLowerCase() ||
+        parsedFundingTx.to?.toLowerCase() !== targetAddress.toLowerCase() ||
+        parsedFundingTx.value !== expectedFundingValue ||
+        parsedFundingTx.chainId !== BigInt(chainId) ||
+        parsedFundingTx.nonce !== claimedNonce
+      ) {
+        await updateGasFundingStatus(sweepId, workerId, 'RECOVERY_REQUIRED', 'Persisted EVM gas-funding payload failed hash, wallet, destination, amount, chain, or nonce integrity checks', existingTxHash);
+        throw new Error('Persisted EVM gas-funding transaction failed integrity validation; manual reconciliation is required.');
+      }
+
       // 1. Check if transaction is already mined on-chain
       let receipt = null;
       try {
@@ -351,32 +666,33 @@ export async function fundGasForAddress(
 
       if (receipt && receipt.status === 1) {
         console.log(`[Sweeper Gas Recovery] Funding tx ${existingTxHash} is already confirmed on-chain!`);
-        await supabaseAdmin.from('gas_funding_operations').update({
-          status: 'CONFIRMED',
-          updated_at: new Date().toISOString(),
-        }).eq('sweep_id', sweepId);
+        await recordEvmGasFundingReceipt(sweepId, workerId, existingTxHash, receipt);
         return;
+      }
+
+      if (receipt && receipt.status === 0) {
+        const recoveryMessage =
+          'Persisted EVM gas-funding transaction was mined but reverted; actual network fee has been recorded and manual reconciliation is required';
+        await recordEvmGasFundingReceipt(sweepId, workerId, existingTxHash, receipt);
+        throw new Error(`${recoveryMessage}: ${existingTxHash}`);
       }
 
       // 2. If not mined, rebroadcast the EXACT SAME signed raw transaction
       console.log(`[Sweeper Gas Recovery] Rebroadcasting exact persisted signed tx ${existingTxHash}...`);
       try {
-        await provider.broadcastTransaction(existingSignedTx);
-        await supabaseAdmin.from('gas_funding_operations').update({
-          status: 'BROADCASTED',
-          updated_at: new Date().toISOString(),
-        }).eq('sweep_id', sweepId);
+        await assertPreBroadcastOwnership(sweepId, workerId, 'GAS_FUNDING');
+        const rebroadcastResponse = await provider.broadcastTransaction(existingSignedTx);
+        if (rebroadcastResponse.hash.toLowerCase() !== existingTxHash.toLowerCase()) {
+          throw new Error('EVM gas-funding node returned a hash that differs from the persisted signed transaction.');
+        }
+        await updateGasFundingStatus(sweepId, workerId, 'BROADCASTED', null, existingTxHash);
       } catch (rebroadcastErr: any) {
         const errMsg = rebroadcastErr?.message || '';
         if (errMsg.includes('already known') || errMsg.includes('nonce too low') || errMsg.includes('ALREADY_EXISTS')) {
           console.log(`[Sweeper Gas Recovery] Tx already in mempool/blockchain: ${errMsg}`);
         } else {
           console.error(`[Sweeper Gas Recovery] Rebroadcast exception:`, rebroadcastErr);
-          await supabaseAdmin.from('gas_funding_operations').update({
-            status: 'RECOVERY_REQUIRED',
-            error_message: errMsg,
-            updated_at: new Date().toISOString(),
-          }).eq('sweep_id', sweepId);
+          await updateGasFundingStatus(sweepId, workerId, 'RECOVERY_REQUIRED', errMsg, existingTxHash);
           throw rebroadcastErr;
         }
       }
@@ -391,6 +707,7 @@ export async function fundGasForAddress(
             isConfirmed = true;
             break;
           } else if (receipt && receipt.status === 0) {
+            await recordEvmGasFundingReceipt(sweepId, workerId, existingTxHash, receipt);
             throw new Error(`Gas funding transaction reverted on-chain: ${existingTxHash}`);
           }
         } catch (receiptErr: any) {
@@ -398,19 +715,12 @@ export async function fundGasForAddress(
         }
       }
 
-      if (isConfirmed) {
-        await supabaseAdmin.from('gas_funding_operations').update({
-          status: 'CONFIRMED',
-          updated_at: new Date().toISOString(),
-        }).eq('sweep_id', sweepId);
-        console.log(`[Sweeper Gas Recovery] Gas funding tx ${existingTxHash} confirmed.`);
+      if (isConfirmed && receipt && receipt.status === 1) {
+        await recordEvmGasFundingReceipt(sweepId, workerId, existingTxHash, receipt);
+        console.log(`[Sweeper Gas Recovery] Gas funding tx ${existingTxHash} confirmed with actual network fee recorded.`);
         return;
       } else {
-        await supabaseAdmin.from('gas_funding_operations').update({
-          status: 'RECOVERY_REQUIRED',
-          error_message: 'Timed out waiting for on-chain gas funding receipt',
-          updated_at: new Date().toISOString(),
-        }).eq('sweep_id', sweepId);
+        await updateGasFundingStatus(sweepId, workerId, 'RECOVERY_REQUIRED', 'Timed out waiting for on-chain gas funding receipt', existingTxHash);
         throw new Error(`Timed out waiting for gas funding tx ${existingTxHash} confirmation`);
       }
     }
@@ -425,15 +735,39 @@ export async function fundGasForAddress(
 
   // Quantity B: fundingTxFee paid by hot wallet for the funding transaction
   const feeData = await provider.getFeeData();
-  const baseGasPrice = feeData.gasPrice || ethers.parseUnits('20', 'gwei');
-  const priorityGasPrice = (baseGasPrice * 200n) / 100n;
   const fundingTxGasLimit = 21000n;
-  const fundingTxFee = priorityGasPrice * fundingTxGasLimit;
-  const maxFeePerGas = feeData.maxFeePerGas ? (feeData.maxFeePerGas * 200n) / 100n : undefined;
-  const maxPriorityFeePerGas = feeData.maxPriorityFeePerGas ? (feeData.maxPriorityFeePerGas * 200n) / 100n : undefined;
+  const hasEip1559Quote =
+    feeData.maxFeePerGas !== null &&
+    feeData.maxFeePerGas > 0n &&
+    feeData.maxPriorityFeePerGas !== null &&
+    feeData.maxPriorityFeePerGas > 0n;
+
+  let priorityGasPrice: bigint;
+  let maxFeePerGas: bigint | undefined;
+  let maxPriorityFeePerGas: bigint | undefined;
+  let fundingTxFee: bigint;
+
+  if (hasEip1559Quote) {
+    maxFeePerGas = feeData.maxFeePerGas! * 2n;
+    maxPriorityFeePerGas = feeData.maxPriorityFeePerGas! * 2n;
+    if (maxFeePerGas < maxPriorityFeePerGas) {
+      throw new Error('EIP-1559 fee quote is inconsistent: max fee is below priority fee.');
+    }
+    priorityGasPrice = maxPriorityFeePerGas;
+    // Reserve the maximum fee cap for solvency; the actual receipt fee is lower or equal.
+    fundingTxFee = maxFeePerGas * fundingTxGasLimit;
+  } else {
+    if (feeData.gasPrice === null || feeData.gasPrice <= 0n) {
+      throw new Error(`Live ${nativeSymbol} gas-price quote is unavailable; refusing a hard-coded fee fallback.`);
+    }
+    priorityGasPrice = feeData.gasPrice * 2n;
+    fundingTxFee = priorityGasPrice * fundingTxGasLimit;
+  }
 
   // Quantity C: childSweepFee (provided or estimated)
-  const childSweepFee = childSweepFeeWei || (priorityGasPrice * 65000n);
+  const childSweepFee = childSweepFeeWei || (
+    (maxFeePerGas || priorityGasPrice) * 65000n
+  );
 
   // Hot wallet total cost for this funding operation
   const hotWalletTotalCost = fundingAmount + fundingTxFee;
@@ -456,19 +790,11 @@ export async function fundGasForAddress(
     p_daily_max_operations: dailyMaxOps,
   });
 
-  if (eligErr) {
-    console.warn(`[Gas Abuse Check] RPC check_gas_funding_eligibility error:`, eligErr);
-  } else if (eligibilityRes && !eligibilityRes.eligible) {
-    const rejectReason = eligibilityRes.reason || 'GAS_FUNDING_POLICY_REJECTED';
-    const rejectMsg = eligibilityRes.message || 'Gas funding policy limit reached';
-    console.warn(`[Gas Abuse Check] Address ${targetAddress} rejected: ${rejectReason} - ${rejectMsg}`);
-    if (sweepId) {
-      await supabaseAdmin.from('gas_funding_operations').update({
-        status: 'FAILED',
-        error_message: `${rejectReason}: ${rejectMsg}`,
-        updated_at: new Date().toISOString(),
-      }).eq('sweep_id', sweepId);
-    }
+  if (eligErr || !eligibilityRes || eligibilityRes.eligible !== true) {
+    const rejectReason = eligibilityRes?.reason || (eligErr ? 'GAS_FUNDING_POLICY_CHECK_UNAVAILABLE' : 'GAS_FUNDING_POLICY_REJECTED');
+    const rejectMsg = eligibilityRes?.message || eligErr?.message || 'Gas funding eligibility could not be confirmed.';
+    const targetStatus = eligErr || !eligibilityRes ? 'RECOVERY_REQUIRED' : 'FAILED';
+    await updateGasFundingStatus(sweepId, workerId, targetStatus, `${rejectReason}: ${rejectMsg}`);
     throw new Error(`Gas funding rejected: ${rejectReason} - ${rejectMsg}`);
   }
 
@@ -485,26 +811,29 @@ export async function fundGasForAddress(
   if (hotWalletBalance < requiredHotWalletBalance) {
     const insolvMsg = `Hot wallet ${hotWalletAddress} has insufficient ${nativeSymbol} balance (${ethers.formatEther(hotWalletBalance)}). Required: ${ethers.formatEther(requiredHotWalletBalance)} (fundingAmount: ${ethers.formatEther(fundingAmount)} + fundingFee: ${ethers.formatEther(fundingTxFee)} + reserve: ${ethers.formatEther(configuredReserve)}).`;
     console.error(`[Hot Wallet Insolvency] ${insolvMsg}`);
-    if (sweepId) {
-      await supabaseAdmin.from('gas_funding_operations').update({
-        status: 'RECOVERY_REQUIRED',
-        error_message: insolvMsg,
-        updated_at: new Date().toISOString(),
-      }).eq('sweep_id', sweepId);
-    }
+    await updateGasFundingStatus(sweepId, workerId, 'RECOVERY_REQUIRED', insolvMsg);
     throw new Error(`HOT_WALLET_INSOLVENT: ${insolvMsg}`);
   }
 
   // Step 5: Obtain/allocate hot-wallet nonce safely
   const onchainPending = await provider.getTransactionCount(hotWalletAddress, 'pending');
-  const { data: allocatedNonce, error: nonceErr } = await supabaseAdmin.rpc('allocate_hot_wallet_nonce', {
+  if (!Number.isSafeInteger(onchainPending) || onchainPending < 0) {
+    throw new Error(`Provider returned an invalid pending nonce for hot wallet ${hotWalletAddress}.`);
+  }
+  const { data: allocatedNonce, error: nonceErr } = await supabaseAdmin.rpc('allocate_gas_funding_nonce', {
+    p_sweep_id: sweepId,
+    p_worker_id: workerId,
     p_network: normNet,
     p_wallet_address: hotWalletAddress,
     p_onchain_pending_nonce: onchainPending,
   });
 
   if (nonceErr || allocatedNonce === null || allocatedNonce === undefined) {
-    throw new Error(`Failed to allocate hot wallet nonce: ${nonceErr?.message || 'UNKNOWN_NONCE_ERROR'}`);
+    throw new Error(`Failed to allocate operation-bound hot-wallet nonce: ${nonceErr?.message || 'UNKNOWN_NONCE_ERROR'}`);
+  }
+  const nonceNumber = Number(allocatedNonce);
+  if (!Number.isSafeInteger(nonceNumber) || nonceNumber < 0) {
+    throw new Error(`Hot-wallet nonce allocator returned an invalid nonce: ${String(allocatedNonce)}`);
   }
 
   // Step 6: Pre-broadcast ownership check
@@ -516,7 +845,7 @@ export async function fundGasForAddress(
   const txReq: ethers.TransactionRequest = {
     to: targetAddress,
     value: fundingAmount,
-    nonce: Number(allocatedNonce),
+    nonce: nonceNumber,
     chainId,
     gasLimit: fundingTxGasLimit,
     gasPrice: maxFeePerGas ? undefined : priorityGasPrice,
@@ -541,7 +870,7 @@ export async function fundGasForAddress(
       p_worker_id: workerId,
       p_signed_tx_hex: signedTxHex,
       p_tx_hash: deterministicTxHash,
-      p_nonce: BigInt(allocatedNonce),
+      p_nonce: BigInt(nonceNumber),
       p_funding_tx_fee: Number(ethers.formatEther(fundingTxFee)),
       p_child_sweep_fee: Number(ethers.formatEther(childSweepFee)),
     });
@@ -554,13 +883,12 @@ export async function fundGasForAddress(
   // Step 10: Broadcast the EXACT persisted signed transaction
   console.log(`[Sweeper Gas Broadcast] Broadcasting ${ethers.formatEther(fundingAmount)} ${nativeSymbol} to ${targetAddress}. TxHash: ${deterministicTxHash}, Nonce: ${allocatedNonce}`);
   try {
-    await provider.broadcastTransaction(signedTxHex);
-    if (sweepId) {
-      await supabaseAdmin.from('gas_funding_operations').update({
-        status: 'BROADCASTED',
-        updated_at: new Date().toISOString(),
-      }).eq('sweep_id', sweepId);
+    await assertPreBroadcastOwnership(sweepId, workerId, 'GAS_FUNDING');
+    const broadcastResponse = await provider.broadcastTransaction(signedTxHex);
+    if (broadcastResponse.hash.toLowerCase() !== deterministicTxHash.toLowerCase()) {
+      throw new Error('EVM gas-funding node returned a hash that differs from the locally signed transaction.');
     }
+    await updateGasFundingStatus(sweepId, workerId, 'BROADCASTED', null, deterministicTxHash);
   } catch (broadcastErr: any) {
     console.error(`[EVM Gas Funding Broadcast Exception] ${targetAddress}:`, broadcastErr);
     // Check if tx is already in mempool/blockchain
@@ -569,63 +897,72 @@ export async function fundGasForAddress(
       minedReceipt = await provider.getTransactionReceipt(deterministicTxHash);
     } catch {}
 
-    if (minedReceipt && minedReceipt.status === 1) {
-      console.log(`[Sweeper Gas] Transaction ${deterministicTxHash} already mined despite broadcast error!`);
-      if (sweepId) {
-        await supabaseAdmin.from('gas_funding_operations').update({
-          status: 'CONFIRMED',
-          updated_at: new Date().toISOString(),
-        }).eq('sweep_id', sweepId);
+    if (minedReceipt) {
+      const receiptFinality = await getEvmSweepReceiptFinality(
+        provider as ethers.JsonRpcProvider,
+        deterministicTxHash,
+        normNet
+      );
+      if (receiptFinality === 'CONFIRMED' || receiptFinality === 'REVERTED') {
+        await recordEvmGasFundingReceipt(sweepId, workerId, deterministicTxHash, minedReceipt);
+        if (receiptFinality === 'CONFIRMED') {
+          console.log(`[Sweeper Gas] Transaction ${deterministicTxHash} reached required finality despite broadcast error.`);
+          return;
+        }
+        throw new Error(`EVM gas-funding transaction reverted after required confirmations: ${deterministicTxHash}`);
       }
-      return;
     }
 
-    if (sweepId) {
-      await supabaseAdmin.from('gas_funding_operations').update({
-        status: 'RECOVERY_REQUIRED',
-        error_message: broadcastErr?.message || 'EVM gas broadcast ambiguous',
-        updated_at: new Date().toISOString(),
-      }).eq('sweep_id', sweepId);
-    }
+    await updateGasFundingStatus(sweepId, workerId, 'RECOVERY_REQUIRED', broadcastErr?.message || 'EVM gas broadcast ambiguous or receipt not final', deterministicTxHash);
     throw broadcastErr;
   }
 
   // Step 11 & 12: Wait & verify actual on-chain receipt
   let isConfirmed = false;
+  let isReverted = false;
+  let finalReceipt: ethers.TransactionReceipt | null = null;
   for (let attempt = 1; attempt <= 20; attempt++) {
     await new Promise((r) => setTimeout(r, 2000));
     try {
       const receipt = await provider.getTransactionReceipt(deterministicTxHash);
-      if (receipt && receipt.status === 1) {
-        isConfirmed = true;
-        break;
-      } else if (receipt && receipt.status === 0) {
-        throw new Error(`Gas funding transaction reverted on-chain: ${deterministicTxHash}`);
+      if (receipt) {
+        finalReceipt = receipt;
+        const finality = await getEvmSweepReceiptFinality(provider as ethers.JsonRpcProvider, deterministicTxHash, normNet);
+        if (finality === 'CONFIRMED') {
+          isConfirmed = true;
+          break;
+        }
+        if (finality === 'REVERTED') {
+          isReverted = true;
+          break;
+        }
       }
-    } catch (receiptErr: any) {
-      if (receiptErr.message?.includes('reverted')) throw receiptErr;
+    } catch {
+      // Continue polling; a missing receipt is not proof of failure or success.
     }
+  }
+
+  if (isReverted) {
+    const recoveryMessage =
+      'EVM gas-funding transaction was mined but reverted; actual network fee has been recorded and manual reconciliation is required';
+    if (!finalReceipt || finalReceipt.status !== 0) {
+      throw new Error('A reverted EVM gas-funding transaction was detected without its complete receipt; recovery remains required.');
+    }
+    await recordEvmGasFundingReceipt(sweepId, workerId, deterministicTxHash, finalReceipt);
+    throw new Error(`${recoveryMessage}: ${deterministicTxHash}`);
   }
 
   if (!isConfirmed) {
-    if (sweepId) {
-      await supabaseAdmin.from('gas_funding_operations').update({
-        status: 'RECOVERY_REQUIRED',
-        error_message: 'Timed out waiting for on-chain gas funding receipt',
-        updated_at: new Date().toISOString(),
-      }).eq('sweep_id', sweepId);
-    }
+    await updateGasFundingStatus(sweepId, workerId, 'RECOVERY_REQUIRED', 'Timed out waiting for on-chain gas funding receipt', deterministicTxHash);
     throw new Error(`Timed out waiting for gas funding confirmation on ${deterministicTxHash}`);
   }
 
-  // Step 13: Transition to CONFIRMED
-  if (sweepId) {
-    await supabaseAdmin.from('gas_funding_operations').update({
-      status: 'CONFIRMED',
-      updated_at: new Date().toISOString(),
-    }).eq('sweep_id', sweepId);
-    console.log(`[Sweeper Gas] Gas funding tx ${deterministicTxHash} CONFIRMED on-chain.`);
+  // Record the receipt and actual fee atomically with the CONFIRMED state.
+  if (!finalReceipt || finalReceipt.status !== 1) {
+    throw new Error('EVM gas-funding confirmation is missing its successful transaction receipt.');
   }
+  await recordEvmGasFundingReceipt(sweepId, workerId, deterministicTxHash, finalReceipt);
+  console.log(`[Sweeper Gas] Gas funding tx ${deterministicTxHash} CONFIRMED; actual fee ${ethers.formatEther(finalReceipt.gasUsed * finalReceipt.gasPrice)} ${nativeSymbol} recorded.`);
 }
 
 /**
@@ -637,6 +974,11 @@ export async function fundTronGasForAddress(
   sweepId?: string,
   workerId?: string
 ) {
+  if (!sweepId || !workerId) {
+    throw new Error('TRON gas funding requires a database-claimed sweep ID and active worker lease.');
+  }
+  await assertPreBroadcastOwnership(sweepId, workerId, 'GAS_FUNDING');
+
   if (sweepId && workerId) {
     const { data: claimRes, error: claimErr } = await supabaseAdmin.rpc('claim_gas_funding_operation', {
       p_sweep_id: sweepId,
@@ -654,12 +996,92 @@ export async function fundTronGasForAddress(
       console.log(`[Tron Gas] Address ${targetAddress} TRX gas funding already processed. Skipping.`);
       return;
     }
+
+    // Recovery must rebroadcast exactly the persisted signed transaction; never re-sign it.
+    const persistedSignedJson = String(claimRes.signed_tx_hex || '');
+    const persistedHash = String(claimRes.tx_hash || '').toLowerCase();
+    const persistedStatus = String(claimRes.status || '').toUpperCase();
+    if (persistedSignedJson || persistedHash) {
+      if (
+        !persistedSignedJson ||
+        !/^[a-f0-9]{64}$/.test(persistedHash) ||
+        !['READY_TO_BROADCAST', 'BROADCASTED', 'RECOVERY_REQUIRED'].includes(persistedStatus)
+      ) {
+        await updateGasFundingStatus(sweepId, workerId, 'RECOVERY_REQUIRED', 'Persisted TRON gas transaction material is incomplete or has an invalid state', persistedHash || null);
+        throw new Error('Persisted TRON gas transaction material is incomplete; manual reconciliation is required.');
+      }
+
+      let persistedSignedTx: any;
+      try {
+        persistedSignedTx = JSON.parse(persistedSignedJson);
+      } catch {
+        await updateGasFundingStatus(sweepId, workerId, 'RECOVERY_REQUIRED', 'Persisted TRON signed transaction JSON is invalid', persistedHash);
+        throw new Error('Persisted TRON signed transaction JSON is invalid; manual reconciliation is required.');
+      }
+
+      if (
+        String(persistedSignedTx?.txID || '').toLowerCase() !== persistedHash ||
+        !Array.isArray(persistedSignedTx?.signature) ||
+        persistedSignedTx.signature.length === 0
+      ) {
+        await updateGasFundingStatus(sweepId, workerId, 'RECOVERY_REQUIRED', 'Persisted TRON transaction hash/signature mismatch', persistedHash);
+        throw new Error('Persisted TRON signed transaction failed integrity validation.');
+      }
+
+      const recoveryTronWeb = getTronWebInstance(process.env.TRON_RPC_URL || 'https://api.trongrid.io');
+      const isConfirmed = async (): Promise<boolean> => {
+        try {
+          const txInfo = await recoveryTronWeb.trx.getTransaction(persistedHash);
+          return Boolean(txInfo?.ret?.some((item: any) => item?.contractRet === 'SUCCESS'));
+        } catch {
+          return false;
+        }
+      };
+
+      if (await isConfirmed()) {
+        await updateGasFundingStatus(sweepId, workerId, 'CONFIRMED', null, persistedHash);
+        return;
+      }
+
+      try {
+        await assertPreBroadcastOwnership(sweepId, workerId, 'GAS_FUNDING');
+        const rebroadcast = await recoveryTronWeb.trx.sendRawTransaction(persistedSignedTx);
+        if (!rebroadcast?.result) {
+          throw new Error('TRON node did not acknowledge exact persisted gas-funding transaction');
+        }
+        await updateGasFundingStatus(sweepId, workerId, 'BROADCASTED', null, persistedHash);
+      } catch (broadcastError: any) {
+        if (await isConfirmed()) {
+          await updateGasFundingStatus(sweepId, workerId, 'CONFIRMED', null, persistedHash);
+          return;
+        }
+        await updateGasFundingStatus(
+          sweepId,
+          workerId,
+          'RECOVERY_REQUIRED',
+          broadcastError?.message || 'TRON gas-funding rebroadcast outcome is ambiguous',
+          persistedHash
+        );
+        throw broadcastError;
+      }
+
+      for (let attempt = 1; attempt <= 10; attempt++) {
+        await new Promise((resolve) => setTimeout(resolve, 3000));
+        if (await isConfirmed()) {
+          await updateGasFundingStatus(sweepId, workerId, 'CONFIRMED', null, persistedHash);
+          return;
+        }
+      }
+
+      await updateGasFundingStatus(sweepId, workerId, 'RECOVERY_REQUIRED', 'Timed out confirming persisted TRON gas-funding transaction', persistedHash);
+      throw new Error(`Timed out confirming persisted TRON gas-funding transaction ${persistedHash}`);
+    }
   }
 
   const tronPrivKey = resolveTronHotWalletPrivateKey();
   if (!tronPrivKey) {
-    console.warn('[Tron Gas] HOT_WALLET_TRON_PRIVATE_KEY not configured. Skipping gas auto-funding.');
-    return;
+    await updateGasFundingStatus(sweepId, workerId, 'FAILED', 'HOT_WALLET_TRON_PRIVATE_KEY is not configured');
+    throw new Error('HOT_WALLET_TRON_PRIVATE_KEY is not configured; TRON gas funding is blocked.');
   }
 
   const tronWeb = getTronWebInstance(
@@ -674,13 +1096,7 @@ export async function fundTronGasForAddress(
   if (BigInt(hotBalanceSun) < BigInt(amountSun) + tronMinReserveSun) {
     const insolvMsg = `TRON hot wallet ${hotWalletAddress} has insufficient TRX (${hotBalanceSun / 1_000_000} TRX). Required: ${(Number(amountSun) + Number(tronMinReserveSun)) / 1_000_000} TRX.`;
     console.error(`[Tron Hot Wallet Insolvency] ${insolvMsg}`);
-    if (sweepId) {
-      await supabaseAdmin.from('gas_funding_operations').update({
-        status: 'RECOVERY_REQUIRED',
-        error_message: insolvMsg,
-        updated_at: new Date().toISOString(),
-      }).eq('sweep_id', sweepId);
-    }
+    await updateGasFundingStatus(sweepId, workerId, 'RECOVERY_REQUIRED', insolvMsg);
     throw new Error(`HOT_WALLET_INSOLVENT: ${insolvMsg}`);
   }
 
@@ -724,25 +1140,16 @@ export async function fundTronGasForAddress(
 
   // 4. Broadcast exact persisted transaction
   try {
+    await assertPreBroadcastOwnership(sweepId, workerId, 'GAS_FUNDING');
     const broadcastRes = await tronWeb.trx.sendRawTransaction(signedTx);
     if (!broadcastRes || !broadcastRes.result) {
       throw new Error(`TRON gas funding broadcast rejected: ${JSON.stringify(broadcastRes)}`);
     }
 
-    if (sweepId) {
-      await supabaseAdmin
-        .from('gas_funding_operations')
-        .update({ status: 'BROADCASTED', updated_at: new Date().toISOString() })
-        .eq('sweep_id', sweepId);
-    }
+    await updateGasFundingStatus(sweepId, workerId, 'BROADCASTED', null, deterministicTxHash);
   } catch (sendErr: any) {
     console.error(`[Tron Gas Funding Broadcast Exception] ${targetAddress}:`, sendErr);
-    if (sweepId) {
-      await supabaseAdmin
-        .from('gas_funding_operations')
-        .update({ status: 'RECOVERY_REQUIRED', updated_at: new Date().toISOString() })
-        .eq('sweep_id', sweepId);
-    }
+    await updateGasFundingStatus(sweepId, workerId, 'RECOVERY_REQUIRED', sendErr?.message || 'TRON gas funding broadcast outcome is ambiguous', deterministicTxHash);
     throw sendErr;
   }
 
@@ -765,13 +1172,49 @@ export async function fundTronGasForAddress(
     }
 
     if (isGasConfirmed) {
-      await supabaseAdmin
-        .from('gas_funding_operations')
-        .update({ status: 'CONFIRMED', tx_hash: deterministicTxHash, updated_at: new Date().toISOString() })
-        .eq('sweep_id', sweepId);
+      await updateGasFundingStatus(sweepId, workerId, 'CONFIRMED', null, deterministicTxHash);
       console.log(`[Tron Gas] Gas funding tx ${deterministicTxHash} confirmed on-chain.`);
+    } else {
+      const recoveryMessage =
+        'TRON gas-funding transaction was broadcast but did not reach successful confirmation within the polling window; reconcile the exact transaction before retrying';
+      await updateGasFundingStatus(
+        sweepId,
+        workerId,
+        'RECOVERY_REQUIRED',
+        recoveryMessage,
+        deterministicTxHash
+      );
+      throw new Error(`${recoveryMessage}: ${deterministicTxHash}`);
     }
   }
+}
+
+type TronTransactionOutcome = 'CONFIRMED' | 'REVERTED' | 'UNKNOWN';
+
+/** Polls the exact deterministic TRON transaction; unknown is never treated as success. */
+async function waitForTronTransactionOutcome(
+  tronWeb: any,
+  txHash: string,
+  attempts: number = 12,
+  intervalMs: number = 3000
+): Promise<TronTransactionOutcome> {
+  if (!/^[a-f0-9]{64}$/i.test(txHash)) {
+    throw new Error('Invalid deterministic TRON transaction hash');
+  }
+
+  for (let attempt = 1; attempt <= attempts; attempt++) {
+    await new Promise((resolve) => setTimeout(resolve, intervalMs));
+    try {
+      const txInfo = await tronWeb.trx.getTransaction(txHash);
+      const contractRet = txInfo?.ret?.[0]?.contractRet;
+      if (contractRet === 'SUCCESS') return 'CONFIRMED';
+      if (contractRet && contractRet !== 'SUCCESS') return 'REVERTED';
+    } catch {
+      // A query error is not proof of either execution or failure; keep checking.
+    }
+  }
+
+  return 'UNKNOWN';
 }
 
 /**
@@ -805,17 +1248,28 @@ export async function delegateEnergyFromPool(
     throw new Error(`Failed to query TRON account resources: ${err?.message || err}`);
   }
 
-  let totalEnergyLimit = Number(resources.TotalEnergyLimit || 180000000000);
-  let totalEnergyWeight = Number(resources.TotalEnergyWeight || 10000000000);
-
-  if (totalEnergyLimit <= 0) totalEnergyLimit = 180000000000;
-  if (totalEnergyWeight <= 0) totalEnergyWeight = 10000000000;
+  const totalEnergyLimit = Number(resources?.TotalEnergyLimit);
+  const totalEnergyWeight = Number(resources?.TotalEnergyWeight);
+  if (
+    !Number.isFinite(totalEnergyLimit) ||
+    !Number.isFinite(totalEnergyWeight) ||
+    totalEnergyLimit <= 0 ||
+    totalEnergyWeight <= 0 ||
+    !Number.isFinite(energyNeeded) ||
+    energyNeeded <= 0
+  ) {
+    throw new Error('TRON Energy delegation requires valid live TotalEnergyLimit, TotalEnergyWeight and estimated energy values; refusing hard-coded fallbacks.');
+  }
 
   const isWeightInSun = totalEnergyWeight > 1000000000000;
   const totalEnergyWeightSun = isWeightInSun ? totalEnergyWeight : totalEnergyWeight * 1000000;
 
-  // Calculate needed TRX (in SUN)
-  const trxNeededSun = BigInt(Math.ceil((energyNeeded * totalEnergyWeightSun) / totalEnergyLimit));
+  // Calculate needed TRX (in SUN) and reject unsafe floating-point conversion.
+  const calculatedTrxNeededSun = Math.ceil((energyNeeded * totalEnergyWeightSun) / totalEnergyLimit);
+  if (!Number.isSafeInteger(calculatedTrxNeededSun) || calculatedTrxNeededSun <= 0) {
+    throw new Error('Calculated TRON Energy delegation amount is not a safe positive SUN integer.');
+  }
+  const trxNeededSun = BigInt(calculatedTrxNeededSun);
 
   console.log(`[Tron Resource Pool] Energy needed: ${energyNeeded}. Calculated TRX weight: ${Number(trxNeededSun) / 1000000} TRX (${trxNeededSun} SUN)`);
 
@@ -833,21 +1287,73 @@ export async function delegateEnergyFromPool(
     throw new Error(`Failed to initialize resource delegation record: ${initErr?.message || initRes?.message || 'UNKNOWN'}`);
   }
 
-  // If already active or delegated on DB, handle safely without duplicate delegation
+  // Reuse an existing delegation only after validating/confirming its exact persisted transaction.
   if (initRes.already_delegated) {
     if (initRes.status === 'DELEGATED') {
       console.log(`[Tron Resource Pool] Sweep ${sweepId} already has active delegation. Reusing existing.`);
       return { success: true, delegatedAmountSun: BigInt(initRes.delegated_amount_sun) };
     }
 
-    if (initRes.status === 'DELEGATING' && initRes.signed_delegation_hex) {
-      console.log(`[Tron Resource Pool] Sweep ${sweepId} in DELEGATING state. Attempting recovery broadcast of persisted bytes.`);
-      try {
-        const rawTx = JSON.parse(initRes.signed_delegation_hex);
-        await tronWeb.trx.sendRawTransaction(rawTx);
-      } catch (rebroadcastErr) {
-        console.warn(`[Tron Resource Pool] Rebroadcast of persisted delegation failed or already in mempool:`, rebroadcastErr);
+    if (initRes.status === 'UNDELEGATING') {
+      throw new Error('TRON Energy for this sweep is currently being reclaimed; a new delegation is not permitted.');
+    }
+
+    if (initRes.status === 'DELEGATING') {
+      if (!initRes.signed_delegation_hex || !initRes.delegation_tx_hash) {
+        throw new Error('Existing TRON delegation is DELEGATING but its durable signed transaction is incomplete.');
       }
+
+      let rawTx: any;
+      try {
+        rawTx = JSON.parse(initRes.signed_delegation_hex);
+      } catch {
+        throw new Error('Persisted TRON delegation payload is invalid JSON; manual reconciliation is required.');
+      }
+
+      if (
+        String(rawTx?.txID || '').toLowerCase() !== String(initRes.delegation_tx_hash).toLowerCase() ||
+        !Array.isArray(rawTx?.signature) ||
+        rawTx.signature.length === 0 ||
+        !rawTx?.raw_data_hex
+      ) {
+        throw new Error('Persisted TRON delegation hash/signature/raw-data mismatch; refusing replacement.');
+      }
+
+      await assertPreBroadcastOwnership(sweepId, workerId, null);
+
+      const priorOutcome = await waitForTronTransactionOutcome(
+        tronWeb,
+        String(initRes.delegation_tx_hash)
+      );
+
+      if (priorOutcome === 'UNKNOWN') {
+        try {
+          await tronWeb.trx.sendRawTransaction(rawTx);
+        } catch (rebroadcastErr: any) {
+          console.warn('[Tron Resource Pool] Exact persisted delegation rebroadcast returned an ambiguous response:', rebroadcastErr);
+        }
+      } else if (priorOutcome === 'REVERTED') {
+        throw new Error(`Persisted TRON delegation transaction reverted on-chain: ${initRes.delegation_tx_hash}. Manual reconciliation is required before a replacement delegation.`);
+      }
+
+      const confirmedOutcome = priorOutcome === 'CONFIRMED'
+        ? 'CONFIRMED'
+        : await waitForTronTransactionOutcome(tronWeb, String(initRes.delegation_tx_hash));
+
+      if (confirmedOutcome !== 'CONFIRMED') {
+        throw new Error(`Persisted TRON delegation transaction ${initRes.delegation_tx_hash} is not confirmed; keeping DELEGATING state for recovery.`);
+      }
+
+      const { data: recoveredStatus, error: recoveredStatusError } = await supabaseAdmin.rpc('update_delegation_status', {
+        p_sweep_id: sweepId,
+        p_worker_id: workerId,
+        p_expected_status: 'DELEGATING',
+        p_new_status: 'DELEGATED',
+      });
+      if (recoveredStatusError || !recoveredStatus || recoveredStatus.success !== true) {
+        throw new Error(`Failed to record confirmed TRON delegation: ${recoveredStatusError?.message || recoveredStatus?.message || 'RPC did not confirm success'}`);
+      }
+
       return { success: true, delegatedAmountSun: BigInt(initRes.delegated_amount_sun) };
     }
   }
@@ -902,31 +1408,38 @@ export async function delegateEnergyFromPool(
     throw new Error(`Failed to persist signed delegation transaction: ${persistErr?.message || persistRes?.message}`);
   }
 
-  // 6. Broadcast delegation transaction
+  // 6. Broadcast only after revalidating the live sweep lease.
   try {
+    await assertPreBroadcastOwnership(sweepId, workerId, null);
     const broadcastRes = await tronWeb.trx.sendRawTransaction(signedTx);
     if (!broadcastRes || !broadcastRes.result) {
-      throw new Error(`TRON delegation raw broadcast rejected: ${JSON.stringify(broadcastRes)}`);
+      throw new Error(`TRON delegation raw broadcast returned an ambiguous response: ${JSON.stringify(broadcastRes)}`);
     }
   } catch (broadcastErr: any) {
-    console.error(`[Tron Resource Pool] Delegation broadcast failed:`, broadcastErr);
-    await supabaseAdmin.rpc('update_delegation_status', {
-      p_sweep_id: sweepId,
-      p_worker_id: workerId,
-      p_expected_status: 'DELEGATING',
-      p_new_status: 'FAILED',
-      p_error_message: `Delegation broadcast failed: ${broadcastErr?.message || broadcastErr}`,
-    });
+    // The signed transaction is already durable. Do not mark it FAILED or
+    // clear its bytes: the node may have accepted it despite the response.
+    console.error(`[Tron Resource Pool] Delegation broadcast is ambiguous; retaining DELEGATING transaction ${deterministicTxHash}:`, broadcastErr);
     throw broadcastErr;
   }
 
-  // 7. Transition status to DELEGATED
-  await supabaseAdmin.rpc('update_delegation_status', {
+  // 7. Mark DELEGATED only after the exact transaction is confirmed on-chain.
+  const delegationOutcome = await waitForTronTransactionOutcome(tronWeb, deterministicTxHash);
+  if (delegationOutcome !== 'CONFIRMED') {
+    const outcomeMessage = delegationOutcome === 'REVERTED'
+      ? 'TRON resource-delegation transaction reverted on-chain'
+      : 'Timed out waiting for TRON resource-delegation confirmation';
+    throw new Error(`${outcomeMessage}; durable transaction ${deterministicTxHash} remains in DELEGATING for reconciliation.`);
+  }
+
+  const { data: delegationStatusRes, error: delegationStatusErr } = await supabaseAdmin.rpc('update_delegation_status', {
     p_sweep_id: sweepId,
     p_worker_id: workerId,
     p_expected_status: 'DELEGATING',
     p_new_status: 'DELEGATED',
   });
+  if (delegationStatusErr || !delegationStatusRes || delegationStatusRes.success !== true) {
+    throw new Error(`Confirmed TRON delegation could not be recorded: ${delegationStatusErr?.message || delegationStatusRes?.message || 'RPC did not confirm success'}`);
+  }
 
   console.log(`[Tron Resource Pool] Successfully delegated ${energyNeeded} Energy to ${receiverAddress}. TxHash: ${deterministicTxHash}`);
   return { success: true, delegatedAmountSun: trxNeededSun };
@@ -965,13 +1478,45 @@ export async function undelegateEnergyToPool(
     return true;
   }
 
+  // Only a verified active delegation may start a new undelegation.
+  // An UNDELEGATING row must always carry its exact previously signed payload.
+  if (
+    (delegation.status === 'DELEGATED' &&
+      (delegation.signed_undelegation_hex || delegation.undelegation_tx_hash)) ||
+    (delegation.status === 'UNDELEGATING' &&
+      (!delegation.signed_undelegation_hex || !delegation.undelegation_tx_hash)) ||
+    !['DELEGATED', 'UNDELEGATING'].includes(String(delegation.status || '').toUpperCase())
+  ) {
+    console.warn(`[Tron Resource Pool] Delegation ${sweepId} is in non-reclaimable state ${delegation.status}; manual reconciliation is required.`);
+    return false;
+  }
+
   const receiverAddress = delegation.receiver_address;
   const trxNeededSun = Number(delegation.delegated_amount_sun);
 
   let deterministicTxHash = delegation.undelegation_tx_hash;
-  let signedTx = delegation.signed_undelegation_hex ? JSON.parse(delegation.signed_undelegation_hex) : null;
+  let signedTx: any = null;
+  if (delegation.signed_undelegation_hex) {
+    try {
+      signedTx = JSON.parse(delegation.signed_undelegation_hex);
+    } catch {
+      console.error('[Tron Resource Pool] Persisted undelegation payload is invalid JSON; refusing to create a replacement transaction.');
+      return false;
+    }
 
-  // 2. Build and sign if not already signed & persisted
+    if (
+      !deterministicTxHash ||
+      String(signedTx?.txID || '').toLowerCase() !== String(deterministicTxHash).toLowerCase() ||
+      !Array.isArray(signedTx?.signature) ||
+      signedTx.signature.length === 0 ||
+      !signedTx?.raw_data_hex
+    ) {
+      console.error('[Tron Resource Pool] Persisted undelegation transaction hash/signature/raw-data mismatch; refusing to broadcast.');
+      return false;
+    }
+  }
+
+  // 2. Build and sign only when no durable undelegation transaction exists.
   if (!signedTx) {
     let undelegationTxObj;
     try {
@@ -1008,8 +1553,10 @@ export async function undelegateEnergyToPool(
     }
   }
 
-  // 4. Broadcast exact persisted signed transaction bytes
+  // 4. Broadcast exact persisted signed transaction bytes only while this
+  // worker still owns the live parent sweep lease.
   try {
+    await assertPreBroadcastOwnership(sweepId, workerId, null);
     const broadcastRes = await tronWeb.trx.sendRawTransaction(signedTx);
     if (!broadcastRes || !broadcastRes.result) {
       const errStr = JSON.stringify(broadcastRes || {});
@@ -1036,14 +1583,9 @@ export async function undelegateEnergyToPool(
         isUndelegationConfirmed = true;
         break;
       } else if (txInfo && txInfo.ret && txInfo.ret[0]?.contractRet && txInfo.ret[0]?.contractRet !== 'SUCCESS') {
-        console.error(`[Tron Resource Pool] Undelegation transaction reverted on-chain: ${txInfo.ret[0]?.contractRet}`);
-        await supabaseAdmin.rpc('update_delegation_status', {
-          p_sweep_id: sweepId,
-          p_worker_id: workerId,
-          p_expected_status: 'UNDELEGATING',
-          p_new_status: 'FAILED',
-          p_error_message: `Undelegation reverted on-chain: ${txInfo.ret[0]?.contractRet}`,
-        });
+        console.error(
+          `[Tron Resource Pool] Undelegation transaction ${deterministicTxHash} reverted on-chain: ${txInfo.ret[0]?.contractRet}. Keeping the persisted UNDELEGATING record; a new signed attempt requires explicit reconciliation.`
+        );
         return false;
       }
     } catch {
@@ -1066,12 +1608,17 @@ export async function undelegateEnergyToPool(
       verifiedDelegationRemoved = true;
       console.log(`[Tron Resource Pool] On-chain delegation verified completely removed via getDelegatedResourceV2.`);
     } else {
-      console.log(`[Tron Resource Pool] Remaining delegated energy on-chain: ${energyDelegation.frozen_balance_for_energy} SUN.`);
-      verifiedDelegationRemoved = true;
+      console.warn(
+        `[Tron Resource Pool] Energy still appears delegated (${energyDelegation.frozen_balance_for_energy} SUN); refusing to mark resources reclaimed.`
+      );
+      verifiedDelegationRemoved = false;
     }
   } catch (v2Err) {
-    console.warn(`[Tron Resource Pool] getDelegatedResourceV2 check encountered warning:`, v2Err);
-    verifiedDelegationRemoved = true; // Fallback to confirmed on-chain tx
+    console.warn(
+      '[Tron Resource Pool] Could not independently verify delegated Energy was reclaimed; leaving the operation pending recovery:',
+      v2Err
+    );
+    verifiedDelegationRemoved = false;
   }
 
   if (!verifiedDelegationRemoved) {
@@ -1104,7 +1651,10 @@ export async function sweepTronDepositAddress(
   sweepId?: string,
   workerId?: string
 ): Promise<SweepResult> {
-  const stopHeartbeat = sweepId && workerId ? startSweeperHeartbeat(sweepId, workerId) : () => {};
+  if (!sweepId || !workerId) {
+    return { address: depositAddress, network: 'TRC20', amountSwept: '0', txHash: '', status: 'FAILED', error: 'A database-claimed sweep ID and worker lease are required before TRON sweep.' };
+  }
+  const stopHeartbeat = startSweeperHeartbeat(sweepId, workerId);
   let delegatedEnergy = false;
 
   try {
@@ -1132,14 +1682,14 @@ export async function sweepTronDepositAddress(
     const tronHost = process.env.TRON_RPC_URL || 'https://api.trongrid.io';
     const tronWeb = getTronWebInstance(tronHost, childTronPrivKey);
 
-    const usdtContractAddress = process.env.USDT_CONTRACT_TRC20 || 'TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t';
+    const usdtContractAddress = 'TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t';
     const contract = await tronWeb.contract().at(usdtContractAddress);
 
     // Check TRC20 USDT balance
     const balanceSun = await contract.balanceOf(childTronAddress).call();
     const balanceUsdt = Number(balanceSun) / 1_000_000;
 
-    if (balanceUsdt < MIN_SWEEP_THRESHOLD_USDT) {
+    if (!(await meetsMinimumSweepUsdValue('USDT', balanceUsdt))) {
       stopHeartbeat();
       return {
         address: depositAddress,
@@ -1147,8 +1697,11 @@ export async function sweepTronDepositAddress(
         amountSwept: balanceUsdt.toString(),
         txHash: '',
         status: 'SKIPPED',
-        error: `Balance ${balanceUsdt} USDT is below minimum threshold ${MIN_SWEEP_THRESHOLD_USDT}`,
+        error: `Balance ${balanceUsdt} USDT is below the $${MIN_SWEEP_VALUE_USD} USD-equivalent sweep threshold`,
       };
+    }
+    if (!HOT_WALLET_TRON_ADDRESS || !tronWeb.isAddress(HOT_WALLET_TRON_ADDRESS)) {
+      throw new Error('A valid HOT_WALLET_TRON_ADDRESS must be configured before gas funding or sweeping.');
     }
 
     // 1. Check dynamic activation status on-chain (Blocker #4)
@@ -1163,9 +1716,49 @@ export async function sweepTronDepositAddress(
     }
 
     let currentStatus = 'CLAIMED';
+    const { data: priorTronGasFunding, error: priorTronGasFundingError } = await supabaseAdmin
+      .from('gas_funding_operations')
+      .select('status, amount_allocated, tx_hash, signed_tx_hex')
+      .eq('sweep_id', sweepId)
+      .maybeSingle();
+
+    if (priorTronGasFundingError) {
+      throw new Error(`Unable to inspect existing TRON gas-funding operation: ${priorTronGasFundingError.message}`);
+    }
+
+    const priorTronGasStatus = String(priorTronGasFunding?.status || '').toUpperCase();
+    const hasPriorTronGasTransaction = [
+      'READY_TO_BROADCAST',
+      'BROADCASTED',
+      'RECOVERY_REQUIRED',
+    ].includes(priorTronGasStatus);
+    let recoveredPriorTronGasFunding = false;
+
+    if (hasPriorTronGasTransaction) {
+      if (
+        !priorTronGasFunding?.tx_hash ||
+        !priorTronGasFunding?.signed_tx_hex ||
+        !priorTronGasFunding?.amount_allocated
+      ) {
+        throw new Error('Existing TRON gas-funding transaction is incomplete; refusing a new funding or sweep attempt.');
+      }
+
+      const priorAmountSun = Math.ceil(Number(priorTronGasFunding.amount_allocated) * 1_000_000);
+      if (!Number.isSafeInteger(priorAmountSun) || priorAmountSun <= 0) {
+        throw new Error('Existing TRON gas-funding amount is invalid; manual reconciliation is required.');
+      }
+
+      await transitionSweepStatus(sweepId, workerId, 'CLAIMED', 'GAS_FUNDING');
+      currentStatus = 'GAS_FUNDING';
+      await fundTronGasForAddress(childTronAddress, priorAmountSun, sweepId, workerId);
+      await transitionSweepStatus(sweepId, workerId, 'GAS_FUNDING', 'GAS_FUNDED');
+      currentStatus = 'GAS_FUNDED';
+      recoveredPriorTronGasFunding = true;
+    }
 
     if (!isActivated) {
-      // Query exact dynamic account creation fee from chain parameters (Blocker #4)
+      if (!recoveredPriorTronGasFunding) {
+        // Query exact dynamic account creation fee from chain parameters (Blocker #4)
       let accountCreationFeeSun = 1_000_000;
       try {
         const chainParams = await tronWeb.trx.getChainParameters();
@@ -1188,6 +1781,7 @@ export async function sweepTronDepositAddress(
       if (sweepId && workerId) {
         await transitionSweepStatus(sweepId, workerId, 'GAS_FUNDING', 'GAS_FUNDED');
         currentStatus = 'GAS_FUNDED';
+      }
       }
 
       // Dynamically poll until account activation is verified on-chain before proceeding
@@ -1288,6 +1882,7 @@ export async function sweepTronDepositAddress(
 
     let txid = deterministicTxHash;
     try {
+      await stopHeartbeat.assertLease();
       const broadcastRes = await tronWeb.trx.sendRawTransaction(signedTx);
       if (!broadcastRes || !broadcastRes.result) {
         throw new Error(`TRON raw broadcast rejected: ${JSON.stringify(broadcastRes)}`);
@@ -1355,6 +1950,187 @@ export async function sweepTronDepositAddress(
 }
 
 /**
+ * Gets a live network fee recommendation from the configured mempool-compatible API.
+ * Refuses to sign with a stale hard-coded fee if the fee provider is unavailable.
+ */
+async function getRecommendedUtxoFeeRate(
+  apiBase: string,
+  network: 'BTC' | 'LTC'
+): Promise<number> {
+  const baseUrl = apiBase.replace(new RegExp(String.fromCharCode(47) + '+$'), '');
+  const response = await fetch(`${baseUrl}/v1/fees/recommended`);
+  if (!response.ok) {
+    throw new Error(`${network} fee recommendation request failed: HTTP ${response.status}`);
+  }
+
+  const feeData: any = await response.json();
+  const candidates = [feeData?.halfHourFee, feeData?.fastestFee, feeData?.minimumFee];
+  const feeRate = candidates.find((value) =>
+    typeof value === 'number' && Number.isFinite(value) && value > 0
+  );
+
+  if (typeof feeRate !== 'number') {
+    throw new Error(`${network} fee provider returned no valid positive recommended fee rate`);
+  }
+
+  return feeRate;
+}
+
+/**
+ * Verify each provider-reported UTXO against the serialized previous transaction.
+ * The raw transaction hash binds the output script/value to the outpoint; the
+ * transaction metadata endpoint must also report a confirmed block inclusion.
+ * Any disagreement fails closed before the UTXO is reserved or signed.
+ */
+async function verifyUtxoPrevouts(
+  apiBase: string,
+  network: 'BTC' | 'LTC',
+  utxos: Array<{ txid: string; vout: number; value: number; status?: { confirmed?: boolean } }>,
+  expectedDepositScript: Buffer
+): Promise<void> {
+  if (!Array.isArray(utxos) || utxos.length === 0 || utxos.length > 100) {
+    throw new Error(`${network} UTXO set is empty or exceeds the supported input limit`);
+  }
+
+  const baseUrl = apiBase.replace(new RegExp(String.fromCharCode(47) + '+$'), '');
+  const uniqueTxids = [...new Set(utxos.map((utxo) => String(utxo.txid).toLowerCase()))];
+  const previousTransactions = new Map<string, bitcoin.Transaction>();
+
+  // Bound concurrency to avoid overwhelming public Esplora-compatible APIs.
+  for (let offset = 0; offset < uniqueTxids.length; offset += 4) {
+    const batch = uniqueTxids.slice(offset, offset + 4);
+    await Promise.all(batch.map(async (txid) => {
+      if (!/^[a-f0-9]{64}$/.test(txid)) {
+        throw new Error(`${network} UTXO contains an invalid previous transaction ID`);
+      }
+
+      const [rawResponse, detailResponse] = await Promise.all([
+        fetch(`${baseUrl}/tx/${txid}/hex`),
+        fetch(`${baseUrl}/tx/${txid}`),
+      ]);
+      if (!rawResponse.ok || !detailResponse.ok) {
+        throw new Error(`${network} previous transaction lookup failed for ${txid}`);
+      }
+
+      const rawHex = (await rawResponse.text()).trim();
+      if (!/^(?:[0-9a-fA-F]{2})+$/.test(rawHex)) {
+        throw new Error(`${network} previous transaction endpoint returned invalid raw hex for ${txid}`);
+      }
+
+      const previousTx = bitcoin.Transaction.fromHex(rawHex);
+      if (previousTx.getId().toLowerCase() !== txid) {
+        throw new Error(`${network} previous transaction hash does not match requested outpoint ${txid}`);
+      }
+
+      const details: any = await detailResponse.json();
+      const status = details?.status;
+      if (details?.txid && String(details.txid).toLowerCase() !== txid) {
+        throw new Error(`${network} transaction metadata ID mismatch for ${txid}`);
+      }
+      if (
+        status?.confirmed !== true ||
+        !Number.isSafeInteger(status?.block_height) ||
+        status.block_height <= 0 ||
+        !/^[a-f0-9]{64}$/i.test(String(status?.block_hash || ''))
+      ) {
+        throw new Error(`${network} previous transaction ${txid} is not confirmed in a verifiable block`);
+      }
+
+      previousTransactions.set(txid, previousTx);
+    }));
+  }
+
+  const seenOutpoints = new Set<string>();
+  for (const utxo of utxos) {
+    const txid = String(utxo.txid).toLowerCase();
+    const vout = utxo.vout;
+    const outpoint = `${txid}:${vout}`;
+    if (seenOutpoints.has(outpoint)) {
+      throw new Error(`${network} UTXO provider returned duplicate outpoint ${outpoint}`);
+    }
+    seenOutpoints.add(outpoint);
+
+    if (
+      utxo.status?.confirmed !== true ||
+      !Number.isSafeInteger(vout) ||
+      vout < 0 ||
+      vout > 0xffffffff ||
+      !Number.isSafeInteger(utxo.value) ||
+      utxo.value <= 0
+    ) {
+      throw new Error(`${network} UTXO provider returned an invalid or unconfirmed outpoint ${outpoint}`);
+    }
+
+    const previousTx = previousTransactions.get(txid);
+    const previousOutput = previousTx?.outs[vout];
+    if (!previousOutput) {
+      throw new Error(`${network} UTXO references a missing previous output ${outpoint}`);
+    }
+
+    if (
+      !Number.isSafeInteger(previousOutput.value) ||
+      previousOutput.value <= 0 ||
+      previousOutput.value !== utxo.value ||
+      !Buffer.from(previousOutput.script).equals(expectedDepositScript)
+    ) {
+      throw new Error(`${network} previous output value or deposit script does not match UTXO ${outpoint}`);
+    }
+  }
+}
+
+/**
+ * Check freshly signed raw transaction bytes against the exact reserved input set
+ * and intended single output before the persistence RPC can move it to READY_TO_BROADCAST.
+ */
+function assertSignedUtxoTransactionMatchesIntent(
+  signedTxHex: string,
+  expectedTxid: string,
+  network: 'BTC' | 'LTC',
+  utxos: Array<{ txid: string; vout: number; value: number; status?: { confirmed?: boolean } }>,
+  expectedDestinationScript: Buffer,
+  expectedOutputSat: number,
+  expectedFeeSat: number
+): void {
+  const tx = bitcoin.Transaction.fromHex(signedTxHex);
+  const actualInputs = tx.ins.map((input) => ({
+    txid: Buffer.from(input.hash).reverse().toString('hex').toLowerCase(),
+    vout: input.index,
+  }));
+  const expectedInputs = utxos.map((utxo) => ({
+    txid: String(utxo.txid).toLowerCase(),
+    vout: utxo.vout,
+  }));
+
+  const inputsMatch = actualInputs.length === expectedInputs.length &&
+    actualInputs.every((input, index) =>
+      input.txid === expectedInputs[index].txid &&
+      input.vout === expectedInputs[index].vout
+    );
+
+  if (
+    tx.getId().toLowerCase() !== expectedTxid.toLowerCase() ||
+    !inputsMatch ||
+    tx.ins.some((input) => !Array.isArray(input.witness) || input.witness.length < 2) ||
+    tx.outs.length !== 1 ||
+    !Number.isSafeInteger(tx.outs[0]?.value) ||
+    !Buffer.from(tx.outs[0]?.script || Buffer.alloc(0)).equals(expectedDestinationScript) ||
+    tx.outs[0].value !== expectedOutputSat
+  ) {
+    throw new Error(`${network} signed transaction does not match its expected input outpoints or destination output`);
+  }
+
+  const inputTotalSat = utxos.reduce((sum, utxo) => sum + BigInt(utxo.value), 0n);
+  const actualFeeSat = inputTotalSat - BigInt(tx.outs[0].value);
+  if (
+    inputTotalSat <= 0n ||
+    actualFeeSat < 0n ||
+    actualFeeSat !== BigInt(expectedFeeSat)
+  ) {
+    throw new Error(`${network} signed transaction input/output fee accounting does not match the persisted intent`);
+  }
+}
+
+/**
  * Sweeps confirmed Bitcoin (BTC Native SegWit) UTXOs to central BTC Hot Wallet.
  */
 export async function sweepBtcDepositAddress(
@@ -1363,7 +2139,10 @@ export async function sweepBtcDepositAddress(
   sweepId?: string,
   workerId?: string
 ): Promise<SweepResult> {
-  const stopHeartbeat = sweepId && workerId ? startSweeperHeartbeat(sweepId, workerId) : () => {};
+  if (!sweepId || !workerId) {
+    return { address: depositAddress, network: 'BTC', amountSwept: '0', txHash: '', status: 'FAILED', error: 'A database-claimed sweep ID and worker lease are required before BTC sweep.' };
+  }
+  const stopHeartbeat = startSweeperHeartbeat(sweepId, workerId);
   try {
     const mnemonic = process.env.DEPOSIT_HD_MNEMONIC;
     if (!mnemonic || !mnemonic.trim()) {
@@ -1392,8 +2171,19 @@ export async function sweepBtcDepositAddress(
       throw new Error(`Failed to query UTXOs for ${btcChildAddress}: ${utxoRes.statusText}`);
     }
 
-    const utxos: Array<{ txid: string; vout: number; value: number }> = await utxoRes.json();
-    if (!utxos || utxos.length === 0) {
+    const apiUtxos: Array<{ txid: string; vout: number; value: number; status?: { confirmed?: boolean } }> = await utxoRes.json();
+    if (!Array.isArray(apiUtxos)) {
+      throw new Error('UTXO provider returned an invalid response shape');
+    }
+    const utxos = apiUtxos.filter((utxo) => utxo?.status?.confirmed === true);
+    if (utxos.some((utxo) =>
+      !/^[a-f0-9]{64}$/i.test(String(utxo.txid || '')) ||
+      !Number.isSafeInteger(utxo.vout) || utxo.vout < 0 ||
+      !Number.isSafeInteger(utxo.value) || utxo.value <= 0
+    )) {
+      throw new Error('UTXO provider returned an invalid confirmed outpoint or value');
+    }
+    if (utxos.length === 0) {
       stopHeartbeat();
       return {
         address: depositAddress,
@@ -1401,16 +2191,49 @@ export async function sweepBtcDepositAddress(
         amountSwept: '0',
         txHash: '',
         status: 'SKIPPED',
-        error: 'No UTXOs available to sweep',
+        error: 'No confirmed UTXOs available to sweep',
       };
     }
 
-    // Reserve UTXOs atomically if sweepId is present
-    if (sweepId) {
+    await verifyUtxoPrevouts(
+      btcApiBase,
+      'BTC',
+      utxos,
+      bitcoin.address.toOutputScript(btcChildAddress, bitcoin.networks.bitcoin)
+    );
+
+    const totalSat = utxos.reduce((acc, u) => acc + u.value, 0);
+    if (!Number.isSafeInteger(totalSat) || totalSat <= 0) {
+      throw new Error('BTC confirmed UTXO total exceeds safe integer bounds or is invalid');
+    }
+    const totalBtc = totalSat / 100_000_000;
+
+    if (!(await meetsMinimumSweepUsdValue('BTC', totalBtc))) {
+      stopHeartbeat();
+      return {
+        address: depositAddress,
+        network: 'BTC',
+        amountSwept: totalBtc.toString(),
+        txHash: '',
+        status: 'SKIPPED',
+        error: `Balance ${totalBtc} BTC is below the $${MIN_SWEEP_VALUE_USD} USD-equivalent sweep threshold`,
+      };
+    }
+    const hotWalletBtcAddress = requireBitcoinHotWalletAddress();
+
+    // The service-role reservation RPC is fenced to the active sweep worker.
+    if (sweepId && !workerId) {
+      stopHeartbeat();
+      throw new Error('BTC sweep requires a worker ID before UTXO reservation');
+    }
+
+    // Reserve UTXOs only after the address balance meets the minimum USD value.
+    if (sweepId && workerId) {
       const { data: reserveRes, error: reserveErr } = await supabaseAdmin.rpc('reserve_utxos_for_sweep', {
         p_sweep_id: sweepId,
+        p_worker_id: workerId,
         p_network: 'BTC',
-        p_utxos: utxos.map((u) => ({ txid: u.txid, vout: u.vout })),
+        p_utxos: utxos.map((u) => ({ txid: u.txid, vout: u.vout, value_sat: String(u.value) })),
         p_lease_seconds: 300,
       });
 
@@ -1427,24 +2250,12 @@ export async function sweepBtcDepositAddress(
       }
     }
 
-    const totalSat = utxos.reduce((acc, u) => acc + u.value, 0);
-    const totalBtc = totalSat / 100_000_000;
-
-    if (totalBtc < MIN_SWEEP_THRESHOLD_BTC) {
-      stopHeartbeat();
-      return {
-        address: depositAddress,
-        network: 'BTC',
-        amountSwept: totalBtc.toString(),
-        txHash: '',
-        status: 'SKIPPED',
-        error: `Balance ${totalBtc} BTC is below minimum threshold ${MIN_SWEEP_THRESHOLD_BTC}`,
-      };
-    }
-
-    const satPerVbyte = 8;
+    const satPerVbyte = await getRecommendedUtxoFeeRate(btcApiBase, 'BTC');
     const estimatedVsize = 68 * utxos.length + 31 + 10;
-    const feeSat = Math.max(250, estimatedVsize * satPerVbyte);
+    const feeSat = Math.max(250, Math.ceil(estimatedVsize * satPerVbyte));
+    if (!Number.isSafeInteger(feeSat) || feeSat <= 0) {
+      throw new Error('BTC recommended fee calculation is invalid');
+    }
     const sweepSat = totalSat - feeSat;
 
     if (sweepSat <= 546) {
@@ -1482,7 +2293,7 @@ export async function sweepBtcDepositAddress(
     }
 
     psbt.addOutput({
-      address: HOT_WALLET_BTC_ADDRESS,
+      address: hotWalletBtcAddress,
       value: sweepSat,
     });
 
@@ -1498,6 +2309,16 @@ export async function sweepBtcDepositAddress(
     const deterministicTxHash = txObj.getId();
     const rawTxHex = txObj.toHex();
 
+    assertSignedUtxoTransactionMatchesIntent(
+      rawTxHex,
+      deterministicTxHash,
+      'BTC',
+      utxos,
+      bitcoin.address.toOutputScript(hotWalletBtcAddress, bitcoin.networks.bitcoin),
+      sweepSat,
+      feeSat
+    );
+
     // Step 3 & 4: Durable database persistence & READY_TO_BROADCAST transition
     if (sweepId && workerId) {
       await assertPreBroadcastOwnership(sweepId, workerId, 'CLAIMED');
@@ -1507,6 +2328,16 @@ export async function sweepBtcDepositAddress(
         p_expected_status: 'CLAIMED',
         p_signed_tx_hex: rawTxHex,
         p_sweep_tx_hash: deterministicTxHash,
+        p_signed_utxo_intent: {
+          inputs: utxos.map((u) => ({
+            txid: u.txid.toLowerCase(),
+            vout: u.vout,
+            value_sat: String(u.value),
+          })),
+          destination_script_hex: txObj.outs[0]?.script.toString('hex') || '',
+          output_amount_sat: String(sweepSat),
+          fee_amount_sat: String(feeSat),
+        },
         p_extend_lease_seconds: 300,
       });
 
@@ -1518,6 +2349,7 @@ export async function sweepBtcDepositAddress(
 
     let txid = deterministicTxHash;
     try {
+      await stopHeartbeat.assertLease();
       const broadcastRes = await fetch(`${btcApiBase}/tx`, {
         method: 'POST',
         body: rawTxHex,
@@ -1529,11 +2361,14 @@ export async function sweepBtcDepositAddress(
         throw new Error(`BTC broadcast failed: ${errText}`);
       }
 
-      const txidRaw = await broadcastRes.text();
-      txid = txidRaw.trim() || deterministicTxHash;
+      const txidRaw = (await broadcastRes.text()).trim();
+      if (txidRaw && txidRaw.toLowerCase() !== deterministicTxHash.toLowerCase()) {
+        throw new Error(`UTXO broadcast endpoint returned a transaction ID that does not match the locally derived signed transaction: ${txidRaw}`);
+      }
+      txid = deterministicTxHash;
 
       if (sweepId && workerId) {
-        await transitionSweepStatus(sweepId, workerId, 'READY_TO_BROADCAST', 'BROADCASTED', txid);
+        await transitionSweepStatus(sweepId, workerId, 'READY_TO_BROADCAST', 'BROADCASTED', deterministicTxHash);
       }
     } catch (broadcastErr: any) {
       console.error(`[BTC Sweeper Broadcast Exception] ${depositAddress}:`, broadcastErr);
@@ -1582,7 +2417,10 @@ export async function sweepLtcDepositAddress(
   sweepId?: string,
   workerId?: string
 ): Promise<SweepResult> {
-  const stopHeartbeat = sweepId && workerId ? startSweeperHeartbeat(sweepId, workerId) : () => {};
+  if (!sweepId || !workerId) {
+    return { address: depositAddress, network: 'LTC', amountSwept: '0', txHash: '', status: 'FAILED', error: 'A database-claimed sweep ID and worker lease are required before LTC sweep.' };
+  }
+  const stopHeartbeat = startSweeperHeartbeat(sweepId, workerId);
   try {
     const mnemonic = process.env.DEPOSIT_HD_MNEMONIC;
     if (!mnemonic || !mnemonic.trim()) {
@@ -1611,8 +2449,19 @@ export async function sweepLtcDepositAddress(
       throw new Error(`Failed to query UTXOs for ${ltcChildAddress}: ${utxoRes.statusText}`);
     }
 
-    const utxos: Array<{ txid: string; vout: number; value: number }> = await utxoRes.json();
-    if (!utxos || utxos.length === 0) {
+    const apiUtxos: Array<{ txid: string; vout: number; value: number; status?: { confirmed?: boolean } }> = await utxoRes.json();
+    if (!Array.isArray(apiUtxos)) {
+      throw new Error('UTXO provider returned an invalid response shape');
+    }
+    const utxos = apiUtxos.filter((utxo) => utxo?.status?.confirmed === true);
+    if (utxos.some((utxo) =>
+      !/^[a-f0-9]{64}$/i.test(String(utxo.txid || '')) ||
+      !Number.isSafeInteger(utxo.vout) || utxo.vout < 0 ||
+      !Number.isSafeInteger(utxo.value) || utxo.value <= 0
+    )) {
+      throw new Error('UTXO provider returned an invalid confirmed outpoint or value');
+    }
+    if (utxos.length === 0) {
       stopHeartbeat();
       return {
         address: depositAddress,
@@ -1620,15 +2469,47 @@ export async function sweepLtcDepositAddress(
         amountSwept: '0',
         txHash: '',
         status: 'SKIPPED',
-        error: 'No UTXOs available to sweep',
+        error: 'No confirmed UTXOs available to sweep',
       };
     }
 
-    if (sweepId) {
+    await verifyUtxoPrevouts(
+      ltcApiBase,
+      'LTC',
+      utxos,
+      bitcoin.address.toOutputScript(ltcChildAddress, LTC_NETWORK as any)
+    );
+
+    const totalLit = utxos.reduce((acc, u) => acc + u.value, 0);
+    if (!Number.isSafeInteger(totalLit) || totalLit <= 0) {
+      throw new Error('LTC confirmed UTXO total exceeds safe integer bounds or is invalid');
+    }
+    const totalLtc = totalLit / 100_000_000;
+
+    if (!(await meetsMinimumSweepUsdValue('LTC', totalLtc))) {
+      stopHeartbeat();
+      return {
+        address: depositAddress,
+        network: 'LTC',
+        amountSwept: totalLtc.toString(),
+        txHash: '',
+        status: 'SKIPPED',
+        error: `Balance ${totalLtc} LTC is below the $${MIN_SWEEP_VALUE_USD} USD-equivalent sweep threshold`,
+      };
+    }
+    const hotWalletLtcAddress = requireLitecoinHotWalletAddress();
+
+    if (sweepId && !workerId) {
+      stopHeartbeat();
+      throw new Error('LTC sweep requires a worker ID before UTXO reservation');
+    }
+
+    if (sweepId && workerId) {
       const { data: reserveRes, error: reserveErr } = await supabaseAdmin.rpc('reserve_utxos_for_sweep', {
         p_sweep_id: sweepId,
+        p_worker_id: workerId,
         p_network: 'LTC',
-        p_utxos: utxos.map((u) => ({ txid: u.txid, vout: u.vout })),
+        p_utxos: utxos.map((u) => ({ txid: u.txid, vout: u.vout, value_sat: String(u.value) })),
         p_lease_seconds: 300,
       });
 
@@ -1645,24 +2526,12 @@ export async function sweepLtcDepositAddress(
       }
     }
 
-    const totalLit = utxos.reduce((acc, u) => acc + u.value, 0);
-    const totalLtc = totalLit / 100_000_000;
-
-    if (totalLtc < MIN_SWEEP_THRESHOLD_LTC) {
-      stopHeartbeat();
-      return {
-        address: depositAddress,
-        network: 'LTC',
-        amountSwept: totalLtc.toString(),
-        txHash: '',
-        status: 'SKIPPED',
-        error: `Balance ${totalLtc} LTC is below minimum threshold ${MIN_SWEEP_THRESHOLD_LTC}`,
-      };
-    }
-
-    const litPerVbyte = 1;
+    const litPerVbyte = await getRecommendedUtxoFeeRate(ltcApiBase, 'LTC');
     const estimatedVsize = 68 * utxos.length + 31 + 10;
-    const feeLit = Math.max(200, estimatedVsize * litPerVbyte);
+    const feeLit = Math.max(200, Math.ceil(estimatedVsize * litPerVbyte));
+    if (!Number.isSafeInteger(feeLit) || feeLit <= 0) {
+      throw new Error('LTC recommended fee calculation is invalid');
+    }
     const sweepLit = totalLit - feeLit;
 
     if (sweepLit <= 546) {
@@ -1700,7 +2569,7 @@ export async function sweepLtcDepositAddress(
     }
 
     psbt.addOutput({
-      address: HOT_WALLET_LTC_ADDRESS,
+      address: hotWalletLtcAddress,
       value: sweepLit,
     });
 
@@ -1716,6 +2585,16 @@ export async function sweepLtcDepositAddress(
     const deterministicTxHash = txObj.getId();
     const rawTxHex = txObj.toHex();
 
+    assertSignedUtxoTransactionMatchesIntent(
+      rawTxHex,
+      deterministicTxHash,
+      'LTC',
+      utxos,
+      bitcoin.address.toOutputScript(hotWalletLtcAddress, LTC_NETWORK as any),
+      sweepLit,
+      feeLit
+    );
+
     // Step 3 & 4: Durable database persistence & READY_TO_BROADCAST transition
     if (sweepId && workerId) {
       await assertPreBroadcastOwnership(sweepId, workerId, 'CLAIMED');
@@ -1725,6 +2604,16 @@ export async function sweepLtcDepositAddress(
         p_expected_status: 'CLAIMED',
         p_signed_tx_hex: rawTxHex,
         p_sweep_tx_hash: deterministicTxHash,
+        p_signed_utxo_intent: {
+          inputs: utxos.map((u) => ({
+            txid: u.txid.toLowerCase(),
+            vout: u.vout,
+            value_sat: String(u.value),
+          })),
+          destination_script_hex: txObj.outs[0]?.script.toString('hex') || '',
+          output_amount_sat: String(sweepLit),
+          fee_amount_sat: String(feeLit),
+        },
         p_extend_lease_seconds: 300,
       });
 
@@ -1736,6 +2625,7 @@ export async function sweepLtcDepositAddress(
 
     let txid = deterministicTxHash;
     try {
+      await stopHeartbeat.assertLease();
       const broadcastRes = await fetch(`${ltcApiBase}/tx`, {
         method: 'POST',
         body: rawTxHex,
@@ -1747,11 +2637,14 @@ export async function sweepLtcDepositAddress(
         throw new Error(`LTC broadcast failed: ${errText}`);
       }
 
-      const txidRaw = await broadcastRes.text();
-      txid = txidRaw.trim() || deterministicTxHash;
+      const txidRaw = (await broadcastRes.text()).trim();
+      if (txidRaw && txidRaw.toLowerCase() !== deterministicTxHash.toLowerCase()) {
+        throw new Error(`UTXO broadcast endpoint returned a transaction ID that does not match the locally derived signed transaction: ${txidRaw}`);
+      }
+      txid = deterministicTxHash;
 
       if (sweepId && workerId) {
-        await transitionSweepStatus(sweepId, workerId, 'READY_TO_BROADCAST', 'BROADCASTED', txid);
+        await transitionSweepStatus(sweepId, workerId, 'READY_TO_BROADCAST', 'BROADCASTED', deterministicTxHash);
       }
     } catch (broadcastErr: any) {
       console.error(`[LTC Sweeper Broadcast Exception] ${depositAddress}:`, broadcastErr);
@@ -1805,6 +2698,10 @@ export async function sweepUserDepositAddress(
   const normNet = (network || '').toUpperCase().trim();
   const normAsset = (assetSymbol || 'USDT').toUpperCase().trim();
 
+  if (!sweepId || !workerId) {
+    return { address: depositAddress, network: normNet || 'UNKNOWN', amountSwept: '0', txHash: '', status: 'FAILED', error: 'A database-claimed sweep ID and worker lease are required before deposit sweep.' };
+  }
+
   if (normNet === 'TRC20' || normNet === 'TRON' || normAsset === 'TRX') {
     return sweepTronDepositAddress(depositAddress, derivationIndex, sweepId, workerId);
   }
@@ -1817,13 +2714,20 @@ export async function sweepUserDepositAddress(
     return sweepLtcDepositAddress(depositAddress, derivationIndex, sweepId, workerId);
   }
 
-  const stopHeartbeat = sweepId && workerId ? startSweeperHeartbeat(sweepId, workerId) : () => {};
+  const stopHeartbeat = startSweeperHeartbeat(sweepId, workerId);
   let hasAllocatedNonce = false;
   let allocatedNonce: number | null = null;
 
   try {
     const rpcUrl = getRpcUrlForNetwork(normNet);
     const provider = new ethers.JsonRpcProvider(rpcUrl);
+    const expectedChainId = ['BEP20', 'BSC', 'BINANCE'].includes(normNet) ? 56n : 1n;
+    const providerNetwork = await provider.getNetwork();
+    if (providerNetwork.chainId !== expectedChainId) {
+      throw new Error(
+        `EVM RPC chain mismatch for ${normNet}: expected chain ID ${expectedChainId}, received ${providerNetwork.chainId}`
+      );
+    }
 
     const derivedWallet = getDerivedEVMWallet(derivationIndex, provider);
 
@@ -1855,18 +2759,58 @@ export async function sweepUserDepositAddress(
         if (rpcErr || resNonce === null || resNonce === undefined) {
           throw new Error(`Failed to allocate deposit address nonce: ${rpcErr?.message || 'Empty response'}`);
         }
-        allocatedNonce = Number(resNonce);
+        const parsedNonce = Number(resNonce);
+        if (!Number.isSafeInteger(parsedNonce) || parsedNonce < 0) {
+          throw new Error(`Nonce allocator returned an invalid nonce value: ${String(resNonce)}`);
+        }
+        allocatedNonce = parsedNonce;
         hasAllocatedNonce = true;
         return allocatedNonce;
       }
       return provider.getTransactionCount(depositAddress, 'pending');
     };
 
+    const holdEvmSweepForReceiptReconciliation = async (
+      txHash: string,
+      reason: string
+    ): Promise<void> => {
+      const { data, error } = await supabaseAdmin.rpc('update_sweep_operation_status', {
+        p_sweep_id: sweepId,
+        p_worker_id: workerId,
+        p_expected_status: 'BROADCASTED',
+        p_new_status: 'RECOVERY_REQUIRED',
+        p_tx_hash: txHash,
+        p_error_message: reason.slice(0, 1000),
+      });
+      if (error || !data || data.success !== true) {
+        console.error(
+          `[EVM Sweeper] Failed to persist receipt recovery hold for ${sweepId}:`,
+          error || data
+        );
+      }
+    };
+
     // 1. Native ETH Sweep
     if (normAsset === 'ETH' || normNet === 'ETH') {
       const balance = await provider.getBalance(depositAddress);
+      const balanceEth = Number(ethers.formatEther(balance));
+      if (!(await meetsMinimumSweepUsdValue('ETH', balanceEth))) {
+        stopHeartbeat();
+        return {
+          address: depositAddress,
+          network: normNet,
+          amountSwept: ethers.formatEther(balance),
+          txHash: '',
+          status: 'SKIPPED',
+          error: `Balance ${balanceEth} ETH is below the $${MIN_SWEEP_VALUE_USD} USD-equivalent sweep threshold`,
+        };
+      }
+      const evmHotWalletAddress = requireEvmHotWalletAddress();
       const feeData = await provider.getFeeData();
-      const gasPrice = feeData.gasPrice || ethers.parseUnits('20', 'gwei');
+      const gasPrice = feeData.maxFeePerGas ?? feeData.gasPrice;
+      if (gasPrice === null || gasPrice === undefined || gasPrice <= 0n) {
+        throw new Error(`Live ${normNet} gas-price/fee-cap quote is unavailable; refusing a hard-coded fee fallback.`);
+      }
       const gasLimit = 21000n;
       const gasCost = (gasPrice * 200n / 100n) * gasLimit;
 
@@ -1886,7 +2830,7 @@ export async function sweepUserDepositAddress(
       const nonceVal = await getOrAllocateNonce();
 
       const txReq = await derivedWallet.populateTransaction({
-        to: HOT_WALLET_ADDRESS,
+        to: evmHotWalletAddress,
         value: sweepAmount,
         gasLimit,
         gasPrice: gasPrice * 200n / 100n,
@@ -1910,6 +2854,11 @@ export async function sweepUserDepositAddress(
           p_nonce: nonceVal,
           p_signed_tx_hex: signedTxHex,
           p_sweep_tx_hash: deterministicTxHash,
+          p_asset_code: 'ETH',
+          p_token_contract: null,
+          p_recipient: evmHotWalletAddress,
+          p_amount_raw: sweepAmount.toString(),
+          p_chain_id: 1,
           p_extend_lease_seconds: 300,
         });
 
@@ -1923,8 +2872,12 @@ export async function sweepUserDepositAddress(
 
       let txResponse;
       try {
-        // Step 5: First Broadcast
+        // Step 5: Revalidate the live owner lease immediately before broadcast.
+        await stopHeartbeat.assertLease();
         txResponse = await provider.broadcastTransaction(signedTxHex);
+        if (String(txResponse.hash).toLowerCase() !== deterministicTxHash.toLowerCase()) {
+          throw new Error(`EVM node returned a broadcast hash that differs from the locally signed transaction: ${txResponse.hash}`);
+        }
         if (sweepId && workerId) {
           await transitionSweepStatus(sweepId, workerId, 'READY_TO_BROADCAST', 'BROADCASTED', deterministicTxHash);
         }
@@ -1944,14 +2897,28 @@ export async function sweepUserDepositAddress(
         throw broadcastErr;
       }
 
-      const receipt = await txResponse.wait(1);
+      let receipt;
+      try {
+        receipt = await txResponse.wait(1);
+      } catch (receiptErr: any) {
+        await holdEvmSweepForReceiptReconciliation(
+          deterministicTxHash,
+          `Native ETH sweep receipt is uncertain or reverted: ${receiptErr?.message || receiptErr}`
+        );
+        throw receiptErr;
+      }
+      if (!receipt || receipt.status !== 1) {
+        const reason = `Native ETH sweep did not produce a successful receipt (status: ${String(receipt?.status)}).`;
+        await holdEvmSweepForReceiptReconciliation(deterministicTxHash, reason);
+        throw new Error(reason);
+      }
       stopHeartbeat();
 
       return {
         address: depositAddress,
         network: normNet,
         amountSwept: ethers.formatEther(sweepAmount),
-        txHash: receipt?.hash || deterministicTxHash,
+        txHash: deterministicTxHash,
         status: 'SUCCESS',
       };
     }
@@ -1967,7 +2934,7 @@ export async function sweepUserDepositAddress(
     const balanceRaw: bigint = await tokenContract.balanceOf(depositAddress);
     const balanceFormatted = parseFloat(ethers.formatUnits(balanceRaw, tokenConfig.decimals));
 
-    if (balanceFormatted < MIN_SWEEP_THRESHOLD_USDT) {
+    if (!(await meetsMinimumSweepUsdValue('USDT', balanceFormatted))) {
       stopHeartbeat();
       return {
         address: depositAddress,
@@ -1975,24 +2942,108 @@ export async function sweepUserDepositAddress(
         amountSwept: balanceFormatted.toString(),
         txHash: '',
         status: 'SKIPPED',
-        error: `Balance ${balanceFormatted} USDT below sweep threshold ${MIN_SWEEP_THRESHOLD_USDT}`,
+        error: `Balance ${balanceFormatted} USDT is below the $${MIN_SWEEP_VALUE_USD} USD-equivalent sweep threshold`,
       };
     }
+    const evmHotWalletAddress = requireEvmHotWalletAddress();
 
     const nativeGasBalance = await provider.getBalance(depositAddress);
     const feeData = await provider.getFeeData();
-    const baseGasPrice = feeData.gasPrice || ethers.parseUnits('20', 'gwei');
+    const baseGasPrice = feeData.maxFeePerGas ?? feeData.gasPrice;
+    if (baseGasPrice === null || baseGasPrice === undefined || baseGasPrice <= 0n) {
+      throw new Error(`Live ${normNet} gas-price/fee-cap quote is unavailable; refusing a hard-coded fee fallback.`);
+    }
     const priorityGasPrice = (baseGasPrice * 200n) / 100n;
     const estimatedGasLimit = 65000n;
     const requiredGasFee = priorityGasPrice * estimatedGasLimit;
 
-    if (nativeGasBalance < requiredGasFee) {
+    const { data: existingGasFunding, error: existingGasFundingError } = await supabaseAdmin
+      .from('gas_funding_operations')
+      .select('status, amount_allocated, tx_hash, signed_tx_hex, nonce, funding_wallet_address')
+      .eq('sweep_id', sweepId)
+      .maybeSingle();
+
+    if (existingGasFundingError) {
+      throw new Error(`Unable to inspect existing EVM gas-funding operation: ${existingGasFundingError.message}`);
+    }
+
+    let existingGasFundingStatus = String(existingGasFunding?.status || '').toUpperCase();
+    const hasPersistedGasFundingIdentity =
+      Boolean(String(existingGasFunding?.tx_hash || '').trim()) ||
+      Boolean(String(existingGasFunding?.signed_tx_hex || '').trim());
+
+    if (
+      existingGasFundingStatus === 'RECOVERY_REQUIRED' &&
+      existingGasFunding?.nonce == null &&
+      !existingGasFunding?.funding_wallet_address &&
+      !hasPersistedGasFundingIdentity &&
+      nativeGasBalance >= requiredGasFee
+    ) {
+      // There is no nonce reservation and no transaction identity, and the
+      // child already has enough native gas. Close the pre-signing recovery
+      // record instead of leaving an orphaned RECOVERY_REQUIRED child row.
+      await updateGasFundingStatus(
+        sweepId,
+        workerId,
+        'FAILED',
+        'Closed pre-signing recovery: no nonce or signed transaction existed and child gas balance now covers the required sweep fee.'
+      );
+      existingGasFundingStatus = 'FAILED';
+    }
+
+    const hasAllocatedNonceWithoutSignedPayload =
+      ['PENDING', 'RECOVERY_REQUIRED'].includes(existingGasFundingStatus) &&
+      existingGasFunding?.nonce !== null &&
+      existingGasFunding?.nonce !== undefined &&
+      !hasPersistedGasFundingIdentity;
+    const requiresGasFundingReconciliation =
+      ['READY_TO_BROADCAST', 'BROADCASTED'].includes(existingGasFundingStatus) ||
+      (existingGasFundingStatus === 'RECOVERY_REQUIRED' && hasPersistedGasFundingIdentity) ||
+      hasAllocatedNonceWithoutSignedPayload;
+
+    if (existingGasFundingStatus === 'CONFIRMED' && nativeGasBalance < requiredGasFee) {
+      throw new Error(
+        'A prior EVM gas-funding transaction is confirmed, but the child wallet still lacks the currently estimated sweep gas; refusing to silently reuse or duplicate that funding operation.'
+      );
+    }
+
+    if (
+      requiresGasFundingReconciliation &&
+      !hasAllocatedNonceWithoutSignedPayload &&
+      (
+        !existingGasFunding?.tx_hash ||
+        !existingGasFunding?.signed_tx_hex ||
+        !existingGasFunding?.amount_allocated ||
+        Number(existingGasFunding.amount_allocated) <= 0
+      )
+    ) {
+      throw new Error('Existing EVM gas-funding transaction is incomplete; refusing a new funding or sweep attempt.');
+    }
+    if (
+      hasAllocatedNonceWithoutSignedPayload &&
+      (
+        !existingGasFunding?.amount_allocated ||
+        Number(existingGasFunding.amount_allocated) <= 0 ||
+        !existingGasFunding?.funding_wallet_address
+      )
+    ) {
+      throw new Error('Existing EVM gas-funding nonce reservation is incomplete; manual reconciliation is required.');
+    }
+
+    if (nativeGasBalance < requiredGasFee || requiresGasFundingReconciliation) {
       const gasBuffer = normNet === 'BEP20' || normNet === 'BSC'
         ? ethers.parseUnits(process.env.EVM_GAS_FUNDING_BUFFER_BNB || '0.0005', 'ether')
         : ethers.parseUnits(process.env.EVM_GAS_FUNDING_BUFFER_ETH || '0.0002', 'ether');
-      const topUpAmount = requiredGasFee - nativeGasBalance + gasBuffer;
+      const calculatedTopUpAmount = requiredGasFee - nativeGasBalance + gasBuffer;
+      const topUpAmount = requiresGasFundingReconciliation
+        ? ethers.parseEther(String(existingGasFunding?.amount_allocated ?? ''))
+        : calculatedTopUpAmount;
       const nativeSymbol = normNet === 'BEP20' || normNet === 'BSC' ? 'BNB' : 'ETH';
-      console.log(`[Sweeper] Auto-funding ${ethers.formatEther(topUpAmount)} ${nativeSymbol} gas to ${depositAddress}...`);
+      console.log(
+        requiresGasFundingReconciliation
+          ? `[Sweeper] Reconciling existing ${nativeSymbol} gas-funding transaction ${existingGasFunding?.tx_hash || 'unknown'} for ${depositAddress}.`
+          : `[Sweeper] Auto-funding ${ethers.formatEther(topUpAmount)} ${nativeSymbol} gas to ${depositAddress}...`
+      );
       if (sweepId && workerId && currentStatus === 'CLAIMED') {
         await transitionSweepStatus(sweepId, workerId, 'CLAIMED', 'GAS_FUNDING');
         currentStatus = 'GAS_FUNDING';
@@ -2006,7 +3057,7 @@ export async function sweepUserDepositAddress(
 
     const nonceVal = await getOrAllocateNonce();
 
-    const txReq = await tokenContract.transfer.populateTransaction(HOT_WALLET_ADDRESS, balanceRaw, {
+    const txReq = await tokenContract.transfer.populateTransaction(evmHotWalletAddress, balanceRaw, {
       gasLimit: estimatedGasLimit,
       gasPrice: priorityGasPrice,
       nonce: nonceVal,
@@ -2019,7 +3070,7 @@ export async function sweepUserDepositAddress(
       throw new Error('Deterministic hash calculation check failed: invalid hash format');
     }
 
-    // Step 3 & 4: Durable database persistence & READY_TO_BROADCAST transition
+    // Step 3 & 4: Persist signed bytes and immutable transfer intent before broadcast.
     if (sweepId && workerId) {
       await assertPreBroadcastOwnership(sweepId, workerId, currentStatus);
       const { data: persistRes, error: persistErr } = await supabaseAdmin.rpc('persist_signed_evm_transaction', {
@@ -2029,6 +3080,11 @@ export async function sweepUserDepositAddress(
         p_nonce: nonceVal,
         p_signed_tx_hex: signedTxHex,
         p_sweep_tx_hash: deterministicTxHash,
+        p_asset_code: 'USDT',
+        p_token_contract: tokenConfig.contractAddress,
+        p_recipient: evmHotWalletAddress,
+        p_amount_raw: balanceRaw.toString(),
+        p_chain_id: normNet === 'BEP20' || normNet === 'BSC' ? 56 : 1,
         p_extend_lease_seconds: 300,
       });
 
@@ -2041,8 +3097,12 @@ export async function sweepUserDepositAddress(
     console.log(`[Sweeper] Sweeping ${balanceFormatted} ${normNet} USDT from ${depositAddress} to ${HOT_WALLET_ADDRESS}`);
     let txResponse;
     try {
-      // Step 5: First Broadcast
+      // Step 5: Revalidate the live owner lease immediately before broadcast.
+      await stopHeartbeat.assertLease();
       txResponse = await provider.broadcastTransaction(signedTxHex);
+      if (String(txResponse.hash).toLowerCase() !== deterministicTxHash.toLowerCase()) {
+        throw new Error(`EVM node returned a broadcast hash that differs from the locally signed transaction: ${txResponse.hash}`);
+      }
       if (sweepId && workerId) {
         await transitionSweepStatus(sweepId, workerId, 'READY_TO_BROADCAST', 'BROADCASTED', deterministicTxHash);
       }
@@ -2062,14 +3122,28 @@ export async function sweepUserDepositAddress(
       throw broadcastErr;
     }
 
-    const receipt = await txResponse.wait(1);
+    let receipt;
+    try {
+      receipt = await txResponse.wait(1);
+    } catch (receiptErr: any) {
+      await holdEvmSweepForReceiptReconciliation(
+        deterministicTxHash,
+        `USDT sweep receipt is uncertain or reverted: ${receiptErr?.message || receiptErr}`
+      );
+      throw receiptErr;
+    }
+    if (!receipt || receipt.status !== 1) {
+      const reason = `USDT sweep did not produce a successful receipt (status: ${String(receipt?.status)}).`;
+      await holdEvmSweepForReceiptReconciliation(deterministicTxHash, reason);
+      throw new Error(reason);
+    }
     stopHeartbeat();
 
     return {
       address: depositAddress,
       network: normNet,
       amountSwept: balanceFormatted.toString(),
-      txHash: receipt?.hash || deterministicTxHash,
+      txHash: deterministicTxHash,
       status: 'SUCCESS',
     };
   } catch (err: any) {
@@ -2088,6 +3162,290 @@ export async function sweepUserDepositAddress(
 }
 
 /**
+ * Returns a complete two-explorer proof only when every signed input has been
+ * spent by a different transaction and that spend is deep enough in both views.
+ * A missing/unconfirmed result returns null: absence is never proof of non-broadcast.
+ */
+async function collectConfirmedUtxoConflictProofs(
+  network: 'BTC' | 'LTC',
+  sweepTxHash: string,
+  signedUtxoIntent: any
+): Promise<Array<Record<string, string>> | null> {
+  const primaryBase = (network === 'BTC'
+    ? process.env.BTC_MEMPOOL_API || 'https://mempool.space/api'
+    : process.env.LTC_MEMPOOL_API || 'https://litecoinspace.org/api').replace(/\/+$/, '');
+  const secondaryRaw = network === 'BTC'
+    ? process.env.BTC_CONFLICT_PROOF_API || 'https://blockstream.info/api'
+    : process.env.LTC_CONFLICT_PROOF_API;
+  if (!secondaryRaw) return null;
+
+  let primaryOrigin: string;
+  let secondaryOrigin: string;
+  let secondaryBase: string;
+  try {
+    const primaryUrl = new URL(primaryBase);
+    secondaryBase = secondaryRaw.replace(/\/+$/, '');
+    const secondaryUrl = new URL(secondaryBase);
+    if (primaryUrl.protocol !== 'https:' || secondaryUrl.protocol !== 'https:') {
+      return null;
+    }
+    primaryOrigin = primaryUrl.origin;
+    secondaryOrigin = secondaryUrl.origin;
+  } catch {
+    return null;
+  }
+  if (!primaryOrigin || !secondaryOrigin || primaryOrigin === secondaryOrigin) return null;
+
+  const inputs = Array.isArray(signedUtxoIntent?.inputs) ? signedUtxoIntent.inputs : [];
+  if (inputs.length < 1 || inputs.length > 100) return null;
+  const requiredConfirmations = network === 'BTC' ? 6 : 12;
+
+  const readTip = async (base: string): Promise<number> => {
+    const response = await fetch(`${base}/blocks/tip/height`);
+    if (!response.ok) throw new Error(`Tip-height lookup failed: HTTP ${response.status}`);
+    const height = Number((await response.text()).trim());
+    if (!Number.isSafeInteger(height) || height <= 0) {
+      throw new Error('Explorer returned an invalid chain tip height');
+    }
+    return height;
+  };
+
+  const [primaryTip, secondaryTip] = await Promise.all([
+    readTip(primaryBase),
+    readTip(secondaryBase),
+  ]);
+
+  const readConfirmedSpend = async (
+    base: string,
+    inputTxid: string,
+    inputVout: number
+  ): Promise<{ txid: string; blockHash: string; blockHeight: number } | null> => {
+    const outspendResponse = await fetch(`${base}/tx/${inputTxid}/outspend/${inputVout}`);
+    if (!outspendResponse.ok) {
+      throw new Error(`Outspend lookup failed: HTTP ${outspendResponse.status}`);
+    }
+    const outspend: any = await outspendResponse.json();
+    const spendingTxid = String(outspend?.txid || '').toLowerCase();
+    if (outspend?.spent !== true || !/^[a-f0-9]{64}$/.test(spendingTxid)) return null;
+    if (spendingTxid === sweepTxHash.toLowerCase()) return null;
+
+    const [detailsResponse, rawResponse] = await Promise.all([
+      fetch(`${base}/tx/${spendingTxid}`),
+      fetch(`${base}/tx/${spendingTxid}/hex`),
+    ]);
+    if (!detailsResponse.ok || !rawResponse.ok) return null;
+
+    const details: any = await detailsResponse.json();
+    const rawHex = (await rawResponse.text()).trim();
+    if (!/^(?:[0-9a-fA-F]{2})+$/.test(rawHex)) return null;
+    const spendingTx = bitcoin.Transaction.fromHex(rawHex);
+    if (spendingTx.getId().toLowerCase() !== spendingTxid) return null;
+
+    const actuallySpendsInput = spendingTx.ins.some((input) =>
+      Buffer.from(input.hash).reverse().toString('hex').toLowerCase() === inputTxid &&
+      input.index === inputVout
+    );
+    const status = details?.status;
+    const blockHeight = Number(status?.block_height);
+    const blockHash = String(status?.block_hash || '').toLowerCase();
+    if (
+      !actuallySpendsInput ||
+      status?.confirmed !== true ||
+      !Number.isSafeInteger(blockHeight) ||
+      blockHeight <= 0 ||
+      !/^[a-f0-9]{64}$/.test(blockHash)
+    ) {
+      return null;
+    }
+
+    const canonicalBlockResponse = await fetch(`${base}/block-height/${blockHeight}`);
+    if (!canonicalBlockResponse.ok) return null;
+    const canonicalBlockHash = (await canonicalBlockResponse.text()).trim().toLowerCase();
+    if (
+      !/^[a-f0-9]{64}$/.test(canonicalBlockHash) ||
+      canonicalBlockHash !== blockHash
+    ) {
+      return null;
+    }
+
+    return { txid: spendingTxid, blockHash, blockHeight };
+  };
+
+  const proofs: Array<Record<string, string>> = [];
+  for (let offset = 0; offset < inputs.length; offset += 4) {
+    const batch = inputs.slice(offset, offset + 4);
+    const batchProofs = await Promise.all(batch.map(async (input: any) => {
+      const inputTxid = String(input?.txid || '').toLowerCase();
+      const voutText = String(input?.vout ?? '');
+      const inputVout = Number(voutText);
+      if (
+        !/^[a-f0-9]{64}$/.test(inputTxid) ||
+        !/^[0-9]{1,10}$/.test(voutText) ||
+        !Number.isSafeInteger(inputVout) ||
+        inputVout < 0 ||
+        inputVout > 0x7fffffff
+      ) {
+        throw new Error('Signed UTXO intent contains an invalid outpoint');
+      }
+
+      const [primarySpend, secondarySpend] = await Promise.all([
+        readConfirmedSpend(primaryBase, inputTxid, inputVout),
+        readConfirmedSpend(secondaryBase, inputTxid, inputVout),
+      ]);
+      if (
+        !primarySpend ||
+        !secondarySpend ||
+        primarySpend.txid !== secondarySpend.txid ||
+        primarySpend.blockHash !== secondarySpend.blockHash ||
+        primarySpend.blockHeight !== secondarySpend.blockHeight
+      ) {
+        return null;
+      }
+
+      const primaryDepth = primaryTip - primarySpend.blockHeight + 1;
+      const secondaryDepth = secondaryTip - secondarySpend.blockHeight + 1;
+      if (Math.min(primaryDepth, secondaryDepth) < requiredConfirmations) return null;
+
+      return {
+        input_txid: inputTxid,
+        input_vout: String(inputVout),
+        conflicting_txid: primarySpend.txid,
+        conflicting_block_hash: primarySpend.blockHash,
+        conflicting_block_height: String(primarySpend.blockHeight),
+        primary_tip_height: String(primaryTip),
+        secondary_tip_height: String(secondaryTip),
+        primary_source: new URL(primaryBase).hostname,
+        secondary_source: new URL(secondaryBase).hostname,
+      };
+    }));
+    if (batchProofs.some((proof) => proof === null)) return null;
+    proofs.push(...batchProofs as Array<Record<string, string>>);
+  }
+
+  return proofs.length === inputs.length ? proofs : null;
+}
+
+/**
+ * Requires independent Esplora-compatible views to agree on the transaction,
+ * containing block and canonical block hash, plus network-specific depth.
+ * A single explorer's "confirmed" flag is never sufficient for UTXO finality.
+ */
+async function isUtxoSweepCanonicallyConfirmed(
+  network: 'BTC' | 'LTC',
+  transactionId: string
+): Promise<{
+  txid: string;
+  blockHash: string;
+  blockHeight: number;
+  primaryTipHeight: number;
+  secondaryTipHeight: number;
+  primarySource: string;
+  secondarySource: string;
+} | null> {
+  const primaryBase = (
+    network === 'BTC'
+      ? process.env.BTC_MEMPOOL_API || 'https://mempool.space/api'
+      : process.env.LTC_MEMPOOL_API || 'https://litecoinspace.org/api'
+  ).replace(/\/+$/, '');
+  const secondaryRaw = network === 'BTC'
+    ? process.env.BTC_FINALITY_API || 'https://blockstream.info/api'
+    : process.env.LTC_FINALITY_API || process.env.LTC_CONFLICT_PROOF_API;
+  if (!secondaryRaw) return null;
+
+  let secondaryBase: string;
+  try {
+    const primaryUrl = new URL(primaryBase);
+    secondaryBase = secondaryRaw.replace(/\/+$/, '');
+    const secondaryUrl = new URL(secondaryBase);
+    if (
+      !['https:', 'http:'].includes(primaryUrl.protocol) ||
+      !['https:', 'http:'].includes(secondaryUrl.protocol) ||
+      primaryUrl.origin === secondaryUrl.origin
+    ) return null;
+  } catch {
+    return null;
+  }
+
+  const txid = String(transactionId || '').toLowerCase();
+  if (!/^[a-f0-9]{64}$/.test(txid)) return null;
+
+  const readSource = async (base: string) => {
+    const [tipResponse, detailResponse, rawResponse] = await Promise.all([
+      fetch(`${base}/blocks/tip/height`),
+      fetch(`${base}/tx/${txid}`),
+      fetch(`${base}/tx/${txid}/hex`),
+    ]);
+    if (!tipResponse.ok || !detailResponse.ok || !rawResponse.ok) return null;
+
+    const tipHeight = Number((await tipResponse.text()).trim());
+    const details: any = await detailResponse.json();
+    const rawHex = (await rawResponse.text()).trim();
+    if (
+      !Number.isSafeInteger(tipHeight) ||
+      tipHeight <= 0 ||
+      !/^(?:[0-9a-fA-F]{2})+$/.test(rawHex)
+    ) return null;
+
+    const parsed = bitcoin.Transaction.fromHex(rawHex);
+    const reportedTxid = String(details?.txid || txid).toLowerCase();
+    const blockHeight = Number(details?.status?.block_height);
+    const blockHash = String(details?.status?.block_hash || '').toLowerCase();
+    if (
+      parsed.getId().toLowerCase() !== txid ||
+      reportedTxid !== txid ||
+      details?.status?.confirmed !== true ||
+      !Number.isSafeInteger(blockHeight) ||
+      blockHeight <= 0 ||
+      blockHeight > tipHeight ||
+      !/^[a-f0-9]{64}$/.test(blockHash)
+    ) return null;
+
+    const canonicalResponse = await fetch(`${base}/block-height/${blockHeight}`);
+    if (!canonicalResponse.ok) return null;
+    const canonicalBlockHash = (await canonicalResponse.text()).trim().toLowerCase();
+    if (
+      !/^[a-f0-9]{64}$/.test(canonicalBlockHash) ||
+      canonicalBlockHash !== blockHash
+    ) return null;
+
+    return { tipHeight, blockHeight, blockHash, txid: parsed.getId().toLowerCase() };
+  };
+
+  try {
+    const [primary, secondary] = await Promise.all([
+      readSource(primaryBase),
+      readSource(secondaryBase),
+    ]);
+    if (!primary || !secondary) return null;
+
+    const minConfirmations = network === 'BTC' ? 6 : 12;
+    const primaryDepth = primary.tipHeight - primary.blockHeight + 1;
+    const secondaryDepth = secondary.tipHeight - secondary.blockHeight + 1;
+
+    if (
+      primary.txid !== secondary.txid ||
+      primary.blockHash !== secondary.blockHash ||
+      primary.blockHeight !== secondary.blockHeight ||
+      primaryDepth < minConfirmations ||
+      secondaryDepth < minConfirmations
+    ) return null;
+
+    return {
+      txid: primary.txid,
+      blockHash: primary.blockHash,
+      blockHeight: primary.blockHeight,
+      primaryTipHeight: primary.tipHeight,
+      secondaryTipHeight: secondary.tipHeight,
+      primarySource: new URL(primaryBase).hostname,
+      secondarySource: new URL(secondaryBase).hostname,
+    };
+  } catch (error) {
+    console.error(`[${network} Sweep Finality] Independent canonicality check failed:`, error);
+    return null;
+  }
+}
+
+/**
  * Reconciles ambiguous sweeps in RECOVERY_REQUIRED, BROADCASTED, or READY_TO_BROADCAST status
  */
 export async function reconcileAmbiguousSweep(sweepId: string, workerId: string): Promise<boolean> {
@@ -2102,39 +3460,361 @@ export async function reconcileAmbiguousSweep(sweepId: string, workerId: string)
   }
 
   const { status, sweep_tx_hash, network, amount_swept, signed_tx_hex, nonce } = sweep;
+  let recoveryStatus = status;
+  await assertPreBroadcastOwnership(sweepId, workerId, status);
 
   const net = (network || '').toUpperCase().trim();
   const isEvmNetwork = ['ERC20', 'BEP20', 'ETH', 'BSC', 'ETHEREUM', 'BINANCE'].includes(net);
+  const canonicalEvmNetwork = ['BEP20', 'BSC', 'BINANCE'].includes(net) ? 'BEP20' : 'ERC20';
 
-  if (status === 'GAS_FUNDING') {
-    const { data: gasOp } = await supabaseAdmin
-      .from('gas_funding_operations')
-      .select('*')
+  // Pre-broadcast TRON cleanup can legitimately have no sweep transaction hash.
+  // Reconcile only when a persisted delegation record proves that Energy may
+  // still be attached to this receiver; never invent a transfer hash.
+  if (
+    status === 'RECOVERY_REQUIRED' &&
+    !sweep_tx_hash &&
+    (net === 'TRC20' || net === 'TRON')
+  ) {
+    const { data: delegation, error: delegationError } = await supabaseAdmin
+      .from('resource_delegation_operations')
+      .select('status, verified_onchain_undelegated')
       .eq('sweep_id', sweepId)
       .maybeSingle();
 
-    if (gasOp) {
-      if (gasOp.status === 'CONFIRMED') {
-        await transitionSweepStatus(sweepId, workerId, 'GAS_FUNDING', 'GAS_FUNDED');
+    if (delegationError) {
+      throw new Error(`Unable to inspect TRON resource delegation during pre-broadcast recovery: ${delegationError.message}`);
+    }
+
+    if (
+      delegation &&
+      ['DELEGATED', 'UNDELEGATING'].includes(String(delegation.status || '').toUpperCase()) &&
+      delegation.verified_onchain_undelegated !== true
+    ) {
+      const resourcesReclaimed = await undelegateEnergyToPool(sweepId, workerId);
+      if (!resourcesReclaimed) return false;
+
+      await transitionSweepStatus(
+        sweepId,
+        workerId,
+        'RECOVERY_REQUIRED',
+        'FAILED',
+        { errorMessage: 'Pre-broadcast sweep was stopped after verified TRON Energy reclamation.' }
+      );
+      return true;
+    }
+  }
+
+  if (status === 'GAS_FUNDING' || status === 'GAS_FUNDED') {
+    if (!isEvmNetwork) return false;
+
+    const { data: gasOp, error: gasOpError } = await supabaseAdmin
+      .from('gas_funding_operations')
+      .select('status, tx_hash, signed_tx_hex, nonce, amount_allocated, funding_wallet_address, funding_receipt_status')
+      .eq('sweep_id', sweepId)
+      .maybeSingle();
+
+    if (gasOpError) {
+      throw new Error(`Unable to inspect gas-funding operation during parent recovery: ${gasOpError.message}`);
+    }
+
+    const childStatus = String(gasOp?.status || '').toUpperCase();
+    const childHash = String(gasOp?.tx_hash || '').trim();
+    const childSignedTx = String(gasOp?.signed_tx_hex || '').trim();
+
+    if (
+      status === 'GAS_FUNDED' &&
+      (
+        !gasOp ||
+        !childHash ||
+        !childSignedTx ||
+        !['CONFIRMED', 'RECOVERY_REQUIRED'].includes(childStatus)
+      )
+    ) {
+      await transitionSweepStatus(
+        sweepId,
+        workerId,
+        'GAS_FUNDED',
+        'RECOVERY_REQUIRED',
+        {
+          errorMessage: 'GAS_FUNDED parent does not have a durable, receipt-backed gas-funding transaction identity. Automatic continuation blocked.',
+        }
+      );
+      return false;
+    }
+
+    if (childStatus === 'FAILED') {
+      if (
+        gasOp?.nonce === null &&
+        !childHash &&
+        !childSignedTx &&
+        gasOp?.funding_receipt_status == null
+      ) {
+        // Policy rejection before nonce reservation/signing: no transaction
+        // could have reached the network, so the parent may safely terminate.
+        await transitionSweepStatus(
+          sweepId,
+          workerId,
+          status,
+          'FAILED',
+          { errorMessage: 'EVM gas funding failed before nonce allocation or signing; no transaction was broadcast.' }
+        );
         return true;
       }
-      if (gasOp.tx_hash && isEvmNetwork) {
-        const rpcUrl = getRpcUrlForNetwork(net);
-        const provider = new ethers.JsonRpcProvider(rpcUrl);
-        let receipt = null;
-        try {
-          receipt = await provider.getTransactionReceipt(gasOp.tx_hash);
-        } catch {}
-        if (receipt && receipt.status === 1) {
-          await supabaseAdmin
-            .from('gas_funding_operations')
-            .update({ status: 'CONFIRMED', updated_at: new Date().toISOString() })
-            .eq('sweep_id', sweepId);
-          await transitionSweepStatus(sweepId, workerId, 'GAS_FUNDING', 'GAS_FUNDED');
-          return true;
+
+      await transitionSweepStatus(
+        sweepId,
+        workerId,
+        status,
+        'RECOVERY_REQUIRED',
+        { errorMessage: 'Gas-funding operation is FAILED after nonce/transaction activity; operator reconciliation is required.' }
+      );
+      return false;
+    }
+
+    if (Boolean(childHash) !== Boolean(childSignedTx)) {
+      await transitionSweepStatus(
+        sweepId,
+        workerId,
+        status,
+        'RECOVERY_REQUIRED',
+        { errorMessage: 'Gas-funding record contains only one of transaction hash or signed bytes; manual reconciliation required.' }
+      );
+      return false;
+    }
+
+    let fundingConfirmed = false;
+    if (childHash && childSignedTx) {
+      if (!gasOp?.amount_allocated || Number(gasOp.amount_allocated) <= 0) {
+        await transitionSweepStatus(
+          sweepId,
+          workerId,
+          status,
+          'RECOVERY_REQUIRED',
+          { errorMessage: 'Persisted gas-funding transaction has no valid allocated amount; manual reconciliation required.' }
+        );
+        return false;
+      }
+
+      // Adopt the persisted child operation under this newly claimed parent
+      // lease before any receipt/status RPC that is worker-bound.
+      const { data: adoptedGasOp, error: adoptGasError } = await supabaseAdmin.rpc(
+        'claim_gas_funding_operation',
+        {
+          p_sweep_id: sweepId,
+          p_deposit_address: String(sweep.deposit_address || ''),
+          p_network: net,
+          p_amount_allocated: String(gasOp.amount_allocated),
+          p_worker_id: workerId,
+        }
+      );
+      if (adoptGasError || adoptedGasOp?.success !== true) {
+        throw new Error(
+          `Could not adopt persisted EVM gas-funding operation for recovery: ${adoptGasError?.message || adoptedGasOp?.message || adoptedGasOp?.code || 'unknown response'}`
+        );
+      }
+
+      const rpcUrl = getRpcUrlForNetwork(net);
+      const provider = new ethers.JsonRpcProvider(rpcUrl);
+      const fundingFinality = await getEvmSweepReceiptFinality(provider, childHash, net);
+
+      if (fundingFinality !== 'CONFIRMED' && childStatus === 'CONFIRMED') {
+        // A receipt previously treated as final is no longer visible as
+        // canonical. Re-lock this nonce before any other hot-wallet funding
+        // operation can allocate a later nonce.
+        const { data: reorgLock, error: reorgLockError } = await supabaseAdmin.rpc(
+          'mark_evm_gas_funding_receipt_recovery_required',
+          {
+            p_sweep_id: sweepId,
+            p_worker_id: workerId,
+            p_tx_hash: childHash,
+            p_error_message: 'Previously confirmed EVM gas-funding receipt is no longer canonical at the configured RPC; preserving its nonce until revalidated.',
+          }
+        );
+        if (reorgLockError || reorgLock?.success !== true) {
+          throw new Error(
+            `Could not re-lock previously confirmed EVM gas-funding nonce after receipt canonicality loss: ${reorgLockError?.message || reorgLock?.code || 'unknown response'}`
+          );
+        }
+      }
+
+      if (fundingFinality === 'PENDING') {
+        // A missing transaction plus an advanced shared hot-wallet nonce is an
+        // incident, not proof of payout or failure. Record it without settling,
+        // replacing, refunding, or releasing the reserved nonce.
+        if (Number.isSafeInteger(Number(gasOp.nonce)) && Number(gasOp.nonce) >= 0) {
+          try {
+            const [expectedTransaction, expectedReceipt] = await Promise.all([
+              provider.getTransaction(childHash),
+              provider.getTransactionReceipt(childHash),
+            ]);
+            if (!expectedTransaction && !expectedReceipt) {
+              const walletAddress = ethers.getAddress(
+                String(gasOp.funding_wallet_address || requireEvmHotWalletAddress()).trim()
+              );
+              const [latestNonce, pendingNonce] = await Promise.all([
+                provider.getTransactionCount(walletAddress, 'latest'),
+                provider.getTransactionCount(walletAddress, 'pending'),
+              ]);
+              const expectedNonce = Number(gasOp.nonce);
+              if (
+                Number.isSafeInteger(latestNonce) &&
+                Number.isSafeInteger(pendingNonce) &&
+                (latestNonce > expectedNonce || pendingNonce > expectedNonce)
+              ) {
+                await recordEvmGasFundingNonceIncident({
+                  sweepId,
+                  network: canonicalEvmNetwork,
+                  walletAddress,
+                  expectedNonce,
+                  expectedTxHash: childHash,
+                  observedLatestNonce: latestNonce,
+                  observedPendingNonce: pendingNonce,
+                  reason: 'Persisted gas-funding transaction and receipt are unavailable while the shared hot-wallet nonce has advanced.',
+                });
+                console.error(
+                  `[Sweeper Recovery] EVM gas-funding nonce incident recorded for ${sweepId}; reservations remain locked for manual reconciliation.`
+                );
+              }
+            }
+          } catch (incidentError) {
+            console.error(
+              `[Sweeper Recovery] Could not record EVM gas-funding nonce incident for ${sweepId}; reservations remain locked:`,
+              incidentError
+            );
+          }
+        }
+
+        // Missing, shallow, or reorged receipt remains locked. Do not create
+        // another funding operation or proceed to the child sweep.
+        return false;
+      }
+
+      const fundingReceipt = await provider.getTransactionReceipt(childHash);
+      if (!fundingReceipt || !fundingReceipt.blockHash || !fundingReceipt.blockNumber) {
+        return false;
+      }
+
+      // Persist actual gas used, effective price, execution status and block
+      // identity before the parent can leave GAS_FUNDING. The receipt RPC
+      // restores CONFIRMED only from RECOVERY_REQUIRED after fresh finality.
+      await recordEvmGasFundingReceipt(sweepId, workerId, childHash, fundingReceipt);
+
+      if (fundingFinality === 'REVERTED') {
+        await transitionSweepStatus(
+          sweepId,
+          workerId,
+          status,
+          'RECOVERY_REQUIRED',
+          {
+            errorMessage: `Gas-funding transaction ${childHash} was mined and reverted after required finality. Actual fee and consumed nonce were recorded; operator action is required before another funding attempt.`,
+          }
+        );
+        return false;
+      }
+
+      fundingConfirmed = true;
+    }
+
+    // Resume the normal sweep pipeline for GAS_FUNDING/GAS_FUNDED rows. This handles:
+    // - a crash before creating a funding operation;
+    // - PENDING operations with a reserved nonce but no signed bytes;
+    // - pre-signing RECOVERY_REQUIRED operations with no broadcast identity;
+    // - confirmed funding whose parent transition was interrupted.
+    // The normal pipeline reuses the same allocated nonce/amount and always
+    // persists a signed transaction before any broadcast.
+    let derivationIndex: number | null =
+      Number.isSafeInteger(sweep.derivation_index) && sweep.derivation_index > 0
+        ? sweep.derivation_index
+        : null;
+
+    if (derivationIndex === null) {
+      const { data: addressRecord, error: addressError } = await supabaseAdmin
+        .from('user_deposit_addresses')
+        .select('derivation_index')
+        .ilike('address', String(sweep.deposit_address || ''))
+        .maybeSingle();
+
+      if (addressError) {
+        throw new Error(`Could not resolve EVM recovery derivation index: ${addressError.message}`);
+      }
+      if (typeof addressRecord?.derivation_index === 'number') {
+        derivationIndex = addressRecord.derivation_index;
+      }
+    }
+
+    if (derivationIndex === null && sweep.deposit_id) {
+      const { data: depositRecord, error: depositError } = await supabaseAdmin
+        .from('onchain_deposits')
+        .select('user_id')
+        .eq('id', sweep.deposit_id)
+        .maybeSingle();
+
+      if (depositError) {
+        throw new Error(`Could not resolve EVM recovery deposit owner: ${depositError.message}`);
+      }
+
+      if (depositRecord?.user_id) {
+        const { data: profileRecord, error: profileError } = await supabaseAdmin
+          .from('profiles')
+          .select('wallet_index')
+          .eq('id', depositRecord.user_id)
+          .maybeSingle();
+
+        if (profileError) {
+          throw new Error(`Could not resolve EVM recovery wallet index: ${profileError.message}`);
+        }
+        if (typeof profileRecord?.wallet_index === 'number') {
+          derivationIndex = profileRecord.wallet_index;
         }
       }
     }
+
+    if (derivationIndex === null) {
+      throw new Error('EVM GAS_FUNDING sweep has no resolvable derivation index; manual reconciliation required.');
+    }
+
+    const resumed = await sweepUserDepositAddress(
+      String(sweep.deposit_address || ''),
+      net as 'ERC20' | 'BEP20' | 'ETH',
+      derivationIndex,
+      String(sweep.asset_symbol || 'USDT'),
+      sweepId,
+      workerId
+    );
+
+    if (resumed.status === 'SUCCESS') return true;
+    if (resumed.status === 'FAILED') {
+      console.warn(`[Sweeper Recovery] EVM GAS_FUNDING retry for ${sweepId} remains unresolved: ${resumed.error || 'unknown worker failure'}`);
+    }
+
+    if (fundingConfirmed) {
+      // A gas-funding transfer was already final, but the child sweep could
+      // not safely proceed (for example, the funded address still lacks the
+      // fee reserve). Stop automatic retries and require an operator decision.
+      const { data: latestSweep, error: latestSweepError } = await supabaseAdmin
+        .from('sweep_operations')
+        .select('status')
+        .eq('id', sweepId)
+        .maybeSingle();
+
+      if (latestSweepError) {
+        throw new Error(`Could not inspect parent after confirmed gas funding: ${latestSweepError.message}`);
+      }
+
+      const latestStatus = String(latestSweep?.status || '');
+      if (latestStatus === 'GAS_FUNDING' || latestStatus === 'GAS_FUNDED') {
+        await transitionSweepStatus(
+          sweepId,
+          workerId,
+          latestStatus,
+          'RECOVERY_REQUIRED',
+          {
+            errorMessage: 'Gas funding is final but the child sweep did not safely complete. Operator review is required; the funding nonce and receipt remain recorded.',
+          }
+        );
+      }
+    }
+    return false;
   }
 
   if (status === 'READY_TO_BROADCAST' && isEvmNetwork) {
@@ -2191,7 +3871,75 @@ export async function reconcileAmbiguousSweep(sweepId: string, workerId: string)
       return false;
     }
 
-    const txNonce = parsedTx.nonce;
+    const expectedChainId = Number(sweep.signed_chain_id);
+    const expectedSender = String(sweep.deposit_address || '').toLowerCase();
+    const expectedRecipient = String(sweep.signed_recipient || '').toLowerCase();
+    const expectedAsset = String(sweep.signed_asset_code || '').toUpperCase();
+    const expectedTokenContract = sweep.signed_token_contract
+      ? String(sweep.signed_token_contract).toLowerCase()
+      : null;
+    const expectedAmountRaw = sweep.signed_amount_raw === null || sweep.signed_amount_raw === undefined
+      ? null
+      : BigInt(String(sweep.signed_amount_raw));
+    const actualSender = String(parsedTx.from || '').toLowerCase();
+    const actualTo = String(parsedTx.to || '').toLowerCase();
+    let transactionIdentityValid = false;
+
+    try {
+      // Old signed rows without the immutable intent fields fail closed. Do not
+      // infer the asset or intended amount from the transaction being checked.
+      if (
+        (expectedChainId === 1 || expectedChainId === 56) &&
+        expectedAmountRaw !== null && expectedAmountRaw > 0n &&
+        ethers.isAddress(expectedSender) &&
+        ethers.isAddress(expectedRecipient) &&
+        parsedTx.chainId === BigInt(expectedChainId) &&
+        actualSender === expectedSender &&
+        actualTo.length > 0
+      ) {
+        if (expectedAsset === 'ETH') {
+          transactionIdentityValid =
+            expectedChainId === 1 &&
+            expectedTokenContract === null &&
+            actualTo === expectedRecipient &&
+            parsedTx.data === '0x' &&
+            parsedTx.value === expectedAmountRaw;
+        } else if (expectedAsset === 'USDT' && expectedTokenContract) {
+          const tokenConfig = getUsdtConfig(net);
+          const canonicalContract = ethers.getAddress(tokenConfig.contractAddress);
+          const storedContract = ethers.getAddress(expectedTokenContract);
+          const transferInterface = new ethers.Interface([
+            'function transfer(address to, uint256 amount) returns (bool)',
+          ]);
+          const decoded = transferInterface.decodeFunctionData('transfer', parsedTx.data);
+          const decodedRecipient = ethers.getAddress(String(decoded[0]));
+          const decodedAmount = BigInt(decoded[1]);
+
+          transactionIdentityValid =
+            BigInt(expectedChainId) === (net === 'BEP20' || net === 'BSC' ? 56n : 1n) &&
+            storedContract === canonicalContract &&
+            ethers.getAddress(actualTo) === storedContract &&
+            parsedTx.value === 0n &&
+            decodedRecipient === ethers.getAddress(expectedRecipient) &&
+            decodedAmount === expectedAmountRaw;
+        }
+      }
+    } catch {
+      transactionIdentityValid = false;
+    }
+
+if (!transactionIdentityValid) {
+    await supabaseAdmin.rpc('update_sweep_operation_status', {
+        p_sweep_id: sweepId,
+        p_worker_id: workerId,
+        p_expected_status: 'READY_TO_BROADCAST',
+        p_new_status: 'RECOVERY_REQUIRED',
+        p_error_message: 'Signed EVM recovery transaction identity mismatch (chain, sender, recipient, asset call or value). Manual reconciliation required.',
+    });
+    return false;
+}
+
+const txNonce = parsedTx.nonce;
     if (nonce === null || nonce === undefined || BigInt(txNonce) !== BigInt(nonce)) {
       await supabaseAdmin.rpc('update_sweep_operation_status', {
         p_sweep_id: sweepId,
@@ -2208,7 +3956,11 @@ export async function reconcileAmbiguousSweep(sweepId: string, workerId: string)
     const provider = new ethers.JsonRpcProvider(rpcUrl);
 
     try {
+      await assertPreBroadcastOwnership(sweepId, workerId, 'READY_TO_BROADCAST');
       const txResponse = await provider.broadcastTransaction(signed_tx_hex);
+      if (String(txResponse.hash || '').toLowerCase() !== String(sweep_tx_hash || '').toLowerCase()) {
+        throw new Error('Recovery broadcast hash differs from the persisted signed transaction hash.');
+      }
       await transitionSweepStatus(sweepId, workerId, 'READY_TO_BROADCAST', 'BROADCASTED', sweep_tx_hash);
       return true;
     } catch (broadcastErr: any) {
@@ -2268,8 +4020,84 @@ export async function reconcileAmbiguousSweep(sweepId: string, workerId: string)
       return false;
     }
 
-    // Broadcast stored bytes
+    // Verify the signed transaction against its separately persisted intent.
+    // Legacy signed rows without this intent are never automatically rebroadcast.
+    const utxoIntent = sweep.signed_utxo_intent;
+    let utxoIntentValid = false;
     try {
+      const txObj = bitcoin.Transaction.fromHex(signed_tx_hex);
+      const intentInputs = Array.isArray(utxoIntent?.inputs) ? utxoIntent.inputs : [];
+      const intentOutput = BigInt(String(utxoIntent?.output_amount_sat ?? '0'));
+      const intentFee = BigInt(String(utxoIntent?.fee_amount_sat ?? '-1'));
+      const expectedScript = String(utxoIntent?.destination_script_hex || '').toLowerCase();
+      const expectedHotWalletAddress = net === 'BTC'
+        ? requireBitcoinHotWalletAddress()
+        : requireLitecoinHotWalletAddress();
+      const expectedHotWalletScript = bitcoin.address.toOutputScript(
+        expectedHotWalletAddress,
+        net === 'BTC' ? bitcoin.networks.bitcoin : LTC_NETWORK as any
+      ).toString('hex').toLowerCase();
+      const actualInputs = txObj.ins.map((input) => ({
+        txid: Buffer.from(input.hash).reverse().toString('hex').toLowerCase(),
+        vout: input.index,
+      }));
+      const expectedInputs = intentInputs.map((input: any) => ({
+        txid: String(input.txid || '').toLowerCase(),
+        vout: Number(input.vout),
+      }));
+      const inputRecordsValid = intentInputs.every((input: any) => {
+        const txid = String(input.txid || '');
+        const voutText = String(input.vout ?? '');
+        const valueText = String(input.value_sat ?? '');
+        const vout = Number(voutText);
+        return /^[0-9a-f]{64}$/i.test(txid) &&
+          /^[0-9]{1,10}$/.test(voutText) &&
+          Number.isSafeInteger(vout) && vout >= 0 && vout <= 0x7fffffff &&
+          /^[1-9][0-9]{0,15}$/.test(valueText) &&
+          BigInt(valueText) <= 8400000000000000n;
+      });
+      const uniqueExpectedOutpoints = new Set(
+        expectedInputs.map((input: any) => `${input.txid}:${input.vout}`)
+      ).size === intentInputs.length;
+      const inputValues = intentInputs.map((input: any) => BigInt(String(input.value_sat)));
+      const inputTotal = inputValues.reduce((sum: bigint, value: bigint) => sum + value, 0n);
+      const actualOutput = txObj.outs.length === 1 ? txObj.outs[0] : null;
+      const outpointsMatch = actualInputs.length === expectedInputs.length &&
+        actualInputs.every((input, index) =>
+          input.txid === expectedInputs[index].txid && input.vout === expectedInputs[index].vout
+        );
+      utxoIntentValid =
+        intentInputs.length > 0 &&
+        intentInputs.length <= 100 &&
+        inputRecordsValid &&
+        uniqueExpectedOutpoints &&
+        inputValues.every((value: bigint) => value > 0n) &&
+        outpointsMatch &&
+        actualOutput !== null &&
+        Buffer.from(actualOutput.script).toString('hex').toLowerCase() === expectedScript &&
+        expectedScript === expectedHotWalletScript &&
+        BigInt(actualOutput.value) === intentOutput &&
+        intentOutput > 0n &&
+        intentFee >= 0n &&
+        inputTotal === intentOutput + intentFee;
+    } catch {
+      utxoIntentValid = false;
+    }
+
+    if (!utxoIntentValid) {
+      await supabaseAdmin.rpc('update_sweep_operation_status', {
+        p_sweep_id: sweepId,
+        p_worker_id: workerId,
+        p_expected_status: 'READY_TO_BROADCAST',
+        p_new_status: 'RECOVERY_REQUIRED',
+        p_error_message: 'Signed BTC/LTC transaction does not match its immutable UTXO intent. Automatic rebroadcast blocked.',
+      });
+      return false;
+    }
+
+    // Broadcast stored bytes only after revalidating the current lease.
+    try {
+      await assertPreBroadcastOwnership(sweepId, workerId, 'READY_TO_BROADCAST');
       if (net === 'BTC') {
         const btcApiBase = process.env.BTC_MEMPOOL_API || 'https://mempool.space/api';
         const broadcastRes = await fetch(`${btcApiBase}/tx`, {
@@ -2334,14 +4162,15 @@ export async function reconcileAmbiguousSweep(sweepId: string, workerId: string)
       const net = (network || '').toUpperCase().trim();
       let isConfirmed = false;
       let isFailed = false;
+      let utxoFinalityProof: Awaited<ReturnType<typeof isUtxoSweepCanonicallyConfirmed>> = null;
 
-      if (net === 'ERC20' || net === 'BEP20' || net === 'ETH' || net === 'BSC') {
+      if (net === 'ERC20' || net === 'BEP20' || net === 'ETH' || net === 'BSC' || net === 'ETHEREUM' || net === 'BINANCE') {
         const rpcUrl = getRpcUrlForNetwork(net);
         const provider = new ethers.JsonRpcProvider(rpcUrl);
-        const receipt = await provider.getTransactionReceipt(sweep_tx_hash);
-        if (receipt && receipt.status === 1) {
+        const finality = await getEvmSweepReceiptFinality(provider, sweep_tx_hash, net);
+        if (finality === 'CONFIRMED') {
           isConfirmed = true;
-        } else if (receipt && receipt.status === 0) {
+        } else if (finality === 'REVERTED') {
           isFailed = true;
         }
       } else if (net === 'TRC20' || net === 'TRON') {
@@ -2353,85 +4182,217 @@ export async function reconcileAmbiguousSweep(sweepId: string, workerId: string)
         } else if (txInfo && txInfo.ret && txInfo.ret[0]?.contractRet && txInfo.ret[0]?.contractRet !== 'SUCCESS') {
           isFailed = true;
         }
-      } else if (net === 'BTC') {
-        const btcApiBase = process.env.BTC_MEMPOOL_API || 'https://mempool.space/api';
-        const res = await fetch(`${btcApiBase}/tx/${sweep_tx_hash}`);
-        if (res.ok) {
-          const txData = await res.json();
-          if (txData.status?.confirmed) {
-            isConfirmed = true;
-          }
-        }
-      } else if (net === 'LTC') {
-        const ltcApiBase = process.env.LTC_MEMPOOL_API || 'https://litecoinspace.org/api';
-        const res = await fetch(`${ltcApiBase}/tx/${sweep_tx_hash}`);
-        if (res.ok) {
-          const txData = await res.json();
-          if (txData.status?.confirmed) {
-            isConfirmed = true;
-          }
-        }
+      } else if (net === 'BTC' || net === 'LTC') {
+        utxoFinalityProof = await isUtxoSweepCanonicallyConfirmed(net, sweep_tx_hash);
+        isConfirmed = utxoFinalityProof !== null;
       }
 
+      const isTronSweep = net === 'TRC20' || net === 'TRON';
+
       if (isConfirmed) {
-        await supabaseAdmin.rpc('update_sweep_operation_status', {
-          p_sweep_id: sweepId,
-          p_worker_id: workerId,
-          p_expected_status: status,
-          p_new_status: 'CONFIRMED',
-          p_tx_hash: sweep_tx_hash,
-          p_amount_swept: amount_swept,
-        });
-        if (net === 'TRC20' || net === 'TRON') {
+        if ((net === 'BTC' || net === 'LTC') && utxoFinalityProof) {
+          const { data: finalityProofResult, error: finalityProofError } = await supabaseAdmin.rpc(
+            'record_utxo_sweep_finality_proof',
+            {
+              p_sweep_id: sweepId,
+              p_worker_id: workerId,
+              p_tx_hash: utxoFinalityProof.txid,
+              p_block_hash: utxoFinalityProof.blockHash,
+              p_block_height: utxoFinalityProof.blockHeight,
+              p_primary_tip_height: utxoFinalityProof.primaryTipHeight,
+              p_secondary_tip_height: utxoFinalityProof.secondaryTipHeight,
+              p_primary_source: utxoFinalityProof.primarySource,
+              p_secondary_source: utxoFinalityProof.secondarySource,
+            }
+          );
+
+          if (finalityProofError || finalityProofResult?.success !== true) {
+            throw new Error(
+              `Could not persist BTC/LTC finality proof: ${finalityProofError?.message || finalityProofResult?.code || 'unknown database response'}`
+            );
+          }
+        }
+
+        // READY_TO_BROADCAST can be confirmed on-chain even if the worker died
+        // before recording BROADCASTED. Reconcile the state machine first.
+        if (recoveryStatus === 'READY_TO_BROADCAST') {
+          await transitionSweepStatus(sweepId, workerId, 'READY_TO_BROADCAST', 'BROADCASTED', sweep_tx_hash);
+          recoveryStatus = 'BROADCASTED';
+        }
+
+        // Resource reclamation must finish while the parent sweep is still in a
+        // post-broadcast state accepted by the TRON undelegation RPCs.
+        if (isTronSweep) {
+          let resourcesReclaimed = false;
           try {
-            await undelegateEnergyToPool(sweepId, workerId);
+            resourcesReclaimed = await undelegateEnergyToPool(sweepId, workerId);
           } catch (unErr) {
             console.error('[Tron Resource Pool] Failed to reclaim resources on confirmed reconciliation:', unErr);
           }
+
+          if (!resourcesReclaimed) {
+            if (recoveryStatus !== 'RECOVERY_REQUIRED') {
+              await transitionSweepStatus(
+                sweepId,
+                workerId,
+                recoveryStatus,
+                'RECOVERY_REQUIRED',
+                {
+                  txHash: sweep_tx_hash,
+                  errorMessage: 'Sweep transfer is confirmed but TRON Energy reclamation is not yet verified',
+                }
+              );
+              recoveryStatus = 'RECOVERY_REQUIRED';
+            }
+            return false;
+          }
         }
+
+        await transitionSweepStatus(
+          sweepId,
+          workerId,
+          recoveryStatus,
+          'CONFIRMED',
+          { txHash: sweep_tx_hash, amountSwept: Number(amount_swept || 0) }
+        );
         return true;
       }
 
       if (isFailed) {
-        await supabaseAdmin.rpc('update_sweep_operation_status', {
-          p_sweep_id: sweepId,
-          p_worker_id: workerId,
-          p_expected_status: status,
-          p_new_status: 'FAILED',
-          p_error_message: 'On-chain transaction execution failed',
-        });
-        if (net === 'TRC20' || net === 'TRON') {
+        // Do not finalize a TRON sweep as FAILED while delegated Energy remains
+        // attached to the child address. Recovery needs the live post-broadcast
+        // parent state to persist/confirm an undelegation transaction.
+        if (isTronSweep) {
+          let resourcesReclaimed = false;
           try {
-            await undelegateEnergyToPool(sweepId, workerId);
+            resourcesReclaimed = await undelegateEnergyToPool(sweepId, workerId);
           } catch (unErr) {
             console.error('[Tron Resource Pool] Failed to reclaim resources on failed reconciliation:', unErr);
           }
+
+          if (!resourcesReclaimed) {
+            if (recoveryStatus !== 'RECOVERY_REQUIRED') {
+              await transitionSweepStatus(
+                sweepId,
+                workerId,
+                recoveryStatus,
+                'RECOVERY_REQUIRED',
+                {
+                  txHash: sweep_tx_hash,
+                  errorMessage: 'Sweep transfer failed and TRON Energy reclamation is not yet verified',
+                }
+              );
+              recoveryStatus = 'RECOVERY_REQUIRED';
+            }
+            return false;
+          }
         }
+
+        await transitionSweepStatus(
+          sweepId,
+          workerId,
+          recoveryStatus,
+          'FAILED',
+          { txHash: sweep_tx_hash, errorMessage: 'On-chain transaction execution failed' }
+        );
         return false;
       }
 
-      // If unconfirmed / pending, ensure record remains safely locked in RECOVERY_REQUIRED
-      if (status !== 'RECOVERY_REQUIRED') {
-        await supabaseAdmin.rpc('update_sweep_operation_status', {
-          p_sweep_id: sweepId,
-          p_worker_id: workerId,
-          p_expected_status: status,
-          p_new_status: 'RECOVERY_REQUIRED',
-          p_tx_hash: sweep_tx_hash,
-          p_error_message: `Unconfirmed transaction ${sweep_tx_hash} moved to RECOVERY_REQUIRED`,
-        });
+      // A signed UTXO transaction may be abandoned only when every input is
+      // demonstrably spent by a different confirmed transaction in two independent
+      // explorer views. A missing transaction or one "unspent" response never releases it.
+      if (
+        !isConfirmed &&
+        !isFailed &&
+        (net === 'BTC' || net === 'LTC') &&
+        sweep_tx_hash &&
+        sweep.signed_utxo_intent
+      ) {
+        // Keep the current recovery claim lease while the proof is gathered and
+        // persisted. Moving into RECOVERY_REQUIRED first clears the legacy status
+        // RPC lease and would make the proof RPC reject this worker.
+        const conflictProofs = await collectConfirmedUtxoConflictProofs(
+          net,
+          sweep_tx_hash,
+          sweep.signed_utxo_intent
+        );
+
+        if (conflictProofs) {
+          const { data: proofResult, error: proofError } = await supabaseAdmin.rpc(
+            'record_utxo_sweep_conflict_proofs',
+            {
+              p_sweep_id: sweepId,
+              p_worker_id: workerId,
+              p_proofs: conflictProofs,
+            }
+          );
+
+          if (proofError || proofResult?.success !== true) {
+            throw new Error(
+              `Could not persist complete UTXO conflict proof: ${proofError?.message || proofResult?.message || proofResult?.code || 'unknown database response'}`
+            );
+          }
+
+          await transitionSweepStatus(
+            sweepId,
+            workerId,
+            recoveryStatus,
+            'FAILED',
+            {
+              txHash: sweep_tx_hash,
+              errorMessage: `Every signed ${net} input was independently verified spent by a different transaction with the required confirmation depth. Signed transaction can no longer be mined; reservations released.`,
+            }
+          );
+          return true;
+        }
+
+        if (recoveryStatus !== 'RECOVERY_REQUIRED') {
+          await transitionSweepStatus(
+            sweepId,
+            workerId,
+            recoveryStatus,
+            'RECOVERY_REQUIRED',
+            {
+              txHash: sweep_tx_hash,
+              errorMessage: `Unconfirmed transaction ${sweep_tx_hash} has no independently confirmed full-input conflict proof; UTXO reservations remain locked.`,
+            }
+          );
+          recoveryStatus = 'RECOVERY_REQUIRED';
+        }
+      }
+
+      // If unconfirmed / pending, ensure record remains safely locked in RECOVERY_REQUIRED.
+      if (recoveryStatus !== 'RECOVERY_REQUIRED') {
+        await transitionSweepStatus(
+          sweepId,
+          workerId,
+          recoveryStatus,
+          'RECOVERY_REQUIRED',
+          {
+            txHash: sweep_tx_hash,
+            errorMessage: `Unconfirmed transaction ${sweep_tx_hash} moved to RECOVERY_REQUIRED`,
+          }
+        );
+        recoveryStatus = 'RECOVERY_REQUIRED';
       }
     } catch (err: any) {
       console.error(`[Reconcile Sweep Exception] ${sweepId}:`, err);
-      if (status !== 'RECOVERY_REQUIRED') {
-        await supabaseAdmin.rpc('update_sweep_operation_status', {
-          p_sweep_id: sweepId,
-          p_worker_id: workerId,
-          p_expected_status: status,
-          p_new_status: 'RECOVERY_REQUIRED',
-          p_tx_hash: sweep_tx_hash,
-          p_error_message: err?.message || 'Reconciliation query exception',
-        });
+      if (recoveryStatus !== 'RECOVERY_REQUIRED') {
+        try {
+          await transitionSweepStatus(
+            sweepId,
+            workerId,
+            recoveryStatus,
+            'RECOVERY_REQUIRED',
+            {
+              txHash: sweep_tx_hash,
+              errorMessage: err?.message || 'Reconciliation query exception',
+            }
+          );
+          recoveryStatus = 'RECOVERY_REQUIRED';
+        } catch (transitionErr) {
+          console.error(`[Reconcile Sweep Exception] Failed to persist RECOVERY_REQUIRED for ${sweepId}:`, transitionErr);
+        }
       }
     }
   }
@@ -2443,8 +4404,49 @@ export async function reconcileAmbiguousSweep(sweepId: string, workerId: string)
  * Scans DB for confirmed deposits and sweeps using atomic worker claims.
  */
 export async function runAutomatedSweeperJob(): Promise<SweepResult[]> {
-  const workerId = `sweeper_worker_${Math.random().toString(36).substring(2, 10)}`;
+  const workerId = randomUUID();
   const results: SweepResult[] = [];
+
+  // Reconcile persisted/ambiguous transactions before starting any new sweep.
+  // If the reconciliation RPC is unavailable, stop this job rather than
+  // initiating fresh transfers while older broadcasts remain unresolved.
+  let reconciliationCount = 0;
+  while (reconciliationCount < 20) {
+    const { data: recoveryClaims, error: recoveryClaimErr } = await supabaseAdmin.rpc(
+      'claim_next_sweep_reconciliation',
+      {
+        p_worker_id: workerId,
+        p_lease_duration_seconds: 300,
+      }
+    );
+
+    if (recoveryClaimErr) {
+      console.error('[Sweeper Job] Recovery claim failed; refusing to start new sweeps:', recoveryClaimErr);
+      return results;
+    }
+
+    if (!recoveryClaims || recoveryClaims.length === 0) break;
+
+    const recoverySweepId = String(recoveryClaims[0]?.id || recoveryClaims[0]?.sweep_id || '');
+    if (!recoverySweepId) {
+      console.error('[Sweeper Job] Recovery claim returned no sweep ID; refusing to start new sweeps.');
+      return results;
+    }
+
+    const stopRecoveryHeartbeat = startSweeperHeartbeat(recoverySweepId, workerId);
+    try {
+      const reconciled = await reconcileAmbiguousSweep(recoverySweepId, workerId);
+      console.info(
+        `[Sweeper Job] Recovery reconciliation for ${recoverySweepId}: ${reconciled ? 'resolved or rebroadcast' : 'still requires reconciliation'}.`
+      );
+    } catch (recoveryErr) {
+      console.error(`[Sweeper Job] Failed to reconcile sweep ${recoverySweepId}:`, recoveryErr);
+    } finally {
+      stopRecoveryHeartbeat();
+    }
+
+    reconciliationCount++;
+  }
 
   let claimActive = true;
   let batchCount = 0;
@@ -2521,8 +4523,10 @@ export async function runAutomatedSweeperJob(): Promise<SweepResult[]> {
 
     if (result.status === 'SUCCESS') {
       const netCode = (network || '').toUpperCase().trim();
-      if (netCode === 'TRC20' || netCode === 'TRON') {
-        console.log(`[Sweeper Job] TRON Sweep ${sweepId} successfully broadcasted (tx: ${result.txHash}). Leaving in BROADCASTED state for on-chain verification.`);
+      if (['TRC20', 'TRON', 'BTC', 'LTC', 'ERC20', 'BEP20', 'ETH', 'BSC', 'ETHEREUM', 'BINANCE'].includes(netCode)) {
+        console.log(
+          `[Sweeper Job] ${netCode} sweep ${sweepId} broadcasted (tx: ${result.txHash}). Leaving in BROADCASTED state until chain confirmation is independently reconciled.`
+        );
       } else {
         await transitionSweepStatus(sweepId, workerId, 'BROADCASTED', 'CONFIRMED', {
           txHash: result.txHash,
@@ -2530,23 +4534,72 @@ export async function runAutomatedSweeperJob(): Promise<SweepResult[]> {
         });
       }
     } else if (result.status === 'FAILED') {
-      // Fail status transition if not already in terminal or recovery state
-      // If a nonce has already been allocated, do NOT transition to FAILED to avoid creating nonce gaps.
-      // The operation will remain retryable as CLAIMED / GAS_FUNDED once the worker lease expires.
-      if (!result.nonceAllocated) {
+      // BTC/LTC failures are terminal only before signed transaction identity is
+      // persisted. Once bytes or a deterministic hash exist, preserve recovery.
+      const netCode = String(network || '').toUpperCase().trim();
+      let preserveUtxoRecovery = false;
+
+      if (netCode === 'BTC' || netCode === 'LTC') {
+        const { data: currentSweep, error: currentSweepError } = await supabaseAdmin
+          .from('sweep_operations')
+          .select('status, signed_tx_hex, sweep_tx_hash')
+          .eq('id', sweepId)
+          .maybeSingle();
+
+        if (currentSweepError || !currentSweep) {
+          // A read failure must never authorize a terminal transition.
+          preserveUtxoRecovery = true;
+          console.error(
+            `[Sweeper Worker ${workerId}] Could not verify BTC/LTC signed state for ${sweepId}; leaving it non-terminal: ${currentSweepError?.message || 'sweep row unavailable'}`
+          );
+        } else if (currentSweep.signed_tx_hex || currentSweep.sweep_tx_hash) {
+          preserveUtxoRecovery = true;
+          if (currentSweep.status !== 'RECOVERY_REQUIRED') {
+            try {
+              await transitionSweepStatus(
+                sweepId,
+                workerId,
+                currentSweep.status,
+                'RECOVERY_REQUIRED',
+                {
+                  txHash: currentSweep.sweep_tx_hash || undefined,
+                  errorMessage: result.error || 'BTC/LTC worker failed after signed transaction identity was persisted; reconciliation required',
+                }
+              );
+            } catch (recoveryTransitionError: any) {
+              console.error(
+                `[Sweeper Worker ${workerId}] Could not move signed BTC/LTC sweep ${sweepId} into recovery: ${recoveryTransitionError?.message || recoveryTransitionError}`
+              );
+            }
+          }
+        }
+      }
+
+      // EVM nonce allocation must not be abandoned; signed UTXO transactions
+      // must never be treated as unsent. Both cases remain recoverable.
+      if (!preserveUtxoRecovery && !result.nonceAllocated) {
         try {
-          await supabaseAdmin.rpc('update_sweep_operation_status', {
+          const { data: failResult, error: failError } = await supabaseAdmin.rpc('update_sweep_operation_status', {
             p_sweep_id: sweepId,
             p_worker_id: workerId,
             p_expected_status: 'CLAIMED',
             p_new_status: 'FAILED',
             p_error_message: result.error || 'Sweep failed',
           });
-        } catch {
-          // Ignore if already transitioned to RECOVERY_REQUIRED
+          if (failError || !failResult?.success) {
+            console.warn(
+              `[Sweeper Worker ${workerId}] FAILED transition rejected for ${sweepId}: ${failError?.message || failResult?.code || 'unknown response'}`
+            );
+          }
+        } catch (failureTransitionError: any) {
+          console.warn(
+            `[Sweeper Worker ${workerId}] FAILED transition errored for ${sweepId}: ${failureTransitionError?.message || failureTransitionError}`
+          );
         }
       } else {
-        console.warn(`[Sweeper Worker ${workerId}] Sweep ${sweepId} failed after nonce allocation. Preserving row for safe sequential retry.`);
+        console.warn(
+          `[Sweeper Worker ${workerId}] Preserving sweep ${sweepId} for recovery; persisted signed UTXO identity or allocated nonce prevents automatic failure.`
+        );
       }
     }
 

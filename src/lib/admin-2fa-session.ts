@@ -16,13 +16,35 @@ function getAdminSessionKey(): Buffer {
   }
 
   const cleanKey = rawKey.trim();
+  let key: Buffer;
   if (/^[0-9a-fA-F]{64}$/.test(cleanKey)) {
-    return Buffer.from(cleanKey, 'hex');
+    key = Buffer.from(cleanKey, 'hex');
   } else if (cleanKey.length === 32) {
-    return Buffer.from(cleanKey, 'utf8');
+    key = Buffer.from(cleanKey, 'utf8');
+  } else if (/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(cleanKey)) {
+    key = Buffer.from(cleanKey, 'base64');
+    if (key.toString('base64') !== cleanKey) {
+      throw new Error('ADMIN_2FA_ENCRYPTION_KEY must be canonical Base64.');
+    }
   } else {
-    return Buffer.from(cleanKey, 'base64');
+    throw new Error('ADMIN_2FA_ENCRYPTION_KEY must encode exactly 32 bytes using 64 hex characters, 32 UTF-8 bytes, or Base64.');
   }
+
+  if (key.length !== 32) {
+    throw new Error('ADMIN_2FA_ENCRYPTION_KEY must decode to exactly 32 bytes.');
+  }
+  return key;
+}
+
+/** Purpose-separate the cookie-signing key from the AES-GCM TOTP encryption key. */
+function getAdminSessionSigningKey(): Buffer {
+  return Buffer.from(crypto.hkdfSync(
+    'sha256',
+    getAdminSessionKey(),
+    Buffer.from('PAXONES_2FA_HKDF_SALT_V1', 'utf8'),
+    Buffer.from('PAXONES_ADMIN_2FA_SESSION_HMAC_V1', 'utf8'),
+    32,
+  ));
 }
 
 /**
@@ -37,10 +59,10 @@ export function createAdmin2FASessionToken(
 
   const verifiedAt = Date.now();
   const exp = verifiedAt + ADMIN_2FA_SESSION_MAX_AGE_SECONDS * 1000;
-  const versionTag = securityVersion ? String(securityVersion).trim() : 'v0';
+  const versionTag = securityVersion ? encodeURIComponent(String(securityVersion).trim()) : 'v0';
 
   const payloadString = `v1:session:${adminId}:${verifiedAt}:${exp}:${versionTag}`;
-  const key = getAdminSessionKey();
+  const key = getAdminSessionSigningKey();
   const hmac = crypto.createHmac('sha256', key).update(payloadString).digest('hex');
 
   return `${payloadString}:${hmac}`;
@@ -74,31 +96,52 @@ export function verifyAdmin2FASessionToken(
     }
 
     // 2. Check expiration
-    const exp = parseInt(expStr, 10);
-    if (isNaN(exp) || Date.now() > exp) {
+    const verifiedAt = Number(verifiedAtStr);
+    const exp = Number(expStr);
+    const now = Date.now();
+    if (
+      !Number.isFinite(verifiedAt) ||
+      !Number.isFinite(exp) ||
+      verifiedAt <= 0 ||
+      exp <= verifiedAt ||
+      exp - verifiedAt > ADMIN_2FA_SESSION_MAX_AGE_SECONDS * 1000 ||
+      verifiedAt > now + 10_000 ||
+      now > exp
+    ) {
       return { valid: false, reason: '2FA session token has expired' };
     }
 
     // 3. Check security version if present
     if (currentSecurityVersion && versionTag !== 'v0') {
+      let decodedVersionTag: string;
+      try {
+        decodedVersionTag = decodeURIComponent(versionTag);
+      } catch {
+        return { valid: false, reason: 'Invalid 2FA security-version encoding' };
+      }
       const cleanCurrentVersion = String(currentSecurityVersion).trim();
-      if (versionTag !== cleanCurrentVersion) {
+      if (decodedVersionTag !== cleanCurrentVersion) {
         return { valid: false, reason: '2FA credentials rotated since token issue' };
       }
     }
 
     // 4. Verify cryptographic signature
     const payloadString = `v1:session:${adminId}:${verifiedAtStr}:${expStr}:${versionTag}`;
-    const key = getAdminSessionKey();
+    if (!/^[0-9a-f]{64}$/i.test(signature)) {
+      return { valid: false, reason: 'Invalid token signature encoding' };
+    }
+    const key = getAdminSessionSigningKey();
     const expectedHmac = crypto.createHmac('sha256', key).update(payloadString).digest('hex');
+    const signatureBuffer = Buffer.from(signature, 'hex');
+    const expectedBuffer = Buffer.from(expectedHmac, 'hex');
 
-    if (!crypto.timingSafeEqual(Buffer.from(signature, 'hex'), Buffer.from(expectedHmac, 'hex'))) {
+    if (signatureBuffer.length !== expectedBuffer.length || !crypto.timingSafeEqual(signatureBuffer, expectedBuffer)) {
       return { valid: false, reason: 'Invalid token signature' };
     }
 
     return { valid: true };
-  } catch (err: any) {
-    return { valid: false, reason: `Verification error: ${err.message}` };
+  } catch {
+    return { valid: false, reason: '2FA session verification failed' };
   }
 }
 

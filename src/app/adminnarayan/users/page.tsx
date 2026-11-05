@@ -64,7 +64,7 @@ export default function AdminUsersPage() {
     // Client fallback
     const { data: profs, error } = await supabase
       .from("profiles")
-      .select("*")
+      .select("id, username, display_name, full_name, email, role, is_admin, is_admin_account, status, is_banned, is_suspended, is_on_hold, is_restricted, account_status, created_at, updated_at, completed_trades, total_completed_trades, total_volume_usd, feedback_score, positive_feedback, negative_feedback, avatar_url, photo_url, is_online, last_seen, last_seen_at, country, preferred_currency, kyc_status, is_verified, id_verified, is_emergency_frozen, merchant_tier, merchant_status, ban_reason, banned_at")
       .order("created_at", { ascending: false });
 
     if (error) {
@@ -73,7 +73,7 @@ export default function AdminUsersPage() {
       return;
     }
 
-    const { data: wData } = await supabase.from("wallet_assets").select("*");
+    const { data: wData } = await supabase.from("wallet_assets").select("user_id, asset_symbol, balance, locked_balance, reserved_balance, in_escrow, in_withdrawal");
 
     const walletMap = new Map<string, any[]>();
     (wData || []).forEach((w: any) => {

@@ -8,14 +8,14 @@ import { Button } from '@/components/ui/button';
 import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar';
 import type { P2PAd, CryptoCurrency } from '@/lib/types';
 import { usePrices } from '@/context/price-context';
+import { useI18n } from '@/context/i18n-context';
 import { ThumbsUp, ThumbsDown, Info, Award, Clock, CheckCircle } from 'lucide-react';
-import { cn, toDate } from '@/lib/utils';
+import { cn } from '@/lib/utils';
 import { BtcLogo, EthLogo, LtcLogo, UsdtLogo, DefaultAvatar } from '@/components/icons';
 import { CurrencyIcon } from '@/components/CurrencyIcon';
 import { FlagIcon } from '../ui/flag-icon';
 import { MerchantBadge } from '@/components/merchant/merchant-badge';
-import { formatDistanceToNow } from 'date-fns';
-import { getPresenceStatus, formatJoinedDate, usePresenceStatus, resolveUserLastSeen } from '@/lib/presence';
+import { usePresenceStatus, resolveUserLastSeen } from '@/lib/presence';
 import {
   Dialog,
   DialogContent,
@@ -61,6 +61,7 @@ interface AdCardProps {
 
 export function AdCard({ ad, marketPriceUsd: propMarketPriceUsd, fiatExchangeRate: propFiatExchangeRate, onActionClick }: AdCardProps) {
   const { prices, fiatRates } = usePrices();
+  const { t, language } = useI18n();
   const adCreator = ad.user || ad.profiles || ({} as any);
 
   // 1. Dynamic fiat & crypto currency resolution from Supabase fields
@@ -121,8 +122,16 @@ export function AdCard({ ad, marketPriceUsd: propMarketPriceUsd, fiatExchangeRat
     ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/50 dark:text-emerald-300' 
     : 'bg-red-100 text-red-800 dark:bg-red-950/50 dark:text-red-300';
 
-  const buttonLabel = isAdTypeBuy ? 'Sell' : 'Buy';
-  const buttonColorClass = buttonLabel === 'Buy'
+  const buttonLabel = isAdTypeBuy ? t('marketplacePage.sell') : t('marketplacePage.buy');
+  const getOfferTagLabel = (tag: string) => {
+    const keyByTag: Record<string, string> = {
+      'Instant release': 'tagInstant', 'No receipt required': 'tagNoReceipt',
+      'No verification': 'tagNoVerification', 'Invoice accepted': 'tagInvoice',
+    };
+    const key = keyByTag[tag];
+    return key ? t('adForm.' + key) : tag;
+  };
+  const buttonColorClass = !isAdTypeBuy
     ? 'bg-green-600 hover:bg-green-700 text-white'
     : 'bg-red-600 hover:bg-red-700 text-white';
 
@@ -130,7 +139,27 @@ export function AdCard({ ad, marketPriceUsd: propMarketPriceUsd, fiatExchangeRat
   const userLastSeen = resolveUserLastSeen(adCreator);
   const userCreatedAt = adCreator?.created_at || adCreator?.createdAt;
   const presence = usePresenceStatus(userLastSeen, 15000);
-  const joinedText = formatJoinedDate(userCreatedAt);
+  const getJoinedLabel = () => {
+    if (!userCreatedAt) return t('p2pAdCard.joinedRecently');
+    const createdAt = new Date(userCreatedAt);
+    if (Number.isNaN(createdAt.getTime())) return t('p2pAdCard.joinedRecently');
+    const days = Math.floor((Date.now() - createdAt.getTime()) / (1000 * 60 * 60 * 24));
+    if (days < 1) return t('p2pAdCard.joinedToday');
+    if (days < 30) return t('p2pAdCard.joinedDays').replace('{count}', String(days));
+    const months = Math.floor(days / 30);
+    if (months < 12) return t('p2pAdCard.joinedMonths').replace('{count}', String(months));
+    return t('p2pAdCard.joinedYears').replace('{count}', String(Math.floor(days / 365)));
+  };
+  const getPresenceLabel = () => {
+    if (presence.isOnline) return t('p2pAdCard.online');
+    const rawLabel = String(presence.label || '');
+    if (rawLabel === 'Offline') return t('p2pAdCard.offline');
+    const match = rawLabel.match(/^Last seen (\\d+)(m|h|d) ago$/);
+    if (!match) return rawLabel;
+    const key = match[2] === 'm' ? 'lastSeenMinutes' : match[2] === 'h' ? 'lastSeenHours' : 'lastSeenDays';
+    return t('p2pAdCard.' + key).replace('{count}', match[1]);
+  };
+  const joinedText = getJoinedLabel();
 
   const isUserOnline = presence.isOnline;
   
@@ -219,7 +248,7 @@ export function AdCard({ ad, marketPriceUsd: propMarketPriceUsd, fiatExchangeRat
                 {hiddenBadgesCount > 0 && <Badge variant="secondary">+{hiddenBadgesCount} more</Badge>}
               </div>
               <div className="text-xs text-muted-foreground flex items-center gap-3 flex-wrap">
-                <span>{adCreator?.total_completed_trades ?? adCreator?.completedTrades ?? adCreator?.completed_trades ?? adCreator?.tradesCount ?? 0} Trades</span>
+                <span>{t('p2pAdCard.tradesCount').replace('{count}', String(adCreator?.total_completed_trades ?? adCreator?.completedTrades ?? adCreator?.completed_trades ?? adCreator?.tradesCount ?? 0))}</span>
                 <div className="flex items-center gap-1">
                   <ThumbsUp className="h-3 w-3 text-green-500" /> {adCreator?.positiveFeedback || 0}
                 </div>
@@ -236,7 +265,7 @@ export function AdCard({ ad, marketPriceUsd: propMarketPriceUsd, fiatExchangeRat
                 />
                 {/* Status Label (Online or "Seen Xm ago") */}
                 <span className={presence.isOnline ? 'text-green-600 dark:text-green-400 font-medium' : ''}>
-                  {presence.label}
+                  {getPresenceLabel()}
                 </span>
 
                 <span>•</span>
@@ -259,7 +288,7 @@ export function AdCard({ ad, marketPriceUsd: propMarketPriceUsd, fiatExchangeRat
           
           {ad.tags && ad.tags.length > 0 && (
             <div className="flex flex-wrap gap-1">
-              {ad.tags.map((tag: string) => <Badge key={tag} variant="secondary">{tag}</Badge>)}
+              {ad.tags.map((tag: string) => <Badge key={tag} variant="secondary">{getOfferTagLabel(tag)}</Badge>)}
             </div>
           )}
         </div>
@@ -267,12 +296,12 @@ export function AdCard({ ad, marketPriceUsd: propMarketPriceUsd, fiatExchangeRat
         {/* Right Side: Price & Action */}
         <div className="w-full sm:w-auto flex flex-col items-start sm:items-end gap-2">
           <div>
-            <p className="text-xs text-muted-foreground">Price</p>
+            <p className="text-xs text-muted-foreground">{t('p2pAdCard.price')}</p>
             {/* Dynamic Price Display */}
             <div className="flex items-center gap-2">
               <CryptoLogo crypto={adCrypto} className="h-5 w-5" />
               <div className="text-lg font-bold">
-                {adPrice.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}{' '}
+                {adPrice.toLocaleString(language, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}{' '}
                 <span className="text-sm font-normal text-muted-foreground">{adFiat} / {adCrypto}</span>
               </div>
               {marketPriceInFiat > 0 && (
@@ -287,11 +316,11 @@ export function AdCard({ ad, marketPriceUsd: propMarketPriceUsd, fiatExchangeRat
             {/* Dynamic Limits Display */}
             {isAvailable ? (
               <div className="text-sm text-muted-foreground">
-                Limits: <span className="font-medium text-foreground">{minLimit.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} - {effectiveMaxLimit.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} {adFiat}</span>
+                {t('p2pAdCard.limits')}: <span className="font-medium text-foreground">{minLimit.toLocaleString(language, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} - {effectiveMaxLimit.toLocaleString(language, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} {adFiat}</span>
               </div>
             ) : (
               <p className="font-semibold text-xs text-red-500">
-                Insufficient Advertiser Balance
+                {t('p2pAdCard.insufficientBalance')}
               </p>
             )}
           </div>
@@ -306,16 +335,16 @@ export function AdCard({ ad, marketPriceUsd: propMarketPriceUsd, fiatExchangeRat
               <DialogContent className="sm:max-w-md">
                 <DialogHeader>
                   <DialogTitle className="text-xl font-bold">
-                    {isAdTypeBuy ? `Sell Ad to ${adCreator?.username || 'Trader'}` : `Buy Ad from ${adCreator?.username || 'Trader'}`}
+                    {isAdTypeBuy ? t('p2pAdCard.sellAdTitle').replace('{username}', adCreator?.username || 'Trader') : t('p2pAdCard.buyAdTitle').replace('{username}', adCreator?.username || 'Trader')}
                   </DialogTitle>
                   <DialogDescription>
-                    {isAdTypeBuy ? `Sell to ${adCreator?.username || 'Trader'}` : `Buy from ${adCreator?.username || 'Trader'}`}
+                    {isAdTypeBuy ? t('p2pAdCard.sellTo').replace('{username}', adCreator?.username || 'Trader') : t('p2pAdCard.buyFrom').replace('{username}', adCreator?.username || 'Trader')}
                   </DialogDescription>
                 </DialogHeader>
                 <ScrollArea className="max-h-[70vh]">
                   <div className="space-y-6 py-4 pr-6">
                     <div>
-                      <h4 className="font-semibold text-base mb-2">Trader Info</h4>
+                      <h4 className="font-semibold text-base mb-2">{t('p2pAdCard.traderInfo')}</h4>
                       <div className="space-y-2 text-sm p-3 border rounded-md bg-secondary/50">
                         <div className="flex items-center gap-3">
                           <Avatar className="h-10 w-10">
@@ -324,13 +353,13 @@ export function AdCard({ ad, marketPriceUsd: propMarketPriceUsd, fiatExchangeRat
                           </Avatar>
                           <div>
                             <p className="font-semibold">{adCreator?.username || 'Trader'}</p>
-                            <p className="text-xs text-muted-foreground">{formatJoinedDate(adCreator?.created_at || adCreator?.createdAt)}</p>
+                            <p className="text-xs text-muted-foreground">{getJoinedLabel()}</p>
                           </div>
                         </div>
                         <div className="grid grid-cols-2 gap-y-2 gap-x-4 pt-2">
                           <div className="flex items-center gap-2">
                             <CheckCircle className="h-4 w-4 text-muted-foreground" /> 
-                            <span>{adCreator?.total_completed_trades ?? adCreator?.completedTrades ?? adCreator?.completed_trades ?? adCreator?.tradesCount ?? 0} Trades</span>
+                            <span>{t('p2pAdCard.tradesCount').replace('{count}', String(adCreator?.total_completed_trades ?? adCreator?.completedTrades ?? adCreator?.completed_trades ?? adCreator?.tradesCount ?? 0))}</span>
                           </div>
                           <div className="flex items-center gap-2"><ThumbsUp className="h-4 w-4 text-green-500" /> <span>{adCreator?.positiveFeedback || 0}</span></div>
                           <div className="flex items-center gap-2"><ThumbsDown className="h-4 w-4 text-red-500" /> <span>{adCreator?.negativeFeedback || 0}</span></div>
@@ -338,29 +367,29 @@ export function AdCard({ ad, marketPriceUsd: propMarketPriceUsd, fiatExchangeRat
                             <Clock className="h-4 w-4 text-muted-foreground" />
                             <span>
                               {isAdTypeBuy
-                                ? (hasValidPayTime ? `${rawPayTime.toFixed(1)}m pay` : 'N/A')
-                                : (hasValidReleaseTime ? `${rawReleaseTime.toFixed(1)}m release` : 'N/A')}
+                                ? (hasValidPayTime ? t('p2pAdCard.payTime').replace('{minutes}', rawPayTime.toFixed(1)) : t('p2pAdCard.notAvailable'))
+                                : (hasValidReleaseTime ? t('p2pAdCard.releaseTime').replace('{minutes}', rawReleaseTime.toFixed(1)) : t('p2pAdCard.notAvailable'))}
                             </span>
                           </div>
                         </div>
                       </div>
                     </div>
                     <div>
-                      <h4 className="font-semibold text-base mb-2">Ad Info</h4>
+                      <h4 className="font-semibold text-base mb-2">{t('p2pAdCard.adInfo')}</h4>
                       <div className="space-y-3 text-sm p-3 border rounded-md bg-secondary/50">
-                        <DetailRow label="Price" value={<div className="flex items-center gap-2">{adPrice.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}<span className="text-muted-foreground">{adFiat} / {adCrypto}</span></div>} />
-                        <DetailRow label="Limits" value={`${minLimit.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} - ${effectiveMaxLimit.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ${adFiat}`} />
-                        <DetailRow label="Payment Window" value={`${configuredPaymentWindow} minutes`} />
-                        <DetailRow label="Payment Methods" value={<div className="flex flex-wrap gap-1 justify-end">{(ad.paymentMethods || []).map(pm => <Badge key={pm} variant="outline">{pm}</Badge>)}</div>} />
+                        <DetailRow label={t('p2pAdCard.price')} value={<div className="flex items-center gap-2">{adPrice.toLocaleString(language, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}<span className="text-muted-foreground">{adFiat} / {adCrypto}</span></div>} />
+                        <DetailRow label={t('p2pAdCard.limits')} value={`${minLimit.toLocaleString(language, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} - ${effectiveMaxLimit.toLocaleString(language, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ${adFiat}`} />
+                        <DetailRow label={t('p2pAdCard.paymentWindow')} value={t('p2pAdCard.paymentMinutes').replace('{count}', String(configuredPaymentWindow))} />
+                        <DetailRow label={t('p2pAdCard.paymentMethods')} value={<div className="flex flex-wrap gap-1 justify-end">{(Array.isArray(ad.paymentMethods) ? ad.paymentMethods : []).map((pm: string) => <Badge key={pm} variant="outline">{pm}</Badge>)}</div>} />
                       </div>
                       <div className="space-y-2 text-sm p-3 border rounded-md bg-secondary/50 mt-2">
-                        <p className="font-medium">Terms & Conditions</p>
-                        <p className="text-muted-foreground whitespace-pre-wrap">{ad.terms || ad.terms_conditions || 'No specific terms provided.'}</p>
+                        <p className="font-medium">{t('p2pAdCard.termsConditions')}</p>
+                        <p className="text-muted-foreground whitespace-pre-wrap">{ad.terms || ad.terms_conditions || t('p2pAdCard.noTerms')}</p>
                       </div>
                       {ad.tags && ad.tags.length > 0 && (
                         <div className="space-y-2 text-sm p-3 border rounded-md bg-secondary/50 mt-2">
-                          <p className="font-medium">Tags</p>
-                          <div className="flex flex-wrap gap-1">{ad.tags.map(tag => <Badge key={tag} variant="secondary">{tag}</Badge>)}</div>
+                          <p className="font-medium">{t('p2pAdCard.tags')}</p>
+                          <div className="flex flex-wrap gap-1">{ad.tags.map((tag: string) => <Badge key={tag} variant="secondary">{getOfferTagLabel(tag)}</Badge>)}</div>
                         </div>
                       )}
                     </div>

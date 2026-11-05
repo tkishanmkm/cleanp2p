@@ -14,8 +14,10 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/input";
 import { UserStatusIndicator } from "@/components/user-status";
 import { Loader2, ArrowRightLeft, ShieldCheck } from "lucide-react";
-import { calculateMinimumFiatAmount, BASE_PLATFORM_USD_MINIMUM } from "@/lib/currency";
+import { calculateMinimumFiatAmount } from "@/lib/currency";
+import { usePlatformFeeSettings } from "@/hooks/use-platform-fees";
 import { playTradeBeep } from "@/lib/utils";
+import { useI18n } from "@/context/i18n-context";
 
 export interface AdData {
   id: string;
@@ -48,21 +50,25 @@ export interface TradeInitiationModalProps {
 
 export function TradeInitiationModal({ ad, isOpen, onClose }: TradeInitiationModalProps) {
   const router = useRouter();
+  const { t, language } = useI18n();
   const [fiatAmount, setFiatAmount] = useState<string>("");
   const [cryptoAmount, setCryptoAmount] = useState<string>("");
   const [loading, setLoading] = useState<boolean>(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
-  const [sellerAvailableBalance, setSellerAvailableBalance] = useState<number>(0);
+  const { fees: platformFees, isLoading: isFeeSettingsLoading, error: feeSettingsError } = usePlatformFeeSettings();
 
-  const availablePaymentMethods = Array.isArray(ad?.payment_methods) && ad.payment_methods.length > 0
-    ? ad.payment_methods
-    : (typeof (ad as any)?.payment_method === 'string' && (ad as any).payment_method.length > 0 ? [(ad as any).payment_method] : ["Bank Transfer"]);
+  const availablePaymentMethods = Array.isArray(ad?.payment_methods)
+    ? ad.payment_methods.filter((method): method is string => typeof method === "string" && method.trim().length > 0)
+    : typeof (ad as any)?.payment_method === "string" && (ad as any).payment_method.trim().length > 0
+      ? [(ad as any).payment_method.trim()]
+      : [];
 
   const [selectedPaymentMethod, setSelectedPaymentMethod] = useState<string>(
     availablePaymentMethods.length === 1 ? availablePaymentMethods[0] : ""
   );
 
-  // Reset inputs and fetch seller balance when modal opens with a new ad
+  // Reset form state when a different ad is opened. Wallet eligibility is enforced
+  // atomically by the canonical wallet_assets escrow RPC, not a legacy balances table.
   useEffect(() => {
     if (isOpen && ad) {
       setFiatAmount("");
@@ -70,28 +76,10 @@ export function TradeInitiationModal({ ad, isOpen, onClose }: TradeInitiationMod
       setErrorMsg(null);
       const methods = Array.isArray(ad.payment_methods) && ad.payment_methods.length > 0
         ? ad.payment_methods
-        : (typeof (ad as any)?.payment_method === 'string' && (ad as any).payment_method.length > 0 ? [(ad as any).payment_method] : ["Bank Transfer"]);
+        : typeof (ad as any)?.payment_method === "string" && (ad as any).payment_method.trim().length > 0
+          ? [(ad as any).payment_method.trim()]
+          : [];
       setSelectedPaymentMethod(methods.length === 1 ? methods[0] : "");
-
-      const fetchSellerBalance = async () => {
-        try {
-          const { data: { user } } = await supabase.auth.getUser();
-          if (!user) return;
-          const targetUserId = (ad.type === "SELL") ? ad.user_id : user.id;
-          const { data: bal } = await supabase
-            .from('balances')
-            .select('available_balance')
-            .eq('user_id', targetUserId)
-            .eq('asset', ad.asset_symbol || 'USDT')
-            .maybeSingle();
-          if (bal) {
-            setSellerAvailableBalance(Number(bal.available_balance || 0));
-          }
-        } catch (err) {
-          console.warn('Error fetching seller balance:', err);
-        }
-      };
-      fetchSellerBalance();
     }
   }, [isOpen, ad?.id]);
 
@@ -125,18 +113,38 @@ export function TradeInitiationModal({ ad, isOpen, onClose }: TradeInitiationMod
   };
 
   const handleStartTrade = async () => {
-    const numericFiat = parseFloat(fiatAmount);
+    const numericFiat = Number(fiatAmount);
+    const numericCrypto = Number(cryptoAmount);
 
-    if (isNaN(numericFiat) || numericFiat <= 0) {
-      setErrorMsg("Please enter a valid amount.");
+    if (!Number.isFinite(numericFiat) || numericFiat <= 0) {
+      setErrorMsg(t('tradeInitiation.validFiatAmount'));
+      return;
+    }
+    if (!Number.isFinite(numericCrypto) || numericCrypto <= 0) {
+      setErrorMsg(t('tradeInitiation.validCryptoAmount'));
       return;
     }
 
-    const dynamicMin = calculateMinimumFiatAmount(BASE_PLATFORM_USD_MINIMUM, ad.fiat_symbol);
-    const effectiveMin = Math.max(ad.min_limit, dynamicMin);
+    if (isFeeSettingsLoading || !platformFees) {
+      setErrorMsg(feeSettingsError || t('tradeInitiation.feeSettingsUnavailable'));
+      return;
+    }
+    if (!Number.isFinite(ad.price) || ad.price <= 0) {
+      setErrorMsg(t('tradeInitiation.invalidPrice'));
+      return;
+    }
 
-    if (numericFiat < effectiveMin || numericFiat > ad.max_limit) {
-      setErrorMsg(`Amount must be between ${effectiveMin} and ${ad.max_limit} ${ad.fiat_symbol} (minimum $${BASE_PLATFORM_USD_MINIMUM} USD equivalent).`);
+    const minLimit = Number(ad.min_limit);
+    const maxLimit = Number(ad.max_limit);
+    if (!Number.isFinite(minLimit) || minLimit <= 0 || !Number.isFinite(maxLimit) || maxLimit < minLimit) {
+      setErrorMsg(t('tradeInitiation.invalidOrderLimits'));
+      return;
+    }
+    const dynamicMin = calculateMinimumFiatAmount(platformFees.minTradeAmount, ad.fiat_symbol);
+    const effectiveMin = Math.max(minLimit, dynamicMin);
+
+    if (numericFiat < effectiveMin || numericFiat > maxLimit) {
+      setErrorMsg(t('tradeInitiation.amountRange').replace('{min}', effectiveMin.toLocaleString(language)).replace('{max}', maxLimit.toLocaleString(language)).replace('{currency}', ad.fiat_symbol).replace('{usdMin}', platformFees.minTradeAmount.toLocaleString(language)));
       return;
     }
 
@@ -147,108 +155,72 @@ export function TradeInitiationModal({ ad, isOpen, onClose }: TradeInitiationMod
       const { data: { user }, error: authError } = await supabase.auth.getUser();
 
       if (authError || !user) {
-        setErrorMsg("Please sign in to initiate a trade.");
+        setErrorMsg(t('tradeInitiation.signInRequired'));
         setLoading(false);
         return;
       }
 
       if (user.id === ad.user_id) {
-        setErrorMsg("You cannot trade with your own advertisement.");
+        setErrorMsg(t('tradeInitiation.cannotTradeOwnAd'));
         setLoading(false);
         return;
       }
 
-      // Determine buyer and seller based on ad type
-      const buyerId = isBuyModal ? user.id : ad.user_id;
-      const sellerId = isBuyModal ? ad.user_id : user.id;
-
+      if (availablePaymentMethods.length === 0) {
+        setErrorMsg(t('tradeInitiation.noPaymentMethods'));
+        setLoading(false);
+        return;
+      }
       if (availablePaymentMethods.length > 1 && !selectedPaymentMethod) {
-        setErrorMsg("Please select a payment method.");
+        setErrorMsg(t('tradeInitiation.selectPaymentMethodError'));
         setLoading(false);
         return;
       }
 
-      const paymentMethod = selectedPaymentMethod || availablePaymentMethods[0] || "Bank Transfer";
+      const paymentMethod = selectedPaymentMethod || availablePaymentMethods[0];
 
-      // 1. First attempt trade creation via secure backend API route
-      let tradeId: string | null = null;
-      try {
-        const response = await fetch('/api/trades/initiate', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            adId: ad.id,
-            buyerId,
-            sellerId,
-            cryptoAmount: numericCrypto,
-            cryptoSymbol: ad.asset_symbol,
-            rate: ad.price,
-            price: ad.price,
-            fiatAmount: numericFiat,
-            fiatCurrency: ad.fiat_symbol || 'INR',
-            paymentMethod,
-          }),
-        });
+      // Trade creation must go through the authenticated, atomic escrow RPC.
+      // Never fall back to a direct client-side trades insert: that can bypass escrow.
+      const idempotencyKey = crypto.randomUUID();
+      const response = await fetch('/api/trades/initiate', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Idempotency-Key': idempotencyKey,
+        },
+        body: JSON.stringify({
+          adId: ad.id,
+          cryptoAmount: numericCrypto,
+          fiatAmount: numericFiat,
+          paymentMethod,
+          idempotencyKey,
+        }),
+      });
 
-        if (response.ok) {
-          const resData = await response.json();
-          if (resData?.tradeId || resData?.trade?.id || resData?.id) {
-            tradeId = resData.tradeId || resData.trade?.id || resData.id;
-          }
+      const resData = await response.json().catch(() => null);
+      if (!response.ok) {
+        const errorCode = resData?.code;
+        if (errorCode === 'AD_OWNER_OFFLINE') {
+          throw new Error(t('tradeChat.adOwnerOffline').replace('{attempts}', String(resData?.attempts ?? 1)));
         }
-      } catch (apiErr) {
-        console.warn('Trade API route creation warning, falling back to direct insert:', apiErr);
+        if (errorCode === 'AD_AUTO_PAUSED_OFFLINE') {
+          throw new Error(t('tradeChat.adAutoPausedOffline'));
+        }
+        if (errorCode === 'AD_AVAILABILITY_CHECK_FAILED') {
+          throw new Error(t('tradeChat.availabilityCheckFailed'));
+        }
+        if (errorCode === 'AD_NOT_ACTIVE') {
+          throw new Error(t('tradeChat.adNotActive'));
+        }
+        if (errorCode === 'AD_NOT_FOUND') {
+          throw new Error(t('tradeChat.adNotFound'));
+        }
+        throw new Error(resData?.error || t('tradeInitiation.secureInitiationFailed'));
       }
 
-      // 2. Direct insert fallback if API route did not return ID
+      const tradeId = resData?.tradeId || resData?.trade?.id || resData?.id;
       if (!tradeId) {
-        const escrowFee = numericCrypto * 0.015;
-        let { data: trade, error: tradeError } = await supabase
-          .from("trades")
-          .insert({
-            ad_id: ad.id,
-            buyer_id: buyerId,
-            seller_id: sellerId,
-            crypto: ad.asset_symbol,
-            crypto_amount: numericCrypto,
-            amount: numericCrypto,
-            escrow_fee: escrowFee,
-            fiat_currency: ad.fiat_symbol || 'INR',
-            fiat_amount: numericFiat,
-            total_fiat: numericFiat,
-            rate: ad.price,
-            price: ad.price,
-            amount_usd: numericFiat,
-            payment_method: paymentMethod,
-            status: "pending",
-          })
-          .select("id")
-          .single();
-
-        if (tradeError) {
-          console.warn("Retrying trade insertion with minimal schema...", tradeError);
-          const { data: fallbackTrade, error: fallbackError } = await supabase
-            .from("trades")
-            .insert({
-              buyer_id: buyerId,
-              seller_id: sellerId,
-              amount_usd: numericFiat,
-              status: "pending",
-            })
-            .select("id")
-            .single();
-
-          if (fallbackError) {
-            throw fallbackError;
-          }
-          tradeId = fallbackTrade?.id;
-        } else {
-          tradeId = trade?.id;
-        }
-      }
-
-      if (!tradeId) {
-        throw new Error("Trade creation returned no ID.");
+        throw new Error(t('tradeInitiation.missingTradeId'));
       }
 
       // Sound feedback and redirect to trade execution page
@@ -259,7 +231,7 @@ export function TradeInitiationModal({ ad, isOpen, onClose }: TradeInitiationMod
       router.push(`/trade/${tradeId}`);
     } catch (err: any) {
       console.error("Trade creation failed:", err);
-      setErrorMsg(err.message || "Failed to initiate trade. Please try again.");
+      setErrorMsg(err.message || t('tradeInitiation.initiationFailed'));
     } finally {
       setLoading(false);
     }
@@ -271,12 +243,12 @@ export function TradeInitiationModal({ ad, isOpen, onClose }: TradeInitiationMod
         <DialogHeader>
           <div className="flex items-center justify-between pb-2">
             <DialogTitle className="text-xl font-bold">
-              {isBuyModal ? "Buy" : "Sell"} {ad.asset_symbol}
+              {isBuyModal ? t('tradeInitiation.buy') : t('tradeInitiation.sell')} {ad.asset_symbol}
             </DialogTitle>
-            <span className="text-xs font-mono text-muted-foreground">Ad ID: {ad.id}</span>
+            <span className="text-xs font-mono text-muted-foreground">{t('tradeInitiation.adId')} {ad.id}</span>
           </div>
           <DialogDescription className="text-xs text-muted-foreground">
-            Price is locked once the order is created.
+            {t('tradeInitiation.priceLocked')}
           </DialogDescription>
         </DialogHeader>
 
@@ -284,7 +256,7 @@ export function TradeInitiationModal({ ad, isOpen, onClose }: TradeInitiationMod
         <div className="flex items-center justify-between p-3 rounded-xl bg-muted/50 border my-2">
           <div className="space-y-0.5">
             <p className="font-semibold text-sm">
-              @{traderProfile?.username || "trader"}
+              @{traderProfile?.username || t('counterpartyPanel.fallbackTrader')}
             </p>
           </div>
           <UserStatusIndicator user={traderProfile} />
@@ -293,15 +265,15 @@ export function TradeInitiationModal({ ad, isOpen, onClose }: TradeInitiationMod
         {/* Pricing & Limits */}
         <div className="grid grid-cols-2 gap-3 text-sm py-2">
           <div>
-            <span className="text-xs text-muted-foreground">Unit Price</span>
+            <span className="text-xs text-muted-foreground">{t('tradeInitiation.unitPrice')}</span>
             <p className="font-bold text-foreground">
-              {ad.price} {ad.fiat_symbol} / {ad.asset_symbol}
+              {Number(ad.price).toLocaleString(language)} {ad.fiat_symbol} / {ad.asset_symbol}
             </p>
           </div>
           <div>
-            <span className="text-xs text-muted-foreground">Order Limits</span>
+            <span className="text-xs text-muted-foreground">{t('tradeInitiation.orderLimits')}</span>
             <p className="font-semibold text-foreground">
-              {ad.min_limit} - {ad.max_limit} {ad.fiat_symbol}
+              {Number(ad.min_limit).toLocaleString(language)} - {Number(ad.max_limit).toLocaleString(language)} {ad.fiat_symbol}
             </p>
           </div>
         </div>
@@ -310,12 +282,12 @@ export function TradeInitiationModal({ ad, isOpen, onClose }: TradeInitiationMod
         <div className="space-y-4 my-2">
           <div className="space-y-1.5">
             <label className="text-xs font-medium text-muted-foreground">
-              I want to {isBuyModal ? "pay" : "receive"} ({ad.fiat_symbol})
+              {(isBuyModal ? t('tradeInitiation.amountToPayFiat') : t('tradeInitiation.amountToReceiveFiat')).replace('{fiat}', ad.fiat_symbol)}
             </label>
             <div className="relative">
               <Input
                 type="number"
-                placeholder={`${ad.min_limit} - ${ad.max_limit}`}
+                placeholder={`${Number(ad.min_limit).toLocaleString(language)} - ${Number(ad.max_limit).toLocaleString(language)}`}
                 value={fiatAmount}
                 onChange={(e) => handleFiatChange(e.target.value)}
                 className="pr-12 font-semibold"
@@ -333,19 +305,17 @@ export function TradeInitiationModal({ ad, isOpen, onClose }: TradeInitiationMod
           <div className="space-y-1.5">
             <div className="flex justify-between items-center">
               <label className="text-xs font-medium text-muted-foreground">
-                I will {isBuyModal ? "receive" : "pay"} ({ad.asset_symbol})
+                {(isBuyModal ? t('tradeInitiation.amountToReceiveCrypto') : t('tradeInitiation.amountToPayCrypto')).replace('{asset}', ad.asset_symbol)}
               </label>
               <button
                 type="button"
                 onClick={() => {
-                  const maxFromBalance = sellerAvailableBalance > 0 ? sellerAvailableBalance / 1.015 : (ad.max_limit / (ad.price || 1));
-                  const maxAllowableFromAd = ad.max_limit / (ad.price || 1);
-                  const maxCrypto = Math.min(maxAllowableFromAd, maxFromBalance);
-                  handleCryptoChange(Math.max(0, maxCrypto).toFixed(4));
+                  const maxAllowableFromAd = ad.price > 0 ? ad.max_limit / ad.price : 0;
+                  handleCryptoChange(Math.max(0, maxAllowableFromAd).toFixed(8));
                 }}
                 className="text-[10px] font-semibold text-[#5D45F9] hover:underline"
               >
-                MAX
+                {t('tradeInitiation.max')}
               </button>
             </div>
             <div className="relative">
@@ -367,8 +337,8 @@ export function TradeInitiationModal({ ad, isOpen, onClose }: TradeInitiationMod
         {availablePaymentMethods.length > 1 ? (
           <div className="space-y-1.5 my-2">
             <label className="text-xs font-medium text-muted-foreground flex items-center justify-between">
-              <span>Select Payment Method</span>
-              <span className="text-rose-500 font-bold">* Required</span>
+              <span>{t('tradeInitiation.selectPaymentMethod')}</span>
+              <span className="text-rose-500 font-bold">* {t('tradeInitiation.required')}</span>
             </label>
             <select
               value={selectedPaymentMethod}
@@ -378,7 +348,7 @@ export function TradeInitiationModal({ ad, isOpen, onClose }: TradeInitiationMod
               }}
               className="w-full h-10 px-3 rounded-xl border bg-background text-xs font-semibold focus:outline-hidden focus:ring-2 focus:ring-[#5D45F9]/30"
             >
-              <option value="" disabled>Choose a payment method...</option>
+              <option value="" disabled>{t('tradeInitiation.choosePaymentMethod')}</option>
               {availablePaymentMethods.map((method) => (
                 <option key={method} value={method}>
                   {method}
@@ -388,8 +358,10 @@ export function TradeInitiationModal({ ad, isOpen, onClose }: TradeInitiationMod
           </div>
         ) : (
           <div className="flex justify-between items-center px-3 py-2 rounded-xl bg-muted/40 border text-xs my-2">
-            <span className="text-muted-foreground font-medium">Payment Method:</span>
-            <span className="font-semibold text-foreground">{availablePaymentMethods[0]}</span>
+            <span className="text-muted-foreground font-medium">{t('tradeInitiation.paymentMethod')}</span>
+            <span className="font-semibold text-foreground">
+              {availablePaymentMethods[0] || t('tradeInitiation.notConfigured')}
+            </span>
           </div>
         )}
 
@@ -397,19 +369,19 @@ export function TradeInitiationModal({ ad, isOpen, onClose }: TradeInitiationMod
         {cryptoAmount && parseFloat(cryptoAmount) > 0 && (
           <div className="p-3 rounded-xl bg-muted/30 border text-xs space-y-1.5 my-2 font-mono">
             <div className="flex justify-between text-muted-foreground">
-              <span>Trade Amount:</span>
+              <span>{t('tradeInitiation.tradeAmount')}</span>
               <span>{parseFloat(cryptoAmount || '0').toFixed(4)} {ad.asset_symbol}</span>
             </div>
             <div className="flex justify-between text-muted-foreground">
-              <span>Escrow Fee (1.5%):</span>
-              <span>{(parseFloat(cryptoAmount || '0') * 0.015).toFixed(4)} {ad.asset_symbol}</span>
+              <span>{t('tradeInitiation.escrowFee').replace('{rate}', platformFees ? platformFees.escrowFeePercent.toFixed(2) : '—')}</span>
+              <span>{(parseFloat(cryptoAmount || '0') * (platformFees?.escrowFeePercent ?? 0) / 100).toFixed(8)} {ad.asset_symbol}</span>
             </div>
             <div className="flex justify-between font-semibold text-foreground border-t pt-1">
-              <span>Total Locked from Wallet:</span>
-              <span>{(parseFloat(cryptoAmount || '0') * 1.015).toFixed(4)} {ad.asset_symbol}</span>
+              <span>{t('tradeInitiation.totalLockedWallet')}</span>
+              <span>{(parseFloat(cryptoAmount || '0') * (1 + (platformFees?.escrowFeePercent ?? 0) / 100)).toFixed(8)} {ad.asset_symbol}</span>
             </div>
             <div className="flex justify-between text-emerald-600 dark:text-emerald-400 font-medium pt-0.5">
-              <span>Net Received by Buyer:</span>
+              <span>{t('tradeInitiation.netReceivedBuyer')}</span>
               <span>{parseFloat(cryptoAmount || '0').toFixed(4)} {ad.asset_symbol}</span>
             </div>
           </div>
@@ -426,19 +398,19 @@ export function TradeInitiationModal({ ad, isOpen, onClose }: TradeInitiationMod
         <div className="pt-3 space-y-3">
           <Button
             onClick={handleStartTrade}
-            disabled={loading || !fiatAmount}
+            disabled={loading || isFeeSettingsLoading || !platformFees || availablePaymentMethods.length === 0 || !fiatAmount}
             className="w-full bg-[#5D45F9] hover:bg-[#4833D8] text-white font-semibold py-2.5 rounded-xl transition-all"
           >
             {loading ? (
               <Loader2 className="w-4 h-4 animate-spin" />
             ) : (
-              `Initiate ${isBuyModal ? "Buy" : "Sell"} Order`
+              isBuyModal ? t('tradeInitiation.initiateBuyOrder') : t('tradeInitiation.initiateSellOrder')
             )}
           </Button>
 
           <div className="flex items-center justify-center gap-1.5 text-[11px] text-muted-foreground">
             <ShieldCheck className="w-3.5 h-3.5 text-emerald-500" />
-            <span>Escrow protected. Crypto is locked safely during the trade.</span>
+            <span>{t('tradeInitiation.escrowSafety')}</span>
           </div>
         </div>
       </DialogContent>

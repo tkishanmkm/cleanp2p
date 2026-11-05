@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import { useI18n } from '@/context/i18n-context';
 
 interface TradeChatTimerProps {
   createdAt: string;
@@ -15,6 +16,7 @@ export default function TradeChatTimer({
   durationSeconds,
   paymentWindowMinutes = 30,
 }: TradeChatTimerProps) {
+  const { t } = useI18n();
   const [elapsed, setElapsed] = useState<number>(0);
   const [remaining, setRemaining] = useState<number>((paymentWindowMinutes || 30) * 60);
 
@@ -78,7 +80,7 @@ export default function TradeChatTimer({
       {/* 1. Reverse Countdown Timer */}
       {!isTradeStopped && (
         <div className="flex flex-col border-r border-border/80 dark:border-slate-700/80 pr-2.5 sm:pr-3.5">
-          <span className="text-[10px] sm:text-xs text-muted-foreground font-medium leading-tight">Payment Window</span>
+          <span className="text-[10px] sm:text-xs text-muted-foreground font-medium leading-tight">{t('tradeChatTimer.paymentWindow')}</span>
           <span className={`text-xs sm:text-sm font-bold font-mono tabular-nums leading-tight ${remaining < 300 ? 'text-destructive animate-pulse' : 'text-amber-600 dark:text-amber-400'}`}>
             {formatMS(remaining)}
           </span>
@@ -88,7 +90,7 @@ export default function TradeChatTimer({
       {/* 2. Straight Stopwatch Count-up */}
       <div className="flex flex-col">
         <span className="text-[10px] sm:text-xs text-muted-foreground font-medium leading-tight">
-          {isTradeStopped ? 'Total Trade Time' : 'Elapsed Time'}
+          {isTradeStopped ? t('tradeChatTimer.totalTradeTime') : t('tradeChatTimer.elapsedTime')}
         </span>
         <span className="text-xs sm:text-sm font-bold font-mono tabular-nums text-emerald-600 dark:text-emerald-400 leading-tight">
           {formatHMS(elapsed)}

@@ -1,4 +1,4 @@
-import { getSupabaseAdminClient } from '@/lib/supabase/server';
+import { createClient, getSupabaseAdminClient } from '@/lib/supabase/server';
 import { assertPlatformControlAllowed } from '@/lib/platform-guard';
 
 export interface CreateTradeWithEscrowParams {
@@ -27,8 +27,16 @@ export async function createTradeWithEscrow({
   tradeRef,
   idempotencyKey,
 }: CreateTradeWithEscrowParams) {
+  // Bind the service-role database operation to the real signed-in user.
+  // Never accept a caller ID from helper arguments or a request payload.
+  const sessionClient = await createClient();
+  const { data: { user }, error: authError } = await sessionClient.auth.getUser();
+  if (authError || !user) {
+    throw new Error('Authentication required to initiate trade with escrow.');
+  }
+
   // Authoritative server-side platform guard: check if trading is allowed
-  await assertPlatformControlAllowed('trade');
+  await assertPlatformControlAllowed('trade', { userId: user.id });
 
   const supabase = getSupabaseAdminClient();
 
@@ -46,6 +54,7 @@ export async function createTradeWithEscrow({
     p_payment_method: String(paymentMethod),
     p_trade_ref: tradeRef ?? null,
     p_idempotency_key: resolvedIdempotencyKey,
+    p_caller_id: user.id,
   });
 
   if (error) {

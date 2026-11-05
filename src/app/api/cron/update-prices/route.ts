@@ -13,8 +13,7 @@ export async function GET(request: Request) {
         process.env.CRON_SECRET,
       ],
       customHeaderNames: ['x-service-key', 'x-worker-secret'],
-      checkQueryParam: true,
-    });
+      });
 
     if (!auth.authorized) {
       return NextResponse.json({ error: 'Unauthorized request' }, { status: 401 });

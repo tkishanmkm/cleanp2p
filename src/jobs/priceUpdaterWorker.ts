@@ -1,14 +1,5 @@
-import { createClient } from '@supabase/supabase-js';
+import { hasSupabaseServiceConfig, supabaseService as supabaseAdmin } from '@/lib/supabase/service-role';
 
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL || 'https://placeholder.supabase.co';
-const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'placeholder-key';
-
-const supabaseAdmin = createClient(supabaseUrl, supabaseKey, {
-  auth: {
-    persistSession: false,
-    autoRefreshToken: false,
-  },
-});
 
 const ASSETS = ['BTC', 'ETH', 'USDT', 'BNB', 'SOL', 'XRP', 'LTC', 'TRX'];
 
@@ -59,6 +50,10 @@ export interface PriceUpdateResult {
  * and upserts them into public.crypto_market_prices.
  */
 export async function runMarketPriceUpdate(): Promise<PriceUpdateResult> {
+  if (!hasSupabaseServiceConfig()) {
+    return { success: false, error: 'SUPABASE_SERVICE_ROLE_CONFIGURATION_UNAVAILABLE' };
+  }
+
   try {
     // 1. Fetch Live Global Fiat Rates from Live Providers
     let usdToFiat: Record<string, number> = {};

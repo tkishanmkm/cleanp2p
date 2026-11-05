@@ -27,8 +27,9 @@ import {
   DialogTrigger,
 } from '@/components/ui/dialog';
 import { ScrollArea } from '../ui/scroll-area';
-import { supabase } from '@/lib/supabase/client';
 import { useAuth } from '@/components/providers/auth-provider';
+
+type BlockedUserDisplay = Pick<User, 'id' | 'userId' | 'username' | 'photoURL' | 'isAdminAccount'>;
 
 export function BlockedUsersManagement({ user: currentUserData }: { user: User }) {
   const { user: authUser } = useAuth();
@@ -36,10 +37,10 @@ export function BlockedUsersManagement({ user: currentUserData }: { user: User }
   const [usernameToBlock, setUsernameToBlock] = useState('');
   const [isBlocking, setIsBlocking] = useState(false);
 
-  const [searchResults, setSearchResults] = useState<User[]>([]);
+  const [searchResults, setSearchResults] = useState<BlockedUserDisplay[]>([]);
   const [isSearching, setIsSearching] = useState(false);
 
-  const [blockedUsers, setBlockedUsers] = useState<User[]>([]);
+  const [blockedUsers, setBlockedUsers] = useState<BlockedUserDisplay[]>([]);
   const [areBlockedUsersLoading, setAreBlockedUsersLoading] = useState(true);
 
   const blockedUserIds = currentUserData?.blockedUsers || [];
@@ -58,26 +59,16 @@ export function BlockedUsersManagement({ user: currentUserData }: { user: User }
     }
 
     try {
-      const { data, error } = await supabase
-        .from('profiles')
-        .select('*')
-        .in('id', ids);
+      const response = await fetch('/api/user/block-status?mode=list', { cache: 'no-store' });
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload?.error || 'Unable to load blocked users');
 
-      if (error) throw error;
-
-      const mapped: User[] = (data || []).map((u: any) => ({
+      const mapped: BlockedUserDisplay[] = (Array.isArray(payload?.users) ? payload.users : []).map((u: any) => ({
         id: u.id,
         userId: u.username || u.id,
         username: u.username,
-        email: u.email,
         photoURL: u.photo_url,
-        country: u.country,
-        preferredCurrency: u.preferred_currency,
         isAdminAccount: u.is_admin_account,
-        isSuspended: u.is_suspended,
-        createdAt: u.created_at,
-        feedbackScore: u.feedback_score,
-        completedTrades: u.completed_trades,
       }));
 
       setBlockedUsers(mapped);
@@ -104,27 +95,16 @@ export function BlockedUsersManagement({ user: currentUserData }: { user: User }
     const timeout = setTimeout(async () => {
       if (!authUserId) return;
       try {
-        const { data, error } = await supabase
-          .from('profiles')
-          .select('*')
-          .ilike('username', `%${usernameToBlock}%`)
-          .limit(5);
-
-        if (!error && data) {
-          const blockedIds = currentUserData?.blockedUsers || [];
-          const users = data
-            .map(
-              (u: any) =>
-                ({
-                  id: u.id,
-                  userId: u.username || u.id,
-                  username: u.username,
-                  photoURL: u.photo_url,
-                  isAdminAccount: u.is_admin_account,
-                } as User)
-            )
-            .filter((u) => u.id !== authUserId && !u.isAdminAccount && !blockedIds.includes(u.id));
-
+        const response = await fetch(`/api/user/block-status?mode=search&q=${encodeURIComponent(usernameToBlock)}`, { cache: 'no-store' });
+        const payload = await response.json();
+        if (response.ok && Array.isArray(payload?.users)) {
+          const users: BlockedUserDisplay[] = payload.users.map((u: any) => ({
+            id: u.id,
+            userId: u.username || u.id,
+            username: u.username,
+            photoURL: u.photo_url,
+            isAdminAccount: u.is_admin_account,
+          }));
           setSearchResults(users);
         }
       } catch (err) {

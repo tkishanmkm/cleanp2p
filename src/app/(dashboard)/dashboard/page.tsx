@@ -1,6 +1,7 @@
 'use client';
 
 import { useAuth } from '@/components/providers/auth-provider';
+import { useI18n } from '@/context/i18n-context';
 import {
   Card,
   CardContent,
@@ -52,6 +53,7 @@ const CryptoLogo = ({ crypto, className }: { crypto: CryptoCurrency; className?:
 };
 
 export default function DashboardPage() {
+  const { t, language } = useI18n();
   const { user: authUser, profile, isUserLoading: isAuthLoading } = useAuth();
   const router = useRouter();
   const { prices, fiatRates } = usePrices();
@@ -60,6 +62,7 @@ export default function DashboardPage() {
 
   const [activeTrades, setActiveTrades] = useState<Trade[]>([]);
   const [isLoadingActiveTrades, setIsLoadingActiveTrades] = useState(true);
+  const [activeTradesError, setActiveTradesError] = useState(false);
 
   useEffect(() => {
     if (!isAuthLoading && !authUser) {
@@ -91,20 +94,16 @@ export default function DashboardPage() {
         // Fallback
       }
 
-      // 2. Fallback to supabase client
+      // Do not fall back to a direct select('*') client query: it bypasses the
+      // server response allowlist and the server-side 20-trade limit.
       if (!data) {
-        const { data: clientData, error } = await supabase
-          .from('trades')
-          .select('*')
-          .or(`buyer_id.eq.${currentUserId},seller_id.eq.${currentUserId}`)
-          .order('created_at', { ascending: false });
-
-        if (!error && clientData) {
-          data = clientData;
-        }
+        setActiveTradesError(true);
+        setActiveTrades([]);
+        return;
       }
+      setActiveTradesError(false);
 
-      if (!data || data.length === 0) {
+      if (data.length === 0) {
         setActiveTrades([]);
         setIsLoadingActiveTrades(false);
         return;
@@ -122,7 +121,7 @@ export default function DashboardPage() {
       let profileMap: Record<string, any> = {};
       if (partnerIds.length > 0) {
         const { data: profiles } = await supabase
-          .from('profiles')
+          .from('public_profiles')
           .select('id, username, display_name, avatar_url, photo_url, country')
           .in('id', partnerIds);
 
@@ -274,10 +273,10 @@ export default function DashboardPage() {
           <Skeleton className="h-9 w-64" />
         ) : (
           <h1 className="text-2xl font-semibold md:text-3xl">
-            Welcome back, {profile?.username || authUser?.displayName || 'Trader'}!
+            {t('dashboardPage.dashboardWelcomeBack')} {profile?.username || authUser?.displayName || 'Trader'}!
           </h1>
         )}
-        <p className="text-muted-foreground">Here's a complete overview of your P2P trading activity.</p>
+        <p className="text-muted-foreground">{t('dashboardPage.dashboardOverview')}</p>
       </div>
 
       <div className="grid gap-4 md:gap-8 lg:grid-cols-3">
@@ -285,10 +284,10 @@ export default function DashboardPage() {
           <Card>
             <CardHeader className="flex flex-row items-center">
               <div className="grid gap-2">
-                <CardTitle>Unified Balance</CardTitle>
+                <CardTitle>{t('dashboardPage.unifiedBalance')}</CardTitle>
                 <CardDescription>
-                  Total estimated value:{' '}
-                  {totalWalletValueConverted.toLocaleString(undefined, {
+                  {t('dashboardPage.totalEstimatedValue')}{' '}
+                  {totalWalletValueConverted.toLocaleString(language, {
                     style: 'currency',
                     currency: preferredCurrency,
                     minimumFractionDigits: 2,
@@ -298,12 +297,12 @@ export default function DashboardPage() {
               <div className="ml-auto flex gap-2">
                 <Button size="sm" variant="outline" asChild>
                   <Link href="/wallets">
-                    <Minus className="h-4 w-4 mr-1" /> Withdraw
+                    <Minus className="h-4 w-4 mr-1" /> {t('wallet.withdraw')}
                   </Link>
                 </Button>
                 <Button size="sm" asChild>
                   <Link href="/wallets">
-                    <Plus className="h-4 w-4 mr-1" /> Deposit
+                    <Plus className="h-4 w-4 mr-1" /> {t('wallet.deposit')}
                   </Link>
                 </Button>
               </div>
@@ -316,9 +315,9 @@ export default function DashboardPage() {
                   <Table className="hidden md:table">
                     <TableHeader>
                       <TableRow>
-                        <TableHead>Asset</TableHead>
-                        <TableHead>Available Balance</TableHead>
-                        <TableHead className="text-right">{preferredCurrency} Value</TableHead>
+                        <TableHead>{t('dashboardPage.asset')}</TableHead>
+                        <TableHead>{t('wallet.availableBalance')}</TableHead>
+                        <TableHead className="text-right">{preferredCurrency} {t('dashboardPage.value')}</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
@@ -335,7 +334,7 @@ export default function DashboardPage() {
                             </TableCell>
                             <TableCell className="font-mono font-medium">{(wallet.balance || 0).toFixed(8)}</TableCell>
                             <TableCell className="text-right font-medium">
-                              {valueConverted.toLocaleString(undefined, {
+                              {valueConverted.toLocaleString(language, {
                                 style: 'currency',
                                 currency: preferredCurrency,
                                 minimumFractionDigits: 2,
@@ -347,7 +346,7 @@ export default function DashboardPage() {
                       {(!walletsToShow || walletsToShow.length === 0) && (
                         <TableRow>
                           <TableCell colSpan={3} className="text-center text-muted-foreground py-10">
-                            No funds detected. Deposit crypto to start trading.
+                            {t('dashboardPage.noFunds')} {t('dashboardPage.depositCryptoToStart')}
                           </TableCell>
                         </TableRow>
                       )}
@@ -365,7 +364,7 @@ export default function DashboardPage() {
                               <CardTitle className="text-lg">{wallet.crypto}</CardTitle>
                             </div>
                             <div className="font-semibold text-right">
-                              {valueConverted.toLocaleString(undefined, {
+                              {valueConverted.toLocaleString(language, {
                                 style: 'currency',
                                 currency: preferredCurrency,
                                 minimumFractionDigits: 2,
@@ -374,7 +373,7 @@ export default function DashboardPage() {
                           </CardHeader>
                           <CardContent className="space-y-1 text-sm">
                             <div className="flex justify-between items-center">
-                              <span className="text-muted-foreground">Available</span>
+                              <span className="text-muted-foreground">{t('wallet.availableBalance')}</span>
                               <span className="font-mono font-medium">{(wallet.balance || 0).toFixed(8)}</span>
                             </div>
                           </CardContent>
@@ -382,7 +381,7 @@ export default function DashboardPage() {
                       );
                     })}
                     {(!walletsToShow || walletsToShow.length === 0) && (
-                      <div className="text-center text-muted-foreground py-10">No funds detected.</div>
+                      <div className="text-center text-muted-foreground py-10">{t('dashboardPage.noFunds')}</div>
                     )}
                   </div>
                 </>
@@ -394,14 +393,14 @@ export default function DashboardPage() {
             <CardHeader className="bg-muted/10 border-b border-border/40 pb-4">
               <div className="flex items-center justify-between">
                 <div>
-                  <CardTitle className="text-base font-bold text-foreground">Active Trades</CardTitle>
+                  <CardTitle className="text-base font-bold text-foreground">{t('dashboardPage.activeTrades')}</CardTitle>
                   <CardDescription className="text-xs text-muted-foreground mt-0.5">
-                    Trades that require your immediate payment, confirmation, or release.
+                    {t('dashboardPage.activeTradesDescription')}
                   </CardDescription>
                 </div>
                 {activeTrades.length > 0 && (
                   <Badge variant="outline" className="bg-blue-500/10 text-blue-600 dark:text-blue-400 border-blue-500/30 text-xs font-semibold">
-                    {activeTrades.length} Active
+                    {t('dashboardPage.activeCount').replace('{count}', String(activeTrades.length))}
                   </Badge>
                 )}
               </div>
@@ -420,12 +419,12 @@ export default function DashboardPage() {
                   <Table className="hidden md:table">
                     <TableHeader className="bg-muted/20">
                       <TableRow>
-                        <TableHead className="text-xs font-semibold">Trade & Partner</TableHead>
-                        <TableHead className="text-xs font-semibold">Crypto Amount</TableHead>
-                        <TableHead className="text-xs font-semibold">Fiat Total</TableHead>
-                        <TableHead className="text-xs font-semibold">Payment Method</TableHead>
-                        <TableHead className="text-xs font-semibold">Status</TableHead>
-                        <TableHead className="text-right text-xs font-semibold">Action</TableHead>
+                        <TableHead className="text-xs font-semibold">{t('dashboardPage.tradeAndPartner')}</TableHead>
+                        <TableHead className="text-xs font-semibold">{t('dashboardPage.cryptoAmount')}</TableHead>
+                        <TableHead className="text-xs font-semibold">{t('dashboardPage.fiatTotal')}</TableHead>
+                        <TableHead className="text-xs font-semibold">{t('dashboardPage.paymentMethod')}</TableHead>
+                        <TableHead className="text-xs font-semibold">{t('common.status')}</TableHead>
+                        <TableHead className="text-right text-xs font-semibold">{t('common.actions')}</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody className="divide-y divide-border/40">
@@ -451,7 +450,7 @@ export default function DashboardPage() {
                                         ? "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400"
                                         : "bg-rose-500/15 text-rose-600 dark:text-rose-400"
                                     )}>
-                                      {trade.isBuyer ? 'BUY' : 'SELL'}
+                                      {trade.isBuyer ? t('dashboardPage.buy') : t('dashboardPage.sell')}
                                     </span>
                                     <span className="font-semibold text-xs text-foreground">
                                       @{trade.counterpartyUsername}
@@ -464,7 +463,7 @@ export default function DashboardPage() {
                               </div>
                             </TableCell>
 
-                            {/* Crypto Amount with MiniCoinIcon */}
+                            {/* {t('dashboardPage.cryptoAmount')} with MiniCoinIcon */}
                             <TableCell className="py-3">
                               <div className="flex items-center gap-1.5 text-xs font-semibold text-foreground">
                                 <MiniCoinIcon symbol={trade.crypto} className="h-4 w-4 shrink-0" />
@@ -472,14 +471,14 @@ export default function DashboardPage() {
                               </div>
                             </TableCell>
 
-                            {/* Fiat Total */}
+                            {/* {t('dashboardPage.fiatTotal')} */}
                             <TableCell className="py-3">
                               <span className="text-xs font-mono font-medium text-foreground">
-                                {trade.fiatAmount.toLocaleString()} {trade.fiatCurrency}
+                                {trade.fiatAmount.toLocaleString(language)} {trade.fiatCurrency}
                               </span>
                             </TableCell>
 
-                            {/* Payment Method */}
+                            {/* {t('dashboardPage.paymentMethod')} */}
                             <TableCell className="py-3">
                               <span className="px-2 py-0.5 text-[11px] font-medium rounded-md bg-muted text-foreground border border-border/50">
                                 {trade.paymentMethod}
@@ -489,7 +488,7 @@ export default function DashboardPage() {
                             {/* Status Badge */}
                             <TableCell className="py-3">
                               <Badge variant="outline" className={cn('capitalize text-xs font-semibold', statusColors[trade.status])}>
-                                {trade.status === 'paid' ? 'Marked Paid' : trade.status}
+                                {trade.status === 'paid' ? t('dashboardPage.markedPaid') : (trade.status === 'disputed' ? t('common.disputed') : t('common.active'))}
                               </Badge>
                             </TableCell>
 
@@ -497,7 +496,7 @@ export default function DashboardPage() {
                             <TableCell className="text-right py-3">
                               <Button asChild variant="outline" size="sm" className="h-8 text-xs font-medium rounded-lg">
                                 <Link href={`/trade/${trade.id}`}>
-                                  Open Trade <ArrowRight className="ml-1.5 h-3 w-3" />
+                                  {t('dashboardPage.openTrade')} <ArrowRight className="ml-1.5 h-3 w-3" />
                                 </Link>
                               </Button>
                             </TableCell>
@@ -530,7 +529,7 @@ export default function DashboardPage() {
                                       ? "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400"
                                       : "bg-rose-500/15 text-rose-600 dark:text-rose-400"
                                   )}>
-                                    {trade.isBuyer ? 'BUY' : 'SELL'}
+                                    {trade.isBuyer ? t('dashboardPage.buy') : t('dashboardPage.sell')}
                                   </span>
                                   <span className="font-semibold text-xs text-foreground">
                                     @{trade.counterpartyUsername}
@@ -543,7 +542,7 @@ export default function DashboardPage() {
                             </div>
 
                             <Badge variant="outline" className={cn('capitalize text-xs font-semibold', statusColors[trade.status])}>
-                              {trade.status === 'paid' ? 'Marked Paid' : trade.status}
+                              {trade.status === 'paid' ? t('dashboardPage.markedPaid') : (trade.status === 'disputed' ? t('common.disputed') : t('common.active'))}
                             </Badge>
                           </div>
 
@@ -552,7 +551,7 @@ export default function DashboardPage() {
                               <MiniCoinIcon symbol={trade.crypto} className="h-3.5 w-3.5" />
                               <span>{trade.amount.toFixed(4)} {trade.crypto}</span>
                               <span className="text-muted-foreground font-normal">≈</span>
-                              <span className="font-mono text-muted-foreground">{trade.fiatAmount.toLocaleString()} {trade.fiatCurrency}</span>
+                              <span className="font-mono text-muted-foreground">{trade.fiatAmount.toLocaleString(language)} {trade.fiatCurrency}</span>
                             </div>
 
                             <span className="px-1.5 py-0.2 text-[10px] font-medium rounded bg-muted text-foreground">
@@ -561,7 +560,7 @@ export default function DashboardPage() {
                           </div>
 
                           <Button asChild variant="secondary" className="w-full h-8 text-xs font-medium rounded-lg">
-                            <Link href={`/trade/${trade.id}`}>View Trade Details →</Link>
+                            <Link href={`/trade/${trade.id}`}>{t('dashboardPage.viewTradeDetails')}</Link>
                           </Button>
                         </div>
                       );
@@ -572,9 +571,19 @@ export default function DashboardPage() {
 
               {!isLoadingActiveTrades && activeTrades.length === 0 && (
                 <div className="text-center text-muted-foreground py-10">
-                  <ArrowLeftRight className="mx-auto h-10 w-10 text-muted-foreground/40 mb-2" />
-                  <h3 className="text-sm font-semibold text-foreground">No Active Trades</h3>
-                  <p className="mt-0.5 text-xs text-muted-foreground">You have no trades that require immediate action.</p>
+                  {activeTradesError ? (
+                    <>
+                      <h3 className="text-sm font-semibold text-foreground">{t('dashboardPage.unableToLoadTrades')}</h3>
+                      <p className="mt-0.5 text-xs text-muted-foreground">{t('dashboardPage.tryAgainTradeNotLoaded')}</p>
+                      <Button size="sm" variant="outline" className="mt-3" onClick={fetchActiveTrades}>{t('dashboardPage.retry')}</Button>
+                    </>
+                  ) : (
+                    <>
+                      <ArrowLeftRight className="mx-auto h-10 w-10 text-muted-foreground/40 mb-2" />
+                      <h3 className="text-sm font-semibold text-foreground">{t('dashboardPage.noActiveTrades')}</h3>
+                      <p className="mt-0.5 text-xs text-muted-foreground">{t('dashboardPage.noImmediateAction')}</p>
+                    </>
+                  )}
                 </div>
               )}
             </CardContent>
@@ -584,8 +593,8 @@ export default function DashboardPage() {
         <div className="lg:col-span-1">
           <Card>
             <CardHeader>
-              <CardTitle>Platform Resources</CardTitle>
-              <CardDescription>Get help and read our policies.</CardDescription>
+              <CardTitle>{t('dashboardPage.platformResources')}</CardTitle>
+              <CardDescription>{t('dashboardPage.resourcesDescription')}</CardDescription>
             </CardHeader>
             <CardContent className="grid gap-4 sm:grid-cols-2 lg:grid-cols-1">
               <Link
@@ -594,8 +603,8 @@ export default function DashboardPage() {
               >
                 <LifeBuoy className="h-8 w-8 text-primary" />
                 <div>
-                  <h3 className="font-semibold">FAQ</h3>
-                  <p className="text-sm text-muted-foreground">Common questions.</p>
+                  <h3 className="font-semibold">{t('footer.faq')}</h3>
+                  <p className="text-sm text-muted-foreground">{t('dashboardPage.commonQuestions')}</p>
                 </div>
               </Link>
               <Link
@@ -604,8 +613,8 @@ export default function DashboardPage() {
               >
                 <BookOpen className="h-8 w-8 text-primary" />
                 <div>
-                  <h3 className="font-semibold">Guides</h3>
-                  <p className="text-sm text-muted-foreground">Learn how to trade.</p>
+                  <h3 className="font-semibold">{t('dashboardPage.guides')}</h3>
+                  <p className="text-sm text-muted-foreground">{t('dashboardPage.learnToTrade')}</p>
                 </div>
               </Link>
               <Link
@@ -614,8 +623,8 @@ export default function DashboardPage() {
               >
                 <FileText className="h-8 w-8 text-primary" />
                 <div>
-                  <h3 className="font-semibold">Terms</h3>
-                  <p className="text-sm text-muted-foreground">Platform rules.</p>
+                  <h3 className="font-semibold">{t('dashboardPage.terms')}</h3>
+                  <p className="text-sm text-muted-foreground">{t('dashboardPage.platformRules')}</p>
                 </div>
               </Link>
               <Link
@@ -624,8 +633,8 @@ export default function DashboardPage() {
               >
                 <ShieldCheck className="h-8 w-8 text-primary" />
                 <div>
-                  <h3 className="font-semibold">Privacy</h3>
-                  <p className="text-sm text-muted-foreground">Your data safety.</p>
+                  <h3 className="font-semibold">{t('dashboardPage.privacy')}</h3>
+                  <p className="text-sm text-muted-foreground">{t('dashboardPage.dataSafety')}</p>
                 </div>
               </Link>
             </CardContent>

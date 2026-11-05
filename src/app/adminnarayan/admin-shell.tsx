@@ -54,64 +54,87 @@ export function AdminShell({
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [isLoggingOut, startLogout] = useTransition();
 
-  const [authStatus, setAuthStatus] = useState<"checking" | "authorized" | "unauthorized" | "unauthenticated">(
-    adminEmail ? "authorized" : "checking"
-  );
+  const [authStatus, setAuthStatus] = useState<
+    "checking" | "authorized" | "unauthorized" | "unauthenticated" | "verification-unavailable"
+  >("checking");
   const [currentUserEmail, setCurrentUserEmail] = useState<string | undefined>(adminEmail);
   const [currentUserName, setCurrentUserName] = useState<string | undefined>(adminName);
+  const [supportMode, setSupportMode] = useState<"none" | "readonly" | "emergency">("none");
+  const [emergencyExpiresAt, setEmergencyExpiresAt] = useState<string | null>(null);
+  const [emergencyUsesRemaining, setEmergencyUsesRemaining] = useState<number | null>(null);
+  const [isActivatingEmergency, setIsActivatingEmergency] = useState(false);
+  const [isEmergencyDialogOpen, setIsEmergencyDialogOpen] = useState(false);
+  const [emergencyCode, setEmergencyCode] = useState("");
+  const [emergencyActionError, setEmergencyActionError] = useState<string | null>(null);
+  const [supportTargetUserId, setSupportTargetUserId] = useState("");
+  const [supportRestrictionReason, setSupportRestrictionReason] = useState("");
+  const [isRestrictingUser, setIsRestrictingUser] = useState(false);
+  const [supportRestrictionMessage, setSupportRestrictionMessage] = useState<string | null>(null);
 
   // If we are on the login page, render children directly without admin shell chrome
   const isLoginPage = pathname === "/adminnarayan/login";
 
   useEffect(() => {
     if (isLoginPage) return;
-    if (adminEmail) {
-      setAuthStatus("authorized");
-      return;
-    }
 
     let isMounted = true;
     async function verifyClientAdmin() {
       try {
         const supabase = createClient();
-        const { data: { session } } = await supabase.auth.getSession();
-        if (!session?.user) {
+        const { data: { user }, error: userError } = await supabase.auth.getUser();
+        if (userError) {
+          if (isMounted) setAuthStatus("verification-unavailable");
+          return;
+        }
+        if (!user) {
           if (isMounted) setAuthStatus("unauthenticated");
           return;
         }
 
-        const user = session.user;
         const { data: verificationResult, error: rpcError } = await supabase.rpc(
           "verify_admin_login",
           { user_uuid: user.id }
         );
 
-        if (!rpcError && verificationResult?.[0]?.is_valid === true) {
-          if (isMounted) {
-            setCurrentUserEmail(user.email);
-            setCurrentUserName(
-              (user.user_metadata?.full_name as string) ||
-              user.email?.split("@")[0] ||
-              "Administrator"
-            );
-            setAuthStatus("authorized");
-          }
+        if (rpcError || verificationResult?.[0]?.is_valid !== true) {
+          // Support admins are intentionally not full admins in verify_admin_login.
+          // A server endpoint separately verifies their read-only grant or active emergency session.
+          try {
+            const supportResponse = await fetch("/api/admin/support-admins/status", { cache: "no-store" });
+            const supportStatus = await supportResponse.json().catch(() => null);
+            if (supportResponse.ok && supportStatus?.success === true && supportStatus?.isSupportAdmin === true) {
+              if (isMounted) {
+                setCurrentUserEmail(user.email);
+                setCurrentUserName(
+                  (user.user_metadata?.full_name as string) || user.email?.split("@")[0] || "Support Admin"
+                );
+                setSupportMode(supportStatus.emergencyActive ? "emergency" : "readonly");
+                setEmergencyExpiresAt(supportStatus.emergencyExpiresAt || null);
+                setEmergencyUsesRemaining(Number.isInteger(supportStatus.usesRemaining) ? supportStatus.usesRemaining : null);
+                setAuthStatus("authorized");
+              }
+              return;
+            }
+          } catch {}
+
+          if (isMounted) setAuthStatus(rpcError ? "verification-unavailable" : "unauthorized");
           return;
         }
 
-        // Secondary check
-        const { data: checkRes } = await supabase.rpc("check_is_admin", { user_uuid: user.id });
-        if (checkRes === true || checkRes?.[0]?.is_valid === true) {
-          if (isMounted) {
-            setCurrentUserEmail(user.email);
-            setAuthStatus("authorized");
-          }
-          return;
+        if (isMounted) {
+          setCurrentUserEmail(user.email);
+          setCurrentUserName(
+            (user.user_metadata?.full_name as string) ||
+            user.email?.split("@")[0] ||
+            "Administrator"
+          );
+          setSupportMode("none");
+          setEmergencyExpiresAt(null);
+          setEmergencyUsesRemaining(null);
+          setAuthStatus("authorized");
         }
-
-        if (isMounted) setAuthStatus("unauthorized");
       } catch {
-        if (isMounted) setAuthStatus("unauthenticated");
+        if (isMounted) setAuthStatus("verification-unavailable");
       }
     }
 
@@ -119,7 +142,7 @@ export function AdminShell({
     return () => {
       isMounted = false;
     };
-  }, [adminEmail, isLoginPage]);
+  }, [isLoginPage]);
 
   if (isLoginPage) {
     return <>{children}</>;
@@ -134,6 +157,59 @@ export function AdminShell({
       await adminSignOut();
       window.location.href = "/adminnarayan/login";
     });
+  };
+
+  const handleEmergencyActivation = async (event: { preventDefault: () => void }) => {
+    event.preventDefault();
+    setEmergencyActionError(null);
+    setIsActivatingEmergency(true);
+    try {
+      const response = await fetch("/api/admin/support-admins/emergency/activate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ code: emergencyCode }),
+      });
+      const result = await response.json().catch(() => null);
+      if (!response.ok || result?.success !== true) {
+        setEmergencyActionError(result?.error || "Emergency mode could not be activated.");
+        return;
+      }
+      setSupportMode("emergency");
+      setEmergencyExpiresAt(result.expiresAt || null);
+      setEmergencyUsesRemaining(Number.isInteger(result.usesRemaining) ? result.usesRemaining : null);
+      setEmergencyCode("");
+      setIsEmergencyDialogOpen(false);
+      window.location.reload();
+    } catch {
+      setEmergencyActionError("Emergency mode could not be activated. Please retry.");
+    } finally {
+      setIsActivatingEmergency(false);
+    }
+  };
+
+  const handleSupportRestriction = async (event: { preventDefault: () => void }) => {
+    event.preventDefault();
+    setSupportRestrictionMessage(null);
+    setIsRestrictingUser(true);
+    try {
+      const response = await fetch("/api/admin/support-admins/restrict-user", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ targetUserId: supportTargetUserId.trim(), reason: supportRestrictionReason.trim() }),
+      });
+      const result = await response.json().catch(() => null);
+      if (!response.ok || result?.success !== true) {
+        setSupportRestrictionMessage(result?.error || "Restriction review request could not be submitted.");
+        return;
+      }
+      setSupportRestrictionMessage(result?.message || "Restriction review request logged for full-administrator review. No account changes were made.");
+      setSupportTargetUserId("");
+      setSupportRestrictionReason("");
+    } catch {
+      setSupportRestrictionMessage("Restriction review request could not be submitted. Please retry.");
+    } finally {
+      setIsRestrictingUser(false);
+    }
   };
 
   if (authStatus === "checking") {
@@ -179,6 +255,37 @@ export function AdminShell({
               Return to Marketplace
             </Button>
           </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (authStatus === "verification-unavailable") {
+    return (
+      <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center p-4 text-slate-300">
+        <div className="w-full max-w-md p-6 bg-slate-900 border border-amber-900/50 rounded-xl text-center space-y-4 shadow-xl">
+          <div className="w-12 h-12 rounded-full bg-amber-500/10 text-amber-400 flex items-center justify-center mx-auto">
+            <ShieldAlert className="w-6 h-6" />
+          </div>
+          <h2 className="text-xl font-bold text-white">Admin Verification Unavailable</h2>
+          <p className="text-sm text-slate-400">
+            Administrator access could not be verified. Protected controls remain locked. Please retry or sign in again.
+          </p>
+          <Button
+            id="admin-shell-retry-verification-btn"
+            onClick={() => window.location.reload()}
+            className="w-full bg-blue-600 hover:bg-blue-500 text-white"
+          >
+            Retry Verification
+          </Button>
+          <Button
+            id="admin-shell-verification-login-btn"
+            variant="ghost"
+            onClick={() => { window.location.href = "/adminnarayan/login"; }}
+            className="w-full text-slate-400 hover:text-white"
+          >
+            Return to Admin Login
+          </Button>
         </div>
       </div>
     );
@@ -261,6 +368,7 @@ export function AdminShell({
     },
     { href: "/adminnarayan/settings", label: "Platform Settings", icon: Settings },
     { href: "/adminnarayan/security", label: "Security & 2FA", icon: Shield },
+    { href: "/adminnarayan/support-admins", label: "Support Admins", icon: Users },
     { href: "/adminnarayan/audit-logs", label: "Audit Logs", icon: ClipboardList },
     { href: "/adminnarayan/appearance", label: "Appearance", icon: Brush },
   ];
@@ -326,7 +434,7 @@ export function AdminShell({
 
         {/* Navigation Links */}
         <nav className="flex-1 overflow-y-auto px-3 py-4 space-y-1">
-          {navItems.map((item) => {
+          {navItems.filter((item) => supportMode === "none" || item.href !== "/adminnarayan/support-admins").map((item) => {
             const isActive =
               item.href === "/adminnarayan/dashboard"
                 ? pathname === "/adminnarayan/dashboard" || pathname === "/adminnarayan"
@@ -410,7 +518,54 @@ export function AdminShell({
         </header>
 
         <main className="flex-1 p-6 md:p-8 overflow-y-auto">
-          <div className="max-w-7xl mx-auto">{children}</div>
+          <div className="max-w-7xl mx-auto">
+            {supportMode === "readonly" && (
+              <section className="mb-5 rounded-xl border border-sky-700/60 bg-sky-950/40 p-4 text-sky-100" role="status">
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                  <div>
+                    <h2 className="font-semibold">Support Admin — View-only mode</h2>
+                    <p className="mt-1 text-sm text-sky-200">You can inspect platform data, but administrative changes are locked. Emergency mode requires a fresh authenticator code and an available use.</p>
+                    {emergencyUsesRemaining !== null && <p className="mt-1 text-xs text-sky-300">Emergency uses remaining: {emergencyUsesRemaining}</p>}
+                  </div>
+                  <Button type="button" onClick={() => { setEmergencyActionError(null); setEmergencyCode(""); setIsEmergencyDialogOpen(true); }} className="shrink-0 bg-amber-500 text-slate-950 hover:bg-amber-400">
+                    Activate Emergency Mode
+                  </Button>
+                </div>
+                <form onSubmit={handleSupportRestriction} className="mt-4 grid grid-cols-1 gap-3 border-t border-sky-800/70 pt-4 md:grid-cols-3">
+                  <label className="block text-xs text-sky-200 md:col-span-1">Request review for user UUID
+                    <input required value={supportTargetUserId} onChange={(event) => setSupportTargetUserId(event.target.value)} className="mt-1 w-full rounded-md border border-sky-800 bg-slate-950 px-3 py-2 text-sm text-white" placeholder="Target user UUID" />
+                  </label>
+                  <label className="block text-xs text-sky-200 md:col-span-1">Reason (optional)
+                    <input value={supportRestrictionReason} maxLength={2000} onChange={(event) => setSupportRestrictionReason(event.target.value)} className="mt-1 w-full rounded-md border border-sky-800 bg-slate-950 px-3 py-2 text-sm text-white" placeholder="Reason for review request" />
+                  </label>
+                  <div className="flex items-end"><Button type="submit" disabled={isRestrictingUser || !supportTargetUserId.trim()} variant="outline" className="w-full border-sky-700 text-sky-100 hover:bg-sky-900">{isRestrictingUser ? "Submitting request…" : "Request Restriction Review"}</Button></div>
+                </form>
+                {supportRestrictionMessage && <p className="mt-3 text-sm text-sky-100" role="status">{supportRestrictionMessage}</p>}
+              </section>
+            )}
+            {supportMode === "emergency" && (
+              <section className="mb-5 rounded-xl border border-amber-600/70 bg-amber-950/50 p-4 text-amber-100" role="status">
+                <h2 className="font-semibold">Emergency mode active</h2>
+                <p className="mt-1 text-sm">Privileged actions are enabled temporarily and audited. Session expiry: {emergencyExpiresAt ? new Date(emergencyExpiresAt).toLocaleString() : "within three hours of activation"}.</p>
+              </section>
+            )}
+            {isEmergencyDialogOpen && (
+              <section className="mb-5 max-w-xl rounded-xl border border-amber-700/60 bg-slate-900 p-4" role="dialog" aria-modal="true" aria-labelledby="support-emergency-title">
+                <h2 id="support-emergency-title" className="font-semibold text-white">Verify emergency activation</h2>
+                <p className="mt-1 text-sm text-slate-300">Enter the current authenticator code. One assigned emergency use will be consumed, and access expires after three hours.</p>
+                <form onSubmit={handleEmergencyActivation} className="mt-4 space-y-3">
+                  <label htmlFor="support-emergency-totp" className="block text-sm text-slate-200">6-digit authenticator code</label>
+                  <input id="support-emergency-totp" name="code" type="text" inputMode="numeric" autoComplete="one-time-code" pattern="[0-9]{6}" maxLength={6} required value={emergencyCode} onChange={(event) => setEmergencyCode(event.target.value.replace(/\D/g, "").slice(0, 6))} className="w-full rounded-md border border-slate-700 bg-slate-950 px-3 py-2 text-white" />
+                  {emergencyActionError && <p className="text-sm text-red-300" role="alert">{emergencyActionError}</p>}
+                  <div className="flex flex-wrap gap-2">
+                    <Button type="submit" disabled={isActivatingEmergency || emergencyCode.length !== 6} className="bg-amber-500 text-slate-950 hover:bg-amber-400">{isActivatingEmergency ? "Verifying…" : "Verify & Activate"}</Button>
+                    <Button type="button" variant="outline" disabled={isActivatingEmergency} onClick={() => { setIsEmergencyDialogOpen(false); setEmergencyCode(""); setEmergencyActionError(null); }}>Cancel</Button>
+                  </div>
+                </form>
+              </section>
+            )}
+            <div data-support-read-only={supportMode === "readonly" ? "true" : "false"}>{children}</div>
+          </div>
         </main>
       </div>
 

@@ -4,6 +4,7 @@ import React, { useState, useEffect } from 'react';
 import { Info, Play, Pause, Trash2, X, Share2, Copy, Check, ExternalLink, Send, Pencil } from 'lucide-react';
 import { FIAT_CURRENCIES } from '@/lib/currencies';
 import Link from 'next/link';
+import { useI18n } from '@/context/i18n-context';
 
 export interface AdItem {
   id: string;
@@ -43,10 +44,14 @@ export default function ManageAds({
   onStatusChange?: (id: string, newStatus: boolean) => Promise<void> | void;
   onDelete?: (id: string) => Promise<void> | void;
 }) {
+  const { t, language } = useI18n();
   const [ads, setAds] = useState<AdItem[]>(initialAds || []);
   const [selectedInfoAd, setSelectedInfoAd] = useState<AdItem | null>(null);
   const [shareModalAd, setShareModalAd] = useState<AdItem | null>(null);
   const [copied, setCopied] = useState(false);
+  const shareModalUrl = shareModalAd
+    ? (typeof window !== 'undefined' ? `${window.location.origin}/ad/${shareModalAd.id}` : `/ad/${shareModalAd.id}`)
+    : '';
 
   useEffect(() => {
     if (initialAds) {
@@ -56,12 +61,12 @@ export default function ManageAds({
 
   const handleShare = async (ad: AdItem) => {
     const shareUrl = typeof window !== 'undefined' ? `${window.location.origin}/ad/${ad.id}` : `/ad/${ad.id}`;
-    const shareText = `${ad.type === 'BUY' ? 'Buying' : 'Selling'} ${ad.asset} on PaxOnes P2P at ${getCurrencySymbol(ad.fiat_currency)}${ad.price} ${ad.fiat_currency}`;
+    const shareText = `${t(ad.type === 'BUY' ? 'manageAds.buy' : 'manageAds.sell')} ${ad.asset} — ${getCurrencySymbol(ad.fiat_currency)}${ad.price} ${ad.fiat_currency}`;
 
     if (typeof navigator !== 'undefined' && navigator.share) {
       try {
         await navigator.share({
-          title: `Trade ${ad.asset} on PaxOnes`,
+          title: t('manageAds.shareAdvertisement'),
           text: shareText,
           url: shareUrl,
         });
@@ -88,33 +93,49 @@ export default function ManageAds({
 
   const toggleStatus = async (id: string, currentStatus: string) => {
     const nextStatus = currentStatus === 'ACTIVE' ? 'INACTIVE' : 'ACTIVE';
-    setAds(prev => prev.map(a => a.id === id ? { ...a, status: nextStatus as any } : a));
-    
+
     try {
       if (onStatusChange) {
+        // The parent updates its authoritative list only after the API succeeds.
         await onStatusChange(id, nextStatus === 'ACTIVE');
       } else {
-        await fetch(`/api/ads/${id}/toggle`, {
+        const response = await fetch(`/api/ads/${id}/toggle`, {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
           body: JSON.stringify({ status: nextStatus }),
         });
+        if (!response.ok) {
+          const errorData = await response.json().catch(() => ({}));
+          throw new Error(errorData.error || errorData.message || `Failed to update ad status (HTTP ${response.status})`);
+        }
+        setAds(prev => prev.map(a => a.id === id ? { ...a, status: nextStatus as any } : a));
       }
     } catch (err) {
+      // Keep the previous visible status when persistence fails.
       console.error('Failed to toggle ad status:', err);
     }
   };
 
   const deleteAd = async (id: string) => {
-    if (!confirm('Are you sure you want to delete this ad?')) return;
-    setAds(prev => prev.filter(a => a.id !== id));
+    if (!confirm(t('manageAds.deleteConfirm'))) return;
     try {
       if (onDelete) {
+        // The parent removes the ad only after the API confirms deletion.
         await onDelete(id);
       } else {
-        await fetch(`/api/ads/${id}`, { method: 'DELETE' });
+        const response = await fetch(`/api/ads/${id}`, {
+          method: 'DELETE',
+          credentials: 'include',
+        });
+        if (!response.ok) {
+          const errorData = await response.json().catch(() => ({}));
+          throw new Error(errorData.error || errorData.message || `Failed to delete ad (HTTP ${response.status})`);
+        }
+        setAds(prev => prev.filter(a => a.id !== id));
       }
     } catch (err) {
+      // Keep the ad visible when the server rejects or fails the delete.
       console.error('Failed to delete ad:', err);
     }
   };
@@ -122,13 +143,13 @@ export default function ManageAds({
   return (
     <div className="space-y-4">
       <div>
-        <h2 className="text-xl font-extrabold text-foreground">Manage Your Ads</h2>
-        <p className="text-xs text-muted-foreground">View, share, activate, deactivate, or inspect full details of your marketplace offers.</p>
+        <h2 className="text-xl font-extrabold text-foreground">{t('manageAds.title')}</h2>
+        <p className="text-xs text-muted-foreground">{t('manageAds.description')}</p>
       </div>
 
       {ads.length === 0 ? (
         <div className="p-8 text-center rounded-2xl bg-card border border-border text-muted-foreground text-sm">
-          No advertisements found. Create your first offer to start trading.
+          {t('manageAds.empty')}
         </div>
       ) : (
         <>
@@ -137,13 +158,13 @@ export default function ManageAds({
             <table className="w-full text-left text-xs text-foreground">
               <thead className="bg-muted/60 text-muted-foreground uppercase tracking-wider border-b border-border">
                 <tr>
-                  <th className="p-4">Ad ID</th>
-                  <th className="p-4">Type</th>
-                  <th className="p-4">Asset</th>
-                  <th className="p-4">Price</th>
-                  <th className="p-4">Limits & Available</th>
-                  <th className="p-4">Status</th>
-                  <th className="p-4 text-right">Actions</th>
+                  <th className="p-4">{t('manageAds.adId')}</th>
+                  <th className="p-4">{t('manageAds.type')}</th>
+                  <th className="p-4">{t('manageAds.asset')}</th>
+                  <th className="p-4">{t('manageAds.price')}</th>
+                  <th className="p-4">{t('manageAds.limitsAvailable')}</th>
+                  <th className="p-4">{t('manageAds.status')}</th>
+                  <th className="p-4 text-right">{t('manageAds.actions')}</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-border">
@@ -164,27 +185,27 @@ export default function ManageAds({
                         <span className={`px-2.5 py-1 rounded-md font-extrabold text-xs ${
                           ad.type === 'BUY' ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30' : 'bg-rose-500/10 text-rose-600 dark:text-rose-400 border border-rose-500/30'
                         }`}>
-                          {ad.type}
+                          {t(ad.type === 'BUY' ? 'manageAds.buy' : 'manageAds.sell')}
                         </span>
                       </td>
                       <td className="p-4 font-semibold text-foreground">{ad.asset}/{ad.fiat_currency}</td>
                       <td className="p-4 font-mono font-bold text-foreground">
-                        {currSym}{price.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} {ad.fiat_currency}
+                        {currSym}{price.toLocaleString(language, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} {ad.fiat_currency}
                         {ad.pricing_type === 'FLOAT' && (
                           <span className="text-xs text-muted-foreground font-normal ml-1">
-                            ({ad.margin_percent && ad.margin_percent > 0 ? `+${ad.margin_percent}` : ad.margin_percent}% float)
+                            ({ad.margin_percent && ad.margin_percent > 0 ? `+${ad.margin_percent}` : ad.margin_percent}% {t('manageAds.float')})
                           </span>
                         )}
                       </td>
                       <td className="p-4 space-y-0.5">
-                        <div className="text-foreground font-mono">{currSym}{minLimit.toLocaleString()} - {currSym}{effectiveMaxLimit.toLocaleString(undefined, { maximumFractionDigits: 2 })} {ad.fiat_currency}</div>
-                        <div className="text-[11px] text-muted-foreground">Avail: <span className="text-primary font-semibold">{availCrypto} {ad.asset}</span></div>
+                        <div className="text-foreground font-mono">{currSym}{minLimit.toLocaleString(language)} - {currSym}{effectiveMaxLimit.toLocaleString(language, { maximumFractionDigits: 2 })} {ad.fiat_currency}</div>
+                        <div className="text-[11px] text-muted-foreground">{t('manageAds.availableShort')} <span className="text-primary font-semibold">{availCrypto} {ad.asset}</span></div>
                       </td>
                       <td className="p-4">
                         <span className={`px-2 py-0.5 rounded-full text-[11px] font-bold ${
                           ad.status === 'ACTIVE' ? 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/25' : 'bg-muted text-muted-foreground border border-border'
                         }`}>
-                          {ad.status}
+                          {t(ad.status === 'ACTIVE' ? 'common.active' : 'common.inactive')}
                         </span>
                       </td>
                       <td className="p-4 text-right">
@@ -192,24 +213,24 @@ export default function ManageAds({
                           <Link
                             href={`/ads/edit/${ad.id}`}
                             className="p-2 rounded-lg bg-blue-500/10 hover:bg-blue-500/20 text-blue-600 dark:text-blue-400 cursor-pointer transition-colors inline-flex items-center justify-center"
-                            title="Edit Ad"
+                            title={t('manageAds.editAd')}
                           >
                             <Pencil className="h-4 w-4" />
                           </Link>
                           <button 
                             onClick={() => handleShare(ad)} 
                             className="p-2 rounded-lg bg-[#9273FC]/10 hover:bg-[#9273FC]/20 text-[#9273FC] cursor-pointer transition-colors" 
-                            title="Share Ad Link"
+                            title={t('manageAds.shareAdLink')}
                           >
                             <Share2 className="h-4 w-4" />
                           </button>
-                          <button onClick={() => setSelectedInfoAd(ad)} className="p-2 rounded-lg bg-muted hover:bg-muted/80 text-primary cursor-pointer transition-colors" title="Full Ad Info">
+                          <button onClick={() => setSelectedInfoAd(ad)} className="p-2 rounded-lg bg-muted hover:bg-muted/80 text-primary cursor-pointer transition-colors" title={t('manageAds.fullAdInfo')}>
                             <Info className="h-4 w-4" />
                           </button>
-                          <button onClick={() => toggleStatus(ad.id, ad.status)} className="p-2 rounded-lg bg-muted hover:bg-muted/80 text-foreground cursor-pointer transition-colors" title={ad.status === 'ACTIVE' ? "Deactivate" : "Activate"}>
+                          <button onClick={() => toggleStatus(ad.id, ad.status)} className="p-2 rounded-lg bg-muted hover:bg-muted/80 text-foreground cursor-pointer transition-colors" title={t(ad.status === 'ACTIVE' ? 'manageAds.deactivate' : 'manageAds.activate')}>
                             {ad.status === 'ACTIVE' ? <Pause className="h-4 w-4 text-amber-500" /> : <Play className="h-4 w-4 text-emerald-500" />}
                           </button>
-                          <button onClick={() => deleteAd(ad.id)} className="p-2 rounded-lg bg-destructive/10 hover:bg-destructive/20 text-destructive cursor-pointer transition-colors" title="Delete Ad">
+                          <button onClick={() => deleteAd(ad.id)} className="p-2 rounded-lg bg-destructive/10 hover:bg-destructive/20 text-destructive cursor-pointer transition-colors" title={t('manageAds.deleteAd')}>
                             <Trash2 className="h-4 w-4" />
                           </button>
                         </div>
@@ -240,29 +261,29 @@ export default function ManageAds({
                       <span className={`px-2.5 py-0.5 rounded-md font-black text-xs ${
                         ad.type === 'BUY' ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400' : 'bg-rose-500/10 text-rose-600 dark:text-rose-400'
                       }`}>
-                        {ad.type}
+                        {t(ad.type === 'BUY' ? 'manageAds.buy' : 'manageAds.sell')}
                       </span>
                       <span className="font-bold text-foreground text-sm">{ad.asset}/{ad.fiat_currency}</span>
                     </div>
                     <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
                       ad.status === 'ACTIVE' ? 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/25' : 'bg-muted text-muted-foreground border border-border'
                     }`}>
-                      {ad.status}
+                      {t(ad.status === 'ACTIVE' ? 'common.active' : 'common.inactive')}
                     </span>
                   </div>
 
                   <div className="grid grid-cols-2 gap-2 text-xs">
                     <div>
-                      <p className="text-muted-foreground text-[10px]">Price</p>
-                      <p className="font-mono font-bold text-foreground">{currSym}{price.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} {ad.fiat_currency}</p>
+                      <p className="text-muted-foreground text-[10px]">{t('manageAds.price')}</p>
+                      <p className="font-mono font-bold text-foreground">{currSym}{price.toLocaleString(language, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} {ad.fiat_currency}</p>
                     </div>
                     <div>
-                      <p className="text-muted-foreground text-[10px]">Available Asset</p>
+                      <p className="text-muted-foreground text-[10px]">{t('manageAds.availableAsset')}</p>
                       <p className="font-mono font-semibold text-primary">{availCrypto} {ad.asset}</p>
                     </div>
                     <div className="col-span-2">
-                      <p className="text-muted-foreground text-[10px]">Trade Limits</p>
-                      <p className="font-mono text-foreground">{currSym}{minLimit.toLocaleString()} - {currSym}{effectiveMaxLimit.toLocaleString(undefined, { maximumFractionDigits: 2 })} {ad.fiat_currency}</p>
+                      <p className="text-muted-foreground text-[10px]">{t('manageAds.limitsAvailable')}</p>
+                      <p className="font-mono text-foreground">{currSym}{minLimit.toLocaleString(language)} - {currSym}{effectiveMaxLimit.toLocaleString(language, { maximumFractionDigits: 2 })} {ad.fiat_currency}</p>
                     </div>
                   </div>
 
@@ -271,22 +292,22 @@ export default function ManageAds({
                       <Link
                         href={`/ads/edit/${ad.id}`}
                         className="px-2.5 py-1.5 rounded-xl bg-blue-500/10 border border-blue-500/20 text-blue-600 dark:text-blue-400 text-xs font-semibold flex items-center gap-1 cursor-pointer hover:bg-blue-500/20 transition-colors"
-                        title="Edit Ad"
+                        title={t('manageAds.editAd')}
                       >
-                        <Pencil className="h-3.5 w-3.5" /> Edit
+                        <Pencil className="h-3.5 w-3.5" /> {t('manageAds.edit')}
                       </Link>
                       <button 
                         onClick={() => handleShare(ad)} 
                         className="px-2.5 py-1.5 rounded-xl bg-[#6347ea]/10 border border-[#6347ea]/20 text-[#6347ea] text-xs font-semibold flex items-center gap-1 cursor-pointer hover:bg-[#6347ea]/20 transition-colors"
-                        title="Share Ad"
+                        title={t('manageAds.shareAdLink')}
                       >
-                        <Share2 className="h-3.5 w-3.5" /> Share
+                        <Share2 className="h-3.5 w-3.5" /> {t('manageAds.share')}
                       </button>
                       <button 
                         onClick={() => setSelectedInfoAd(ad)} 
                         className="px-2.5 py-1.5 rounded-xl bg-primary/10 border border-primary/20 text-primary text-xs font-semibold flex items-center gap-1 cursor-pointer hover:bg-primary/20 transition-colors"
                       >
-                        <Info className="h-3.5 w-3.5" /> Info
+                        <Info className="h-3.5 w-3.5" /> {t('manageAds.info')}
                       </button>
                     </div>
 
@@ -295,7 +316,7 @@ export default function ManageAds({
                         onClick={() => toggleStatus(ad.id, ad.status)} 
                         className="px-2.5 py-1.5 rounded-xl bg-muted hover:bg-muted/80 text-foreground text-xs font-semibold flex items-center gap-1 cursor-pointer transition-colors"
                       >
-                        {ad.status === 'ACTIVE' ? <><Pause className="h-3.5 w-3.5 text-amber-500" /> Pause</> : <><Play className="h-3.5 w-3.5 text-emerald-500" /> Start</>}
+                        {ad.status === 'ACTIVE' ? <><Pause className="h-3.5 w-3.5 text-amber-500" /> {t('manageAds.pause')}</> : <><Play className="h-3.5 w-3.5 text-emerald-500" /> {t('manageAds.start')}</>}
                       </button>
                       <button 
                         onClick={() => deleteAd(ad.id)} 
@@ -318,7 +339,7 @@ export default function ManageAds({
           <div className="w-full max-w-md rounded-3xl bg-card border border-border p-6 shadow-2xl space-y-4 text-foreground">
             <div className="flex items-center justify-between border-b border-border pb-3">
               <h3 className="text-base font-extrabold text-foreground flex items-center gap-2">
-                <Share2 className="h-5 w-5 text-[#6347ea]" /> Share Advertisement
+                <Share2 className="h-5 w-5 text-[#6347ea]" /> {t('manageAds.shareAdvertisement')}
               </h3>
               <button onClick={() => setShareModalAd(null)} className="p-1 rounded-lg text-muted-foreground hover:text-foreground cursor-pointer">
                 <X className="h-5 w-5" />
@@ -327,15 +348,15 @@ export default function ManageAds({
 
             <div className="p-3 rounded-2xl bg-[#6347ea]/10 border border-[#6347ea]/20 text-xs text-foreground space-y-1">
               <div className="font-bold text-sm text-[#6347ea]">
-                {shareModalAd.type === 'BUY' ? 'Buy' : 'Sell'} {shareModalAd.asset} Offer
+                {t(shareModalAd.type === 'BUY' ? 'manageAds.buy' : 'manageAds.sell')} {shareModalAd.asset} {t('manageAds.offer')}
               </div>
               <div className="text-muted-foreground">
-                Rate: {getCurrencySymbol(shareModalAd.fiat_currency)}{Number(shareModalAd.price).toLocaleString()} {shareModalAd.fiat_currency} | Limits: {getCurrencySymbol(shareModalAd.fiat_currency)}{Number(shareModalAd.min_limit).toLocaleString()} - {getCurrencySymbol(shareModalAd.fiat_currency)}{Number(shareModalAd.max_limit).toLocaleString()}
+                {t('manageAds.rate')} {getCurrencySymbol(shareModalAd.fiat_currency)}{Number(shareModalAd.price).toLocaleString(language)} {shareModalAd.fiat_currency} | {t('manageAds.limits')} {getCurrencySymbol(shareModalAd.fiat_currency)}{Number(shareModalAd.min_limit).toLocaleString(language)} - {getCurrencySymbol(shareModalAd.fiat_currency)}{Number(shareModalAd.max_limit).toLocaleString(language)}
               </div>
             </div>
 
             <div className="space-y-2">
-              <label className="text-xs font-bold text-foreground">Public Ad Link</label>
+              <label className="text-xs font-bold text-foreground">{t('manageAds.publicAdLink')}</label>
               <div className="flex items-center gap-2">
                 <input 
                   type="text" 
@@ -352,37 +373,37 @@ export default function ManageAds({
                   }`}
                 >
                   {copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
-                  {copied ? 'Copied!' : 'Copy'}
+                  {copied ? t('manageAds.copied') : t('manageAds.copy')}
                 </button>
               </div>
             </div>
 
             <div className="space-y-2 pt-1">
-              <label className="text-xs font-bold text-muted-foreground">Quick Share via</label>
+              <label className="text-xs font-bold text-muted-foreground">{t('manageAds.quickShareVia')}</label>
               <div className="grid grid-cols-3 gap-2">
                 <a
-                  href={`https://api.whatsapp.com/send?text=${encodeURIComponent(`Check out my ${shareModalAd.type} ${shareModalAd.asset} offer on PaxOnes P2P: ${typeof window !== 'undefined' ? `${window.location.origin}/ad/${shareModalAd.id}` : ''}`)}`}
+                  href={`https://api.whatsapp.com/send?text=${encodeURIComponent(t('manageAds.shareWhatsAppText').replace('{type}', t(shareModalAd.type === 'BUY' ? 'manageAds.buy' : 'manageAds.sell')).replace('{asset}', shareModalAd.asset).replace('{url}', shareModalUrl))}`}
                   target="_blank"
                   rel="noopener noreferrer"
                   className="py-2.5 px-3 rounded-xl bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 text-xs font-bold flex items-center justify-center gap-1.5 transition-colors"
                 >
-                  <Send className="h-3.5 w-3.5" /> WhatsApp
+                  <Send className="h-3.5 w-3.5" /> {t('manageAds.whatsApp')}
                 </a>
                 <a
-                  href={`https://t.me/share/url?url=${encodeURIComponent(typeof window !== 'undefined' ? `${window.location.origin}/ad/${shareModalAd.id}` : '')}&text=${encodeURIComponent(`Trade ${shareModalAd.asset} with me on PaxOnes P2P`)}`}
+                  href={`https://t.me/share/url?url=${encodeURIComponent(typeof window !== 'undefined' ? `${window.location.origin}/ad/${shareModalAd.id}` : '')}&text=${encodeURIComponent(t('manageAds.shareTelegramText').replace('{asset}', shareModalAd.asset))}`}
                   target="_blank"
                   rel="noopener noreferrer"
                   className="py-2.5 px-3 rounded-xl bg-sky-500/10 hover:bg-sky-500/20 text-sky-600 dark:text-sky-400 border border-sky-500/20 text-xs font-bold flex items-center justify-center gap-1.5 transition-colors"
                 >
-                  <Send className="h-3.5 w-3.5" /> Telegram
+                  <Send className="h-3.5 w-3.5" /> {t('manageAds.telegram')}
                 </a>
                 <a
-                  href={`https://twitter.com/intent/tweet?text=${encodeURIComponent(`Trade ${shareModalAd.asset} on PaxOnes P2P: ${typeof window !== 'undefined' ? `${window.location.origin}/ad/${shareModalAd.id}` : ''}`)}`}
+                  href={`https://twitter.com/intent/tweet?text=${encodeURIComponent(t('manageAds.shareTwitterText').replace('{asset}', shareModalAd.asset).replace('{url}', shareModalUrl))}`}
                   target="_blank"
                   rel="noopener noreferrer"
                   className="py-2.5 px-3 rounded-xl bg-slate-500/10 hover:bg-slate-500/20 text-foreground border border-border text-xs font-bold flex items-center justify-center gap-1.5 transition-colors"
                 >
-                  <ExternalLink className="h-3.5 w-3.5" /> X / Twitter
+                  <ExternalLink className="h-3.5 w-3.5" /> {t('manageAds.xTwitter')}
                 </a>
               </div>
             </div>
@@ -393,13 +414,13 @@ export default function ManageAds({
                 target="_blank"
                 className="flex-1 py-2.5 rounded-xl bg-muted hover:bg-muted/80 text-foreground font-bold text-xs flex items-center justify-center gap-1.5 transition-colors"
               >
-                <ExternalLink className="h-3.5 w-3.5" /> View Public Page
+                <ExternalLink className="h-3.5 w-3.5" /> {t('manageAds.viewPublicPage')}
               </Link>
               <button 
                 onClick={() => setShareModalAd(null)}
                 className="px-5 py-2.5 rounded-xl bg-[#6347ea] hover:bg-[#5238d6] text-white font-bold text-xs cursor-pointer transition-all"
               >
-                Done
+                {t('manageAds.done')}
               </button>
             </div>
           </div>
@@ -412,7 +433,7 @@ export default function ManageAds({
           <div className="w-full max-w-md rounded-3xl bg-card border border-border p-6 shadow-2xl space-y-4 text-foreground">
             <div className="flex items-center justify-between border-b border-border pb-3">
               <h3 className="text-base font-extrabold text-foreground flex items-center gap-2">
-                <Info className="h-5 w-5 text-primary" /> Full Ad Information
+                <Info className="h-5 w-5 text-primary" /> {t('manageAds.fullAdInformation')}
               </h3>
               <button onClick={() => setSelectedInfoAd(null)} className="p-1 rounded-lg text-muted-foreground hover:text-foreground cursor-pointer">
                 <X className="h-5 w-5" />
@@ -421,15 +442,15 @@ export default function ManageAds({
 
             <div className="space-y-3 text-xs">
               <div className="p-3 rounded-xl bg-muted/50 border border-border space-y-1 font-mono">
-                <div className="flex justify-between"><span className="text-muted-foreground">Ad ID:</span><span className="text-foreground">{selectedInfoAd.id}</span></div>
-                <div className="flex justify-between"><span className="text-muted-foreground">Type:</span><span className="text-primary font-bold">{selectedInfoAd.type}</span></div>
-                <div className="flex justify-between"><span className="text-muted-foreground">Rate:</span><span className="text-foreground font-bold">{getCurrencySymbol(selectedInfoAd.fiat_currency)}{Number(selectedInfoAd.price).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} {selectedInfoAd.fiat_currency}</span></div>
-                <div className="flex justify-between"><span className="text-muted-foreground">Available:</span><span className="text-emerald-600 dark:text-emerald-400 font-bold">{selectedInfoAd.available_amount} {selectedInfoAd.asset}</span></div>
-                <div className="flex justify-between"><span className="text-muted-foreground">Min - Max Limit:</span><span className="text-foreground">{getCurrencySymbol(selectedInfoAd.fiat_currency)}{Number(selectedInfoAd.min_limit).toLocaleString()} - {getCurrencySymbol(selectedInfoAd.fiat_currency)}{Number(selectedInfoAd.max_limit).toLocaleString()} {selectedInfoAd.fiat_currency}</span></div>
+                <div className="flex justify-between"><span className="text-muted-foreground">{t('manageAds.adId')}:</span><span className="text-foreground">{selectedInfoAd.id}</span></div>
+                <div className="flex justify-between"><span className="text-muted-foreground">{t('manageAds.type')}:</span><span className="text-primary font-bold">{t(selectedInfoAd.type === 'BUY' ? 'manageAds.buy' : 'manageAds.sell')}</span></div>
+                <div className="flex justify-between"><span className="text-muted-foreground">{t('manageAds.rate')}:</span><span className="text-foreground font-bold">{getCurrencySymbol(selectedInfoAd.fiat_currency)}{Number(selectedInfoAd.price).toLocaleString(language, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} {selectedInfoAd.fiat_currency}</span></div>
+                <div className="flex justify-between"><span className="text-muted-foreground">{t('manageAds.available')}:</span><span className="text-emerald-600 dark:text-emerald-400 font-bold">{selectedInfoAd.available_amount} {selectedInfoAd.asset}</span></div>
+                <div className="flex justify-between"><span className="text-muted-foreground">{t('manageAds.minMaxLimit')}</span><span className="text-foreground">{getCurrencySymbol(selectedInfoAd.fiat_currency)}{Number(selectedInfoAd.min_limit).toLocaleString(language)} - {getCurrencySymbol(selectedInfoAd.fiat_currency)}{Number(selectedInfoAd.max_limit).toLocaleString(language)} {selectedInfoAd.fiat_currency}</span></div>
               </div>
 
               <div className="space-y-1">
-                <label className="font-semibold text-foreground">Accepted Payment Methods</label>
+                <label className="font-semibold text-foreground">{t('manageAds.acceptedPaymentMethods')}</label>
                 <div className="flex flex-wrap gap-1.5">
                   {(selectedInfoAd.payment_methods || []).map((pm, idx) => (
                     <span key={idx} className="px-2.5 py-1 rounded-lg bg-primary/10 border border-primary/20 text-primary font-medium">
@@ -440,9 +461,9 @@ export default function ManageAds({
               </div>
 
               <div className="space-y-1">
-                <label className="font-semibold text-foreground">Terms & Conditions</label>
+                <label className="font-semibold text-foreground">{t('manageAds.termsConditions')}</label>
                 <p className="p-3 rounded-xl bg-muted/40 border border-border text-foreground leading-relaxed max-h-32 overflow-y-auto whitespace-pre-wrap">
-                  {selectedInfoAd.terms_conditions || (selectedInfoAd as any).terms || 'No custom terms provided.'}
+                  {selectedInfoAd.terms_conditions || (selectedInfoAd as any).terms || t('manageAds.noCustomTerms')}
                 </p>
               </div>
             </div>
@@ -456,13 +477,13 @@ export default function ManageAds({
                 }}
                 className="flex-1 py-2.5 rounded-xl bg-[#6347ea]/10 hover:bg-[#6347ea]/20 text-[#6347ea] border border-[#6347ea]/30 font-bold text-xs flex items-center justify-center gap-1.5 cursor-pointer transition-all"
               >
-                <Share2 className="h-3.5 w-3.5" /> Share Offer
+                <Share2 className="h-3.5 w-3.5" /> {t('manageAds.shareOffer')}
               </button>
               <button 
                 onClick={() => setSelectedInfoAd(null)}
                 className="flex-1 py-2.5 rounded-xl bg-primary hover:bg-primary/90 text-primary-foreground font-bold text-xs cursor-pointer transition-all"
               >
-                Close Window
+                {t('manageAds.closeWindow')}
               </button>
             </div>
           </div>

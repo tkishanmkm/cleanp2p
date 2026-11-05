@@ -1,0 +1,68 @@
+-- Bind authenticated verify_admin_login calls to the caller's own identity.
+-- Service-role callers may provide an explicit user ID for trusted server-side checks.
+-- Local candidate only: validate against schema-faithful staging before applying.
+BEGIN;
+
+DO $migration$
+DECLARE
+    v_signature text := 'public.verify_admin_login(uuid,uuid)';
+    v_oid oid;
+    v_definition text;
+    v_patched text;
+    v_declaration_pattern text := 'v_uid UUID := COALESCE\(p_user_uuid, user_uuid, auth\.uid\(\)\);';
+    v_begin_pattern text := 'BEGIN[[:space:]]+IF v_uid IS NULL THEN';
+    v_guard text := $guard$BEGIN
+    IF auth.uid() IS NOT NULL THEN
+        IF (p_user_uuid IS NOT NULL AND p_user_uuid IS DISTINCT FROM auth.uid())
+           OR (user_uuid IS NOT NULL AND user_uuid IS DISTINCT FROM auth.uid()) THEN
+            RAISE EXCEPTION 'Authenticated user ID mismatch.'
+                USING ERRCODE = '42501';
+        END IF;
+        v_uid := auth.uid();
+    ELSIF COALESCE(auth.role(), '') <> 'service_role' THEN
+        RAISE EXCEPTION 'Authentication required.'
+            USING ERRCODE = '42501';
+    ELSE
+        v_uid := COALESCE(p_user_uuid, user_uuid);
+    END IF;
+
+    IF v_uid IS NULL THEN$guard$;
+BEGIN
+    v_oid := to_regprocedure(v_signature);
+    IF v_oid IS NULL THEN
+        RAISE EXCEPTION 'Required function % is missing; refusing to patch.', v_signature;
+    END IF;
+
+    v_definition := pg_get_functiondef(v_oid);
+
+    IF regexp_count(v_definition, v_declaration_pattern) <> 1 THEN
+        RAISE EXCEPTION 'Expected exactly one known v_uid initializer; refusing to patch.';
+    END IF;
+    IF regexp_count(v_definition, v_begin_pattern) <> 1 THEN
+        RAISE EXCEPTION 'Expected exactly one known BEGIN/NULL-check block; refusing to patch.';
+    END IF;
+
+    v_patched := regexp_replace(
+        v_definition,
+        v_declaration_pattern,
+        'v_uid UUID;',
+        'g'
+    );
+    v_patched := regexp_replace(
+        v_patched,
+        v_begin_pattern,
+        v_guard,
+        'g'
+    );
+
+    IF v_patched = v_definition
+       OR position('Authenticated user ID mismatch.' IN v_patched) = 0
+       OR position('v_uid := auth.uid();' IN v_patched) = 0 THEN
+        RAISE EXCEPTION 'Identity binding patch could not be verified; refusing to alter function.';
+    END IF;
+
+    EXECUTE v_patched;
+END;
+$migration$;
+
+COMMIT;

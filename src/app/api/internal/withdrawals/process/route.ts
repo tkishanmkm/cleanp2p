@@ -1,53 +1,34 @@
-import { NextRequest, NextResponse } from 'next/server';
-import { processPendingWithdrawals } from '@/lib/withdrawal-processor';
+import { NextResponse } from 'next/server';
 import { verifyWorkerAuth } from '@/lib/security/worker-auth';
 
-export async function POST(req: NextRequest) {
-  try {
-    const auth = verifyWorkerAuth(req, {
-      allowedSecrets: [
-        process.env.WITHDRAWAL_WORKER_SECRET,
-        process.env.PROVISION_SERVICE_KEY,
-        process.env.CHAIN_INGEST_SECRET,
-      ],
-      customHeaderNames: ['x-withdrawal-secret', 'x-service-key', 'x-worker-secret'],
-    });
+export const dynamic = 'force-dynamic';
 
-    if (!auth.authorized) {
-      return NextResponse.json(
-        { error: 'Unauthorized: Invalid or missing withdrawal worker secret header.' },
-        { status: 401 }
-      );
-    }
+/**
+ * Retired legacy payout endpoint. It used the unleased withdrawal processor,
+ * which could broadcast and mark withdrawals complete without the canonical
+ * worker's durable broadcast evidence and confirmation workflow.
+ *
+ * All dispatch must go through /api/cron/withdrawals/dispatch and the
+ * owner-token-fenced worker. This endpoint intentionally performs no DB writes
+ * and no blockchain calls.
+ */
+export async function POST(req: Request) {
+  const auth = verifyWorkerAuth(req, {
+    allowedSecrets: [
+      process.env.WITHDRAWAL_WORKER_SECRET,
+      process.env.WORKER_SECRET,
+      process.env.CRON_SECRET,
+    ],
+    customHeaderNames: ['x-withdrawal-secret', 'x-worker-secret', 'x-cron-secret'],
+  });
 
-    // Parse optional batch limit from query or body
-    let limit = 20;
-    try {
-      const url = new URL(req.url);
-      const limitParam = url.searchParams.get('limit');
-      if (limitParam) {
-        limit = parseInt(limitParam, 10) || 20;
-      }
-    } catch {
-      // Ignore URL parsing errors
-    }
-
-    // Process pending approved withdrawals
-    const summary = await processPendingWithdrawals(limit);
-
-    return NextResponse.json({
-      success: true,
-      timestamp: new Date().toISOString(),
-      ...summary,
-    });
-  } catch (error: unknown) {
-    const message = error instanceof Error ? error.message : String(error);
-    return NextResponse.json(
-      {
-        success: false,
-        error: `Withdrawal broadcast processing failed: ${message}`,
-      },
-      { status: 500 }
-    );
+  if (!auth.authorized) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
+
+  return NextResponse.json({
+    error: 'Legacy withdrawal processor is disabled. Use the canonical lease-aware withdrawal worker.',
+    code: 'LEGACY_WITHDRAWAL_PROCESSOR_DISABLED',
+    reconciliationRequired: false,
+  }, { status: 410 });
 }

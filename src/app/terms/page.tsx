@@ -1,5 +1,6 @@
 import { Header } from "@/components/layout/header";
 import { Footer } from "@/components/layout/footer";
+import { LegalDocumentBanner, LegalRiskWarningTitle } from '@/components/legal/legal-document-banner';
 
 export const metadata = {
   title: "Terms of Service | Paxones™",
@@ -13,20 +14,16 @@ export default function TermsPage() {
       <main className="flex-grow container mx-auto px-4 py-12 md:py-16 max-w-4xl">
         <div className="bg-white dark:bg-[#0f1423] border border-slate-200 dark:border-[#1e2640] rounded-2xl p-6 sm:p-10 md:p-12 shadow-sm">
           
-          {/* Header Banner */}
-          <div className="border-b border-slate-200 dark:border-[#1e2640] pb-6 mb-8">
-            <h1 className="text-3xl sm:text-4xl font-black tracking-tight text-slate-900 dark:text-white mb-3">
-              PAXONES™ TERMS OF SERVICE
-            </h1>
-            <p className="text-sm font-medium text-slate-500 dark:text-slate-400">
-              <strong>Effective Date:</strong> January 1, 2026 &nbsp;|&nbsp; <strong>Last Updated:</strong> September 9, 2026
-            </p>
-          </div>
+          <LegalDocumentBanner
+            document="terms"
+            effectiveDate="January 1, 2026"
+            lastUpdated="September 9, 2026"
+          />
 
           {/* High-Risk Warning Box */}
           <div className="bg-amber-500/10 border border-amber-500/20 text-amber-900 dark:text-amber-200 rounded-xl p-5 mb-10 text-sm leading-relaxed">
             <h2 className="text-base font-bold mb-2 flex items-center gap-2 text-amber-800 dark:text-amber-300">
-              ⚠️ IMPORTANT NOTICE & RISK WARNING
+              <LegalRiskWarningTitle />
             </h2>
             <p className="mb-3">
               PLEASE READ THESE TERMS OF SERVICE CAREFULLY BEFORE CREATING AN ACCOUNT OR USING PAXONES™.

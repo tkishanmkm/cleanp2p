@@ -1,0 +1,47 @@
+-- Keep previously credited deposit mirrors confirmed when scanners re-register
+-- old chain outputs with zero confirmations. This is a state-reconciliation only;
+-- it does not touch wallet balances or create a second ledger credit.
+BEGIN;
+
+DO $migration$
+DECLARE
+    v_oid OID;
+    v_definition TEXT;
+    v_updated TEXT;
+    v_old TEXT;
+    v_new TEXT;
+BEGIN
+    v_oid := pg_catalog.to_regprocedure(
+        'public.process_deposit_atomic(text,text,text,numeric,text,integer,bigint,text,text,integer,text)'
+    );
+    IF v_oid IS NULL THEN
+        RAISE EXCEPTION 'Canonical process_deposit_atomic RPC is missing.';
+    END IF;
+
+    v_definition := pg_catalog.pg_get_functiondef(v_oid);
+    v_definition := pg_catalog.replace(v_definition, E'\r\n', E'\n');
+
+    v_old := E'    -- PENDING DEPOSIT\n    -- ================================================================\n\n    IF NOT v_is_confirmed THEN';
+    IF pg_catalog.strpos(v_definition, v_old) = 0
+       OR pg_catalog.strpos(
+            pg_catalog.substr(v_definition, pg_catalog.strpos(v_definition, v_old) + pg_catalog.length(v_old)),
+            v_old
+          ) > 0 THEN
+        RAISE EXCEPTION 'Could not locate unique process_deposit_atomic pending-branch boundary.';
+    END IF;
+
+    v_new := E'    -- PENDING DEPOSIT\n    -- ================================================================\n\n    -- A scanner may see the same chain output again after it has already been\n    -- credited. Its zero-confirmation registration must never demote either\n    -- mirrored deposit row back to PENDING. Preserve the confirmed status when\n    -- the unique, identity-matched deposit ledger entry already exists.\n    IF NOT v_is_confirmed AND v_existing_deposit.id IS NOT NULL THEN\n\n        SELECT COUNT(*)\n          INTO v_ledger_count\n          FROM public.ledger_entries\n         WHERE reference_id = v_existing_deposit.id::TEXT;\n\n        IF v_ledger_count > 1 THEN\n            RAISE EXCEPTION ''Multiple ledger entries found for previously credited deposit %'', v_existing_deposit.id;\n        END IF;\n\n        IF v_ledger_count = 1 THEN\n            SELECT *\n              INTO v_existing_ledger\n              FROM public.ledger_entries\n             WHERE reference_id = v_existing_deposit.id::TEXT\n             FOR UPDATE;\n\n            IF v_existing_ledger.user_id IS DISTINCT FROM v_user_id\n               OR v_existing_ledger.type IS DISTINCT FROM ''deposit''\n               OR v_existing_ledger.amount IS DISTINCT FROM p_amount\n               OR v_existing_ledger.crypto IS DISTINCT FROM v_asset\n               OR v_existing_ledger.asset IS DISTINCT FROM v_asset THEN\n                RAISE EXCEPTION ''Existing ledger entry is inconsistent for deposit %'', v_existing_deposit.id;\n            END IF;\n\n            IF v_existing_onchain.id IS NULL THEN\n                RAISE EXCEPTION ''Previously credited deposit % is missing its on-chain mirror; reconciliation required'', v_existing_deposit.id;\n            END IF;\n\n            UPDATE public.deposits\n               SET status = ''CONFIRMED'',\n                   block_number = CASE\n                       WHEN block_number IS NOT NULL AND p_block_number IS NOT NULL\n                       THEN GREATEST(block_number, p_block_number)\n                       ELSE COALESCE(block_number, p_block_number)\n                   END\n             WHERE id = v_existing_deposit.id;\n\n            UPDATE public.onchain_deposits\n               SET status = ''CONFIRMED'',\n                   required_confirmations = v_required_confirmations,\n                   updated_at = NOW()\n             WHERE id = v_existing_onchain.id;\n\n            RETURN jsonb_build_object(\n                ''success'', true,\n                ''status'', ''ALREADY_CREDITED'',\n                ''credited'', false,\n                ''already_credited'', true,\n                ''deposit_id'', v_existing_deposit.id,\n                ''onchain_deposit_id'', v_existing_onchain.id,\n                ''ledger_id'', v_existing_ledger.id,\n                ''user_id'', v_user_id,\n                ''asset'', v_asset,\n                ''network'', v_network,\n                ''amount'', p_amount\n            );\n        END IF;\n    END IF;\n\n    IF NOT v_is_confirmed THEN';
+
+    v_updated := pg_catalog.replace(v_definition, v_old, v_new);
+
+    IF pg_catalog.strpos(v_updated, 'ALREADY_CREDITED') = 0
+       OR pg_catalog.strpos(v_updated, 'Previously credited deposit') = 0
+       OR pg_catalog.strpos(v_updated, v_old) > 0 THEN
+        RAISE EXCEPTION 'Previously-credited deposit replay guard verification failed.';
+    END IF;
+
+    EXECUTE v_updated;
+END;
+$migration$;
+
+COMMIT;

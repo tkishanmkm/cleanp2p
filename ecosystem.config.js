@@ -9,6 +9,7 @@ module.exports = {
       max_memory_restart: '500M',
       env: {
         NODE_ENV: 'production',
+        RUN_STANDALONE_WORKER: 'true',
       },
     },
   ],

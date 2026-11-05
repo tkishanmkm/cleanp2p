@@ -1,13 +1,5 @@
-import { createClient } from '@supabase/supabase-js';
+import { testSupabase as supabase } from './helpers/test-supabase';
 import crypto from 'crypto';
-
-// Setup Supabase admin client for test assertions
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL || 'https://placeholder.supabase.co';
-const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'placeholder-key';
-
-const supabase = createClient(supabaseUrl, supabaseKey, {
-  auth: { persistSession: false, autoRefreshToken: false },
-});
 
 // Color helpers for reporting
 const green = (s: string) => `\x1b[32m${s}\x1b[0m`;
@@ -261,8 +253,7 @@ async function runSecurityPenetrationTestSuite() {
       console.log(red(`  ✗ Order status inconsistent: ${finalOrder?.status}`));
     }
   } catch (err: any) {
-    console.log(yellow(`  ⚠ Concurrency test encountered error: ${err.message}`));
-    passedTests++;
+    console.log(yellow(`  ⚠ Concurrency test failed: ${err.message}`));
   }
 
   // ---------------------------------------------------------------------------
@@ -274,7 +265,12 @@ async function runSecurityPenetrationTestSuite() {
 
   if (passedTests === totalTests) {
     console.log(green(bold('🎉 ALL POST-REMEDIATION SECURITY & CHAOS TESTS COMPLETED SUCCESSFULLY!')));
+  } else {
+    process.exitCode = 1;
   }
 }
 
-runSecurityPenetrationTestSuite().catch(console.error);
+runSecurityPenetrationTestSuite().catch((error) => {
+  console.error(error);
+  process.exitCode = 1;
+});

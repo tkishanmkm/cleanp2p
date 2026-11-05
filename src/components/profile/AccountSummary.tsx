@@ -1,7 +1,7 @@
 'use client';
 
 import React from 'react';
-import PrivateAccountView from '@/app/(dashboard)/profile/page';
+import ProfilePage from '@/app/profile/page';
 
-export { PrivateAccountView };
+export const PrivateAccountView = ProfilePage;
 export default PrivateAccountView;

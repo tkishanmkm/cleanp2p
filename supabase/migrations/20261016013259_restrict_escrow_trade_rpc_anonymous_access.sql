@@ -1,0 +1,2 @@
+REVOKE EXECUTE ON FUNCTION public.initiate_trade_with_escrow(text, numeric, numeric, text, numeric, text, text, text, uuid) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.initiate_trade_with_escrow(text, numeric, numeric, text, numeric, text, text, text, uuid) TO authenticated, service_role;

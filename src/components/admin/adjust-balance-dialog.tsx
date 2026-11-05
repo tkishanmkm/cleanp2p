@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import * as z from 'zod';
@@ -39,7 +39,7 @@ import { adjustUserWalletBalance } from '@/lib/admin';
 
 const adjustBalanceSchema = z.object({
   crypto: z.string().min(1, 'Please select a cryptocurrency.'),
-  action: z.enum(['add', 'subtract'], { required_error: 'Please select an action.' }),
+  action: z.enum(['add', 'subtract'], { message: 'Please select an action.' }),
   amount: z.coerce.number().positive('Amount must be a positive number.'),
   reason: z.string().min(10, 'A reason is required (min 10 characters).').max(100, 'Reason cannot exceed 100 characters.'),
 });
@@ -57,6 +57,7 @@ export function AdjustBalanceDialog({ open, onOpenChange, userId, userDisplayNam
   const { user: adminUser } = useAuth();
   const { toast } = useToast();
   const [isLoading, setIsLoading] = useState(false);
+  const adjustmentRequestRef = useRef<{ fingerprint: string; requestId: string } | null>(null);
 
   const form = useForm<AdjustBalanceFormValues>({
     resolver: zodResolver(adjustBalanceSchema),
@@ -67,6 +68,23 @@ export function AdjustBalanceDialog({ open, onOpenChange, userId, userDisplayNam
     setIsLoading(true);
 
     try {
+      const fingerprint = JSON.stringify({
+        userId,
+        asset: values.crypto,
+        action: values.action,
+        amount: values.amount,
+        reason: values.reason.trim(),
+      });
+      if (adjustmentRequestRef.current?.fingerprint !== fingerprint) {
+        if (typeof globalThis.crypto?.randomUUID !== 'function') {
+          throw new Error('This browser cannot create a safe adjustment request ID. Please update the browser and retry.');
+        }
+        adjustmentRequestRef.current = {
+          fingerprint,
+          requestId: globalThis.crypto.randomUUID(),
+        };
+      }
+
       await adjustUserWalletBalance(
         null,
         adminUser.uid,
@@ -75,8 +93,10 @@ export function AdjustBalanceDialog({ open, onOpenChange, userId, userDisplayNam
         values.crypto as CryptoCurrency,
         values.action as 'add' | 'subtract',
         values.amount,
-        values.reason
+        values.reason,
+        adjustmentRequestRef.current.requestId,
       );
+      adjustmentRequestRef.current = null;
       toast({
         title: 'Balance Adjusted',
         description: `Successfully adjusted ${userDisplayName}'s ${values.crypto} balance.`,

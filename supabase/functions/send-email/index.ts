@@ -2,10 +2,70 @@ import nodemailer from "nodemailer";
 
 const jsonHeaders = {
   "Content-Type": "application/json",
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-email-function-secret",
-  "Access-Control-Allow-Methods": "POST, OPTIONS",
+  "Cache-Control": "no-store",
+  "Vary": "Origin",
 };
+
+const MAX_REQUEST_BYTES = 512 * 1024;
+
+class PayloadTooLargeError extends Error {
+  constructor() {
+    super("Request payload is too large.");
+    this.name = "PayloadTooLargeError";
+  }
+}
+
+async function readBoundedRequestText(req: Request, maxBytes: number): Promise<string> {
+  if (!req.body) return "";
+
+  const reader = req.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let totalBytes = 0;
+
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (!value) continue;
+
+      totalBytes += value.byteLength;
+      if (totalBytes > maxBytes) {
+        await reader.cancel();
+        throw new PayloadTooLargeError();
+      }
+      chunks.push(value);
+    }
+  } finally {
+    reader.releaseLock();
+  }
+
+  const body = new Uint8Array(totalBytes);
+  let offset = 0;
+  for (const chunk of chunks) {
+    body.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return new TextDecoder().decode(body);
+}
+
+async function secretsMatch(actual: string, expected: string): Promise<boolean> {
+  if (!actual || !expected || actual.length > 512 || expected.length > 512) return false;
+
+  const encoder = new TextEncoder();
+  const [actualDigest, expectedDigest] = await Promise.all([
+    crypto.subtle.digest("SHA-256", encoder.encode(actual)),
+    crypto.subtle.digest("SHA-256", encoder.encode(expected)),
+  ]);
+
+  // Compare fixed-size digests without an early-exit string comparison.
+  const left = new Uint8Array(actualDigest);
+  const right = new Uint8Array(expectedDigest);
+  let difference = 0;
+  for (let index = 0; index < left.length; index += 1) {
+    difference |= left[index] ^ right[index];
+  }
+  return difference === 0;
+}
 
 interface EmailPayload {
   to: string;
@@ -23,9 +83,9 @@ function isValidEmail(email: string): boolean {
 }
 
 Deno.serve(async (req: Request) => {
-  // Handle CORS preflight OPTIONS request
+  // This function is server-to-server only. Do not grant browser CORS access.
   if (req.method === "OPTIONS") {
-    return new Response("ok", { headers: jsonHeaders });
+    return new Response(null, { status: 204, headers: jsonHeaders });
   }
 
   // Only allow POST requests
@@ -57,11 +117,7 @@ Deno.serve(async (req: Request) => {
 
     const expectedSecret = Deno.env.get("EMAIL_FUNCTION_AUTH_SECRET")?.trim();
 
-    const isAuthorized = Boolean(
-      expectedSecret &&
-      providedSecret &&
-      providedSecret === expectedSecret
-    );
+    const isAuthorized = await secretsMatch(providedSecret, expectedSecret || "");
 
     if (!isAuthorized) {
       return new Response(
@@ -100,10 +156,41 @@ Deno.serve(async (req: Request) => {
       );
     }
 
-    // 3. Strict Payload Validation & Length Limits
+    // 3. Strict Payload Validation & Byte Limits
+    const contentLength = Number(req.headers.get("content-length") || 0);
+    if (Number.isFinite(contentLength) && contentLength > MAX_REQUEST_BYTES) {
+      return new Response(
+        JSON.stringify({ success: false, error: "Request payload is too large." }),
+        { status: 413, headers: jsonHeaders }
+      );
+    }
+
+    let rawBody: string;
+    try {
+      rawBody = await readBoundedRequestText(req, MAX_REQUEST_BYTES);
+    } catch (error) {
+      if (error instanceof PayloadTooLargeError) {
+        return new Response(
+          JSON.stringify({ success: false, error: "Request payload is too large." }),
+          { status: 413, headers: jsonHeaders }
+        );
+      }
+      return new Response(
+        JSON.stringify({ success: false, error: "Invalid request payload." }),
+        { status: 400, headers: jsonHeaders }
+      );
+    }
+
     let body: EmailPayload;
     try {
-      body = await req.json();
+      const parsed: unknown = JSON.parse(rawBody);
+      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+        return new Response(
+          JSON.stringify({ success: false, error: "Invalid JSON request payload." }),
+          { status: 400, headers: jsonHeaders }
+        );
+      }
+      body = parsed as EmailPayload;
     } catch {
       return new Response(
         JSON.stringify({ success: false, error: "Invalid JSON request payload." }),
@@ -113,7 +200,7 @@ Deno.serve(async (req: Request) => {
 
     const { to, subject, html, text } = body;
 
-    if (!to || !isValidEmail(to)) {
+    if (typeof to !== "string" || !isValidEmail(to)) {
       return new Response(
         JSON.stringify({
           success: false,
@@ -143,6 +230,13 @@ Deno.serve(async (req: Request) => {
       );
     }
 
+    if (text !== undefined && (typeof text !== "string" || text.length > 100000)) {
+      return new Response(
+        JSON.stringify({ success: false, error: "Invalid plain-text email body." }),
+        { status: 400, headers: jsonHeaders }
+      );
+    }
+
     // 4. Configure Secure Hostinger SMTP Transporter
     const isSecure = smtpPort === 465;
 
@@ -157,6 +251,11 @@ Deno.serve(async (req: Request) => {
       tls: {
         rejectUnauthorized: true,
       },
+      // Require STARTTLS on non-implicit-TLS SMTP ports to prevent downgrade.
+      requireTLS: !isSecure,
+      connectionTimeout: 10_000,
+      greetingTimeout: 10_000,
+      socketTimeout: 20_000,
     });
 
     // 5. Send Transactional Email
@@ -168,7 +267,7 @@ Deno.serve(async (req: Request) => {
       ...(text && typeof text === "string" ? { text: text.trim() } : {}),
     });
 
-    console.log(`[send-email] Success: Email dispatched to ${to.trim()} (Message ID: ${info.messageId})`);
+    console.log(`[send-email] Dispatch completed (Message ID: ${info.messageId})`);
 
     return new Response(
       JSON.stringify({
@@ -179,11 +278,9 @@ Deno.serve(async (req: Request) => {
       { status: 200, headers: jsonHeaders }
     );
   } catch (err: any) {
-    // 6. Safe Error Handling — Sanitize output, log server-side diagnostic, return generic client error
-    const rawError = err?.message || String(err) || "Unknown error";
-    // Sanitize any credential occurrences in logs
-    const sanitizedLog = rawError.replace(/pass=.*?(?=\s|$)/gi, "pass=***");
-    console.error("[send-email] SMTP Dispatch Failure:", sanitizedLog);
+    // 6. Safe Error Handling — do not log provider diagnostics or recipient data.
+    const errorCode = typeof err?.code === "string" ? err.code.slice(0, 40) : "unknown";
+    console.error("[send-email] SMTP dispatch failed (code):", errorCode);
 
     return new Response(
       JSON.stringify({

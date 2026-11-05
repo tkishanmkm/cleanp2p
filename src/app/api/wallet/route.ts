@@ -1,5 +1,4 @@
 import { createClient } from '@/lib/supabase/server';
-import { cookies } from 'next/headers';
 import { NextResponse } from 'next/server';
 
 export const dynamic = 'force-dynamic';
@@ -28,9 +27,15 @@ export async function GET() {
       .maybeSingle();
 
     if (assetRow) {
-      const avail = Number(assetRow.available ?? assetRow.balance ?? 0);
-      const locked = Number(assetRow.locked_escrow ?? assetRow.locked_balance ?? 0);
-      availableBalance = Math.max(0, avail - locked);
+      const explicitAvailable = assetRow.available ?? assetRow.available_balance;
+      const balance = Number(assetRow.balance ?? 0);
+      const lockedEscrow = Number(assetRow.locked_escrow ?? assetRow.locked_balance ?? 0);
+      const lockedWithdrawal = Number(assetRow.locked_withdrawal ?? 0);
+      // wallet_assets.available is already spendable; only derive from total balance
+      // when the canonical available column is absent, to avoid subtracting escrow twice.
+      availableBalance = explicitAvailable !== null && explicitAvailable !== undefined
+        ? Math.max(0, Number.isFinite(Number(explicitAvailable)) ? Number(explicitAvailable) : 0)
+        : Math.max(0, balance - lockedEscrow - lockedWithdrawal);
       assetSymbol = assetRow.asset_symbol || 'USDT';
       lastUpdated = assetRow.updated_at || null;
     } else {
@@ -43,9 +48,13 @@ export async function GET() {
         .maybeSingle();
 
       if (userWallet) {
-        const bal = Number(userWallet.balance || 0);
-        const locked = Number(userWallet.locked_balance || 0);
-        availableBalance = Math.max(0, bal - locked);
+        const explicitAvailable = userWallet.available_balance ?? userWallet.available;
+        const bal = Number(userWallet.balance ?? 0);
+        const locked = Number(userWallet.locked_balance ?? userWallet.locked ?? 0);
+        const lockedWithdrawal = Number(userWallet.locked_withdrawal ?? 0);
+        availableBalance = explicitAvailable !== null && explicitAvailable !== undefined
+          ? Math.max(0, Number.isFinite(Number(explicitAvailable)) ? Number(explicitAvailable) : 0)
+          : Math.max(0, bal - locked - lockedWithdrawal);
         assetSymbol = userWallet.asset_symbol || 'USDT';
         lastUpdated = userWallet.updated_at || null;
       } else {
@@ -54,6 +63,7 @@ export async function GET() {
           .from('wallets')
           .select('user_id, currency, balance, available_balance, created_at')
           .eq('user_id', user.id)
+          .eq('currency', 'USDT')
           .maybeSingle();
 
         if (wallet) {

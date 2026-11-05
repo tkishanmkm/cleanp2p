@@ -30,20 +30,6 @@ const translations: Record<string, any> = {
   'zh-TW': zhTW,
 };
 
-const countryToLang: Record<string, string> = {
-  CN: 'zh-CN',
-  TW: 'zh-TW',
-  HK: 'zh-TW',
-  BR: 'pt-BR',
-  PT: 'pt-BR',
-  KR: 'ko',
-  FR: 'fr',
-  ES: 'es',
-  MX: 'es',
-  RU: 'ru',
-  VN: 'vi',
-  IN: 'hi',
-};
 
 interface I18nContextType {
   t: (key: string) => string;
@@ -63,7 +49,7 @@ export function I18nProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     try {
-      const savedLang = localStorage.getItem('tradeflow-lang');
+      const savedLang = localStorage.getItem('paxones-language') || localStorage.getItem('tradeflow-lang');
       if (savedLang && translations[savedLang]) {
         setLanguageState(savedLang);
         return;
@@ -71,9 +57,9 @@ export function I18nProvider({ children }: { children: ReactNode }) {
 
       if (typeof navigator !== 'undefined') {
         const browserLang = navigator.language;
-        const supportedLang = LANGUAGES.find(
-          (l) => l.code === browserLang || browserLang.startsWith(l.code.split('-')[0])
-        );
+        const supportedLang =
+          LANGUAGES.find((l) => l.code === browserLang) ||
+          LANGUAGES.find((l) => browserLang.startsWith(l.code.split('-')[0]));
         if (supportedLang) {
           setLanguageState(supportedLang.code);
           return;
@@ -86,12 +72,37 @@ export function I18nProvider({ children }: { children: ReactNode }) {
   }, []);
 
   useEffect(() => {
+    const syncLanguage = (event: Event) => {
+      const lang = (event as CustomEvent<string>).detail;
+      if (typeof lang === 'string' && translations[lang]) setLanguageState(lang);
+    };
+    window.addEventListener('language-changed', syncLanguage);
+    return () => window.removeEventListener('language-changed', syncLanguage);
+  }, []);
+
+  useEffect(() => {
     setMessages(translations[language] || translations.en);
   }, [language]);
 
+  // Keep assistive technology, browser language tools, and layout direction in sync
+  // with the selected locale. Arabic is the only currently supported RTL locale.
+  useEffect(() => {
+    if (typeof document === 'undefined') return;
+    document.documentElement.lang = language;
+    document.documentElement.dir = language === 'ar' ? 'rtl' : 'ltr';
+  }, [language]);
+
   const setLanguage = useCallback((lang: string) => {
-    localStorage.setItem('tradeflow-lang', lang);
+    if (!translations[lang]) return;
+    // Language selection must still work when browser storage is disabled or full.
+    try {
+      localStorage.setItem('tradeflow-lang', lang);
+      localStorage.setItem('paxones-language', lang);
+    } catch {
+      // Keep the selection in memory for the current page session.
+    }
     setLanguageState(lang);
+    if (typeof window !== 'undefined') window.dispatchEvent(new CustomEvent('language-changed', { detail: lang }));
   }, []);
 
   const t = useCallback((key: string): string => {

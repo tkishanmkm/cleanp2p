@@ -8,6 +8,7 @@ import { usePrices } from '@/context/price-context';
 import { calculateMinimumFiatAmount, BASE_PLATFORM_USD_MINIMUM } from '@/lib/currency';
 import { CryptoCurrency } from '@/lib/types';
 import { toast } from 'sonner';
+import { useI18n } from '@/context/i18n-context';
 import { 
   Check, 
   Search, 
@@ -325,6 +326,39 @@ const PAYMENT_CATEGORIES = [
 
 export default function CreateP2PAdPage() {
   const router = useRouter();
+  const { t, language } = useI18n();
+  const paymentCategoryKeyById: Record<string, string> = {
+    bank: 'Bank',
+    wallets: 'Wallet',
+    online: 'Wallet',
+    mobile: 'Mobile',
+    cash: 'Cash',
+    giftcards: 'Gift',
+    giftcard: 'Gift',
+  };
+  const getPaymentCategoryTitle = (id: string, fallback: string) => {
+    const suffix = paymentCategoryKeyById[id];
+    return suffix ? t(`adForm.cat${suffix}`) : fallback;
+  };
+  const getPaymentCategorySubtitle = (id: string, fallback: string) => {
+    const suffix = paymentCategoryKeyById[id];
+    return suffix ? t(`adForm.${suffix.toLowerCase()}Subtitle`) : fallback;
+  };
+  const getPaymentCategoryTitleByName = (name: string) => {
+    const category = PAYMENT_CATEGORIES.find((item) => item.title === name);
+    return category ? getPaymentCategoryTitle(category.id, name) : name;
+  };
+  const adTagKeyByValue: Record<string, string> = {
+    'Instant release': 'tagInstant',
+    'No receipt required': 'tagNoReceipt',
+    'No verification': 'tagNoVerification',
+    'Invoice accepted': 'tagInvoice',
+  };
+  const getAdTagLabel = (tag: string) => {
+    const key = adTagKeyByValue[tag];
+    return key ? t(`adForm.${key}`) : tag;
+  };
+
   const { balances } = useWallet();
   const [user, setUser] = useState<any>(null);
   const [profile, setProfile] = useState<any>(null);
@@ -567,7 +601,7 @@ export default function CreateP2PAdPage() {
       setSelectedPaymentMethods(selectedPaymentMethods.filter((m) => m !== method));
     } else {
       if (selectedPaymentMethods.length >= 5) {
-        toast.error('You can select a maximum of 5 payment methods.');
+        toast.error(t('adFormErrors.maxPaymentMethods'));
         return;
       }
       setSelectedPaymentMethods([...selectedPaymentMethods, method]);
@@ -577,7 +611,7 @@ export default function CreateP2PAdPage() {
   const addCustomPaymentMethod = () => {
     if (!customMethod.trim()) return;
     if (selectedPaymentMethods.length >= 5) {
-      toast.error('You can select a maximum of 5 payment methods.');
+      toast.error(t('adFormErrors.maxPaymentMethods'));
       return;
     }
     if (!selectedPaymentMethods.includes(customMethod.trim())) {
@@ -605,24 +639,24 @@ export default function CreateP2PAdPage() {
 
     // Direct Validation Checks
     if (!selectedPaymentMethods || selectedPaymentMethods.length === 0) {
-      toast.error('Please select at least 1 payment method.');
+      toast.error(t('adFormErrors.selectPayment'));
       return;
     }
 
     if (rateType === 'fixed' && (!fixedPrice || parseFloat(fixedPrice) <= 0)) {
-      toast.error('Please enter a valid fixed price.');
+      toast.error(t('adFormErrors.validFixedPrice'));
       return;
     }
 
     // Enforce dynamic $10 USD equivalent minimum trade limit
     const minRequired = calculateMinimumFiatAmount(10.00, fiat.code, fiatRates);
     if (!minAmount || parseFloat(minAmount) < minRequired) {
-      toast.error(`Minimum trade limit must be at least ${minRequired} ${fiat.code} (equivalent to $10.00 USD).`);
+      toast.error(`${t('adFormErrors.minimumTradeLimit').replace('{minimum}', minRequired.toLocaleString(language)).replace('{fiat}', fiat.code)}`);
       return;
     }
 
     if (!maxAmount || parseFloat(minAmount) > parseFloat(maxAmount)) {
-      toast.error('Invalid trade limits: Minimum amount must be less than maximum amount.');
+      toast.error(t('adFormErrors.invalidTradeLimits'));
       return;
     }
 
@@ -643,7 +677,7 @@ export default function CreateP2PAdPage() {
       );
 
       if (!isTier2) {
-        toast.error('KYC verification is required to sell.');
+        toast.error(t('adFormErrors.kycRequired'));
         return;
       }
 
@@ -667,13 +701,13 @@ export default function CreateP2PAdPage() {
       }
 
       if (availableBalance < minCoinRequired) {
-        toast.error(`Insufficient ${crypto} balance. You need at least ${minCoinRequired.toFixed(6)} ${crypto} to set a minimum limit of ${minAmount} ${fiat.code}. Available: ${availableBalance.toFixed(6)} ${crypto}.`);
+        toast.error(`${t('adFormErrors.insufficientCrypto').replace('{crypto}', crypto).replace('{required}', minCoinRequired.toFixed(6)).replace('{minimum}', minAmount).replace('{fiat}', fiat.code).replace('{available}', availableBalance.toFixed(6))}`);
         return;
       }
     }
 
     setIsSubmitting(true);
-    const toastId = toast.loading('Publishing your advertisement...');
+    const toastId = toast.loading(t('adFormErrors.publishing'));
 
     try {
       // 2. Real-time session resolution
@@ -695,7 +729,7 @@ export default function CreateP2PAdPage() {
       }
 
       if (!activeUser) {
-        toast.error('No active session found! Please refresh or log in again.', { id: toastId });
+        toast.error(t('adFormErrors.noSession'), { id: toastId });
         setIsSubmitting(false);
         return;
       }
@@ -723,7 +757,7 @@ export default function CreateP2PAdPage() {
       if (pricingType !== 'FLOAT') {
         const numFixed = Number(fixedPrice);
         if (isNaN(numFixed) || numFixed <= 0) {
-          toast.error('Please enter a valid fixed price greater than 0.', { id: toastId });
+          toast.error(t('adFormErrors.validFixedPricePositive'), { id: toastId });
           setIsSubmitting(false);
           return;
         }
@@ -732,7 +766,10 @@ export default function CreateP2PAdPage() {
           const maxAllowed = marketPrice * 1.50;
           if (numFixed < minAllowed || numFixed > maxAllowed) {
             toast.error(
-              `Fixed price must be within ±50% of market price (${minAllowed.toFixed(2)} - ${maxAllowed.toFixed(2)} ${fiatSymbol})`,
+              t('adFormErrors.fixedPriceRange')
+                .replace('{minimum}', minAllowed.toFixed(2))
+                .replace('{maximum}', maxAllowed.toFixed(2))
+                .replace('{fiat}', fiatSymbol),
               { id: toastId }
             );
             setIsSubmitting(false);
@@ -838,19 +875,19 @@ export default function CreateP2PAdPage() {
       if (!response.ok) {
         const errorMsg = result?.realError || result?.error || result?.message || `Server returned ${response.status}`;
         console.error('Error creating ad:', errorMsg);
-        toast.error(`Failed: ${errorMsg}`, { id: toastId, duration: 6000 });
+        toast.error(`${t('adFormErrors.createFailed').replace('{error}', errorMsg)}`, { id: toastId, duration: 6000 });
         setIsSubmitting(false);
         return;
       }
 
       console.log('Ad created successfully:', result?.data);
-      toast.success('P2P Advertisement created successfully!', { id: toastId });
+      toast.success(t('adFormErrors.createSuccess'), { id: toastId });
       setTimeout(() => {
         router.push('/my-ads');
       }, 500);
     } catch (err: any) {
       console.error('Runtime error:', err);
-      toast.error(`Unexpected error: ${err?.message || String(err)}`, { id: toastId });
+      toast.error(`${t('adFormErrors.unexpectedError').replace('{error}', err?.message || String(err))}`, { id: toastId });
     } finally {
       setIsSubmitting(false);
     }
@@ -873,10 +910,10 @@ export default function CreateP2PAdPage() {
         {/* Instruction 1: Solid #9273fc Header banner with exact text and no tag */}
         <div className="bg-[#9273fc] text-white py-8 px-6 sm:px-8 rounded-2xl shadow-lg">
           <h1 className="text-2xl md:text-3xl font-extrabold text-white tracking-tight">
-            Create a P2P Advertisement
+            {t('adForm.createTitle')}
           </h1>
           <p className="text-sm text-white/95 mt-1 font-medium">
-            Set up your custom advertisement to buy or sell coin
+            {t('adForm.createSubtitle')}
           </p>
         </div>
 
@@ -895,7 +932,7 @@ export default function CreateP2PAdPage() {
                     : 'bg-white dark:bg-[#202026] text-gray-700 dark:text-gray-300 border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-800'
                 }`}
               >
-                I want to Buy
+                {t('adForm.buyAction')}
               </button>
               <button
                 type="button"
@@ -906,13 +943,13 @@ export default function CreateP2PAdPage() {
                     : 'bg-white dark:bg-[#202026] text-gray-700 dark:text-gray-300 border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-800'
                 }`}
               >
-                I want to Sell
+                {t('adForm.sellAction')}
               </button>
             </div>
 
             <div>
               <label className="block text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400 mb-2">
-                Coin
+                {t('adForm.coin')}
               </label>
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
                 {CRYPTO_OPTIONS.map((c) => {
@@ -938,7 +975,7 @@ export default function CreateP2PAdPage() {
 
             <div>
               <label className="block text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400 mb-2">
-                With Fiat
+                {t('adForm.withFiat')}
               </label>
               <div className="flex items-center justify-between p-3.5 bg-gray-50 dark:bg-[#202026] border border-gray-200 dark:border-gray-700 rounded-lg">
                 <div className="flex items-center gap-3">
@@ -958,7 +995,7 @@ export default function CreateP2PAdPage() {
                   className="flex items-center gap-1.5 text-xs font-medium bg-white dark:bg-[#18181c] text-gray-800 dark:text-gray-200 px-3 py-1.5 rounded border border-gray-200 dark:border-gray-700 hover:bg-gray-100 dark:hover:bg-gray-800 transition"
                 >
                   <Globe className="w-3.5 h-3.5 text-gray-500 dark:text-gray-400" />
-                  Change
+                  {t('adForm.change')}
                 </button>
               </div>
             </div>
@@ -968,9 +1005,9 @@ export default function CreateP2PAdPage() {
           {/* STEP 2: Payment Methods with Search Option */}
           <div className="bg-white dark:bg-[#18181c] p-5 md:p-6 rounded-xl border border-gray-200 dark:border-gray-800 shadow-sm space-y-5 transition-colors">
             <div>
-              <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Payment Methods</h2>
+              <h2 className="text-lg font-semibold text-gray-900 dark:text-white">{t('adForm.paymentMethods')}</h2>
               <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
-                Select up to 5 methods. Add a custom method if yours isn&apos;t listed under a category.
+                {t('adForm.paymentHelp')}
               </p>
             </div>
 
@@ -979,7 +1016,7 @@ export default function CreateP2PAdPage() {
               <Search className="w-4 h-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" />
               <input
                 type="text"
-                placeholder="Search payment methods (e.g. UPI, Bank Transfer, PayPal, Zelle)..."
+                placeholder={t('adForm.searchPayment')}
                 value={paymentSearch}
                 onChange={(e) => setPaymentSearch(e.target.value)}
                 className="w-full pl-9 pr-9 py-2.5 text-xs md:text-sm border border-gray-200 dark:border-gray-700 bg-gray-50/50 dark:bg-[#202026] text-gray-900 dark:text-white rounded-lg focus:outline-none focus:ring-2 focus:ring-[#9273fc] transition"
@@ -1018,13 +1055,13 @@ export default function CreateP2PAdPage() {
             {paymentSearch.trim() ? (
               <div className="space-y-2">
                 <div className="flex items-center justify-between text-xs text-gray-500 dark:text-gray-400">
-                  <span>Search Results ({searchedPaymentMethods.length})</span>
+                  <span>{t('adForm.searchResults').replace('{count}', String(searchedPaymentMethods.length))}</span>
                   <button
                     type="button"
                     onClick={() => setPaymentSearch('')}
                     className="text-[#9273fc] hover:underline"
                   >
-                    Clear search
+                    {t('adForm.clearSearch')}
                   </button>
                 </div>
                 {searchedPaymentMethods.length > 0 ? (
@@ -1045,7 +1082,7 @@ export default function CreateP2PAdPage() {
                           <div className="flex items-center gap-2">
                             <span>{item.name}</span>
                             <span className="text-[10px] text-gray-400 dark:text-gray-500 bg-gray-100 dark:bg-gray-800 px-1.5 py-0.5 rounded">
-                              {item.category}
+                              {getPaymentCategoryTitleByName(item.category)}
                             </span>
                           </div>
                           {isSelected && <Check className="w-4 h-4 text-[#9273fc]" />}
@@ -1055,7 +1092,7 @@ export default function CreateP2PAdPage() {
                   </div>
                 ) : (
                   <div className="py-6 text-center text-xs text-gray-500">
-                    No payment methods matching &quot;{paymentSearch}&quot;. You can add it as a custom method below!
+                    {t('adForm.noPaymentResults').replace('{query}', paymentSearch)}
                   </div>
                 )}
               </div>
@@ -1077,7 +1114,7 @@ export default function CreateP2PAdPage() {
                         }`}
                       >
                         <Icon className="w-3.5 h-3.5" />
-                        {cat.title}
+                        {getPaymentCategoryTitle(cat.id, cat.title)}
                       </button>
                     );
                   })}
@@ -1085,7 +1122,7 @@ export default function CreateP2PAdPage() {
 
                 {PAYMENT_CATEGORIES.filter((c) => c.id === selectedCategory).map((cat) => (
                   <div key={cat.id} className="space-y-3 pt-1">
-                    <p className="text-xs text-gray-500 dark:text-gray-400">{cat.subtitle}</p>
+                    <p className="text-xs text-gray-500 dark:text-gray-400">{getPaymentCategorySubtitle(cat.id, cat.subtitle)}</p>
                     <div className="max-h-56 overflow-y-auto pr-1 space-y-1">
                       {cat.options.map((option) => {
                         const isSelected = selectedPaymentMethods.includes(option);
@@ -1112,11 +1149,11 @@ export default function CreateP2PAdPage() {
             )}
 
             <div className="pt-2 border-t border-gray-100 dark:border-gray-800">
-              <label className="block text-xs text-gray-500 dark:text-gray-400 mb-1.5">Add Custom Payment Method</label>
+              <label className="block text-xs text-gray-500 dark:text-gray-400 mb-1.5">{t('adForm.addCustomPayment')}</label>
               <div className="flex gap-2">
                 <input
                   type="text"
-                  placeholder="e.g. Local Bank Transfer"
+                  placeholder={t('adForm.customPlaceholder')}
                   value={customMethod}
                   onChange={(e) => setCustomMethod(e.target.value)}
                   className="flex-1 px-3 py-2 text-xs border border-gray-200 dark:border-gray-700 bg-white dark:bg-[#202026] text-gray-900 dark:text-white rounded-lg focus:outline-none focus:ring-1 focus:ring-[#9273fc]"
@@ -1127,7 +1164,7 @@ export default function CreateP2PAdPage() {
                   className="px-3 py-2 bg-gray-100 dark:bg-gray-800 text-gray-800 dark:text-gray-200 rounded-lg text-xs font-medium hover:bg-gray-200 dark:hover:bg-gray-700 transition flex items-center gap-1"
                 >
                   <Plus className="w-3.5 h-3.5" />
-                  Add
+                  {t('adForm.add')}
                 </button>
               </div>
             </div>
@@ -1135,7 +1172,7 @@ export default function CreateP2PAdPage() {
 
           {/* STEP 3: Pricing & Limits with Market Rate vs Fixed Auto-Adjustment */}
           <div className="bg-white dark:bg-[#18181c] p-5 md:p-6 rounded-xl border border-gray-200 dark:border-gray-800 shadow-sm space-y-5 transition-colors">
-            <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Pricing</h2>
+            <h2 className="text-lg font-semibold text-gray-900 dark:text-white">{t('adForm.pricing')}</h2>
 
             <div className="grid grid-cols-2 gap-3">
               <button
@@ -1147,7 +1184,7 @@ export default function CreateP2PAdPage() {
                     : 'bg-white dark:bg-[#202026] text-gray-700 dark:text-gray-300 border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-800'
                 }`}
               >
-                Market Rate
+                {t('adForm.marketRate')}
               </button>
               <button
                 type="button"
@@ -1158,14 +1195,14 @@ export default function CreateP2PAdPage() {
                     : 'bg-white dark:bg-[#202026] text-gray-700 dark:text-gray-300 border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-800'
                 }`}
               >
-                Fixed Rate
+                {t('adForm.fixedRate')}
               </button>
             </div>
 
             {rateType === 'market' ? (
               <div className="space-y-2">
                 <label className="block text-xs font-medium text-gray-700 dark:text-gray-300">
-                  Market Rate Adjustment
+                  {t('adForm.marketAdjust')}
                 </label>
                 <div className="relative">
                   <input
@@ -1179,25 +1216,25 @@ export default function CreateP2PAdPage() {
                 </div>
                 {/* Instruction 4: Live Market Price Display */}
                 <p className="text-xs text-gray-500 dark:text-gray-400 leading-relaxed">
-                  Your price will float with the market. Current market price is approx.{' '}
+                  {t('adForm.marketFloatIntro')}{' '}
                   <span className="font-semibold text-gray-800 dark:text-gray-200">
-                    {fiat.code} {currentMarketPrice ? currentMarketPrice.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '100.00'}
+                    {fiat.code} {currentMarketPrice ? currentMarketPrice.toLocaleString(language, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '100.00'}
                   </span>
-                  . Calculated offer price:{' '}
+                  {'. ' + t('adForm.calculatedOfferPrice') + ':'}{' '}
                   <span className="font-semibold text-[#9273fc]">
-                    {fiat.code} {calculatedOfferPrice.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    {fiat.code} {calculatedOfferPrice.toLocaleString(language, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                   </span>
                   .
                   <br />
-                  Set your adjustment percentage (from -50% to 50%). E.g., &apos;1.5&apos; for 1.5% above market.
+                  {t('adForm.adjustmentHelp')}
                 </p>
               </div>
             ) : (
               <div className="space-y-2">
                 <div className="flex items-center justify-between">
-                  <label className="block text-xs font-medium text-gray-700 dark:text-gray-300">Fixed Price</label>
+                  <label className="block text-xs font-medium text-gray-700 dark:text-gray-300">{t('adForm.fixedPrice')}</label>
                   <span className="text-[11px] text-gray-500 dark:text-gray-400">
-                    Market base: <strong className="text-gray-700 dark:text-gray-300">{fiat.code} {currentMarketPrice ? currentMarketPrice.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '—'}</strong>
+                    {t('adForm.marketBase')} <strong className="text-gray-700 dark:text-gray-300">{fiat.code} {currentMarketPrice ? currentMarketPrice.toLocaleString(language, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '—'}</strong>
                   </span>
                 </div>
                 <div className="relative">
@@ -1215,13 +1252,13 @@ export default function CreateP2PAdPage() {
                 </div>
                 {currentMarketPrice > 0 && (
                   <div className="flex items-center justify-between text-[11px] text-gray-400">
-                    <span>Allowed (±50%): {(currentMarketPrice * 0.5).toFixed(2)} – {(currentMarketPrice * 1.5).toFixed(2)} {fiat.code}</span>
+                    <span>{t('adForm.allowedRange').replace('{min}', (currentMarketPrice * 0.5).toFixed(2)).replace('{max}', (currentMarketPrice * 1.5).toFixed(2)).replace('{fiat}', fiat.code)}</span>
                     <button
                       type="button"
                       onClick={() => setFixedPrice(currentMarketPrice.toFixed(crypto === 'USDT' ? 2 : 4))}
                       className="underline text-[#9273fc] hover:text-purple-600 cursor-pointer"
                     >
-                      Reset to Market
+                      {t('adForm.resetMarket')}
                     </button>
                   </div>
                 )}
@@ -1232,10 +1269,10 @@ export default function CreateP2PAdPage() {
               <div>
                 <div className="flex items-center justify-between mb-1">
                   <label className="block text-xs font-medium text-gray-700 dark:text-gray-300">
-                    Minimum Trade Amount
+                    {t('adForm.minAmount')}
                   </label>
                   <span className="text-[11px] font-medium text-purple-600 dark:text-purple-400">
-                    Min: {dynamicMinLimit.toLocaleString()} {fiat.code} ($10 USD)
+                    {t('adForm.minimumShort')} {dynamicMinLimit.toLocaleString(language)} {fiat.code} ($10 USD)
                   </span>
                 </div>
                 <div className="relative">
@@ -1256,25 +1293,25 @@ export default function CreateP2PAdPage() {
                 </div>
                 {parseFloat(minAmount || '0') < dynamicMinLimit ? (
                   <div className="flex items-center justify-between mt-1 text-[11px] text-rose-500 font-medium">
-                    <span>Must be at least {dynamicMinLimit.toLocaleString()} {fiat.code} ($10.00 USD)</span>
+                    <span>{t('adForm.minWarning').replace('{amount}', dynamicMinLimit.toLocaleString(language)).replace('{fiat}', fiat.code)}</span>
                     <button
                       type="button"
                       onClick={() => setMinAmount(String(dynamicMinLimit))}
                       className="underline text-[#9273fc] hover:text-purple-600 cursor-pointer"
                     >
-                      Set to Min
+                      {t('adForm.setMin')}
                     </button>
                   </div>
                 ) : (
                   <span className="text-[11px] text-gray-400 mt-1 block">
-                    Equivalent to ≥ ${BASE_PLATFORM_USD_MINIMUM.toFixed(2)} USD in {fiat.code}.
+                    {t('adForm.minEquivalent').replace('{amount}', BASE_PLATFORM_USD_MINIMUM.toFixed(2)).replace('{fiat}', fiat.code)}
                   </span>
                 )}
               </div>
 
               <div>
                 <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">
-                  Maximum Trade Amount
+                  {t('adForm.maxAmount')}
                 </label>
                 <div className="relative">
                   <input
@@ -1288,7 +1325,7 @@ export default function CreateP2PAdPage() {
                   </span>
                 </div>
                 <span className="text-[11px] text-gray-400 mt-1 block">
-                  Maximum limit per individual trade order.
+                  {t('adForm.maxHelper')}
                 </span>
               </div>
             </div>
@@ -1312,12 +1349,12 @@ export default function CreateP2PAdPage() {
                       </div>
                       <div className="flex-1 space-y-0.5">
                         <div className="font-semibold">
-                          {isShort ? 'Insufficient balance for minimum limit' : 'Wallet balance verified'}
+                          {isShort ? t('adForm.insufficientBalance') : t('adForm.walletVerified')}
                         </div>
                         <div className="text-[11px] opacity-90 leading-relaxed">
-                          Your available balance: <span className="font-mono font-bold">{avail.toFixed(6)} {crypto}</span>. 
-                          Minimum required for {minAmount || '0'} {fiat.code}: <span className="font-mono font-bold">{reqCoin.toFixed(6)} {crypto}</span>.
-                          {isShort && ' Please deposit funds or lower your minimum trade limit before publishing.'}
+                          {t('adForm.availableBalance')} <span className="font-mono font-bold">{avail.toFixed(6)} {crypto}</span>.
+                          {t('adForm.minimumRequired').replace('{amount}', minAmount || '0').replace('{fiat}', fiat.code)} <span className="font-mono font-bold">{reqCoin.toFixed(6)} {crypto}</span>.
+                          {isShort && ' ' + t('adForm.depositHint')}
                         </div>
                       </div>
                     </div>
@@ -1328,7 +1365,7 @@ export default function CreateP2PAdPage() {
 
             <div>
               <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">
-                Payment Window
+                {t('adForm.paymentWindow')}
               </label>
               <div className="relative">
                 <select
@@ -1336,15 +1373,15 @@ export default function CreateP2PAdPage() {
                   onChange={(e) => setPaymentWindow(e.target.value)}
                   className="w-full appearance-none px-3 py-2.5 border border-gray-200 dark:border-gray-700 rounded-lg text-sm bg-white dark:bg-[#202026] text-gray-900 dark:text-white focus:outline-none focus:ring-1 focus:ring-[#9273fc] pr-8"
                 >
-                  <option value="30">30 minutes</option>
-                  <option value="60">60 minutes</option>
-                  <option value="90">90 minutes</option>
-                  <option value="120">120 minutes</option>
+                  <option value="30">{t('adForm.paymentMinutes').replace('{count}', '30')}</option>
+                  <option value="60">{t('adForm.paymentMinutes').replace('{count}', '60')}</option>
+                  <option value="90">{t('adForm.paymentMinutes').replace('{count}', '90')}</option>
+                  <option value="120">{t('adForm.paymentMinutes').replace('{count}', '120')}</option>
                 </select>
                 <ChevronDown className="w-4 h-4 text-gray-400 absolute right-3 top-3.5 pointer-events-none" />
               </div>
               <span className="text-[11px] text-gray-400 mt-1 block">
-                Time buyer has to pay.
+                {t('adForm.buyerPaymentTime')}
               </span>
             </div>
           </div>
@@ -1353,10 +1390,10 @@ export default function CreateP2PAdPage() {
           <div className="bg-white dark:bg-[#18181c] p-5 md:p-6 rounded-xl border border-gray-200 dark:border-gray-800 shadow-sm space-y-5 transition-colors">
             <div>
               <label className="block text-sm font-medium text-gray-900 dark:text-white">
-                Targeted Countries (Optional)
+                {t('adForm.targetedCountries')}
               </label>
               <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
-                Only show this ad to users from these countries.
+                {t('adForm.onlyShowTo')}
               </p>
               <button
                 type="button"
@@ -1370,8 +1407,8 @@ export default function CreateP2PAdPage() {
                   <Globe className="w-3.5 h-3.5 text-gray-500 dark:text-gray-400" />
                   <span>
                     {targetedCountries.length > 0
-                      ? `${targetedCountries.length} Countries Selected`
-                      : 'Select Targeted Countries'}
+                      ? t('adForm.targetedCount').replace('{count}', String(targetedCountries.length))
+                      : t('adForm.selectTargeted')}
                   </span>
                 </div>
                 {targetedCountries.length > 0 && (
@@ -1384,10 +1421,10 @@ export default function CreateP2PAdPage() {
 
             <div className="pt-2 border-t border-gray-100 dark:border-gray-800">
               <label className="block text-sm font-medium text-gray-900 dark:text-white">
-                Blocked Countries (Optional)
+                {t('adForm.blockedCountries')}
               </label>
               <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
-                Hide this ad from users in these countries.
+                {t('adForm.hideFromBlocked')}
               </p>
               <button
                 type="button"
@@ -1401,8 +1438,8 @@ export default function CreateP2PAdPage() {
                   <Globe className="w-3.5 h-3.5 text-gray-500 dark:text-gray-400" />
                   <span>
                     {blockedCountries.length > 0
-                      ? `${blockedCountries.length} Countries Blocked`
-                      : 'Select Blocked Countries'}
+                      ? t('adForm.blockedCount').replace('{count}', String(blockedCountries.length))
+                      : t('adForm.selectBlocked')}
                   </span>
                 </div>
                 {blockedCountries.length > 0 && (
@@ -1418,39 +1455,39 @@ export default function CreateP2PAdPage() {
           <div className="bg-white dark:bg-[#18181c] p-5 md:p-6 rounded-xl border border-gray-200 dark:border-gray-800 shadow-sm space-y-5 transition-colors">
             <div>
               <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">
-                Terms & Conditions
+                {t('adForm.terms')}
               </label>
               <textarea
                 rows={3}
                 value={terms}
                 onChange={(e) => setTerms(e.target.value)}
-                placeholder="e.g., Fast release upon payment receipt. Please leave reference note..."
+                placeholder={t('adForm.termsPlaceholder')}
                 className="w-full px-3 py-2 border border-gray-200 dark:border-gray-700 bg-white dark:bg-[#202026] text-gray-900 dark:text-white rounded-lg text-xs focus:outline-none focus:ring-1 focus:ring-[#9273fc] resize-none"
               />
             </div>
 
             <div>
               <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">
-                Offer Label (Optional)
+                {t('adForm.offerLabel')}
               </label>
               <input
                 type="text"
                 maxLength={30}
                 value={offerLabel}
                 onChange={(e) => setOfferLabel(e.target.value)}
-                placeholder="e.g., Best rate on the market!"
+                placeholder={t('adForm.offerLabelPlaceholder')}
                 className="w-full px-3 py-2 border border-gray-200 dark:border-gray-700 bg-white dark:bg-[#202026] text-gray-900 dark:text-white rounded-lg text-xs focus:outline-none focus:ring-1 focus:ring-[#9273fc]"
               />
               <span className="text-[11px] text-gray-400 mt-1 block">
-                A short, eye-catching label for your ad (max 30 characters).
+                {t('adForm.offerLabelHint')}
               </span>
             </div>
 
             <div>
               <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">
-                Ad Tags
+                {t('adForm.adTags')}
               </label>
-              <p className="text-[11px] text-gray-400 mb-2">Select tags that apply to your ad.</p>
+              <p className="text-[11px] text-gray-400 mb-2">{t('adForm.selectTags')}</p>
               <div className="grid grid-cols-2 gap-2">
                 {[
                   'Instant release',
@@ -1475,7 +1512,7 @@ export default function CreateP2PAdPage() {
                         readOnly
                         className="rounded border-gray-300 text-[#9273fc] focus:ring-[#9273fc]"
                       />
-                      <span>{tag}</span>
+                      <span>{getAdTagLabel(tag)}</span>
                     </label>
                   );
                 })}
@@ -1483,7 +1520,7 @@ export default function CreateP2PAdPage() {
             </div>
 
             <div className="pt-2 border-t border-gray-100 dark:border-gray-800 space-y-4">
-              <h3 className="text-sm font-medium text-gray-900 dark:text-white">Trader Requirements</h3>
+              <h3 className="text-sm font-medium text-gray-900 dark:text-white">{t('adForm.traderRequirements')}</h3>
 
               {/* Requirement Checkboxes */}
               <div className="space-y-2.5">
@@ -1497,10 +1534,10 @@ export default function CreateP2PAdPage() {
                   />
                   <div>
                     <span className="text-xs font-semibold text-gray-900 dark:text-white block">
-                      Only full name verified take trade
+                      {t('adForm.fullNameVerified')}
                     </span>
                     <span className="text-[11px] text-gray-500 dark:text-gray-400 block mt-0.5">
-                      Counterparty must have completed full legal name identity verification before opening this trade.
+                      {t('adForm.fullNameHelp')}
                     </span>
                   </div>
                 </label>
@@ -1515,10 +1552,10 @@ export default function CreateP2PAdPage() {
                   />
                   <div>
                     <span className="text-xs font-semibold text-gray-900 dark:text-white block">
-                      Verified users take trade
+                      {t('adForm.verifiedUsers')}
                     </span>
                     <span className="text-[11px] text-gray-500 dark:text-gray-400 block mt-0.5">
-                      Only allow verified accounts with confirmed KYC status to take this trade.
+                      {t('adForm.verifiedUsersHelp')}
                     </span>
                   </div>
                 </label>
@@ -1526,7 +1563,7 @@ export default function CreateP2PAdPage() {
 
               <div>
                 <label className="block text-xs text-gray-600 dark:text-gray-400 mb-1">
-                  Minimum Completed Trades
+                  {t('adForm.minCompletedTrades')}
                 </label>
                 <div className="relative">
                   <select
@@ -1534,17 +1571,17 @@ export default function CreateP2PAdPage() {
                     onChange={(e) => setMinTrades(e.target.value)}
                     className="w-full appearance-none px-3 py-2.5 border border-gray-200 dark:border-gray-700 rounded-lg text-xs bg-white dark:bg-[#202026] text-gray-900 dark:text-white focus:outline-none focus:ring-1 focus:ring-[#9273fc] pr-8 cursor-pointer"
                   >
-                    <option value="0">No requirement</option>
-                    <option value="1">1 completed trade</option>
-                    <option value="2">2 completed trades</option>
-                    <option value="3">3 completed trades</option>
-                    <option value="4">4 completed trades</option>
-                    <option value="5">5 completed trades</option>
+                    <option value="0">{t('adForm.noRequirement')}</option>
+                    <option value="1">{t('adForm.completedTrades').replace('{count}', '1')}</option>
+                    <option value="2">{t('adForm.completedTrades').replace('{count}', '2')}</option>
+                    <option value="3">{t('adForm.completedTrades').replace('{count}', '3')}</option>
+                    <option value="4">{t('adForm.completedTrades').replace('{count}', '4')}</option>
+                    <option value="5">{t('adForm.completedTrades').replace('{count}', '5')}</option>
                   </select>
                   <ChevronDown className="w-4 h-4 text-gray-400 absolute right-3 top-3 pointer-events-none" />
                 </div>
                 <span className="text-[11px] text-gray-400 mt-1 block">
-                  Set a minimum number of trades a user must have completed to start a trade with you.
+                  {t('adForm.minTradesHelp')}
                 </span>
               </div>
             </div>
@@ -1557,7 +1594,7 @@ export default function CreateP2PAdPage() {
             disabled={isSubmitting}
             className="w-full py-3.5 bg-[#9273fc] text-white rounded-xl font-medium text-sm hover:bg-[#8160f5] transition shadow-md shadow-[#9273fc]/25 disabled:opacity-50 cursor-pointer active:scale-[0.99]"
           >
-            {isSubmitting ? 'Creating Ad...' : 'Create Ad'}
+            {isSubmitting ? t('adForm.creatingAd') : t('adForm.createAd')}
           </button>
         </form>
 
@@ -1568,7 +1605,7 @@ export default function CreateP2PAdPage() {
         <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4">
           <div className="bg-white dark:bg-[#18181c] rounded-xl max-w-md w-full max-h-[80vh] flex flex-col shadow-2xl border border-gray-200 dark:border-gray-800">
             <div className="p-4 border-b border-gray-100 dark:border-gray-800 flex items-center justify-between">
-              <h3 className="font-semibold text-gray-900 dark:text-white text-sm">Change Fiat Currency</h3>
+              <h3 className="font-semibold text-gray-900 dark:text-white text-sm">{t('adForm.changeFiatCurrency')}</h3>
               <button type="button" onClick={() => setIsFiatModalOpen(false)}>
                 <X className="w-4 h-4 text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200" />
               </button>
@@ -1578,7 +1615,7 @@ export default function CreateP2PAdPage() {
                 <Search className="w-4 h-4 absolute left-3 top-2.5 text-gray-400" />
                 <input
                   type="text"
-                  placeholder="Search currency name or code..."
+                  placeholder={t('adForm.searchCurrency')}
                   value={fiatSearch}
                   onChange={(e) => setFiatSearch(e.target.value)}
                   className="w-full pl-9 pr-8 py-1.5 border border-gray-200 dark:border-gray-700 bg-white dark:bg-[#202026] text-gray-900 dark:text-white rounded-lg text-xs focus:outline-none focus:ring-1 focus:ring-[#9273fc]"
@@ -1626,7 +1663,7 @@ export default function CreateP2PAdPage() {
           <div className="bg-white dark:bg-[#18181c] rounded-xl max-w-md w-full max-h-[80vh] flex flex-col shadow-2xl border border-gray-200 dark:border-gray-800">
             <div className="p-4 border-b border-gray-100 dark:border-gray-800 flex items-center justify-between">
               <h3 className="font-semibold text-gray-900 dark:text-white text-sm">
-                {isTargetedModalOpen ? 'Select Targeted Countries' : 'Select Blocked Countries'}
+                {isTargetedModalOpen ? t('adForm.selectTargeted') : t('adForm.selectBlocked')}
               </h3>
               <button
                 type="button"
@@ -1643,7 +1680,7 @@ export default function CreateP2PAdPage() {
                 <Search className="w-4 h-4 absolute left-3 top-2.5 text-gray-400" />
                 <input
                   type="text"
-                  placeholder="Search countries..."
+                  placeholder={t('adForm.searchCountries')}
                   value={countrySearch}
                   onChange={(e) => setCountrySearch(e.target.value)}
                   className="w-full pl-9 pr-8 py-1.5 border border-gray-200 dark:border-gray-700 bg-white dark:bg-[#202026] text-gray-900 dark:text-white rounded-lg text-xs focus:outline-none focus:ring-1 focus:ring-[#9273fc]"
@@ -1662,7 +1699,7 @@ export default function CreateP2PAdPage() {
                 }}
                 className="px-3 py-1.5 border border-gray-200 dark:border-gray-700 rounded-lg text-[11px] text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-800"
               >
-                Clear All
+                {t('adForm.clearAll')}
               </button>
             </div>
             <div className="overflow-y-auto p-2 divide-y divide-gray-50 dark:divide-gray-800/40 max-h-[50vh]">

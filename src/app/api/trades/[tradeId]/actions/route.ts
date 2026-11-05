@@ -1,13 +1,47 @@
 import { NextResponse } from 'next/server';
 import { createClient, getSupabaseAdminClient } from '@/utils/supabase/server';
 import { insertPaxonesSystemMessage } from '@/lib/trade-system-messages';
-import { verify2FAOTP } from '@/lib/2fa';
+import { verifyUserTotpForSensitiveAction } from '@/lib/2fa';
 
 export const dynamic = 'force-dynamic';
 
+const MAX_TRADE_ACTION_BODY_BYTES = 8 * 1024;
+
+async function readBoundedRequestBody(req: Request): Promise<string | null> {
+  const reader = req.body?.getReader();
+  if (!reader) return '';
+
+  const chunks: Uint8Array[] = [];
+  let totalBytes = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (!value) continue;
+
+      totalBytes += value.byteLength;
+      if (totalBytes > MAX_TRADE_ACTION_BODY_BYTES) {
+        await reader.cancel().catch(() => undefined);
+        return null;
+      }
+      chunks.push(value);
+    }
+  } finally {
+    reader.releaseLock();
+  }
+
+  const body = new Uint8Array(totalBytes);
+  let offset = 0;
+  for (const chunk of chunks) {
+    body.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return new TextDecoder('utf-8').decode(body);
+}
+
 export async function POST(
   req: Request,
-  { params }: { params: Promise<{ tradeId: string }> | { tradeId: string } }
+  { params }: { params: Promise<{ tradeId: string }> }
 ) {
   try {
     const resolvedParams = await params;
@@ -36,9 +70,22 @@ export async function POST(
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    const adminClient = getSupabaseAdminClient();
+    const rawBody = await readBoundedRequestBody(req);
+    if (rawBody === null) {
+      return NextResponse.json({ error: 'Request body exceeds the 8 KB limit.' }, { status: 413 });
+    }
 
-    const body = await req.json().catch(() => ({}));
+    let body: any = null;
+    try {
+      body = JSON.parse(rawBody);
+    } catch {
+      return NextResponse.json({ error: 'A valid JSON object is required.' }, { status: 400 });
+    }
+    if (!body || typeof body !== 'object' || Array.isArray(body)) {
+      return NextResponse.json({ error: 'A valid JSON object is required.' }, { status: 400 });
+    }
+
+    const adminClient = getSupabaseAdminClient();
     const { action, reason, receiptUrl } = body;
     const totpCode = body.totpCode || body.totp_code || body.code;
 
@@ -192,7 +239,7 @@ export async function POST(
         p_payment_method: confirmedPaymentMethod,
       });
 
-      if (rpcError || (rpcData && !rpcData.success)) {
+      if (rpcError || !rpcData || rpcData.success !== true) {
         const errorMsg = rpcError?.message || rpcData?.message || 'Failed to mark trade as paid.';
         console.error('mark_p2p_trade_paid RPC failed:', errorMsg);
         return NextResponse.json({ error: errorMsg }, { status: 400 });
@@ -239,8 +286,16 @@ export async function POST(
     }
 
     if (action === 'RELEASE_ESCROW') {
-      // Ensure caller is the seller
-      if (trade?.seller_id && trade.seller_id !== user.id) {
+      // Do not let user-editable metadata turn the participant release route into an
+      // administrator dispute-settlement path. Admins must use verified admin APIs.
+      if (user.app_metadata?.role === 'admin' || user.user_metadata?.role === 'admin') {
+        return NextResponse.json({ error: 'Use the authorized admin workflow for administrative trade actions.' }, { status: 403 });
+      }
+      if (!trade) {
+        return NextResponse.json({ error: 'Trade not found.' }, { status: 404 });
+      }
+      // Ensure caller is the seller; fail closed when seller identity is missing.
+      if (!trade.seller_id || trade.seller_id !== user.id) {
         return NextResponse.json({ error: 'Only the seller can release escrow.' }, { status: 403 });
       }
 
@@ -257,13 +312,17 @@ export async function POST(
       }
 
       // 2FA check for sensitive trade release operation
-      const { data: sellerProfile } = await adminClient
+      const { data: sellerProfile, error: profileError } = await adminClient
         .from('profiles')
         .select('is_2fa_enabled, is_mfa_enabled, two_factor_enabled, totp_secret, two_factor_secret')
         .eq('id', user.id)
         .maybeSingle();
+      if (profileError || !sellerProfile) {
+        console.error('[trades/actions] Unable to verify seller security settings', { code: profileError?.code || null });
+        return NextResponse.json({ error: 'Unable to verify account security settings. Please try again.' }, { status: 503 });
+      }
 
-      const is2faActive = Boolean(sellerProfile?.is_2fa_enabled || sellerProfile?.is_mfa_enabled || sellerProfile?.two_factor_enabled);
+      const is2faActive = Boolean(sellerProfile.is_2fa_enabled || sellerProfile.is_mfa_enabled || sellerProfile.two_factor_enabled);
       const secret = sellerProfile?.totp_secret || sellerProfile?.two_factor_secret;
 
       if (is2faActive) {
@@ -273,9 +332,19 @@ export async function POST(
             { status: 403 }
           );
         }
-        const isValid = verify2FAOTP(secret, String(totpCode).trim(), is2faActive);
-        if (!isValid) {
-          return NextResponse.json({ error: 'Invalid 2FA authentication code.' }, { status: 401 });
+        const verification = await verifyUserTotpForSensitiveAction(
+          adminClient, user.id, secret, totpCode, 'trade_release'
+        );
+        if (!verification.ok) {
+          return NextResponse.json(
+            { error: verification.error },
+            {
+              status: verification.status,
+              headers: verification.retryAfterSeconds
+                ? { 'Retry-After': String(verification.retryAfterSeconds) }
+                : undefined,
+            }
+          );
         }
       }
 
@@ -285,10 +354,9 @@ export async function POST(
         p_caller_id: user.id,
       });
 
-      if (rpcError || (rpcData && !rpcData.success)) {
-        const errorMsg = rpcError?.message || rpcData?.message || 'Failed to release escrow.';
-        console.error('release_trade_escrow RPC failed:', errorMsg);
-        return NextResponse.json({ error: errorMsg }, { status: 400 });
+      if (rpcError || !rpcData || rpcData.success !== true) {
+        console.warn('[trades/actions] release_trade_escrow RPC rejected', { code: rpcError?.code || null });
+        return NextResponse.json({ error: 'Escrow release was rejected. Verify the trade status and try again.' }, { status: 400 });
       }
 
       const coinAmount = Number(trade?.amount ?? trade?.crypto_amount ?? 0);
@@ -328,6 +396,12 @@ export async function POST(
     }
 
     if (action === 'CANCEL_TRADE') {
+      if (!trade) {
+        return NextResponse.json({ error: 'Trade not found.' }, { status: 404 });
+      }
+      if (trade.buyer_id !== user.id && trade.seller_id !== user.id) {
+        return NextResponse.json({ error: 'Only trade participants can cancel this trade.' }, { status: 403 });
+      }
       const now = new Date().toISOString();
 
       // Canonical RPC call
@@ -336,10 +410,9 @@ export async function POST(
         p_caller_id: user.id,
       });
 
-      if (rpcError || (rpcData && !rpcData.success)) {
-        const errorMsg = rpcError?.message || rpcData?.message || 'Failed to cancel trade.';
-        console.error('cancel_p2p_trade RPC failed:', errorMsg);
-        return NextResponse.json({ error: errorMsg }, { status: 400 });
+      if (rpcError || !rpcData || rpcData.success !== true) {
+        console.warn('[trades/actions] cancel_p2p_trade RPC rejected', { code: rpcError?.code || null });
+        return NextResponse.json({ error: 'Trade cancellation was rejected. Verify the trade status and try again.' }, { status: 400 });
       }
 
       try {
@@ -380,9 +453,8 @@ export async function POST(
 
       // Check caller authorization: buyer, seller, or admin
       const isParticipant = user.id === trade.buyer_id || user.id === trade.seller_id;
-      const isAdmin =
-        user.app_metadata?.role === 'admin' ||
-        user.user_metadata?.role === 'admin';
+      // Never authorize administrator actions from user-editable metadata.
+      const isAdmin = user.app_metadata?.role === 'admin';
 
       if (!isParticipant && !isAdmin) {
         return NextResponse.json({ error: 'Unauthorized: Only trade participants or administrators can trigger trade expiration.' }, { status: 403 });
@@ -425,12 +497,25 @@ export async function POST(
         return NextResponse.json({ error: 'Trade payment window has not expired yet.' }, { status: 400 });
       }
 
-      // Canonical RPC call
+      // Fail closed: the current expiry RPC credits several wallet mirrors,
+      // has no internal expiry-timestamp check, and its migration grants EXECUTE
+      // to authenticated users. Do not invoke it until one canonical atomic,
+      // authorization-checked refund-and-expire RPC is verified in staging.
+      return NextResponse.json(
+        {
+          success: false,
+          error: 'Trade expiry is temporarily unavailable until atomic escrow refund accounting and RPC permissions are verified.',
+          code: 'TRADE_EXPIRY_ACCOUNTING_UNVERIFIED',
+        },
+        { status: 503 },
+      );
+
+      // Legacy RPC call retained below for audit reference; unreachable while guarded.
       const { data: rpcData, error: rpcError } = await adminClient.rpc('expire_p2p_trade', {
         p_trade_id: actualTradeId,
       });
 
-      if (rpcError || (rpcData && !rpcData.success)) {
+      if (rpcError || !rpcData || rpcData.success !== true) {
         const errorMsg = rpcError?.message || rpcData?.message || 'Failed to expire trade.';
         console.error('expire_p2p_trade RPC failed:', errorMsg);
         return NextResponse.json({ error: errorMsg }, { status: 400 });

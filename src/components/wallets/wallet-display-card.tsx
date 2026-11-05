@@ -55,7 +55,7 @@ export function WalletDisplayCard({ coin, wallets }: WalletDisplayCardProps) {
             <WithdrawDialog
                 open={isWithdrawOpen}
                 onOpenChange={setIsWithdrawOpen}
-                wallet={selectedWallet}
+                asset={coin}
             />
             <Card>
                 <CardHeader className="flex flex-row items-start justify-between pb-2">

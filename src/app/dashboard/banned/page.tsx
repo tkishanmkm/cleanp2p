@@ -48,7 +48,7 @@ export default function BannedUserDashboard() {
 
       const { data: prof } = await supabase
         .from('profiles')
-        .select('*')
+        .select('id, username, email, ban_reason, suspension_reason, status, is_banned, is_suspended, is_on_hold, account_status, banned_at, created_at')
         .eq('id', user.id)
         .maybeSingle();
       
@@ -57,7 +57,7 @@ export default function BannedUserDashboard() {
       // Fetch wallets with positive balance (> 0)
       const { data: wData } = await supabase
         .from('wallets')
-        .select('*')
+        .select('currency, balance')
         .eq('user_id', user.id);
 
       const positiveWallets = (wData || []).filter(

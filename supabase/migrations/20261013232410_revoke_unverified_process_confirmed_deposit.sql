@@ -1,0 +1,1 @@
+REVOKE EXECUTE ON FUNCTION public.process_confirmed_deposit(uuid) FROM service_role;

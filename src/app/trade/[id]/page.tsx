@@ -12,12 +12,14 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { Button } from '@/components/ui/button';
 import { FileText, MessageSquare } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { useI18n } from '@/context/i18n-context';
 
 export default function TradePage() {
   const params = useParams();
   const tradeIdParam = (params?.id || params?.tradeId) as string;
   const supabase = createClient();
   const { isAdmin } = useAdminStatus();
+  const { t } = useI18n();
 
   const [trade, setTrade] = useState<any>(null);
   const [ad, setAd] = useState<any>(null);
@@ -42,7 +44,7 @@ export default function TradePage() {
       } = await supabase.auth.getUser();
 
       if (authErr || !user) {
-        setError('Please sign in to view this trade room.');
+        setError('AUTH_REQUIRED');
         setLoading(false);
         return;
       }
@@ -75,7 +77,7 @@ export default function TradePage() {
       }
 
       if (!tradeData) {
-        setError('Trade record not found or you do not have permission to view it.');
+        setError('TRADE_NOT_FOUND');
         setLoading(false);
         return;
       }
@@ -97,36 +99,31 @@ export default function TradePage() {
       // 4. Fetch Counterparty Profile
       if (opponentId) {
         const { data: opponentProfile } = await supabase
-          .from('profiles')
-          .select('*')
+          .from('public_profiles')
+          .select('id, username, display_name, country, avatar_url, photo_url, feedback_score, positive_feedback, negative_feedback, completed_trades, created_at, is_online')
           .eq('id', opponentId)
           .maybeSingle();
 
         if (opponentProfile) {
           setOpponent({
-            ...opponentProfile,
             id: opponentProfile.id,
-            userId: opponentProfile.username || 'Trader',
-            username: opponentProfile.username || 'Trader',
-            fullName: opponentProfile.full_name,
-            dob: opponentProfile.dob,
+            userId: opponentProfile.username || opponentProfile.display_name || 'Trader',
+            username: opponentProfile.username || opponentProfile.display_name || 'Trader',
+            display_name: opponentProfile.display_name,
             country: opponentProfile.country,
-            ipBasedCountry: opponentProfile.ip_based_country,
-            photoURL: opponentProfile.photo_url || opponentProfile.avatar_url || (opponentProfile.id ? `/api/media/avatar/${opponentProfile.id}` : null),
-            photo_url: opponentProfile.photo_url || opponentProfile.avatar_url || (opponentProfile.id ? `/api/media/avatar/${opponentProfile.id}` : null),
-            avatar_url: opponentProfile.avatar_url || opponentProfile.photo_url || (opponentProfile.id ? `/api/media/avatar/${opponentProfile.id}` : null),
+            photoURL: opponentProfile.photo_url || opponentProfile.avatar_url || `/api/media/avatar/${opponentProfile.id}`,
+            photo_url: opponentProfile.photo_url || opponentProfile.avatar_url || `/api/media/avatar/${opponentProfile.id}`,
+            avatar_url: opponentProfile.avatar_url || opponentProfile.photo_url || `/api/media/avatar/${opponentProfile.id}`,
             feedbackScore: opponentProfile.feedback_score,
             positiveFeedback: opponentProfile.positive_feedback,
             negativeFeedback: opponentProfile.negative_feedback,
             completedTrades: opponentProfile.completed_trades,
-            blockedUsers: opponentProfile.blocked_users,
             createdAt: opponentProfile.created_at,
-            merchant_tier: opponentProfile.merchant_tier,
-            is_online: opponentProfile.is_online,
-            last_seen: opponentProfile.last_seen,
-            last_seen_at: opponentProfile.last_seen_at,
-            last_active: opponentProfile.last_active,
-            lastActive: opponentProfile.last_seen || opponentProfile.last_seen_at || opponentProfile.last_active || opponentProfile.updated_at
+            is_online: opponentProfile.is_online === true,
+            last_seen: null,
+            last_seen_at: null,
+            last_active: null,
+            lastActive: null
           });
         } else {
           setOpponent({
@@ -219,11 +216,11 @@ export default function TradePage() {
       }
     } catch (err: any) {
       console.error('Error loading trade:', err);
-      setError(err.message || 'Failed to load trade room.');
+      setError(err.message || t('tradeRoomPage.unableToLoad'));
     } finally {
       setLoading(false);
     }
-  }, [tradeIdParam, supabase]);
+  }, [tradeIdParam, supabase, t]);
 
   useEffect(() => {
     loadTradeData();
@@ -282,7 +279,7 @@ export default function TradePage() {
   if (error || !trade) {
     return (
       <div className="min-h-screen bg-background flex flex-col items-center justify-center text-destructive p-4">
-        <p className="text-base font-semibold mb-2">{error || 'Unable to load trade.'}</p>
+        <p className="text-base font-semibold mb-2">{error === 'AUTH_REQUIRED' ? t('tradeRoomPage.signInRequired') : error === 'TRADE_NOT_FOUND' ? t('tradeRoomPage.tradeNotFound') : error || t('tradeRoomPage.unableToLoad')}</p>
       </div>
     );
   }
@@ -347,7 +344,7 @@ export default function TradePage() {
 
           {/* Mobile Bottom Footer: Fixed Tabs for Trade Details and Trade Chat */}
           <footer className="shrink-0 border-t border-border bg-card/95 backdrop-blur-md px-3 py-2 shadow-lg z-30">
-            <nav aria-label="Trade mobile navigation" className="flex items-center gap-2 max-w-md mx-auto">
+            <nav aria-label={t('tradeRoomPage.navLabel')} className="flex items-center gap-2 max-w-md mx-auto">
               <Button
                 id="trade-tab-details-btn"
                 variant={mobileActiveTab === 'details' ? 'default' : 'ghost'}
@@ -361,7 +358,7 @@ export default function TradePage() {
                 )}
               >
                 <FileText className="h-4 w-4 shrink-0" />
-                <span>Trade Details</span>
+                <span>{t('tradeRoomPage.detailsTab')}</span>
               </Button>
               <Button
                 id="trade-tab-chat-btn"
@@ -376,7 +373,7 @@ export default function TradePage() {
                 )}
               >
                 <MessageSquare className="h-4 w-4 shrink-0" />
-                <span>Trade Chat</span>
+                <span>{t('tradeRoomPage.chatTab')}</span>
               </Button>
             </nav>
           </footer>

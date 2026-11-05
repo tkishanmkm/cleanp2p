@@ -3,6 +3,7 @@
 import { useState, useMemo, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/components/providers/auth-provider';
+import { useI18n } from '@/context/i18n-context';
 import type { CoinTransfer, CryptoCurrency } from '@/lib/types';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -18,6 +19,7 @@ import { DepositDialog } from '@/components/wallets/deposit-dialog';
 import { WithdrawDialog } from '@/components/wallets/withdraw-dialog';
 import { TransferDialog } from '@/components/wallets/transfer-dialog';
 import { BtcLogo, EthLogo, LtcLogo, UsdtLogo } from '@/components/icons';
+import { CoinBadgeLogo } from '@/components/wallets/coin-badge-logo';
 import { getUserWalletBalances } from '@/lib/wallet';
 import { getUserDeposits, getUserWithdrawals, type DepositRecord, type WithdrawalRecord } from '@/lib/supabase/db';
 import { supabase } from '@/lib/supabase/client';
@@ -29,40 +31,76 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { TransferHistoryList } from '@/components/wallets/transfer-history-table';
 import { getTxExplorerUrl, getAddressExplorerUrl } from '@/lib/explorer';
 
-const depositStatusText: Record<string, string> = {
-  pending: 'Confirming on Blockchain',
-  detected: 'Detected on Chain',
-  confirmed: 'Confirmed',
-  credited: 'Credited',
-  approved: 'Credited',
-  completed: 'Confirmed',
-  rejected: 'Rejected',
-  declined: 'Cancelled',
-  expired: 'Expired',
-  awaiting_confirmation: 'Waiting for Confirmations',
+type WalletRecordKind = 'deposit' | 'withdrawal';
+
+const depositStatusTranslationKeys: Record<string, string> = {
+  pending: 'confirmingOnBlockchain',
+  confirming: 'confirmingOnBlockchain',
+  confirming_on_chain: 'confirmingOnBlockchain',
+  confirming_on_blockchain: 'confirmingOnBlockchain',
+  detecting: 'detectedOnChain',
+  detected: 'detectedOnChain',
+  seen: 'detectedOnChain',
+  seen_on_chain: 'detectedOnChain',
+  confirmed: 'confirmed',
+  credited: 'credited',
+  approved: 'credited',
+  completed: 'confirmed',
+  rejected: 'rejected',
+  declined: 'common.cancelled',
+  cancelled: 'common.cancelled',
+  canceled: 'common.cancelled',
+  expired: 'common.expired',
+  awaiting_confirmation: 'waitingForConfirmations',
+  awaiting_confirmations: 'waitingForConfirmations',
+  waiting_for_confirmations: 'waitingForConfirmations',
+  processing: 'processing',
+  queued: 'processing',
+  failed: 'statusFailed',
+  error: 'statusFailed',
+  refunded: 'statusRefunded',
 };
 
-export function CoinBadgeLogo({ coin, className = "h-5 w-5" }: { coin: string; className?: string }) {
-  const norm = (coin || '').toUpperCase();
-  switch (norm) {
-    case 'BTC':
-    case 'BITCOIN':
-      return <BtcLogo className={className} />;
-    case 'ETH':
-    case 'ETHEREUM':
-      return <EthLogo className={className} />;
-    case 'LTC':
-    case 'LITECOIN':
-      return <LtcLogo className={className} />;
-    case 'USDT':
-    case 'USDT-ERC20':
-    case 'USDT-TRC20':
-    case 'USDT-BEP20':
-      return <UsdtLogo className={className} />;
-    default:
-      return <UsdtLogo className={className} />;
-  }
+const withdrawalStatusTranslationKeys: Record<string, string> = {
+  pending: 'statusPending',
+  processing: 'processing',
+  queued: 'processing',
+  broadcasting: 'statusBroadcasting',
+  broadcast: 'statusBroadcasting',
+  broadcasted: 'statusBroadcasted',
+  submitted: 'statusBroadcasted',
+  sent: 'statusBroadcasted',
+  confirmed: 'confirmed',
+  completed: 'common.completed',
+  success: 'common.completed',
+  credited: 'credited',
+  approved: 'common.completed',
+  failed: 'statusFailed',
+  error: 'statusFailed',
+  rejected: 'rejected',
+  declined: 'common.cancelled',
+  cancelled: 'common.cancelled',
+  canceled: 'common.cancelled',
+  expired: 'common.expired',
+  refunded: 'statusRefunded',
+  requested: 'statusRequested',
+  awaiting_approval: 'statusAwaitingApproval',
+  awaiting_review: 'statusAwaitingApproval',
+};
+
+function walletStatusLabel(
+  status: string,
+  t: (key: string) => string,
+  kind: WalletRecordKind = 'deposit'
+): string {
+  const normalized = String(status || '').trim().toLowerCase().replace(/[\s-]+/g, '_');
+  const translationKey = (kind === 'deposit' ? depositStatusTranslationKeys : withdrawalStatusTranslationKeys)[normalized];
+  if (!translationKey) return status || t('walletPage.notAvailable');
+  return translationKey.startsWith('common.')
+    ? t(translationKey)
+    : t('walletPage.' + translationKey);
 }
+
 
 interface DisplayDeposit {
   id: string;
@@ -88,6 +126,7 @@ interface DisplayWithdrawal {
 }
 
 function DepositsHistory({ userId, onRowClick }: { userId: string; onRowClick: (deposit: DisplayDeposit) => void }) {
+  const { t, language } = useI18n();
   const [deposits, setDeposits] = useState<DisplayDeposit[] | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
@@ -128,7 +167,7 @@ function DepositsHistory({ userId, onRowClick }: { userId: string; onRowClick: (
         <Skeleton className="h-16 w-full rounded-xl" />
       </div>
     );
-  if (!deposits?.length) return <p className="text-center text-muted-foreground py-8 text-sm">No deposit history found.</p>;
+  if (!deposits?.length) return <p className="text-center text-muted-foreground py-8 text-sm">{t('walletPage.noDepositHistory')}</p>;
 
   return (
     <div className="space-y-4">
@@ -137,20 +176,20 @@ function DepositsHistory({ userId, onRowClick }: { userId: string; onRowClick: (
         <Table>
           <TableHeader className="bg-blue-500/5 dark:bg-blue-950/20">
             <TableRow className="hover:bg-transparent border-blue-500/10">
-              <TableHead className="text-blue-600 dark:text-blue-400 font-semibold">Asset</TableHead>
-              <TableHead className="text-blue-600 dark:text-blue-400 font-semibold">Amount</TableHead>
-              <TableHead className="text-blue-600 dark:text-blue-400 font-semibold">Status</TableHead>
-              <TableHead className="text-blue-600 dark:text-blue-400 font-semibold">Date & Time</TableHead>
-              <TableHead className="text-blue-600 dark:text-blue-400 font-semibold">Transaction Hash</TableHead>
-              <TableHead className="text-right text-blue-600 dark:text-blue-400 font-semibold">Action</TableHead>
+              <TableHead className="text-blue-600 dark:text-blue-400 font-semibold">{t('walletPage.asset')}</TableHead>
+              <TableHead className="text-blue-600 dark:text-blue-400 font-semibold">{t('common.amount')}</TableHead>
+              <TableHead className="text-blue-600 dark:text-blue-400 font-semibold">{t('common.status')}</TableHead>
+              <TableHead className="text-blue-600 dark:text-blue-400 font-semibold">{t('walletPage.dateTime')}</TableHead>
+              <TableHead className="text-blue-600 dark:text-blue-400 font-semibold">{t('walletPage.transactionHash')}</TableHead>
+              <TableHead className="text-right text-blue-600 dark:text-blue-400 font-semibold">{t('walletPage.action')}</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {deposits.map((d) => {
-              const displayStatus = depositStatusText[d.status.toLowerCase()] || d.status;
+              const displayStatus = walletStatusLabel(d.status, t, 'deposit');
               const dateObj = d.createdAt ? new Date(d.createdAt) : null;
-              const dateStr = dateObj ? dateObj.toLocaleDateString() : 'N/A';
-              const timeStr = dateObj ? dateObj.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }) : '';
+              const dateStr = dateObj ? dateObj.toLocaleDateString(language) : t('walletPage.notAvailable');
+              const timeStr = dateObj ? dateObj.toLocaleTimeString(language, { hour: '2-digit', minute: '2-digit', second: '2-digit' }) : '';
               const explorerUrl = getTxExplorerUrl(d.txid, d.chain || d.crypto);
 
               return (
@@ -207,7 +246,7 @@ function DepositsHistory({ userId, onRowClick }: { userId: string; onRowClick: (
                         </span>
                       )
                     ) : (
-                      <span className="text-xs text-muted-foreground italic">Pending</span>
+                      <span className="text-xs text-muted-foreground italic">{t('common.pending')}</span>
                     )}
                   </TableCell>
                   <TableCell className="text-right" onClick={(e) => { e.stopPropagation(); onRowClick(d); }}>
@@ -217,7 +256,7 @@ function DepositsHistory({ userId, onRowClick }: { userId: string; onRowClick: (
                       className="h-8 gap-1 border-blue-500/30 text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-950/50"
                     >
                       <Eye className="h-3.5 w-3.5" />
-                      <span>View</span>
+                      <span>{t('walletPage.view')}</span>
                     </Button>
                   </TableCell>
                 </TableRow>
@@ -230,10 +269,10 @@ function DepositsHistory({ userId, onRowClick }: { userId: string; onRowClick: (
       {/* Mobile Card View */}
       <div className="grid gap-3 md:hidden">
         {deposits.map((d) => {
-          const displayStatus = depositStatusText[d.status.toLowerCase()] || d.status;
+          const displayStatus = walletStatusLabel(d.status, t, 'deposit');
           const dateObj = d.createdAt ? new Date(d.createdAt) : null;
-          const dateStr = dateObj ? dateObj.toLocaleDateString() : 'N/A';
-          const timeStr = dateObj ? dateObj.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '';
+          const dateStr = dateObj ? dateObj.toLocaleDateString(language) : t('walletPage.notAvailable');
+          const timeStr = dateObj ? dateObj.toLocaleTimeString(language, { hour: '2-digit', minute: '2-digit' }) : '';
           const explorerUrl = getTxExplorerUrl(d.txid, d.chain || d.crypto);
 
           return (
@@ -276,7 +315,7 @@ function DepositsHistory({ userId, onRowClick }: { userId: string; onRowClick: (
                   className="pt-2 border-t border-border/40 flex items-center justify-between text-xs"
                   onClick={(e) => e.stopPropagation()}
                 >
-                  <span className="text-muted-foreground text-[11px]">Tx Hash:</span>
+                  <span className="text-muted-foreground text-[11px]">{t('walletPage.transactionHash')}:</span>
                   {explorerUrl ? (
                     <a
                       href={explorerUrl}
@@ -303,7 +342,7 @@ function DepositsHistory({ userId, onRowClick }: { userId: string; onRowClick: (
                   onClick={(e) => { e.stopPropagation(); onRowClick(d); }}
                 >
                   <Eye className="h-3.5 w-3.5" />
-                  <span>View Details</span>
+                  <span>{t('walletPage.viewDetails')}</span>
                 </Button>
               </div>
             </div>
@@ -321,6 +360,7 @@ function WithdrawalsHistory({
   userId: string;
   onRowClick: (withdrawal: DisplayWithdrawal) => void;
 }) {
+  const { t, language } = useI18n();
   const [withdrawals, setWithdrawals] = useState<DisplayWithdrawal[] | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
@@ -361,7 +401,7 @@ function WithdrawalsHistory({
         <Skeleton className="h-16 w-full rounded-xl" />
       </div>
     );
-  if (!withdrawals?.length) return <p className="text-center text-muted-foreground py-8 text-sm">No withdrawal history found.</p>;
+  if (!withdrawals?.length) return <p className="text-center text-muted-foreground py-8 text-sm">{t('walletPage.noWithdrawalHistory')}</p>;
 
   return (
     <div className="space-y-4">
@@ -369,19 +409,19 @@ function WithdrawalsHistory({
         <Table>
           <TableHeader className="bg-blue-500/5 dark:bg-blue-950/20">
             <TableRow className="hover:bg-transparent border-blue-500/10">
-              <TableHead className="text-blue-600 dark:text-blue-400 font-semibold">Asset</TableHead>
-              <TableHead className="text-blue-600 dark:text-blue-400 font-semibold">Amount</TableHead>
-              <TableHead className="text-blue-600 dark:text-blue-400 font-semibold">Status</TableHead>
-              <TableHead className="text-blue-600 dark:text-blue-400 font-semibold">Date & Time</TableHead>
-              <TableHead className="text-blue-600 dark:text-blue-400 font-semibold">Transaction Hash</TableHead>
-              <TableHead className="text-right text-blue-600 dark:text-blue-400 font-semibold">Action</TableHead>
+              <TableHead className="text-blue-600 dark:text-blue-400 font-semibold">{t('walletPage.asset')}</TableHead>
+              <TableHead className="text-blue-600 dark:text-blue-400 font-semibold">{t('common.amount')}</TableHead>
+              <TableHead className="text-blue-600 dark:text-blue-400 font-semibold">{t('common.status')}</TableHead>
+              <TableHead className="text-blue-600 dark:text-blue-400 font-semibold">{t('walletPage.dateTime')}</TableHead>
+              <TableHead className="text-blue-600 dark:text-blue-400 font-semibold">{t('walletPage.transactionHash')}</TableHead>
+              <TableHead className="text-right text-blue-600 dark:text-blue-400 font-semibold">{t('walletPage.action')}</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {withdrawals.map((w) => {
               const dateObj = w.createdAt ? new Date(w.createdAt) : null;
-              const dateStr = dateObj ? dateObj.toLocaleDateString() : 'N/A';
-              const timeStr = dateObj ? dateObj.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }) : '';
+              const dateStr = dateObj ? dateObj.toLocaleDateString(language) : t('walletPage.notAvailable');
+              const timeStr = dateObj ? dateObj.toLocaleTimeString(language, { hour: '2-digit', minute: '2-digit', second: '2-digit' }) : '';
               const explorerUrl = getTxExplorerUrl(w.txid, w.chain || w.crypto);
 
               return (
@@ -411,7 +451,7 @@ function WithdrawalsHistory({
                       variant="outline"
                       className={cn('capitalize text-xs font-medium', statusColors[w.status as keyof typeof statusColors] || 'bg-muted text-muted-foreground')}
                     >
-                      {w.status}
+                      {walletStatusLabel(w.status, t, 'withdrawal')}
                     </Badge>
                   </TableCell>
                   <TableCell>
@@ -438,7 +478,7 @@ function WithdrawalsHistory({
                         </span>
                       )
                     ) : (
-                      <span className="text-xs text-muted-foreground italic">Processing</span>
+                      <span className="text-xs text-muted-foreground italic">{t('walletPage.processing')}</span>
                     )}
                   </TableCell>
                   <TableCell className="text-right" onClick={(e) => { e.stopPropagation(); onRowClick(w); }}>
@@ -448,7 +488,7 @@ function WithdrawalsHistory({
                       className="h-8 gap-1 border-blue-500/30 text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-950/50"
                     >
                       <Eye className="h-3.5 w-3.5" />
-                      <span>View</span>
+                      <span>{t('walletPage.view')}</span>
                     </Button>
                   </TableCell>
                 </TableRow>
@@ -461,8 +501,8 @@ function WithdrawalsHistory({
       <div className="grid gap-3 md:hidden">
         {withdrawals.map((w) => {
           const dateObj = w.createdAt ? new Date(w.createdAt) : null;
-          const dateStr = dateObj ? dateObj.toLocaleDateString() : 'N/A';
-          const timeStr = dateObj ? dateObj.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '';
+          const dateStr = dateObj ? dateObj.toLocaleDateString(language) : t('walletPage.notAvailable');
+          const timeStr = dateObj ? dateObj.toLocaleTimeString(language, { hour: '2-digit', minute: '2-digit' }) : '';
           const explorerUrl = getTxExplorerUrl(w.txid, w.chain || w.crypto);
 
           return (
@@ -495,7 +535,7 @@ function WithdrawalsHistory({
                     variant="outline"
                     className={cn('capitalize text-[10px] font-medium mt-1', statusColors[w.status as keyof typeof statusColors] || 'bg-muted text-muted-foreground')}
                   >
-                    {w.status}
+                    {walletStatusLabel(w.status, t, 'withdrawal')}
                   </Badge>
                 </div>
               </div>
@@ -505,7 +545,7 @@ function WithdrawalsHistory({
                   className="pt-2 border-t border-border/40 flex items-center justify-between text-xs"
                   onClick={(e) => e.stopPropagation()}
                 >
-                  <span className="text-muted-foreground text-[11px]">Tx Hash:</span>
+                  <span className="text-muted-foreground text-[11px]">{t('walletPage.transactionHash')}:</span>
                   {explorerUrl ? (
                     <a
                       href={explorerUrl}
@@ -532,7 +572,7 @@ function WithdrawalsHistory({
                   onClick={(e) => { e.stopPropagation(); onRowClick(w); }}
                 >
                   <Eye className="h-3.5 w-3.5" />
-                  <span>View Details</span>
+                  <span>{t('walletPage.viewDetails')}</span>
                 </Button>
               </div>
             </div>
@@ -544,6 +584,7 @@ function WithdrawalsHistory({
 }
 
 export default function WalletPage() {
+  const { t, language } = useI18n();
   const { user, profile, isUserLoading } = useAuth();
   const router = useRouter();
   const { toast } = useToast();
@@ -800,11 +841,11 @@ export default function WalletPage() {
       />
 
       <div className="flex items-center justify-between mb-6">
-        <h1 className="text-lg font-semibold md:text-2xl">Unified Wallets</h1>
+        <h1 className="text-lg font-semibold md:text-2xl">{t('walletPage.walletPageTitle')}</h1>
         <div className="text-right">
-          <p className="text-sm text-muted-foreground">Total Available Value</p>
+          <p className="text-sm text-muted-foreground">{t('walletPage.totalAvailableValue')}</p>
           <p className="text-xl font-bold">
-            {totalAvailableValue.toLocaleString(undefined, {
+            {totalAvailableValue.toLocaleString(language, {
               style: 'currency',
               currency: profile?.preferredCurrency || 'USD',
             })}
@@ -821,13 +862,13 @@ export default function WalletPage() {
             </CardHeader>
             <CardContent className="space-y-2">
               <div>
-                <span className="text-xs text-muted-foreground font-medium uppercase tracking-wider block">Available Balance</span>
+                <span className="text-xs text-muted-foreground font-medium uppercase tracking-wider block">{t('wallet.availableBalance')}</span>
                 <div className="text-3xl font-bold mt-1">
                   {data.availableBalance === 0 ? '0' : data.availableBalance.toFixed(6)}
                 </div>
                 <p className="text-xs text-muted-foreground mt-0.5">
                   ≈{' '}
-                  {data.fiatValue.toLocaleString(undefined, {
+                  {data.fiatValue.toLocaleString(language, {
                     style: 'currency',
                     currency: profile?.preferredCurrency || 'USD',
                   })}
@@ -837,7 +878,7 @@ export default function WalletPage() {
             <CardFooter className="grid grid-cols-3 gap-1.5 pt-2">
               <Button size="sm" variant="default" className="px-2" onClick={() => handleDepositClick(data.coin as CryptoCurrency)}>
                 <ArrowDown className="mr-1 h-3.5 w-3.5" />
-                Deposit
+                {t('wallet.deposit')}
               </Button>
               <Button
                 size="sm"
@@ -846,7 +887,7 @@ export default function WalletPage() {
                 onClick={() => handleTransferClick(data.coin as CryptoCurrency)}
               >
                 <Send className="mr-1 h-3.5 w-3.5" />
-                Transfer
+                {t('walletPage.transferAction')}
               </Button>
               <Button
                 size="sm"
@@ -855,7 +896,7 @@ export default function WalletPage() {
                 onClick={() => handleWithdrawClick(data.coin as CryptoCurrency)}
               >
                 <ArrowUp className="mr-1 h-3.5 w-3.5" />
-                Withdraw
+                {t('wallet.withdraw')}
               </Button>
             </CardFooter>
           </Card>
@@ -864,14 +905,14 @@ export default function WalletPage() {
 
       <Card>
         <CardHeader>
-          <CardTitle>Transaction History</CardTitle>
+          <CardTitle>{t('walletPage.transactionHistory')}</CardTitle>
         </CardHeader>
         <CardContent>
           <Tabs defaultValue="deposits">
             <TabsList className="grid w-full grid-cols-3">
-              <TabsTrigger value="deposits">Deposits</TabsTrigger>
-              <TabsTrigger value="withdrawals">Withdrawals</TabsTrigger>
-              <TabsTrigger value="transfers">Transfers</TabsTrigger>
+              <TabsTrigger value="deposits">{t('walletPage.deposits')}</TabsTrigger>
+              <TabsTrigger value="withdrawals">{t('walletPage.withdrawals')}</TabsTrigger>
+              <TabsTrigger value="transfers">{t('walletPage.transfers')}</TabsTrigger>
             </TabsList>
             <TabsContent value="deposits" className="mt-4">
               <DepositsHistory userId={user.uid} onRowClick={handleHistoryRowClick} />
@@ -897,7 +938,7 @@ export default function WalletPage() {
               )}
               <div>
                 <DialogTitle className="text-lg font-bold text-foreground">
-                  {'walletAddress' in (selectedTx || {}) ? 'Deposit Details' : 'Withdrawal Details'}
+                  {'walletAddress' in (selectedTx || {}) ? t('walletPage.depositDetails') : t('walletPage.withdrawalDetails')}
                 </DialogTitle>
                 <DialogDescription className="text-xs text-muted-foreground">
                   {selectedTx && (selectedTx.crypto || (selectedTx as any).asset || 'Crypto')} on {selectedTx?.chain || 'Mainnet'}
@@ -910,7 +951,7 @@ export default function WalletPage() {
             <div className="space-y-3.5 text-sm divide-y divide-border/50 py-1">
               {/* Amount */}
               <div className="flex justify-between items-center pt-2">
-                <span className="text-xs font-medium text-muted-foreground">Amount:</span>
+                <span className="text-xs font-medium text-muted-foreground">{t('common.amount')}:</span>
                 <span className="font-mono font-bold text-base text-emerald-600 dark:text-emerald-400">
                   {'walletAddress' in selectedTx ? '+' : '-'}{selectedTx.amount} {selectedTx.crypto || (selectedTx as any).asset || 'USDT'}
                 </span>
@@ -918,29 +959,29 @@ export default function WalletPage() {
 
               {/* Status */}
               <div className="flex justify-between items-center pt-3">
-                <span className="text-xs font-medium text-muted-foreground">Status:</span>
+                <span className="text-xs font-medium text-muted-foreground">{t('common.status')}:</span>
                 <Badge
                   variant="outline"
                   className={cn('capitalize text-xs font-medium', statusColors[selectedTx.status as keyof typeof statusColors] || 'bg-muted text-muted-foreground')}
                 >
-                  {depositStatusText[selectedTx.status.toLowerCase()] || selectedTx.status}
+                  {walletStatusLabel(selectedTx.status, t, 'walletAddress' in selectedTx ? 'deposit' : 'withdrawal')}
                 </Badge>
               </div>
 
               {/* Date & Time */}
               <div className="flex justify-between items-center pt-3">
-                <span className="text-xs font-medium text-muted-foreground">Date & Time:</span>
+                <span className="text-xs font-medium text-muted-foreground">{t('walletPage.dateTime')}:</span>
                 <span className="text-xs font-medium text-foreground">
-                  {selectedTx.createdAt ? new Date(selectedTx.createdAt).toLocaleString(undefined, {
+                  {selectedTx.createdAt ? new Date(selectedTx.createdAt).toLocaleString(language, {
                     dateStyle: 'medium',
                     timeStyle: 'medium',
-                  }) : 'N/A'}
+                  }) : t('walletPage.notAvailable')}
                 </span>
               </div>
 
               {/* Network / Chain */}
               <div className="flex justify-between items-center pt-3">
-                <span className="text-xs font-medium text-muted-foreground">Network / Chain:</span>
+                <span className="text-xs font-medium text-muted-foreground">{t('walletPage.networkChain')}:</span>
                 <span className="text-xs font-semibold px-2 py-0.5 rounded bg-blue-500/10 text-blue-600 dark:text-blue-400">
                   {selectedTx.chain || 'Mainnet'}
                 </span>
@@ -950,7 +991,7 @@ export default function WalletPage() {
               <div className="flex flex-col gap-1.5 pt-3">
                 <div className="flex justify-between items-center">
                   <span className="text-xs font-medium text-muted-foreground">
-                    {'walletAddress' in selectedTx ? 'Deposit Address:' : 'Destination Address:'}
+                    {'walletAddress' in selectedTx ? t('walletPage.depositAddress') + ':' : t('walletPage.destinationAddress') + ':'}
                   </span>
                   {('walletAddress' in selectedTx ? selectedTx.walletAddress : (selectedTx as DisplayWithdrawal).address) && (
                     (() => {
@@ -963,7 +1004,7 @@ export default function WalletPage() {
                           rel="noopener noreferrer"
                           className="text-[11px] text-blue-600 dark:text-blue-400 hover:underline flex items-center gap-1"
                         >
-                          <span>Explorer</span>
+                          <span>{t('walletPage.explorer')}</span>
                           <ExternalLink className="h-3 w-3" />
                         </a>
                       ) : null;
@@ -972,15 +1013,15 @@ export default function WalletPage() {
                 </div>
                 <div className="p-2.5 rounded-lg bg-muted/50 border border-border/60 font-mono text-xs break-all text-foreground select-all">
                   {'walletAddress' in selectedTx
-                    ? selectedTx.walletAddress || 'N/A'
-                    : (selectedTx as DisplayWithdrawal).address || 'N/A'}
+                    ? selectedTx.walletAddress || t('walletPage.notAvailable')
+                    : (selectedTx as DisplayWithdrawal).address || t('walletPage.notAvailable')}
                 </div>
               </div>
 
               {/* Gas Fee / Network Fee - ONLY shown for withdrawals */}
               {'gasFee' in selectedTx && (
                 <div className="flex justify-between items-center pt-3">
-                  <span className="text-xs font-medium text-muted-foreground">Gas / Network Fee:</span>
+                  <span className="text-xs font-medium text-muted-foreground">{t('walletPage.gasNetworkFee')}:</span>
                   <span className="font-mono text-xs font-semibold text-foreground px-2 py-0.5 rounded bg-muted">
                     {(selectedTx as DisplayWithdrawal).gasFee} {selectedTx.crypto}
                   </span>
@@ -991,7 +1032,7 @@ export default function WalletPage() {
               {selectedTx.txid && (
                 <div className="flex flex-col gap-1.5 pt-3">
                   <div className="flex justify-between items-center">
-                    <span className="text-xs font-medium text-muted-foreground">Transaction Hash (TxID):</span>
+                    <span className="text-xs font-medium text-muted-foreground">{t('wallet.txHash')}:</span>
                     {(() => {
                       const expUrl = getTxExplorerUrl(selectedTx.txid, selectedTx.chain || selectedTx.crypto);
                       return expUrl ? (
@@ -1001,7 +1042,7 @@ export default function WalletPage() {
                           rel="noopener noreferrer"
                           className="text-[11px] text-blue-600 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-300 hover:underline flex items-center gap-1 font-semibold"
                         >
-                          <span>View on Explorer</span>
+                          <span>{t('walletPage.viewOnExplorer')}</span>
                           <ExternalLink className="h-3 w-3" />
                         </a>
                       ) : null;
@@ -1027,7 +1068,7 @@ export default function WalletPage() {
                   rel="noopener noreferrer"
                 >
                   <ExternalLink className="h-3.5 w-3.5" />
-                  <span>Open in Explorer</span>
+                  <span>{t('walletPage.openInExplorer')}</span>
                 </a>
               </Button>
             )}
@@ -1039,7 +1080,7 @@ export default function WalletPage() {
               )}
               onClick={() => setIsDetailsOpen(false)}
             >
-              Close
+              {t('walletPage.close')}
             </Button>
           </div>
         </DialogContent>

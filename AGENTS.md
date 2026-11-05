@@ -17,3 +17,18 @@
 ## 4. Code Output & Craftsmanship
 - Provide clean, production-grade, defensive TypeScript and SQL code.
 - Add explanatory notes for critical type conversions, concurrency safety, and transaction atomicity.
+
+
+## 5. Free-tier and cost controls
+- Use local tools and free/community editions wherever practical; respect existing free-tier quotas and rate limits.
+- Do not add paid subscriptions, metered API keys, paid scanners, paid CI runners, paid cloud resources, paid trials, or enable billing without explicit user approval.
+- Do not use an API key or dangerous sandbox bypass to work around Codex/ChatGPT limits. If the free allowance or permissions block progress, report the limit and stop that route.
+- Never claim a service is free or unlimited without checking its current terms. Do not silently upgrade Supabase, Backblaze, Google AI, GitHub, or any other provider.
+
+## 6. Autonomous execution and verification
+- Follow `docs/AUTONOMOUS-AGENT.md` for every non-trivial task. Work from evidence, make small reversible changes, add regression tests, and verify the final diff.
+- Do not stop after describing a fix: implement and test it when the task and permissions allow. If a check fails, diagnose the actual output, fix the root cause, and rerun; cap retries at three per failure class and report any blocker.
+- Run `scripts/agentic-quality-gate.ps1` for the local quality gate. It captures results under ignored `local-audit-logs/` and exits nonzero if any configured check fails.
+- Never claim a task is complete without reporting exact test outcomes. Never commit, push, merge, deploy, or modify production Supabase/financial state unless that exact action is authorized.
+- Do not test wallet balances, deposits, withdrawals, sweeps, broadcasts, escrow releases, or live blockchain transactions against production. Use isolated staging projects and test-chain funds.
+- Never bypass another user's authorization, exploit a third-party system, expose credentials, or disable a failing security check just to make CI green.

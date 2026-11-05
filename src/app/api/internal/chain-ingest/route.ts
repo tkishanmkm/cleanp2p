@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseAdminClient } from '@/lib/supabase/server';
 import { normalizeDepositNetwork } from '@/lib/hd-derivation-engine';
 import { CANONICAL_USDT_CONTRACTS } from '@/jobs/depositIngestion';
+import { timingSafeEqualString } from '@/lib/security/worker-auth';
 
 interface IngestPayload {
   networkCode: string;
@@ -21,7 +22,7 @@ export async function POST(req: NextRequest) {
     const providedSecret = req.headers.get('x-ingest-secret');
     const configuredSecret = process.env.CHAIN_INGEST_SECRET;
 
-    if (!configuredSecret || providedSecret !== configuredSecret) {
+    if (!configuredSecret || !providedSecret || !timingSafeEqualString(providedSecret, configuredSecret)) {
       return NextResponse.json(
         { error: 'Unauthorized: Invalid or missing x-ingest-secret header.' },
         { status: 401 }
@@ -62,8 +63,9 @@ export async function POST(req: NextRequest) {
     const normAsset = assetCode.toUpperCase().trim();
     const tokenContract = CANONICAL_USDT_CONTRACTS[normNet] || null;
 
-    // 3. Delegate to canonical atomic RPC
-    const { data: rpcData, error: rpcErr } = await supabaseAdmin.rpc('process_deposit_atomic', {
+    // 3. Ingress is never allowed to credit balances. Confirmation values from
+    // the caller are untrusted; register only a PENDING candidate with zero confirmations.
+    const { data: rpcData, error: rpcErr } = await supabaseAdmin.rpc('register_pending_deposit', {
       p_destination_address: toAddress.trim(),
       p_asset_symbol: normAsset,
       p_network_code: normNet,
@@ -73,7 +75,7 @@ export async function POST(req: NextRequest) {
       p_block_number: blockHeight || null,
       p_from_address: fromAddress ? fromAddress.trim() : null,
       p_token_contract: tokenContract,
-      p_confirmations: Number(confirmations) || 0,
+      p_confirmations: 0,
       p_provider: 'chain_ingest_internal',
     });
 

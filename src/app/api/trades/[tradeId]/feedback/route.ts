@@ -1,10 +1,9 @@
 import { NextResponse } from 'next/server';
-import { createClient } from '@/utils/supabase/server';
-import { createClient as createSupabaseClient } from '@supabase/supabase-js';
+import { createClient, createBearerClient } from '@/utils/supabase/server';
 
 export async function POST(
   req: Request,
-  context: { params: { tradeId: string } | Promise<{ tradeId: string }> }
+  context: { params: Promise<{ tradeId: string }> }
 ) {
   try {
     const rawParams = await Promise.resolve(context.params);
@@ -14,11 +13,7 @@ export async function POST(
     const authHeader = req.headers.get('Authorization');
     if (authHeader && authHeader.startsWith('Bearer ')) {
       const token = authHeader.substring(7);
-      supabase = createSupabaseClient(
-        process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://placeholder.supabase.co',
-        process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'placeholder-key',
-        { global: { headers: { Authorization: `Bearer ${token}` } } }
-      );
+      supabase = createBearerClient(token);
     }
 
     const { data: { user }, error: authError } = await supabase.auth.getUser();
@@ -26,8 +21,18 @@ export async function POST(
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    const body = await req.json();
+    const body = await req.json().catch(() => null);
+    if (!body || typeof body !== 'object' || Array.isArray(body)) {
+      return NextResponse.json({ error: 'A valid JSON object is required' }, { status: 400 });
+    }
     const { isPositive, comment } = body;
+    if (typeof isPositive !== 'boolean') {
+      return NextResponse.json({ error: 'Feedback rating must be a boolean value' }, { status: 400 });
+    }
+    if (typeof comment !== 'string' || comment.trim().length === 0 || comment.trim().length > 2000) {
+      return NextResponse.json({ error: 'Feedback comment must be 2000 characters or fewer' }, { status: 400 });
+    }
+    const cleanComment = comment.trim();
 
     // 1. Fetch trade and authorize
     const { data: trade, error: tradeErr } = await supabase
@@ -62,36 +67,48 @@ export async function POST(
       return NextResponse.json({ error: 'Cannot submit feedback for yourself' }, { status: 400 });
     }
 
-    // 2. Check for duplicate feedback (idempotency)
-    const { data: existingFeedback } = await supabase
-      .from('trade_feedback')
+    // The deployed schema stores review rows in public.feedbacks. The old
+    // trade_feedback table is not present in the production database.
+    const { data: existingFeedback, error: existingFeedbackError } = await supabase
+      .from('feedbacks')
       .select('id')
       .eq('trade_id', tradeId)
       .eq('reviewer_id', reviewerId)
-      .single();
+      .maybeSingle();
 
+    if (existingFeedbackError) {
+      console.error('[TRADE_FEEDBACK] Existing feedback lookup failed.', { code: existingFeedbackError.code || null });
+      return NextResponse.json({ error: 'Unable to verify whether feedback already exists.' }, { status: 503 });
+    }
     if (existingFeedback) {
-      return NextResponse.json({ error: 'Feedback already submitted for this trade' }, { status: 400 });
+      return NextResponse.json({ error: 'Feedback already submitted for this trade' }, { status: 409 });
     }
 
-    // 3. Insert feedback
-    const { error: fbErr } = await supabase.from('trade_feedback').insert({
+    // RLS independently verifies the completed trade and reviewer/reviewee pair.
+    const { error: fbErr } = await supabase.from('feedbacks').insert({
       trade_id: tradeId,
       reviewer_id: reviewerId,
       reviewee_id: revieweeId,
-      is_positive: !!isPositive,
-      comment: comment || ''
+      is_positive: isPositive,
+      comment: cleanComment,
     });
 
-    if (fbErr) throw fbErr;
+    if (fbErr) {
+      console.error('[TRADE_FEEDBACK] Feedback insert failed.', { code: fbErr.code || null });
+      return NextResponse.json({ error: 'Unable to save feedback.' }, { status: 400 });
+    }
 
-    // 4. Create system message
+    // Keep the message schema aligned with the deployed trade_messages table.
     const message = `${isPositive ? 'Positive' : 'Negative'} feedback submitted.`;
-    await supabase.from('trade_messages').insert({
+    const { error: messageError } = await supabase.from('trade_messages').insert({
       trade_id: tradeId,
-      message_type: 'SYSTEM',
-      content: message
+      sender_id: user.id,
+      message,
     });
+    if (messageError) {
+      // Feedback is already committed; chat notification is best-effort.
+      console.warn('[TRADE_FEEDBACK] Notice could not be posted.', { code: messageError.code || null });
+    }
 
     return NextResponse.json({ success: true });
   } catch (err: any) {

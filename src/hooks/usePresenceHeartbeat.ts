@@ -8,39 +8,32 @@ export function usePresenceHeartbeat(userId?: string) {
     if (!userId) return;
 
     const supabase = createClient();
-
-    const updatePresence = async () => {
+    const updatePresence = async (isOnline: boolean) => {
       try {
-        await supabase
-          .from('profiles')
-          .update({
-            is_online: true,
-            last_seen_at: new Date().toISOString()
-          })
-          .eq('id', userId);
+        const { error } = await supabase.rpc('set_my_presence', {
+          p_is_online: isOnline,
+        });
+        if (error && process.env.NODE_ENV !== 'production') {
+          console.warn('Presence update was not accepted:', error.code);
+        }
       } catch (err) {
-        // Silently catch background heartbeat error
+        if (process.env.NODE_ENV !== 'production') {
+          console.warn('Presence update failed.');
+        }
       }
     };
 
-    // Update immediately on mount
-    updatePresence();
-
-    // Heartbeat ping every 60 seconds (1 minute)
-    const interval = setInterval(updatePresence, 60 * 1000);
-
-    // Set offline on tab unload
+    void updatePresence(true);
+    const interval = window.setInterval(() => void updatePresence(true), 60_000);
     const handleUnload = () => {
-      if (typeof navigator !== 'undefined' && typeof navigator.sendBeacon === 'function') {
-        supabase.from('profiles').update({ is_online: false }).eq('id', userId);
-      }
+      void updatePresence(false);
     };
-
-    window.addEventListener('beforeunload', handleUnload);
+    window.addEventListener('pagehide', handleUnload);
 
     return () => {
-      clearInterval(interval);
-      window.removeEventListener('beforeunload', handleUnload);
+      window.clearInterval(interval);
+      window.removeEventListener('pagehide', handleUnload);
+      void updatePresence(false);
     };
   }, [userId]);
 }

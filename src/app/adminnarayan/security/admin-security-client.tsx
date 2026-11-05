@@ -27,7 +27,7 @@ import {
   History,
   Info,
 } from 'lucide-react';
-import { AdminSecurityState } from '@/lib/admin-security';
+import type { AdminSecurityState } from '@/lib/admin-security';
 
 export function AdminSecurityClient() {
   const { toast } = useToast();
@@ -652,7 +652,7 @@ export function AdminSecurityClient() {
                           {log.action}
                         </Badge>
                       </td>
-                      <td className="py-2.5 px-3 text-slate-400">{log.ip_address || 'client'}</td>
+                      <td className="py-2.5 px-3 text-slate-400">{log.details?.ip_address || 'server-observed'}</td>
                       <td className="py-2.5 px-3 text-slate-400 truncate max-w-xs">
                         {JSON.stringify(log.details || {})}
                       </td>

@@ -1,34 +1,18 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createClient } from '@supabase/supabase-js';
 import { verifyServerAdmin } from '@/lib/server-admin-auth';
+import { supabaseAdmin } from '@/lib/supabaseAdmin';
 
 export const dynamic = 'force-dynamic';
-
-const supabaseUrl =
-  process.env.NEXT_PUBLIC_SUPABASE_URL ||
-  process.env.SUPABASE_URL ||
-  'https://placeholder.supabase.co';
-
-const supabaseKey =
-  process.env.SUPABASE_SERVICE_ROLE_KEY ||
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ||
-  'placeholder-key';
-
-const supabaseAdmin = createClient(supabaseUrl, supabaseKey, {
-  auth: {
-    persistSession: false,
-    autoRefreshToken: false,
-  },
-});
 
 // GET: Fetch active (unresolved) system alerts
 export async function GET(req: NextRequest) {
   try {
-    const auth = await verifyServerAdmin(req);
-    if (!auth.authorized) {
-      return (
-        auth.response ||
-        NextResponse.json({ error: 'Unauthorized: Admin privileges required' }, { status: 401 })
+    const auth = await verifyServerAdmin(req, { allowSupportReadOnly: true });
+    if (!auth.authorized) return auth.response!;
+    if (auth.supportAdmin === true || auth.supportReadOnly === true) {
+      return NextResponse.json(
+        { success: false, error: 'Full administrator access is required to view platform security alerts.' },
+        { status: 403 }
       );
     }
 

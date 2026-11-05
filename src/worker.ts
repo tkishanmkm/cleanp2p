@@ -43,8 +43,9 @@ async function initializeDatabaseConnection(): Promise<boolean> {
     const { error } = await supabaseAdmin.from('profiles').select('id').limit(1);
     const latency = Date.now() - startTime;
 
-    if (error && error.code !== 'PGRST116') {
-      console.warn(`[Database] Connection notice (${latency}ms):`, error.message);
+    if (error) {
+      state.isDatabaseConnected = false;
+      throw new Error(`Database readiness check failed (${latency}ms, code=${error.code || 'unknown'}): ${error.message}`);
     }
 
     state.isDatabaseConnected = true;
@@ -203,7 +204,10 @@ function handleGracefulShutdown(signal: string): void {
  */
 export async function startWorkerDaemon(): Promise<void> {
   console.log('[Worker] Starting Paxones Background Daemon...');
-  await initializeDatabaseConnection();
+  const databaseReady = await initializeDatabaseConnection();
+  if (!databaseReady) {
+    throw new Error('WORKER_STARTUP_ABORTED_DATABASE_NOT_READY');
+  }
   await initializeBlockchainListeners();
   initializeScheduledJobs();
   console.log('[Worker] All systems initialized and listening.');
@@ -224,6 +228,7 @@ if (typeof require !== 'undefined' && require.main === module && process.env.RUN
 
   startWorkerDaemon().catch((err) => {
     console.error('[Worker Fatal Startup Error]:', err);
+    process.exitCode = 1;
   });
 }
 

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { processWithdrawalQueue, processAllPendingWithdrawals } from '@/jobs/withdrawalWorker';
+import { processAllPendingWithdrawals } from '@/jobs/withdrawalWorker';
 import { verifyWorkerAuth } from '@/lib/security/worker-auth';
 
 export const dynamic = 'force-dynamic';
@@ -13,7 +13,6 @@ function isAuthorized(req: NextRequest): boolean {
       process.env.CRON_SECRET,
     ],
     customHeaderNames: ['x-service-key', 'x-worker-secret', 'x-withdrawal-worker-secret'],
-    checkQueryParam: true,
   });
 
   return result.authorized;
@@ -36,7 +35,8 @@ export async function GET(req: NextRequest) {
     });
   }
 
-  const result = await processWithdrawalQueue();
+  // Single-item runs must use the same singleton guard as batch dispatch.
+  const result = await processAllPendingWithdrawals(1);
   return NextResponse.json({
     success: true,
     timestamp: new Date().toISOString(),

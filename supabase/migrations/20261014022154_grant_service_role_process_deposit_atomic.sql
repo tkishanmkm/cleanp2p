@@ -1,0 +1,1 @@
+GRANT EXECUTE ON FUNCTION public.process_deposit_atomic(text, text, text, numeric, text, integer, bigint, text, text, integer, text) TO service_role;

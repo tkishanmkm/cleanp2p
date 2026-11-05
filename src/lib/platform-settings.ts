@@ -1,3 +1,5 @@
+import "server-only";
+
 import { getSupabaseAdminClient } from "@/lib/supabase/server";
 
 export type PlatformControlKey =
@@ -49,8 +51,8 @@ export function invalidatePlatformSettingsCache(): void {
 }
 
 /**
- * Fetch all platform settings from canonical system_settings table.
- * Falls back to default safe settings if database read fails.
+ * Fetch all platform settings from the canonical system_settings table.
+ * Fail closed when the database is unavailable or required control rows are missing.
  */
 export async function getPlatformSettings(forceFresh = false): Promise<PlatformSettingsState> {
   const now = Date.now();
@@ -65,27 +67,75 @@ export async function getPlatformSettings(forceFresh = false): Promise<PlatformS
       .select("key, value, updated_at");
 
     if (error || !data) {
-      console.warn("[PlatformSettings] Error reading system_settings, using fallback defaults:", error?.message);
-      return cachedSettings || DEFAULT_SETTINGS;
+      throw new Error(`Unable to read required platform controls: ${error?.message || "empty database response"}`);
+    }
+
+    const requiredKeys: PlatformControlKey[] = [
+      "emergency_mode",
+      "prevent_new_trades",
+      "prevent_withdrawals",
+      "prevent_transfers",
+      "prevent_new_ads",
+      "prevent_user_login",
+      "prevent_new_signups",
+      "maintenance_mode",
+    ];
+    const returnedKeys = new Set(data.map((row: { key: string }) => row.key));
+    const missingKeys = requiredKeys.filter((key) => !returnedKeys.has(key));
+    if (missingKeys.length > 0) {
+      throw new Error(`Required platform controls are missing: ${missingKeys.join(", ")}`);
     }
 
     const state: PlatformSettingsState = { ...DEFAULT_SETTINGS };
     let latestUpdate = DEFAULT_SETTINGS.updated_at;
 
-    data.forEach((row: any) => {
+    const parseControlBoolean = (key: PlatformControlKey, value: unknown): boolean => {
+      if (typeof value === "boolean") return value;
+      if (typeof value === "number" && (value === 0 || value === 1)) return value === 1;
+      if (typeof value === "string") {
+        const normalized = value.trim().toLowerCase();
+        if (["true", "1", "t"].includes(normalized)) return true;
+        if (["false", "0", "f"].includes(normalized)) return false;
+      }
+      throw new Error(`Platform control "${key}" has a missing or invalid boolean value.`);
+    };
+
+    data.forEach((row: { key: string; value: unknown; updated_at?: string | null }) => {
       const k = row.key;
       const v = row.value;
-      const boolVal = typeof v === "boolean" ? v : v === "true" || v === true;
 
-      if (k === "emergency_mode") state.emergency_mode = boolVal;
-      if (k === "prevent_new_trades") state.prevent_new_trades = boolVal;
-      if (k === "prevent_withdrawals") state.prevent_withdrawals = boolVal;
-      if (k === "prevent_transfers") state.prevent_transfers = boolVal;
-      if (k === "prevent_new_ads") state.prevent_new_ads = boolVal;
-      if (k === "prevent_user_login") state.prevent_user_login = boolVal;
-      if (k === "prevent_new_signups") state.prevent_new_signups = boolVal;
-      if (k === "maintenance_mode") state.maintenance_mode = boolVal;
-      if (k === "all_ads_paused_at") state.all_ads_paused_at = v ? String(v) : null;
+      switch (k) {
+        case "emergency_mode":
+          state.emergency_mode = parseControlBoolean(k, v);
+          break;
+        case "prevent_new_trades":
+          state.prevent_new_trades = parseControlBoolean(k, v);
+          break;
+        case "prevent_withdrawals":
+          state.prevent_withdrawals = parseControlBoolean(k, v);
+          break;
+        case "prevent_transfers":
+          state.prevent_transfers = parseControlBoolean(k, v);
+          break;
+        case "prevent_new_ads":
+          state.prevent_new_ads = parseControlBoolean(k, v);
+          break;
+        case "prevent_user_login":
+          state.prevent_user_login = parseControlBoolean(k, v);
+          break;
+        case "prevent_new_signups":
+          state.prevent_new_signups = parseControlBoolean(k, v);
+          break;
+        case "maintenance_mode":
+          state.maintenance_mode = parseControlBoolean(k, v);
+          break;
+        case "all_ads_paused_at":
+          state.all_ads_paused_at = v ? String(v) : null;
+          break;
+        default:
+          break;
+      }
+
       if (row.updated_at && row.updated_at > latestUpdate) latestUpdate = row.updated_at;
     });
 
@@ -95,8 +145,10 @@ export async function getPlatformSettings(forceFresh = false): Promise<PlatformS
 
     return state;
   } catch (err) {
-    console.error("[PlatformSettings] Failed to fetch settings:", err);
-    return cachedSettings || DEFAULT_SETTINGS;
+    // Never turn a control-plane outage into permissive defaults.
+    invalidatePlatformSettingsCache();
+    console.error("[PlatformSettings] Failed to fetch required controls:", err);
+    throw err instanceof Error ? err : new Error("Platform controls unavailable");
   }
 }
 
@@ -109,114 +161,24 @@ export async function getPlatformControl(key: PlatformControlKey): Promise<boole
 }
 
 /**
- * Helper to determine action name for admin audit logs.
- */
-function getAuditAction(key: string, value: boolean): string {
-  if (key === "emergency_mode") {
-    return value ? "EMERGENCY_MODE_ENABLED" : "EMERGENCY_MODE_DISABLED";
-  }
-  if (key === "maintenance_mode") {
-    return value ? "MAINTENANCE_MODE_ENABLED" : "MAINTENANCE_MODE_DISABLED";
-  }
-  if (key === "prevent_new_trades") {
-    return value ? "GLOBAL_TRADING_DISABLED" : "GLOBAL_TRADING_ENABLED";
-  }
-  if (key === "prevent_withdrawals") {
-    return value ? "GLOBAL_WITHDRAWALS_DISABLED" : "GLOBAL_WITHDRAWALS_ENABLED";
-  }
-  if (key === "prevent_transfers") {
-    return value ? "GLOBAL_TRANSFERS_DISABLED" : "GLOBAL_TRANSFERS_ENABLED";
-  }
-  if (key === "prevent_new_ads") {
-    return value ? "GLOBAL_AD_CREATION_DISABLED" : "GLOBAL_AD_CREATION_ENABLED";
-  }
-  if (key === "prevent_user_login") {
-    return value ? "GLOBAL_LOGIN_DISABLED" : "GLOBAL_LOGIN_ENABLED";
-  }
-  if (key === "prevent_new_signups") {
-    return value ? "GLOBAL_SIGNUP_DISABLED" : "GLOBAL_SIGNUP_ENABLED";
-  }
-  return `PLATFORM_CONTROL_${key.toUpperCase()}_${value ? "ENABLED" : "DISABLED"}`;
-}
-
-/**
- * Set a single platform setting key in canonical system_settings table.
- * Strictly stores boolean values as native JSON booleans.
- * Logs event to admin_audit_logs.
+ * Persist platform controls through the service-only, actor-bound database RPC.
+ * Data writes and admin audit entries commit or roll back together.
  */
 export async function setPlatformSettingKey(
-  key: keyof PlatformSettingsState,
-  value: boolean | string | null,
+  key: PlatformControlKey,
+  value: boolean,
   adminId: string,
   adminEmail: string,
   reason?: string
 ): Promise<{ success: boolean; error?: string }> {
-  try {
-    const supabase = getSupabaseAdminClient();
-
-    // Fetch existing value for audit log tracking
-    const { data: existingRow } = await supabase
-      .from("system_settings")
-      .select("value")
-      .eq("key", key)
-      .maybeSingle();
-
-    const previousValue = existingRow?.value ?? null;
-
-    // Store booleans natively as JSON booleans
-    const jsonbValue = typeof value === "boolean" ? value : value;
-
-    const { error } = await supabase
-      .from("system_settings")
-      .upsert(
-        {
-          key,
-          value: jsonbValue,
-          updated_at: new Date().toISOString(),
-        },
-        { onConflict: "key" }
-      );
-
-    if (error) {
-      throw error;
-    }
-
-    // Invalidate cache immediately
-    invalidatePlatformSettingsCache();
-
-    // Log to admin_audit_logs
-    const auditAction = typeof value === "boolean"
-      ? getAuditAction(key, value)
-      : `PLATFORM_SETTING_${key.toUpperCase()}_UPDATED`;
-
-    try {
-      await supabase.from("admin_audit_logs").insert({
-        admin_id: adminId,
-        admin_email: adminEmail,
-        action: auditAction,
-        target_id: key,
-        details: {
-          setting_key: key,
-          previous_value: previousValue,
-          new_value: value,
-          reason: reason || "Manual administrator update",
-          updated_at: new Date().toISOString(),
-        },
-        created_at: new Date().toISOString(),
-      });
-    } catch (e: any) {
-      console.warn("[PlatformSettings] Audit log error:", e?.message);
-    }
-
-    return { success: true };
-  } catch (err: any) {
-    console.error(`[PlatformSettings] Failed to set ${key}:`, err);
-    return { success: false, error: err.message };
-  }
+  const result = await setPlatformControls({ [key]: value }, adminId, adminEmail, reason);
+  return result.success
+    ? { success: true }
+    : { success: false, error: result.error || "Platform control update was rejected." };
 }
 
 /**
- * Atomically update multiple platform controls in a batch.
+ * Atomically update one or more platform controls through the canonical RPC.
  */
 export async function setPlatformControls(
   updates: Partial<Record<PlatformControlKey, boolean>>,
@@ -224,7 +186,7 @@ export async function setPlatformControls(
   adminEmail: string,
   reason?: string
 ): Promise<{ success: boolean; error?: string; updated?: Record<string, boolean> }> {
-  const allowedKeys: PlatformControlKey[] = [
+  const allowedKeys = new Set<PlatformControlKey>([
     "emergency_mode",
     "prevent_new_trades",
     "prevent_withdrawals",
@@ -233,24 +195,47 @@ export async function setPlatformControls(
     "prevent_user_login",
     "prevent_new_signups",
     "maintenance_mode",
-  ];
+  ]);
 
-  const updated: Record<string, boolean> = {};
-
-  for (const [k, v] of Object.entries(updates)) {
-    if (!allowedKeys.includes(k as PlatformControlKey)) {
-      continue;
-    }
-    if (typeof v === "boolean") {
-      const res = await setPlatformSettingKey(k as PlatformControlKey, v, adminId, adminEmail, reason);
-      if (!res.success) {
-        return { success: false, error: res.error, updated };
-      }
-      updated[k] = v;
-    }
+  const entries = Object.entries(updates);
+  if (!adminId || !adminEmail || entries.length < 1 || entries.length > 8) {
+    return { success: false, error: "A verified administrator and at least one platform control are required." };
   }
 
-  return { success: true, updated };
+  const normalized: Partial<Record<PlatformControlKey, boolean>> = {};
+  for (const [key, value] of entries) {
+    if (!allowedKeys.has(key as PlatformControlKey) || typeof value !== "boolean") {
+      return { success: false, error: "Only allowlisted platform controls with boolean values may be changed." };
+    }
+    normalized[key as PlatformControlKey] = value;
+  }
+
+  try {
+    const supabase = getSupabaseAdminClient();
+    const { data, error } = await supabase.rpc("admin_set_platform_controls_authorized", {
+      p_updates: normalized,
+      p_reason: reason ?? null,
+      p_actor_id: adminId,
+      p_actor_email: adminEmail,
+    });
+
+    const result = data as { success?: boolean; updated?: Record<string, boolean> } | null;
+    if (error || !result || result.success !== true) {
+      throw new Error(error?.message || "The platform-control RPC did not confirm success.");
+    }
+
+    invalidatePlatformSettingsCache();
+    return {
+      success: true,
+      updated: result.updated && typeof result.updated === "object" ? result.updated : normalized as Record<string, boolean>,
+    };
+  } catch (err: unknown) {
+    console.error("[PlatformSettings] Atomic control update failed:", err instanceof Error ? err.message : "UnknownError");
+    return {
+      success: false,
+      error: err instanceof Error ? err.message : "Platform controls could not be updated.",
+    };
+  }
 }
 
 /**
@@ -326,12 +311,13 @@ export async function isFeaturePrevented(
     }
 
     return { prevented: false };
-  } catch (err: any) {
+  } catch (err: unknown) {
     console.error(`[isFeaturePrevented] Fail-closed check for ${feature}:`, err);
-    if (feature === "trades" || feature === "withdrawals" || feature === "transfers") {
-      return { prevented: true, error: "Operation temporarily unavailable due to system verification. Please try again.", code: "PLATFORM_SERVICE_UNAVAILABLE" };
-    }
-    return { prevented: false };
+    return {
+      prevented: true,
+      error: "Operation temporarily unavailable because platform controls could not be verified. Please retry.",
+      code: "PLATFORM_SERVICE_UNAVAILABLE",
+    };
   }
 }
 

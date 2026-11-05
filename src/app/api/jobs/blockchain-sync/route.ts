@@ -1,28 +1,18 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { runDepositIngestion } from '@/jobs/depositIngestion';
 import { processAllPendingWithdrawals, checkSubmittedWithdrawals } from '@/jobs/withdrawalWorker';
+import { verifyWorkerAuth } from '@/lib/security/worker-auth';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60; // 60 seconds maximum execution duration
 
 function verifyCronAuthorization(req: NextRequest): boolean {
-  const cronSecret = process.env.CRON_SECRET || process.env.WORKER_SECRET;
-
-  // In production environments with a configured secret, enforce strict validation
-  if (cronSecret && cronSecret.trim().length > 0) {
-    const authHeader = req.headers.get('authorization');
-    const xCronHeader = req.headers.get('x-cron-secret');
-
-    const bearerToken = authHeader?.startsWith('Bearer ')
-      ? authHeader.substring(7).trim()
-      : null;
-
-    if (bearerToken !== cronSecret && xCronHeader !== cronSecret) {
-      return false;
-    }
-  }
-
-  return true;
+  // Shared worker auth fails closed when no valid secret is configured and uses
+  // constant-time comparisons; this route triggers deposit and withdrawal work.
+  return verifyWorkerAuth(req, {
+    allowedSecrets: [process.env.CRON_SECRET, process.env.WORKER_SECRET],
+    customHeaderNames: ['x-cron-secret', 'x-worker-secret'],
+  }).authorized;
 }
 
 async function handleSync(req: NextRequest) {

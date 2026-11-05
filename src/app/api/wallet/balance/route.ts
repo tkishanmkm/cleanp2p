@@ -2,6 +2,7 @@ import { createClient } from '@/utils/supabase/server';
 import { getSupabaseAdminClient } from '@/lib/supabase/server';
 import { NextResponse } from 'next/server';
 import type { CryptoCurrency } from '@/lib/types';
+import { normalizePrimaryWalletAssetBalance } from '@/lib/wallet-balance-normalization';
 
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
@@ -53,7 +54,6 @@ export async function GET(request: Request) {
       TRX: { available: 0, inEscrow: 0, inWithdrawal: 0, total: 0 },
     };
 
-    const rawRecords: any[] = [];
     const coins: CryptoCurrency[] = ['BTC', 'ETH', 'LTC', 'USDT', 'BNB', 'TRX'];
 
     // 1. Calculate real-time active escrow locked from seller's active trades
@@ -136,186 +136,33 @@ export async function GET(request: Request) {
     try {
       const { data: assetsByUserId } = await supabaseAdmin
         .from('wallet_assets')
-        .select('*')
+        .select('user_id, asset_symbol, balance, locked_balance, reserved_balance, in_escrow, in_withdrawal')
         .eq('user_id', effectiveUserId);
 
       if (assetsByUserId && assetsByUserId.length > 0) {
         for (const row of assetsByUserId) {
-          rawRecords.push(row);
-          const rawSymbol = String(row.asset_symbol || row.asset_code || row.symbol || '').toUpperCase();
+          const rawSymbol = String(row.asset_symbol || '').toUpperCase();
           const symbol = (coins.includes(rawSymbol as CryptoCurrency) ? rawSymbol : null) as CryptoCurrency | null;
           if (!symbol) continue;
 
           hasWalletAssets[symbol] = true;
-          const dbAvail = row.available !== undefined && row.available !== null ? Number(row.available) : null;
-          const dbBal = row.balance !== undefined && row.balance !== null ? Number(row.balance) : null;
-          const dbLocked = Number(row.locked_balance ?? row.locked_escrow ?? row.locked ?? row.in_escrow ?? 0);
-          const activeEscrow = activeEscrowMap[symbol] || 0;
-          const withdraw = Number(row.locked_withdrawal ?? 0);
-          const escrow = Math.max(dbLocked, activeEscrow);
-
-          // Calculate available balance safely:
-          // If explicit available is provided, ensure it accounts for active escrow.
-          // Otherwise, derive available as balance - locked escrow.
-          let avail = 0;
-          if (dbAvail !== null && !isNaN(dbAvail)) {
-            const unaccountedEscrow = Math.max(0, activeEscrow - dbLocked);
-            avail = Math.max(0, dbAvail - unaccountedEscrow);
-          } else if (dbBal !== null && !isNaN(dbBal)) {
-            avail = Math.max(0, dbBal - escrow - withdraw);
-          }
-
-          const total = avail + escrow + withdraw;
-
-          balanceMap[symbol] = {
-            available: Math.max(0, avail),
-            inEscrow: escrow,
-            inWithdrawal: withdraw,
-            total: Math.max(0, total),
-          };
+          const normalized = normalizePrimaryWalletAssetBalance(row, activeEscrowMap[symbol]);
+          balanceMap[symbol] = normalized;
         }
       }
     } catch (err) {
       console.warn('wallet_assets primary query notice:', err);
     }
 
-    // 3. Fallback for coins not yet in wallet_assets: Check balances table
-    try {
-      const { data: balancesTableData } = await supabaseAdmin
-        .from('balances')
-        .select('*')
-        .eq('user_id', effectiveUserId);
-
-      if (balancesTableData && balancesTableData.length > 0) {
-        for (const row of balancesTableData) {
-          rawRecords.push(row);
-          const rawSymbol = String(row.asset || row.asset_symbol || row.symbol || '').toUpperCase();
-          const symbol = (coins.includes(rawSymbol as CryptoCurrency) ? rawSymbol : null) as CryptoCurrency | null;
-          if (!symbol) continue;
-
-          if (!hasWalletAssets[symbol]) {
-            const avail = Number(row.available_balance ?? row.available ?? row.balance ?? 0);
-            const escrow = Math.max(Number(row.locked_balance ?? row.locked ?? row.in_escrow ?? 0), activeEscrowMap[symbol]);
-            const withdraw = Number(row.locked_withdrawal ?? 0);
-            const total = avail + escrow + withdraw;
-
-            balanceMap[symbol] = {
-              available: Math.max(0, avail),
-              inEscrow: escrow,
-              inWithdrawal: withdraw,
-              total: Math.max(0, total),
-            };
-            hasWalletAssets[symbol] = true;
-          }
-        }
-      }
-    } catch (err) {
-      console.warn('balances fallback query notice:', err);
-    }
-
-    // 4. Fallback for coins not yet initialized: Check user_balances table
-    try {
-      const { data: userBalancesData } = await supabaseAdmin
-        .from('user_balances')
-        .select('*')
-        .eq('user_id', effectiveUserId);
-
-      if (userBalancesData && userBalancesData.length > 0) {
-        for (const row of userBalancesData) {
-          rawRecords.push(row);
-          const rawSymbol = String(row.asset || row.asset_symbol || '').toUpperCase();
-          const symbol = (coins.includes(rawSymbol as CryptoCurrency) ? rawSymbol : null) as CryptoCurrency | null;
-          if (!symbol) continue;
-
-          if (!hasWalletAssets[symbol]) {
-            const avail = Number(row.available_balance ?? 0);
-            const escrow = Math.max(Number(row.locked_balance ?? 0), activeEscrowMap[symbol]);
-            const total = avail + escrow;
-
-            balanceMap[symbol] = {
-              available: Math.max(0, avail),
-              inEscrow: escrow,
-              inWithdrawal: 0,
-              total: Math.max(0, total),
-            };
-            hasWalletAssets[symbol] = true;
-          }
-        }
-      }
-    } catch (err) {
-      console.warn('user_balances fallback query notice:', err);
-    }
-
-    // 5. Fallback from user_wallets
-    try {
-      const { data: userWalletsView } = await supabaseAdmin
-        .from('user_wallets')
-        .select('*')
-        .eq('user_id', effectiveUserId);
-
-      if (userWalletsView && userWalletsView.length > 0) {
-        for (const row of userWalletsView) {
-          rawRecords.push(row);
-          const rawSymbol = String(row.asset_symbol || row.asset_code || '').toUpperCase();
-          const symbol = (coins.includes(rawSymbol as CryptoCurrency) ? rawSymbol : null) as CryptoCurrency | null;
-          if (!symbol) continue;
-
-          if (!hasWalletAssets[symbol]) {
-            const avail = Number(row.available_balance ?? row.balance ?? 0);
-            const escrow = Math.max(Number(row.locked_balance ?? row.reserved_balance ?? 0), activeEscrowMap[symbol]);
-            const total = avail + escrow;
-
-            balanceMap[symbol] = {
-              available: Math.max(0, avail),
-              inEscrow: escrow,
-              inWithdrawal: 0,
-              total: Math.max(0, total),
-            };
-            hasWalletAssets[symbol] = true;
-          }
-        }
-      }
-    } catch (err) {
-      console.warn('user_wallets fallback query notice:', err);
-    }
-
-    // 6. Profiles fallback
-    try {
-      const { data: profileRow } = await supabaseAdmin
-        .from('profiles')
-        .select('*')
-        .or(`id.eq.${effectiveUserId},user_id.eq.${effectiveUserId}`)
-        .maybeSingle();
-
-      if (profileRow) {
-        const btc = Number(profileRow.btc_balance ?? profileRow.btcBalance ?? profileRow.wallets?.BTC?.balance ?? 0);
-        const eth = Number(profileRow.eth_balance ?? profileRow.ethBalance ?? profileRow.wallets?.ETH?.balance ?? 0);
-        const ltc = Number(profileRow.ltc_balance ?? profileRow.ltcBalance ?? profileRow.wallets?.LTC?.balance ?? 0);
-        const usdt = Number(profileRow.usdt_balance ?? profileRow.usdtBalance ?? profileRow.wallets?.USDT?.balance ?? 0);
-
-        if (!hasWalletAssets['BTC'] && btc > 0) {
-          balanceMap['BTC'] = { available: btc, inEscrow: activeEscrowMap['BTC'], inWithdrawal: 0, total: btc + activeEscrowMap['BTC'] };
-        }
-        if (!hasWalletAssets['ETH'] && eth > 0) {
-          balanceMap['ETH'] = { available: eth, inEscrow: activeEscrowMap['ETH'], inWithdrawal: 0, total: eth + activeEscrowMap['ETH'] };
-        }
-        if (!hasWalletAssets['LTC'] && ltc > 0) {
-          balanceMap['LTC'] = { available: ltc, inEscrow: activeEscrowMap['LTC'], inWithdrawal: 0, total: ltc + activeEscrowMap['LTC'] };
-        }
-        if (!hasWalletAssets['USDT'] && usdt > 0) {
-          balanceMap['USDT'] = { available: usdt, inEscrow: activeEscrowMap['USDT'], inWithdrawal: 0, total: usdt + activeEscrowMap['USDT'] };
-        }
-      }
-    } catch (err) {
-      console.warn('profiles query notice:', err);
-    }
+    // No legacy balances/user_balances/user_wallets/profile columns are authoritative.
+    // If a wallet_assets row is not initialized, the spendable balance remains zero.
 
     // 7. Ensure active escrow is accurately recorded and sync other tables
     coins.forEach((coin) => {
       const activeEscrow = activeEscrowMap[coin] || 0;
       if (activeEscrow > balanceMap[coin].inEscrow) {
-        const diff = activeEscrow - balanceMap[coin].inEscrow;
-        balanceMap[coin].available = Math.max(0, balanceMap[coin].available - diff);
+        // The wallet_assets spendable balance was already debited when escrow was reserved.
+        // Raise only the displayed escrow liability; do not debit available a second time.
         balanceMap[coin].inEscrow = activeEscrow;
       }
       balanceMap[coin].total = balanceMap[coin].available + balanceMap[coin].inEscrow + balanceMap[coin].inWithdrawal;
@@ -337,7 +184,6 @@ export async function GET(request: Request) {
       success: true,
       balances: balanceMap,
       wallets: formattedList,
-      raw: rawRecords,
     });
   } catch (err: any) {
     console.error('Unhandled balance fetch error:', err);

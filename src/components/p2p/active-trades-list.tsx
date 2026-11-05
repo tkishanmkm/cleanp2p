@@ -12,6 +12,7 @@ import { Card, CardContent } from '../ui/card';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { supabase } from '@/lib/supabase/client';
 import { MiniCoinIcon } from '@/components/notifications/notification-bell';
+import { useI18n } from '@/context/i18n-context';
 
 interface DetailedActiveTrade {
   id: string;
@@ -35,6 +36,7 @@ interface DetailedActiveTrade {
 
 export function ActiveTradesList() {
   const { user: authUser, isUserLoading } = useAuth();
+  const { t, language } = useI18n();
   const [activeTrades, setActiveTrades] = useState<DetailedActiveTrade[]>([]);
   const [isLoading, setIsLoading] = useState(true);
 
@@ -93,7 +95,7 @@ export function ActiveTradesList() {
       let profileMap: Record<string, any> = {};
       if (partnerIds.length > 0) {
         const { data: profiles } = await supabase
-          .from('profiles')
+          .from('public_profiles')
           .select('id, username, display_name, avatar_url, photo_url')
           .in('id', partnerIds);
 
@@ -209,6 +211,16 @@ export function ActiveTradesList() {
     return null;
   }
 
+  const getStatusLabel = (status: string) => {
+    const keyByStatus: Record<string, string> = {
+      active: 'statusActive', pending: 'statusPending', paid: 'statusPaid', buyer_marked_paid: 'statusPaid',
+      payment_sent: 'statusPaid', disputed: 'statusDisputed', dispute: 'statusDisputed', released: 'statusReleased',
+      completed: 'statusCompleted', cancelled: 'statusCancelled', canceled: 'statusCancelled', expired: 'statusExpired',
+    };
+    const key = keyByStatus[String(status || '').toLowerCase()];
+    return key ? t(`activeTrades.${key}`) : status;
+  };
+
   const getStatusBadgeClass = (status: string) => {
     switch (status) {
       case 'paid':
@@ -224,7 +236,7 @@ export function ActiveTradesList() {
     <div className="mb-6">
       <div className="flex items-center justify-between mb-2.5">
         <h2 className="text-base sm:text-lg font-bold text-foreground flex items-center gap-2">
-          <span>Active Trades</span>
+          <span>{t('activeTrades.title')}</span>
           <span className="text-xs font-mono font-bold px-2 py-0.5 rounded-full bg-blue-500/15 text-blue-600 dark:text-blue-400 border border-blue-500/30">
             {activeTrades.length}
           </span>
@@ -263,7 +275,7 @@ export function ActiveTradesList() {
                                 ? 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400'
                                 : 'bg-rose-500/15 text-rose-600 dark:text-rose-400'
                             )}>
-                              {trade.isBuyer ? 'BUY' : 'SELL'}
+                              {trade.isBuyer ? t('activeTrades.buy') : t('activeTrades.sell')}
                             </span>
                             <span className="font-bold text-xs text-foreground truncate">
                               @{trade.counterpartyUsername}
@@ -280,7 +292,7 @@ export function ActiveTradesList() {
                         variant="outline"
                         className={cn('capitalize text-[11px] font-semibold px-2 py-0.5 rounded-full border shrink-0', getStatusBadgeClass(trade.status))}
                       >
-                        {trade.status === 'paid' ? 'Marked Paid' : trade.status}
+                        {getStatusLabel(trade.status)}
                       </Badge>
                     </div>
 
@@ -293,7 +305,7 @@ export function ActiveTradesList() {
                         </span>
                       </div>
                       <span className="text-xs font-semibold text-muted-foreground font-mono">
-                        ≈ {trade.fiatAmount.toLocaleString()} {trade.fiatCurrency}
+                        ≈ {trade.fiatAmount.toLocaleString(language)} {trade.fiatCurrency}
                       </span>
                     </div>
 
@@ -305,7 +317,7 @@ export function ActiveTradesList() {
 
                       <Button asChild variant="default" size="sm" className="h-7 text-xs px-2.5 rounded-lg shrink-0 gap-1 font-semibold cursor-pointer">
                         <Link href={`/trade/${trade.id}`}>
-                          View <ChevronRight className="h-3.5 w-3.5" />
+                          {t('activeTrades.view')} <ChevronRight className="h-3.5 w-3.5" />
                         </Link>
                       </Button>
                     </div>

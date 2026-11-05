@@ -10,6 +10,12 @@ export async function POST(req: NextRequest) {
     if (!auth.authorized) {
       return auth.response!;
     }
+    if (auth.supportAdmin === true) {
+      return NextResponse.json(
+        { success: false, error: 'Support administrators cannot change merchant approval or tier.' },
+        { status: 403 }
+      );
+    }
 
     const admin = getSupabaseAdminClient();
 

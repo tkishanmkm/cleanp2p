@@ -5,7 +5,7 @@ import UserProfileClient from './UserProfileClient';
 import { getIdentityVerificationState } from '@/utils/userPrivacy';
 
 interface PageProps {
-  params: Promise<{ username: string }> | { username: string };
+  params: Promise<{ username: string }>;
 }
 
 export const dynamic = 'force-dynamic';
@@ -20,7 +20,7 @@ export default async function UserProfilePage({ params }: PageProps) {
   const isUuid = /^[0-9a-fA-F-]{32,36}$/.test(username);
 
   // 1. Fetch Target Profile
-  const PUBLIC_PROFILE_COLUMNS = 'id, username, display_name, avatar_url, photo_url, country, is_verified, id_verified, kyc_status, is_online, last_seen_at, created_at, total_completed_trades, completed_trades, trade_volume, positive_feedback, negative_feedback, feedback_score';
+  const PUBLIC_PROFILE_COLUMNS = 'id, username, display_name, avatar_url, photo_url, country, status, account_status, is_banned, is_restricted, is_suspended, is_on_hold, is_emergency_frozen, is_minor_restricted, is_verified, id_verified, kyc_status, is_online, last_seen_at, created_at, total_completed_trades, completed_trades, trade_volume, positive_feedback, negative_feedback, feedback_score';
   let profileQuery = supabase.from('profiles').select(PUBLIC_PROFILE_COLUMNS);
   if (isUuid) {
     profileQuery = profileQuery.or(`id.eq.${username},username.ilike.${username}`);
@@ -34,6 +34,26 @@ export default async function UserProfilePage({ params }: PageProps) {
     return notFound();
   }
 
+  const accountStatus = String(profile.account_status || '').toUpperCase();
+  const profileStatus = String(profile.status || '').toLowerCase();
+  const hidePublicAds =
+    accountStatus === 'DELETION_PENDING' ||
+    accountStatus === 'DELETED' ||
+    accountStatus === 'BANNED' ||
+    accountStatus === 'RESTRICTED' ||
+    accountStatus === 'SUSPENDED' ||
+    accountStatus === 'INACTIVE' ||
+    profileStatus === 'deleted' ||
+    profileStatus === 'banned' ||
+    profileStatus === 'inactive' ||
+    profile.is_banned === true ||
+    profile.is_restricted === true ||
+    profile.is_suspended === true ||
+    profile.is_on_hold === true ||
+    profile.is_emergency_frozen === true ||
+    profile.is_minor_restricted === true ||
+    profileStatus === 'suspended';
+
   // 2. Fetch Active Ads listed by this user (both buy & sell)
   let userAds: any[] = [];
   try {
@@ -42,7 +62,9 @@ export default async function UserProfilePage({ params }: PageProps) {
       .select('*')
       .eq('user_id', profile.id)
       .neq('status', 'DELETED')
-      .order('created_at', { ascending: false });
+      .or('active.eq.true,is_active.eq.true,status.eq.active,status.eq.published')
+      .order('created_at', { ascending: false })
+      .limit(20);
 
     if (!adsError && Array.isArray(adsData)) {
       userAds = adsData;
@@ -53,7 +75,9 @@ export default async function UserProfilePage({ params }: PageProps) {
         .select('*')
         .eq('user_id', profile.id)
         .neq('status', 'DELETED')
-        .order('created_at', { ascending: false });
+        .or('active.eq.true,is_active.eq.true,status.eq.active,status.eq.published')
+        .order('created_at', { ascending: false })
+        .limit(20);
       if (Array.isArray(p2pAdsData)) {
         userAds = p2pAdsData;
       }
@@ -107,12 +131,22 @@ export default async function UserProfilePage({ params }: PageProps) {
     console.warn('Error querying wallet balances:', err);
   }
 
+  // Keep the profile page visible as a tombstone, but never display ads for deleted,
+  // banned, suspended, or restricted accounts.
+  if (hidePublicAds) userAds = [];
+
   // Filter ads from visitor perspective and attach available crypto:
   // 1. If advertiser created a 'SELL' ad, the visitor BUYs crypto from advertiser -> "Buy Ads" tab
   const buyAds = userAds
     .filter((ad) => {
       const type = String(ad.type || ad.ad_type || ad.trade_type || '').toUpperCase();
-      const isActive = ad.is_active !== false && ad.active !== false && String(ad.status || '').toUpperCase() !== 'INACTIVE';
+      const adStatus = String(ad.status || '').toUpperCase();
+      const hasActiveFlags = ad.is_active != null || ad.active != null;
+      const isActive =
+        !['INACTIVE', 'PAUSED', 'DELETED', 'SUSPENDED'].includes(adStatus) &&
+        (hasActiveFlags
+          ? ad.is_active === true || ad.active === true
+          : ['ACTIVE', 'PUBLISHED'].includes(adStatus));
       return (type === 'SELL' || type === 'ONLINE_SELL' || type === '') && isActive;
     })
     .map((ad) => {
@@ -127,7 +161,13 @@ export default async function UserProfilePage({ params }: PageProps) {
   const sellAds = userAds
     .filter((ad) => {
       const type = String(ad.type || ad.ad_type || ad.trade_type || '').toUpperCase();
-      const isActive = ad.is_active !== false && ad.active !== false && String(ad.status || '').toUpperCase() !== 'INACTIVE';
+      const adStatus = String(ad.status || '').toUpperCase();
+      const hasActiveFlags = ad.is_active != null || ad.active != null;
+      const isActive =
+        !['INACTIVE', 'PAUSED', 'DELETED', 'SUSPENDED'].includes(adStatus) &&
+        (hasActiveFlags
+          ? ad.is_active === true || ad.active === true
+          : ['ACTIVE', 'PUBLISHED'].includes(adStatus));
       return (type === 'BUY' || type === 'ONLINE_BUY') && isActive;
     })
     .map((ad) => ({
@@ -320,17 +360,19 @@ export default async function UserProfilePage({ params }: PageProps) {
   return (
     <UserProfileClient
       profile={{
-        ...profile,
-        last_seen: profile.last_seen_at || null,
-        last_seen_at: profile.last_seen_at || null,
-        last_active: profile.last_seen_at || null,
-        is_online: profile.is_online ?? false,
+        id: profile.id,
         username: profile.username || username,
+        display_name: profile.display_name || null,
+        avatar_url: profile.avatar_url || profile.photo_url || null,
+        photo_url: profile.photo_url || profile.avatar_url || null,
+        country: countryCode,
+        created_at: profile.created_at || null,
+        is_online: profile.is_online ?? false,
+        is_trading_eligible: !hidePublicAds,
         is_email_verified: isEmailVerified,
         is_id_verified: verification.isVerified,
-        kyc_status: verification.isVerified ? 'VERIFIED' : verification.isPending ? 'PENDING' : 'UNVERIFIED',
+        kyc_status: verification.isVerified ? 'VERIFIED' : 'UNVERIFIED',
         verification_tier: verification.tier,
-        country: countryCode,
       }}
       buyAds={buyAds}
       sellAds={sellAds}

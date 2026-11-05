@@ -1,36 +1,53 @@
-import { createServerClient } from '@supabase/ssr';
-import { cookies } from 'next/headers';
+import { createClient } from '@/utils/supabase/server';
 import { NextResponse, type NextRequest } from 'next/server';
 import { getSupabaseAdminClient } from '@/utils/supabase/server';
 
 export async function GET(request: NextRequest) {
-  const cookieHeader = cookies();
-  const cookieStore = typeof (cookieHeader as any)?.then === 'function' ? await cookieHeader : cookieHeader;
-
-  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://placeholder.supabase.co';
-  const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'placeholder-key';
-
-  const supabase = createServerClient(
-    supabaseUrl,
-    supabaseAnonKey,
-    {
-      cookies: {
-        getAll() { return cookieStore.getAll(); },
-        setAll(cookiesToSet: Array<{ name: string; value: string; options?: any }>) {
-          try { cookiesToSet.forEach(({ name, value, options }) => cookieStore.set(name, value, options)); } catch {}
-        },
-      },
-    }
-  );
+  const supabase = await createClient();
 
   const { data: { user } } = await supabase.auth.getUser();
-  const targetId = request.nextUrl.searchParams.get('targetId');
-
-  if (!user || !targetId) {
-    return NextResponse.json({ status: 'NOT_BLOCKED', isBlockedByMe: false, blockedByCount: 0, usersBlockedCount: 0 });
+  if (!user) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
+  const targetId = request.nextUrl.searchParams.get('targetId');
   const admin = getSupabaseAdminClient();
+  const mode = request.nextUrl.searchParams.get('mode');
+
+  if (mode === 'list' || mode === 'search') {
+    if (mode === 'list') {
+      const { data: ownProfile, error: ownError } = await admin
+        .from('profiles').select('blocked_users').eq('id', user.id).maybeSingle();
+      if (ownError) return NextResponse.json({ error: 'Unable to load blocked users' }, { status: 500 });
+      const ids: string[] = Array.isArray(ownProfile?.blocked_users)
+        ? ownProfile.blocked_users.filter((id: unknown): id is string => typeof id === 'string').slice(0, 200)
+        : [];
+      if (!ids.length) return NextResponse.json({ users: [] });
+      const { data, error } = await admin.from('public_profiles')
+        .select('id, username, photo_url').in('id', ids);
+      if (error) return NextResponse.json({ error: 'Unable to load blocked users' }, { status: 500 });
+      return NextResponse.json({ users: data || [] });
+    }
+
+    const query = (request.nextUrl.searchParams.get('q') || '').trim().replace(/^@/, '').slice(0, 64);
+    if (query.length < 2) return NextResponse.json({ users: [] });
+    const { data: ownProfile, error: ownError } = await admin
+      .from('profiles').select('blocked_users').eq('id', user.id).maybeSingle();
+    if (ownError) return NextResponse.json({ error: 'Unable to search users' }, { status: 500 });
+    const blockedIds: string[] = Array.isArray(ownProfile?.blocked_users) ? ownProfile.blocked_users : [];
+    const escapedQuery = query.replace(/[\\%_]/g, '\\$&');
+    const { data, error } = await admin.from('public_profiles')
+      .select('id, username, photo_url')
+      .ilike('username', `%${escapedQuery}%`)
+      .neq('id', user.id)
+      .limit(5);
+    if (error) return NextResponse.json({ error: 'Unable to search users' }, { status: 500 });
+    return NextResponse.json({ users: (data || []).filter((profile: any) => !blockedIds.includes(profile.id)) });
+  }
+
+  if (!targetId) {
+    return NextResponse.json({ status: 'NOT_BLOCKED', isBlockedByMe: false, blockedByCount: 0, usersBlockedCount: 0 });
+  }
 
   try {
     // 1. Fetch blocker & target profile
@@ -84,27 +101,31 @@ export async function GET(request: NextRequest) {
       status = 'THIS_USER_BLOCKED_YOU';
     }
 
-    // Calculate how many distinct users have blocked this target user
+    // Count relationships from the normalized block table. Never scan every profile
+    // row (or retrieve other users' private blocked_users arrays) for this response.
     let blockedByCount = 0;
+    let usersBlockedCount = 0;
     try {
-      const { data: allProfiles } = await admin
-        .from('profiles')
-        .select('id, blocked_users');
+      const { data: incomingBlocks, error: incomingError } = await admin
+        .from('user_blocks')
+        .select('blocker_id')
+        .eq('blocked_id', targetRealId);
 
-      if (allProfiles) {
-        for (const p of allProfiles) {
-          if (p.id === targetRealId) continue;
-          const blk: string[] = Array.isArray(p.blocked_users) ? p.blocked_users : [];
-          if (blk.includes(targetRealId) || (targetProfile?.username && blk.includes(targetProfile.username))) {
-            blockedByCount++;
-          }
-        }
+      if (!incomingError && Array.isArray(incomingBlocks)) {
+        blockedByCount = new Set(incomingBlocks.map((block) => block.blocker_id)).size;
+      }
+
+      const { data: outgoingBlocks, error: outgoingError } = await admin
+        .from('user_blocks')
+        .select('blocked_id')
+        .eq('blocker_id', targetRealId);
+
+      if (!outgoingError && Array.isArray(outgoingBlocks)) {
+        usersBlockedCount = new Set(outgoingBlocks.map((block) => block.blocked_id)).size;
       }
     } catch {
-      // ignore
+      // Keep counts at zero if the normalized relationship table is unavailable.
     }
-
-    const usersBlockedCount = Array.from(new Set(targetBlocked)).length;
 
     return NextResponse.json({
       status,

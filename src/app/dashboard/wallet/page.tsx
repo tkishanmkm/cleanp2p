@@ -1,6 +1,8 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import { supabase } from '@/lib/supabase/client';
+import { clearPendingWithdrawalKey, getOrCreatePendingWithdrawalKey } from '@/lib/withdrawal-idempotency-store';
 
 export default function WalletDashboard() {
   const [loading, setLoading] = useState(true);
@@ -8,6 +10,7 @@ export default function WalletDashboard() {
   const [balances, setBalances] = useState<any[]>([]);
   const [withdrawAddress, setWithdrawAddress] = useState('');
   const [withdrawAmount, setWithdrawAmount] = useState('');
+  const [totpCode, setTotpCode] = useState('');
   const [withdrawStatus, setWithdrawStatus] = useState('');
 
   useEffect(() => {
@@ -24,15 +27,20 @@ export default function WalletDashboard() {
             evm_address: evmAddr,
             btc_address: btcAddr,
           });
+        }
 
-          // 2. Fetch live multi-chain balances if EVM address available
-          if (evmAddr) {
-            const balanceRes = await fetch(`/api/wallet/balances?address=${encodeURIComponent(evmAddr)}`);
-            const balanceData = await balanceRes.json();
-            if (balanceData.balances) {
-              setBalances(balanceData.balances);
-            }
-          }
+        // Fetch balances regardless of address provisioning state, using the
+        // authenticated user's authoritative wallet endpoint.
+        const balanceRes = await fetch('/api/wallet/balance', { cache: 'no-store' });
+        const balanceData = await balanceRes.json();
+        if (balanceRes.ok && balanceData.success && balanceData.balances) {
+          const map = balanceData.balances;
+          setBalances([
+            { network: 'Ethereum Mainnet', symbol: 'ETH', balance: Number(map.ETH?.available ?? 0).toFixed(4) },
+            { network: 'USDT (All Chains)', symbol: 'USDT', balance: Number(map.USDT?.available ?? 0).toFixed(2) },
+            { network: 'Bitcoin', symbol: 'BTC', balance: Number(map.BTC?.available ?? 0).toFixed(6) },
+            { network: 'Litecoin', symbol: 'LTC', balance: Number(map.LTC?.available ?? 0).toFixed(4) },
+          ]);
         }
       } catch (err) {
         console.error('Failed to load wallet data', err);
@@ -45,26 +53,52 @@ export default function WalletDashboard() {
 
   const handleWithdraw = async (e: React.FormEvent) => {
     e.preventDefault();
-    setWithdrawStatus('Processing withdrawal...');
+    setWithdrawStatus('Submitting withdrawal request...');
 
+    let userId: string | null = null;
+    let fingerprint = '';
+    let idempotencyKey = '';
     try {
+      const { data: { user }, error: authError } = await supabase.auth.getUser();
+      if (authError || !user?.id) throw new Error('Please sign in again before withdrawing.');
+
+      const amount = Number(withdrawAmount);
+      if (!Number.isFinite(amount) || amount <= 0) throw new Error('Enter a valid positive amount.');
+      const destinationAddress = withdrawAddress.trim();
+      userId = user.id;
+      fingerprint = JSON.stringify(['ETH', 'ETH', destinationAddress, amount]);
+      idempotencyKey = await getOrCreatePendingWithdrawalKey(userId, fingerprint);
+
       const res = await fetch('/api/wallet/withdraw', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'x-idempotency-key': idempotencyKey,
+        },
         body: JSON.stringify({
-          recipientAddress: withdrawAddress,
-          amountEth: withdrawAmount,
+          asset: 'ETH',
+          network: 'ETH',
+          destinationAddress,
+          amount,
+          totpCode: totpCode.trim(),
         }),
       });
 
       const data = await res.json();
-      if (data.success) {
-        setWithdrawStatus(`Success! Tx Hash: ${data.transactionHash}`);
-      } else {
-        setWithdrawStatus(`Error: ${data.error}`);
+      const withdrawalId = data?.withdrawalId || data?.withdrawal_id;
+      if (
+        !res.ok ||
+        data?.success !== true ||
+        typeof withdrawalId !== 'string' ||
+        !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(withdrawalId)
+      ) {
+        throw new Error(data?.error || 'Withdrawal result could not be confirmed. Check withdrawal history before retrying.');
       }
+
+      await clearPendingWithdrawalKey(userId, fingerprint, idempotencyKey);
+      setWithdrawStatus(`Withdrawal queued: ${withdrawalId} (status: ${data.status || 'QUEUED'}). Check withdrawal history for updates.`);
     } catch (err: any) {
-      setWithdrawStatus(`Error: ${err.message}`);
+      setWithdrawStatus(`Error: ${err?.message || 'Withdrawal request failed'}`);
     }
   };
 
@@ -136,9 +170,24 @@ export default function WalletDashboard() {
               type="number"
               step="0.0001"
               required
+              min="0.0001"
               placeholder="0.01"
               value={withdrawAmount}
               onChange={(e) => setWithdrawAmount(e.target.value)}
+              className="w-full p-2 border rounded text-sm"
+            />
+          </div>
+          <div>
+            <label className="text-xs text-muted-foreground block mb-1">2FA code (if enabled)</label>
+            <input
+              type="text"
+              inputMode="numeric"
+              autoComplete="one-time-code"
+              pattern="[0-9]{4,8}"
+              maxLength={8}
+              placeholder="Enter authenticator code"
+              value={totpCode}
+              onChange={(e) => setTotpCode(e.target.value.replace(/\D/g, '').slice(0, 8))}
               className="w-full p-2 border rounded text-sm"
             />
           </div>

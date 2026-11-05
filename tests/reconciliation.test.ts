@@ -1,12 +1,5 @@
-import { createClient } from '@supabase/supabase-js';
+import { testSupabase as supabase } from './helpers/test-supabase';
 import { runFinancialReconciliation } from '../src/lib/security/reconciliation';
-
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL || 'https://placeholder.supabase.co';
-const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'placeholder-key';
-
-const supabase = createClient(supabaseUrl, supabaseKey, {
-  auth: { persistSession: false, autoRefreshToken: false },
-});
 
 // Color helpers
 const green = (s: string) => `\x1b[32m${s}\x1b[0m`;
@@ -117,8 +110,13 @@ async function runReconciliationTests() {
     console.log(bold(cyan('------------------------------------------------------\n')));
     if (passedTests === totalTests) {
       console.log(green(bold('ALL FINANCIAL RECONCILIATION AUDIT TESTS PASSED!')));
+    } else {
+      process.exitCode = 1;
     }
   }
 }
 
-runReconciliationTests();
+runReconciliationTests().catch((error) => {
+  console.error(error);
+  process.exitCode = 1;
+});

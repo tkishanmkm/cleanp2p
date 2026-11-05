@@ -5,7 +5,8 @@ import { bech32 } from 'bech32';
 import { ethers } from 'ethers';
 import bs58 from 'bs58';
 import { networks } from 'bitcoinjs-lib';
-import { createClient, SupabaseClient } from '@supabase/supabase-js';
+import type { SupabaseClient } from '@supabase/supabase-js';
+import { getSupabaseServiceClient } from '@/lib/supabase/service-role';
 
 // ============================================================================
 // Network Definitions (Mainnet)
@@ -176,22 +177,7 @@ export const BIP_PATHS = {
 // ============================================================================
 
 export function getAdminClient(): SupabaseClient {
-  const supabaseUrl =
-    process.env.NEXT_PUBLIC_SUPABASE_URL ||
-    process.env.SUPABASE_URL ||
-    'https://eaiwgfxoiwxepinvcykg.supabase.co';
-
-  const serviceRoleKey =
-    process.env.SUPABASE_SERVICE_ROLE_KEY ||
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ||
-    'placeholder-key';
-
-  return createClient(supabaseUrl, serviceRoleKey, {
-    auth: {
-      persistSession: false,
-      autoRefreshToken: false,
-    },
-  });
+  return getSupabaseServiceClient();
 }
 
 // ============================================================================

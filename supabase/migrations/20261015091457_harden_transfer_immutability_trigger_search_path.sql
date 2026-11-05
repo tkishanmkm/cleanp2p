@@ -1,0 +1,1 @@
+ALTER FUNCTION public.prevent_transfer_immutability_update() SET search_path = '';

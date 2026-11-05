@@ -37,7 +37,8 @@ export const SUPPORTED_EVM_CHAINS: Record<string, ChainConfig> = {
     blockExplorer: 'https://etherscan.io',
     isTestnet: false,
     requiredConfirmations: 12,
-    usdtContractAddress: process.env.USDT_CONTRACT_ERC20 || '0xdAC17F958D2ee523a2206206994597C13D831ec7',
+    // Mainnet payout contract is intentionally fixed: environment overrides could route withdrawals into counterfeit tokens.
+    usdtContractAddress: '0xdAC17F958D2ee523a2206206994597C13D831ec7',
     usdtDecimals: 6,
   },
   BEP20: {
@@ -55,7 +56,8 @@ export const SUPPORTED_EVM_CHAINS: Record<string, ChainConfig> = {
     blockExplorer: 'https://bscscan.com',
     isTestnet: false,
     requiredConfirmations: 15,
-    usdtContractAddress: process.env.USDT_CONTRACT_BEP20 || '0x55d398326f99059fF775485246999027B3197955',
+    // BSC mainnet USDT contract is fixed to prevent counterfeit-token payouts.
+    usdtContractAddress: '0x55d398326f99059fF775485246999027B3197955',
     usdtDecimals: 18, // BSC USDT uses 18 decimals
   },
 };
@@ -161,6 +163,74 @@ export const ERC20_ABI = [
 ];
 
 /**
+ * Fail-closed evidence check for a completed EVM withdrawal. A successful receipt
+ * alone is insufficient: verify chain, transaction target/value and the exact
+ * token Transfer event before releasing the reserved withdrawal liability.
+ */
+export async function verifyEvmWithdrawalEvidence(params: {
+  provider: ethers.JsonRpcProvider;
+  txHash: string;
+  network: string;
+  assetSymbol: string;
+  destinationAddress: string;
+  amount: string | number;
+  expectedSender?: string | null;
+}): Promise<{ verified: boolean; reason: string }> {
+  try {
+    const networkCode = normalizeNetworkCode(params.network);
+    const chain = SUPPORTED_EVM_CHAINS[networkCode];
+    if (!chain) return { verified: false, reason: 'unsupported_evm_network' };
+    if (!ethers.isAddress(params.destinationAddress)) return { verified: false, reason: 'invalid_destination' };
+    const actualNetwork = await params.provider.getNetwork();
+    if (actualNetwork.chainId !== BigInt(chain.chainId)) return { verified: false, reason: 'provider_chain_id_mismatch' };
+    const tx = await params.provider.getTransaction(params.txHash);
+    const receipt = await params.provider.getTransactionReceipt(params.txHash);
+    if (!tx || !receipt || receipt.status !== 1 || tx.hash.toLowerCase() !== params.txHash.toLowerCase()) {
+      return { verified: false, reason: 'transaction_or_success_receipt_missing' };
+    }
+    if (tx.chainId !== BigInt(chain.chainId)) return { verified: false, reason: 'transaction_chain_id_mismatch' };
+    if (!params.expectedSender || !ethers.isAddress(params.expectedSender)) {
+      return { verified: false, reason: 'expected_hot_wallet_unavailable' };
+    }
+    if (tx.from.toLowerCase() !== params.expectedSender.toLowerCase()) {
+      return { verified: false, reason: 'sender_mismatch' };
+    }
+    const asset = params.assetSymbol.toUpperCase().trim();
+    const isNative = asset === chain.nativeSymbol;
+    const expectedAmount = ethers.parseUnits(String(params.amount), isNative ? chain.nativeDecimals : getTokenDecimals(networkCode, asset));
+    if (expectedAmount <= 0n) return { verified: false, reason: 'invalid_expected_amount' };
+    if (isNative) {
+      if (!tx.to || tx.to.toLowerCase() !== params.destinationAddress.toLowerCase() || tx.value !== expectedAmount || tx.data !== '0x') {
+        return { verified: false, reason: 'native_transfer_mismatch' };
+      }
+      return { verified: true, reason: 'verified_native_transfer' };
+    }
+    const tokenAddress = getTokenContractAddress(networkCode, asset);
+    if (!tokenAddress || !tx.to || tx.to.toLowerCase() !== tokenAddress.toLowerCase()) {
+      return { verified: false, reason: 'token_contract_mismatch' };
+    }
+    const iface = new ethers.Interface(ERC20_ABI);
+    let exactTransferCount = 0;
+    for (const log of receipt.logs) {
+      if (log.address.toLowerCase() !== tokenAddress.toLowerCase()) continue;
+      try {
+        const parsed = iface.parseLog(log);
+        if (parsed?.name !== 'Transfer') continue;
+        const from = String(parsed.args.from);
+        const to = String(parsed.args.to);
+        const value = BigInt(parsed.args.value);
+        if (params.expectedSender && from.toLowerCase() !== params.expectedSender.toLowerCase()) continue;
+        if (to.toLowerCase() === params.destinationAddress.toLowerCase() && value === expectedAmount) exactTransferCount++;
+      } catch { /* Ignore unrelated logs; exact matching event is required below. */ }
+    }
+    if (exactTransferCount !== 1) return { verified: false, reason: 'exact_token_transfer_event_missing_or_ambiguous' };
+    return { verified: true, reason: 'verified_token_transfer' };
+  } catch {
+    return { verified: false, reason: 'verification_unavailable' };
+  }
+}
+
+/**
  * Dynamically resolves token decimals for accurate unit calculations
  */
 export function getTokenDecimals(network: string, assetSymbol: string): number {
@@ -228,6 +298,113 @@ export async function getEip1559FeeOverrides(
   return {};
 }
 
+export type FinalizedEvmWithdrawalReceiptProof =
+  | {
+      verified: true;
+      network: string;
+      chainId: number;
+      txHash: string;
+      receiptStatus: 0 | 1;
+      blockNumber: number;
+      blockHash: string;
+      confirmations: number;
+      gasUsed: string;
+      effectiveGasPrice: string;
+      actualGasAmount: string;
+      transactionNonce: number;
+      signerAddress: string;
+    }
+  | { verified: false; reason: string };
+
+/**
+ * Builds a durable EVM withdrawal receipt proof only after checking transaction
+ * identity, configured chain, sender/nonce, canonical block hash and finality.
+ * A successful proof still requires the separate exact payout/event check.
+ */
+export async function getFinalizedEvmWithdrawalReceiptProof(params: {
+  provider: ethers.JsonRpcProvider;
+  txHash: string;
+  network: string;
+  expectedSender: string;
+  expectedNonce: number;
+}): Promise<FinalizedEvmWithdrawalReceiptProof> {
+  try {
+    const network = normalizeNetworkCode(params.network);
+    const chain = SUPPORTED_EVM_CHAINS[network];
+    if (!chain) return { verified: false, reason: 'unsupported_evm_network' };
+    if (!/^0x[a-fA-F0-9]{64}$/.test(params.txHash)) {
+      return { verified: false, reason: 'invalid_transaction_hash' };
+    }
+    if (!ethers.isAddress(params.expectedSender) || !Number.isSafeInteger(params.expectedNonce) || params.expectedNonce < 0) {
+      return { verified: false, reason: 'expected_signer_or_nonce_unavailable' };
+    }
+
+    const [actualNetwork, tx, receipt] = await Promise.all([
+      params.provider.getNetwork(),
+      params.provider.getTransaction(params.txHash),
+      params.provider.getTransactionReceipt(params.txHash),
+    ]);
+    if (actualNetwork.chainId !== BigInt(chain.chainId)) {
+      return { verified: false, reason: 'provider_chain_id_mismatch' };
+    }
+    if (!tx || !receipt || tx.hash.toLowerCase() !== params.txHash.toLowerCase()) {
+      return { verified: false, reason: 'transaction_or_receipt_missing' };
+    }
+    if (tx.chainId !== BigInt(chain.chainId)) {
+      return { verified: false, reason: 'transaction_chain_id_mismatch' };
+    }
+    if (tx.from.toLowerCase() !== params.expectedSender.toLowerCase()) {
+      return { verified: false, reason: 'transaction_signer_mismatch' };
+    }
+    if (tx.nonce !== params.expectedNonce) {
+      return { verified: false, reason: 'transaction_nonce_mismatch' };
+    }
+    if (receipt.status !== 0 && receipt.status !== 1) {
+      return { verified: false, reason: 'receipt_status_unknown' };
+    }
+    if (!receipt.blockHash || !Number.isSafeInteger(receipt.blockNumber) || receipt.blockNumber < 0) {
+      return { verified: false, reason: 'receipt_block_identity_missing' };
+    }
+
+    const [currentBlock, canonicalBlock] = await Promise.all([
+      params.provider.getBlockNumber(),
+      params.provider.getBlock(receipt.blockNumber),
+    ]);
+    if (!canonicalBlock?.hash || canonicalBlock.hash.toLowerCase() !== receipt.blockHash.toLowerCase()) {
+      return { verified: false, reason: 'receipt_block_not_canonical' };
+    }
+
+    const confirmations = Math.max(0, currentBlock - receipt.blockNumber + 1);
+    if (confirmations < chain.requiredConfirmations) {
+      return { verified: false, reason: 'receipt_finality_threshold_not_met' };
+    }
+
+    const effectiveGasPrice = receipt.gasPrice ?? tx.gasPrice;
+    if (!effectiveGasPrice || effectiveGasPrice <= 0n || receipt.gasUsed <= 0n) {
+      return { verified: false, reason: 'receipt_fee_measurement_unavailable' };
+    }
+    const actualGasAmount = ethers.formatEther(receipt.gasUsed * effectiveGasPrice);
+
+    return {
+      verified: true,
+      network,
+      chainId: chain.chainId,
+      txHash: tx.hash,
+      receiptStatus: receipt.status as 0 | 1,
+      blockNumber: receipt.blockNumber,
+      blockHash: receipt.blockHash,
+      confirmations,
+      gasUsed: receipt.gasUsed.toString(),
+      effectiveGasPrice: effectiveGasPrice.toString(),
+      actualGasAmount,
+      transactionNonce: tx.nonce,
+      signerAddress: tx.from,
+    };
+  } catch {
+    return { verified: false, reason: 'receipt_proof_verification_unavailable' };
+  }
+}
+
 /**
  * Calculates confirmations and actual gas cost for an on-chain transaction
  */
@@ -241,13 +418,21 @@ export async function getTransactionConfirmations(
       return { confirmations: 0 };
     }
 
-    const currentBlock = await provider.getBlockNumber();
+    const [currentBlock, canonicalBlock] = await Promise.all([
+      provider.getBlockNumber(),
+      provider.getBlock(receipt.blockNumber),
+    ]);
+    // A receipt returned by an RPC may refer to an orphaned block after a reorg.
+    // Treat missing/mismatched canonical block data as unconfirmed for both payout and refund.
+    if (!canonicalBlock?.hash || !receipt.blockHash || canonicalBlock.hash.toLowerCase() !== receipt.blockHash.toLowerCase()) {
+      return { confirmations: 0 };
+    }
     const confirmations = Math.max(0, currentBlock - receipt.blockNumber + 1);
 
-    // Compute actual on-chain gas cost (gasUsed * effectiveGasPrice)
+    // Ethers v6 TransactionReceipt exposes gasPrice; compute actual gas cost.
     let actualGasCost: string | undefined;
     try {
-      const gasPrice = receipt.effectiveGasPrice ?? receipt.gasPrice ?? 0n;
+      const gasPrice = receipt.gasPrice ?? 0n;
       const gasCostWei = receipt.gasUsed * gasPrice;
       actualGasCost = ethers.formatEther(gasCostWei);
     } catch {

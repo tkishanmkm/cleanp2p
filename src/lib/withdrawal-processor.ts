@@ -118,15 +118,17 @@ export async function processTronWithdrawalOnChain(
 
   console.log(`[TRON Withdrawal Engine] Broadcast Successful. TxID: ${txid}`);
 
-  try {
-    await supabase.rpc('complete_onchain_withdrawal', {
-      p_withdrawal_id: withdrawal.id,
-      p_tx_hash: txid,
-      p_actual_gas_amount: 0,
-      p_gas_asset: 'TRX',
-    });
-  } catch (dbErr) {
-    console.warn('[TRON Withdrawal Engine] DB notice on update:', dbErr);
+  const { data: settlementResult, error: settlementError } = await supabase.rpc('complete_onchain_withdrawal', {
+    p_withdrawal_id: withdrawal.id,
+    p_tx_hash: txid,
+    p_actual_gas_amount: 0,
+    p_gas_asset: 'TRX',
+  });
+  if (settlementError || settlementResult?.success !== true) {
+    // The transaction may already be broadcast. Propagate the settlement failure
+    // so the caller leaves this withdrawal for reconciliation, never rebroadcast.
+    const reason = settlementError?.message || 'RPC did not confirm success';
+    throw new Error(`TRON transaction ${txid} broadcast, but settlement persistence failed: ${reason}`);
   }
 
   return txid;
@@ -239,16 +241,16 @@ export async function processBtcWithdrawalOnChain(
   console.log(`[BTC Withdrawal Engine] Broadcast Successful. TxID: ${txid}`);
 
   const supabase = getSupabaseAdminClient();
-  try {
-    const feeBtc = Number((networkFeeSat / 1e8).toFixed(8));
-    await supabase.rpc('complete_onchain_withdrawal', {
-      p_withdrawal_id: withdrawal.id,
-      p_tx_hash: txid,
-      p_actual_gas_amount: feeBtc,
-      p_gas_asset: 'BTC',
-    });
-  } catch (dbErr) {
-    console.warn('[BTC Withdrawal Engine] DB notice on update:', dbErr);
+  const feeBtc = Number((networkFeeSat / 1e8).toFixed(8));
+  const { data: settlementResult, error: settlementError } = await supabase.rpc('complete_onchain_withdrawal', {
+    p_withdrawal_id: withdrawal.id,
+    p_tx_hash: txid,
+    p_actual_gas_amount: feeBtc,
+    p_gas_asset: 'BTC',
+  });
+  if (settlementError || settlementResult?.success !== true) {
+    const reason = settlementError?.message || 'RPC did not confirm success';
+    throw new Error(`BTC transaction ${txid} broadcast, but settlement persistence failed: ${reason}`);
   }
 
   return txid;
@@ -361,16 +363,16 @@ export async function processLtcWithdrawalOnChain(
   console.log(`[LTC Withdrawal Engine] Broadcast Successful. TxID: ${txid}`);
 
   const supabase = getSupabaseAdminClient();
-  try {
-    const feeLtc = Number((networkFeeLit / 1e8).toFixed(8));
-    await supabase.rpc('complete_onchain_withdrawal', {
-      p_withdrawal_id: withdrawal.id,
-      p_tx_hash: txid,
-      p_actual_gas_amount: feeLtc,
-      p_gas_asset: 'LTC',
-    });
-  } catch (dbErr) {
-    console.warn('[LTC Withdrawal Engine] DB notice on update:', dbErr);
+  const feeLtc = Number((networkFeeLit / 1e8).toFixed(8));
+  const { data: settlementResult, error: settlementError } = await supabase.rpc('complete_onchain_withdrawal', {
+    p_withdrawal_id: withdrawal.id,
+    p_tx_hash: txid,
+    p_actual_gas_amount: feeLtc,
+    p_gas_asset: 'LTC',
+  });
+  if (settlementError || settlementResult?.success !== true) {
+    const reason = settlementError?.message || 'RPC did not confirm success';
+    throw new Error(`LTC transaction ${txid} broadcast, but settlement persistence failed: ${reason}`);
   }
 
   return txid;
@@ -448,17 +450,20 @@ export async function processEvmWithdrawalOnChain(
 
   console.log(`[Withdrawal Engine] Broadcast Successful. TxHash: ${txResponse.hash}`);
 
-  // Settle via authoritative complete_onchain_withdrawal RPC
-  try {
-    const gasAsset = (withdrawal.network_code || '').toUpperCase().includes('BEP') || (withdrawal.network_code || '').toUpperCase().includes('BSC') ? 'BNB' : 'ETH';
-    await supabase.rpc('complete_onchain_withdrawal', {
-      p_withdrawal_id: withdrawal.id,
-      p_tx_hash: txResponse.hash,
-      p_actual_gas_amount: 0,
-      p_gas_asset: gasAsset,
-    });
-  } catch (dbErr) {
-    console.warn('[Withdrawal Engine] DB notice on RPC execution:', dbErr);
+  // Settle via authoritative complete_onchain_withdrawal RPC. A returned RPC
+  // error must not be swallowed: the transaction is already broadcast and needs
+  // reconciliation rather than another send or a refund.
+  const networkCode = (withdrawal.network || '').toUpperCase();
+  const gasAsset = networkCode.includes('BEP') || networkCode.includes('BSC') ? 'BNB' : 'ETH';
+  const { data: settlementResult, error: settlementError } = await supabase.rpc('complete_onchain_withdrawal', {
+    p_withdrawal_id: withdrawal.id,
+    p_tx_hash: txResponse.hash,
+    p_actual_gas_amount: 0,
+    p_gas_asset: gasAsset,
+  });
+  if (settlementError || settlementResult?.success !== true) {
+    const reason = settlementError?.message || 'RPC did not confirm success';
+    throw new Error(`EVM transaction ${txResponse.hash} broadcast, but settlement persistence failed: ${reason}`);
   }
 
   return txResponse.hash;
@@ -510,7 +515,10 @@ export async function processPendingWithdrawals(limit: number = 20): Promise<Pro
   const { data: withdrawals, error: fetchError } = await supabaseAdmin
     .from('withdrawals')
     .select('*')
-    .in('status', ['approved', 'processing', 'QUEUED'])
+    // Never automatically rebroadcast a record already marked processing: a prior
+    // worker may have broadcast successfully before losing its database response.
+    // Such records require explicit transaction reconciliation.
+    .in('status', ['approved', 'QUEUED'])
     .order('created_at', { ascending: true })
     .limit(limit);
 
@@ -537,16 +545,31 @@ export async function processPendingWithdrawals(limit: number = 20): Promise<Pro
     const networkCode = (item.network || item.network_code || 'TRC20').toUpperCase().trim();
     const destAddr = item.destination_address;
     const amountNum = Number(item.amount);
+    let didClaim = false;
 
     try {
-      await supabaseAdmin
+      // Compare-and-set claim: only one concurrent worker can move this exact
+      // eligible status to processing. A failed claim must never broadcast.
+      const { data: claimed, error: claimError } = await supabaseAdmin
         .from('withdrawals')
         .update({
           status: 'processing',
           broadcast_attempts: attempts,
           updated_at: new Date().toISOString(),
         })
-        .eq('id', item.id);
+        .eq('id', item.id)
+        .eq('status', item.status)
+        .select('id')
+        .maybeSingle();
+
+      if (claimError) {
+        throw new Error(`Could not claim withdrawal ${item.id}: ${claimError.message}`);
+      }
+      if (!claimed) {
+        // Another worker or moderator changed the row; skip without broadcasting.
+        continue;
+      }
+      didClaim = true;
 
       const task: WithdrawalTask = {
         id: item.id,
@@ -589,21 +612,11 @@ export async function processPendingWithdrawals(limit: number = 20): Promise<Pro
       successful++;
     } catch (broadcastErr: unknown) {
       const errorMsg = broadcastErr instanceof Error ? broadcastErr.message : String(broadcastErr);
-      const isPermanentlyFailed = attempts >= 3;
 
-      if (isPermanentlyFailed) {
-        // Trigger automated refund via process_failed_withdrawal RPC
-        try {
-          await supabaseAdmin.rpc('process_failed_withdrawal', {
-            p_withdrawal_id: item.id,
-            p_error_reason: errorMsg,
-            p_is_verified_unbroadcast: true,
-          });
-        } catch (rpcErr) {
-          console.error('[processPendingWithdrawals] Refund RPC failed:', rpcErr);
-        }
-      } else {
-        await supabaseAdmin
+      if (didClaim) {
+        // A broadcast timeout/error does not prove the transaction was never sent.
+        // Keep the row out of automatic retry/refund queues until chain reconciliation.
+        const { error: recordError } = await supabaseAdmin
           .from('withdrawals')
           .update({
             status: 'processing',
@@ -611,7 +624,11 @@ export async function processPendingWithdrawals(limit: number = 20): Promise<Pro
             broadcast_error: errorMsg,
             updated_at: new Date().toISOString(),
           })
-          .eq('id', item.id);
+          .eq('id', item.id)
+          .eq('status', 'processing');
+        if (recordError) {
+          console.error(`[processPendingWithdrawals] Failed to record uncertain broadcast for ${item.id}:`, recordError);
+        }
       }
 
       results.push({

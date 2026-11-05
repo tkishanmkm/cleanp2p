@@ -5,8 +5,11 @@ import { verifyServerAdmin } from "@/lib/server-admin-auth";
 
 export async function exportAuditLogsAction(format: "csv" | "json") {
   const auth = await verifyServerAdmin();
-  if (!auth.authorized || !auth.adminId) {
-    return { success: false, error: "Unauthorized: Admin permissions required." };
+  if (!auth.authorized || !auth.adminId || auth.supportAdmin === true) {
+    return { success: false, error: "Unauthorized: Full administrator permissions required to export audit logs." };
+  }
+  if (format !== "csv" && format !== "json") {
+    return { success: false, error: "Unsupported audit export format." };
   }
 
   // Fetch full log history

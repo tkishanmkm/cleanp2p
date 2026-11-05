@@ -6,6 +6,7 @@ import { useAuth } from '@/components/providers/auth-provider';
 import { usePrices } from '@/context/price-context';
 import type { CryptoCurrency } from '@/lib/types';
 import { SUPPORTED_CRYPTOS } from '@/lib/constants';
+import { clearPendingWithdrawalKey, getOrCreatePendingWithdrawalKeyDetails } from '@/lib/withdrawal-idempotency-store';
 
 export interface AssetBalanceData {
   available: number;
@@ -129,160 +130,19 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
         console.debug('[WalletProvider] /api/wallet/balance fetch note:', apiErr);
       }
 
-      // If API failed, perform direct fallback queries
+      // Fail closed: never replace an unavailable authoritative balance API with
+      // browser-side queries against legacy wallet/profile tables or stale local data.
       if (!apiSuccess) {
-        // 2. Fetch wallet_assets directly by user_id
-        try {
-          const { data: directAssets, error: directError } = await supabase
-            .from('wallet_assets')
-            .select('*')
-            .eq('user_id', userId);
-
-          if (!directError && directAssets && directAssets.length > 0) {
-            directAssets.forEach((row: any) => {
-              const rawSym = String(row.asset_symbol || row.asset_code || row.symbol || '').toUpperCase();
-              const sym = (['BTC', 'ETH', 'LTC', 'USDT'].includes(rawSym) ? rawSym : null) as CryptoCurrency | null;
-              if (sym && nextMap[sym]) {
-                const avail = Number(row.available ?? row.balance ?? row.amount ?? 0);
-                const escrow = Number(row.locked_escrow ?? row.locked ?? row.locked_balance ?? 0);
-                const withdraw = Number(row.locked_withdrawal ?? 0);
-
-                nextMap[sym] = {
-                  available: Math.max(0, isNaN(avail) ? 0 : avail),
-                  inEscrow: Math.max(0, isNaN(escrow) ? 0 : escrow),
-                  inWithdrawal: Math.max(0, isNaN(withdraw) ? 0 : withdraw),
-                };
-              }
-            });
-          }
-        } catch (err) {
-          console.warn('Direct wallet_assets check warning:', err);
-        }
-
-        // 3. Query via wallets relation if available
-        try {
-          const { data: walletData } = await supabase
-            .from('wallets')
-            .select('id')
-            .eq('user_id', userId)
-            .maybeSingle();
-
-          if (walletData?.id) {
-            const { data: walletAssets } = await supabase
-              .from('wallet_assets')
-              .select('*')
-              .eq('wallet_id', walletData.id);
-
-            if (walletAssets && walletAssets.length > 0) {
-              walletAssets.forEach((row: any) => {
-                const rawSym = String(row.asset_symbol || row.asset_code || row.symbol || '').toUpperCase();
-                const sym = (['BTC', 'ETH', 'LTC', 'USDT'].includes(rawSym) ? rawSym : null) as CryptoCurrency | null;
-                if (sym && nextMap[sym]) {
-                  const avail = Number(row.available ?? row.balance ?? row.amount ?? 0);
-                  const escrow = Number(row.locked_escrow ?? row.locked ?? row.locked_balance ?? 0);
-                  const withdraw = Number(row.locked_withdrawal ?? 0);
-
-                  nextMap[sym] = {
-                    available: Math.max(0, isNaN(avail) ? 0 : avail),
-                    inEscrow: Math.max(0, isNaN(escrow) ? 0 : escrow),
-                    inWithdrawal: Math.max(0, isNaN(withdraw) ? 0 : withdraw),
-                  };
-                }
-              });
-            }
-          }
-        } catch (err) {
-          console.warn('Wallets relation query warning:', err);
-        }
-
-        // 4. Fallback check user_wallets table
-        try {
-          const { data: userWallets } = await supabase
-            .from('user_wallets')
-            .select('*')
-            .eq('user_id', userId);
-
-          if (userWallets && userWallets.length > 0) {
-            userWallets.forEach((row: any) => {
-              const rawSym = String(row.asset_symbol || row.asset_code || row.symbol || '').toUpperCase();
-              const sym = (['BTC', 'ETH', 'LTC', 'USDT'].includes(rawSym) ? rawSym : null) as CryptoCurrency | null;
-              if (sym && nextMap[sym]) {
-                const avail = Number(row.available_balance ?? row.available ?? row.balance ?? 0);
-                const escrow = Number(row.locked_balance ?? row.locked ?? 0);
-                nextMap[sym] = {
-                  available: Math.max(0, isNaN(avail) ? 0 : avail),
-                  inEscrow: Math.max(0, isNaN(escrow) ? 0 : escrow),
-                  inWithdrawal: nextMap[sym].inWithdrawal,
-                };
-              }
-            });
-          }
-        } catch (err) {
-          console.warn('user_wallets fallback check warning:', err);
-        }
-
-        // 5. Check profiles table directly
-        try {
-          const { data: profileRow } = await supabase
-            .from('profiles')
-            .select('*')
-            .or(`id.eq.${userId},user_id.eq.${userId}`)
-            .maybeSingle();
-
-          if (profileRow) {
-            const btc = Number(profileRow.btc_balance ?? profileRow.btcBalance ?? profileRow.wallets?.BTC?.balance ?? 0);
-            const eth = Number(profileRow.eth_balance ?? profileRow.ethBalance ?? profileRow.wallets?.ETH?.balance ?? 0);
-            const ltc = Number(profileRow.ltc_balance ?? profileRow.ltcBalance ?? profileRow.wallets?.LTC?.balance ?? 0);
-            const usdt = Number(profileRow.usdt_balance ?? profileRow.usdtBalance ?? profileRow.wallets?.USDT?.balance ?? 0);
-
-            if (btc > 0 && nextMap['BTC'].available === 0) nextMap['BTC'].available = btc;
-            if (eth > 0 && nextMap['ETH'].available === 0) nextMap['ETH'].available = eth;
-            if (ltc > 0 && nextMap['LTC'].available === 0) nextMap['LTC'].available = ltc;
-            if (usdt > 0 && nextMap['USDT'].available === 0) nextMap['USDT'].available = usdt;
-          }
-        } catch (err) {
-          console.warn('Profiles balance check warning:', err);
-        }
+        // Preserve the last displayed snapshot but mark it unavailable/stale;
+        // never replace it with fabricated zeroes or legacy/cache data.
+        setError('Live wallet balances are temporarily unavailable. Please retry shortly.');
+        setIsLoading(false);
+        return;
       }
 
-      // 6. Fallback to auth profile in memory
-      if (profile) {
-        const btc = Number(profile.btc_balance ?? profile.btcBalance ?? profile.wallets?.BTC?.balance ?? 0);
-        const eth = Number(profile.eth_balance ?? profile.ethBalance ?? profile.wallets?.ETH?.balance ?? 0);
-        const ltc = Number(profile.ltc_balance ?? profile.ltcBalance ?? profile.wallets?.LTC?.balance ?? 0);
-        const usdt = Number(profile.usdt_balance ?? profile.usdtBalance ?? profile.wallets?.USDT?.balance ?? 0);
-
-        if (btc > 0 && nextMap['BTC'].available === 0) nextMap['BTC'].available = btc;
-        if (eth > 0 && nextMap['ETH'].available === 0) nextMap['ETH'].available = eth;
-        if (ltc > 0 && nextMap['LTC'].available === 0) nextMap['LTC'].available = ltc;
-        if (usdt > 0 && nextMap['USDT'].available === 0) nextMap['USDT'].available = usdt;
-      }
-
-      // 7. Check localStorage cache for instant persistence if DB is in transition
-      if (typeof window !== 'undefined') {
-        try {
-          const cachedStr = localStorage.getItem(`wallet_cache_${userId}`);
-          if (cachedStr) {
-            const cached = JSON.parse(cachedStr);
-            (Object.keys(cached) as CryptoCurrency[]).forEach((sym) => {
-              if (nextMap[sym] && nextMap[sym].available === 0 && Number(cached[sym]?.available) > 0) {
-                nextMap[sym] = {
-                  available: Number(cached[sym].available || 0),
-                  inEscrow: Number(cached[sym].inEscrow || 0),
-                  inWithdrawal: Number(cached[sym].inWithdrawal || 0),
-                };
-              }
-            });
-          }
-        } catch {}
-      }
-
+      // The authenticated balance API is the sole source of displayed balances.
+      // Do not supplement a valid response with profile or localStorage snapshots.
       setRawBalances(nextMap);
-      if (typeof window !== 'undefined') {
-        try {
-          localStorage.setItem(`wallet_cache_${userId}`, JSON.stringify(nextMap));
-        } catch {}
-      }
       setError(null);
     } catch (err: any) {
       console.error('[WalletProvider] Error fetching live balances:', err);
@@ -464,32 +324,45 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
       }
 
       const totalDeduction = amount + fee;
-      if (balances[asset].available < totalDeduction) {
+
+      // Persist the retry key across reloads and tabs. Exclude the displayed fee:
+      // the server recalculates it authoritatively, and a changed fee must not turn
+      // an ambiguous retry into a second withdrawal intent.
+      const withdrawalFingerprint = JSON.stringify([asset, chain, toAddress.trim(), amount]);
+      const retry = await getOrCreatePendingWithdrawalKeyDetails(userId, withdrawalFingerprint);
+      const idempotencyKey = retry.key;
+
+      // If this intent already has a key, it may have reserved funds on the server
+      // even if the prior response was lost. Let the idempotent server replay decide
+      // the outcome instead of rejecting it against the now-lower displayed balance.
+      if (balances[asset].available < totalDeduction && !retry.reused) {
+        await clearPendingWithdrawalKey(userId, withdrawalFingerprint, idempotencyKey);
         throw new Error(`Insufficient available balance. Available: ${balances[asset].available} ${asset}`);
       }
 
-      // Optimistic balance update
-      setRawBalances((prev) => {
-        const updated = {
-          ...prev,
-          [asset]: {
-            ...prev[asset],
-            available: Math.max(0, prev[asset].available - totalDeduction),
-            inWithdrawal: prev[asset].inWithdrawal + totalDeduction,
-          },
-        };
-        if (typeof window !== 'undefined') {
-          try {
-            localStorage.setItem(`wallet_cache_${userId}`, JSON.stringify(updated));
-          } catch {}
-        }
-        return updated;
-      });
+      // Only apply an optimistic debit for a genuinely new intent. A retry must not
+      // locally deduct the same amount twice while the server resolves the old key.
+      if (!retry.reused) {
+        setRawBalances((prev) => {
+          const updated = {
+            ...prev,
+            [asset]: {
+              ...prev[asset],
+              available: Math.max(0, prev[asset].available - totalDeduction),
+              inWithdrawal: prev[asset].inWithdrawal + totalDeduction,
+            },
+          };
+          return updated;
+        });
+      }
 
       try {
         const res = await fetch('/api/withdraw', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: {
+            'Content-Type': 'application/json',
+            'x-idempotency-key': idempotencyKey,
+          },
           body: JSON.stringify({
             asset,
             chain,
@@ -501,12 +374,21 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
         });
 
         const resData = await res.json();
-        if (!res.ok) {
-          throw new Error(resData.error || 'Withdrawal request failed');
+        const withdrawalId = resData?.withdrawalId || resData?.withdrawal_id;
+        if (
+          !res.ok ||
+          resData?.success !== true ||
+          typeof withdrawalId !== 'string' ||
+          !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(withdrawalId)
+        ) {
+          // Keep the key when the outcome is not definitively acknowledged. A retry
+          // must query/replay the original reservation instead of creating a new one.
+          throw new Error(resData?.error || 'Withdrawal request could not be confirmed. Check withdrawal history before retrying.');
         }
 
+        await clearPendingWithdrawalKey(userId, withdrawalFingerprint, idempotencyKey);
         await fetchBalances();
-        return { success: true, withdrawal_id: resData?.withdrawalId || resData?.withdrawal_id };
+        return { success: true, withdrawal_id: withdrawalId };
       } catch (err: any) {
         // Rollback optimistic update
         await fetchBalances();

@@ -30,7 +30,7 @@ import {
 import { formatUtcDateTime, formatCompactUtc } from "@/lib/date-utils";
 import { freezeUserAction, unfreezeUserAction } from "@/app/adminnarayan/users/actions";
 
-export default function AdminUserDetailsPage({ params }: { params?: Promise<{ userId: string }> | { userId: string } }) {
+export default function AdminUserDetailsPage({ params }: { params?: Promise<{ userId: string }> }) {
   const routeParams = useParams();
   let resolvedUserId = "";
 
@@ -129,14 +129,14 @@ export default function AdminUserDetailsPage({ params }: { params?: Promise<{ us
     const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(userId);
 
     if (isUuid) {
-      const { data } = await supabase.from("profiles").select("*").eq("id", userId).maybeSingle();
+      const { data } = await supabase.from("profiles").select("id, username, display_name, full_name, email, role, is_admin, is_admin_account, status, is_banned, is_suspended, is_on_hold, is_restricted, account_status, created_at, updated_at, completed_trades, total_completed_trades, total_volume_usd, feedback_score, positive_feedback, negative_feedback, avatar_url, photo_url, is_online, last_seen, last_seen_at, country, preferred_currency, kyc_status, is_verified, id_verified, is_emergency_frozen, merchant_tier, merchant_status, ban_reason, banned_at, is_kyc_locked, is_withdrawal_locked, dob, date_of_birth").eq("id", userId).maybeSingle();
       prof = data;
     }
 
     if (!prof) {
       const { data } = await supabase
         .from("profiles")
-        .select("*")
+        .select("id, username, display_name, full_name, email, role, is_admin, is_admin_account, status, is_banned, is_suspended, is_on_hold, is_restricted, account_status, created_at, updated_at, completed_trades, total_completed_trades, total_volume_usd, feedback_score, positive_feedback, negative_feedback, avatar_url, photo_url, is_online, last_seen, last_seen_at, country, preferred_currency, kyc_status, is_verified, id_verified, is_emergency_frozen, merchant_tier, merchant_status, ban_reason, banned_at, is_kyc_locked, is_withdrawal_locked, dob, date_of_birth")
         .or(`username.eq.${userId},email.eq.${userId}`)
         .limit(1)
         .maybeSingle();

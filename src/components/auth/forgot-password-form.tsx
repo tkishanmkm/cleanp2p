@@ -3,12 +3,12 @@
 import React, { useState, useRef } from 'react';
 import Link from 'next/link';
 import { User, KeyRound, ShieldAlert, CheckCircle2, Loader2, ArrowLeft } from 'lucide-react';
-import { UNIVERSAL_SECURITY_QUESTIONS } from '@/lib/settings-constants';
+
 import { ResponsiveHCaptcha, ResponsiveHCaptchaRef } from '@/components/auth/responsive-hcaptcha';
 
 export function ForgotPasswordForm() {
   const [identifier, setIdentifier] = useState('');
-  const [securityQuestion, setSecurityQuestion] = useState(UNIVERSAL_SECURITY_QUESTIONS[0]);
+
   const [securityAnswer, setSecurityAnswer] = useState('');
   const [captchaToken, setCaptchaToken] = useState('');
   const [loading, setLoading] = useState(false);
@@ -43,7 +43,7 @@ export function ForgotPasswordForm() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           identifier: identifier.trim(),
-          securityQuestion,
+
           securityAnswer: securityAnswer.trim(),
           captchaToken,
         }),
@@ -117,23 +117,9 @@ export function ForgotPasswordForm() {
         </div>
       </div>
 
-      {/* Security Question Selection */}
-      <div>
-        <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5">
-          Security Question
-        </label>
-        <select
-          value={securityQuestion}
-          onChange={(e) => setSecurityQuestion(e.target.value)}
-          className="w-full bg-slate-50 dark:bg-[#07090e] border border-slate-200 dark:border-[#1e2640] rounded-xl px-3.5 py-2.5 text-xs text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500/30 focus:border-blue-500 transition"
-        >
-          {UNIVERSAL_SECURITY_QUESTIONS.map((q, idx) => (
-            <option key={idx} value={q} className="bg-white dark:bg-[#0f1423]">
-              {q}
-            </option>
-          ))}
-        </select>
-      </div>
+      <p className="text-[11px] text-slate-500 dark:text-slate-400 -mt-1">
+        Enter the answer to the security question already saved on your account.
+      </p>
 
       {/* Security Answer */}
       <div>
@@ -143,8 +129,9 @@ export function ForgotPasswordForm() {
         <div className="relative">
           <KeyRound className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
           <input
-            type="text"
+            type="password"
             required
+            autoComplete="off"
             value={securityAnswer}
             onChange={(e) => setSecurityAnswer(e.target.value)}
             placeholder="Enter your confidential security answer"

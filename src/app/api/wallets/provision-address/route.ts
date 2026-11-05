@@ -204,7 +204,7 @@ async function authenticateRequest(req: NextRequest, adminClient: SupabaseClient
 
   // 2. Authenticate via @supabase/ssr request cookies
   try {
-    const cookieStore = cookies();
+    const cookieStore = await cookies();
     const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL || '';
     const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
 
@@ -237,7 +237,7 @@ async function authenticateRequest(req: NextRequest, adminClient: SupabaseClient
 
   // 3. Fallback: Parse Supabase session access tokens from cookies
   try {
-    const cookieStore = cookies();
+    const cookieStore = await cookies();
     const allCookies = cookieStore.getAll();
     for (const c of allCookies) {
       if (c.name.includes('auth-token') || c.name.startsWith('sb-')) {

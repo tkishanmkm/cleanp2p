@@ -32,7 +32,7 @@ import { Button } from '@/components/ui/button';
 import { Search, Copy } from 'lucide-react';
 import Link from 'next/link';
 import { Badge } from '@/components/ui/badge';
-import { supabase } from '@/lib/supabase/client';
+
 
 export default function AdminTransfersPage() {
   const { isAdmin, isLoading: isAdminLoading } = useAdminStatus();
@@ -54,14 +54,18 @@ export default function AdminTransfersPage() {
     const fetchTransfers = async () => {
       setIsLoading(true);
       try {
-        const { data, error } = await supabase
-          .from('transfers')
-          .select('*')
-          .order('created_at', { ascending: false });
+        const response = await fetch('/api/admin/transfers?limit=1000', {
+          method: 'GET',
+          credentials: 'include',
+          cache: 'no-store',
+          headers: { Accept: 'application/json' },
+        });
+        const result = await response.json().catch(() => null);
+        if (!response.ok || !result?.success || !Array.isArray(result.data)) {
+          throw new Error(result?.error || 'Transfer history could not be loaded.');
+        }
 
-        if (error) throw error;
-
-        const mapped: CoinTransfer[] = (data || []).map((t: any) => ({
+        const mapped: CoinTransfer[] = result.data.map((t: any) => ({
           id: t.id,
           publicId: t.public_id || t.publicId || t.id,
           senderId: t.sender_id || t.senderId,

@@ -1,0 +1,119 @@
+﻿-- Harden the canonical custodial withdrawal RPC without replacing its existing
+-- reservation/ledger logic: serialize per-user requests and enforce limits inside
+-- the same transaction as the balance reservation.
+DO $migration$
+DECLARE
+  v_definition text;
+  v_guard text := $guard$
+    -- Serialize all withdrawal requests for this user before checking limits.
+    PERFORM pg_advisory_xact_lock(
+      hashtextextended('custodial-withdrawal-user:' || p_user_id::text, 0)
+    );
+
+    SELECT max_single_withdrawal_usd,
+           daily_withdrawal_limit_usd,
+           withdrawals_enabled,
+           global_kill_switch_active
+      INTO v_max_single_usd,
+           v_daily_limit_usd,
+           v_withdrawals_enabled,
+           v_kill_switch
+      FROM public.platform_settings
+     WHERE id = 1;
+
+    IF NOT FOUND
+       OR v_max_single_usd IS NULL
+       OR v_daily_limit_usd IS NULL
+       OR v_withdrawals_enabled IS NULL
+       OR v_kill_switch IS NULL THEN
+      RAISE EXCEPTION 'Withdrawal platform controls unavailable; request rejected';
+    END IF;
+
+    IF v_kill_switch OR NOT v_withdrawals_enabled THEN
+      RAISE EXCEPTION 'Withdrawals are disabled by platform controls';
+    END IF;
+
+    IF p_amount > v_max_single_usd THEN
+      RAISE EXCEPTION 'Single withdrawal limit exceeded';
+    END IF;
+
+    IF EXISTS (
+      SELECT 1
+        FROM public.onchain_withdrawals
+       WHERE user_id = p_user_id
+         AND upper(status) IN ('NEEDS_APPROVAL', 'PENDING_APPROVAL')
+    ) OR EXISTS (
+      SELECT 1
+        FROM public.withdrawals
+       WHERE user_id = p_user_id
+         AND upper(status) IN ('PENDING_APPROVAL')
+    ) THEN
+      RAISE EXCEPTION 'A withdrawal is already awaiting administrator approval';
+    END IF;
+
+    SELECT COALESCE(SUM(past.amount), 0)
+      INTO v_rolling_24h
+      FROM (
+        SELECT id, amount
+          FROM public.onchain_withdrawals
+         WHERE user_id = p_user_id
+           AND created_at >= now() - interval '24 hours'
+           AND upper(status) IN (
+             'NEEDS_APPROVAL', 'PENDING_APPROVAL', 'PENDING', 'QUEUED',
+             'APPROVED', 'BROADCASTED', 'PROCESSING', 'AMBIGUOUS_BROADCAST',
+             'COMPLETED', 'CONFIRMED'
+           )
+        UNION
+        SELECT id, amount
+          FROM public.withdrawals
+         WHERE user_id = p_user_id
+           AND created_at >= now() - interval '24 hours'
+           AND upper(status) IN (
+             'PENDING_APPROVAL', 'PENDING', 'QUEUED', 'APPROVED',
+             'PROCESSING', 'COMPLETED', 'CONFIRMED'
+           )
+      ) AS past;
+
+    IF v_rolling_24h + p_amount > v_daily_limit_usd THEN
+      RAISE EXCEPTION 'Rolling 24-hour withdrawal limit exceeded';
+    END IF;
+
+$guard$;
+BEGIN
+  v_definition := pg_get_functiondef(
+    'public.request_custodial_withdrawal(uuid,text,text,text,numeric,numeric,text)'::regprocedure
+  );
+
+  IF v_definition IS NULL THEN
+    RAISE EXCEPTION 'Canonical custodial withdrawal function was not found';
+  END IF;
+
+  IF position('v_daily_limit_usd' in v_definition) > 0
+     OR position('custodial-withdrawal-user:' in v_definition) > 0 THEN
+    RAISE EXCEPTION 'Withdrawal limits appear to have already been applied; refusing duplicate patch';
+  END IF;
+
+  v_definition := replace(
+    v_definition,
+    'v_wallet_chain text;',
+    E'v_wallet_chain text;\n    v_max_single_usd numeric;\n    v_daily_limit_usd numeric;\n    v_withdrawals_enabled boolean;\n    v_kill_switch boolean;\n    v_rolling_24h numeric := 0;'
+  );
+
+  IF position('v_rolling_24h numeric' in v_definition) = 0 THEN
+    RAISE EXCEPTION 'Could not add withdrawal-limit variables; migration aborted';
+  END IF;
+
+  v_definition := replace(
+    v_definition,
+    '-- Map withdrawal network to custody wallet chain',
+    v_guard || '-- Map withdrawal network to custody wallet chain'
+  );
+
+  IF position('custodial-withdrawal-user:' in v_definition) = 0
+     OR position('Rolling 24-hour withdrawal limit exceeded' in v_definition) = 0 THEN
+    RAISE EXCEPTION 'Could not inject withdrawal-limit guard; migration aborted';
+  END IF;
+
+  EXECUTE v_definition;
+END;
+$migration$;

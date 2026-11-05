@@ -21,7 +21,7 @@ import {
 } from "lucide-react";
 import { formatUtcDateTime } from "@/lib/date-utils";
 
-export default function AdminTradeModeratorPage({ params }: { params?: Promise<{ tradeId: string }> | { tradeId: string } }) {
+export default function AdminTradeModeratorPage({ params }: { params?: Promise<{ tradeId: string }> }) {
   const routeParams = useParams();
   let resolvedTradeId = "";
 
@@ -69,74 +69,32 @@ export default function AdminTradeModeratorPage({ params }: { params?: Promise<{
 
     setLoading(true);
     setErrorMessage(null);
-
     try {
-      // 1. Fetch via admin API route (handles UUID or trade_id string, joins buyer/seller, bypasses RLS)
-      const res = await fetch(`/api/admin/trades/${encodeURIComponent(tradeId)}`);
-      const data = await res.json();
-
-      if (data.success && data.trade) {
-        setTrade(data.trade);
-        setMessages(data.messages || []);
-        const joinedBefore = (data.messages || []).some((m: any) =>
-          m.message?.includes("Paxones Moderator Joined") ||
-          (m.is_system_message && m.message?.toLowerCase().includes("moderator joined"))
-        );
-        if (joinedBefore) setHasJoined(true);
-        setLoading(false);
-        return;
+      const res = await fetch('/api/admin/trades/' + encodeURIComponent(tradeId), {
+        method: "GET",
+        cache: "no-store",
+      });
+      const data = await res.json().catch(() => null);
+      if (!res.ok || !data?.success || !data.trade) {
+        throw new Error(data?.error || "Unable to load this trade through the admin service.");
       }
-    } catch (apiErr) {
-      console.warn("[TRADE MODERATOR] API fetch fallback to client DB:", apiErr);
-    }
 
-    // 2. Client fallback
-    const isTradeUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(tradeId);
-    let fallbackQuery = supabase.from("trades").select("*");
-    if (isTradeUuid) {
-      fallbackQuery = fallbackQuery.or(`id.eq.${tradeId},trade_id.eq.${tradeId}`);
-    } else {
-      fallbackQuery = fallbackQuery.eq("trade_id", tradeId);
-    }
-    const { data: simpleTrade, error: fetchErr } = await fallbackQuery.maybeSingle();
-
-    if (fetchErr || !simpleTrade) {
-      setErrorMessage(fetchErr?.message || `Trade ID "${tradeId}" not found in database.`);
-      setLoading(false);
-      return;
-    }
-
-    const ids = [simpleTrade.buyer_id, simpleTrade.seller_id].filter(Boolean);
-    if (ids.length > 0) {
-      const { data: profs } = await supabase
-        .from("profiles")
-        .select("id, email, full_name, username")
-        .in("id", ids);
-
-      const pMap = new Map((profs || []).map((p: any) => [p.id, p]));
-      simpleTrade.buyer = pMap.get(simpleTrade.buyer_id) || null;
-      simpleTrade.seller = pMap.get(simpleTrade.seller_id) || null;
-    }
-    setTrade(simpleTrade);
-
-    const { data: msgData } = await supabase
-      .from("trade_chat_messages")
-      .select("*")
-      .eq("trade_id", simpleTrade.id)
-      .order("created_at", { ascending: true });
-
-    if (msgData) {
-      setMessages(msgData);
-      const joinedBefore = msgData.some((m: any) =>
+      setTrade(data.trade);
+      setMessages(Array.isArray(data.messages) ? data.messages : []);
+      const joinedBefore = (Array.isArray(data.messages) ? data.messages : []).some((m: any) =>
         m.message?.includes("Paxones Moderator Joined") ||
         (m.is_system_message && m.message?.toLowerCase().includes("moderator joined"))
       );
-      if (joinedBefore) setHasJoined(true);
+      setHasJoined(Boolean(data.hasModeratorJoined || joinedBefore));
+    } catch (error: any) {
+      console.error("[TRADE MODERATOR] Secure trade lookup failed.", error);
+      setTrade(null);
+      setMessages([]);
+      setErrorMessage(error?.message || "Unable to load this trade.");
+    } finally {
+      setLoading(false);
     }
-
-    setLoading(false);
-  }, [supabase, tradeId]);
-
+  }, [tradeId]);
   useEffect(() => {
     fetchAdminSession();
     fetchTradeAndChat();
@@ -168,78 +126,61 @@ export default function AdminTradeModeratorPage({ params }: { params?: Promise<{
     };
   }, [fetchAdminSession, fetchTradeAndChat, supabase, tradeId]);
 
-  // Join as Moderator Handler
+  // Moderator actions are server-mediated; never fall back to direct client table writes.
   async function handleJoinAsModerator() {
-    if (!adminEmail) return alert("Admin email session not identified.");
-
-    try {
-      const res = await fetch(`/api/admin/trades/${encodeURIComponent(tradeId)}`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "join", adminEmail }),
-      });
-      const data = await res.json();
-      if (data.success) {
-        setHasJoined(true);
-        fetchTradeAndChat();
-        return;
-      }
-    } catch (apiErr) {
-      console.warn("API join fallback to client DB:", apiErr);
+    if (!adminEmail) {
+      alert("Admin email session not identified.");
+      return;
     }
 
-    const { data: { session } } = await supabase.auth.getSession();
-    const senderId = session?.user?.id || "00000000-0000-0000-0000-000000000000";
-    const systemMsg = "Paxones Moderator Joined";
-
-    await supabase.from("trade_chat_messages").insert({
-      trade_id: trade?.id || tradeId,
-      sender_id: senderId,
-      message: systemMsg,
-    });
-
-    setHasJoined(true);
-    fetchTradeAndChat();
+    try {
+      const res = await fetch('/api/admin/trades/' + encodeURIComponent(tradeId), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "join" }),
+      });
+      const data = await res.json().catch(() => null);
+      if (!res.ok || data?.success !== true) {
+        throw new Error(data?.error || "The moderator join action was not confirmed.");
+      }
+      setHasJoined(true);
+      await fetchTradeAndChat();
+    } catch (error: any) {
+      console.error("[TRADE MODERATOR] Secure join action failed.", error);
+      alert(error?.message || "Unable to join this trade as moderator.");
+    }
   }
 
   // Send message as Moderator
   async function handleSendMessage(e: React.FormEvent) {
     e.preventDefault();
-    if (!newMessage.trim()) return;
+    const cleanMessage = newMessage.trim();
+    if (!cleanMessage || sendLoading) return;
+    if (!adminEmail) {
+      alert("Admin email session not identified.");
+      return;
+    }
 
     setSendLoading(true);
     try {
-      const res = await fetch(`/api/admin/trades/${encodeURIComponent(tradeId)}`, {
+      const res = await fetch('/api/admin/trades/' + encodeURIComponent(tradeId), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "message", message: newMessage.trim(), adminEmail }),
+        body: JSON.stringify({ action: "message", message: cleanMessage }),
       });
-      const data = await res.json();
-      if (data.success) {
-        setNewMessage("");
-        setSendLoading(false);
-        fetchTradeAndChat();
-        return;
+      const data = await res.json().catch(() => null);
+      if (!res.ok || data?.success !== true) {
+        throw new Error(data?.error || "The moderator message was not confirmed.");
       }
-    } catch (apiErr) {
-      console.warn("API message send fallback to client DB:", apiErr);
+      setNewMessage("");
+      await fetchTradeAndChat();
+    } catch (error: any) {
+      console.error("[TRADE MODERATOR] Secure message action failed.", error);
+      alert(error?.message || "Unable to send the moderator message.");
+    } finally {
+      setSendLoading(false);
     }
-
-    const { data: { session } } = await supabase.auth.getSession();
-    const senderId = session?.user?.id || "00000000-0000-0000-0000-000000000000";
-    const formattedMsg = `[MODERATOR]: ${newMessage.trim()}`;
-
-    await supabase.from("trade_chat_messages").insert({
-      trade_id: trade?.id || tradeId,
-      sender_id: senderId,
-      message: formattedMsg,
-    });
-
-    setNewMessage("");
-    setSendLoading(false);
-    fetchTradeAndChat();
   }
-
   // Escrow Intervention (Release or Refund with Audit Logging & Scam Protection)
   async function handleInterveneEscrow(e: React.FormEvent) {
     e.preventDefault();

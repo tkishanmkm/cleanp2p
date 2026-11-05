@@ -1,105 +1,69 @@
-/**
- * User 2FA In-Memory Rate Limiter
- * Enforces maximum 5 failed attempts per 15 minutes per user / identifier.
- */
+import 'server-only';
 
-interface UserRateLimitRecord {
-  failures: number;
-  firstFailureTime: number;
-  lastFailureTime: number;
-}
+import { createAdminClient } from '@/lib/supabase/server';
 
-const MAX_FAILURES = 5;
-const WINDOW_MS = 15 * 60 * 1000; // 15 minutes
-
-// Runtime process memory store
-const userFailureStore = new Map<string, UserRateLimitRecord>();
-
-function cleanupStaleRecords() {
-  const now = Date.now();
-  for (const [key, record] of userFailureStore.entries()) {
-    if (now - record.lastFailureTime > WINDOW_MS) {
-      userFailureStore.delete(key);
-    }
-  }
-}
-
-/**
- * Checks if the given user key is rate-limited.
- */
-export function checkUser2FARateLimit(key: string): {
+export interface UserTwoFactorRateLimit {
   allowed: boolean;
   remainingAttempts: number;
   retryAfterSeconds: number;
-} {
-  if (!key) return { allowed: true, remainingAttempts: MAX_FAILURES, retryAfterSeconds: 0 };
+}
 
-  cleanupStaleRecords();
+type RpcRateLimitResult = {
+  allowed?: unknown;
+  remaining_attempts?: unknown;
+  retry_after_seconds?: unknown;
+};
 
-  const now = Date.now();
-  const record = userFailureStore.get(key);
-
-  if (!record) {
-    return { allowed: true, remainingAttempts: MAX_FAILURES, retryAfterSeconds: 0 };
+function normalizeResult(data: unknown): UserTwoFactorRateLimit {
+  if (!data || typeof data !== 'object' || Array.isArray(data)) {
+    throw new Error('User 2FA rate-limit service returned an invalid response.');
   }
-
-  // If window expired, reset
-  if (now - record.firstFailureTime > WINDOW_MS) {
-    userFailureStore.delete(key);
-    return { allowed: true, remainingAttempts: MAX_FAILURES, retryAfterSeconds: 0 };
+  const value = data as RpcRateLimitResult;
+  if (
+    typeof value.allowed !== 'boolean' ||
+    !Number.isInteger(value.remaining_attempts) ||
+    !Number.isInteger(value.retry_after_seconds) ||
+    Number(value.remaining_attempts) < 0 ||
+    Number(value.remaining_attempts) > 5 ||
+    Number(value.retry_after_seconds) < 0 ||
+    Number(value.retry_after_seconds) > 900
+  ) {
+    throw new Error('User 2FA rate-limit service returned an invalid response.');
   }
-
-  if (record.failures >= MAX_FAILURES) {
-    const retryAfterMs = record.firstFailureTime + WINDOW_MS - now;
-    const retryAfterSeconds = Math.max(1, Math.ceil(retryAfterMs / 1000));
-    return {
-      allowed: false,
-      remainingAttempts: 0,
-      retryAfterSeconds,
-    };
-  }
-
   return {
-    allowed: true,
-    remainingAttempts: Math.max(0, MAX_FAILURES - record.failures),
-    retryAfterSeconds: 0,
+    allowed: value.allowed,
+    remainingAttempts: Number(value.remaining_attempts),
+    retryAfterSeconds: Number(value.retry_after_seconds),
   };
 }
 
-/**
- * Records a failed 2FA verification attempt.
- */
-export function recordUser2FAFailure(key: string): {
-  allowed: boolean;
-  remainingAttempts: number;
-  retryAfterSeconds: number;
-} {
-  if (!key) return { allowed: true, remainingAttempts: MAX_FAILURES, retryAfterSeconds: 0 };
-
-  const now = Date.now();
-  let record = userFailureStore.get(key);
-
-  if (!record || now - record.firstFailureTime > WINDOW_MS) {
-    record = {
-      failures: 1,
-      firstFailureTime: now,
-      lastFailureTime: now,
-    };
-  } else {
-    record.failures += 1;
-    record.lastFailureTime = now;
+function assertUserId(userId: string): void {
+  if (
+    typeof userId !== 'string' ||
+    !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(userId)
+  ) {
+    throw new Error('A valid user ID is required for 2FA rate limiting.');
   }
-
-  userFailureStore.set(key, record);
-
-  return checkUser2FARateLimit(key);
 }
 
-/**
- * Resets failures on successful 2FA verification.
- */
-export function resetUser2FAFailures(key: string) {
-  if (key) {
-    userFailureStore.delete(key);
+/** Persistent rate limiting applies across instances and survives restarts. */
+export async function checkUser2FARateLimit(userId: string): Promise<UserTwoFactorRateLimit> {
+  assertUserId(userId);
+  const admin = createAdminClient();
+  const { data, error } = await admin.rpc('check_user_2fa_rate_limit', { p_user_id: userId });
+  if (error) {
+    console.error('[User 2FA] Rate-limit check failed:', error.code || 'unknown');
+    throw new Error('Two-factor protection is temporarily unavailable.');
+  }
+  return normalizeResult(data);
+}
+
+export async function resetUser2FAFailures(userId: string): Promise<void> {
+  assertUserId(userId);
+  const admin = createAdminClient();
+  const { data, error } = await admin.rpc('reset_user_2fa_rate_limit', { p_user_id: userId });
+  if (error || data !== true) {
+    console.error('[User 2FA] Could not reset persistent rate limit:', error?.code || null);
+    throw new Error('Two-factor protection could not be reset.');
   }
 }

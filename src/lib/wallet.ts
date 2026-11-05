@@ -4,6 +4,7 @@ import type { CryptoCurrency, P2PAd, Trade, User as AppUser, Withdrawal, Deposit
 import { add, isPast } from 'date-fns';
 import { toDate } from '@/lib/utils';
 import { SUPPORTED_CRYPTOS, CHAINS } from './constants';
+import { clearPendingWithdrawalKey, getOrCreatePendingWithdrawalKey } from '@/lib/withdrawal-idempotency-store';
 import { supabase } from '@/lib/supabase/client';
 import { insertPaxonesSystemMessage } from '@/lib/trade-system-messages';
 import {
@@ -248,8 +249,10 @@ export async function requestWithdrawal(
   idempotencyKey?: string,
   totpCode?: string
 ): Promise<{ success: boolean; withdrawal_id?: string; status?: string }> {
-  const safeKey = idempotencyKey || `with_${user.id}_${crypto}_${Date.now()}`;
-  
+  const withdrawalFingerprint = JSON.stringify([crypto, chain, address.trim(), amount]);
+  const usesStoredKey = !idempotencyKey;
+  const safeKey = idempotencyKey || await getOrCreatePendingWithdrawalKey(user.id, withdrawalFingerprint);
+
   const res = await fetch('/api/withdraw', {
     method: 'POST',
     headers: {
@@ -266,13 +269,23 @@ export async function requestWithdrawal(
   });
 
   const resData = await res.json();
-  if (!res.ok) {
-    throw new Error(resData.error || 'Withdrawal request failed');
+  const withdrawalId = resData?.withdrawalId || resData?.withdrawal_id;
+  if (
+    !res.ok ||
+    resData?.success !== true ||
+    typeof withdrawalId !== 'string' ||
+    !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(withdrawalId)
+  ) {
+    throw new Error(resData.error || 'Withdrawal request could not be confirmed. Check withdrawal history before retrying.');
+  }
+
+  if (usesStoredKey) {
+    await clearPendingWithdrawalKey(user.id, withdrawalFingerprint, safeKey);
   }
 
   return {
     success: true,
-    withdrawal_id: resData.withdrawalId || resData.withdrawal_id,
+    withdrawal_id: withdrawalId,
     status: resData.status || 'QUEUED',
   };
 }

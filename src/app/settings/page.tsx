@@ -52,6 +52,7 @@ import { FlagIcon } from '@/components/ui/flag-icon';
 import { getCurrencyCountryCode } from '@/lib/currencies';
 import { setUserTimezonePreference } from '@/lib/date-utils';
 import { MERCHANT_TIERS, type MerchantTier } from '@/lib/merchant';
+import { LANGUAGES } from '@/lib/constants';
 import { MerchantBadge } from '@/components/merchant/merchant-badge';
 import {
   Dialog,
@@ -114,17 +115,8 @@ const CATEGORIES_LIST: CategoryListItem[] = [
   },
 ];
 
-const LANGUAGES = [
-  { code: 'en', name: 'English (US)' },
-  { code: 'es', name: 'Español (Spanish)' },
-  { code: 'hi', name: 'हिन्दी (Hindi)' },
-  { code: 'ar', name: 'العربية (Arabic)' },
-  { code: 'fr', name: 'Français (French)' },
-  { code: 'de', name: 'Deutsch (German)' },
-  { code: 'zh', name: '中文 (Chinese)' },
-  { code: 'pt', name: 'Português (Portuguese)' },
-  { code: 'ru', name: 'Русский (Russian)' },
-];
+// Use the same supported locale registry as the app-wide i18n provider so
+// Settings cannot persist a language code that the application cannot load.
 
 const KYC_DOC_TYPES = [
   { id: 'PASSPORT', label: 'Passport' },
@@ -277,6 +269,7 @@ export default function SettingsPage() {
 
   const [is2faEnabled, setIs2faEnabled] = useState(false);
   const [twoFaStep, setTwoFaStep] = useState<'setup' | 'otp'>('setup');
+  const [twoFaRecoveryCodes, setTwoFaRecoveryCodes] = useState<string[]>([]);
   const [twoFactorSecret, setTwoFactorSecret] = useState('');
   const [qrCodeSvg, setQrCodeSvg] = useState('');
   const [manualSecret, setManualSecret] = useState('');
@@ -812,7 +805,7 @@ export default function SettingsPage() {
     setSavingField('preferences');
     try {
       // 1. Currency
-      await fetch('/api/user/settings', {
+      const currencyResponse = await fetch('/api/user/settings', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -820,9 +813,13 @@ export default function SettingsPage() {
           data: { currency },
         }),
       });
+      if (!currencyResponse.ok) {
+        const errorData = await currencyResponse.json().catch(() => ({}));
+        throw new Error(errorData.error || 'Could not save your currency preference.');
+      }
 
       // 2. Preferences (Language, Timezone, Auto-Reply Message, Notifications)
-      await fetch('/api/user/settings', {
+      const preferencesResponse = await fetch('/api/user/settings', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -835,6 +832,10 @@ export default function SettingsPage() {
           },
         }),
       });
+      if (!preferencesResponse.ok) {
+        const errorData = await preferencesResponse.json().catch(() => ({}));
+        throw new Error(errorData.error || 'Could not save your language and other preferences.');
+      }
 
       // 3. Timezone helper update for all platform dates
       setUserTimezonePreference(timezone);
@@ -880,8 +881,8 @@ export default function SettingsPage() {
       notify('error', 'Please enter your current password.');
       return;
     }
-    if (!newPassword || newPassword.length < 6) {
-      notify('error', 'New password must be at least 6 characters long.');
+    if (!newPassword || newPassword.length < 8 || newPassword.length > 128) {
+      notify('error', 'New password must contain between 8 and 128 characters.');
       return;
     }
     if (newPassword !== confirmPassword) {
@@ -890,8 +891,8 @@ export default function SettingsPage() {
     }
 
     if (is2faEnabled) {
-      if (!password2faOtp || password2faOtp.length < 4 || password2faOtp.length > 8) {
-        notify('error', 'Mandatory 4-8 digit 2FA code is required to change password.');
+      if (!/^\d{6}$/.test(password2faOtp)) {
+        notify('error', 'A 6-digit 2FA code is required to change password.');
         return;
       }
       const verifyRes = await fetch('/api/auth/2fa/verify', {
@@ -908,6 +909,25 @@ export default function SettingsPage() {
 
     setSavingField('password');
     try {
+      // Re-authenticate with the current password instead of treating a
+      // non-empty text field as proof of account ownership.
+      const { error: reauthError } = await supabase.auth.signInWithPassword({
+        email: userEmail,
+        password: currentPassword,
+      });
+      if (reauthError) throw new Error('Current password verification failed. Please check it and try again.');
+
+      // Establish the withdrawal security hold before changing the password.
+      const holdResponse = await fetch('/api/user/settings', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ field: 'password_change_hold', data: {} }),
+      });
+      const holdData = await holdResponse.json().catch(() => ({}));
+      if (!holdResponse.ok || holdData.success !== true) {
+        throw new Error(holdData.error || 'Could not establish the required account security hold.');
+      }
+
       const { error } = await supabase.auth.updateUser({ password: newPassword });
       if (error) throw error;
 
@@ -959,13 +979,15 @@ export default function SettingsPage() {
     }
   }, [activeSecSub, is2faEnabled]);
 
-  // Verify OTP code to complete challenge and enable 2FA
+  // Confirm the pending encrypted enrollment through the atomic 2FA endpoint.
+  // The server validates the pending secret, commits its hash-only recovery codes,
+  // and turns on the profile flags in one transaction.
   const handleVerifyAndEnable2fa = async (e: FormEvent) => {
     e.preventDefault();
     setMfaError('');
     const cleanOtp = twoFaOtpCode.replace(/\s+/g, '').trim();
-    if (!cleanOtp || cleanOtp.length < 6) {
-      notify('error', 'Please enter a valid 6-digit verification code from your authenticator app.');
+    if (!/^\d{6}$/.test(cleanOtp)) {
+      notify('error', 'Please enter the 6-digit verification code from your authenticator app.');
       return;
     }
 
@@ -974,39 +996,24 @@ export default function SettingsPage() {
       const verifyRes = await fetch('/api/auth/2fa/verify', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          secret: manualSecret || twoFactorSecret,
-          token: cleanOtp,
-        }),
+        body: JSON.stringify({ token: cleanOtp }),
       });
-
-      const verifyData = await verifyRes.json();
-      if (!verifyRes.ok || !verifyData.success) {
-        throw new Error(verifyData.error || 'Invalid 6-digit verification code. Please check your app.');
+      const verifyData = await verifyRes.json().catch(() => ({}));
+      if (!verifyRes.ok || verifyData.success !== true || verifyData.is_2fa_enabled !== true) {
+        throw new Error(verifyData.error || '2FA enrollment could not be confirmed. Please try again.');
       }
 
-      // Step 2: Sync to server profile and broadcast state
-      try {
-        await fetch('/api/user/settings', {
-          method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            field: 'two_factor',
-            data: {
-              enabled: true,
-              code: cleanOtp,
-              secret: manualSecret || twoFactorSecret,
-            },
-          }),
-        });
-      } catch {
-        // Handled
-      }
-
+      const recoveryCodes = Array.isArray(verifyData.recoveryCodes)
+        ? verifyData.recoveryCodes.filter((value: unknown): value is string => typeof value === 'string' && value.length > 0)
+        : [];
+      setTwoFaRecoveryCodes(recoveryCodes);
       setIs2faEnabled(true);
       setTwoFaOtpCode('');
+      setManualSecret('');
+      setTwoFactorSecret('');
+      setTotpUri('');
       setTwoFaStep('setup');
-      setProfile((prev: any) => ({ ...prev, is_2fa_enabled: true, is_mfa_enabled: true }));
+      setProfile((prev: any) => ({ ...prev, is_2fa_enabled: true, is_mfa_enabled: true, two_factor_enabled: true }));
       await broadcastProfileUpdate({ is_2fa_enabled: true });
       notify('success', 'Authenticator successfully linked and 2FA enabled!');
     } catch (err: any) {
@@ -1017,48 +1024,39 @@ export default function SettingsPage() {
     }
   };
 
-  // Disable 2FA & unenroll factors (Enforce mandatory OTP verification)
+  // Disable through the atomic RPC-backed endpoint. Do not unenroll a factor
+  // or change local UI state before the server confirms the database commit.
   const handleDisable2fa = async (codeToUse?: string) => {
     const otp = (codeToUse || disable2faOtp).replace(/\s+/g, '').trim();
-    if (!otp || otp.length < 4 || otp.length > 8) {
+    if (!/^\d{6}$/.test(otp)) {
       setIsDisable2faModalOpen(true);
       return;
     }
 
     setSavingField('2fa');
     try {
-      // Unenroll all TOTP factors from Supabase Auth
-      try {
-        const { data: factorList } = await supabase.auth.mfa.listFactors();
-        const allFactors = [...(factorList?.totp || []), ...(factorList?.all || [])];
-        for (const factor of allFactors) {
-          await supabase.auth.mfa.unenroll({ factorId: factor.id });
-        }
-      } catch (unenrollErr) {
-        console.warn('Factor unenroll notice:', unenrollErr);
+      const res = await fetch('/api/auth/2fa/disable', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token: otp }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || data.success !== true) {
+        throw new Error(data.error || 'Failed to disable 2FA.');
       }
 
-      const res = await fetch('/api/user/settings', {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          field: 'two_factor',
-          data: { enabled: false, code: otp },
-        }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Failed to disable 2FA');
-
       setIs2faEnabled(false);
+      setTwoFaRecoveryCodes([]);
       setFactorId('');
       setQrCodeSvg('');
       setManualSecret('');
+      setTwoFactorSecret('');
       setTotpUri('');
       setTwoFaOtpCode('');
       setDisable2faOtp('');
       setIsDisable2faModalOpen(false);
       setTwoFaStep('setup');
-      setProfile((prev: any) => ({ ...prev, is_2fa_enabled: false, is_mfa_enabled: false }));
+      setProfile((prev: any) => ({ ...prev, is_2fa_enabled: false, is_mfa_enabled: false, two_factor_enabled: false }));
       await broadcastProfileUpdate({ is_2fa_enabled: false });
       notify('success', 'Two-Factor Authentication disabled.');
     } catch (err: any) {
@@ -1075,8 +1073,8 @@ export default function SettingsPage() {
     }
 
     if (is2faEnabled) {
-      if (!secQuestionOtp || secQuestionOtp.length < 4 || secQuestionOtp.length > 8) {
-        notify('error', 'Mandatory 4-8 digit 2FA code is required to modify security questions.');
+      if (!/^\d{6}$/.test(secQuestionOtp)) {
+        notify('error', 'A 6-digit 2FA code is required to modify security questions.');
         return;
       }
       const verifyRes = await fetch('/api/auth/2fa/verify', {
@@ -1193,7 +1191,12 @@ export default function SettingsPage() {
       });
 
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Failed to initiate verification session');
+      if (!res.ok) {
+        if (res.status === 503 && data.error === 'Verification service is not configured') {
+          throw new Error('Identity verification is temporarily unavailable. Your KYC has not been submitted. Please contact support and try again later.');
+        }
+        throw new Error(data.message || data.error || 'Failed to initiate verification session');
+      }
 
       setIsKycSubmitted(true);
       setKycStatus('PENDING');
@@ -2275,9 +2278,9 @@ export default function SettingsPage() {
                               type="text"
                               id="input-password-2fa-otp"
                               value={password2faOtp}
-                              onChange={(e) => setPassword2faOtp(e.target.value.replace(/\D/g, '').slice(0, 8))}
-                              placeholder="Enter 4-8 digit OTP from Authenticator"
-                              maxLength={8}
+                              onChange={(e) => setPassword2faOtp(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                              placeholder="Enter 6-digit OTP from Authenticator"
+                              maxLength={6}
                               className="w-full px-3.5 py-2.5 rounded-xl border border-input bg-background text-sm font-mono tracking-widest focus:ring-2 focus:ring-primary focus:border-primary focus:outline-none"
                               required
                             />
@@ -2363,10 +2366,51 @@ export default function SettingsPage() {
                                 Two-Factor Authentication is Active
                               </p>
                               <p className="text-[11px] text-muted-foreground mt-0.5">
-                                Your account is protected. A 4 to 8 digit OTP passcode is required during login and high-value crypto withdrawals.
+                                Your account is protected. A 6-digit authenticator passcode is required for 2FA challenges.
                               </p>
                             </div>
                           </div>
+
+                          {twoFaRecoveryCodes.length > 0 && (
+                            <div className="p-4 rounded-xl border border-amber-500/40 bg-amber-500/10 space-y-3">
+                              <div>
+                                <p className="text-xs font-bold text-amber-800 dark:text-amber-300">Save your recovery codes now</p>
+                                <p className="text-[11px] text-muted-foreground mt-1">
+                                  Each code can be used once if you lose access to your authenticator. These codes are shown only after enrollment.
+                                </p>
+                              </div>
+                              <div className="grid grid-cols-2 gap-2">
+                                {twoFaRecoveryCodes.map((code) => (
+                                  <code key={code} className="rounded-lg border border-border bg-background px-3 py-2 text-center text-xs font-mono select-all">
+                                    {code}
+                                  </code>
+                                ))}
+                              </div>
+                              <div className="flex flex-wrap gap-2">
+                                <button
+                                  type="button"
+                                  onClick={async () => {
+                                    try {
+                                      await navigator.clipboard.writeText(twoFaRecoveryCodes.join('\n'));
+                                      notify('success', 'Recovery codes copied. Store them somewhere private.');
+                                    } catch {
+                                      notify('error', 'Copy is unavailable. Please copy the codes manually.');
+                                    }
+                                  }}
+                                  className="px-3 py-2 rounded-lg border border-border text-xs font-semibold hover:bg-muted"
+                                >
+                                  Copy recovery codes
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => setTwoFaRecoveryCodes([])}
+                                  className="px-3 py-2 rounded-lg bg-primary text-primary-foreground text-xs font-semibold hover:bg-primary/90"
+                                >
+                                  I saved these codes
+                                </button>
+                              </div>
+                            </div>
+                          )}
 
                           <button
                             type="button"
@@ -2506,35 +2550,35 @@ export default function SettingsPage() {
                                   Enter Authenticator OTP Code <span className="text-rose-500">*</span>
                                 </h4>
                                 <p className="text-xs text-muted-foreground">
-                                  Enter the 4 to 8 digit OTP code generated by your authenticator app. When entered correctly, 2FA will be enabled immediately.
+                                  Enter the 6-digit OTP code generated by your authenticator app. When entered correctly, 2FA will be enabled immediately.
                                 </p>
                               </div>
 
                               <div className="space-y-2 max-w-sm">
                                 <label className="block text-xs font-semibold text-foreground">
-                                  4 to 8 Digit OTP Code
+                                  6-Digit OTP Code
                                 </label>
                                 <input
                                   type="text"
                                   inputMode="numeric"
                                   pattern="[0-9]*"
-                                  maxLength={8}
+                                  maxLength={6}
                                   id="input-2fa-otp"
                                   autoFocus
                                   value={twoFaOtpCode}
-                                  onChange={(e) => setTwoFaOtpCode(e.target.value.replace(/\D/g, '').slice(0, 8))}
-                                  placeholder="Enter 4-8 digit OTP"
+                                  onChange={(e) => setTwoFaOtpCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                                  placeholder="Enter 6-digit OTP"
                                   className="w-full px-4 py-2.5 rounded-xl border border-input bg-background text-center text-lg font-mono font-bold tracking-widest focus:ring-2 focus:ring-primary focus:border-primary focus:outline-none"
                                   required
                                 />
                                 <div className="flex items-center justify-between text-[11px] text-muted-foreground px-1">
-                                  <span>Digits: {twoFaOtpCode.length} / 8</span>
-                                  <span>{twoFaOtpCode.length >= 4 ? '✓ Ready to verify' : 'Minimum 4 digits required'}</span>
+                                  <span>Digits: {twoFaOtpCode.length} / 6</span>
+                                  <span>{twoFaOtpCode.length === 6 ? '✓ Ready to verify' : 'Enter all 6 digits'}</span>
                                 </div>
                               </div>
 
                               <p className="text-[11px] text-muted-foreground">
-                                Note: Two-Factor Authentication will only be enabled after the correct 4 to 8 digit OTP code is verified.
+                                Note: Two-Factor Authentication will only be enabled after the correct 6-digit OTP code is verified.
                               </p>
 
                               <div className="pt-2 flex items-center gap-3">
@@ -2549,7 +2593,7 @@ export default function SettingsPage() {
                                 <button
                                   type="submit"
                                   id="verify-enable-2fa-btn"
-                                  disabled={verifying2fa || twoFaOtpCode.trim().length < 4 || twoFaOtpCode.trim().length > 8}
+                                  disabled={verifying2fa || twoFaOtpCode.trim().length !== 6}
                                   className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-xs font-bold bg-primary text-primary-foreground hover:bg-primary/90 transition-colors shadow-xs disabled:opacity-50 cursor-pointer"
                                 >
                                   {verifying2fa ? (
@@ -2640,9 +2684,9 @@ export default function SettingsPage() {
                               type="text"
                               id="input-sec-question-2fa-otp"
                               value={secQuestionOtp}
-                              onChange={(e) => setSecQuestionOtp(e.target.value.replace(/\D/g, '').slice(0, 8))}
-                              placeholder="Enter 4-8 digit OTP from Authenticator"
-                              maxLength={8}
+                              onChange={(e) => setSecQuestionOtp(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                              placeholder="Enter 6-digit OTP from Authenticator"
+                              maxLength={6}
                               className="w-full px-3.5 py-2.5 rounded-xl border border-input bg-background text-sm font-mono tracking-widest focus:ring-2 focus:ring-primary focus:border-primary focus:outline-none"
                               required
                             />
@@ -3061,8 +3105,10 @@ export default function SettingsPage() {
                               const targetUserId = userId || profile?.id;
                               const syncRes = await fetch(`/api/kyc/sync?userId=${targetUserId}`);
                               const syncData = await syncRes.json();
-                              if (syncData.status === 'approved' || syncData.is_verified) {
+                              if (syncData.is_verified === true && syncData.status === 'approved') {
                                 notify('success', 'Verification approved! Limits unlocked.');
+                              } else if (syncData.awaiting_webhook) {
+                                notify('info', `Didit reports ${syncData.provider_status || 'a completed result'}. Waiting for the signed verification update.`);
                               } else {
                                 notify('info', `Status: ${syncData.status || 'Cooldown active'}`);
                               }
@@ -3122,8 +3168,10 @@ export default function SettingsPage() {
                                 const targetUserId = userId || profile?.id;
                                 const syncRes = await fetch(`/api/kyc/sync?userId=${targetUserId}`);
                                 const syncData = await syncRes.json();
-                                if (syncData.status === 'approved' || syncData.is_verified) {
+                                if (syncData.is_verified === true && syncData.status === 'approved') {
                                   notify('success', 'Verification approved! Limits unlocked.');
+                                } else if (syncData.awaiting_webhook) {
+                                  notify('info', `Didit reports ${syncData.provider_status || 'a completed result'}. Waiting for the signed verification update.`);
                                 } else {
                                   notify('info', `Status: ${syncData.status || 'Under review'}`);
                                 }
@@ -3139,7 +3187,7 @@ export default function SettingsPage() {
                         </div>
                       </div>
                       <p className="text-[11px] text-muted-foreground pt-1">
-                        Note: If verification does not receive a vendor response within 24 hours, the review status will automatically clear so you can resubmit.
+                        Note: If your provider result is delayed or no update appears after 24 hours, contact support. Account verification changes only after the signed result is securely confirmed.
                       </p>
                     </div>
                   ) : (
@@ -3616,7 +3664,7 @@ export default function SettingsPage() {
               Security Verification Required
             </DialogTitle>
             <DialogDescription className="text-xs text-muted-foreground leading-relaxed pt-1">
-              To disable Two-Factor Authentication, enter the current 4-8 digit verification code from your authenticator app to verify ownership.
+              To disable Two-Factor Authentication, enter the current 6-digit verification code from your authenticator app to verify ownership.
             </DialogDescription>
           </DialogHeader>
 
@@ -3656,7 +3704,7 @@ export default function SettingsPage() {
             <Button
               type="button"
               variant="destructive"
-              disabled={savingField === '2fa' || disable2faOtp.trim().length < 4}
+              disabled={savingField === '2fa' || disable2faOtp.trim().length !== 6}
               onClick={() => handleDisable2fa(disable2faOtp)}
               className="flex-1 text-xs font-bold bg-rose-600 hover:bg-rose-700 text-white"
             >
