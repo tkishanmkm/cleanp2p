@@ -23,8 +23,8 @@ const isUuid = (val: string) =>
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(val);
 
 /**
- * Inserts a new P2P trade chat message into Supabase.
- * Syncs to both trade_chat_messages and trade_messages to guarantee real-time delivery.
+ * Inserts a buyer/seller chat message into the canonical trade_messages stream.
+ * The legacy trade_chat_messages table is moderator/system compatibility data and is server-write-only.
  */
 export async function sendTradeMessage(
   tradeId: string,
@@ -36,36 +36,8 @@ export async function sendTradeMessage(
   let primaryRecord: TradeMessageRecord | null = null;
   let primaryError: Error | null = null;
 
-  // 1. Insert into trade_chat_messages if UUIDs are valid
-  if (isUuid(tradeId) && isUuid(senderId)) {
-    try {
-      const { data: chatData, error: chatError } = await supabase
-        .from('trade_chat_messages')
-        .insert({
-          trade_id: tradeId,
-          sender_id: senderId,
-          message,
-          created_at: now,
-        })
-        .select()
-        .single();
-
-      if (!chatError && chatData) {
-        primaryRecord = {
-          id: chatData.id,
-          trade_id: chatData.trade_id,
-          sender_id: chatData.sender_id,
-          message: chatData.message,
-          attachment_url: attachmentUrl || null,
-          created_at: chatData.created_at,
-        };
-      }
-    } catch {
-      // Non-fatal if table RLS or network falls back to trade_messages
-    }
-  }
-
-  // 2. Also insert into trade_messages for backwards compatibility and attachment support
+  // Canonical participant chat writes only. RLS binds sender_id to auth.uid()
+  // and verifies that the authenticated caller belongs to this trade.
   try {
     const { data, error } = await supabase
       .from('trade_messages')
@@ -79,15 +51,15 @@ export async function sendTradeMessage(
       .select()
       .single();
 
-    if (error && !primaryRecord) {
+    if (error) {
       primaryError = new Error(error.message);
-    } else if (data && !primaryRecord) {
+    } else if (data) {
       primaryRecord = data;
+    } else {
+      primaryError = new Error('Trade message insert returned no row');
     }
   } catch (err: unknown) {
-    if (!primaryRecord) {
-      primaryError = err instanceof Error ? err : new Error(String(err));
-    }
+    primaryError = err instanceof Error ? err : new Error(String(err));
   }
 
   return { data: primaryRecord, error: primaryError };
