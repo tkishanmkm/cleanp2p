@@ -42,14 +42,44 @@ async function readBoundedWebhookBody(req: Request): Promise<string | null> {
   return new TextDecoder('utf-8', { fatal: true }).decode(bytes);
 }
 
-function positiveDecimalText(value: unknown): string | null {
-  if (typeof value !== 'string' && typeof value !== 'number') return null;
-  const text = String(value).trim();
-  if (!/^(?:0|[1-9]\\d*)(?:\\.\\d+)?$/.test(text)) return null;
+function positiveDecimalText(value: unknown, maxDecimals: number): string | null {
+  if (typeof value !== 'string' || value.length > 128) return null;
+  const text = value.trim();
+  const decimalPoint = text.indexOf('.');
+  if (decimalPoint !== -1 && text.indexOf('.', decimalPoint + 1) !== -1) return null;
+
+  const whole = decimalPoint === -1 ? text : text.slice(0, decimalPoint);
+  const fraction = decimalPoint === -1 ? '' : text.slice(decimalPoint + 1);
+  if (
+    whole.length === 0 ||
+    (whole.length > 1 && whole.startsWith('0')) ||
+    !isAsciiDigits(whole) ||
+    (decimalPoint !== -1 && !isAsciiDigits(fraction)) ||
+    fraction.length > maxDecimals
+  ) return null;
+
   try {
-    return BigInt(text.replace('.', '')) > 0n ? text : null;
+    return BigInt(whole + fraction) > 0n ? text : null;
   } catch {
     return null;
+  }
+}
+
+function isAsciiDigits(value: string): boolean {
+  if (value.length === 0) return false;
+  for (let index = 0; index < value.length; index++) {
+    const code = value.charCodeAt(index);
+    if (code < 48 || code > 57) return false;
+  }
+  return true;
+}
+
+function getCanonicalTokenContract(network: string): string | null {
+  switch (network) {
+    case 'ERC20': return CANONICAL_USDT_CONTRACTS.ERC20;
+    case 'BEP20': return CANONICAL_USDT_CONTRACTS.BEP20;
+    case 'TRC20': return CANONICAL_USDT_CONTRACTS.TRC20;
+    default: return null;
   }
 }
 
@@ -143,7 +173,7 @@ export async function POST(req: Request) {
       logIndex?: number;
       from?: string;
       to: string;
-      value: string | number;
+      value: unknown;
       assetSymbol: string;
       network: string;
       confirmations?: number;
@@ -205,14 +235,30 @@ export async function POST(req: Request) {
       const destinationAddress = typeof item.to === 'string' ? item.to.trim() : '';
       const txHash = typeof item.txHash === 'string' ? item.txHash.trim() : '';
       let outputIndex = item.logIndex;
-      const amountText = positiveDecimalText(item.value);
       const normNet = normalizeDepositNetwork(item.network);
-      const assetSymbol = (item.assetSymbol || 'USDT').toUpperCase().trim();
-      const tokenContract = CANONICAL_USDT_CONTRACTS[normNet] || null;
-      let verifiedAmount = amountText;
+      const assetSymbol = typeof item.assetSymbol === 'string' ? item.assetSymbol.toUpperCase().trim() : '';
+      const tokenContract = getCanonicalTokenContract(normNet);
+      const isEvmDeposit = normNet === 'ETH' || normNet === 'ERC20' || normNet === 'BEP20';
+      const isTronDeposit = normNet === 'TRC20';
+      const expectedAsset = normNet === 'ETH' ? 'ETH'
+        : normNet === 'ERC20' || normNet === 'BEP20' || normNet === 'TRC20' ? 'USDT'
+        : '';
+      const amountText = positiveDecimalText(item.value, 6);
+      let verifiedAmount: string | null = null;
 
-      if (!destinationAddress || !/^0x[a-fA-F0-9]{64}$/.test(txHash) && ['ETH','ERC20','BEP20'].includes(normNet) ||
-          !amountText) {
+      const validTxHash = isEvmDeposit
+        ? txHash.length === 66 && txHash.startsWith('0x') && /^[a-fA-F0-9]{64}$/.test(txHash.slice(2))
+        : isTronDeposit
+          ? txHash.length === 64 && /^[a-fA-F0-9]{64}$/.test(txHash)
+          : false;
+
+      if (!destinationAddress || !validTxHash || !expectedAsset || assetSymbol !== expectedAsset) {
+        processedResults.push({ txHash, status: 'error', error: 'Unsupported or invalid deposit identity' });
+        continue;
+      }
+
+      if (isTronDeposit && !amountText) {
+        processedResults.push({ txHash, status: 'error', error: 'TRC20 amount must be an exact decimal string' });
         continue;
       }
 
@@ -262,6 +308,19 @@ export async function POST(req: Request) {
           processedResults.push({ txHash, status: 'error', error: 'Unable to verify native chain transfer and amount' });
           continue;
         }
+      } else if (normNet === 'TRC20') {
+        // TRON ingress records only a pending candidate. The confirmation worker
+        // re-queries the transaction and validates the exact Transfer event/index.
+        if (!Number.isSafeInteger(outputIndex) || (outputIndex as number) < 0 || !tokenContract) {
+          processedResults.push({ txHash, status: 'error', error: 'Missing TRC20 event index or canonical token contract' });
+          continue;
+        }
+        verifiedAmount = amountText;
+      }
+
+      if (!verifiedAmount) {
+        processedResults.push({ txHash, status: 'error', error: 'Exact verified deposit amount is unavailable' });
+        continue;
       }
 
       if (!Number.isSafeInteger(outputIndex) || (outputIndex as number) < 0) {

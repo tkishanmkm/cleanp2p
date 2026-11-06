@@ -7,6 +7,77 @@ import { getEvmProvider } from '@/lib/blockchain/providers';
 import { resolveUniqueEvmTransferEvidence } from '@/lib/blockchain/resolve-evm-transfer-log-index';
 import { verifyWorkerAuth } from '@/lib/security/worker-auth';
 
+function getDepositRules(network: string): { asset: string; decimals: number } | null {
+  switch (network) {
+    case 'BTC': return { asset: 'BTC', decimals: 8 };
+    case 'LTC': return { asset: 'LTC', decimals: 8 };
+    case 'ETH': return { asset: 'ETH', decimals: 18 };
+    case 'ERC20': return { asset: 'USDT', decimals: 6 };
+    case 'BEP20': return { asset: 'USDT', decimals: 18 };
+    case 'TRC20': return { asset: 'USDT', decimals: 6 };
+    default: return null;
+  }
+}
+
+function getCanonicalTokenContract(network: string): string | null {
+  switch (network) {
+    case 'ERC20': return CANONICAL_USDT_CONTRACTS.ERC20;
+    case 'BEP20': return CANONICAL_USDT_CONTRACTS.BEP20;
+    case 'TRC20': return CANONICAL_USDT_CONTRACTS.TRC20;
+    default: return null;
+  }
+}
+
+function isAsciiDigits(value: string): boolean {
+  if (value.length === 0) return false;
+  for (let index = 0; index < value.length; index++) {
+    const code = value.charCodeAt(index);
+    if (code < 48 || code > 57) return false;
+  }
+  return true;
+}
+
+function parsePositiveDecimalAmount(value: unknown, maxDecimals: number): string | null {
+  if (typeof value !== 'string' || value.length > 128) return null;
+  const text = value.trim();
+  const decimalPoint = text.indexOf('.');
+  if (decimalPoint !== -1 && text.indexOf('.', decimalPoint + 1) !== -1) return null;
+
+  const whole = decimalPoint === -1 ? text : text.slice(0, decimalPoint);
+  const fraction = decimalPoint === -1 ? '' : text.slice(decimalPoint + 1);
+  if (
+    whole.length === 0 ||
+    (whole.length > 1 && whole.startsWith('0')) ||
+    !isAsciiDigits(whole) ||
+    (decimalPoint !== -1 && !isAsciiDigits(fraction)) ||
+    fraction.length > maxDecimals
+  ) return null;
+
+  try {
+    return BigInt(whole + fraction) > 0n ? text : null;
+  } catch {
+    return null;
+  }
+}
+
+function parseNonNegativeSafeInteger(value: unknown): number | null {
+  if (typeof value === 'number') {
+    return Number.isSafeInteger(value) && value >= 0 ? value : null;
+  }
+  if (typeof value === 'string' && value.length <= 16 && isAsciiDigits(value)) {
+    const parsed = Number(value);
+    return Number.isSafeInteger(parsed) && parsed >= 0 ? parsed : null;
+  }
+  return null;
+}
+
+function isValidTransactionHash(network: string, txHash: string): boolean {
+  if (network === 'ETH' || network === 'ERC20' || network === 'BEP20') {
+    return txHash.length === 66 && txHash.startsWith('0x') && /^[a-fA-F0-9]{64}$/.test(txHash.slice(2));
+  }
+  return txHash.length === 64 && /^[a-fA-F0-9]{64}$/.test(txHash);
+}
+
 export async function POST(req: Request) {
   try {
     const auth = verifyWorkerAuth(req, {
@@ -22,15 +93,35 @@ export async function POST(req: Request) {
     const body = await req.json().catch(() => ({}));
     const { userId, assetCode, networkCode, amount, txHash, destinationAddress, outputIndex } = body;
 
-    if (!assetCode || !amount || !txHash) {
-      return NextResponse.json({ error: 'Missing deposit payload fields' }, { status: 400 });
+    if (
+      typeof assetCode !== 'string' || !assetCode.trim() ||
+      typeof txHash !== 'string' || !txHash.trim() ||
+      typeof networkCode !== 'string' && networkCode !== undefined && networkCode !== null
+    ) {
+      return NextResponse.json({ error: 'Missing or invalid deposit identity fields' }, { status: 400 });
     }
 
-    const normNet = normalizeDepositNetwork(networkCode || 'ERC20');
+    const normNet = normalizeDepositNetwork(typeof networkCode === 'string' && networkCode.trim() ? networkCode : 'ERC20');
     const normAsset = assetCode.toUpperCase().trim();
-    const tokenContract = CANONICAL_USDT_CONTRACTS[normNet] || null;
+    const rules = getDepositRules(normNet);
+    if (!rules || normAsset !== rules.asset) {
+      return NextResponse.json({ error: 'Unsupported deposit asset/network combination' }, { status: 400 });
+    }
 
-    let targetAddress = destinationAddress;
+    const isReceiptVerifiedEvm = normNet === 'ETH' || normNet === 'ERC20' || normNet === 'BEP20';
+    const amountText = parsePositiveDecimalAmount(amount, rules.decimals);
+    if (!isReceiptVerifiedEvm && !amountText) {
+      return NextResponse.json({ error: 'Deposit amount must be a positive exact decimal string with supported precision' }, { status: 400 });
+    }
+
+    const cleanTxHash = txHash.trim();
+    if (!isValidTransactionHash(normNet, cleanTxHash)) {
+      return NextResponse.json({ error: 'Invalid transaction hash for network' }, { status: 400 });
+    }
+
+    const tokenContract = getCanonicalTokenContract(normNet);
+
+    let targetAddress = typeof destinationAddress === 'string' ? destinationAddress.trim() : '';
     if (!targetAddress && userId) {
       // Lookup user's deposit address
       const { data: addrData } = await supabase
@@ -57,28 +148,17 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: 'Deposit destination address not found' }, { status: 400 });
     }
 
-    const amountText = typeof amount === 'string'
-      ? amount.trim()
-      : typeof amount === 'number' && Number.isFinite(amount)
-        ? String(amount)
-        : '';
-    if (!/^(?:0|[1-9]\\d*)(?:\\.\\d+)?$/.test(amountText) ||
-        BigInt(amountText.replace('.', '') || '0') <= 0n ||
-        typeof txHash !== 'string') {
-      return NextResponse.json({ error: 'Invalid deposit amount or transaction hash' }, { status: 400 });
-    }
-
-    let verifiedAmount = amountText;
+    let verifiedAmount: string | null = amountText;
     let resolvedOutputIndex: number;
     if (normNet === 'ERC20' || normNet === 'BEP20') {
-      if (!tokenContract || !/^0x[a-fA-F0-9]{64}$/.test(txHash)) {
+      if (!tokenContract) {
         return NextResponse.json({ error: 'Invalid token transfer identity' }, { status: 400 });
       }
       try {
         const provider = getEvmProvider(normNet);
         const [transaction, receipt] = await Promise.all([
-          provider.getTransaction(txHash),
-          provider.getTransactionReceipt(txHash),
+          provider.getTransaction(cleanTxHash),
+          provider.getTransactionReceipt(cleanTxHash),
         ]);
         const providerNetwork = await provider.getNetwork();
         const expectedChainId = normNet === 'BEP20' ? 56n : 1n;
@@ -86,11 +166,11 @@ export async function POST(req: Request) {
             providerNetwork.chainId !== expectedChainId ||
             (transaction.chainId != null && transaction.chainId !== expectedChainId) ||
             typeof transaction.to !== 'string' || transaction.to.toLowerCase() !== tokenContract.toLowerCase() ||
-            receipt.hash.toLowerCase() !== txHash.toLowerCase()) {
+            receipt.hash.toLowerCase() !== cleanTxHash.toLowerCase()) {
           return NextResponse.json({ error: 'On-chain token transfer evidence is unavailable or invalid' }, { status: 503 });
         }
         const evidence = resolveUniqueEvmTransferEvidence({
-          receipt, txHash, tokenContract, destinationAddress: targetAddress,
+          receipt, txHash: cleanTxHash, tokenContract, destinationAddress: targetAddress,
           decimals: normNet === 'ERC20' ? 6 : 18,
         });
         if (!evidence) {
@@ -105,14 +185,14 @@ export async function POST(req: Request) {
       try {
         const provider = getEvmProvider('ETH');
         const [transaction, receipt, providerNetwork] = await Promise.all([
-          provider.getTransaction(txHash),
-          provider.getTransactionReceipt(txHash),
+          provider.getTransaction(cleanTxHash),
+          provider.getTransactionReceipt(cleanTxHash),
           provider.getNetwork(),
         ]);
-        if (!/^0x[a-fA-F0-9]{64}$/.test(txHash) ||
-            providerNetwork.chainId !== 1n ||
+        if (providerNetwork.chainId !== 1n ||
             !transaction || !receipt || receipt.status !== 1 ||
-            receipt.hash.toLowerCase() !== txHash.toLowerCase() ||
+            (transaction.chainId != null && transaction.chainId !== 1n) ||
+            receipt.hash.toLowerCase() !== cleanTxHash.toLowerCase() ||
             !transaction.to || transaction.to.toLowerCase() !== targetAddress.toLowerCase() ||
             transaction.value <= 0n) {
           return NextResponse.json({ error: 'On-chain native transfer evidence is unavailable or invalid' }, { status: 503 });
@@ -123,10 +203,14 @@ export async function POST(req: Request) {
         return NextResponse.json({ error: 'Unable to verify native transfer with chain provider' }, { status: 503 });
       }
     } else {
-      resolvedOutputIndex = Number(outputIndex);
-      if (!Number.isSafeInteger(resolvedOutputIndex) || resolvedOutputIndex < 0) {
+      resolvedOutputIndex = parseNonNegativeSafeInteger(outputIndex) ?? -1;
+      if (resolvedOutputIndex < 0) {
         return NextResponse.json({ error: 'A valid output/event index is required' }, { status: 400 });
       }
+    }
+
+    if (!verifiedAmount) {
+      return NextResponse.json({ error: 'A verified exact deposit amount is required' }, { status: 400 });
     }
 
     const { data, error } = await supabase.rpc('register_pending_deposit', {
@@ -134,7 +218,7 @@ export async function POST(req: Request) {
       p_asset_symbol: normAsset,
       p_network_code: normNet,
       p_amount: verifiedAmount,
-      p_tx_hash: txHash,
+      p_tx_hash: cleanTxHash,
       p_output_index: resolvedOutputIndex,
       p_block_number: null,
       p_from_address: null,
