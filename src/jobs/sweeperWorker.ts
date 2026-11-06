@@ -117,7 +117,7 @@ async function meetsMinimumSweepUsdValue(assetSymbol: string, amount: number): P
  * ETH uses 12 confirmations and BSC uses 15, matching the deposit policy.
  */
 async function getEvmSweepReceiptFinality(
-  provider: ethers.JsonRpcProvider,
+  provider: ethers.Provider,
   txHash: string,
   network: string
 ): Promise<'PENDING' | 'CONFIRMED' | 'REVERTED'> {
@@ -467,19 +467,49 @@ async function recordEvmGasFundingNonceIncident(params: {
 
 /** Persist the actual EVM network fee and outcome from a mined gas-funding receipt. */
 async function recordEvmGasFundingReceipt(
+  provider: ethers.Provider,
+  network: string,
   sweepId: string,
   workerId: string,
-  expectedTxHash: string,
-  receipt: ethers.TransactionReceipt
+  expectedTxHash: string
 ): Promise<void> {
+  const normalizedNetwork = network.toUpperCase().trim();
+  const requiredConfirmations =
+    ['BEP20', 'BSC', 'BINANCE'].includes(normalizedNetwork) ? 15 :
+    ['ERC20', 'ETH', 'ETHEREUM'].includes(normalizedNetwork) ? 12 : 0;
+  if (!requiredConfirmations) {
+    throw new Error(`Unsupported EVM network for gas-funding receipt finality: ${network}`);
+  }
+
+  // The receipt writer is itself a finality boundary. No caller may persist a
+  // shallow, non-canonical, or merely node-reported receipt as CONFIRMED.
+  const finality = await getEvmSweepReceiptFinality(provider, expectedTxHash, normalizedNetwork);
+  if (finality !== 'CONFIRMED' && finality !== 'REVERTED') {
+    throw new Error(
+      `EVM gas-funding receipt ${expectedTxHash} has not reached canonical ${requiredConfirmations}-block finality; its hot-wallet nonce remains reserved.`
+    );
+  }
+
+  // Re-read after finality calculation and independently verify that the
+  // receipt block is still canonical before persisting its evidence.
+  const receipt = await provider.getTransactionReceipt(expectedTxHash);
+  if (!receipt) {
+    throw new Error('EVM gas-funding receipt disappeared before finality evidence could be persisted.');
+  }
+  const canonicalBlock = await provider.getBlock(receipt.blockNumber);
+  const latestBlock = await provider.getBlockNumber();
+  const confirmations = latestBlock - receipt.blockNumber + 1;
   const txHash = String(receipt.hash || '').toLowerCase();
   const blockHash = String(receipt.blockHash || '').toLowerCase();
+  const canonicalBlockHash = String(canonicalBlock?.hash || '').toLowerCase();
   const blockNumber = Number(receipt.blockNumber);
   const gasUsed = receipt.gasUsed;
   const effectiveGasPrice = receipt.gasPrice;
+  const receiptFinality = receipt.status === 1 ? 'CONFIRMED' : receipt.status === 0 ? 'REVERTED' : 'PENDING';
 
   if (
     txHash !== expectedTxHash.toLowerCase() ||
+    receiptFinality !== finality ||
     (receipt.status !== 0 && receipt.status !== 1) ||
     typeof gasUsed !== 'bigint' ||
     gasUsed <= 0n ||
@@ -487,9 +517,12 @@ async function recordEvmGasFundingReceipt(
     effectiveGasPrice <= 0n ||
     !Number.isSafeInteger(blockNumber) ||
     blockNumber < 0 ||
-    !/^0x[a-f0-9]{64}$/.test(blockHash)
+    !/^0x[a-f0-9]{64}$/.test(blockHash) ||
+    canonicalBlockHash !== blockHash ||
+    !Number.isSafeInteger(confirmations) ||
+    confirmations < requiredConfirmations
   ) {
-    throw new Error('Mined EVM gas-funding receipt is incomplete or does not match the persisted transaction.');
+    throw new Error('EVM gas-funding receipt changed, is non-canonical, or failed the required confirmation-depth check.');
   }
 
   const { data, error } = await supabaseAdmin.rpc('record_evm_gas_funding_receipt', {
@@ -497,6 +530,7 @@ async function recordEvmGasFundingReceipt(
     p_worker_id: workerId,
     p_tx_hash: txHash,
     p_receipt_status: receipt.status,
+    p_confirmations: confirmations,
     p_gas_used: gasUsed.toString(),
     p_effective_gas_price: effectiveGasPrice.toString(),
     p_block_number: blockNumber,
@@ -664,17 +698,24 @@ export async function fundGasForAddress(
         console.warn(`[Sweeper Gas Recovery] Failed to query receipt for ${existingTxHash}:`, qErr);
       }
 
-      if (receipt && receipt.status === 1) {
-        console.log(`[Sweeper Gas Recovery] Funding tx ${existingTxHash} is already confirmed on-chain!`);
-        await recordEvmGasFundingReceipt(sweepId, workerId, existingTxHash, receipt);
-        return;
-      }
+      if (receipt) {
+        const receiptFinality = await getEvmSweepReceiptFinality(provider, existingTxHash, normNet);
+        if (receiptFinality === 'CONFIRMED') {
+          console.log(`[Sweeper Gas Recovery] Funding tx ${existingTxHash} reached canonical finality.`);
+          await recordEvmGasFundingReceipt(provider, normNet, sweepId, workerId, existingTxHash);
+          return;
+        }
 
-      if (receipt && receipt.status === 0) {
-        const recoveryMessage =
-          'Persisted EVM gas-funding transaction was mined but reverted; actual network fee has been recorded and manual reconciliation is required';
-        await recordEvmGasFundingReceipt(sweepId, workerId, existingTxHash, receipt);
-        throw new Error(`${recoveryMessage}: ${existingTxHash}`);
+        if (receiptFinality === 'REVERTED') {
+          const recoveryMessage =
+            'Persisted EVM gas-funding transaction was mined and reverted after required canonical finality; actual network fee has been recorded and operator reconciliation is required';
+          await recordEvmGasFundingReceipt(provider, normNet, sweepId, workerId, existingTxHash);
+          throw new Error(`${recoveryMessage}: ${existingTxHash}`);
+        }
+
+        console.warn(
+          `[Sweeper Gas Recovery] Receipt for ${existingTxHash} is shallow or non-canonical; nonce remains reserved while exact-byte recovery continues.`
+        );
       }
 
       // 2. If not mined, rebroadcast the EXACT SAME signed raw transaction
@@ -703,12 +744,16 @@ export async function fundGasForAddress(
         await new Promise((r) => setTimeout(r, 2000));
         try {
           receipt = await provider.getTransactionReceipt(existingTxHash);
-          if (receipt && receipt.status === 1) {
-            isConfirmed = true;
-            break;
-          } else if (receipt && receipt.status === 0) {
-            await recordEvmGasFundingReceipt(sweepId, workerId, existingTxHash, receipt);
-            throw new Error(`Gas funding transaction reverted on-chain: ${existingTxHash}`);
+          if (receipt) {
+            const receiptFinality = await getEvmSweepReceiptFinality(provider, existingTxHash, normNet);
+            if (receiptFinality === 'CONFIRMED') {
+              isConfirmed = true;
+              break;
+            }
+            if (receiptFinality === 'REVERTED') {
+              await recordEvmGasFundingReceipt(provider, normNet, sweepId, workerId, existingTxHash);
+              throw new Error(`Gas funding transaction reverted after required canonical finality: ${existingTxHash}`);
+            }
           }
         } catch (receiptErr: any) {
           if (receiptErr.message?.includes('reverted')) throw receiptErr;
@@ -716,7 +761,7 @@ export async function fundGasForAddress(
       }
 
       if (isConfirmed && receipt && receipt.status === 1) {
-        await recordEvmGasFundingReceipt(sweepId, workerId, existingTxHash, receipt);
+        await recordEvmGasFundingReceipt(provider, normNet, sweepId, workerId, existingTxHash);
         console.log(`[Sweeper Gas Recovery] Gas funding tx ${existingTxHash} confirmed with actual network fee recorded.`);
         return;
       } else {
@@ -904,7 +949,7 @@ export async function fundGasForAddress(
         normNet
       );
       if (receiptFinality === 'CONFIRMED' || receiptFinality === 'REVERTED') {
-        await recordEvmGasFundingReceipt(sweepId, workerId, deterministicTxHash, minedReceipt);
+        await recordEvmGasFundingReceipt(provider, normNet, sweepId, workerId, deterministicTxHash);
         if (receiptFinality === 'CONFIRMED') {
           console.log(`[Sweeper Gas] Transaction ${deterministicTxHash} reached required finality despite broadcast error.`);
           return;
@@ -948,7 +993,7 @@ export async function fundGasForAddress(
     if (!finalReceipt || finalReceipt.status !== 0) {
       throw new Error('A reverted EVM gas-funding transaction was detected without its complete receipt; recovery remains required.');
     }
-    await recordEvmGasFundingReceipt(sweepId, workerId, deterministicTxHash, finalReceipt);
+    await recordEvmGasFundingReceipt(provider, normNet, sweepId, workerId, deterministicTxHash);
     throw new Error(`${recoveryMessage}: ${deterministicTxHash}`);
   }
 
@@ -961,7 +1006,7 @@ export async function fundGasForAddress(
   if (!finalReceipt || finalReceipt.status !== 1) {
     throw new Error('EVM gas-funding confirmation is missing its successful transaction receipt.');
   }
-  await recordEvmGasFundingReceipt(sweepId, workerId, deterministicTxHash, finalReceipt);
+  await recordEvmGasFundingReceipt(provider, normNet, sweepId, workerId, deterministicTxHash);
   console.log(`[Sweeper Gas] Gas funding tx ${deterministicTxHash} CONFIRMED; actual fee ${ethers.formatEther(finalReceipt.gasUsed * finalReceipt.gasPrice)} ${nativeSymbol} recorded.`);
 }
 
@@ -3697,7 +3742,7 @@ export async function reconcileAmbiguousSweep(sweepId: string, workerId: string)
       // Persist actual gas used, effective price, execution status and block
       // identity before the parent can leave GAS_FUNDING. The receipt RPC
       // restores CONFIRMED only from RECOVERY_REQUIRED after fresh finality.
-      await recordEvmGasFundingReceipt(sweepId, workerId, childHash, fundingReceipt);
+      await recordEvmGasFundingReceipt(provider, canonicalEvmNetwork, sweepId, workerId, childHash);
 
       if (fundingFinality === 'REVERTED') {
         await transitionSweepStatus(
