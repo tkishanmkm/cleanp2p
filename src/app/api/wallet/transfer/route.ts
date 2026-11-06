@@ -8,6 +8,74 @@ import { isTransferAccountBlocked } from '@/lib/transfer-account-status';
 import { isValidTransferRpcResponse } from '@/lib/transfer-rpc-validation';
 import { getPlatformFeeSettings } from '@/lib/platform-fees';
 
+function hasValidTransferAmountFormat(decimal: string): boolean {
+  if (!decimal || decimal.length > 27) return false;
+
+  let integerDigits = 0;
+  let fractionalDigits = 0;
+  let decimalSeen = false;
+
+  for (let index = 0; index < decimal.length; index += 1) {
+    const code = decimal.charCodeAt(index);
+    if (code === 46) {
+      if (decimalSeen || integerDigits === 0) return false;
+      decimalSeen = true;
+      continue;
+    }
+    if (code < 48 || code > 57) return false;
+    if (decimalSeen) {
+      fractionalDigits += 1;
+      if (fractionalDigits > 8) return false;
+    } else {
+      integerDigits += 1;
+      if (integerDigits > 18) return false;
+    }
+  }
+
+  return integerDigits > 0 && (!decimalSeen || fractionalDigits > 0);
+}
+
+function expandNumberToPlainDecimal(value: number): string {
+  const raw = value.toString().toLowerCase();
+  if (!raw.includes('e')) return raw;
+
+  const [coefficient, exponentText] = raw.split('e');
+  const exponent = Number(exponentText);
+  if (!Number.isInteger(exponent) || Math.abs(exponent) > 27) return '';
+
+  const [whole, fraction = ''] = coefficient.split('.');
+  const digits = `${whole}${fraction}`;
+  const decimalIndex = whole.length + exponent;
+
+  if (decimalIndex <= 0) {
+    return `0.${'0'.repeat(-decimalIndex)}${digits}`;
+  }
+  if (decimalIndex >= digits.length) {
+    return `${digits}${'0'.repeat(decimalIndex - digits.length)}`;
+  }
+  return `${digits.slice(0, decimalIndex)}.${digits.slice(decimalIndex)}`;
+}
+
+function parseTransferAmount(value: unknown): { decimal: string; numeric: number } | null {
+  let decimal: string;
+  if (typeof value === 'number') {
+    if (!Number.isFinite(value) || value <= 0) return null;
+    decimal = expandNumberToPlainDecimal(value);
+  } else if (typeof value === 'string') {
+    decimal = value.trim();
+  } else {
+    return null;
+  }
+
+  if (!hasValidTransferAmountFormat(decimal)) {
+    return null;
+  }
+
+  const numeric = Number(decimal);
+  if (!Number.isFinite(numeric) || numeric <= 0) return null;
+  return { decimal, numeric };
+}
+
 export async function POST(req: NextRequest) {
   try {
     const supabase = await createClient();
@@ -37,7 +105,11 @@ export async function POST(req: NextRequest) {
     }
 
     const admin = getSupabaseAdminClient();
-    const body = await req.json();
+    const body = await req.json().catch(() => null);
+    if (!body || typeof body !== 'object' || Array.isArray(body)) {
+      return NextResponse.json({ error: 'A valid JSON object is required.' }, { status: 400 });
+    }
+
     const {
       recipientInput,
       recipientUsername,
@@ -49,15 +121,28 @@ export async function POST(req: NextRequest) {
       idempotency_key,
       requestId,
     } = body;
-    
-    const targetIdentifier = String(recipientInput || recipientUsername || '').trim();
-    const coinSymbol = String(asset || crypto || 'USDT').toUpperCase().trim();
-    const numericAmount = Number(amount);
 
-    // Extract and validate client idempotency key
+    const rawTarget = typeof recipientInput === 'string'
+      ? recipientInput
+      : typeof recipientUsername === 'string'
+        ? recipientUsername
+        : '';
+    const targetIdentifier = rawTarget.trim();
+    const rawAsset = typeof asset === 'string'
+      ? asset
+      : typeof crypto === 'string'
+        ? crypto
+        : 'USDT';
+    const coinSymbol = rawAsset.toUpperCase().trim();
+    const parsedAmount = parseTransferAmount(amount);
+    const numericAmount = parsedAmount?.numeric ?? Number.NaN;
+
+    // Extract a bounded, predictable client idempotency key.
     const headerIdempotencyKey = req.headers.get('x-idempotency-key') || req.headers.get('idempotency-key');
-    const rawKey = String(bodyIdempotencyKey || idempotency_key || requestId || headerIdempotencyKey || '').trim();
-    const idempotencyKey = rawKey && rawKey.length >= 8 && rawKey.length <= 128 ? rawKey : null;
+    const rawKeyValue = [bodyIdempotencyKey, idempotency_key, requestId, headerIdempotencyKey]
+      .find((value) => typeof value === 'string' && value.trim().length > 0);
+    const rawKey = typeof rawKeyValue === 'string' ? rawKeyValue.trim() : '';
+    const idempotencyKey = /^[A-Za-z0-9._:-]{8,128}$/.test(rawKey) ? rawKey : null;
 
     if (!idempotencyKey) {
       return NextResponse.json({
@@ -66,8 +151,11 @@ export async function POST(req: NextRequest) {
       }, { status: 400 });
     }
 
-    if (!targetIdentifier || !coinSymbol || !Number.isFinite(numericAmount) || numericAmount <= 0) {
-      return NextResponse.json({ error: 'Invalid transfer payload. Recipient and positive amount required.' }, { status: 400 });
+    if (!targetIdentifier || !coinSymbol || !parsedAmount) {
+      return NextResponse.json({
+        error: 'Invalid transfer payload. Recipient and a positive amount with at most 8 decimal places are required.',
+        code: 'INVALID_TRANSFER_AMOUNT',
+      }, { status: 400 });
     }
 
     // 1. Fetch sender profile & check banned / restricted / emergency frozen status
@@ -252,7 +340,7 @@ export async function POST(req: NextRequest) {
       p_sender_id: user.id,
       p_recipient_username: recipientProfile.username,
       p_asset: coinSymbol,
-      p_gross_amount: numericAmount,
+      p_gross_amount: parsedAmount.decimal,
       p_idempotency_key: idempotencyKey,
     });
 
