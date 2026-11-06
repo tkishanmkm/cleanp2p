@@ -361,9 +361,9 @@ async function executeConfirmationsWorker(): Promise<ConfirmationWorkerResult> {
         const blockNumber = onChainData.blockNumber ?? null;
         const fromAddress = onChainData.fromAddress ?? null;
 
-        // The database RPC currently takes GREATEST(submitted, stored) confirmations.
-        // Never invoke it until independently verified chain evidence meets threshold,
-        // otherwise a stale/inflated stored count could trigger an early credit.
+        // The canonical credit RPC derives its effective confirmation count from this
+        // submitted value. Keep the worker-side threshold gate as an independent guard:
+        // the RPC is never called until current chain evidence meets the network threshold.
         if (currentConfirmations < requiredConfs) {
           result.pendingCount++;
           result.details.push({
