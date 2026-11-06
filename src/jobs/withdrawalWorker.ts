@@ -148,7 +148,9 @@ export async function processWithdrawalQueue(workerId: string = randomUUID()): P
   const assetSymbol = (withdrawal.asset_symbol || 'USDT').toUpperCase().trim();
   const amountStr = withdrawal.amount.toString();
   const destination = withdrawal.to_address.trim();
-  let isLocalCheckStage = true;
+  // Refund is allowed only after a successful durable-payload lookup proves
+  // that no signed transaction exists for this withdrawal. Start fail-closed.
+  let isLocalCheckStage = false;
   let reservedEvmNonce: number | null = null;
   // Retain the exact transaction hash if persistence or broadcast acknowledgement is uncertain.
   let broadcastTxHash = '';
@@ -167,6 +169,9 @@ export async function processWithdrawalQueue(workerId: string = randomUUID()): P
     }
 
     if (existingBroadcast) {
+      // The presence of any durable payload forbids a pre-broadcast refund,
+      // even if its fields are malformed and require manual reconciliation.
+      isLocalCheckStage = false;
       const persistedNetwork = normalizeNetworkCode(String(existingBroadcast.network || ''));
       const expectedNetwork = normalizeNetworkCode(network);
       const persistedHash = String(existingBroadcast.tx_hash || '');
@@ -214,6 +219,11 @@ export async function processWithdrawalQueue(workerId: string = randomUUID()): P
         status: 'BROADCASTED',
       };
     }
+
+    // A successful query returning no row is the only event that opens the
+    // verified-unbroadcast refund path. Read errors and existing payload rows
+    // leave the worker fail-closed.
+    isLocalCheckStage = true;
 
     // BRANCH A: TRON Network (TRC-20 USDT)
     if (normalizeNetworkCode(network) === 'TRC20') {
@@ -439,6 +449,19 @@ export async function processWithdrawalQueue(workerId: string = randomUUID()): P
         };
       }
     } else {
+      // A durable-payload read failure or malformed persisted record may leave
+      // the transaction hash unknown to this process. Never invent an ambiguity
+      // transition with an empty hash, and never attempt an unbroadcast refund.
+      if (!broadcastTxHash) {
+        console.error(`[Withdrawal Worker] Durable signed payload state is unverified for ${withdrawal.id}; funds remain reserved for reconciliation.`);
+        return {
+          processed: false,
+          withdrawalId: withdrawal.id,
+          status: 'DURABLE_PAYLOAD_RECONCILIATION_REQUIRED',
+          error: 'The signed transaction state could not be verified. No automatic refund or replacement transaction was attempted.',
+        };
+      }
+
       console.warn(`[Withdrawal Worker] Ambiguous broadcast result for withdrawal ${withdrawal.id}. Transitioning to AMBIGUOUS_BROADCAST and preserving funds reservation.`);
       try {
         const { data: ambiguousData, error: ambiguousError } = await supabaseAdmin.rpc('mark_withdrawal_ambiguous_broadcast', {
