@@ -410,13 +410,18 @@ export async function processWithdrawalQueue(workerId: string = randomUUID()): P
         }
         if (nonceReservation) {
           const reservationStatus = String(nonceReservation.status || '').toUpperCase();
+          const originalError = String(err?.message || 'Unknown nonce allocation error');
+          const nonceNeedsManualReconciliation =
+            /already consumed on-chain|no longer unsigned|exact durable transaction recovery is required/i.test(originalError);
+          const canRetrySameReservedNonce =
+            reservationStatus === 'RESERVED' && !nonceNeedsManualReconciliation;
           console.warn(`[Withdrawal Worker] Preserving EVM nonce ${nonceReservation.nonce} for ${withdrawal.id} in ${reservationStatus}; automatic refund blocked pending exact-nonce retry/reconciliation.`);
           return {
             processed: false,
             withdrawalId: withdrawal.id,
             nonce: Number(nonceReservation.nonce),
-            status: reservationStatus === 'RESERVED' ? 'NONCE_RESERVED_RETRY' : 'NONCE_RESERVATION_RECONCILIATION_REQUIRED',
-            error: `Nonce reservation remains ${reservationStatus}; funds stay reserved and the nonce must not be reused. Original error: ${err.message}`,
+            status: canRetrySameReservedNonce ? 'NONCE_RESERVED_RETRY' : 'NONCE_RESERVATION_RECONCILIATION_REQUIRED',
+            error: `Nonce reservation remains ${reservationStatus}; ${nonceNeedsManualReconciliation ? 'the chain reports this nonce is already consumed or its signed state is inconsistent, so operator reconciliation is required. ' : 'funds stay reserved and the nonce must not be reused. '}Original error: ${originalError}`,
           };
         }
       }
