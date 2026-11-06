@@ -20,12 +20,19 @@ export async function POST(req: NextRequest) {
     const adminId = auth.adminId || auth.user.id;
     const supabaseAdmin = getSupabaseAdminClient();
 
-    const body = await req.json();
-    const withdrawalId = body?.withdrawalId;
-    const action = body?.action;
-    const rejectionReason = body?.rejectionReason;
+    const body = await req.json().catch(() => null);
+    if (!body || typeof body !== 'object' || Array.isArray(body)) {
+      return NextResponse.json({ error: 'A valid JSON object is required.' }, { status: 400 });
+    }
 
-    if (typeof withdrawalId !== 'string' || !withdrawalId.trim() || !['APPROVE', 'REJECT'].includes(action)) {
+    const withdrawalId = typeof body.withdrawalId === 'string' ? body.withdrawalId.trim() : '';
+    const action = body.action;
+    const rejectionReason = typeof body.rejectionReason === 'string'
+      ? body.rejectionReason.trim().slice(0, 1000)
+      : 'Rejected by administrator during security review.';
+    const isWithdrawalIdValid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(withdrawalId);
+
+    if (!isWithdrawalIdValid || (action !== 'APPROVE' && action !== 'REJECT')) {
       return NextResponse.json({ error: 'Invalid payload parameters' }, { status: 400 });
     }
 
@@ -55,10 +62,10 @@ export async function POST(req: NextRequest) {
       // Call authoritative refund procedure to safely return liability to available balance
       // Refund and audit are performed in one database transaction. If audit insertion fails,
       // the refund transaction rolls back instead of leaving an unaudited financial change.
-      const { data: refundData, error: rpcError } = await supabaseAdmin.rpc('admin_reject_withdrawal', {
+      const { data: refundData, error: rpcError } = await supabaseAdmin.rpc('reject_withdrawal_pending_approval', {
         p_withdrawal_id: withdrawalId,
         p_admin_id: adminId,
-        p_rejection_reason: rejectionReason || 'Rejected by administrator during security review.',
+        p_reason: rejectionReason,
       });
 
       if (rpcError) {
