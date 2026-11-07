@@ -1,15 +1,22 @@
 import { randomUUID } from 'node:crypto';
 import { ethers } from 'ethers';
-import { normalizeNetworkCode } from '@/lib/blockchain/providers';
+import { normalizeNetworkCode, SUPPORTED_EVM_CHAINS } from '@/lib/blockchain/providers';
 import { hasSupabaseServiceConfig, supabaseService } from '@/lib/supabase/service-role';
 
 type IntegrityOutcome = 'MATCH' | 'MISMATCH' | 'INCONCLUSIVE';
+
+interface ProviderObservation {
+  provider: string;
+  blockHash: string | null;
+  reason?: string;
+}
 
 interface IntegrityInspection {
   outcome: IntegrityOutcome;
   provider: string;
   observedBlockHash: string | null;
   reason?: string;
+  providerEvidence?: ProviderObservation[];
 }
 
 interface ClaimedDeposit {
@@ -33,8 +40,67 @@ function validBlockHash(network: string, value: unknown): value is string {
     : /^(?!0x)[a-fA-F0-9]{64}$/.test(value);
 }
 
-function inconclusive(provider: string, reason: string): IntegrityInspection {
-  return { outcome: 'INCONCLUSIVE', provider, observedBlockHash: null, reason };
+function inconclusive(
+  provider: string,
+  reason: string,
+  providerEvidence?: ProviderObservation[]
+): IntegrityInspection {
+  return { outcome: 'INCONCLUSIVE', provider, observedBlockHash: null, reason, providerEvidence };
+}
+
+function distinctHttpsUrls(values: string[]): string[] {
+  const origins = new Set<string>();
+  const urls: string[] = [];
+
+  for (const value of values) {
+    try {
+      const url = new URL(value.trim());
+      if (url.protocol !== 'https:' || url.username || url.password || origins.has(url.origin)) continue;
+      origins.add(url.origin);
+      urls.push(url.toString().replace(/\/$/, ''));
+    } catch {
+      // Invalid optional providers are ignored; fewer than two valid origins
+      // causes the observation to remain inconclusive.
+    }
+    if (urls.length === 3) break;
+  }
+
+  return urls;
+}
+
+/** Two independent origins must agree on the active-chain hash. */
+function resolveProviderQuorum(
+  providerGroup: string,
+  expectedHash: string,
+  observations: ProviderObservation[]
+): IntegrityInspection {
+  const votes = new Map<string, string[]>();
+  for (const observation of observations) {
+    if (!observation.blockHash) continue;
+    const hash = observation.blockHash.toLowerCase();
+    const group = votes.get(hash) || [];
+    group.push(observation.provider);
+    votes.set(hash, group);
+  }
+
+  const quorum = Array.from(votes.entries()).find(([, providers]) => providers.length >= 2);
+  if (!quorum) {
+    return inconclusive(
+      providerGroup,
+      'independent_provider_quorum_unavailable_or_disagreeing',
+      observations
+    );
+  }
+
+  const [observedHash, providers] = quorum;
+  return {
+    outcome: observedHash === expectedHash.toLowerCase() ? 'MATCH' : 'MISMATCH',
+    provider: providers.join(','),
+    observedBlockHash: observations.find(
+      (item) => item.blockHash?.toLowerCase() === observedHash
+    )?.blockHash || null,
+    providerEvidence: observations,
+  };
 }
 
 async function inspectEvmBlock(
@@ -42,36 +108,40 @@ async function inspectEvmBlock(
   height: number,
   expectedHash: string
 ): Promise<IntegrityInspection> {
-  const chainId = network === 'BEP20' ? 56n : 1n;
-  const rpcUrl = network === 'BEP20'
-    ? process.env.BSC_RPC_URL || 'https://bsc-dataseed.binance.org'
-    : process.env.ETH_RPC_URL || process.env.EVM_RPC_URL || 'https://cloudflare-eth.com';
-  const providerName = network === 'BEP20' ? 'bsc_json_rpc' : 'ethereum_json_rpc';
-
-  try {
-    let provider = evmProviderCache.get(rpcUrl);
-    if (!provider) {
-      provider = new ethers.JsonRpcProvider(rpcUrl);
-      evmProviderCache.set(rpcUrl, provider);
-    }
-    const actualNetwork = await provider.getNetwork();
-    if (actualNetwork.chainId !== chainId) {
-      return inconclusive(providerName, 'rpc_chain_id_mismatch');
-    }
-
-    const block = await provider.getBlock(height);
-    if (!block || typeof block.hash !== 'string' || !validBlockHash(network, block.hash)) {
-      return inconclusive(providerName, 'canonical_block_unavailable_or_invalid');
-    }
-
-    return {
-      outcome: block.hash.toLowerCase() === expectedHash.toLowerCase() ? 'MATCH' : 'MISMATCH',
-      provider: providerName,
-      observedBlockHash: block.hash,
-    };
-  } catch {
-    return inconclusive(providerName, 'rpc_request_failed');
+  const chain = network === 'BEP20'
+    ? SUPPORTED_EVM_CHAINS.BEP20
+    : SUPPORTED_EVM_CHAINS.ERC20;
+  const providerGroup = network === 'BEP20' ? 'bsc_rpc_quorum' : 'ethereum_rpc_quorum';
+  const urls = distinctHttpsUrls(chain.rpcUrls);
+  if (urls.length < 2) {
+    return inconclusive(providerGroup, 'fewer_than_two_independent_rpc_origins_configured');
   }
+
+  const chainId = BigInt(chain.chainId);
+  const observations = await Promise.all(urls.map(async (rpcUrl): Promise<ProviderObservation> => {
+    let provider: ethers.JsonRpcProvider;
+    try {
+      provider = evmProviderCache.get(rpcUrl) || new ethers.JsonRpcProvider(rpcUrl);
+      evmProviderCache.set(rpcUrl, provider);
+      const [actualNetwork, block] = await Promise.all([
+        provider.getNetwork(),
+        provider.getBlock(height),
+      ]);
+      const hostname = new URL(rpcUrl).hostname;
+
+      if (actualNetwork.chainId !== chainId) {
+        return { provider: hostname, blockHash: null, reason: 'rpc_chain_id_mismatch' };
+      }
+      if (!block || typeof block.hash !== 'string' || !validBlockHash(network, block.hash)) {
+        return { provider: hostname, blockHash: null, reason: 'canonical_block_unavailable_or_invalid' };
+      }
+      return { provider: hostname, blockHash: block.hash };
+    } catch {
+      return { provider: new URL(rpcUrl).hostname, blockHash: null, reason: 'rpc_request_failed' };
+    }
+  }));
+
+  return resolveProviderQuorum(providerGroup, expectedHash, observations);
 }
 
 async function inspectUtxoBlock(
@@ -79,76 +149,89 @@ async function inspectUtxoBlock(
   height: number,
   expectedHash: string
 ): Promise<IntegrityInspection> {
-  const configured = network === 'BTC' ? process.env.BTC_MEMPOOL_API : process.env.LTC_MEMPOOL_API;
-  const fallback = network === 'BTC'
-    ? 'https://mempool.space/api'
-    : 'https://litecoinspace.org/api';
-  let base: string;
-
-  try {
-    const url = new URL((configured || fallback).trim().replace(/\/+$/, ''));
-    if (url.protocol !== 'https:') return inconclusive('utxo_block_explorer', 'explorer_must_use_https');
-    base = url.toString().replace(/\/+$/, '');
-  } catch {
-    return inconclusive('utxo_block_explorer', 'explorer_url_invalid');
+  const primary = network === 'BTC'
+    ? process.env.BTC_MEMPOOL_API || 'https://mempool.space/api'
+    : process.env.LTC_MEMPOOL_API || 'https://litecoinspace.org/api';
+  const backup = network === 'BTC'
+    ? process.env.BTC_MEMPOOL_BACKUP_API
+    : process.env.LTC_MEMPOOL_BACKUP_API;
+  const providerGroup = network === 'BTC' ? 'bitcoin_explorer_quorum' : 'litecoin_explorer_quorum';
+  const urls = distinctHttpsUrls([primary, backup || '']);
+  if (urls.length < 2) {
+    return inconclusive(
+      providerGroup,
+      network === 'BTC'
+        ? 'configure_BTC_MEMPOOL_BACKUP_API_for_independent_verification'
+        : 'configure_LTC_MEMPOOL_BACKUP_API_for_independent_verification'
+    );
   }
 
-  try {
-    const response = await fetch(`${base}/block-height/${height}`, {
-      headers: { accept: 'text/plain' },
-      signal: AbortSignal.timeout(10000),
-      cache: 'no-store',
-    });
-    if (!response.ok) return inconclusive('utxo_block_explorer', `explorer_http_${response.status}`);
+  const observations = await Promise.all(urls.map(async (base): Promise<ProviderObservation> => {
+    const hostname = new URL(base).hostname;
+    try {
+      const response = await fetch(`${base}/block-height/${height}`, {
+        headers: { accept: 'text/plain' },
+        signal: AbortSignal.timeout(10000),
+        cache: 'no-store',
+      });
+      if (!response.ok) {
+        return { provider: hostname, blockHash: null, reason: `explorer_http_${response.status}` };
+      }
 
-    const canonicalHash = (await response.text()).trim();
-    if (!/^[a-fA-F0-9]{64}$/.test(canonicalHash)) {
-      return inconclusive('utxo_block_explorer', 'canonical_hash_invalid');
+      const canonicalHash = (await response.text()).trim();
+      if (!/^[a-fA-F0-9]{64}$/.test(canonicalHash)) {
+        return { provider: hostname, blockHash: null, reason: 'canonical_hash_invalid' };
+      }
+      return { provider: hostname, blockHash: canonicalHash };
+    } catch {
+      return { provider: hostname, blockHash: null, reason: 'explorer_request_failed' };
     }
+  }));
 
-    return {
-      outcome: canonicalHash.toLowerCase() === expectedHash.toLowerCase() ? 'MATCH' : 'MISMATCH',
-      provider: 'utxo_block_explorer',
-      observedBlockHash: canonicalHash,
-    };
-  } catch {
-    return inconclusive('utxo_block_explorer', 'explorer_request_failed');
-  }
+  return resolveProviderQuorum(providerGroup, expectedHash, observations);
 }
 
 async function inspectTronBlock(height: number, expectedHash: string): Promise<IntegrityInspection> {
-  const host = (process.env.TRON_RPC_URL || 'https://api.trongrid.io').replace(/\/+$/, '');
-  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-  if (process.env.TRON_PRO_API_KEY) headers['TRON-PRO-API-KEY'] = process.env.TRON_PRO_API_KEY;
-
-  try {
-    const response = await fetch(`${host}/walletsolidity/getblockbynum`, {
-      method: 'POST',
-      headers,
-      body: JSON.stringify({ num: height }),
-      signal: AbortSignal.timeout(10000),
-      cache: 'no-store',
-    });
-    if (!response.ok) return inconclusive('tron_solidity_node', `solidity_node_http_${response.status}`);
-
-    const block: any = await response.json();
-    const canonicalHash = block?.blockID;
-    if (
-      block?.block_header?.raw_data?.number !== height ||
-      typeof canonicalHash !== 'string' ||
-      !/^[a-fA-F0-9]{64}$/.test(canonicalHash)
-    ) {
-      return inconclusive('tron_solidity_node', 'solidified_block_unavailable_or_invalid');
-    }
-
-    return {
-      outcome: canonicalHash.toLowerCase() === expectedHash.toLowerCase() ? 'MATCH' : 'MISMATCH',
-      provider: 'tron_solidity_node',
-      observedBlockHash: canonicalHash,
-    };
-  } catch {
-    return inconclusive('tron_solidity_node', 'solidity_node_request_failed');
+  const primary = process.env.TRON_RPC_URL || 'https://api.trongrid.io';
+  const backup = process.env.TRON_BACKUP_RPC_URL || '';
+  const urls = distinctHttpsUrls([primary, backup]);
+  if (urls.length < 2) {
+    return inconclusive('tron_solidity_node_quorum', 'configure_TRON_BACKUP_RPC_URL_for_independent_verification');
   }
+
+  const observations = await Promise.all(urls.map(async (host): Promise<ProviderObservation> => {
+    const hostname = new URL(host).hostname;
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+    if (process.env.TRON_PRO_API_KEY) headers['TRON-PRO-API-KEY'] = process.env.TRON_PRO_API_KEY;
+
+    try {
+      const response = await fetch(`${host}/walletsolidity/getblockbynum`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ num: height }),
+        signal: AbortSignal.timeout(10000),
+        cache: 'no-store',
+      });
+      if (!response.ok) {
+        return { provider: hostname, blockHash: null, reason: `solidity_node_http_${response.status}` };
+      }
+
+      const block: any = await response.json();
+      const canonicalHash = block?.blockID;
+      if (
+        block?.block_header?.raw_data?.number !== height ||
+        typeof canonicalHash !== 'string' ||
+        !/^[a-fA-F0-9]{64}$/.test(canonicalHash)
+      ) {
+        return { provider: hostname, blockHash: null, reason: 'solidified_block_unavailable_or_invalid' };
+      }
+      return { provider: hostname, blockHash: canonicalHash };
+    } catch {
+      return { provider: hostname, blockHash: null, reason: 'solidity_node_request_failed' };
+    }
+  }));
+
+  return resolveProviderQuorum('tron_solidity_node_quorum', expectedHash, observations);
 }
 
 /**
@@ -222,6 +305,8 @@ async function executeIntegrityMonitor(): Promise<{ scanned: number; mismatches:
     const evidence = {
       outcome: inspection.outcome,
       reason: inspection.reason || null,
+      providers: inspection.providerEvidence || [],
+      quorum_required: 2,
       checked_at: new Date().toISOString(),
       check: 'canonical_block_at_persisted_height',
     };
