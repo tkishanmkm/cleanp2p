@@ -7,6 +7,7 @@ import { startWithdrawalWorker, stopWithdrawalWorker } from './jobs/withdrawalWo
 import { checkHotWalletBalance } from './jobs/hotWalletMonitor';
 import { processExpiredP2PTrades } from './jobs/p2pExpiryWorker';
 import { runDepositSweeper } from './jobs/sweeperWorker';
+import { runDepositChainIntegrityMonitor } from './jobs/depositIntegrityWorker';
 import { runMarketPriceUpdate } from './jobs/priceUpdaterWorker';
 import { reconcileLedgerVsChain } from './jobs/reconciliationWorker';
 import { SUPPORTED_EVM_CHAINS, getEvmProvider } from './lib/blockchain/providers';
@@ -164,7 +165,17 @@ function initializeScheduledJobs(): void {
     }
   });
 
-  // 6. Worker Health Heartbeat: every 5 minutes
+  // 6. Post-credit deposit chain integrity monitor: canonical block identity checks.
+  // This creates durable alerts for hash divergence only; it never reverses customer balances.
+  cron.schedule('*/5 * * * *', async () => {
+    try {
+      await runDepositChainIntegrityMonitor();
+    } catch (err: any) {
+      console.error('[Cron: Deposit Integrity Error]:', err?.message);
+    }
+  });
+
+  // 7. Worker Health Heartbeat: every 5 minutes
   cron.schedule('*/5 * * * *', () => {
     const memory = process.memoryUsage();
     console.log('[Worker Heartbeat]', {
