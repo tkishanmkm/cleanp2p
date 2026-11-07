@@ -41,18 +41,40 @@ async function readBoundedBody(req: Request): Promise<string | null> {
 
 export async function POST(req: NextRequest) {
   try {
-    // 1. Authenticate caller session
+    // 1. Authenticate one explicit credential source. A supplied Bearer token
+    // must validate independently and may not fall back to a different cookie user.
     const supabaseUser = await createClient();
-    let { data: { user } } = await supabaseUser.auth.getUser();
-
     const authHeader = req.headers.get("authorization");
-    if (!user && authHeader && authHeader.startsWith("Bearer ")) {
-      const token = authHeader.substring(7).trim();
-      if (token) {
-        const adminClient = getSupabaseAdminClient();
-        const { data: tokenData } = await adminClient.auth.getUser(token);
-        if (tokenData?.user) user = tokenData.user;
+    let user = null as Awaited<ReturnType<typeof supabaseUser.auth.getUser>>["data"]["user"];
+
+    if (authHeader !== null) {
+      const bearerMatch = /^Bearer\s+(.+)$/i.exec(authHeader);
+      const bearerToken = bearerMatch?.[1]?.trim() || null;
+      if (!bearerToken) {
+        return NextResponse.json(
+          { error: "unauthorized", message: "A valid Bearer authorization token is required." },
+          { status: 401 }
+        );
       }
+
+      const adminClient = getSupabaseAdminClient();
+      const { data: tokenData, error: tokenError } = await adminClient.auth.getUser(bearerToken);
+      if (tokenError || !tokenData?.user) {
+        return NextResponse.json(
+          { error: "unauthorized", message: "Authentication token is invalid or expired." },
+          { status: 401 }
+        );
+      }
+      user = tokenData.user;
+    } else {
+      const { data: cookieAuth, error: cookieError } = await supabaseUser.auth.getUser();
+      if (cookieError || !cookieAuth?.user) {
+        return NextResponse.json(
+          { error: "unauthorized", message: "Authentication session required to initiate KYC." },
+          { status: 401 }
+        );
+      }
+      user = cookieAuth.user;
     }
 
     if (!user) {
@@ -367,17 +389,30 @@ export async function POST(req: NextRequest) {
 
     // Persist the provider session through the trusted atomic RPC. This keeps the
     // profile session, retry counters, and kyc_verifications row in one transaction.
-    const { data: initiationResult, error: initiationError } = await supabase.rpc('initiate_didit_kyc', {
+    const { data: initiationResult, error: initiationError } = await supabase.rpc('initiate_didit_kyc_secure', {
       p_user_id: userId,
       p_session_id: sessionId,
+      p_actor_id: user.id,
     });
     if (initiationError) {
-      console.error('[KYC INITIATE] Atomic session registration failed:', initiationError);
-      return NextResponse.json({ error: 'Could not save verification session. Please retry or contact support.' }, { status: 500 });
+      const rpcMissing = initiationError.code === 'PGRST202' || initiationError.code === '42883';
+      const actorDenied = initiationError.code === '42501';
+      console.error('[KYC INITIATE] Secure session registration failed:', { code: initiationError.code || null });
+      return NextResponse.json(
+        {
+          error: rpcMissing
+            ? 'KYC session registration is temporarily unavailable until the database migration is installed.'
+            : actorDenied
+              ? 'You are not authorized to initiate KYC for this account.'
+              : 'Could not save verification session. Please retry or contact support.',
+          code: rpcMissing ? 'SECURE_KYC_INITIATION_RPC_NOT_INSTALLED' : actorDenied ? 'KYC_ACTOR_NOT_AUTHORIZED' : 'KYC_SESSION_REGISTRATION_FAILED',
+        },
+        { status: rpcMissing ? 503 : actorDenied ? 403 : 503 },
+      );
     }
     if (!initiationResult || initiationResult.success !== true) {
       const reason = String(initiationResult?.error || 'session_registration_failed');
-      const status = reason === 'max_attempts_exceeded' ? 403 : reason === 'already_in_review' || reason === 'already_verified' ? 409 : 400;
+      const status = reason === 'max_attempts_exceeded' || reason === 'user_banned' || reason === 'account_restricted' ? 403 : reason === 'already_in_review' || reason === 'already_verified' || reason === 'session_already_registered' ? 409 : 400;
       return NextResponse.json({ error: reason, message: initiationResult?.message || 'Could not register verification session.' }, { status });
     }
 
