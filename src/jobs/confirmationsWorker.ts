@@ -98,6 +98,8 @@ async function fetchOnChainConfirmations(
         method: 'POST',
         headers,
         body: JSON.stringify({ value: txHash }),
+        signal: AbortSignal.timeout(8000),
+        cache: 'no-store',
       });
 
       if (!res.ok) return null;
@@ -109,9 +111,37 @@ async function fetchOnChainConfirmations(
         return null;
       }
 
-      const nowRes = await fetch(`${tronHost}/wallet/getnowblock`, {
+      // A full-node receipt is not finality proof. Require the transaction to be
+      // present in the Solidity-node block at the reported height (solidified view).
+      const solidifiedBlockRes = await fetch(`${tronHost}/walletsolidity/getblockbynum`, {
         method: 'POST',
         headers,
+        body: JSON.stringify({ num: data.blockNumber }),
+        signal: AbortSignal.timeout(8000),
+        cache: 'no-store',
+      });
+      if (!solidifiedBlockRes.ok) return null;
+      const solidifiedBlock = await solidifiedBlockRes.json();
+      const solidifiedTransactions = Array.isArray(solidifiedBlock?.transactions)
+        ? solidifiedBlock.transactions
+        : [];
+      if (
+        solidifiedBlock?.block_header?.raw_data?.number !== data.blockNumber ||
+        typeof solidifiedBlock?.blockID !== 'string' ||
+        !/^[a-fA-F0-9]{64}$/.test(solidifiedBlock.blockID) ||
+        !solidifiedTransactions.some((item: any) =>
+          typeof item?.txID === 'string' && item.txID.toLowerCase() === txHash.toLowerCase()
+        )
+      ) {
+        return null;
+      }
+
+      // Count only solidified blocks, never the potentially unconfirmed full-node tip.
+      const nowRes = await fetch(`${tronHost}/walletsolidity/getnowblock`, {
+        method: 'POST',
+        headers,
+        signal: AbortSignal.timeout(8000),
+        cache: 'no-store',
       });
       if (!nowRes.ok) return null;
       const nowData = await nowRes.json();
@@ -206,6 +236,12 @@ async function fetchOnChainConfirmations(
       return null;
     }
     const tokenContract = CANONICAL_USDT_CONTRACTS[norm] || null;
+    // A receipt can refer to a block that has since been orphaned. Fetch the
+    // canonical block at its height and require its hash to match both receipt
+    // and transaction before this evidence can authorize a deposit credit.
+    const canonicalBlock = receipt && Number.isSafeInteger(receipt.blockNumber) && receipt.blockNumber > 0
+      ? await provider.getBlock(receipt.blockNumber)
+      : null;
     const verified = verifyEvmDepositEvidence({
       network: norm,
       chainId: providerNetwork.chainId,
@@ -217,6 +253,7 @@ async function fetchOnChainConfirmations(
       transaction,
       receipt,
       currentBlock,
+      canonicalBlockHash: typeof canonicalBlock?.hash === 'string' ? canonicalBlock.hash : null,
     });
     if (!verified) {
       return null; // Success alone is insufficient; exact transfer evidence must match.

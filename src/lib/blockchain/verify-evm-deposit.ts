@@ -14,6 +14,8 @@ export interface EvmDepositEvidence {
   transaction: any;
   receipt: any;
   currentBlock: number;
+  /** Hash fetched independently from the canonical RPC block at receipt.blockNumber. */
+  canonicalBlockHash: string | null;
 }
 
 const TRANSFER_TOPIC = ethers.id('Transfer(address,address,uint256)').toLowerCase();
@@ -39,7 +41,7 @@ export function verifyEvmDepositEvidence(input: EvmDepositEvidence): {
   blockNumber: number;
   fromAddress?: string;
 } | null {
-  const { network, chainId, txHash, destinationAddress, expectedAmount, outputIndex, tokenContract, transaction, receipt, currentBlock } = input;
+  const { network, chainId, txHash, destinationAddress, expectedAmount, outputIndex, tokenContract, transaction, receipt, currentBlock, canonicalBlockHash } = input;
   const expectedChainId = network === 'BEP20' ? 56n : 1n;
   let reportedChainId: bigint;
   try {
@@ -65,7 +67,14 @@ export function verifyEvmDepositEvidence(input: EvmDepositEvidence): {
       receipt.status !== 1 ||
       !Number.isSafeInteger(receipt.blockNumber) || receipt.blockNumber <= 0 ||
       currentBlock < receipt.blockNumber ||
-      (transaction.blockNumber != null && transaction.blockNumber !== receipt.blockNumber) ||
+      typeof receipt.blockHash !== 'string' ||
+      !/^0x[a-fA-F0-9]{64}$/.test(receipt.blockHash) ||
+      typeof canonicalBlockHash !== 'string' ||
+      !/^0x[a-fA-F0-9]{64}$/.test(canonicalBlockHash) ||
+      receipt.blockHash.toLowerCase() !== canonicalBlockHash.toLowerCase() ||
+      transaction.blockNumber !== receipt.blockNumber ||
+      typeof transaction.blockHash !== 'string' ||
+      transaction.blockHash.toLowerCase() !== receipt.blockHash.toLowerCase() ||
       typeof transaction.from !== 'string') return null;
 
   let expectedUnits: bigint | null;

@@ -8,6 +8,7 @@ const txHash = '0x' + 'a'.repeat(64);
 const destination = '0x1111111111111111111111111111111111111111';
 const sender = '0x2222222222222222222222222222222222222222';
 const contract = '0xdac17f958d2ee523a2206206994597c13d831ec7';
+const blockHash = '0x' + 'c'.repeat(64);
 const topicAddress = (address: string) => ethers.zeroPadValue(address, 32);
 const base = {
   network: 'ERC20' as const,
@@ -17,9 +18,10 @@ const base = {
   expectedAmount: '12.5',
   outputIndex: 3,
   tokenContract: contract,
-  transaction: { hash: txHash, from: sender, to: contract, blockNumber: 100 },
+  transaction: { hash: txHash, from: sender, to: contract, blockNumber: 100, blockHash },
   receipt: {
-    hash: txHash, status: 1, blockNumber: 100,
+    hash: txHash, status: 1, blockNumber: 100, blockHash,
+
     logs: [{
       address: contract,
       topics: [ethers.id('Transfer(address,address,uint256)'), topicAddress(sender), topicAddress(destination)],
@@ -28,6 +30,7 @@ const base = {
     }],
   },
   currentBlock: 111,
+  canonicalBlockHash: blockHash,
 };
 
 test('verifies exact ERC20 transfer recipient, contract, amount and log index', () => {
@@ -61,13 +64,25 @@ test('rejects transaction hash, failed receipt and mismatched block identity', (
   assert.equal(verifyEvmDepositEvidence({ ...base, receipt: { ...base.receipt, blockNumber: 101 } }), null);
 });
 
+test('rejects orphaned EVM receipts whose block hash is not canonical', () => {
+  assert.equal(verifyEvmDepositEvidence({
+    ...base,
+    canonicalBlockHash: '0x' + 'd'.repeat(64),
+  }), null);
+  assert.equal(verifyEvmDepositEvidence({
+    ...base,
+    transaction: { ...base.transaction, blockHash: '0x' + 'e'.repeat(64) },
+  }), null);
+});
+
 test('native ETH deposits require exact recipient and wei amount', () => {
   const eth = {
     network: 'ETH' as const, chainId: 1n, txHash, destinationAddress: destination,
     expectedAmount: '0.25', outputIndex: 0,
-    transaction: { hash: txHash, from: sender, to: destination, value: ethers.parseEther('0.25'), blockNumber: 100 },
-    receipt: { hash: txHash, status: 1, blockNumber: 100, logs: [] },
+    transaction: { hash: txHash, from: sender, to: destination, value: ethers.parseEther('0.25'), blockNumber: 100, blockHash },
+    receipt: { hash: txHash, status: 1, blockNumber: 100, blockHash, logs: [] },
     currentBlock: 100,
+    canonicalBlockHash: blockHash,
   };
   assert.equal(verifyEvmDepositEvidence(eth)?.confirmations, 1);
   assert.equal(verifyEvmDepositEvidence({ ...eth, transaction: { ...eth.transaction, value: ethers.parseEther('0.26') } }), null);

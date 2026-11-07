@@ -58,18 +58,34 @@ export async function verifyUtxoDepositOutput(
   const tx: any = await txResponse.json();
   if (typeof tx?.txid !== 'string' || tx.txid.toLowerCase() !== txid.toLowerCase() ||
       !Array.isArray(tx.vout) || !tx.status?.confirmed ||
-      !Number.isSafeInteger(tx.status.block_height) || tx.status.block_height <= 0) return null;
+      !Number.isSafeInteger(tx.status.block_height) || tx.status.block_height <= 0 ||
+      typeof tx.status.block_hash !== 'string' ||
+      !/^[a-fA-F0-9]{64}$/.test(tx.status.block_hash)) return null;
 
-  const output = tx.vout[outputIndex];
+  const output = tx.vout.at(outputIndex);
   if (!output || output.scriptpubkey_address !== address ||
       !Number.isSafeInteger(output.value) || output.value <= 0) return null;
 
-  const tipResponse = await fetcher(`${base}/blocks/tip/height`, {
-    headers: { accept: 'text/plain' },
-    signal: AbortSignal.timeout(8000),
-    cache: 'no-store',
-  });
-  if (!tipResponse.ok) return null;
+  // A confirmed transaction may still refer to an orphaned block after a
+  // reorganization. Compare its reported block hash with the active-chain hash
+  // at the same height; inability to obtain this proof must fail closed.
+  const [canonicalBlockResponse, tipResponse] = await Promise.all([
+    fetcher(`${base}/block-height/${tx.status.block_height}`, {
+      headers: { accept: 'text/plain' },
+      signal: AbortSignal.timeout(8000),
+      cache: 'no-store',
+    }),
+    fetcher(`${base}/blocks/tip/height`, {
+      headers: { accept: 'text/plain' },
+      signal: AbortSignal.timeout(8000),
+      cache: 'no-store',
+    }),
+  ]);
+  if (!canonicalBlockResponse.ok || !tipResponse.ok) return null;
+  const canonicalBlockHash = (await canonicalBlockResponse.text()).trim();
+  if (!/^[a-fA-F0-9]{64}$/.test(canonicalBlockHash) ||
+      canonicalBlockHash.toLowerCase() !== tx.status.block_hash.toLowerCase()) return null;
+
   const tipText = (await tipResponse.text()).trim();
   if (!/^\d+$/.test(tipText)) return null;
   const tip = Number(tipText);
