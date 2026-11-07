@@ -75,7 +75,8 @@ BEGIN
     )
        OR has_function_privilege('anon', v_rpc, 'EXECUTE')
        OR has_function_privilege('authenticated', v_rpc, 'EXECUTE')
-       OR NOT has_function_privilege('service_role', v_rpc, 'EXECUTE') THEN
+       OR has_function_privilege('service_role', v_rpc, 'EXECUTE')
+       OR NOT has_function_privilege('postgres', v_rpc, 'EXECUTE') THEN
         RAISE EXCEPTION 'FAIL: canonical deposit RPC grants do not match the server-only contract';
     END IF;
 

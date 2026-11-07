@@ -1,9 +1,13 @@
-﻿import { NextResponse } from 'next/server';
+import { NextResponse } from 'next/server';
 import { getSupabaseAdminClient } from '@/lib/supabase/server';
 import { verifyWorkerAuth } from '@/lib/security/worker-auth';
 import { verifyUtxoDepositOutput } from '@/lib/blockchain/verify-utxo-deposit';
+import { readBoundedRequestBody } from '@/lib/security/read-bounded-request-body';
 
 export const dynamic = 'force-dynamic';
+
+const MAX_BLOCKCYPHER_WEBHOOK_BYTES = 2 * 1024 * 1024;
+const MAX_BLOCKCYPHER_OUTPUTS = 100;
 
 export async function POST(req: Request) {
   // Fail closed: deposit-credit callbacks must never put a shared secret in
@@ -19,11 +23,30 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
-  const payload = await req.json().catch(() => null);
+  let rawBody: string | null;
+  try {
+    rawBody = await readBoundedRequestBody(req, MAX_BLOCKCYPHER_WEBHOOK_BYTES);
+  } catch {
+    return NextResponse.json({ error: 'Invalid UTF-8 webhook body.' }, { status: 400 });
+  }
+  if (rawBody === null) {
+    return NextResponse.json({ error: 'Webhook payload is too large.' }, { status: 413 });
+  }
+
+  let payload: any;
+  try {
+    payload = JSON.parse(rawBody);
+  } catch {
+    return NextResponse.json({ message: 'Invalid JSON payload' }, { status: 400 });
+  }
+
   const txHash = payload?.hash;
   const outputs = payload?.outputs;
-  if (!txHash || typeof txHash !== 'string' || !Array.isArray(outputs)) {
+  if (typeof txHash !== 'string' || !Array.isArray(outputs)) {
     return NextResponse.json({ message: 'Invalid payload' }, { status: 400 });
+  }
+  if (outputs.length > MAX_BLOCKCYPHER_OUTPUTS) {
+    return NextResponse.json({ error: 'Too many transaction outputs in one webhook payload.' }, { status: 413 });
   }
 
   const supabaseAdmin = getSupabaseAdminClient();
@@ -35,7 +58,7 @@ export async function POST(req: Request) {
 
     try {
       // BlockCypher payload fields are notifications only. Derive output amount,
-      // block height and confirmations from the BTC chain explorer before crediting.
+      // block height and confirmations from the BTC chain explorer before registering.
       const verified = await verifyUtxoDepositOutput('BTC', txHash, toAddress, outputIndex);
       if (!verified) {
         results.push({ txHash, outputIndex, status: 'pending_or_unverified' });
@@ -55,13 +78,16 @@ export async function POST(req: Request) {
         p_provider: 'blockcypher_webhook_pending',
       });
       if (rpcErr) {
-        console.error(`[Blockcypher Webhook] RPC error for ${txHash}:${outputIndex}:`, rpcErr.message);
+        console.error('[Blockcypher Webhook] Pending registration RPC failed:', {
+          code: rpcErr.code || 'UNKNOWN',
+          outputIndex,
+        });
         results.push({ txHash, outputIndex, error: 'deposit_processing_failed' });
       } else {
         results.push({ txHash, outputIndex, result: rpcData });
       }
-    } catch (error) {
-      console.error('[Blockcypher Webhook] Chain verification failed:', error);
+    } catch {
+      console.error('[Blockcypher Webhook] Independent chain verification failed.', { outputIndex });
       results.push({ txHash, outputIndex, status: 'verification_unavailable' });
     }
   }

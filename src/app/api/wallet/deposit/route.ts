@@ -6,6 +6,9 @@ import { CANONICAL_USDT_CONTRACTS } from '@/jobs/depositIngestion';
 import { getEvmProvider } from '@/lib/blockchain/providers';
 import { resolveUniqueEvmTransferEvidence } from '@/lib/blockchain/resolve-evm-transfer-log-index';
 import { verifyWorkerAuth } from '@/lib/security/worker-auth';
+import { readBoundedRequestBody } from '@/lib/security/read-bounded-request-body';
+
+const MAX_WALLET_DEPOSIT_BODY_BYTES = 256 * 1024;
 
 function getDepositRules(network: string): { asset: string; decimals: number } | null {
   switch (network) {
@@ -88,9 +91,26 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: 'Unauthorized webhook' }, { status: 401 });
     }
 
-    const supabase = getSupabaseAdminClient();
+    let rawBody: string | null;
+    try {
+      rawBody = await readBoundedRequestBody(req, MAX_WALLET_DEPOSIT_BODY_BYTES);
+    } catch {
+      return NextResponse.json({ error: 'Invalid UTF-8 request body.' }, { status: 400 });
+    }
+    if (rawBody === null) {
+      return NextResponse.json({ error: 'Request body is too large.' }, { status: 413 });
+    }
 
-    const body = await req.json().catch(() => ({}));
+    let body: any;
+    try {
+      body = JSON.parse(rawBody);
+    } catch {
+      return NextResponse.json({ error: 'Invalid JSON payload' }, { status: 400 });
+    }
+    if (!body || typeof body !== 'object' || Array.isArray(body)) {
+      return NextResponse.json({ error: 'Request body must be a JSON object' }, { status: 400 });
+    }
+
     const { userId, assetCode, networkCode, amount, txHash, destinationAddress, outputIndex } = body;
 
     if (
@@ -120,6 +140,7 @@ export async function POST(req: Request) {
     }
 
     const tokenContract = getCanonicalTokenContract(normNet);
+    const supabase = getSupabaseAdminClient();
 
     let targetAddress = typeof destinationAddress === 'string' ? destinationAddress.trim() : '';
     if (!targetAddress && userId) {

@@ -139,7 +139,8 @@ BEGIN
        OR NOT has_function_privilege('service_role', v_confirm, 'EXECUTE')
        OR has_function_privilege('anon', v_credit, 'EXECUTE')
        OR has_function_privilege('authenticated', v_credit, 'EXECUTE')
-       OR NOT has_function_privilege('service_role', v_credit, 'EXECUTE') THEN
+       OR has_function_privilege('service_role', v_credit, 'EXECUTE')
+       OR NOT has_function_privilege('postgres', v_credit, 'EXECUTE') THEN
         RAISE EXCEPTION 'FAIL: deposit RPC execution grants do not match the server-only contract';
     END IF;
 

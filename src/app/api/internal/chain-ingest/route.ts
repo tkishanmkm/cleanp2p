@@ -3,6 +3,9 @@ import { getSupabaseAdminClient } from '@/lib/supabase/server';
 import { normalizeDepositNetwork } from '@/lib/hd-derivation-engine';
 import { CANONICAL_USDT_CONTRACTS } from '@/jobs/depositIngestion';
 import { timingSafeEqualString } from '@/lib/security/worker-auth';
+import { readBoundedRequestBody } from '@/lib/security/read-bounded-request-body';
+
+const MAX_CHAIN_INGEST_BODY_BYTES = 256 * 1024;
 
 interface IngestPayload {
   networkCode: string;
@@ -102,9 +105,19 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    let rawBody: string | null;
+    try {
+      rawBody = await readBoundedRequestBody(req, MAX_CHAIN_INGEST_BODY_BYTES);
+    } catch {
+      return NextResponse.json({ error: 'Invalid UTF-8 request body.' }, { status: 400 });
+    }
+    if (rawBody === null) {
+      return NextResponse.json({ error: 'Request body is too large.' }, { status: 413 });
+    }
+
     let body: IngestPayload;
     try {
-      body = await req.json();
+      body = JSON.parse(rawBody) as IngestPayload;
     } catch {
       return NextResponse.json({ error: 'Invalid JSON payload.' }, { status: 400 });
     }
