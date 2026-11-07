@@ -29,19 +29,32 @@ export async function verifyServerAdmin(
     const supabase = await createClient();
     const adminClient = getSupabaseAdminClient();
 
-    // 1. Check session from cookies or Bearer Authorization header
-    let { data: { user }, error: userError } = await supabase.auth.getUser();
+    // 1. Verify exactly one credential source. An explicit Bearer token takes
+    // precedence over cookies; never silently fall back to a different user.
+    const authHeader = req?.headers?.get("authorization");
+    let user: any = null;
+    let userError: any = null;
 
-    if (!user && req && req.headers?.get("authorization")) {
-      const authHeader = req.headers.get("authorization") || "";
-      const token = authHeader.replace(/^Bearer\s+/i, "").trim();
-      if (token) {
-        const { data: tokenUser, error: tokenError } = await adminClient.auth.getUser(token);
-        if (!tokenError && tokenUser?.user) {
-          user = tokenUser.user;
-          userError = null;
-        }
+    if (authHeader !== null && authHeader !== undefined) {
+      const bearerMatch = /^Bearer\s+(.+)$/i.exec(authHeader);
+      const bearerToken = bearerMatch?.[1]?.trim() || null;
+      if (!bearerToken) {
+        return {
+          authorized: false,
+          response: NextResponse.json(
+            { success: false, error: "Invalid authorization header." },
+            { status: 401 },
+          ),
+        };
       }
+
+      const { data: tokenData, error: tokenError } = await adminClient.auth.getUser(bearerToken);
+      user = tokenData?.user || null;
+      userError = tokenError;
+    } else {
+      const { data: cookieAuth, error: cookieError } = await supabase.auth.getUser();
+      user = cookieAuth?.user || null;
+      userError = cookieError;
     }
 
     if (userError || !user) {
