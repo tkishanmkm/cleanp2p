@@ -154,7 +154,7 @@ export async function POST(req: NextRequest) {
     // 1. Fetch user status
     const { data: profile, error } = await supabase
       .from('profiles')
-      .select('kyc_status, is_banned, kyc_retry_count, kyc_attempts, kyc_last_attempt_at, kyc_submitted_at, is_verified, id_verified')
+      .select('kyc_status, is_banned, is_suspended, is_on_hold, status, kyc_retry_count, kyc_attempts, kyc_last_attempt_at, kyc_submitted_at, is_verified, id_verified')
       .eq('id', userId)
       .single();
 
@@ -166,6 +166,15 @@ export async function POST(req: NextRequest) {
     if (profile.is_banned || profile.kyc_status === 'banned') {
       return NextResponse.json({ error: 'Account is banned from performing KYC' }, { status: 403 });
     }
+    if (
+      profile.is_suspended ||
+      profile.is_on_hold ||
+      ['banned', 'suspended', 'disabled', 'deleted', 'inactive', 'on_hold', 'hold'].includes(
+        String(profile.status || '').toLowerCase(),
+      )
+    ) {
+      return NextResponse.json({ error: 'Account is restricted from starting KYC verification.' }, { status: 403 });
+    }
 
     const isApprovedTier2 = isTier2User(profile);
     if (isApprovedTier2) {
@@ -174,6 +183,27 @@ export async function POST(req: NextRequest) {
         message: 'Account is already verified with Tier 2 privileges.',
         status: 'approved',
       });
+    }
+
+    // The secure database boundary must exist before we persist compliance
+    // documents or create an external Didit session. A NULL actor deliberately
+    // returns actor_required before any database mutation.
+    const { data: initiationProbe, error: initiationProbeError } = await supabase.rpc('initiate_didit_kyc_secure', {
+      p_user_id: userId,
+      p_session_id: '__availability_probe__',
+      p_actor_id: null,
+    });
+    if (initiationProbeError || initiationProbe?.error !== 'actor_required' || initiationProbe.success !== false) {
+      console.error('[KYC INITIATE] Secure session registration RPC is unavailable.', {
+        code: initiationProbeError?.code || null,
+      });
+      return NextResponse.json(
+        {
+          error: 'KYC session registration is temporarily unavailable. Please try again later.',
+          code: 'SECURE_KYC_INITIATION_RPC_UNAVAILABLE',
+        },
+        { status: 503 },
+      );
     }
 
     // Validate all provider and callback destinations before storing compliance data

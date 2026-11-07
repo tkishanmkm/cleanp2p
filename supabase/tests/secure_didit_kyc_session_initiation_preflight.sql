@@ -8,6 +8,8 @@ DECLARE
     v_timeout regprocedure := to_regprocedure('public.check_kyc_review_timeout(uuid)');
     v_definition text;
     v_callers text[];
+    v_probe_position integer;
+    v_lock_position integer;
 BEGIN
     IF v_secure IS NULL OR v_legacy IS NULL OR v_timeout IS NULL THEN
         RAISE EXCEPTION 'Secure/legacy Didit initiation dependencies are missing';
@@ -59,8 +61,15 @@ BEGIN
        OR pg_catalog.strpos(v_definition,'interval ''24 hours''')=0
        OR pg_catalog.strpos(v_definition,'v_attempts >= 3')=0
        OR pg_catalog.strpos(v_definition,'session_already_registered')=0
+       OR pg_catalog.strpos(v_definition,'actor_required')=0
        OR pg_catalog.strpos(v_definition,'INSERT INTO public.kyc_verifications')=0 THEN
         RAISE EXCEPTION 'Secure KYC initiation lacks trusted actor, serialization, retry or session-registration guards';
+    END IF;
+
+    v_probe_position := pg_catalog.strpos(v_definition,'IF p_actor_id IS NULL THEN');
+    v_lock_position := pg_catalog.strpos(v_definition,'pg_advisory_xact_lock');
+    IF v_probe_position=0 OR v_lock_position=0 OR v_probe_position > v_lock_position THEN
+        RAISE EXCEPTION 'Non-mutating actor_required availability probe must exit before profile/session locks or writes';
     END IF;
 
     SELECT coalesce(array_agg(caller.proname ORDER BY caller.proname),ARRAY[]::text[])

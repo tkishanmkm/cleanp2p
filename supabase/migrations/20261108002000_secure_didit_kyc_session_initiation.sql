@@ -105,13 +105,21 @@ BEGIN
             USING ERRCODE = '42501';
     END IF;
 
-    IF p_user_id IS NULL OR p_actor_id IS NULL
+    IF p_user_id IS NULL
        OR p_session_id IS NULL
        OR pg_catalog.btrim(p_session_id) = ''
        OR pg_catalog.length(p_session_id) > 512
        OR p_session_id ~ '[[:cntrl:]]' THEN
         RETURN pg_catalog.jsonb_build_object(
             'success',false,'error','invalid_request'
+        );
+    END IF;
+
+    -- Safe availability probe used by the API before sending PII/provider
+    -- requests. This branch exits before identity lookup or any data mutation.
+    IF p_actor_id IS NULL THEN
+        RETURN pg_catalog.jsonb_build_object(
+            'success',false,'error','actor_required'
         );
     END IF;
 
