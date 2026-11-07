@@ -7,10 +7,11 @@ DO $dependencies$
 DECLARE
     v_cancel regprocedure := to_regprocedure('public.cancel_p2p_trade(uuid,uuid,text)');
     v_resolver regprocedure := to_regprocedure('public.resolve_trade_dispute(uuid,text,uuid,uuid)');
+    v_wrapper regprocedure := to_regprocedure('public.admin_resolve_trade_dispute_atomic(uuid,uuid,uuid,uuid,text,text)');
     v_definition text;
 BEGIN
-    IF v_cancel IS NULL OR v_resolver IS NULL THEN
-        RAISE EXCEPTION 'Canonical cancel/dispute resolver RPC is missing';
+    IF v_cancel IS NULL OR v_resolver IS NULL OR v_wrapper IS NULL THEN
+        RAISE EXCEPTION 'Canonical cancel/dispute resolver and atomic admin wrapper RPCs are required';
     END IF;
 
     IF NOT EXISTS (
@@ -33,8 +34,24 @@ BEGIN
           AND p.prosecdef IS TRUE
           AND pg_catalog.pg_get_userbyid(p.proowner)='postgres'
           AND 'search_path=""' = ANY(coalesce(p.proconfig,ARRAY[]::text[]))
-    ) OR NOT pg_catalog.has_function_privilege('service_role',v_resolver,'EXECUTE') THEN
-        RAISE EXCEPTION 'Canonical dispute resolver must remain a postgres-owned server-only SECURITY DEFINER function';
+    ) OR pg_catalog.has_function_privilege('service_role',v_resolver,'EXECUTE')
+       OR pg_catalog.has_function_privilege('anon',v_resolver,'EXECUTE')
+       OR pg_catalog.has_function_privilege('authenticated',v_resolver,'EXECUTE')
+       OR NOT pg_catalog.has_function_privilege('postgres',v_resolver,'EXECUTE') THEN
+        RAISE EXCEPTION 'Inner dispute resolver must remain postgres-only behind the atomic admin wrapper';
+    END IF;
+
+    IF NOT EXISTS (
+        SELECT 1
+        FROM pg_catalog.pg_proc p
+        WHERE p.oid=v_wrapper
+          AND p.prosecdef IS TRUE
+          AND pg_catalog.pg_get_userbyid(p.proowner)='postgres'
+          AND 'search_path=""' = ANY(coalesce(p.proconfig,ARRAY[]::text[]))
+    ) OR NOT pg_catalog.has_function_privilege('service_role',v_wrapper,'EXECUTE')
+       OR pg_catalog.has_function_privilege('anon',v_wrapper,'EXECUTE')
+       OR pg_catalog.has_function_privilege('authenticated',v_wrapper,'EXECUTE') THEN
+        RAISE EXCEPTION 'Atomic admin dispute wrapper must remain server-only';
     END IF;
 
     -- Preserve the single trusted internal caller. If another database
@@ -65,6 +82,26 @@ BEGIN
     END IF;
 END;
 $dependencies$;
+
+-- Enforce the same single-open-dispute invariant against concurrent dispute
+-- creation. The cancellation RPC's COUNT check alone is not a concurrency guard.
+DO $open_dispute_index_precheck$
+BEGIN
+    IF EXISTS (
+        SELECT 1
+        FROM public.disputes
+        WHERE status = 'open'::public.dispute_status
+        GROUP BY trade_id
+        HAVING COUNT(*) > 1
+    ) THEN
+        RAISE EXCEPTION 'Duplicate open disputes exist for a trade; reconcile them before adding the unique invariant';
+    END IF;
+END;
+$open_dispute_index_precheck$;
+
+CREATE UNIQUE INDEX IF NOT EXISTS disputes_one_open_per_trade_uidx
+    ON public.disputes (trade_id)
+    WHERE status = 'open'::public.dispute_status AND trade_id IS NOT NULL;
 
 DO $patch$
 DECLARE
