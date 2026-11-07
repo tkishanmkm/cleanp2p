@@ -10,8 +10,12 @@ export const dynamic = 'force-dynamic';
 
 export async function POST(request: NextRequest) {
   try {
-    const authHeader = request.headers.get('Authorization') || request.headers.get('authorization');
-    const bearerToken = authHeader?.startsWith('Bearer ') ? authHeader.substring(7).trim() : null;
+    const authHeader = request.headers.get('authorization');
+    const bearerMatch = authHeader !== null ? /^Bearer\s+(.+)$/i.exec(authHeader) : null;
+    const bearerToken = bearerMatch?.[1]?.trim() || null;
+    if (authHeader !== null && !bearerToken) {
+      return NextResponse.json({ error: 'A valid Bearer authorization token is required.' }, { status: 401 });
+    }
     const supabase = bearerToken ? createBearerClient(bearerToken) : await createClient();
 
     const contentLength = Number(request.headers.get('content-length') || 0);
@@ -23,28 +27,14 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'A valid advertisement JSON object is required.' }, { status: 400 });
     }
 
-    // 1. Authenticate user session
-    let user: any = null;
-    let authError: any = null;
+    // Validate the one selected credential source. A rejected Bearer token
+    // must not fall back to a different authenticated cookie.
+    const { data: authData, error: authError } = await supabase.auth.getUser();
+    const user = authData?.user || null;
 
-    if (bearerToken) {
-      const tokenAuth = await supabase.auth.getUser(bearerToken);
-      user = tokenAuth.data?.user;
-      authError = tokenAuth.error;
-    }
-
-    if (!user) {
-      const cookieAuth = await supabase.auth.getUser();
-      user = cookieAuth.data?.user;
-      authError = cookieAuth.error;
-    }
-
-    if (!user) {
+    if (authError || !user) {
       return NextResponse.json(
-        { 
-          error: 'No active session found! Please refresh or log in again.', 
-          details: authError?.message || 'Authentication required'
-        }, 
+        { error: 'No active session found. Please refresh or log in again.' },
         { status: 401 }
       );
     }

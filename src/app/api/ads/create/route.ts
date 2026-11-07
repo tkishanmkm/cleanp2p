@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { createClient, getSupabaseAdminClient } from '@/utils/supabase/server';
+import { createClient, createBearerClient, getSupabaseAdminClient } from '@/utils/supabase/server';
 import { resolveTradeType } from '@/utils/p2p-helpers';
 import { FIAT_CURRENCIES } from '@/lib/currencies';
 import { getMinimumFiatAmountFromUsd } from '@/lib/currency.server';
@@ -12,36 +12,24 @@ const VALID_SUPPORTED_ASSETS = ['USDT', 'BTC', 'ETH', 'LTC'];
 
 export async function POST(req: Request) {
   try {
-    const supabase = await createClient();
+    // Use exactly one verified credential source. An explicit Bearer token
+    // must validate and must not fall back to a different cookie user.
+    const authHeader = req.headers.get('authorization');
+    const bearerMatch = authHeader !== null ? /^Bearer\s+(.+)$/i.exec(authHeader) : null;
+    const bearerToken = bearerMatch?.[1]?.trim() || null;
 
-    // Support Bearer token header if provided by frontend
-    const authHeader = req.headers.get('Authorization') || req.headers.get('authorization');
-    const bearerToken = authHeader?.startsWith('Bearer ') ? authHeader.substring(7).trim() : null;
-
-    // 1. Explicit Auth Check
-    let user = null;
-    let authError: any = null;
-
-    if (bearerToken) {
-      const tokenAuth = await supabase.auth.getUser(bearerToken);
-      user = tokenAuth.data?.user;
-      authError = tokenAuth.error;
+    if (authHeader !== null && !bearerToken) {
+      return NextResponse.json({ error: 'A valid Bearer authorization token is required.' }, { status: 401 });
     }
 
-    if (!user) {
-      const cookieAuth = await supabase.auth.getUser();
-      user = cookieAuth.data?.user;
-      authError = cookieAuth.error;
-    }
+    const supabase = bearerToken ? createBearerClient(bearerToken) : await createClient();
+    const { data: authData, error: authError } = await supabase.auth.getUser();
+    const user = authData?.user || null;
 
     if (authError || !user) {
-      console.error('[Auth Error Details in /api/ads/create]:', authError?.message);
       return NextResponse.json(
-        { 
-          error: 'No active session found! Please refresh or log in again.', 
-          details: authError?.message 
-        }, 
-        { status: 401 }
+        { error: 'No active session found. Please refresh or log in again.' },
+        { status: 401 },
       );
     }
 
@@ -53,28 +41,6 @@ export async function POST(req: Request) {
         { error: guardErr.message || 'Creating new advertisements is temporarily disabled.', code: guardErr.code || 'PLATFORM_AD_CREATION_DISABLED' },
         { status: guardErr.statusCode || 403 }
       );
-    }
-
-    // Ensure public.profiles record exists for user.id to guarantee foreign key integrity
-    try {
-      const admin = getSupabaseAdminClient();
-      const profileName = user.user_metadata?.full_name || user.user_metadata?.name || user.email?.split('@')[0] || 'Trader';
-      const cleanUsername = user.user_metadata?.username || (user.email?.split('@')[0] || 'trader').toLowerCase().replace(/[^a-z0-9_]/g, '_');
-
-      await admin
-        .from('profiles')
-        .upsert(
-          {
-            id: user.id,
-            email: user.email,
-            username: cleanUsername,
-            full_name: profileName,
-            updated_at: new Date().toISOString(),
-          },
-          { onConflict: 'id', ignoreDuplicates: true }
-        );
-    } catch (profileUpsertErr) {
-      console.warn('Profile auto-ensure warning in /api/ads/create:', profileUpsertErr);
     }
 
     // A user restriction must block new ads even if a database trigger is missing or delayed.
