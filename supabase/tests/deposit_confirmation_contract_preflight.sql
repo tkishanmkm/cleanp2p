@@ -115,23 +115,28 @@ BEGIN
         RAISE EXCEPTION 'FAIL: deposit SECURITY DEFINER RPC search_path settings are not hardened';
     END IF;
 
-    IF has_function_privilege('public', v_register, 'EXECUTE')
+    IF EXISTS (
+            SELECT 1
+            FROM pg_catalog.pg_proc p
+            CROSS JOIN LATERAL pg_catalog.aclexplode(
+                coalesce(p.proacl, pg_catalog.acldefault('f', p.proowner))
+            ) acl
+            WHERE p.oid IN (v_register, v_claim, v_release, v_confirm, v_credit)
+              AND acl.grantee = 0
+              AND acl.privilege_type = 'EXECUTE'
+       )
        OR has_function_privilege('anon', v_register, 'EXECUTE')
        OR has_function_privilege('authenticated', v_register, 'EXECUTE')
        OR NOT has_function_privilege('service_role', v_register, 'EXECUTE')
-       OR has_function_privilege('public', v_claim, 'EXECUTE')
        OR has_function_privilege('anon', v_claim, 'EXECUTE')
        OR has_function_privilege('authenticated', v_claim, 'EXECUTE')
        OR NOT has_function_privilege('service_role', v_claim, 'EXECUTE')
-       OR has_function_privilege('public', v_release, 'EXECUTE')
        OR has_function_privilege('anon', v_release, 'EXECUTE')
        OR has_function_privilege('authenticated', v_release, 'EXECUTE')
        OR NOT has_function_privilege('service_role', v_release, 'EXECUTE')
-       OR has_function_privilege('public', v_confirm, 'EXECUTE')
        OR has_function_privilege('anon', v_confirm, 'EXECUTE')
        OR has_function_privilege('authenticated', v_confirm, 'EXECUTE')
        OR NOT has_function_privilege('service_role', v_confirm, 'EXECUTE')
-       OR has_function_privilege('public', v_credit, 'EXECUTE')
        OR has_function_privilege('anon', v_credit, 'EXECUTE')
        OR has_function_privilege('authenticated', v_credit, 'EXECUTE')
        OR NOT has_function_privilege('service_role', v_credit, 'EXECUTE') THEN
