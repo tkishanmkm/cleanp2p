@@ -87,10 +87,12 @@ export async function POST(
     }
 
     const supabase = await createClient();
-    const { data: { session } } = await supabase.auth.getSession();
-    const user = session?.user || (await supabase.auth.getUser()).data?.user;
+    // Never authorize a privileged system-event write from a cached session
+    // object. Supabase Auth must validate the current cookie JWT first.
+    const { data: authData, error: authError } = await supabase.auth.getUser();
+    const user = authData?.user;
 
-    if (!user) {
+    if (authError || !user) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 

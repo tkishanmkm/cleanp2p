@@ -54,19 +54,22 @@ export async function POST(
     const supabase = await createClient();
 
     const authHeader = req.headers.get('Authorization') || req.headers.get('authorization');
-    const bearerToken = authHeader?.startsWith('Bearer ') ? authHeader.substring(7).trim() : null;
+    const bearerMatch = authHeader ? /^Bearer\s+(.+)$/i.exec(authHeader) : null;
+    const bearerToken = bearerMatch?.[1]?.trim() || null;
 
-    let user: any = null;
-    if (bearerToken) {
-      const tokenAuth = await supabase.auth.getUser(bearerToken);
-      user = tokenAuth.data?.user;
-    }
-    if (!user) {
-      const { data: { session } } = await supabase.auth.getSession();
-      user = session?.user || (await supabase.auth.getUser()).data.user;
+    if (authHeader && !bearerToken) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    if (!user) {
+    // A cookie-backed session object is not an authoritative identity source.
+    // Always ask Supabase Auth to validate the JWT before a service-role trade
+    // action can use this caller ID.
+    const authResult = bearerToken
+      ? await supabase.auth.getUser(bearerToken)
+      : await supabase.auth.getUser();
+    const user = authResult.data?.user;
+
+    if (authResult.error || !user) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
@@ -396,6 +399,11 @@ export async function POST(
     }
 
     if (action === 'CANCEL_TRADE') {
+      // Admin escrow refunds belong to the verified dispute-resolution workflow,
+      // not the participant cancellation endpoint.
+      if (user.app_metadata?.role === 'admin' || user.user_metadata?.role === 'admin') {
+        return NextResponse.json({ error: 'Use the authorized admin workflow for administrative trade actions.' }, { status: 403 });
+      }
       if (!trade) {
         return NextResponse.json({ error: 'Trade not found.' }, { status: 404 });
       }
