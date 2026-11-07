@@ -49,6 +49,7 @@ BEGIN
     IF pg_catalog.strpos(v_definition, '''status'', ''ALREADY_CREDITED''') = 0
        OR pg_catalog.strpos(v_definition, '''credited'', false') = 0
        OR pg_catalog.strpos(v_definition, '''already_credited'', true') = 0
+       OR pg_catalog.strpos(v_definition, 'WALLET_ASSET_BALANCE_INVALID') = 0
        OR pg_catalog.regexp_count(v_definition, 'DEPOSIT_STATE_INCONSISTENT') < 2 THEN
         RAISE EXCEPTION 'FAIL: idempotent replay or terminal-state response contract is incomplete';
     END IF;

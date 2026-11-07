@@ -43,12 +43,27 @@ BEGIN
     END IF;
 
     IF NOT EXISTS (
+        SELECT 1
+        FROM pg_catalog.pg_constraint
+        WHERE conrelid = 'public.onchain_deposits'::regclass
+          AND conname = 'onchain_deposit_confirmation_lease_state_check'
+    ) THEN
+        RAISE EXCEPTION 'FAIL: confirmation lease owner/expiry consistency constraint is missing';
+    END IF;
+
+    IF NOT EXISTS (
         SELECT 1 FROM pg_indexes
         WHERE schemaname = 'public'
           AND tablename = 'onchain_deposits'
           AND indexname = 'idx_onchain_deposits_confirmation_claim'
     ) THEN
         RAISE EXCEPTION 'FAIL: pending deposit claim index is missing';
+    END IF;
+
+    IF to_regprocedure('public.claim_pending_deposit_confirmations(uuid,integer,integer)') IS NOT NULL
+       OR to_regprocedure('public.release_pending_deposit_confirmation_claim(uuid,uuid)') IS NOT NULL
+       OR to_regprocedure('public.process_deposit_atomic_with_lease(uuid,uuid,text,text,text,numeric,text,integer,bigint,text,text,integer,text)') IS NOT NULL THEN
+        RAISE EXCEPTION 'FAIL: conflicting UUID-based confirmation lease RPC overloads are installed';
     END IF;
 
     SELECT pg_get_functiondef(v_register) INTO v_register_def;
@@ -65,6 +80,11 @@ BEGIN
     IF position('v_effective_confirmations := COALESCE(p_confirmations, 0)' IN v_credit_def) = 0
        OR position('v_effective_confirmations >= v_required_confirmations' IN v_credit_def) = 0 THEN
         RAISE EXCEPTION 'FAIL: canonical credit must base its confirmation decision on the submitted verification count and the network threshold';
+    END IF;
+
+    IF position('WALLET_ASSET_BALANCE_INVALID' IN v_credit_def) = 0
+       OR position('v_previous_balance::TEXT IN (''NaN'', ''Infinity'', ''-Infinity'')' IN v_credit_def) = 0 THEN
+        RAISE EXCEPTION 'FAIL: canonical deposit credit must fail closed on NULL, negative or non-finite wallet balances';
     END IF;
 
     IF position('FOR UPDATE SKIP LOCKED' IN v_claim_def) = 0

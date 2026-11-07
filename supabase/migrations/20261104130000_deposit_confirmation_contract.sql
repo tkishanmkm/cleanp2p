@@ -9,6 +9,31 @@ ALTER TABLE public.onchain_deposits
   ADD COLUMN IF NOT EXISTS confirmation_worker_id text,
   ADD COLUMN IF NOT EXISTS confirmation_lease_expires_at timestamptz;
 
+-- The worker identity and expiry are one indivisible lease state. Reject blank
+-- owner tokens and partial leases so claims cannot become permanently ambiguous.
+DO $constraint$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_catalog.pg_constraint
+    WHERE conrelid = 'public.onchain_deposits'::regclass
+      AND conname = 'onchain_deposit_confirmation_lease_state_check'
+  ) THEN
+    ALTER TABLE public.onchain_deposits
+      ADD CONSTRAINT onchain_deposit_confirmation_lease_state_check
+      CHECK (
+        (confirmation_worker_id IS NULL AND confirmation_lease_expires_at IS NULL)
+        OR
+        (
+          confirmation_worker_id IS NOT NULL
+          AND pg_catalog.btrim(confirmation_worker_id) <> ''
+          AND confirmation_lease_expires_at IS NOT NULL
+        )
+      );
+  END IF;
+END;
+$constraint$;
+
 CREATE INDEX IF NOT EXISTS idx_onchain_deposits_confirmation_claim
   ON public.onchain_deposits (status, confirmation_lease_expires_at, created_at, id)
   WHERE status = 'PENDING';

@@ -14,6 +14,30 @@ DECLARE
   v_ledger_section_pos INTEGER;
   v_marker TEXT := '    -- PENDING DEPOSIT';
   v_ledger_marker TEXT := '    IF v_ledger_count > 1 THEN';
+  v_wallet_marker TEXT := $wallet_marker$
+    IF NOT FOUND THEN
+        RETURN jsonb_build_object(
+            'success', false,
+            'code', 'WALLET_ASSET_NOT_PROVISIONED',
+            'asset', v_asset
+        );
+    END IF;
+$wallet_marker$;
+  v_wallet_guard TEXT := $wallet_guard$
+    -- Never turn a corrupted/null wallet balance into a silent null credit.
+    -- Require manual reconciliation before any deposit balance mutation.
+    IF v_previous_balance IS NULL
+       OR v_previous_balance < 0
+       OR v_previous_balance::TEXT IN ('NaN', 'Infinity', '-Infinity') THEN
+      RETURN jsonb_build_object(
+        'success', false,
+        'code', 'WALLET_ASSET_BALANCE_INVALID',
+        'message', 'Wallet asset balance requires reconciliation; deposit credit was not applied',
+        'asset', v_asset
+      );
+    END IF;
+
+$wallet_guard$;
   v_guard TEXT := $guard$
     -- Scanner replay returned an existing credited deposit without changing balances.
     -- Return an idempotent success when its exact ledger identity is validated.
@@ -104,7 +128,22 @@ BEGIN
     RAISE EXCEPTION 'Canonical process_deposit_atomic signature is missing.';
   END IF;
 
+  -- Re-assert the hardened path here instead of trusting an older migration's
+  -- history row: the live function may have been replaced with a mutable path.
+  EXECUTE 'ALTER FUNCTION public.process_deposit_atomic(text,text,text,numeric,text,integer,bigint,text,text,integer,text) SET search_path = pg_catalog';
+
   v_definition := pg_catalog.pg_get_functiondef(v_signature);
+
+  -- A NULL, negative, or non-finite wallet balance is an integrity incident,
+  -- not a value that a deposit may silently coerce or extend.
+  IF pg_catalog.strpos(v_definition, 'WALLET_ASSET_BALANCE_INVALID') = 0 THEN
+    IF pg_catalog.length(v_definition)
+       - pg_catalog.length(pg_catalog.replace(v_definition, v_wallet_marker, ''))
+       <> pg_catalog.length(v_wallet_marker) THEN
+      RAISE EXCEPTION 'Unexpected canonical deposit RPC body: wallet balance guard marker is missing or ambiguous.';
+    END IF;
+    v_definition := pg_catalog.replace(v_definition, v_wallet_marker, v_wallet_marker || v_wallet_guard);
+  END IF;
 
   IF pg_catalog.strpos(v_definition, 'v_ledger_count = 1') = 0
      OR pg_catalog.strpos(v_definition, 'reference_id = v_deposit_id::TEXT') = 0
