@@ -9,7 +9,7 @@ DECLARE
     'public.register_pending_deposit(text,text,text,numeric,text,integer,bigint,text,text,integer,text)'
   );
   v_confirm REGPROCEDURE := pg_catalog.to_regprocedure(
-    'public.process_deposit_atomic_with_lease(uuid,text,text,text,text,numeric,text,integer,bigint,text,text,integer,text)'
+    'public.process_deposit_atomic_with_lease(uuid,text,text,text,text,numeric,text,integer,bigint,text,text,integer,text,text)'
   );
 BEGIN
   IF v_credit IS NULL OR v_register IS NULL OR v_confirm IS NULL THEN

@@ -7,6 +7,7 @@ export interface VerifiedUtxoOutput {
   amount: string;
   confirmations: number;
   blockHeight: number | null;
+  blockHash: string;
 }
 
 type FetchLike = (input: string | URL, init?: RequestInit) => Promise<Response>;
@@ -99,5 +100,6 @@ export async function verifyUtxoDepositOutput(
     amount: formatSatoshis(output.value),
     confirmations,
     blockHeight: tx.status.block_height,
+    blockHash: tx.status.block_hash,
   };
 }

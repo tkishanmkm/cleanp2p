@@ -39,6 +39,7 @@ function decimalUnits(value: string | number, decimals: number): bigint | null {
 export function verifyEvmDepositEvidence(input: EvmDepositEvidence): {
   confirmations: number;
   blockNumber: number;
+  blockHash: string;
   fromAddress?: string;
 } | null {
   const { network, chainId, txHash, destinationAddress, expectedAmount, outputIndex, tokenContract, transaction, receipt, currentBlock, canonicalBlockHash } = input;
@@ -114,6 +115,7 @@ export function verifyEvmDepositEvidence(input: EvmDepositEvidence): {
   return {
     confirmations: currentBlock - receipt.blockNumber + 1,
     blockNumber: receipt.blockNumber,
+    blockHash: receipt.blockHash,
     fromAddress: transaction.from.toLowerCase(),
   };
 }

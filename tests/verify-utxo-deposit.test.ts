@@ -41,7 +41,7 @@ function mockFetch(options: {
 test('verifies chain-derived address, output amount, block and confirmations', async () => {
   const { fetcher, calls } = mockFetch();
   const result = await verifyUtxoDepositOutput('BTC', txid, address, 0, fetcher);
-  assert.deepEqual(result, { txid, address, outputIndex: 0, amount: 2.5, confirmations: 21, blockHeight: 100 });
+  assert.deepEqual(result, { txid, address, outputIndex: 0, amount: '2.5', confirmations: 21, blockHeight: 100, blockHash: 'c'.repeat(64) });
   assert.match(calls[0], /^https:\/\/mempool\.space\/api\/tx\//);
 });
 

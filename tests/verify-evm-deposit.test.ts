@@ -35,7 +35,7 @@ const base = {
 
 test('verifies exact ERC20 transfer recipient, contract, amount and log index', () => {
   assert.deepEqual(verifyEvmDepositEvidence(base), {
-    confirmations: 12, blockNumber: 100, fromAddress: sender,
+    confirmations: 12, blockNumber: 100, blockHash, fromAddress: sender,
   });
 });
 

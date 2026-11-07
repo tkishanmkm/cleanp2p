@@ -1,13 +1,62 @@
--- Paxones canonical multi-chain pending-deposit ingestion contract.
--- This migration adds only wrappers/lease metadata around the existing
--- process_deposit_atomic function. It does not credit balances by itself.
+-- Paxones canonical multi-chain pending-deposit and confirmation contract.
+-- The leased wrapper performs the only scanner credit path and persists the
+-- independently verified block inclusion identity in the same DB transaction.
 -- Run only after reconciling the local migration history with paxonesflows.
 
 BEGIN;
 
 ALTER TABLE public.onchain_deposits
   ADD COLUMN IF NOT EXISTS confirmation_worker_id text,
-  ADD COLUMN IF NOT EXISTS confirmation_lease_expires_at timestamptz;
+  ADD COLUMN IF NOT EXISTS confirmation_lease_expires_at timestamptz,
+  ADD COLUMN IF NOT EXISTS block_number bigint,
+  ADD COLUMN IF NOT EXISTS block_hash text;
+
+ALTER TABLE public.deposits
+  ADD COLUMN IF NOT EXISTS block_hash text;
+
+-- Persist the inclusion identity that authorized each financial credit. Legacy
+-- rows remain NULL and are intentionally not assigned a guessed block hash.
+DO $block_identity$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_catalog.pg_constraint
+    WHERE conrelid = 'public.onchain_deposits'::regclass
+      AND conname = 'onchain_deposit_block_identity_check'
+  ) THEN
+    ALTER TABLE public.onchain_deposits
+      ADD CONSTRAINT onchain_deposit_block_identity_check
+      CHECK (
+        (block_number IS NULL AND block_hash IS NULL)
+        OR (
+          block_number IS NOT NULL AND block_number > 0
+          AND block_hash IS NOT NULL
+          AND (
+            (upper(network) IN ('ETH', 'ERC20', 'BEP20') AND block_hash ~ '^0x[0-9a-fA-F]{64}$')
+            OR
+            (upper(network) IN ('TRC20', 'BTC', 'LTC') AND block_hash ~ '^[0-9a-fA-F]{64}$')
+          )
+        )
+      );
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_catalog.pg_constraint
+    WHERE conrelid = 'public.deposits'::regclass
+      AND conname = 'deposits_block_hash_format_check'
+  ) THEN
+    ALTER TABLE public.deposits
+      ADD CONSTRAINT deposits_block_hash_format_check
+      CHECK (
+        block_hash IS NULL
+        OR (
+          (upper(chain) IN ('ETH', 'ERC20', 'BEP20') AND block_hash ~ '^0x[0-9a-fA-F]{64}$')
+          OR
+          (upper(chain) IN ('TRC20', 'BTC', 'LTC') AND block_hash ~ '^[0-9a-fA-F]{64}$')
+        )
+      );
+  END IF;
+END;
+$block_identity$;
 
 -- The worker identity and expiry are one indivisible lease state. Reject blank
 -- owner tokens and partial leases so claims cannot become permanently ambiguous.
@@ -37,6 +86,11 @@ $constraint$;
 CREATE INDEX IF NOT EXISTS idx_onchain_deposits_confirmation_claim
   ON public.onchain_deposits (status, confirmation_lease_expires_at, created_at, id)
   WHERE status = 'PENDING';
+
+-- Supports the follow-up integrity monitor without scanning unconfirmed records.
+CREATE INDEX IF NOT EXISTS idx_onchain_deposits_confirmed_block_identity
+  ON public.onchain_deposits (updated_at, id)
+  WHERE status = 'CONFIRMED' AND block_hash IS NOT NULL;
 
 -- Scanner wrapper: insert/update the pending record through the canonical
 -- identity-checking RPC. Scanners pass zero confirmations; they never credit.
@@ -204,7 +258,8 @@ CREATE OR REPLACE FUNCTION public.process_deposit_atomic_with_lease(
   p_from_address text,
   p_token_contract text,
   p_confirmations integer,
-  p_provider text
+  p_provider text,
+  p_block_hash text
 )
 RETURNS jsonb
 LANGUAGE plpgsql
@@ -216,6 +271,9 @@ DECLARE
   v_result jsonb;
   v_saved_address text;
   v_requested_address text;
+  v_deposit_record_id uuid;
+  v_existing_deposit_block_hash text;
+  v_rows integer;
   v_network text := upper(btrim(coalesce(p_network_code, '')));
 BEGIN
   IF auth.role() IS DISTINCT FROM 'service_role'
@@ -227,8 +285,19 @@ BEGIN
   IF p_deposit_id IS NULL
      OR p_lease_token IS NULL OR btrim(p_lease_token) = ''
      OR p_confirmations IS NULL OR p_confirmations < 0
-     OR p_output_index IS NULL OR p_output_index < 0 THEN
-    RAISE EXCEPTION 'Invalid leased deposit confirmation payload'
+     OR p_output_index IS NULL OR p_output_index < 0
+     OR p_block_number IS NULL OR p_block_number <= 0
+     OR p_block_hash IS NULL
+     OR (
+       v_network IN ('ETH', 'ERC20', 'BEP20')
+       AND p_block_hash !~ '^0x[0-9a-fA-F]{64}$'
+     )
+     OR (
+       v_network IN ('TRC20', 'BTC', 'LTC')
+       AND p_block_hash !~ '^[0-9a-fA-F]{64}$'
+     )
+     OR v_network NOT IN ('ETH', 'ERC20', 'BEP20', 'TRC20', 'BTC', 'LTC') THEN
+    RAISE EXCEPTION 'Invalid leased deposit confirmation or canonical block identity payload'
       USING ERRCODE = '22023';
   END IF;
 
@@ -284,20 +353,82 @@ BEGIN
 
   IF v_result->>'success' = 'true'
      AND v_result->>'status' IN ('CONFIRMED', 'ALREADY_CREDITED') THEN
+    -- Resolve and lock the canonical deposit row created/updated by the credit RPC.
+    SELECT id, block_hash
+      INTO v_deposit_record_id, v_existing_deposit_block_hash
+      FROM public.deposits
+     WHERE lower(btrim(tx_hash)) = lower(btrim(p_tx_hash))
+       AND upper(btrim(chain)) = v_network
+       AND output_index = p_output_index
+     FOR UPDATE;
+
+    IF NOT FOUND THEN
+      RAISE EXCEPTION 'Canonical deposit row missing after successful credit RPC.'
+        USING ERRCODE = '23514';
+    END IF;
+
+    IF (v_deposit.block_hash IS NOT NULL
+        AND lower(v_deposit.block_hash) IS DISTINCT FROM lower(p_block_hash))
+       OR (v_deposit.block_number IS NOT NULL
+        AND v_deposit.block_number IS DISTINCT FROM p_block_number)
+       OR (v_existing_deposit_block_hash IS NOT NULL
+        AND lower(v_existing_deposit_block_hash) IS DISTINCT FROM lower(p_block_hash)) THEN
+      RAISE EXCEPTION 'DEPOSIT_BLOCK_IDENTITY_CONFLICT: verified inclusion differs from previously persisted credit evidence.'
+        USING ERRCODE = '23514';
+    END IF;
+
     UPDATE public.onchain_deposits
-    SET confirmation_worker_id = NULL,
-        confirmation_lease_expires_at = NULL
-    WHERE id = p_deposit_id
-      AND confirmation_worker_id = p_lease_token;
+       SET block_number = COALESCE(block_number, p_block_number),
+           block_hash = COALESCE(block_hash, p_block_hash),
+           confirmation_worker_id = NULL,
+           confirmation_lease_expires_at = NULL,
+           updated_at = pg_catalog.clock_timestamp()
+     WHERE id = p_deposit_id
+       AND confirmation_worker_id = p_lease_token
+       AND (block_number IS NULL OR block_number = p_block_number)
+       AND (block_hash IS NULL OR lower(block_hash) = lower(p_block_hash));
+
+    GET DIAGNOSTICS v_rows = ROW_COUNT;
+    IF v_rows <> 1 THEN
+      RAISE EXCEPTION 'Could not atomically persist the on-chain deposit block identity and release its lease.'
+        USING ERRCODE = '40001';
+    END IF;
+
+    UPDATE public.deposits
+       SET block_number = p_block_number,
+           block_hash = COALESCE(block_hash, p_block_hash)
+     WHERE id = v_deposit_record_id
+       AND (block_hash IS NULL OR lower(block_hash) = lower(p_block_hash));
+
+    GET DIAGNOSTICS v_rows = ROW_COUNT;
+    IF v_rows <> 1 THEN
+      RAISE EXCEPTION 'Could not atomically persist the canonical deposit block identity.'
+        USING ERRCODE = '40001';
+    END IF;
+
+    UPDATE public.ledger_entries
+       SET metadata = COALESCE(metadata, '{}'::jsonb)
+         || jsonb_build_object('block_number', p_block_number, 'block_hash', p_block_hash)
+     WHERE reference_id = v_deposit_record_id::text
+       AND type = 'deposit'
+       AND user_id = v_deposit.user_id
+       AND amount = p_amount
+       AND asset = upper(btrim(p_asset_symbol));
+
+    GET DIAGNOSTICS v_rows = ROW_COUNT;
+    IF v_rows <> 1 THEN
+      RAISE EXCEPTION 'Successful deposit credit is missing its single matching ledger identity row.'
+        USING ERRCODE = '23514';
+    END IF;
   END IF;
 
   RETURN v_result;
 END;
 $function$;
 
-REVOKE ALL ON FUNCTION public.process_deposit_atomic_with_lease(uuid, text, text, text, text, numeric, text, integer, bigint, text, text, integer, text)
+REVOKE ALL ON FUNCTION public.process_deposit_atomic_with_lease(uuid, text, text, text, text, numeric, text, integer, bigint, text, text, integer, text, text)
   FROM PUBLIC, anon, authenticated;
-GRANT EXECUTE ON FUNCTION public.process_deposit_atomic_with_lease(uuid, text, text, text, text, numeric, text, integer, bigint, text, text, integer, text)
+GRANT EXECUTE ON FUNCTION public.process_deposit_atomic_with_lease(uuid, text, text, text, text, numeric, text, integer, bigint, text, text, integer, text, text)
   TO service_role, postgres;
 
 

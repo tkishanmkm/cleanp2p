@@ -82,7 +82,7 @@ async function fetchOnChainConfirmations(
   destinationAddress?: string,
   outputIndex = 0,
   expectedAmount?: string | number
-): Promise<{ confirmations: number; blockNumber?: number; fromAddress?: string } | null> {
+): Promise<{ confirmations: number; blockNumber?: number; blockHash: string; fromAddress?: string } | null> {
   const norm = normalizeDepositNetwork(network);
 
   // Handle Tron TRC-20
@@ -176,7 +176,12 @@ async function fetchOnChainConfirmations(
       if (!verifiedEvent) return null;
 
       const confs = currentBlock - data.blockNumber + 1;
-      return { confirmations: confs, blockNumber: data.blockNumber, fromAddress: verifiedEvent.fromAddress };
+      return {
+        confirmations: confs,
+        blockNumber: data.blockNumber,
+        blockHash: solidifiedBlock.blockID,
+        fromAddress: verifiedEvent.fromAddress,
+      };
     } catch (tronErr) {
       console.warn(`Tron confirmation query error for ${txHash}:`, tronErr);
       return null;
@@ -205,7 +210,11 @@ async function fetchOnChainConfirmations(
         return null;
       }
       if (expectedUnits <= 0n || verifiedUnits !== expectedUnits) return null;
-      return { confirmations: verified.confirmations, blockNumber: verified.blockHeight ?? undefined };
+      return {
+        confirmations: verified.confirmations,
+        blockNumber: verified.blockHeight ?? undefined,
+        blockHash: verified.blockHash,
+      };
     } catch (utxoErr) {
       console.warn(`${norm} deposit verification failed for ${txHash}:`, utxoErr);
       return null;
@@ -396,6 +405,7 @@ async function executeConfirmationsWorker(): Promise<ConfirmationWorkerResult> {
 
         const currentConfirmations = onChainData.confirmations;
         const blockNumber = onChainData.blockNumber ?? null;
+        const blockHash = onChainData.blockHash;
         const fromAddress = onChainData.fromAddress ?? null;
 
         // The canonical credit RPC derives its effective confirmation count from this
@@ -428,6 +438,7 @@ async function executeConfirmationsWorker(): Promise<ConfirmationWorkerResult> {
           p_tx_hash: deposit.tx_hash,
           p_output_index: outputIndex,
           p_block_number: blockNumber,
+          p_block_hash: blockHash,
           p_from_address: fromAddress,
           p_token_contract: tokenContract,
           p_confirmations: currentConfirmations,

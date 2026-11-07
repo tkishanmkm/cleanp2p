@@ -8,7 +8,7 @@ DECLARE
     v_release regprocedure :=
       to_regprocedure('public.release_pending_deposit_confirmation_claim(uuid,text)');
     v_confirm regprocedure :=
-      to_regprocedure('public.process_deposit_atomic_with_lease(uuid,text,text,text,text,numeric,text,integer,bigint,text,text,integer,text)');
+      to_regprocedure('public.process_deposit_atomic_with_lease(uuid,text,text,text,text,numeric,text,integer,bigint,text,text,integer,text,text)');
     v_credit regprocedure :=
       to_regprocedure('public.process_deposit_atomic(text,text,text,numeric,text,integer,bigint,text,text,integer,text)');
     v_register_def text;
@@ -38,8 +38,26 @@ BEGIN
           AND table_name = 'onchain_deposits'
           AND column_name = 'confirmation_lease_expires_at'
           AND data_type = 'timestamp with time zone'
+    ) OR NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = 'public'
+          AND table_name = 'onchain_deposits'
+          AND column_name = 'block_number'
+          AND data_type = 'bigint'
+    ) OR NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = 'public'
+          AND table_name = 'onchain_deposits'
+          AND column_name = 'block_hash'
+          AND data_type = 'text'
+    ) OR NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = 'public'
+          AND table_name = 'deposits'
+          AND column_name = 'block_hash'
+          AND data_type = 'text'
     ) THEN
-        RAISE EXCEPTION 'FAIL: deposit confirmation lease columns are missing or have incorrect types';
+        RAISE EXCEPTION 'FAIL: deposit confirmation lease or canonical block identity columns are missing or have incorrect types';
     END IF;
 
     IF NOT EXISTS (
@@ -52,12 +70,29 @@ BEGIN
     END IF;
 
     IF NOT EXISTS (
+        SELECT 1 FROM pg_catalog.pg_constraint
+        WHERE conrelid = 'public.onchain_deposits'::regclass
+          AND conname = 'onchain_deposit_block_identity_check'
+    ) OR NOT EXISTS (
+        SELECT 1 FROM pg_catalog.pg_constraint
+        WHERE conrelid = 'public.deposits'::regclass
+          AND conname = 'deposits_block_hash_format_check'
+    ) THEN
+        RAISE EXCEPTION 'FAIL: chain-specific block identity format constraints are missing';
+    END IF;
+
+    IF NOT EXISTS (
         SELECT 1 FROM pg_indexes
         WHERE schemaname = 'public'
           AND tablename = 'onchain_deposits'
           AND indexname = 'idx_onchain_deposits_confirmation_claim'
+    ) OR NOT EXISTS (
+        SELECT 1 FROM pg_indexes
+        WHERE schemaname = 'public'
+          AND tablename = 'onchain_deposits'
+          AND indexname = 'idx_onchain_deposits_confirmed_block_identity'
     ) THEN
-        RAISE EXCEPTION 'FAIL: pending deposit claim index is missing';
+        RAISE EXCEPTION 'FAIL: pending confirmation or confirmed block-identity index is missing';
     END IF;
 
     IF to_regprocedure('public.claim_pending_deposit_confirmations(uuid,integer,integer)') IS NOT NULL
@@ -102,8 +137,11 @@ BEGIN
        OR position('v_deposit.confirmation_lease_expires_at <= pg_catalog.clock_timestamp()' IN v_confirm_def) = 0
        OR position('v_deposit.amount IS DISTINCT FROM p_amount' IN v_confirm_def) = 0
        OR position('v_deposit.output_index IS DISTINCT FROM p_output_index' IN v_confirm_def) = 0
+       OR position('p_block_hash' IN v_confirm_def) = 0
+       OR position('block_hash = COALESCE(block_hash, p_block_hash)' IN v_confirm_def) = 0
+       OR position('metadata = COALESCE(metadata' IN v_confirm_def) = 0
        OR position('public.process_deposit_atomic' IN v_confirm_def) = 0 THEN
-        RAISE EXCEPTION 'FAIL: leased credit wrapper is missing lease-expiry or exact-deposit-identity checks';
+        RAISE EXCEPTION 'FAIL: leased credit wrapper is missing lease, exact identity or atomic block-hash ledger persistence';
     END IF;
 
     IF NOT EXISTS (
