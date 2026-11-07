@@ -32,8 +32,9 @@ The canonical `process_deposit_atomic(...)` function is currently executable by 
 
 The local working tree was inventoried against the live latest migration version:
 
-- 62 tracked SQL migration files have versions newer than the production head.
-- 90 untracked SQL migration files have versions at or before the production head.
+- 62 pre-existing tracked SQL migration files have versions newer than the production head.
+- 90 untracked historical SQL migration files have versions at or before the production head.
+- This release also prepares two new forward migrations after the production head, bringing the newer tracked release inventory to 64 once the new files are committed.
 - Two older SQL migration files are modified locally:
   - `20260928020000_withdrawal_hardened_rpcs.sql`
   - `20260928070000_canonical_p2p_state_machine_and_rpcs.sql`
@@ -44,7 +45,7 @@ Those 90 older files may be unapplied historical changes, superseded scripts, or
 
 ## 2. Required deposit migration order
 
-After the full migration-history reconciliation, execute all approved pending migrations in ascending version order. The deposit-specific dependency sequence is:
+After the full migration-history reconciliation, execute all approved pending migrations in ascending version order. The deposit and coupled trade-opening dependency sequence is:
 
 | Order | Migration | Purpose |
 |---:|---|---|
@@ -53,8 +54,10 @@ After the full migration-history reconciliation, execute all approved pending mi
 | 2 | `20261107210306_guard_terminal_deposit_registration_replay.sql` | Makes terminal deposit replay idempotent and fail-closed |
 | 3 | `20261107211754_revoke_direct_deposit_credit_rpc_execution.sql` | Removes direct `service_role` execution of the canonical credit primitive; leaves only guarded wrappers |
 | 4 | `20261108013000_deposit_chain_integrity_monitor.sql` | Adds integrity-check leases, durable mismatch events, and deduplicated critical alerts |
+| 5 | `20261108014000_restore_authenticated_presence_rpc.sql` | Restores the authenticated, caller-bound presence heartbeat needed by seller availability checks |
+| 6 | `20261108020000_guard_offline_ad_trade_opening.sql` | Restores the missing pre-trade availability RPC, durable offline-attempt counter, seller-online DB trigger, and retention job |
 
-This table is the deposit-specific order, **not permission to skip other pending migrations**. In the actual release, all approved migration versions between the current production head and the monitor migration must be reconciled and applied in ascending order. In particular, the direct-credit ACL revocation must complete before any deposit scanner or confirmation worker is restarted.
+This table shows the ordered deposit and closely coupled trade-opening remediation sequence, **not permission to skip other pending migrations**. In the actual release, all approved migration versions between the current production head and the latest listed migration must be reconciled and applied in ascending order. In particular, the direct-credit ACL revocation must complete before any deposit scanner or confirmation worker is restarted.
 
 The SQL migration files are individually transactional. Apply each using the approved Supabase migration mechanism and confirm that its version appears in migration history before proceeding to the next file. Stop on the first error; do not continue with later migrations.
 
@@ -67,30 +70,35 @@ Before opening a production migration window:
 3. Confirm a recent recoverable Supabase backup/PITR restore point and the incident owner who can authorize recovery.
 4. Identify every running deposit ingestion, webhook, confirmation and scanner process, including standalone workers and scheduled jobs. Prepare a pause procedure and verify the pause has taken effect.
 5. Pause deposit ingestion and confirmation workers before changing the RPC contract. Keep them paused through the ACL migration, SQL preflights and compatible application deployment. Do not allow an old worker to keep calling `process_deposit_atomic` directly.
-6. Do not run live deposits, credits, transfers, withdrawals, sweeps, nonce allocation or broadcasts as a deployment check.
+6. Pause all three trade-opening API routes while `record_ad_offline_open_attempt` and `set_my_presence` are absent. Do not bypass the missing availability check or create trades by calling the escrow RPC manually.
+7. Do not run live deposits, credits, transfers, withdrawals, sweeps, nonce allocation or broadcasts as a deployment check.
 
 If any pre-deployment gate cannot be verified, stop without applying migrations.
 
 ## 4. Apply sequence and pause boundary
 
-1. Pause the deposit-related workers and any route/job that can register or credit deposits. Preserve pending rows; do not manually edit their status or balances.
+1. Pause the deposit-related workers and the three trade-opening API routes. Preserve pending rows; do not manually edit deposit status or balances.
 2. Apply the full approved migration set in version order, including the three deposit contract/replay/ACL migrations above and the other approved intervening migrations.
 3. Confirm `20261107211754_revoke_direct_deposit_credit_rpc_execution.sql` is recorded as applied. At this point `service_role` must no longer be able to execute the raw credit primitive.
 4. Apply `20261108013000_deposit_chain_integrity_monitor.sql` only after the block identity columns from `20261104130000` exist.
-5. Run all four deposit SQL preflights in Section 5. Do not resume workers on a failure.
-6. Deploy the compatible application release at or after commit `71e8ba77d1e3c5387e0c441b94ca21d6f84ca6e7`. This contains the leased deposit worker path, integrity monitor and quorum verification logic.
-7. Confirm the deployed worker is running the intended release, then resume deposit ingestion and confirmation workers gradually while observing logs and database errors.
+5. Apply `20261108014000_restore_authenticated_presence_rpc.sql`.
+6. Apply `20261108020000_guard_offline_ad_trade_opening.sql` only after the presence RPC migration; its online decision depends on the fresh `last_seen_at` heartbeat.
+7. Run all six SQL preflights in Section 5. Do not resume workers or trade-opening routes on a failure.
+8. Deploy the compatible application release at or after commit `71e8ba77d1e3c5387e0c441b94ca21d6f84ca6e7`. This contains the leased deposit worker path, integrity monitor and quorum verification logic.
+9. Confirm the deployed worker is running the intended release, then resume deposit ingestion, confirmation workers and trade-opening routes gradually while observing logs and database errors.
 
 Do not roll the application back to a version that calls the raw canonical credit RPC after the ACL migration has revoked that permission. If the new release fails after the ACL migration, leave deposit workers paused and deploy a forward fix.
 
 ## 5. Required SQL preflights and post-deployment checks
 
-Run these read-only preflight files after the complete deposit migration sequence, especially after the final ACL migration:
+Run these read-only preflight files after the complete deposit and trade-opening remediation sequence, especially after the final ACL migration:
 
 1. `supabase/tests/deposit_confirmation_contract_preflight.sql`
 2. `supabase/tests/terminal_deposit_registration_replay_preflight.sql`
 3. `supabase/tests/deposit_credit_rpc_acl_preflight.sql`
 4. `supabase/tests/deposit_chain_integrity_monitor_preflight.sql`
+5. `supabase/tests/authenticated_presence_rpc_preflight.sql`
+6. `supabase/tests/offline_ad_trade_opening_preflight.sql`
 
 The first preflight also asserts the final server-only credit ACL, so do not use it as a pass criterion immediately after migration 1; run it after migration 3.
 
@@ -141,21 +149,25 @@ Backup sources must be independent providers on the same mainnet and expose the 
 Resume the deposit workers only when:
 
 - migration history is reconciled and the approved ordered release is fully applied;
-- all four SQL preflights pass;
+- all six SQL preflights pass;
 - the direct raw-credit grant is absent and guarded wrapper grants are correct;
 - the compatible application commit is deployed;
 - the required provider quorum variables are configured for the supported chains;
-- worker logs show successful claims/completions without missing-RPC, ACL, lease or schema errors.
+- worker logs show successful claims/completions without missing-RPC, ACL, lease or schema errors;
+- the authenticated presence preflight passes before the offline-ad trade-opening guard is enabled;
+- all three trade-opening routes can resolve advertiser availability through the installed RPC contract.
 
 No live financial transaction is required to establish these database and code-level acceptance conditions. The monitor is not operational until its migration is applied and its worker is running with valid provider quorum configuration.
 
 ---
 
-**Current decision:** **NO-GO for production migration execution.** The application code and migration files are pushed, but the older migration-file reconciliation gate remains open. No production migration has been applied during preparation of this runbook.
+**Current decision:** **NO-GO for production migration execution.** The older migration-file reconciliation gate remains open, and confirmed application dependencies (including presence and offline-ad trade-opening RPCs) are still absent in production. The new forward migrations and preflights are prepared and rollback-rehearsed only; no production migration has been applied.
+
+See [the production migration reconciliation audit](production-migration-reconciliation.md) for confirmed missing RPC/table dependencies and superseded historical candidates.
 
 ## Appendix A. Tracked local migration files newer than the production head
 
-Inventory only; this list records the 62 tracked local SQL files with versions greater than `20261103204401` at the time of inspection. It is **not** a blanket approval to apply them. Each file remains subject to the historical-file reconciliation and review gates above. If the release inventory changes, regenerate this list before a production window.
+Inventory only; this list records the 64 tracked local SQL files with versions greater than `20261103204401` after the current forward migrations are committed. It is **not** a blanket approval to apply them. Each file remains subject to the historical-file reconciliation and review gates above. If the release inventory changes, regenerate this list before a production window.
 
 ```text
 20261104120000_withdrawal_confirmation_and_control_flags.sql
@@ -220,4 +232,6 @@ Inventory only; this list records the 62 tracked local SQL files with versions g
 20261108001000_retire_legacy_didit_kyc_status_writer.sql
 20261108002000_secure_didit_kyc_session_initiation.sql
 20261108013000_deposit_chain_integrity_monitor.sql
+20261108014000_restore_authenticated_presence_rpc.sql
+20261108020000_guard_offline_ad_trade_opening.sql
 ```
