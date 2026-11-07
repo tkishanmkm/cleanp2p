@@ -631,10 +631,13 @@ export async function checkSubmittedWithdrawals(): Promise<{
         p_tx_hash: w.tx_hash,
         p_next_check_at: nextCheckAt,
       });
-      if (scheduleError || scheduled !== true) {
-        console.error(`[Withdrawal Worker] Failed scheduling next confirmation check for ${w.id}:`, scheduleError?.message || 'RPC did not confirm schedule');
+      if (scheduleError) {
+        console.error(`[Withdrawal Worker] Could not claim confirmation check for ${w.id}:`, scheduleError.message);
         continue;
       }
+      // Another worker may have claimed this due row after our SELECT. A false
+      // compare-and-set result is an expected concurrent skip, not an error.
+      if (scheduled !== true) continue;
 
       const normNet = normalizeNetworkCode(w.network);
 
