@@ -56,7 +56,10 @@ BEGIN
         SELECT 1 FROM pg_proc
         WHERE oid = v_canonical
           AND prosecdef IS TRUE
-          AND proconfig @> ARRAY['search_path=pg_catalog']::text[]
+          AND (
+              proconfig @> ARRAY['search_path=pg_catalog']::text[]
+              OR proconfig @> ARRAY['search_path=""']::text[]
+          )
     ) THEN
         RAISE EXCEPTION 'FAIL: canonical transfer SECURITY DEFINER search_path is not pg_catalog.';
     END IF;

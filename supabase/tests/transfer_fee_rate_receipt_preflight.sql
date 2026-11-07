@@ -15,7 +15,10 @@ BEGIN
     IF NOT EXISTS (
         SELECT 1 FROM pg_catalog.pg_proc p
         WHERE p.oid=v_oid AND p.prosecdef IS TRUE
-          AND 'search_path=pg_catalog' = ANY(coalesce(p.proconfig,ARRAY[]::text[]))
+          AND (
+              'search_path=pg_catalog' = ANY(coalesce(p.proconfig,ARRAY[]::text[]))
+              OR 'search_path=""' = ANY(coalesce(p.proconfig,ARRAY[]::text[]))
+          )
     ) OR NOT pg_catalog.has_function_privilege('service_role',v_oid,'EXECUTE')
        OR pg_catalog.has_function_privilege('anon',v_oid,'EXECUTE')
        OR pg_catalog.has_function_privilege('authenticated',v_oid,'EXECUTE') THEN

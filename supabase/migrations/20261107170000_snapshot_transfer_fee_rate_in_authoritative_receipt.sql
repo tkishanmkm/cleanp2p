@@ -32,7 +32,15 @@ BEGIN
     IF pg_catalog.strpos(v_definition, 'public.app_settings') = 0
        OR pg_catalog.strpos(v_definition, '''fee_rate'', v_fee_rate') = 0
        OR pg_catalog.strpos(v_definition, '''total_deduction'', v_total_deduction') = 0
-       OR pg_catalog.strpos(v_definition, 'SET search_path TO ''pg_catalog''') = 0 THEN
+       OR NOT EXISTS (
+            SELECT 1
+            FROM pg_catalog.pg_proc p
+            WHERE p.oid = 'public.execute_internal_transfer(uuid,text,text,numeric,text)'::regprocedure
+              AND (
+                  'search_path=pg_catalog' = ANY(coalesce(p.proconfig,ARRAY[]::text[]))
+                  OR 'search_path=""' = ANY(coalesce(p.proconfig,ARRAY[]::text[]))
+              )
+       ) THEN
         RAISE EXCEPTION 'Configured-fee transfer migration must be installed before fee snapshot receipt patch';
     END IF;
 END;
