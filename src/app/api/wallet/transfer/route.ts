@@ -363,6 +363,7 @@ export async function POST(req: NextRequest) {
       gross_amount?: number | string;
       net_amount?: number | string;
       fee_amount?: number | string;
+      fee_rate?: number | string | null;
       fee?: number | string;
       total_deduction?: number | string;
       sender_balance_after?: number | string;
@@ -390,7 +391,6 @@ export async function POST(req: NextRequest) {
       recipientId: recipientProfile.id,
       asset: coinSymbol,
       amount: numericAmount,
-      feeRate: transferFeeRate,
     })) {
       console.error('[Internal Transfer] RPC response failed financial integrity validation.');
       return NextResponse.json({
@@ -400,6 +400,10 @@ export async function POST(req: NextRequest) {
     }
 
     const isIdempotentReplay = Boolean(transferData.idempotent_replay);
+    const reportedFeeRate = transferData.fee_rate != null ? Number(transferData.fee_rate) : null;
+    const appliedTransferFeeRate = reportedFeeRate !== null && Number.isFinite(reportedFeeRate)
+      ? reportedFeeRate
+      : transferFeeRate;
     const transferId = String(transferData.public_id || transferData.transfer_id);
     const dbTransferId = String(transferData.transfer_id);
     const grossAmount = Number(transferData.gross_amount);
@@ -416,7 +420,7 @@ export async function POST(req: NextRequest) {
         await admin.from('notifications').insert({
           user_id: user.id,
           title: 'Transfer Sent',
-          message: `Successfully transferred ${grossAmount} ${coinSymbol} to @${recipientName} (${(transferFeeRate * 100).toFixed(2)}% Fee: ${feeAmount} ${coinSymbol}, Total Deducted: ${totalDeduction} ${coinSymbol}).`,
+          message: `Successfully transferred ${grossAmount} ${coinSymbol} to @${recipientName} (${(appliedTransferFeeRate * 100).toFixed(2)}% Fee: ${feeAmount} ${coinSymbol}, Total Deducted: ${totalDeduction} ${coinSymbol}).`,
           type: 'transfer',
           is_read: false,
           metadata: { link: '/wallet' },
@@ -429,7 +433,7 @@ export async function POST(req: NextRequest) {
 
     const message = isIdempotentReplay
       ? `Transfer was already completed previously (ID: ${transferId}).`
-      : `Successfully transferred ${grossAmount} ${coinSymbol} to @${recipientName} (${(transferFeeRate * 100).toFixed(2)}% Fee: ${feeAmount} ${coinSymbol}, Total Deducted: ${totalDeduction} ${coinSymbol}).`;
+      : `Successfully transferred ${grossAmount} ${coinSymbol} to @${recipientName} (${(appliedTransferFeeRate * 100).toFixed(2)}% Fee: ${feeAmount} ${coinSymbol}, Total Deducted: ${totalDeduction} ${coinSymbol}).`;
 
     return NextResponse.json({
       success: true,

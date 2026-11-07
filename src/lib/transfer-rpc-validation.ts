@@ -3,7 +3,6 @@ export interface TransferRpcExpectedValues {
   recipientId: string;
   asset: string;
   amount: number;
-  feeRate: number;
 }
 
 interface TransferRpcResponseShape {
@@ -16,6 +15,7 @@ interface TransferRpcResponseShape {
   gross_amount?: unknown;
   net_amount?: unknown;
   fee_amount?: unknown;
+  fee_rate?: unknown;
   fee?: unknown;
   total_deduction?: unknown;
   sender_balance_after?: unknown;
@@ -49,6 +49,7 @@ export function isValidTransferRpcResponse(
   gross_amount: number | string;
   net_amount: number | string;
   fee_amount: number | string;
+  fee_rate?: number | string | null;
   total_deduction: number | string;
 } {
   if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
@@ -82,11 +83,20 @@ export function isValidTransferRpcResponse(
     if (Math.abs(net + fee - total) > feeTolerance) return false;
   } else {
     // Current contract: the recipient receives the entered amount and the sender
-    // pays the configured platform fee in addition, rounded to 8 decimal places.
-    if (!Number.isFinite(expected.feeRate) || expected.feeRate < 0 || expected.feeRate > 0.1) return false;
-    const expectedFee = Math.round((gross * expected.feeRate + Number.EPSILON) * 1e8) / 1e8;
+    // pays the fee captured by the database transaction, rounded to 8 decimals.
+    // New transfers must return that exact rate. Replays may reference historical
+    // transfers created before the rate snapshot was stored; those are checked by
+    // their immutable amount/fee arithmetic instead of today's mutable setting.
+    const replay = result.idempotent_replay === true;
+    const appliedFeeRate = result.fee_rate == null ? null : finiteNumber(result.fee_rate);
+    if (result.fee_rate != null && appliedFeeRate === null) return false;
+    if (!replay && appliedFeeRate === null) return false;
+    if (appliedFeeRate !== null) {
+      if (appliedFeeRate < 0 || appliedFeeRate > 0.1) return false;
+      const expectedFee = Math.round((gross * appliedFeeRate + Number.EPSILON) * 1e8) / 1e8;
+      if (Math.abs(fee - expectedFee) > feeTolerance) return false;
+    }
     if (Math.abs(net - gross) > amountTolerance) return false;
-    if (Math.abs(fee - expectedFee) > feeTolerance) return false;
     if (Math.abs(total - (gross + fee)) > feeTolerance) return false;
   }
 
