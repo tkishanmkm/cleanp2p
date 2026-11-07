@@ -2,10 +2,13 @@
 DO $check$
 DECLARE
     v_definition text;
+    v_trade_definition text;
     v_legacy regprocedure :=
       to_regprocedure('public.execute_wallet_transfer(uuid,uuid,text,numeric,numeric,text)');
     v_canonical regprocedure :=
       to_regprocedure('public.execute_internal_transfer(uuid,text,text,numeric,text)');
+    v_trade regprocedure :=
+      to_regprocedure('public.initiate_trade_with_escrow(text,numeric,numeric,text,numeric,text,text,text,uuid)');
     v_fee numeric;
     v_escrow_fee numeric;
     v_min_trade numeric;
@@ -87,6 +90,32 @@ BEGIN
         RAISE EXCEPTION 'FAIL: transfer sender/idempotency unique index is missing.';
     END IF;
 
-    RAISE NOTICE 'PASS: authoritative fee values, entered-amount recipient credit, fee-on-top sender debit, success/replay receipt contract, and RPC privileges verified.';
+    IF v_trade IS NULL THEN
+        RAISE EXCEPTION 'FAIL: canonical P2P escrow initiation RPC is missing.';
+    END IF;
+
+    SELECT pg_get_functiondef(v_trade) INTO v_trade_definition;
+
+    IF position('FROM public.app_settings' IN v_trade_definition) = 0
+       OR position('WHERE key = ''escrow_fee_percent''' IN v_trade_definition) = 0
+       OR position('v_escrow_fee := ROUND(v_crypto_amount * v_escrow_fee_rate, 8)' IN v_trade_definition) = 0
+       OR position('ESCROW_FEE_CONFIG_UNAVAILABLE' IN v_trade_definition) = 0
+       OR position('v_crypto_amount * 0.015' IN v_trade_definition) > 0 THEN
+        RAISE EXCEPTION 'FAIL: P2P escrow initiation must use the configured escrow fee and fail closed when configuration is missing.';
+    END IF;
+
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_proc
+        WHERE oid = v_trade
+          AND prosecdef IS TRUE
+          AND proowner = 'postgres'::regrole
+          AND proconfig @> ARRAY['search_path=""']::text[]
+    ) OR has_function_privilege('anon', v_trade, 'EXECUTE')
+       OR NOT has_function_privilege('authenticated', v_trade, 'EXECUTE')
+       OR NOT has_function_privilege('service_role', v_trade, 'EXECUTE') THEN
+        RAISE EXCEPTION 'FAIL: canonical P2P escrow RPC ownership, search_path, or execute grants changed.';
+    END IF;
+
+    RAISE NOTICE 'PASS: authoritative transfer/escrow fee values, configured-fee P2P initiation, entered-amount recipient credit, fee-on-top sender debit, success/replay receipt contract, and RPC privileges verified.';
 END;
 $check$;
