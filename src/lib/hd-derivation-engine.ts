@@ -416,7 +416,7 @@ export async function getOrDeriveUserDepositAddresses(
   // 1. Fetch user profile
   const { data: profileData, error: profileErr } = await supabase
     .from('profiles')
-    .select('*')
+    .select('id, username, display_name, wallet_index')
     .eq('id', userId)
     .maybeSingle();
 

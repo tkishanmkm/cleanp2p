@@ -224,7 +224,7 @@ export default function UserProfileClient({
     // 1. Fetch latest profile immediately on mount to prevent stale SSR cache
     const fetchLatestProfile = async () => {
       try {
-        const PUBLIC_PROFILE_COLUMNS = 'id, username, display_name, avatar_url, photo_url, country, is_verified, is_online, is_trading_eligible, created_at, avg_payment_time_mins, avg_payment_minutes, avg_pay_time, avg_release_time_mins, avg_release_minutes, avg_release_time, total_completed_trades, completed_trades, trade_volume, positive_feedback, negative_feedback, feedback_score';
+        const PUBLIC_PROFILE_COLUMNS = 'id, username, display_name, avatar_url, photo_url, country, is_verified, is_online, is_trading_eligible, merchant_tier, created_at, avg_payment_time_mins, avg_payment_minutes, avg_pay_time, avg_release_time_mins, avg_release_minutes, avg_release_time, total_completed_trades, completed_trades, trade_volume, total_volume_usd, positive_feedback, negative_feedback, feedback_score';
         const { data: latest } = await supabase
           .from('public_profiles')
           .select(PUBLIC_PROFILE_COLUMNS)
@@ -297,7 +297,7 @@ export default function UserProfileClient({
   if (!profile.country) countryInfo.name = t('publicProfile.global');
 
   const cleanUsername = (profile.username || t('publicProfile.fallbackUser')).replace(/^@/, '');
-  const profileStatusKey = profile.is_trading_eligible === false ? 'restricted' : null;
+  const profileStatusKey = profile.is_trading_eligible !== true ? 'restricted' : null;
   const visibleBuyAds = profileStatusKey ? [] : buyAds;
   const visibleSellAds = profileStatusKey ? [] : sellAds;
 
@@ -362,26 +362,8 @@ export default function UserProfileClient({
                 </span>
               </div>
 
-              {/* Badges: Email Verified, ID Verified, Origin Country */}
+              {/* Public ID-verification badge; email and pending KYC state stay private. */}
               <div className="flex flex-wrap items-center gap-2 pt-2">
-                {/* Email Verification Badge */}
-                {profile.is_email_verified ? (
-                  <span
-                    id="badge-email-verified"
-                    className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold bg-emerald-50 text-emerald-700 dark:bg-emerald-950/50 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800/80"
-                  >
-                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
-                    {t('publicProfile.emailVerified')}
-                  </span>
-                ) : (
-                  <span
-                    id="badge-email-unverified"
-                    className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-medium bg-neutral-100 text-neutral-600 dark:bg-neutral-800/80 dark:text-neutral-400 border border-neutral-200 dark:border-neutral-700"
-                  >
-                    {t('publicProfile.emailUnverified')}
-                  </span>
-                )}
-
                 {/* ID / KYC Verification Badge */}
                 {(() => {
                   const v = getIdentityVerificationState(profile);

@@ -279,8 +279,9 @@ export async function POST(
     const resolvedParams = await params;
     const userId = resolvedParams.userId;
 
-    if (!userId || typeof userId !== "string") {
-      return NextResponse.json({ success: false, error: "Missing or invalid userId" }, { status: 400 });
+    if (typeof userId !== "string" ||
+        !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(userId)) {
+      return NextResponse.json({ success: false, error: "A valid user UUID is required." }, { status: 400 });
     }
 
     const body = await req.json().catch(() => ({}));
@@ -395,100 +396,85 @@ export async function POST(
       });
     }
 
-    if (action === "reset_kyc") {
-      await supabase
-        .from("profiles")
-        .update({
-          kyc_status: "NOT_SUBMITTED",
-          is_verified: false,
-          id_verified: false,
-          is_id_verified: false,
-          kyc_attempts: 0,
-          verification_tier: 1,
-          kyc_vendor_session_id: null,
-          kyc_retry_after: null,
-        })
-        .eq("id", userId);
+    if (action === "reset_kyc" || action === "verify_kyc" || action === "unverify_kyc") {
+      const { data: kycResult, error: kycError } = await supabase.rpc(
+        "admin_update_user_kyc_authorized",
+        {
+          p_admin_id: adminId,
+          p_admin_email: adminEmail,
+          p_target_user_id: userId,
+          p_action: action,
+        }
+      );
 
-      await supabase.from("admin_audit_logs").insert({
-        admin_email: adminEmail,
-        admin_id: adminId,
-        action: "RESET_USER_KYC",
-        target_user_id: userId,
-        details: { reset_at: new Date().toISOString(), executedBy: adminEmail },
-      });
+      if (kycError || !kycResult || kycResult.success !== true || kycResult.audit_logged !== true) {
+        console.error("[ADMIN_USER_KYC] Atomic KYC lifecycle RPC failed:", {
+          code: kycError?.code || null,
+          action,
+        });
+        const status = kycError?.code === "42501" ? 403
+          : kycError?.code === "P0002" ? 404
+          : 503;
+        return NextResponse.json(
+          {
+            success: false,
+            code: "ADMIN_KYC_ACTION_FAILED",
+            error: "The KYC action and its audit record could not be completed atomically.",
+          },
+          { status }
+        );
+      }
 
-      return NextResponse.json({ success: true, message: "KYC verification reset. User can submit documents again." });
-    }
+      const message = action === "reset_kyc"
+        ? "KYC verification reset. User can submit documents again."
+        : action === "verify_kyc"
+          ? "User KYC marked as Verified (Tier 2)."
+          : "User KYC marked as Unverified (Tier 1).";
 
-    if (action === "verify_kyc") {
-      await supabase
-        .from("profiles")
-        .update({
-          kyc_status: "VERIFIED",
-          is_verified: true,
-          id_verified: true,
-          is_id_verified: true,
-          verification_tier: 2,
-        })
-        .eq("id", userId);
-
-      await supabase.from("admin_audit_logs").insert({
-        admin_email: adminEmail,
-        admin_id: adminId,
-        action: "FORCE_VERIFY_KYC",
-        target_user_id: userId,
-        details: { verified_at: new Date().toISOString(), executedBy: adminEmail },
-      });
-
-      return NextResponse.json({ success: true, message: "User KYC marked as Verified (Tier 2)." });
-    }
-
-    if (action === "unverify_kyc") {
-      await supabase
-        .from("profiles")
-        .update({
-          kyc_status: "UNVERIFIED",
-          is_verified: false,
-          id_verified: false,
-          is_id_verified: false,
-          verification_tier: 1,
-          is_kyc_locked: false,
-        })
-        .eq("id", userId);
-
-      await supabase.from("admin_audit_logs").insert({
-        admin_email: adminEmail,
-        admin_id: adminId,
-        action: "FORCE_UNVERIFY_KYC",
-        target_user_id: userId,
-        details: { unverified_at: new Date().toISOString(), executedBy: adminEmail },
-      });
-
-      return NextResponse.json({ success: true, message: "User KYC marked as Unverified (Tier 1)." });
+      return NextResponse.json({ success: true, message, data: kycResult });
     }
 
     if (action === "toggle_withdrawal") {
-      const lock = Boolean(body.locked);
-      await supabase
-        .from("profiles")
-        .update({
-          is_withdrawal_locked: lock,
-          withdrawals_disabled: lock,
-        })
-        .eq("id", userId);
+      if (typeof body.locked !== "boolean") {
+        return NextResponse.json(
+          { success: false, error: "A boolean locked value is required." },
+          { status: 400 }
+        );
+      }
 
-      await supabase.from("admin_audit_logs").insert({
-        admin_email: adminEmail,
-        admin_id: adminId,
-        action: lock ? "LOCK_USER_WITHDRAWAL" : "UNLOCK_USER_WITHDRAWAL",
-        target_user_id: userId,
-        details: { locked: lock, executedBy: adminEmail, date: new Date().toISOString() },
-      });
+      const lock = body.locked;
+      const { data: lockResult, error: lockError } = await supabase.rpc(
+        "admin_set_user_withdrawal_lock_authorized",
+        {
+          p_admin_id: adminId,
+          p_admin_email: adminEmail,
+          p_target_user_id: userId,
+          p_locked: lock,
+        }
+      );
+
+      if (lockError || !lockResult || lockResult.success !== true || lockResult.audit_logged !== true) {
+        console.error("[ADMIN_USER_WITHDRAWAL_LOCK] Atomic lock RPC failed:", {
+          code: lockError?.code || null,
+          locked: lock,
+        });
+        const status = lockError?.code === "42501" ? 403
+          : lockError?.code === "P0002" ? 404
+          : 503;
+        return NextResponse.json(
+          {
+            success: false,
+            code: "ADMIN_WITHDRAWAL_LOCK_FAILED",
+            error: "The withdrawal lock and its audit record could not be completed atomically.",
+          },
+          { status }
+        );
+      }
 
       return NextResponse.json({
         success: true,
         message: lock ? "User withdrawals temporarily stopped." : "User withdrawals resumed.",
+        data: lockResult,
       });
     }
 

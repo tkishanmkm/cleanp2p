@@ -138,11 +138,19 @@ export async function POST(req: NextRequest) {
     }
 
     if (ad) {
-      const { data: profile } = await supabase
+      const { data: profile, error: profileError } = await supabase
         .from('profiles')
-        .select('*')
+        .select('full_name, display_name, kyc_status')
         .eq('id', user.id)
         .maybeSingle();
+
+      if (profileError) {
+        console.error('[POST /api/p2p/orders/create] Buyer profile eligibility lookup failed:', profileError.code || 'UNKNOWN');
+        return NextResponse.json(
+          { error: 'Unable to verify the buyer profile requirements. Please try again.', code: 'BUYER_PROFILE_UNAVAILABLE' },
+          { status: 503 }
+        );
+      }
 
       const hasFullName = Boolean(
         profile?.full_name?.trim() ||

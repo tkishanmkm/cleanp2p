@@ -94,7 +94,7 @@ export async function getUserKycTierInfo(
   try {
     const { data } = await supabase
       .from('profiles')
-      .select('id, kyc_status, is_verified, id_verified, is_id_verified, verification_tier')
+      .select('id, kyc_status, is_verified, id_verified, verification_tier')
       .eq('id', userId)
       .maybeSingle();
     profile = data;

@@ -36,14 +36,7 @@ export function AdFeed({ type }: { type?: "BUY" | "SELL" }) {
             max_limit,
             payment_methods,
             created_at,
-            user_id,
-            profiles (
-              id,
-              username,
-              display_name,
-              is_online,
-              last_seen_at
-            )
+            user_id
           `)
           .eq("is_active", true)
           .order("created_at", { ascending: false })
@@ -86,8 +79,8 @@ export function AdFeed({ type }: { type?: "BUY" | "SELL" }) {
           } else if (p2pData && p2pData.length > 0) {
             const userIds = Array.from(new Set(p2pData.map((d: any) => d.user_id).filter(Boolean)));
             const { data: profiles } = await supabase
-              .from("profiles")
-              .select("id, username, display_name, is_online, last_seen_at")
+              .from("public_profiles")
+              .select("id, username, display_name, avatar_url, photo_url, is_online, created_at, merchant_tier, completed_trades, positive_feedback, negative_feedback")
               .in("id", userIds);
 
             const profileMap = new Map((profiles || []).map((p: any) => [p.id, p]));
@@ -108,7 +101,24 @@ export function AdFeed({ type }: { type?: "BUY" | "SELL" }) {
             setAds([]);
           }
         } else {
-          setAds(data || []);
+          const userIds = Array.from(new Set((data || []).map((ad: any) => ad.user_id).filter(Boolean)));
+          const { data: publicProfiles, error: profileError } = userIds.length > 0
+            ? await supabase
+                .from("public_profiles")
+                .select("id, username, display_name, avatar_url, photo_url, is_online, created_at, merchant_tier, completed_trades, positive_feedback, negative_feedback")
+                .in("id", userIds)
+            : { data: [], error: null };
+
+          if (profileError) {
+            console.error("Error fetching public trader profiles:", profileError);
+            setAds([]);
+          } else {
+            const profileMap = new Map((publicProfiles || []).map((profile: any) => [profile.id, profile]));
+            setAds((data || []).map((ad: any) => ({
+              ...ad,
+              profiles: profileMap.get(ad.user_id) || null,
+            })));
+          }
         }
       } catch (err) {
         console.error("Error fetching ads:", err);

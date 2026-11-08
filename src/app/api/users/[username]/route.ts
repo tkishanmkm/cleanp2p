@@ -16,7 +16,7 @@ export async function GET(
 
     // 1. Query public profile / profiles table
     let profile: any = null;
-    const PUBLIC_PROFILE_COLUMNS = 'id, username, display_name, avatar_url, photo_url, country, is_verified, is_online, is_trading_eligible, created_at, total_completed_trades, completed_trades, trade_volume, total_volume_usd, avg_payment_minutes, avg_release_minutes, positive_feedback, negative_feedback, feedback_score, merchant_tier';
+    const PUBLIC_PROFILE_COLUMNS = 'id, username, display_name, avatar_url, photo_url, country, is_verified, is_online, is_trading_eligible, created_at, total_completed_trades, completed_trades, trade_volume, total_volume_usd, total_traded_usd, avg_payment_minutes, avg_release_minutes, positive_feedback, negative_feedback, feedback_score, merchant_tier';
     let query = supabaseAdmin.from('public_profiles').select(PUBLIC_PROFILE_COLUMNS);
     if (isUuid) {
       // Treat UUID-shaped input strictly as an ID; do not interpolate it into
@@ -103,14 +103,15 @@ export async function GET(
       country: profile.country || 'US',
       is_email_verified: isEmailVerified,
       is_id_verified: isIdVerified,
-      last_seen: profile.last_seen || profile.last_seen_at || profile.last_active || profile.updated_at || null,
-      last_seen_at: profile.last_seen || profile.last_seen_at || profile.last_active || profile.updated_at || null,
-      last_active: profile.last_seen || profile.last_seen_at || profile.last_active || profile.updated_at || null,
+      // Exact presence timestamps remain private and are not part of public profiles.
+      last_seen: null,
+      last_seen_at: null,
+      last_active: null,
       is_online: profile.is_online ?? false,
       joined_at: profile.created_at || null,
       stats: {
         completed_trades: profile.completed_trades || 0,
-        total_trade_volume: profile.total_trade_volume || profile.trade_volume || 0,
+        total_trade_volume: profile.trade_volume || profile.total_volume_usd || profile.total_traded_usd || 0,
         avg_payment_minutes: profile.avg_payment_minutes || 0,
         avg_release_minutes: profile.avg_release_minutes || 0,
         positive_feedback_count: positiveFeedback,

@@ -92,7 +92,7 @@ export async function GET(req: NextRequest) {
     const reviewerNames = new Map<string, string | null>();
     if (reviewerIds.length > 0) {
       const { data: profiles, error: reviewerError } = await admin
-        .from('profiles')
+        .from('public_profiles')
         .select('id,username')
         .in('id', reviewerIds);
       if (reviewerError) {
@@ -224,7 +224,7 @@ export async function POST(req: NextRequest) {
     }
 
     const { data: reviewer } = await admin
-      .from('profiles')
+      .from('public_profiles')
       .select('username')
       .eq('id', user.id)
       .maybeSingle();

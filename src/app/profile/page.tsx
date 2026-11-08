@@ -205,22 +205,29 @@ export default function ProfilePage() {
       // 3. Fetch Blocked Users
       const { data: blocks } = await supabase
         .from('user_blocks')
-        .select(`
-          id,
-          blocked_id,
-          created_at,
-          blocked:profiles!user_blocks_blocked_id_fkey(id, username, avatar_url)
-        `)
+        .select('id, blocked_id, created_at')
         .eq('blocker_id', userId);
 
       if (blocks) {
-        setBlockedUsers(blocks.map((b: any) => ({
-          id: b.id,
-          userId: b.blocked_id,
-          username: b.blocked?.username || 'Unknown User',
-          avatarUrl: b.blocked?.avatar_url,
-          blockedAt: b.created_at,
-        })));
+        const blockedIds = Array.from(new Set(blocks.map((block: any) => block.blocked_id).filter(Boolean)));
+        const { data: blockedProfiles } = blockedIds.length > 0
+          ? await supabase
+              .from('public_profiles')
+              .select('id, username, avatar_url, photo_url')
+              .in('id', blockedIds)
+          : { data: [] };
+        const blockedProfileMap = new Map((blockedProfiles || []).map((profile: any) => [profile.id, profile]));
+
+        setBlockedUsers(blocks.map((b: any) => {
+          const blockedProfile: any = blockedProfileMap.get(b.blocked_id);
+          return {
+            id: b.id,
+            userId: b.blocked_id,
+            username: blockedProfile?.username || 'Unknown User',
+            avatarUrl: blockedProfile?.avatar_url || blockedProfile?.photo_url || null,
+            blockedAt: b.created_at,
+          };
+        }));
       }
 
       // 4. Load feedback from both supported production stores. Newer review
@@ -229,20 +236,12 @@ export default function ProfilePage() {
       const [canonicalFeedbackResult, legacyFeedbackResult] = await Promise.all([
         supabase
           .from('feedbacks')
-          .select(`
-            id, trade_id, reviewer_id, reviewee_id, is_positive, comment, created_at,
-            reviewer:profiles!feedbacks_reviewer_id_fkey(username, avatar_url),
-            reviewee:profiles!feedbacks_reviewee_id_fkey(username, avatar_url)
-          `)
+          .select('id, trade_id, reviewer_id, reviewee_id, is_positive, comment, created_at')
           .or(`reviewee_id.eq.${userId},reviewer_id.eq.${userId}`)
           .order('created_at', { ascending: false }),
         supabase
           .from('feedback')
-          .select(`
-            id, trade_id, from_user, from_username, to_user, rating, is_positive, comment, created_at,
-            reviewer:profiles!feedback_from_user_fkey(username, avatar_url),
-            reviewee:profiles!feedback_to_user_fkey(username, avatar_url)
-          `)
+          .select('id, trade_id, from_user, from_username, to_user, rating, is_positive, comment, created_at')
           .or(`to_user.eq.${userId},from_user.eq.${userId}`)
           .order('created_at', { ascending: false }),
       ]);
@@ -256,18 +255,42 @@ export default function ProfilePage() {
             reviewer_id: row.from_user,
             reviewee_id: row.to_user,
             is_positive: row.is_positive ?? String(row.rating || '').toLowerCase() === 'positive',
-            reviewer: row.reviewer || { username: row.from_username || 'Trader', avatar_url: null },
           }))
         : [];
 
+      // Resolve reviewer/reviewee display data through the approved public view.
+      // The private profiles table is owner-only and is not a public join target.
+      const feedbackUserIds = Array.from(new Set(
+        [...canonicalFeedback, ...legacyFeedback]
+          .flatMap((row: any) => [row.reviewer_id, row.reviewee_id])
+          .filter((id: unknown): id is string => typeof id === 'string' && id.length > 0)
+      ));
+      const { data: feedbackProfiles } = feedbackUserIds.length > 0
+        ? await supabase
+            .from('public_profiles')
+            .select('id, username, avatar_url, photo_url')
+            .in('id', feedbackUserIds)
+        : { data: [] };
+      const feedbackProfileMap = new Map((feedbackProfiles || []).map((profile: any) => [profile.id, profile]));
+      const attachFeedbackProfiles = (rows: any[]) => rows.map((row: any) => ({
+        ...row,
+        reviewer: feedbackProfileMap.get(row.reviewer_id) || (
+          row.from_username ? { username: row.from_username, avatar_url: null } : null
+        ),
+        reviewee: feedbackProfileMap.get(row.reviewee_id) || null,
+      }));
+
+      const resolvedCanonicalFeedback = attachFeedbackProfiles(canonicalFeedback);
+      const resolvedLegacyFeedback = attachFeedbackProfiles(legacyFeedback);
+
       const feedbackByTradeAndReviewer = new Map<string, any>();
-      for (const row of canonicalFeedback) {
+      for (const row of resolvedCanonicalFeedback) {
         const key = `${row.trade_id}:${row.reviewer_id}`;
         feedbackByTradeAndReviewer.set(key, row);
       }
       // Prefer the legacy record when both stores contain the same review;
       // it carries the username/rating fields used by existing trade screens.
-      for (const row of legacyFeedback) {
+      for (const row of resolvedLegacyFeedback) {
         const key = `${row.trade_id}:${row.reviewer_id}`;
         feedbackByTradeAndReviewer.set(key, { ...feedbackByTradeAndReviewer.get(key), ...row });
       }

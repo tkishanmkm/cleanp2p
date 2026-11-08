@@ -374,13 +374,13 @@ export default function CreateP2PAdPage() {
         const { data: { session } } = await supabase.auth.getSession();
         if (isMounted && session?.user) {
           setUser(session.user);
-          const { data: profileData } = await supabase.from('profiles').select('is_verified, id_verified, is_id_verified, kyc_status, verification_tier').eq('id', session.user.id).maybeSingle();
+          const { data: profileData } = await supabase.from('profiles').select('is_verified, id_verified, kyc_status, verification_tier').eq('id', session.user.id).maybeSingle();
           if (isMounted) setProfile(profileData);
         } else {
           const { data: { user: currentUser } } = await supabase.auth.getUser();
           if (isMounted && currentUser) {
             setUser(currentUser);
-            const { data: profileData } = await supabase.from('profiles').select('is_verified, id_verified, is_id_verified, kyc_status, verification_tier').eq('id', currentUser.id).maybeSingle();
+            const { data: profileData } = await supabase.from('profiles').select('is_verified, id_verified, kyc_status, verification_tier').eq('id', currentUser.id).maybeSingle();
             if (isMounted) setProfile(profileData);
           }
         }
@@ -401,7 +401,7 @@ export default function CreateP2PAdPage() {
         setUser(session?.user ?? null);
         setProfile(null);
         if (session?.user) {
-          void supabase.from('profiles').select('is_verified, id_verified, is_id_verified, kyc_status, verification_tier').eq('id', session.user.id).maybeSingle().then(({ data }) => { if (isMounted) setProfile(data); });
+          void supabase.from('profiles').select('is_verified, id_verified, kyc_status, verification_tier').eq('id', session.user.id).maybeSingle().then(({ data }) => { if (isMounted) setProfile(data); });
         }
       }
     });

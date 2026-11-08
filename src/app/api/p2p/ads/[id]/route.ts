@@ -6,7 +6,7 @@ import { verifyServerAdmin } from '@/lib/server-admin-auth';
 
 export const dynamic = 'force-dynamic';
 
-// GET: Fetch ad details with creator's live profile, reputation, and wallet balance
+// GET: Fetch public ad details with the seller's approved public trader profile.
 export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
@@ -57,8 +57,8 @@ export async function GET(
 
     if (creatorId) {
       const { data: prof } = await supabaseAdmin
-        .from('profiles')
-        .select('id, username, display_name, avatar_url, photo_url, country, feedback_score, positive_feedback, negative_feedback, completed_trades, avg_release_minutes, avg_release_time, avg_payment_minutes, avg_pay_time, created_at, is_verified, kyc_status, merchant_tier, is_online, last_seen, last_seen_at, updated_at')
+        .from('public_profiles')
+        .select('id, username, display_name, avatar_url, photo_url, country, feedback_score, positive_feedback, negative_feedback, completed_trades, total_completed_trades, avg_release_time_mins, avg_release_minutes, avg_release_time, avg_payment_time_mins, avg_payment_minutes, avg_pay_time, created_at, is_verified, merchant_tier, is_online')
         .eq('id', creatorId)
         .maybeSingle();
       if (prof) {
@@ -69,8 +69,8 @@ export async function GET(
     // Fallback: If not found by id, try matching by username/display name
     if (!creatorProfile && ad.user_display_name) {
       const { data: prof } = await supabaseAdmin
-        .from('profiles')
-        .select('id, username, display_name, avatar_url, photo_url, country, feedback_score, positive_feedback, negative_feedback, completed_trades, avg_release_minutes, avg_release_time, avg_payment_minutes, avg_pay_time, created_at, is_verified, kyc_status, merchant_tier, is_online, last_seen, last_seen_at, updated_at')
+        .from('public_profiles')
+        .select('id, username, display_name, avatar_url, photo_url, country, feedback_score, positive_feedback, negative_feedback, completed_trades, total_completed_trades, avg_release_time_mins, avg_release_minutes, avg_release_time, avg_payment_time_mins, avg_payment_minutes, avg_pay_time, created_at, is_verified, merchant_tier, is_online')
         .ilike('username', ad.user_display_name)
         .maybeSingle();
       if (prof) {
@@ -83,7 +83,7 @@ export async function GET(
 
     // STRICT USERNAME ENFORCEMENT: lowercase letters, numbers, dot, underscore only
     const username = creatorProfile?.username || ad.user_display_name || 'trader';
-    const lastActive = creatorProfile?.last_seen || creatorProfile?.last_seen_at || creatorProfile?.last_active || creatorProfile?.updated_at || null;
+    const isOnline = creatorProfile?.is_online === true;
 
     return NextResponse.json({
       ad: {
@@ -94,8 +94,10 @@ export async function GET(
           avatar_url: creatorProfile?.avatar_url || creatorProfile?.photo_url || null,
           photo_url: creatorProfile?.avatar_url || creatorProfile?.photo_url || null,
           created_at: creatorProfile?.created_at || ad.created_at,
-          last_seen_at: lastActive,
-          last_active: lastActive,
+          is_online: isOnline,
+          // Exact presence timestamps are private and excluded from public trader APIs.
+          last_seen_at: null,
+          last_active: null,
           completed_trades: creatorProfile?.completed_trades ?? 0,
           positive_feedback: creatorProfile?.positive_feedback ?? 0,
           negative_feedback: creatorProfile?.negative_feedback ?? 0,

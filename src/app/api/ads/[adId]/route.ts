@@ -11,17 +11,6 @@ export const dynamic = 'force-dynamic';
 
 const VALID_SUPPORTED_ASSETS = ['USDT', 'BTC', 'ETH', 'LTC'];
 
-function formatPresence(lastActive?: string | null): string {
-  if (!lastActive) return 'Online';
-  const diffMs = Date.now() - new Date(lastActive).getTime();
-  const diffMinutes = Math.floor(diffMs / (1000 * 60));
-  if (diffMinutes < 5) return 'Online';
-  if (diffMinutes < 60) return `${diffMinutes}m ago`;
-  const diffHours = Math.floor(diffMinutes / 60);
-  if (diffHours < 24) return `${diffHours}h ago`;
-  return 'Offline';
-}
-
 export async function GET(
   request: NextRequest,
   context: { params: Promise<{ adId: string }> }
@@ -72,16 +61,13 @@ export async function GET(
     if (adOwnerUserId) {
       try {
         const { data: profile } = await admin
-          .from('profiles')
-          .select('id, username, display_name, full_name, avatar_url, photo_url, country, feedback_score, positive_feedback, negative_feedback, completed_trades, avg_release_minutes, avg_release_time, avg_payment_minutes, avg_pay_time, created_at, is_verified, kyc_status, merchant_tier, is_online, last_seen, last_seen_at, updated_at')
+          .from('public_profiles')
+          .select('id, username, display_name, avatar_url, photo_url, country, feedback_score, positive_feedback, negative_feedback, completed_trades, total_completed_trades, avg_release_time_mins, avg_release_minutes, avg_release_time, avg_payment_time_mins, avg_payment_minutes, avg_pay_time, created_at, is_verified, merchant_tier, is_online')
           .eq('id', adOwnerUserId)
           .maybeSingle();
         if (profile) {
           profileData = profile;
-          const lastSeen = profile.last_seen || profile.last_seen_at;
-          if (lastSeen) {
-            presence = formatPresence(lastSeen);
-          }
+          presence = profile.is_online === true ? 'Online' : 'Offline';
         }
       } catch (profileErr) {
         console.warn('Failed to fetch profile in ad GET:', profileErr);
@@ -195,8 +181,10 @@ export async function GET(
         avg_release_minutes: profileData.avg_release_minutes,
         avg_pay_time: profileData.avg_pay_time || 'N/A',
         avg_payment_minutes: profileData.avg_payment_minutes,
-        last_seen: profileData.last_seen || profileData.last_seen_at || profileData.last_active,
-        last_seen_at: profileData.last_seen_at || profileData.last_seen || profileData.last_active,
+        is_online: profileData.is_online === true,
+        // Exact presence timestamps are private and excluded from public trader APIs.
+        last_seen: null,
+        last_seen_at: null,
       } : {
         id: adOwnerUserId,
         username: ad.user_display_name || 'Trader',

@@ -130,8 +130,8 @@ export async function GET(
 
     if (userIds.length > 0) {
       const { data: profiles } = await adminSupabase
-        .from('profiles')
-        .select('id, username, full_name, photo_url, country, status')
+        .from('public_profiles')
+        .select('id, username, display_name, avatar_url, photo_url, country, is_verified, merchant_tier')
         .in('id', userIds);
 
       (profiles || []).forEach((p: any) => {

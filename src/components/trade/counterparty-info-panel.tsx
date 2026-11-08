@@ -94,6 +94,7 @@ export function CounterpartyInfoPanel({
   const dateFnsLocale = dateFnsLocaleByLanguage[language as keyof typeof dateFnsLocaleByLanguage] || enUS;
   const [profileData, setProfileData] = useState<any>(user);
   const [blockedByCount, setBlockedByCount] = useState<number>(0);
+  const [usersBlockedCount, setUsersBlockedCount] = useState<number>(0);
   const [isBlockedByMe, setIsBlockedByMe] = useState(false);
   const [isBlockedByThem, setIsBlockedByThem] = useState(false);
   const [isCheckingStatus, setIsCheckingStatus] = useState(true);
@@ -160,6 +161,9 @@ export function CounterpartyInfoPanel({
             }
             if (typeof blockData.blockedByCount === 'number') {
               setBlockedByCount(blockData.blockedByCount);
+            }
+            if (typeof blockData.usersBlockedCount === 'number') {
+              setUsersBlockedCount(blockData.usersBlockedCount);
             }
           } catch {
             // Fail closed for block-sensitive actions when the status endpoint is unavailable.
@@ -246,12 +250,12 @@ export function CounterpartyInfoPanel({
 
   const current = profileData || user;
   const username = current.username || (current.userId && !current.userId.includes('-') ? current.userId : t('counterpartyPanel.fallbackTrader'));
-  const fullName = current.fullName || current.full_name || t('counterpartyPanel.fallbackUnverifiedUser');
+  // Public trader projections expose display_name, never legal full_name.
+  const displayName = current.display_name || username || t('counterpartyPanel.fallbackUnverifiedUser');
   const photoURL = current.photoURL || current.photo_url;
   
   const createdDate = toDate(current.createdAt || current.created_at);
   const joinedAgo = createdDate ? formatDistanceToNow(createdDate, { addSuffix: true, locale: dateFnsLocale }) : t('counterpartyPanel.notAvailable');
-  const dobDate = toDate(current.dob);
 
   const getCountryName = (code?: string) => (code ? countries.find((c) => c.code === code)?.name || code : 'N/A');
 
@@ -261,13 +265,9 @@ export function CounterpartyInfoPanel({
   const positiveScore = totalFeedback > 0 ? Math.round((positiveCount / totalFeedback) * 100) : 100;
 
   const completedTradesCount = Number(current.completedTrades ?? current.completed_trades ?? 0);
-  const rawBlockedList = Array.isArray(current.blockedUsers || current.blocked_users)
-    ? (current.blockedUsers || current.blocked_users)
-    : [];
-  const blockedUsersCount = Array.from(new Set(rawBlockedList)).length;
+  // The server-only block-status endpoint supplies aggregate block counts.
 
   const countryCode = current.country;
-  const ipCountryCode = current.ipBasedCountry || current.ip_based_country;
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
@@ -294,7 +294,7 @@ export function CounterpartyInfoPanel({
               </Avatar>
               <div>
                 <h3 className="text-lg font-bold text-foreground">@{username}</h3>
-                <p className="text-xs text-muted-foreground">{fullName}</p>
+                <p className="text-xs text-muted-foreground">{displayName}</p>
               </div>
               <div className="flex items-center gap-3 mt-1">
                 <span className="inline-flex items-center gap-1 text-xs font-semibold px-2 py-0.5 rounded-md bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">
@@ -308,32 +308,10 @@ export function CounterpartyInfoPanel({
 
             {/* Detailed Stats List */}
             <div className="space-y-1">
-              <DetailItem icon={<UserIcon size={16} />} label={t('counterpartyPanel.fullName')} value={fullName} />
+              <DetailItem icon={<UserIcon size={16} />} label={t('counterpartyPanel.fullName')} value={displayName} />
               
-              {/* Verification Badges */}
-              <div className="flex items-center justify-between py-2.5 border-b border-border/50 text-sm">
-                <div className="flex items-center gap-2.5 text-muted-foreground">
-                  <CheckCircle className="h-4 w-4 text-primary shrink-0" />
-                  <span>{t('counterpartyPanel.emailVerified')}</span>
-                </div>
-                <div>
-                  {(
-                    current.email_verified === true ||
-                    current.is_email_verified === true ||
-                    current.emailVerified === true ||
-                    current.email_confirmed_at != null
-                  ) ? (
-                    <span className="inline-flex items-center gap-1 text-xs font-bold px-2 py-0.5 rounded-md bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">
-                      <CheckCircle className="h-3 w-3" /> {t('counterpartyPanel.verified')}
-                    </span>
-                  ) : (
-                    <span className="inline-flex items-center gap-1 text-xs font-semibold px-2 py-0.5 rounded-md bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20">
-                      {t('counterpartyPanel.unverified')}
-                    </span>
-                  )}
-                </div>
-              </div>
-
+              {/* Only the public projection's verified flag is displayed. Email
+                  confirmation and detailed KYC lifecycle metadata stay private. */}
               <div className="flex items-center justify-between py-2.5 border-b border-border/50 text-sm">
                 <div className="flex items-center gap-2.5 text-muted-foreground">
                   <ShieldCheck className="h-4 w-4 text-primary shrink-0" />
@@ -341,14 +319,7 @@ export function CounterpartyInfoPanel({
                 </div>
                 <div>
                   {(
-                    current.id_verified === true ||
-                    current.is_id_verified === true ||
-                    current.idVerified === true ||
-                    current.kyc_status === 'VERIFIED' ||
-                    current.kyc_status === 'verified' ||
-                    current.verification_tier === 2 ||
-                    current.verification_tier === 'TIER_2' ||
-                    current.kyc_verified === true
+                    current.is_verified === true
                   ) ? (
                     <span className="inline-flex items-center gap-1 text-xs font-bold px-2 py-0.5 rounded-md bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">
                       <CheckCircle className="h-3 w-3" /> {t('counterpartyPanel.verified')}
@@ -386,7 +357,7 @@ export function CounterpartyInfoPanel({
               <DetailItem
                 icon={<ShieldBan size={16} />}
                 label={t('counterpartyPanel.blockedByThem')}
-                value={<span className="font-[Arial,Helvetica,sans-serif]">{blockedUsersCount}</span>}
+                value={<span className="font-[Arial,Helvetica,sans-serif]">{usersBlockedCount}</span>}
               />
               <DetailItem
                 icon={<ShieldAlert size={16} />}
@@ -396,12 +367,7 @@ export function CounterpartyInfoPanel({
               <DetailItem
                 icon={<Globe size={16} />}
                 label={t('counterpartyPanel.residence')}
-                value={<CountryDisplay rawCodeOrName={countryCode || current.country_of_residence || 'India'} />}
-              />
-              <DetailItem
-                icon={<Globe size={16} />}
-                label={t('counterpartyPanel.ipBasedLocation')}
-                value={<CountryDisplay rawCodeOrName={ipCountryCode || current.ip_country || 'India'} />}
+                value={<CountryDisplay rawCodeOrName={countryCode || 'N/A'} />}
               />
             </div>
 

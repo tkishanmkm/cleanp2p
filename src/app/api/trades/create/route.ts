@@ -168,11 +168,19 @@ export async function POST(req: NextRequest) {
     if (limitError) return NextResponse.json({ error: limitError }, { status: 400 });
 
     // 5. Verify Trader Requirements (Full name & KYC)
-    const { data: buyerProfile } = await supabase
+    const { data: buyerProfile, error: buyerProfileError } = await supabase
       .from('profiles')
-      .select('*')
+      .select('full_name, display_name, kyc_status')
       .eq('id', user.id)
       .maybeSingle();
+
+    if (buyerProfileError) {
+      console.error('[Trade Creation] Buyer profile eligibility lookup failed:', buyerProfileError.code || 'UNKNOWN');
+      return NextResponse.json(
+        { error: 'Unable to verify the buyer profile requirements. Please try again.', code: 'BUYER_PROFILE_UNAVAILABLE' },
+        { status: 503 }
+      );
+    }
 
     const hasFullName = Boolean(
       buyerProfile?.full_name?.trim() ||
@@ -331,18 +339,20 @@ export async function POST(req: NextRequest) {
       let sellerAutoReply = autoReplyText;
       let sellerUsername = 'Trader';
 
-      const { data: sellerProf } = await supabase
-        .from('profiles')
-        .select('username, auto_reply_message')
+      const { data: sellerProf, error: sellerProfileError } = await supabase
+        .from('public_profiles')
+        .select('username')
         .eq('id', sellerId)
         .maybeSingle();
 
-      if (sellerProf) {
-        if (sellerProf.username) sellerUsername = sellerProf.username;
-        if (!sellerAutoReply && sellerProf.auto_reply_message?.trim()) {
-          sellerAutoReply = sellerProf.auto_reply_message.trim();
-        }
+      if (sellerProfileError) {
+        console.warn('[Trade Creation] Public seller username lookup failed:', sellerProfileError.code || 'UNKNOWN');
+      } else if (sellerProf?.username) {
+        sellerUsername = sellerProf.username;
       }
+
+      // Auto-reply is sourced from the advertisement itself. The deployed
+      // profiles table has no auto_reply_message column.
 
       if (sellerAutoReply && sellerAutoReply.length > 0) {
         await supabase.from('trade_messages').insert({

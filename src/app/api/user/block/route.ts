@@ -142,7 +142,7 @@ export async function POST(request: NextRequest) {
           const blockerName = blockerProfile?.username || 'Trader';
           let blockedName = 'Counterpart';
           const { data: targetProfile } = await admin
-            .from('profiles')
+            .from('public_profiles')
             .select('username')
             .eq('id', targetUserId)
             .maybeSingle();

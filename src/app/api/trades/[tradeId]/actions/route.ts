@@ -110,11 +110,11 @@ export async function POST(
     let buyerName = 'Buyer';
     let sellerName = 'Seller';
     if (trade?.buyer_id) {
-      const { data: bp } = await adminClient.from('profiles').select('username').eq('id', trade.buyer_id).maybeSingle();
+      const { data: bp } = await adminClient.from('public_profiles').select('username').eq('id', trade.buyer_id).maybeSingle();
       if (bp?.username) buyerName = bp.username;
     }
     if (trade?.seller_id) {
-      const { data: sp } = await adminClient.from('profiles').select('username').eq('id', trade.seller_id).maybeSingle();
+      const { data: sp } = await adminClient.from('public_profiles').select('username').eq('id', trade.seller_id).maybeSingle();
       if (sp?.username) sellerName = sp.username;
     }
 

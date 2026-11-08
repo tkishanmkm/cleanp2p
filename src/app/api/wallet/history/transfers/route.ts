@@ -70,7 +70,7 @@ export async function GET(req: NextRequest) {
     const totalCount = count ?? 0;
     const totalPages = Math.ceil(totalCount / limit);
 
-    // Extract all unique user IDs to fetch their real profile.username from profiles table
+    // Resolve display names only from the approved public trader projection.
     const userIdsToFetch = new Set<string>();
     (data || []).forEach((t: any) => {
       if (t.sender_id) userIdsToFetch.add(t.sender_id);
@@ -80,37 +80,19 @@ export async function GET(req: NextRequest) {
     const profileMap: Record<string, string> = {};
     if (userIdsToFetch.size > 0) {
       try {
-        const { data: profs } = await admin
-          .from('profiles')
+        const { data: profs, error: profileError } = await admin
+          .from('public_profiles')
           .select('id, username')
           .in('id', Array.from(userIdsToFetch));
 
-        if (profs) {
+        if (profileError) {
+          console.error('Public trader-name lookup failed for transfer history:', profileError.code || 'UNKNOWN');
+        } else if (profs) {
           profs.forEach((p: any) => {
             if (p.id && p.username) {
               profileMap[p.id] = p.username;
             }
           });
-        }
-
-        // Check any missing users directly from auth.admin
-        const missingIds = Array.from(userIdsToFetch).filter((id) => !profileMap[id]);
-        if (missingIds.length > 0) {
-          try {
-            const { data: authData } = await admin.auth.admin.listUsers();
-            if (authData?.users) {
-              for (const u of authData.users) {
-                if (missingIds.includes(u.id)) {
-                  const resolvedUName = u.user_metadata?.username || u.email?.split('@')[0] || `user_${u.id.slice(0, 6)}`;
-                  profileMap[u.id] = resolvedUName;
-                  // Auto-heal profile record in background
-                  admin.from('profiles').upsert({ id: u.id, username: resolvedUName, email: u.email }).then();
-                }
-              }
-            }
-          } catch (authErr) {
-            console.warn('Auth fallback for profiles notice:', authErr);
-          }
         }
       } catch (profErr) {
         console.warn('Error batch-resolving profiles for transfers:', profErr);

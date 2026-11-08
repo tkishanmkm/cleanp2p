@@ -61,8 +61,8 @@ export default async function AdDetailPage({ params }: PageProps) {
   if (sellerUserId) {
     try {
       const { data: prof } = await adminClient
-        .from('profiles')
-        .select('id, username, display_name, full_name, avatar_url, photo_url, country, feedback_score, positive_feedback, negative_feedback, completed_trades, avg_release_minutes, avg_release_time, avg_payment_minutes, avg_pay_time, created_at, is_verified, kyc_status, merchant_tier, is_online, last_seen, last_seen_at, updated_at')
+        .from('public_profiles')
+        .select('id, username, display_name, avatar_url, photo_url, country, feedback_score, positive_feedback, negative_feedback, completed_trades, total_completed_trades, avg_release_time_mins, avg_release_minutes, avg_release_time, avg_payment_time_mins, avg_payment_minutes, avg_pay_time, created_at, is_verified, merchant_tier, is_online')
         .eq('id', sellerUserId)
         .maybeSingle()
       advertiserProfile = prof
@@ -74,8 +74,8 @@ export default async function AdDetailPage({ params }: PageProps) {
       const lookupName = ad.user_display_name || ad.username || ad.user?.username
       try {
         const { data: prof } = await adminClient
-          .from('profiles')
-          .select('id, username, display_name, full_name, avatar_url, photo_url, country, feedback_score, positive_feedback, negative_feedback, completed_trades, avg_release_minutes, avg_release_time, avg_payment_minutes, avg_pay_time, created_at, is_verified, kyc_status, merchant_tier, is_online, last_seen, last_seen_at, updated_at')
+          .from('public_profiles')
+          .select('id, username, display_name, avatar_url, photo_url, country, feedback_score, positive_feedback, negative_feedback, completed_trades, total_completed_trades, avg_release_time_mins, avg_release_minutes, avg_release_time, avg_payment_time_mins, avg_payment_minutes, avg_pay_time, created_at, is_verified, merchant_tier, is_online')
           .ilike('username', lookupName)
           .maybeSingle()
         advertiserProfile = prof

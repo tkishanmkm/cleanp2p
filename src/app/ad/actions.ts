@@ -38,20 +38,11 @@ export async function getMarketplaceAds(tradeType: 'BUY' | 'SELL' | 'buy' | 'sel
     const supabase = await createClient();
     const queryTradeType = tradeType.toUpperCase();
 
-    // Query linking ads.user_id -> profiles.id
+    // Public seller details come from the narrow public_profiles projection,
+    // not a relationship join to the private profiles table.
     const { data: ads, error } = await supabase
       .from('ads')
-      .select(`
-        *,
-        profiles!user_id (
-          id,
-          username,
-          avatar_url,
-          is_online,
-          last_seen,
-          created_at
-        )
-      `)
+      .select('*')
       .or(`trade_type.eq.${queryTradeType},type.eq.${queryTradeType.toLowerCase()}`)
       .order('created_at', { ascending: false });
 
@@ -68,12 +59,34 @@ export async function getMarketplaceAds(tradeType: 'BUY' | 'SELL' | 'buy' | 'sel
       };
     }
 
-    const formattedAds = (ads || []).map((ad) => {
-      const profileRecord = Array.isArray(ad.profiles) ? ad.profiles[0] : ad.profiles || ad.user;
+    const sellerIds = Array.from(new Set(
+      (ads || []).map((ad: any) => ad.user_id).filter((id: unknown): id is string => typeof id === 'string' && id.length > 0)
+    ));
+    const { data: publicProfiles, error: publicProfilesError } = sellerIds.length > 0
+      ? await supabase
+          .from('public_profiles')
+          .select('id, username, avatar_url, photo_url, is_online, created_at, merchant_tier, completed_trades, positive_feedback, negative_feedback')
+          .in('id', sellerIds)
+      : { data: [], error: null };
+
+    if (publicProfilesError) {
+      console.error('[Marketplace Public Profile Query Error]:', publicProfilesError);
+      return {
+        data: null,
+        error: {
+          message: 'Trader profile information is temporarily unavailable.',
+          code: publicProfilesError.code,
+        },
+      };
+    }
+
+    const profileMap = new Map((publicProfiles || []).map((profile: any) => [profile.id, profile]));
+    const formattedAds = (ads || []).map((ad: any) => {
+      const profileRecord = profileMap.get(ad.user_id) || null;
       return {
         ...ad,
-        profiles: profileRecord || null,
-        user: profileRecord || null,
+        profiles: profileRecord,
+        user: profileRecord,
       };
     });
 
@@ -153,8 +166,8 @@ export async function getAdDetails(adId: string): Promise<ActionResponse<any>> {
     if (ad && ad.user_id) {
       try {
         const { data: prof } = await adminClient
-          .from('profiles')
-          .select('id, username, display_name, full_name, avatar_url, photo_url, country, feedback_score, positive_feedback, negative_feedback, completed_trades, avg_release_minutes, avg_release_time, avg_payment_minutes, avg_pay_time, created_at, is_verified, kyc_status, merchant_tier, is_online, last_seen, last_seen_at, updated_at')
+          .from('public_profiles')
+          .select('id, username, display_name, avatar_url, photo_url, country, feedback_score, positive_feedback, negative_feedback, completed_trades, total_completed_trades, avg_release_time_mins, avg_release_minutes, avg_release_time, avg_payment_time_mins, avg_payment_minutes, avg_pay_time, created_at, is_verified, merchant_tier, is_online')
           .eq('id', ad.user_id)
           .maybeSingle();
         if (prof) {
@@ -531,7 +544,7 @@ export async function createTradeOrderWithEscrow(input: {
     // Seller MUST be Tier 2
     const { data: sellerProf } = await adminClient
       .from('profiles')
-      .select('is_verified, id_verified, is_id_verified, kyc_status, verification_tier')
+      .select('is_verified, id_verified, kyc_status, verification_tier')
       .eq('id', sellerId)
       .maybeSingle();
 
@@ -550,7 +563,7 @@ export async function createTradeOrderWithEscrow(input: {
     // Buyer: If Tier 1, cumulative BUY volume capped at $1,000.00
     const { data: buyerProf } = await adminClient
       .from('profiles')
-      .select('is_verified, id_verified, is_id_verified, kyc_status, verification_tier')
+      .select('is_verified, id_verified, kyc_status, verification_tier')
       .eq('id', buyerId)
       .maybeSingle();
 
