@@ -1,7 +1,8 @@
 import { createClient, createBearerClient, getSupabaseAdminClient } from '@/utils/supabase/server';
 import { NextResponse, type NextRequest } from 'next/server';
-import { findAdById, resolveBothTargetRows } from '@/lib/ad-lookup';
+import { findAdById } from '@/lib/ad-lookup';
 import { setAdStatusAtomically } from '@/lib/ad-status';
+import { updateAdContentAtomically } from '@/lib/ad-content';
 import { checkNewTradeEligibility } from '@/lib/account-action-guard';
 import { verifyServerAdmin } from '@/lib/server-admin-auth';
 
@@ -179,6 +180,9 @@ export async function PATCH(
     }
 
     const rawBody = await request.json();
+    if (!rawBody || typeof rawBody !== 'object' || Array.isArray(rawBody)) {
+      return NextResponse.json({ error: 'A valid advertisement update object is required.' }, { status: 400 });
+    }
 
     // Sanitize payload data types
     const body: Record<string, any> = { ...rawBody };
@@ -191,35 +195,15 @@ export async function PATCH(
       body.price_margin = Number(body.margin);
       delete body.margin;
     }
+    if (body.rate_percent !== undefined && body.rate_percent !== null && body.rate_percent !== '') {
+      body.rate_percent = Number(body.rate_percent);
+    }
     if (body.min_amount !== undefined && body.min_amount !== null && body.min_amount !== '') body.min_amount = Number(body.min_amount);
     if (body.max_amount !== undefined && body.max_amount !== null && body.max_amount !== '') body.max_amount = Number(body.max_amount);
     if (body.min_limit !== undefined && body.min_limit !== null && body.min_limit !== '') body.min_limit = Number(body.min_limit);
     if (body.max_limit !== undefined && body.max_limit !== null && body.max_limit !== '') body.max_limit = Number(body.max_limit);
 
     const supabaseAdmin = getSupabaseAdminClient();
-
-    const resolvedRows = await resolveBothTargetRows(existingAd, id, supabaseAdmin);
-    if (resolvedRows.lookupErrors.p2p_ads || resolvedRows.lookupErrors.ads) {
-      return NextResponse.json(
-        { success: false, code: 'AD_MIRROR_LOOKUP_FAILED', error: 'Advertisement records could not be checked safely. No edit was attempted.' },
-        { status: 503 }
-      );
-    }
-    if (resolvedRows.ownerMismatches.p2p_ads || resolvedRows.ownerMismatches.ads) {
-      return NextResponse.json(
-        { success: false, code: 'AD_IDENTIFIER_OWNER_MISMATCH', error: 'Advertisement records did not resolve to one consistent owner. No edit was attempted.' },
-        { status: 409 }
-      );
-    }
-
-    const { p2pAdsRow, adsRow } = resolvedRows;
-    if (!p2pAdsRow && !adsRow) {
-      return NextResponse.json({ error: 'Advertisement not found.' }, { status: 404 });
-    }
-
-    let p2pMutated = false;
-    let adsMutated = false;
-    let updatedResult: any = null;
 
     const hasStatus = body.status !== undefined || body.active !== undefined || body.is_active !== undefined;
     let newStatus: string | undefined;
@@ -256,7 +240,7 @@ export async function PATCH(
     }
 
     const existingDirection = String(existingAd.trade_type || existingAd.ad_type || existingAd.type || '').toUpperCase();
-    const requestedDirection = [body.trade_type, body.ad_type, body.type, body.side]
+    const requestedDirection = [body.trade_type, body.ad_type, body.type, body.side, body.direction]
       .find((value) => typeof value === 'string' && value.trim())?.trim().toUpperCase();
     const hasNonStatusEdits = Object.keys(body).some(
       (key) => !['status', 'active', 'is_active'].includes(key)
@@ -348,126 +332,181 @@ export async function PATCH(
       );
     }
 
-    if (p2pAdsRow) {
-      // Explicit allowlisted update payload for canonical public.p2p_ads
-      const p2pPayload: Record<string, any> = {
-        updated_at: new Date().toISOString(),
-      };
+    const contentPatch: Record<string, unknown> = {};
 
-      if (body.price !== undefined) {
-        p2pPayload.price = body.price;
-        p2pPayload.unit_price = body.price;
+    if (body.price !== undefined) {
+      if (!Number.isFinite(body.price) || body.price <= 0 || body.price >= 1e18) {
+        return NextResponse.json({ error: 'Price must be a finite positive number below 1e18.' }, { status: 400 });
       }
-      if (body.min_limit !== undefined || body.min_amount !== undefined) {
-        const minL = body.min_limit ?? body.min_amount;
-        p2pPayload.min_limit = minL;
-        p2pPayload.min_amount = minL;
+      contentPatch.price = body.price;
+    }
+    const minLimit = body.min_limit ?? body.min_amount;
+    const maxLimit = body.max_limit ?? body.max_amount;
+    if (minLimit !== undefined) {
+      if (!Number.isFinite(minLimit) || minLimit <= 0 || minLimit >= 1e18) {
+        return NextResponse.json({ error: 'Minimum trade limit must be positive and below 1e18.' }, { status: 400 });
       }
-      if (body.max_limit !== undefined || body.max_amount !== undefined) {
-        const maxL = body.max_limit ?? body.max_amount;
-        p2pPayload.max_limit = maxL;
-        p2pPayload.max_amount = maxL;
-        p2pPayload.available_amount = maxL;
+      contentPatch.min_limit = minLimit;
+    }
+    if (maxLimit !== undefined) {
+      if (!Number.isFinite(maxLimit) || maxLimit <= 0 || maxLimit >= 1e18) {
+        return NextResponse.json({ error: 'Maximum trade limit must be positive and below 1e18.' }, { status: 400 });
       }
-      if (body.rate_percent !== undefined) {
-        p2pPayload.rate_percent = body.rate_percent;
-        p2pPayload.price_margin = body.rate_percent;
+      contentPatch.max_limit = maxLimit;
+    }
+    if (minLimit !== undefined || maxLimit !== undefined) {
+      const effectiveMin = minLimit ?? Number(existingAd.min_limit ?? existingAd.min_amount ?? 10);
+      const effectiveMax = maxLimit ?? Number(existingAd.max_limit ?? existingAd.max_amount ?? 1000);
+      if (!Number.isFinite(effectiveMin) || !Number.isFinite(effectiveMax) || effectiveMin <= 0 || effectiveMax < effectiveMin) {
+        return NextResponse.json({ error: 'Maximum trade limit must be greater than or equal to minimum trade limit.' }, { status: 400 });
       }
-      if (body.pricing_type !== undefined) p2pPayload.pricing_type = body.pricing_type;
-      if (body.rate_type !== undefined) p2pPayload.rate_type = body.rate_type;
-      if (body.payment_methods !== undefined) p2pPayload.payment_methods = body.payment_methods;
-      if (body.terms_conditions !== undefined || body.terms !== undefined) p2pPayload.terms_conditions = body.terms_conditions || body.terms;
-      if (body.offer_label !== undefined || body.label !== undefined) p2pPayload.offer_label = body.offer_label || body.label;
-      if (body.offer_tags !== undefined || body.tags !== undefined) p2pPayload.offer_tags = body.offer_tags || body.tags;
-      if (body.payment_window !== undefined || body.payment_window_minutes !== undefined) {
-        const pw = Number(body.payment_window ?? body.payment_window_minutes);
-        p2pPayload.payment_window = pw;
-        p2pPayload.payment_window_minutes = pw;
-        p2pPayload.payment_time_limit = pw;
-      }
-      if (body.require_full_name_verified !== undefined) p2pPayload.require_full_name_verified = Boolean(body.require_full_name_verified);
-      if (body.require_verified_users !== undefined) p2pPayload.require_verified_users = Boolean(body.require_verified_users);
-      if (body.min_completed_trades !== undefined) p2pPayload.min_completed_trades = parseInt(String(body.min_completed_trades), 10) || 0;
+    }
 
-      // Ensure is_active NEVER reaches p2p_ads
-      delete p2pPayload.is_active;
+    if (body.rate_percent !== undefined) {
+      if (!Number.isFinite(body.rate_percent) || body.rate_percent < -50 || body.rate_percent > 50) {
+        return NextResponse.json({ error: 'Pricing margin must be between -50% and +50%.' }, { status: 400 });
+      }
+      contentPatch.margin = body.rate_percent;
+    }
+    const pricingInput = body.pricing_type ?? body.rate_type;
+    if (pricingInput !== undefined) {
+      const normalizedPricing = String(pricingInput).toUpperCase().trim();
+      const mappedPricing = normalizedPricing === 'FIXED' ? 'FIXED'
+        : (normalizedPricing === 'FLOAT' || normalizedPricing === 'MARKET' ? 'FLOAT' : null);
+      if (!mappedPricing) {
+        return NextResponse.json({ error: 'Pricing type must be FIXED or FLOAT.' }, { status: 400 });
+      }
+      contentPatch.pricing_type = mappedPricing;
+    }
 
-      const { data: p2pRes, error: p2pErr } = await supabaseAdmin
-        .from('p2p_ads')
-        .update(p2pPayload)
-        .eq('id', p2pAdsRow.id)
-        .select()
+    const currentPricingType = existingAd.pricing_type !== undefined && existingAd.pricing_type !== null
+      ? (String(existingAd.pricing_type).toUpperCase() === 'FIXED' ? 'FIXED' : 'FLOAT')
+      : (String(existingAd.rate_type || '').toLowerCase() === 'fixed' || existingAd.is_fixed === true
+        ? 'FIXED'
+        : 'FLOAT');
+    const nextPricingType = (contentPatch.pricing_type as string | undefined) || currentPricingType;
+    const currentPrice = Number(existingAd.price ?? existingAd.unit_price ?? existingAd.fixed_rate ?? 0);
+    const nextPrice = body.price !== undefined ? body.price : currentPrice;
+    const fixedPricingChanged = nextPricingType === 'FIXED' &&
+      (currentPricingType !== 'FIXED' || Math.abs(nextPrice - currentPrice) > 1e-8);
+    if (fixedPricingChanged) {
+      if (!Number.isFinite(nextPrice) || nextPrice <= 0) {
+        return NextResponse.json({ error: 'A valid fixed price is required.' }, { status: 400 });
+      }
+      const asset = String(existingAd.asset_symbol || existingAd.crypto_currency || existingAd.coin || 'USDT').toUpperCase();
+      const fiat = String(existingAd.fiat_symbol || existingAd.fiat_currency || 'USD').toUpperCase();
+      const { data: marketRow, error: marketError } = await supabaseAdmin
+        .from('crypto_market_prices')
+        .select('price_in_fiat')
+        .eq('asset_symbol', asset)
+        .eq('fiat_symbol', fiat)
         .maybeSingle();
-
-      if (!p2pErr && p2pRes) {
-        p2pMutated = true;
-        updatedResult = p2pRes;
-      } else {
-        console.error('[PATCH /api/p2p/ads/[id]] Canonical p2p_ads update failed:', p2pErr?.message);
+      if (marketError || !marketRow || !Number.isFinite(Number(marketRow.price_in_fiat)) || Number(marketRow.price_in_fiat) <= 0) {
+        return NextResponse.json(
+          { error: `Market reference price is unavailable for ${asset}/${fiat}.`, code: 'MARKET_PRICE_UNAVAILABLE' },
+          { status: 503 }
+        );
+      }
+      const referencePrice = Number(marketRow.price_in_fiat);
+      if (nextPrice < referencePrice * 0.5 || nextPrice > referencePrice * 1.5) {
+        return NextResponse.json(
+          { error: `Fixed price must be within ±50% of the reference market price (${(referencePrice * 0.5).toFixed(2)} - ${(referencePrice * 1.5).toFixed(2)} ${fiat}).` },
+          { status: 400 }
+        );
       }
     }
 
-    if (p2pAdsRow && !p2pMutated) {
-      return NextResponse.json(
-        { success: false, code: 'CANONICAL_AD_UPDATE_FAILED', error: 'The canonical advertisement could not be updated. The legacy mirror was not changed.' },
-        { status: 503 }
-      );
-    }
-
-    if (adsRow) {
-      try {
-        const adsPayload: Record<string, any> = {
-          updated_at: new Date().toISOString(),
-        };
-        if (body.price !== undefined) adsPayload.price = body.price;
-        if (body.min_limit !== undefined || body.min_amount !== undefined) adsPayload.min_limit = body.min_limit ?? body.min_amount;
-        if (body.max_limit !== undefined || body.max_amount !== undefined) adsPayload.max_limit = body.max_limit ?? body.max_amount;
-        if (body.payment_methods !== undefined) adsPayload.payment_methods = body.payment_methods;
-        if (body.terms_conditions !== undefined || body.terms !== undefined) adsPayload.terms = body.terms_conditions || body.terms;
-        if (body.offer_label !== undefined || body.label !== undefined) adsPayload.offer_label = body.offer_label || body.label;
-
-        const { data: adsRes, error: adsErr } = await supabaseAdmin
-          .from('ads')
-          .update(adsPayload)
-          .eq('id', adsRow.id)
-          .select()
-          .maybeSingle();
-
-        if (!adsErr && adsRes) {
-          adsMutated = true;
-          if (!updatedResult) updatedResult = adsRes;
-        } else {
-          console.error('[PATCH /api/p2p/ads/[id]] Legacy ads mirror update failed after canonical update:', adsErr?.code || 'unknown');
-        }
-      } catch (legacyErr: any) {
-        console.error('[PATCH /api/p2p/ads/[id]] Legacy ads update exception after canonical update:', legacyErr?.message);
+    const rawMethods = body.payment_methods ?? body.paymentMethods;
+    if (rawMethods !== undefined) {
+      const methodValues = Array.isArray(rawMethods) ? rawMethods : (typeof rawMethods === 'string' ? [rawMethods] : null);
+      if (!methodValues || methodValues.length < 1 || methodValues.length > 20 ||
+          methodValues.some((method: unknown) => typeof method !== 'string' || !method.trim() || method.trim().length > 80)) {
+        return NextResponse.json({ error: 'Provide between 1 and 20 valid payment methods.' }, { status: 400 });
       }
+      contentPatch.payment_methods = Array.from(new Set(methodValues.map((method: string) => method.trim())));
     }
 
-    if (adsRow && !adsMutated) {
+    if (body.terms_conditions !== undefined || body.terms !== undefined) {
+      const termsValue = body.terms_conditions !== undefined ? body.terms_conditions : body.terms;
+      if (typeof termsValue !== 'string' || termsValue.length > 2000) {
+        return NextResponse.json({ error: 'Advertisement terms must be text of at most 2000 characters.' }, { status: 400 });
+      }
+      contentPatch.terms = termsValue;
+    }
+    if (body.offer_label !== undefined || body.label !== undefined) {
+      const labelValue = body.offer_label !== undefined ? body.offer_label : body.label;
+      if (typeof labelValue !== 'string' || labelValue.length > 120) {
+        return NextResponse.json({ error: 'Offer label must be text of at most 120 characters.' }, { status: 400 });
+      }
+      contentPatch.offer_label = labelValue;
+    }
+    const tags = body.offer_tags ?? body.tags ?? body.ad_tags;
+    if (tags !== undefined) {
+      if (!Array.isArray(tags) || tags.length > 20 || tags.some((tag: unknown) => typeof tag !== 'string' || tag.trim().length > 50)) {
+        return NextResponse.json({ error: 'Provide no more than 20 tags, each 50 characters or fewer.' }, { status: 400 });
+      }
+      contentPatch.tags = tags.map((tag: string) => tag.trim());
+    }
+
+    const paymentWindowInput = body.payment_window ?? body.payment_window_minutes;
+    if (paymentWindowInput !== undefined) {
+      const paymentWindow = Number(paymentWindowInput);
+      if (!Number.isInteger(paymentWindow) || paymentWindow < 30 || paymentWindow > 1440) {
+        return NextResponse.json({ error: 'Payment window must be a whole number between 30 and 1440 minutes.' }, { status: 400 });
+      }
+      contentPatch.payment_window = paymentWindow;
+    }
+
+    if (body.require_full_name_verified !== undefined) {
+      if (typeof body.require_full_name_verified !== 'boolean') {
+        return NextResponse.json({ error: 'require_full_name_verified must be a boolean.' }, { status: 400 });
+      }
+      contentPatch.require_full_name_verified = body.require_full_name_verified;
+    }
+    if (body.require_verified_users !== undefined) {
+      if (typeof body.require_verified_users !== 'boolean') {
+        return NextResponse.json({ error: 'require_verified_users must be a boolean.' }, { status: 400 });
+      }
+      contentPatch.require_verified_users = body.require_verified_users;
+    }
+
+    if (body.min_completed_trades !== undefined) {
+      const minimumTrades = Number(body.min_completed_trades);
+      if (!Number.isInteger(minimumTrades) || minimumTrades < 0 || minimumTrades > 1000000) {
+        return NextResponse.json({ error: 'Minimum completed trades must be a whole number from 0 to 1000000.' }, { status: 400 });
+      }
+      contentPatch.min_completed_trades = minimumTrades;
+    }
+    if (requestedDirection !== undefined) contentPatch.direction = requestedDirection;
+    if (body.auto_reply !== undefined) {
+      if (typeof body.auto_reply !== 'string' || body.auto_reply.length > 2000) {
+        return NextResponse.json({ error: 'Auto reply must be text of at most 2000 characters.' }, { status: 400 });
+      }
+      contentPatch.auto_reply = body.auto_reply;
+    }
+
+    if (Object.keys(contentPatch).length === 0) {
+      return NextResponse.json({ error: 'No editable advertisement fields were supplied.' }, { status: 400 });
+    }
+
+    const contentUpdate = await updateAdContentAtomically(
+      supabaseAdmin,
+      existingAd,
+      id,
+      { id: user.id, email: user.email, isAdmin: false },
+      contentPatch
+    );
+    if (!contentUpdate.ok) {
       return NextResponse.json(
-        { success: false, code: 'AD_MIRROR_UPDATE_FAILED', error: 'The canonical advertisement may have updated, but its legacy mirror failed. Reconcile the listing before retrying.' },
-        { status: 503 }
+        { success: false, code: contentUpdate.code, error: contentUpdate.error },
+        { status: contentUpdate.statusCode }
       );
     }
 
-    if (!p2pAdsRow && !adsRow) {
-      return NextResponse.json({ error: 'Advertisement not found.' }, { status: 404 });
-    }
-
-    // Canonical p2p_ads is authoritative. If p2pAdsRow exists, canonical p2p update must succeed.
-    // If only legacy adsRow exists, ads update must succeed.
-    const overallSuccess =
-      (!p2pAdsRow || p2pMutated) &&
-      (!adsRow || adsMutated) &&
-      Boolean(p2pAdsRow || adsRow);
-
-    if (!overallSuccess) {
-      console.error('[PATCH /api/p2p/ads/[id]] Target update failed:', { p2pRowId: p2pAdsRow?.id, p2pMutated, adsRowId: adsRow?.id, adsMutated });
-      return NextResponse.json({ error: 'Failed to update advertisement.' }, { status: 500 });
-    }
-
-    return NextResponse.json({ success: true, data: updatedResult || existingAd });
+    return NextResponse.json({
+      success: true,
+      data: { ...existingAd, ...contentPatch },
+    });
   } catch (err: any) {
     console.error('Error updating ad:', err);
     return NextResponse.json({ error: err.message || 'Internal Server Error' }, { status: 500 });
