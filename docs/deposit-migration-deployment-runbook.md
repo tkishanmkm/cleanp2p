@@ -8,7 +8,7 @@
 
 **Region:** `ap-northeast-1`
 
-**Application release required:** branch `fix/production-typecheck-batch-1`, current verified code baseline `d48111c0acc4f806bf3963415f4e51ebf2af5862` (escrow replay and ad-row locking hardening; not deployed)
+**Application release required:** branch `fix/production-typecheck-batch-1`, current verified code baseline `9c6701eaad93ca1dc8b80ed6aa4233eee9e24873` (trade-entry availability parity, authoritative Tier 1 BUY-volume gating and offline-replay support; not deployed)
 
 ## 1. Current production snapshot
 
