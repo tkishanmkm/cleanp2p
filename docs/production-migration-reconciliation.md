@@ -284,7 +284,7 @@ Before applying anything:
 3. Replay the exact approved migration release against a schema-faithful disposable database; do not mark historical migrations applied just to bypass history gaps.
 4. Include all approved intervening migrations in version order. The presence, offline-ad, 2FA, support-admin, restricted-enum, admin/trade and supporting-table forward candidates must be applied only after the prior historical-release reconciliation and in exact version order. Configure Vault and match the deployed `CRON_SECRET` before scheduling account-deletion media cleanup.
 5. Keep `PAXONES_ATOMIC_DISPUTE_SETTLEMENT_ENABLED` disabled until a separately approved isolated financial validation of the admin dispute wrapper has been completed.
-6. Deploy compatible application code and verify all twenty-five SQL preflights before resuming routes/workers.
+6. Deploy compatible application code and verify all thirty-three SQL preflights before resuming deposit, sweep, gas-funding or trade-opening workers/routes.
 
 A production migration being absent does not authorize a code workaround that bypasses authorization, idempotency, financial fencing, or audit guarantees. Preserve fail-closed behavior until the matching database contract is installed.
 
@@ -467,3 +467,103 @@ sync_didit_kyc_status(uuid,text,text,jsonb) is covered by 20261108001000_retire_
 initiate_p2p_trade(...) is similarly a legacy wrapper covered by 20261107180000_restrict_legacy_trade_kyc_helper_execution.sql; that migration hardens its path and removes direct execution so trade creation flows through the canonical escrow RPC.
 
 Result: the new empty-path batches now cover 19 of the 45 inventoried functions (5 trade dependencies, 13 profile/trigger helpers and the active wallet-provisioning RPC). The remaining 26 are mapped above to existing ordered forward hardening/retirement candidates or explicitly retained for legacy caller-graph review. This is an inventory and dependency mapping only: no migration from this section was applied to production, no production DDL was run, and the overall release remains NO-GO pending historical migration reconciliation and full ordered preflight.
+
+## 13. Sweeper worker signed-intent and EVM gas-funding contract reconciliation
+
+A read-only production catalog review on 8 November 2026 compared the current source in src/jobs/sweeperWorker.ts with the live public function signatures, ACLs, search paths, columns and triggers. This found a release-critical mismatch: the current worker source uses newer intent-bound RPC contracts, but production still has older overloads and lacks their supporting schema.
+
+### Current worker call contracts
+
+The current worker calls the following RPCs and supplies the named payloads:
+
+- persist_signed_evm_transaction with the 12-argument intent-bound signature, including asset, token contract, recipient, raw amount and chain ID.
+- persist_signed_btc_ltc_transaction with the seven-argument signature that includes a JSONB signed_utxo_intent containing all input outpoints and values, destination script, output amount and fee.
+- allocate_gas_funding_nonce(uuid,text,text,text,bigint) before signing any EVM gas-funding transaction.
+- record_evm_gas_funding_receipt with the nine-argument, confirmation-depth-aware receipt payload.
+- record_evm_gas_funding_nonce_incident(uuid,text,text,bigint,text,bigint,bigint,text) for an observed nonce conflict.
+- The same worker also uses the lease-aware claim, lease-extension, ownership-verification, sweep-state and value-bound UTXO-reservation APIs.
+
+The BTC/LTC and EVM signing paths persist the exact signed transaction before broadcast. A missing intent-bound RPC therefore causes that worker path to fail before its broadcast step; the old overload is not a compatible fallback. The operation-bound gas nonce allocator is called before EVM gas-funding signing and is also a hard prerequisite.
+
+### Live production findings
+
+The live catalog returned these exact conditions:
+
+1. EVM signed persistence
+   - Present: the old seven-argument persist_signed_evm_transaction(uuid,text,text,bigint,text,text,integer).
+   - Its current path is public, pg_temp; it is postgres-owned SECURITY DEFINER and remains executable by service_role.
+   - Missing: the 12-argument intent-bound overload used by the current worker.
+   - The live sweep_operations table lacks signed_asset_code, signed_token_contract, signed_recipient, signed_amount_raw and signed_chain_id.
+
+2. BTC/LTC signed persistence and reservation values
+   - Present: the old six-argument persist_signed_btc_ltc_transaction(uuid,text,text,text,text,integer), postgres-owned SECURITY DEFINER with empty search_path and service_role execution.
+   - Missing: the seven-argument JSONB-intent overload called by the current worker.
+   - sweep_operations lacks signed_utxo_intent.
+   - utxo_reservations lacks value_sat.
+   - The currently available five-argument reserve_utxos_for_sweep(uuid,text,text,jsonb,integer) has empty search_path and service_role execution, but its live body has no value_sat handling. It therefore does not yet bind each reservation to its independently verified previous-output value.
+   - The live catalog lacks the signed-intent immutability trigger and the UTXO reservation-value matching trigger. The signed-sweep failure and protected reservation lifecycle triggers from the later candidates are also required before resuming.
+
+3. EVM gas-funding nonce and receipt
+   - Present: claim_gas_funding_operation, persist_signed_gas_funding and update_gas_funding_operation_status, each postgres-owned SECURITY DEFINER with empty search_path and service_role execution.
+   - Missing: allocate_gas_funding_nonce(uuid,text,text,text,bigint).
+   - Missing: the finality-aware record_evm_gas_funding_receipt(uuid,text,text,smallint,integer,numeric,numeric,bigint,text).
+   - Missing: record_evm_gas_funding_nonce_incident(uuid,text,text,bigint,text,bigint,bigint,text).
+   - gas_funding_operations currently lacks funding_wallet_address, actual_funding_tx_gas_used, actual_funding_tx_effective_gas_price, actual_funding_tx_fee, funding_receipt_status, funding_receipt_block_number, funding_receipt_block_hash and funding_receipt_confirmations.
+   - hot_wallet_nonces exists with chain_id/current_nonce, but the operation-bound gas allocator is not installed.
+
+4. Sweep worker lease and generic nonce boundaries
+   - claim_next_deposit_sweep, verify_sweep_ownership and extend_sweep_lease exist, but all three still use public, pg_temp and are service_role executable. The 20261106114027 forward migration replaces them with empty-path lease-fenced definitions.
+   - update_sweep_operation_status and verify_and_lock_pre_broadcast_cleanup exist, but still use public, pg_temp and are service_role executable. The 20261107150000 candidate replaces/hardens those RPCs and pins their paths.
+   - initialize_resource_delegation remains service_role executable with public, pg_temp. The same 20261107150000 candidate leaves this legacy helper postgres-only and points current workers to claim_or_initialize_resource_delegation.
+   - Both generic allocate_hot_wallet_nonce overloads still have service_role execution in production. The 20261107120000 migration sets empty paths and revokes direct execution from API/runtime roles.
+   - These findings are not fixed by the wallet-provisioning search-path migration; they are separate worker functions and must follow the sweep dependency chain.
+
+A final read-only marker query confirmed all five missing current worker RPCs above, the absence of signed intent columns and key triggers, the live reservation function's lack of value_sat handling, and direct service_role execution on both generic nonce allocator overloads. No DDL or financial operation was run.
+
+### Required ordered migration candidates
+
+The exact migration candidates that establish the current worker contracts are already in the local release inventory:
+
+- 20261104160000_restore_deposit_sweep_nonce_allocator.sql
+- 20261104170000_bind_hot_wallet_nonces_to_funding_operations.sql
+- 20261104180000_record_evm_gas_funding_receipts.sql
+- 20261105100000_harden_signed_evm_sweep_persistence.sql
+- 20261105110000_bind_evm_sweep_intent.sql
+- 20261105120000_bind_btc_ltc_sweep_intent.sql
+- 20261105130000_protect_signed_utxo_reservations.sql
+- 20261105160000_bind_reserved_utxo_values.sql
+- 20261105170000_preserve_reserved_withdrawal_nonces.sql
+- 20261105180000_serialize_shared_evm_hot_wallet_nonce_stream.sql
+- 20261105190000_require_persisted_evm_withdrawal_receipts.sql
+- 20261105200000_record_unresolved_evm_withdrawal_nonce_incidents.sql
+- 20261105210000_record_unresolved_evm_gas_funding_nonce_incidents.sql
+- 20261106112502_harden_evm_gas_funding_receipt_finality.sql
+- 20261106114027_fence_sweeper_worker_leases_and_gas_funding_claims.sql
+- 20261107100000_fence_shared_evm_nonce_recovery_claims.sql
+- 20261107120000_revoke_direct_hot_wallet_nonce_allocators.sql
+- 20261107130000_revoke_direct_nonce_and_sweeper_table_writes.sql
+- 20261107140000_repair_sweep_operations_ready_to_broadcast_status.sql
+- 20261107150000_harden_sweep_status_and_tron_cleanup_rpcs.sql
+- 20261107160000_restrict_legacy_financial_mutation_helpers.sql
+
+They must be reconciled and applied with all intervening migrations in strict version order. The signed-intent migration depends on the earlier EVM persistence definition; BTC/LTC intent persistence precedes reservation-value binding and lifecycle triggers; receipt finality and nonce incidents build on the operation-bound nonce/receipt tables; and generic nonce access is revoked only after operation-bound allocators are in place. Do not apply a later ACL revocation or resume workers while an earlier contract is missing.
+
+### Preflight coverage
+
+Existing release preflights already cover the operation-bound EVM nonce stream, nonce recovery claims, legacy generic nonce ACLs, worker-table RLS/grants, sweep lease fencing, READY_TO_BROADCAST status and TRON cleanup:
+
+- supabase/tests/evm_gas_funding_nonce_stream_preflight.sql
+- supabase/tests/evm_hot_wallet_nonce_recovery_claims_preflight.sql
+- supabase/tests/legacy_hot_wallet_nonce_allocator_acl_preflight.sql
+- supabase/tests/nonce_and_sweeper_table_acl_preflight.sql
+- supabase/tests/sweeper_worker_lease_fencing_preflight.sql
+- supabase/tests/sweep_operations_ready_to_broadcast_status_preflight.sql
+- supabase/tests/sweep_status_and_tron_cleanup_preflight.sql
+
+The new supabase/tests/signed_sweep_intent_contract_preflight.sql covers the gap left by those checks: exact current EVM/BTC/LTC signature overloads, retirement of old persistence signatures, empty-path/service-only execution, intent and value columns, value-bound reserve RPC body, enabled integrity triggers and trigger-function privileges. It is a read-only catalog/schema preflight; it creates no transaction, nonce, reservation, receipt or broadcast.
+
+### Release decision for sweep workers
+
+The current worker release is not compatible with the live sweep catalog yet. Keep sweep and EVM gas-funding workers paused until the complete ordered migration inventory is reconciled, the new signed-intent preflight and all existing nonce/lease/status preflights pass, and the matching worker code is deployed. The current RPC mismatch fails closed before the normal signed-transaction broadcast step, but it will prevent sweeping/gas funding from completing. Do not bypass the missing contracts with direct table writes, old persistence overloads or generic nonce allocation.
+
+No migration from this section was applied to production. The production decision remains NO-GO pending full historical migration reconciliation, the ordered migration release and the complete 33-preflight gate.

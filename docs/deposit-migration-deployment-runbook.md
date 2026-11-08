@@ -28,6 +28,8 @@ The following deposit APIs are absent in production:
 
 The canonical `process_deposit_atomic(...)` function is currently executable by `service_role`. The direct execution grant is intentionally revoked by the final deposit ACL migration below. Do not treat the deposit worker as safely fenced until that migration and its ACL preflight have succeeded.
 
+The live sweeper catalog also has a material contract gap: the current worker release expects intent-bound EVM and BTC/LTC signed-transaction RPC signatures, signed-intent columns, UTXO previous-output value binding and operation-bound gas nonce/receipt RPCs that are not all present in production. Keep sweep and EVM gas-funding workers paused until the ordered sweep migration chain and the signed-sweep/nonce preflights in Section 5 pass.
+
 ### Migration-history reconciliation is a hard deployment gate
 
 The local working tree was inventoried against the live latest migration version:
@@ -87,6 +89,10 @@ After the full migration-history reconciliation, execute all approved pending mi
 
 This table shows the currently mapped ordered deposit, trade-opening, identity, support-admin, administrator-action, supporting-table, Wayones-branding, profile-privacy, wallet-index, administrator KYC/withdrawal-lock, atomic BUY-ad creation, marketplace DML lock-down, atomic advertisement status, terminal soft-delete, trade-opening row-lock, atomic bulk-ad-control, atomic content-edit, escrow replay eligibility, deterministic ad locking, offline-guard idempotent retry, trade/KYC dependency, profile/trigger and wallet-provisioning search-path hardening sequence, **not permission to skip other pending migrations**. In the actual release, all approved migration versions between the current production head and the latest listed migration must be reconciled and applied in ascending order. In particular, the direct-credit ACL revocation must complete before any deposit scanner or confirmation worker is restarted.
 
+### Sweep and EVM gas-funding dependency chain
+
+The current sweeper worker requires the following migration candidates to be installed in their normal ascending version order before the current worker release is deployed or resumed: `20261104150000_claim_sweep_reconciliation.sql`, `20261104160000_restore_deposit_sweep_nonce_allocator.sql`, `20261104170000_bind_hot_wallet_nonces_to_funding_operations.sql`, `20261104180000_record_evm_gas_funding_receipts.sql`, `20261105100000_harden_signed_evm_sweep_persistence.sql`, `20261105110000_bind_evm_sweep_intent.sql`, `20261105120000_bind_btc_ltc_sweep_intent.sql`, `20261105130000_protect_signed_utxo_reservations.sql`, `20261105160000_bind_reserved_utxo_values.sql`, `20261105170000_preserve_reserved_withdrawal_nonces.sql`, `20261105180000_serialize_shared_evm_hot_wallet_nonce_stream.sql`, `20261105190000_require_persisted_evm_withdrawal_receipts.sql`, `20261105200000_record_unresolved_evm_withdrawal_nonce_incidents.sql`, `20261105210000_record_unresolved_evm_gas_funding_nonce_incidents.sql`, `20261106112502_harden_evm_gas_funding_receipt_finality.sql`, `20261106114027_fence_sweeper_worker_leases_and_gas_funding_claims.sql`, `20261107100000_fence_shared_evm_nonce_recovery_claims.sql`, `20261107120000_revoke_direct_hot_wallet_nonce_allocators.sql`, `20261107130000_revoke_direct_nonce_and_sweeper_table_writes.sql`, `20261107140000_repair_sweep_operations_ready_to_broadcast_status.sql`, `20261107150000_harden_sweep_status_and_tron_cleanup_rpcs.sql`, and `20261107160000_restrict_legacy_financial_mutation_helpers.sql`. This is a dependency map, not an alternative migration order: reconcile and apply every approved intervening migration in ascending version order. Do not resume the sweep or gas-funding worker until the relevant preflights in Section 5 pass.
+
 Apply each migration file separately using the approved Supabase migration mechanism and confirm its version appears in migration history before proceeding. The enum-only `20261108040000_add_restricted_user_status.sql` is a standalone migration and must be fully committed before `20261108041000` is applied. Stop on the first error; do not continue with later migrations.
 
 ## 3. Pre-deployment gates
@@ -96,8 +102,8 @@ Before opening a production migration window:
 1. Reconcile the 90 untracked older migration files and the two modified older migrations. Record for every file whether it is pending, already represented by an applied migration, superseded with an identified replacement, or intentionally excluded. Do not infer this from names.
 2. Compare local and production migration history again. Confirm the approved release contains every required SQL file and the release commit is pushed to the intended branch.
 3. Confirm a recent recoverable Supabase backup/PITR restore point and the incident owner who can authorize recovery.
-4. Identify every running deposit ingestion, webhook, confirmation and scanner process, including standalone workers and scheduled jobs. Prepare a pause procedure and verify the pause has taken effect.
-5. Pause deposit ingestion and confirmation workers before changing the RPC contract. Keep them paused through the ACL migration, SQL preflights and compatible application deployment. Do not allow an old worker to keep calling `process_deposit_atomic` directly.
+4. Identify every running deposit ingestion, webhook, confirmation, scanner, sweep and EVM gas-funding process, including standalone workers and scheduled jobs. Prepare a pause procedure and verify the pause has taken effect.
+5. Pause deposit ingestion, confirmation, sweep and gas-funding workers before changing their RPC contracts. Keep them paused through the ACL migration, signed-intent migrations, SQL preflights and compatible application deployment. Do not allow an old worker to keep calling `process_deposit_atomic` directly or a newer worker to run against the older persistence signatures.
 6. Pause all four trade-opening API routes while `record_ad_offline_open_attempt` and `set_my_presence` are absent. Do not bypass the missing availability check or create trades by calling the escrow RPC manually.
 7. Do not bypass missing administrator RPCs with direct table writes or direct calls to legacy admin/escrow helpers; all account/mark-paid/dispute actions must pass through the actor-bound wrappers.
 8. Keep `PAXONES_ATOMIC_DISPUTE_SETTLEMENT_ENABLED` disabled until a separately approved isolated financial validation is completed.
@@ -107,7 +113,7 @@ If any pre-deployment gate cannot be verified, stop without applying migrations.
 
 ## 4. Apply sequence and pause boundary
 
-1. Pause the deposit-related workers and all four trade-opening API routes. Preserve pending rows; do not manually edit deposit status or balances.
+1. Pause deposit ingestion, confirmation, sweep and EVM gas-funding workers, plus all four trade-opening API routes. Preserve pending rows and worker leases; do not manually edit deposit status, UTXO reservations, nonces or balances.
 2. Apply the full approved migration set in version order, including the three deposit contract/replay/ACL migrations above and the other approved intervening migrations.
    In that ascending order, apply `20261105250000_atomic_buy_ad_creation.sql` when its version is reached, then apply the intervening `20261105260000` through `20261105280000` migrations, followed by `20261105300000_harden_marketplace_rls_and_dml.sql` and the remaining versions in order. Do not deploy ad creation while either the narrow RPC or marketplace DML restrictions are missing.
 3. Confirm `20261107211754_revoke_direct_deposit_credit_rpc_execution.sql` is recorded as applied. At this point `service_role` must no longer be able to execute the raw credit primitive.
@@ -141,9 +147,9 @@ If any pre-deployment gate cannot be verified, stop without applying migrations.
 31. Apply `20261108190000_empty_profile_trigger_search_paths.sql` after confirming all 13 target helpers retain the exact owner, SECURITY DEFINER, previous search_path and grants. The reviewed references are schema-qualified or are trigger-record/builtin-only; the migration changes only the search_path and verifies that function bodies, owners and grants remain unchanged. Financial movement, deposit-credit and sweep RPCs remain outside this batch pending their separate source, ACL and migration-order review.
 32. Apply `20261108200000_empty_wallet_provisioning_search_path.sql` after confirming `provision_user_wallets_atomic(uuid,integer,text,text,text,text)` retains its exact postgres owner, SECURITY DEFINER flag, `public, auth, pg_temp` path and service-role-only grant. Its wallet/address tables, `public.chain_network` type and non-catalog references are schema-qualified; the migration changes only the path and asserts the original function body and grants are unchanged.
 33. After the Vault configuration is complete, schedule the media cleanup cron once by running `SELECT public.schedule_account_deletion_media_cleanup();` as `postgres`. Do not expose this helper to application roles.
-34. After every approved migration is applied, run all twenty-five SQL preflights in Section 5. Do not resume workers or trade-opening routes on a failure.
+34. After every approved migration is applied, run all thirty-three SQL preflights in Section 5. Do not resume deposit, sweep or gas-funding workers, or trade-opening routes, if any preflight fails.
 35. Deploy the compatible application release containing the public-profile projection reads, atomic wallet-index allocator, atomic admin KYC/withdrawal-lock operations, atomic ad status mirroring, soft deletion, trade-opening row locking, bulk ad controls, atomic ad content edits, serialized ten-ad BUY creation, cross-store public ad ID trade resolution, pre-replay account eligibility and deterministic escrow ad-row locking, consistent advertiser availability checks across all trade entry points, authoritative Tier 1 BUY-volume gating, the offline idempotent-replay bypass, empty search_path on the reviewed trade/KYC dependency, profile/trigger helpers and wallet provisioning RPC, leased deposit worker path, integrity monitor/quorum logic, 2FA, support-admin, admin-action, table dependencies and Wayones global branding.
-36. Confirm the deployed worker is running the intended release, then resume deposit ingestion, confirmation workers and trade-opening routes gradually while observing logs and database errors.
+36. Confirm the deployed workers are running the intended release, then resume deposit ingestion, confirmation, sweep and EVM gas-funding workers plus trade-opening routes gradually while observing logs and database errors.
 
 Do not roll the application back to a version that calls the raw canonical credit RPC after the ACL migration has revoked that permission. If the new release fails after the ACL migration, leave deposit workers paused and deploy a forward fix.
 
@@ -176,6 +182,14 @@ Run these read-only preflights only after all approved migrations in Section 2 h
 23. `supabase/tests/trade_dependency_search_path_preflight.sql`
 24. `supabase/tests/profile_trigger_search_path_preflight.sql`
 25. `supabase/tests/wallet_provisioning_search_path_preflight.sql`
+26. `supabase/tests/evm_gas_funding_nonce_stream_preflight.sql`
+27. `supabase/tests/evm_hot_wallet_nonce_recovery_claims_preflight.sql`
+28. `supabase/tests/legacy_hot_wallet_nonce_allocator_acl_preflight.sql`
+29. `supabase/tests/nonce_and_sweeper_table_acl_preflight.sql`
+30. `supabase/tests/sweeper_worker_lease_fencing_preflight.sql`
+31. `supabase/tests/sweep_operations_ready_to_broadcast_status_preflight.sql`
+32. `supabase/tests/sweep_status_and_tron_cleanup_preflight.sql`
+33. `supabase/tests/signed_sweep_intent_contract_preflight.sql`
 
 The first preflight also asserts the final server-only credit ACL, so do not use it as a pass criterion immediately after migration 1; run it after migration 3.
 
@@ -188,6 +202,11 @@ Verify all of the following:
 - The four deposit-confirmation RPCs and both integrity-monitor RPCs exist with the exact signatures in Section 1.
 - The registration, claim, release, leased-credit and integrity-monitor wrappers are postgres-owned `SECURITY DEFINER` functions with empty `search_path`.
 - The canonical `process_deposit_atomic` is postgres-owned, `SECURITY DEFINER`, and uses `search_path=pg_catalog`.
+- The current EVM signed-persistence function has the intent-bound 12-argument signature; the older seven-argument signature is absent. The BTC/LTC signed-persistence function accepts the JSONB signed UTXO intent; the older six-argument signature is absent.
+- `sweep_operations` has `signed_asset_code`, `signed_token_contract`, `signed_recipient`, `signed_amount_raw`, `signed_chain_id` and `signed_utxo_intent`; `utxo_reservations.value_sat` exists.
+- The immutable signed-intent, signed-UTXO failure, reservation value-match and protected reservation lifecycle triggers are enabled.
+- The five current sweeper worker lease/status RPCs use empty `search_path`, retain their postgres-owned SECURITY DEFINER and service-role execution contract, and legacy delegation initialization is no longer directly service-role executable.
+- The operation-bound `allocate_gas_funding_nonce`, finality-aware `record_evm_gas_funding_receipt` and durable `record_evm_gas_funding_nonce_incident` RPCs exist with empty `search_path` and service-role-only execution. Generic hot-wallet nonce allocators are not executable by `service_role`.
 - `initiate_trade_with_escrow` selects the requested `public.ads` row `FOR UPDATE`, retains its active/status/deletion guard, and preserves the existing actor/idempotency/ACL contract so pause/delete mutations serialize with trade creation.
 - `initiate_trade_with_escrow` rejects missing, banned, restricted, on-hold, suspended, minor-restricted, emergency-frozen or non-active caller profiles before checking an idempotency replay; idempotency keys are limited to 200 characters. The ad lookup deterministically prefers exact `ads.id`, then `public_ad_id`, then `public_id`, and locks the chosen row before it reads/locks participant profiles. Both participant account/status guards include on-hold and explicit active status. Replay checks require the stored price value(s) to match the request and reject divergent `price`/`unit_price`; the replay retains the material-input fingerprint checks.
 - All trade-opening entry points (`/api/trades`, `/api/trades/create`, `/api/trades/initiate`, `/api/p2p/orders/create` and the marketplace server action) use the same advertiser-online availability RPC before a new escrow open. The availability RPC lets only an already-existing trade participant proceed to escrow replay; the escrow RPC still checks the request fingerprint, advertisement identity, participants, amounts and caller eligibility. New opens still require the advertiser's explicit online flag and fresh heartbeat.
@@ -257,10 +276,11 @@ Backup sources must be independent providers on the same mainnet and expose the 
 
 ## 8. Go-live acceptance
 
-Resume the deposit workers only when:
+Resume deposit, sweep and EVM gas-funding workers only when:
 
 - migration history is reconciled and the approved ordered release is fully applied;
-- all twenty-five SQL preflights pass;
+- all thirty-three SQL preflights pass;
+- the signed EVM/BTC/LTC worker contracts, UTXO input-value binding, nonce allocator and receipt/incident RPCs pass their SQL preflights;
 - the direct raw-credit grant is absent and guarded wrapper grants are correct;
 - the compatible application commit is deployed;
 - the required provider quorum variables are configured for the supported chains;
@@ -275,7 +295,7 @@ No live financial transaction is required to establish these database and code-l
 
 ---
 
-**Current decision:** **NO-GO for production migration execution.** The historical migration-file reconciliation gate remains open, and confirmed application dependencies (deposit confirmation/integrity RPCs, presence, offline-ad trade-opening, atomic BUY-ad creation and marketplace DML hardening, canonical escrow replay/account/row-lock hardening, offline-guard idempotent retry hardening, 2FA lifecycle/rate-limit, support-admin, guarded admin account/trade RPCs, supporting tables and the public-profile projection) remain absent in production. The listed forward migrations and twenty-five preflight scripts are prepared locally only; no migration in this local release batch has been applied to production. Supabase Vault lacks `paxones_app_url` and `paxones_cron_secret`, so account-deletion media cleanup is not enabled. Keep admin dispute settlement feature-disabled.
+**Current decision:** **NO-GO for production migration execution.** The historical migration-file reconciliation gate remains open. Confirmed production blockers include the deposit confirmation/integrity RPCs, presence and offline-ad trade-opening contracts, atomic BUY-ad creation and marketplace DML hardening, canonical escrow replay/account/row-lock hardening, 2FA lifecycle/rate-limit, support-admin, guarded admin account/trade RPCs, supporting tables and the public-profile projection. The current sweeper worker's intent-bound EVM and BTC/LTC persistence RPCs, UTXO value-binding columns/triggers, operation-bound gas nonce allocator, finality-aware receipt RPC and nonce-incident RPC are also missing from the live catalog; older signed-persistence overloads remain. The legacy generic hot-wallet nonce allocators and several sweep worker RPCs still have service-role grants or public search paths that the pending hardening migrations must correct. The listed forward migrations and thirty-three preflight scripts are prepared locally only; no migration in this local release batch has been applied to production. Supabase Vault lacks `paxones_app_url` and `paxones_cron_secret`, so account-deletion media cleanup is not enabled. Keep admin dispute settlement feature-disabled.
 
 See [the production migration reconciliation audit](production-migration-reconciliation.md) for confirmed missing RPC/table dependencies and superseded historical candidates.
 
