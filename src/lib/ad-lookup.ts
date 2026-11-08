@@ -153,6 +153,14 @@ export interface TargetRowsResult {
   p2pAdsRow: any | null;
   adsRow: any | null;
   ownerId: string | null;
+  lookupErrors: {
+    p2p_ads: boolean;
+    ads: boolean;
+  };
+  ownerMismatches: {
+    p2p_ads: boolean;
+    ads: boolean;
+  };
 }
 
 /**
@@ -185,44 +193,72 @@ export async function resolveBothTargetRows(
   }
 
   const candidateIds = Array.from(candidateIdsSet);
+  const lookupErrors: TargetRowsResult['lookupErrors'] = {
+    p2p_ads: false,
+    ads: false,
+  };
+  const ownerMismatches: TargetRowsResult['ownerMismatches'] = {
+    p2p_ads: false,
+    ads: false,
+  };
 
   async function findRowInTable(tableName: 'ads' | 'p2p_ads'): Promise<any | null> {
     for (const cid of candidateIds) {
       const isUuid = isValidUUID(cid);
-      if (isUuid) {
+      // ads.id is text and must be checked for every external identifier;
+      // p2p_ads.id is UUID and must only receive valid UUID candidates.
+      if (tableName === 'ads' || isUuid) {
         try {
           const { data, error } = await adminClient
             .from(tableName)
             .select('*')
             .eq('id', cid)
             .maybeSingle();
-          if (data && !error && (!ownerId || String(data.user_id || data.userId || '') === String(ownerId))) {
-            return data;
+          if (error) lookupErrors[tableName] = true;
+          if (data && !error) {
+            const rowOwnerId = data.user_id || data.userId || null;
+            if (ownerId && String(rowOwnerId) !== String(ownerId)) {
+              ownerMismatches[tableName] = true;
+            } else {
+              return data;
+            }
           }
-        } catch {}
+        } catch {
+          lookupErrors[tableName] = true;
+        }
       }
 
-      if (tableName === 'p2p_ads') {
-        try {
-          const { data, error } = await adminClient
-            .from('p2p_ads')
-            .select('*')
-            .eq('public_ad_id', cid)
-            .maybeSingle();
-          if (data && !error && (!ownerId || String(data.user_id || data.userId || '') === String(ownerId))) {
+      // Both schemas carry the stable public_ad_id linkage. Query it exactly
+      // rather than relying on the bounded owner scan below.
+      try {
+        const { data, error } = await adminClient
+          .from(tableName)
+          .select('*')
+          .eq('public_ad_id', cid)
+          .maybeSingle();
+        if (error) lookupErrors[tableName] = true;
+        if (data && !error) {
+          const rowOwnerId = data.user_id || data.userId || null;
+          if (ownerId && String(rowOwnerId) !== String(ownerId)) {
+            ownerMismatches[tableName] = true;
+          } else {
             return data;
           }
-        } catch {}
+        }
+      } catch {
+        lookupErrors[tableName] = true;
       }
     }
 
     if (ownerId) {
       try {
-        const { data } = await adminClient
+        const { data, error } = await adminClient
           .from(tableName)
           .select('*')
           .eq('user_id', ownerId)
           .limit(100);
+
+        if (error) lookupErrors[tableName] = true;
 
         if (Array.isArray(data)) {
           const matched = data.find((row: any) => {
@@ -233,7 +269,9 @@ export async function resolveBothTargetRows(
           });
           if (matched) return matched;
         }
-      } catch {}
+      } catch {
+        lookupErrors[tableName] = true;
+      }
     }
 
     return null;
@@ -244,5 +282,5 @@ export async function resolveBothTargetRows(
     findRowInTable('ads'),
   ]);
 
-  return { p2pAdsRow, adsRow, ownerId };
+  return { p2pAdsRow, adsRow, ownerId, lookupErrors, ownerMismatches };
 }
