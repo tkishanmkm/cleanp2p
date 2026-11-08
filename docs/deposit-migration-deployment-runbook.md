@@ -8,7 +8,7 @@
 
 **Region:** `ap-northeast-1`
 
-**Application release required:** branch `fix/production-typecheck-batch-1`, current verified code baseline `4201fdcfb66a0fb76399ea11a0801bd61a09387f` (ad-content atomic update batch; not deployed)
+**Application release required:** branch `fix/production-typecheck-batch-1`, current verified code baseline `a6e49f10bdcf4cc6e5581939233d5115a5ecf3f1` (ad-creation/trade-opening hardening batch; not deployed)
 
 ## 1. Current production snapshot
 
