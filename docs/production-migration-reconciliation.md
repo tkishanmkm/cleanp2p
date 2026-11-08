@@ -21,15 +21,15 @@ Live `supabase_migrations.schema_migrations`:
 - Latest version: `20261103204401`
 - Latest name: `lock_admin_audit_logs_to_verified_server_routes`
 
-Local inventory immediately before the current admin-action batch:
+Local inventory immediately before the current supporting-table batch:
 
-- **68** tracked, clean SQL files newer than the production head (including the prior presence, trade-opening and 2FA/support forward migrations).
+- **72** tracked, clean SQL files newer than the production head (including the earlier presence, trade-opening, 2FA/support and admin-action forward migrations).
 - **90** untracked historical SQL files dated from `20261017010000` through `20261102000003`, all at or before the production head.
 - **2** modified older SQL files:
   - `20260928020000_withdrawal_hardened_rpcs.sql`
   - `20260928070000_canonical_p2p_state_machine_and_rpcs.sql`
 
-Ten forward files are now prepared after the production head:
+Thirteen forward files are now prepared after the production head:
 
 - `20261108014000_restore_authenticated_presence_rpc.sql`
 - `20261108020000_guard_offline_ad_trade_opening.sql`
@@ -41,8 +41,11 @@ Ten forward files are now prepared after the production head:
 - `20261108041000_restore_admin_user_action_contracts.sql`
 - `20261108042000_restore_admin_mark_paid_authorized_rpc.sql`
 - `20261108043000_restore_atomic_admin_dispute_settlement.sql`
+- `20261108050000_restore_trade_event_and_chat_limit_tables.sql`
+- `20261108051000_restore_admin_wallet_and_deposit_address_registries.sql`
+- `20261108052000_restore_account_deletion_grace_period.sql`
 
-The current admin-action batch adds four forward migration files to the 68-file newer inventory; after commit, the local release inventory will contain **72** files newer than the production head.
+The supporting-table batch adds three forward migration files to the 72-file newer inventory; after commit, the local release inventory will contain **75** files newer than the production head.
 
 The 90 historical file versions are absent from the production migration ledger. That establishes missing migration provenance, but not that every contained schema change is absent: some effects exist via other applied migrations or live catalog changes. Do not apply, delete, rename, or mark historical files applied without a file-by-file code/catalog comparison.
 
@@ -193,13 +196,42 @@ Preflight:
 
 The four migrations, together with the 2FA/support base migration required by the strict actor helper, passed a combined rollback-only schema rehearsal with the admin-action preflight. The preflight also verifies restricted/suspended/banned statuses and emergency freeze pause all three marketplace ad stores, while unfreeze does not silently reactivate offers. A read-only post-rollback catalog check confirmed the `restricted` enum value, six admin-action RPCs and support-admin tables were still absent and the production migration ledger remained at 137 records / `20261103204401`. No production DDL was retained and no financial function was called.
 
-## 6. Profile public projection remains a separate review
+## 6. Trade events, chat support, admin registries and account deletion
+
+The live production catalog confirmed these application dependencies were absent: `trade_system_events`, `trade_chat_limit_requests`, `platform_wallets`, `crypto_deposit_addresses`, `account_deletion_cleanup_queue`, and the three account-deletion timestamp columns on `profiles`.
+
+### Prepared forward migrations
+
+1. `20261108050000_restore_trade_event_and_chat_limit_tables.sql`
+   - Restores `trade_system_events` with a foreign key to `trades(id)`, object-only metadata, bounded message/type/dedupe fields and unique `(trade_id, dedupe_key)` idempotency.
+   - The table is service-role-only, RLS-enabled and deliberately excluded from Supabase Realtime publication.
+   - Restores `trade_chat_limit_requests` with its `(trade_id, user_id)` idempotency constraint and service-role-only table grants. The route continues to record support tickets separately.
+
+2. `20261108051000_restore_admin_wallet_and_deposit_address_registries.sql`
+   - Restores `platform_wallets` as a read-only registry for authenticated full administrators; authenticated users cannot insert/update/delete rows.
+   - Restores `crypto_deposit_addresses` for rotating address-set management. The admin page uses browser-client CRUD, so the table grants CRUD to `authenticated` but the RLS policy calls a no-argument postgres-owned helper which derives identity exclusively from `auth.uid()` and the strict full-admin actor check. No caller can supply an administrator UUID.
+   - It stores only public addresses/metadata; it contains no private-key or signing material.
+
+3. `20261108052000_restore_account_deletion_grace_period.sql`
+   - Adds the three deletion timestamps consumed by the current account-deletion route, the partial due-deletion index and a server-only cleanup queue.
+   - Restores an account-status trigger that pauses `advertisements`, `ads` and `p2p_ads` as soon as an account enters `DELETION_PENDING` or `DELETED`.
+   - Restores the daily postgres-owned 20-day finalizer with a transaction advisory lock, row locking and a fail-closed guard: if either Vault secret is absent, it returns without anonymizing any profile.
+   - The finalizer, HTTP invoker and media-cron scheduling helper are postgres-only; service_role cannot directly invoke the destructive finalizer.
+   - The media-cleanup cron is deliberately not scheduled by this migration. The live project currently lacks both `paxones_app_url` and `paxones_cron_secret`; after those values are configured in Vault and the cron secret matches the deployed app's `CRON_SECRET`, schedule it once using `SELECT public.schedule_account_deletion_media_cleanup();` as postgres. Until then, due accounts remain pending and the finalizer does not anonymize them.
+
+Preflights:
+- `supabase/tests/trade_admin_registry_contract_preflight.sql`
+- `supabase/tests/account_deletion_grace_period_preflight.sql`
+
+The three migrations and both preflights passed a combined rollback-only schema rehearsal, including the prerequisite support-admin migration that creates the strict full-admin helper. A read-only post-rollback catalog check confirmed the tables, profile columns, policies, functions, trigger and cron job were all absent again; the migration ledger remained at 137 records / `20261103204401`. No production DDL was retained, no deletion finalizer was invoked, and no media cleanup request or financial operation was run.
+
+## 7. Profile public projection remains a separate review
 
 Production `profiles` has RLS enabled but still has a broad `Public profiles are viewable by everyone` SELECT policy. Anon has column-level SELECT grants for trader-card fields; authenticated has column-level SELECT and UPDATE grants for profile fields. Production lacks the `public_profiles` view and the `set_my_presence` RPC.
 
 The old `20261101125944_secure_profile_public_projection.sql` combines several profile policy/grant changes with the presence RPC. Do not apply the whole historical migration merely to restore presence. The new narrow `20261108014000` migration restores the heartbeat without changing the public profile projection. The app's public-profile query paths and column-grant compatibility still require a separate migration/code review.
 
-## 7. Deployment gate and next reconciliation work
+## 8. Deployment gate and next reconciliation work
 
 **Current status: NO-GO for production migration execution.**
 
@@ -207,8 +239,8 @@ Before applying anything:
 1. Reconcile the 90 historical untracked SQL files one by one against the applied ledger, live catalog, current source references and later replacement migrations.
 2. Review the two modified older migrations separately.
 3. Replay the exact approved migration release against a schema-faithful disposable database; do not mark historical migrations applied just to bypass history gaps.
-4. Include all approved intervening migrations in version order. The presence, offline-ad, 2FA, support-admin, restricted-enum and admin/trade forward candidates must be applied only after the prior historical-release reconciliation and in exact version order.
+4. Include all approved intervening migrations in version order. The presence, offline-ad, 2FA, support-admin, restricted-enum, admin/trade and supporting-table forward candidates must be applied only after the prior historical-release reconciliation and in exact version order. Configure Vault and match the deployed `CRON_SECRET` before scheduling account-deletion media cleanup.
 5. Keep `PAXONES_ATOMIC_DISPUTE_SETTLEMENT_ENABLED` disabled until a separately approved isolated financial validation of the admin dispute wrapper has been completed.
-6. Deploy compatible application code and verify all eight SQL preflights before resuming routes/workers.
+6. Deploy compatible application code and verify all ten SQL preflights before resuming routes/workers.
 
 A production migration being absent does not authorize a code workaround that bypasses authorization, idempotency, financial fencing, or audit guarantees. Preserve fail-closed behavior until the matching database contract is installed.

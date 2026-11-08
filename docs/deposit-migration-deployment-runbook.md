@@ -8,7 +8,7 @@
 
 **Region:** `ap-northeast-1`
 
-**Application release required:** branch `fix/production-typecheck-batch-1`, current verified code baseline `1b8e23ade5ecf2282be486bb4c6c4510f8778cad` (superseded by the current batch commit after it is pushed)
+**Application release required:** branch `fix/production-typecheck-batch-1`, current verified code baseline `19f37685e6326641baefa6b8a90cbcb49756f1b5` (superseded by the current infrastructure batch commit after it is pushed)
 
 ## 1. Current production snapshot
 
@@ -32,9 +32,9 @@ The canonical `process_deposit_atomic(...)` function is currently executable by 
 
 The local working tree was inventoried against the live latest migration version:
 
-- 68 tracked SQL migration files were already present with versions newer than the production head before this admin-action batch; that inventory includes the prior presence, trade-opening, 2FA and support-admin forward migrations.
+- 72 tracked SQL migration files were already present with versions newer than the production head before this infrastructure batch; that inventory includes the previous presence, trade-opening, 2FA/support and admin-action forward migrations.
 - 90 untracked historical SQL migration files have versions at or before the production head.
-- This admin-action batch adds four more forward migrations after the production head, bringing the newer tracked release inventory from 68 to **72** once this batch is committed.
+- This infrastructure batch adds three more forward migrations after the production head, bringing the newer tracked release inventory from 72 to **75** once this batch is committed.
 - Two older SQL migration files are modified locally:
   - `20260928020000_withdrawal_hardened_rpcs.sql`
   - `20260928070000_canonical_p2p_state_machine_and_rpcs.sql`
@@ -43,7 +43,7 @@ Those 90 older files may be unapplied historical changes, superseded scripts, or
 
 **STOP:** Do not run `supabase db push`, apply only a partial subset of the mapped deposit/trade/identity/admin migrations, or resume financial workers until this inventory is reconciled and the exact ordered release set is committed and approved. A newer migration can depend on an older schema change even when the older file is absent from the recorded history.
 
-## 2. Required migration order (deposit, trade, identity and admin)
+## 2. Required migration order (deposit, trade, identity, admin and platform support)
 
 After the full migration-history reconciliation, execute all approved pending migrations in ascending version order. The deposit and coupled trade-opening dependency sequence is:
 
@@ -64,8 +64,11 @@ After the full migration-history reconciliation, execute all approved pending mi
 | 12 | `20261108041000_restore_admin_user_action_contracts.sql` | Restores strict-actor admin role/status and freeze/unfreeze wrappers; serializes role changes and protects the last active administrator |
 | 13 | `20261108042000_restore_admin_mark_paid_authorized_rpc.sql` | Restores the server-only mark-paid wrapper around the canonical trade state transition with mandatory audit |
 | 14 | `20261108043000_restore_atomic_admin_dispute_settlement.sql` | Restores audited admin dispute settlement via canonical release/cancel RPCs; its runtime feature flag must remain off pending isolated financial validation |
+| 15 | `20261108050000_restore_trade_event_and_chat_limit_tables.sql` | Restores server-only trade system-event persistence and chat-limit support-request idempotency tables |
+| 16 | `20261108051000_restore_admin_wallet_and_deposit_address_registries.sql` | Restores admin-only platform wallet reads and the strict full-admin rotating deposit-address registry |
+| 17 | `20261108052000_restore_account_deletion_grace_period.sql` | Restores the 20-day deletion schedule, server-only cleanup queue, fail-closed finalizer, and postgres-only cleanup scheduler; media cron remains gated on Vault secrets |
 
-This table shows the currently mapped ordered deposit, trade-opening, identity, support-admin and administrator-action remediation sequence, **not permission to skip other pending migrations**. In the actual release, all approved migration versions between the current production head and the latest listed migration must be reconciled and applied in ascending order. In particular, the direct-credit ACL revocation must complete before any deposit scanner or confirmation worker is restarted.
+This table shows the currently mapped ordered deposit, trade-opening, identity, support-admin, administrator-action and supporting-table remediation sequence, **not permission to skip other pending migrations**. In the actual release, all approved migration versions between the current production head and the latest listed migration must be reconciled and applied in ascending order. In particular, the direct-credit ACL revocation must complete before any deposit scanner or confirmation worker is restarted.
 
 Apply each migration file separately using the approved Supabase migration mechanism and confirm its version appears in migration history before proceeding. The enum-only `20261108040000_add_restricted_user_status.sql` is a standalone migration and must be fully committed before `20261108041000` is applied. Stop on the first error; do not continue with later migrations.
 
@@ -101,9 +104,13 @@ If any pre-deployment gate cannot be verified, stop without applying migrations.
 12. Apply `20261108041000_restore_admin_user_action_contracts.sql` only after the restricted enum and support-admin tables are present; it restores actor-bound account/role/freeze operations.
 13. Apply `20261108042000_restore_admin_mark_paid_authorized_rpc.sql` after verifying the canonical mark-paid and strict full-admin helper dependencies.
 14. Apply `20261108043000_restore_atomic_admin_dispute_settlement.sql` after verifying canonical escrow/dispute functions. Keep `PAXONES_ATOMIC_DISPUTE_SETTLEMENT_ENABLED` disabled until separately-approved isolated financial validation.
-15. Run all eight SQL preflights in Section 5. Do not resume workers or trade-opening routes on a failure.
-16. Deploy the compatible application release containing the leased deposit worker path, integrity monitor/quorum logic, 2FA, support-admin and admin-action contracts.
-17. Confirm the deployed worker is running the intended release, then resume deposit ingestion, confirmation workers and trade-opening routes gradually while observing logs and database errors.
+15. Apply `20261108050000_restore_trade_event_and_chat_limit_tables.sql` to restore server-only system events and chat-limit support idempotency.
+16. Apply `20261108051000_restore_admin_wallet_and_deposit_address_registries.sql` after the strict full-admin helper from `20261108033000` is present.
+17. Apply `20261108052000_restore_account_deletion_grace_period.sql`; its finalizer cron is postgres-owned and fails closed while either Vault secret is missing. Do not schedule media cleanup until the Vault app URL and cron secret are configured and the cron secret matches the deployed `CRON_SECRET`.
+18. After the Vault configuration is complete, schedule the media cleanup cron once by running `SELECT public.schedule_account_deletion_media_cleanup();` as `postgres`. Do not expose this helper to application roles.
+19. Run all ten SQL preflights in Section 5. Do not resume workers or trade-opening routes on a failure.
+20. Deploy the compatible application release containing the leased deposit worker path, integrity monitor/quorum logic, 2FA, support-admin, admin-action and table dependencies.
+21. Confirm the deployed worker is running the intended release, then resume deposit ingestion, confirmation workers and trade-opening routes gradually while observing logs and database errors.
 
 Do not roll the application back to a version that calls the raw canonical credit RPC after the ACL migration has revoked that permission. If the new release fails after the ACL migration, leave deposit workers paused and deploy a forward fix.
 
@@ -119,6 +126,8 @@ Run these read-only preflights only after all approved migrations in Section 2 h
 6. `supabase/tests/offline_ad_trade_opening_preflight.sql`
 7. `supabase/tests/two_factor_support_admin_contract_preflight.sql`
 8. `supabase/tests/admin_user_trade_action_contract_preflight.sql`
+9. `supabase/tests/trade_admin_registry_contract_preflight.sql`
+10. `supabase/tests/account_deletion_grace_period_preflight.sql`
 
 The first preflight also asserts the final server-only credit ACL, so do not use it as a pass criterion immediately after migration 1; run it after migration 3.
 
@@ -147,6 +156,11 @@ Verify all of the following:
 - Restricted/suspended/banned statuses and emergency freeze pause offers in `advertisements`, `ads` and `p2p_ads`; unfreeze does not reactivate them.
 - Admin mark-paid uses the canonical mark-paid transition and writes the required audit without a direct wallet mutation.
 - Admin dispute settlement checks the final dispute/trade state and has mandatory same-transaction audit; its runtime feature flag remains disabled pending separately approved isolated financial validation.
+- Trade-system events are stored in a service-role-only table outside Supabase Realtime and use a unique `(trade_id, dedupe_key)` contract.
+- Chat-limit support reservations use a unique `(trade_id, user_id)` key and service-role-only table access.
+- Platform wallet addresses are read-only to authenticated administrators under a strict full-admin policy; rotating deposit-address sets allow authenticated CRUD only under the same strict policy.
+- Account-deletion timestamps, queue and finalizer are present; the finalizer runs as postgres and does not anonymize accounts until both Vault secrets exist.
+- The media-cleanup cron is scheduled only after Vault values are configured and the Vault cron secret matches the deployed application `CRON_SECRET`.
 
 A successful migration command alone is not proof that the grants, function ownership, search paths and RLS state are correct. The SQL preflights must complete without exception.
 
@@ -180,7 +194,7 @@ Backup sources must be independent providers on the same mainnet and expose the 
 Resume the deposit workers only when:
 
 - migration history is reconciled and the approved ordered release is fully applied;
-- all eight SQL preflights pass;
+- all ten SQL preflights pass;
 - the direct raw-credit grant is absent and guarded wrapper grants are correct;
 - the compatible application commit is deployed;
 - the required provider quorum variables are configured for the supported chains;
@@ -195,13 +209,13 @@ No live financial transaction is required to establish these database and code-l
 
 ---
 
-**Current decision:** **NO-GO for production migration execution.** The historical migration-file reconciliation gate remains open, and confirmed application dependencies (deposit confirmation/integrity RPCs, presence, offline-ad trade-opening, 2FA lifecycle/rate-limit, support-admin and guarded admin account/trade RPCs) remain absent in production. The ten forward migrations and eight preflights are prepared and rollback-rehearsed only; no production migration has been applied. Keep admin dispute settlement feature-disabled.
+**Current decision:** **NO-GO for production migration execution.** The historical migration-file reconciliation gate remains open, and confirmed application dependencies (deposit confirmation/integrity RPCs, presence, offline-ad trade-opening, 2FA lifecycle/rate-limit, support-admin, guarded admin account/trade RPCs and supporting tables) remain absent in production. The thirteen forward migrations and ten preflights are prepared and rollback-rehearsed only; no production migration has been applied. Supabase Vault lacks `paxones_app_url` and `paxones_cron_secret`, so account-deletion media cleanup is not enabled. Keep admin dispute settlement feature-disabled.
 
 See [the production migration reconciliation audit](production-migration-reconciliation.md) for confirmed missing RPC/table dependencies and superseded historical candidates.
 
 ## Appendix A. Tracked local migration files newer than the production head
 
-Inventory only; this list records the 72 tracked local SQL files with versions greater than `20261103204401` after the current forward migrations are committed. It is **not** a blanket approval to apply them. Each file remains subject to the historical-file reconciliation and review gates above. If the release inventory changes, regenerate this list before a production window.
+Inventory only; this list records the 75 tracked local SQL files with versions greater than `20261103204401` after the current forward migrations are committed. It is **not** a blanket approval to apply them. Each file remains subject to the historical-file reconciliation and review gates above. If the release inventory changes, regenerate this list before a production window.
 
 ```text
 20261104120000_withdrawal_confirmation_and_control_flags.sql
@@ -276,4 +290,7 @@ Inventory only; this list records the 72 tracked local SQL files with versions g
 20261108041000_restore_admin_user_action_contracts.sql
 20261108042000_restore_admin_mark_paid_authorized_rpc.sql
 20261108043000_restore_atomic_admin_dispute_settlement.sql
+20261108050000_restore_trade_event_and_chat_limit_tables.sql
+20261108051000_restore_admin_wallet_and_deposit_address_registries.sql
+20261108052000_restore_account_deletion_grace_period.sql
 ```
