@@ -8,7 +8,7 @@
 
 **Region:** `ap-northeast-1`
 
-**Application release required:** branch `fix/production-typecheck-batch-1`, current verified code baseline `4897e20ff986dbfa0e8b2dc2755a31cca140dd09` (trade-entry availability parity, authoritative Tier 1 BUY-volume gating, offline-replay support and trade/KYC SECURITY DEFINER search-path hardening; not deployed)
+**Application release required:** branch `fix/production-typecheck-batch-1`, current verified code baseline `6eeb046b42ad3acfe637445aec942a5e93e85541` (trade-entry availability parity, authoritative Tier 1 BUY-volume gating, offline-replay support and trade/profile/trigger SECURITY DEFINER search-path hardening; not deployed)
 
 ## 1. Current production snapshot
 
