@@ -117,6 +117,23 @@ BEGIN
         RAISE EXCEPTION 'FAIL: canonical credit must base its confirmation decision on the submitted verification count and the network threshold';
     END IF;
 
+    -- Keep the pending-registration count (zero) strictly below every
+    -- supported network's positive canonical credit threshold.
+    IF position('WHEN ''BTC'' THEN' IN v_credit_def) = 0
+       OR position('v_required_confirmations := 3;' IN substring(v_credit_def FROM position('WHEN ''BTC'' THEN' IN v_credit_def) FOR 700)) = 0
+       OR position('WHEN ''LTC'' THEN' IN v_credit_def) = 0
+       OR position('v_required_confirmations := 6;' IN substring(v_credit_def FROM position('WHEN ''LTC'' THEN' IN v_credit_def) FOR 700)) = 0
+       OR position('WHEN ''ETH'' THEN' IN v_credit_def) = 0
+       OR position('v_required_confirmations := 12;' IN substring(v_credit_def FROM position('WHEN ''ETH'' THEN' IN v_credit_def) FOR 700)) = 0
+       OR position('WHEN ''ERC20'' THEN' IN v_credit_def) = 0
+       OR position('v_required_confirmations := 12;' IN substring(v_credit_def FROM position('WHEN ''ERC20'' THEN' IN v_credit_def) FOR 700)) = 0
+       OR position('WHEN ''BEP20'' THEN' IN v_credit_def) = 0
+       OR position('v_required_confirmations := 15;' IN substring(v_credit_def FROM position('WHEN ''BEP20'' THEN' IN v_credit_def) FOR 700)) = 0
+       OR position('WHEN ''TRC20'' THEN' IN v_credit_def) = 0
+       OR position('v_required_confirmations := 19;' IN substring(v_credit_def FROM position('WHEN ''TRC20'' THEN' IN v_credit_def) FOR 700)) = 0 THEN
+        RAISE EXCEPTION 'FAIL: canonical deposit credit no longer enforces positive per-network confirmation floors (BTC 3, LTC 6, ETH/ERC20 12, BEP20 15, TRC20 19)';
+    END IF;
+
     IF position('WALLET_ASSET_BALANCE_INVALID' IN v_credit_def) = 0
        OR position('v_previous_balance::TEXT IN (''NaN'', ''Infinity'', ''-Infinity'')' IN v_credit_def) = 0 THEN
         RAISE EXCEPTION 'FAIL: canonical deposit credit must fail closed on NULL, negative or non-finite wallet balances';

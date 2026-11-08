@@ -9,7 +9,7 @@
 
 **Production migration execution remains NO-GO.** The Supabase migration ledger stops at `20261103204401` (137 recorded migrations). There are 90 untracked historical SQL files with versions at or before that recorded head, two modified older SQL files, and a long sequence of later tracked migrations. Their exact effects cannot be inferred safely from names or file presence.
 
-The audit also confirmed that several current application paths call RPCs/tables which are absent from the live catalog. These are real operational gaps, not merely untracked-file bookkeeping. Ten narrow forward migrations now cover the presence heartbeat, seller-online guard, user/admin 2FA contracts, support-admin emergency mode, the missing restricted account enum and guarded administrator/trade actions. They are prepared and rollback-rehearsed only; none has been applied.
+The audit also confirmed that several current application paths call RPCs/tables which are absent from the live catalog. These are real operational gaps, not merely untracked-file bookkeeping. Thirteen narrow forward migrations now cover the presence heartbeat, seller-online guard, user/admin 2FA contracts, support-admin emergency mode, the missing restricted account enum, guarded administrator/trade actions and supporting platform tables. The five deposit/withdrawal control migrations are also prepared in the ordered release plan. All remain unapplied.
 
 No production DDL or financial operation was executed.
 
@@ -61,6 +61,7 @@ The following RPCs were found in application code, but the exact RPCs were absen
 
 | Missing RPC | Current code reference | Impact |
 |---|---|---|
+| `register_pending_deposit(...)`, `claim_pending_deposit_confirmations(...)`, `release_pending_deposit_confirmation_claim(...)`, `process_deposit_atomic_with_lease(...)`, `claim_deposit_integrity_checks(...)`, `complete_deposit_integrity_check(...)` | Deposit scanners, `src/jobs/confirmationsWorker.ts`, `src/jobs/depositIntegrityWorker.ts` | Pending deposits cannot be registered/claimed/credited through the lease path, and chain-integrity checks cannot be claimed/completed. The raw legacy credit RPC remains directly executable by `service_role` until the ACL migration is applied. |
 | `record_ad_offline_open_attempt(text,text)` | `src/lib/ad-owner-availability.ts` | All three trade-opening API routes call this guard before escrow initiation; errors return HTTP 503. |
 | `set_my_presence(boolean)` | `src/components/providers/UserPresenceProvider.tsx`, `src/hooks/usePresence.ts`, `src/hooks/usePresenceHeartbeat.ts` | Presence heartbeat cannot update seller availability timestamps. |
 | `check_admin_2fa_rate_limit(uuid)`, `reset_admin_2fa_rate_limit(uuid)` | `src/lib/admin-2fa-rate-limit.ts` | Admin 2FA challenges/recovery fail closed when rate-limit state cannot be checked or reset. |
@@ -225,13 +226,54 @@ Preflights:
 
 The three migrations and both preflights passed a combined rollback-only schema rehearsal, including the prerequisite support-admin migration that creates the strict full-admin helper. A read-only post-rollback catalog check confirmed the tables, profile columns, policies, functions, trigger and cron job were all absent again; the migration ledger remained at 137 records / `20261103204401`. No production DDL was retained, no deletion finalizer was invoked, and no media cleanup request or financial operation was run.
 
-## 7. Profile public projection remains a separate review
+## 7. Deposit registration, confirmation and credit safety
+
+The live public catalog confirms that the six current deposit RPC contracts are absent:
+
+- `register_pending_deposit(text,text,text,numeric,text,integer,bigint,text,text,integer,text)`
+- `claim_pending_deposit_confirmations(text,integer,integer)`
+- `release_pending_deposit_confirmation_claim(uuid,text)`
+- `process_deposit_atomic_with_lease(uuid,text,text,text,text,numeric,text,integer,bigint,text,text,integer,text,text)`
+- `claim_deposit_integrity_checks(text,integer,integer)`
+- `complete_deposit_integrity_check(uuid,text,text,text,text,jsonb,integer)`
+
+The underlying `process_deposit_atomic(text,text,text,numeric,text,integer,bigint,text,text,integer,text)` remains executable by `service_role` in production. This direct credit path must be revoked **only after** the pending-registration and lease-protected credit wrappers have been installed and their ownership/ACL preflight passes. No application source callsite directly invokes this raw RPC; all ingress paths use `register_pending_deposit`, and only the confirmation worker uses the lease-protected credit wrapper.
+
+### Verified confirmation boundary
+
+- Deposit scanners register new observations with `p_confirmations = 0`; that is a pending registration, not a verified chain confirmation.
+- The live canonical credit function requires positive network-specific confirmation thresholds: BTC **3**, LTC **6**, ETH **12**, ERC20 **12**, BEP20 **15**, TRC20 **19**. The canonical credit function uses the independently submitted verification count and compares it to that threshold; a zero-count scanner registration cannot satisfy it.
+- `src/jobs/confirmationsWorker.ts` separately verifies chain confirmation depth, acquires a per-deposit claim, and invokes `process_deposit_atomic_with_lease`. Its cleanup path releases any unconsumed lease token after provider failures or below-threshold results.
+- The integrity monitor requires agreement from at least two independent HTTPS RPC origins before recording a verified block-hash result. An inconclusive/mismatched result is retried; a proven reorg is durably recorded and alerted, with **no automatic wallet-balance reversal**.
+
+### Approved release order and preflights
+
+The existing forward migration sequence is:
+
+1. `20261104120000_withdrawal_confirmation_and_control_flags.sql`
+2. `20261104130000_deposit_confirmation_contract.sql`
+3. `20261107210306_guard_terminal_deposit_registration_replay.sql`
+4. `20261107211754_revoke_direct_deposit_credit_rpc_execution.sql`
+5. `20261108013000_deposit_chain_integrity_monitor.sql`
+
+The first four migrations establish the control flags, pending-registration and lease contracts, terminal replay guard, then remove direct service-role execution on the raw credit RPC. The integrity-monitor migration follows, with these read-only preflights:
+
+- `supabase/tests/deposit_confirmation_contract_preflight.sql`
+- `supabase/tests/terminal_deposit_registration_replay_preflight.sql`
+- `supabase/tests/deposit_credit_rpc_acl_preflight.sql`
+- `supabase/tests/deposit_chain_integrity_monitor_preflight.sql`
+
+The confirmation preflight now verifies the exact positive network thresholds above, the zero-confirmation pending-registration contract, leased-worker execution and the canonical credit/replay guards. The five migrations and all four preflights passed a combined `BEGIN; ... ROLLBACK;` rehearsal against the live schema. A read-only catalog check afterwards confirmed all six new RPCs, the integrity table and its indexes remained absent; the raw credit RPC remained service-role executable; and the production ledger remained at 137 migrations / `20261103204401`.
+
+No production DDL was retained. No deposit was credited, no worker was invoked and no financial operation was run. The deposit release remains a **production blocker** until the exact migration sequence is reconciled with all intervening migrations, applied in order by an authorized release operator, and the four preflights pass on the deployed schema.
+
+## 8. Profile public projection remains a separate review
 
 Production `profiles` has RLS enabled but still has a broad `Public profiles are viewable by everyone` SELECT policy. Anon has column-level SELECT grants for trader-card fields; authenticated has column-level SELECT and UPDATE grants for profile fields. Production lacks the `public_profiles` view and the `set_my_presence` RPC.
 
 The old `20261101125944_secure_profile_public_projection.sql` combines several profile policy/grant changes with the presence RPC. Do not apply the whole historical migration merely to restore presence. The new narrow `20261108014000` migration restores the heartbeat without changing the public profile projection. The app's public-profile query paths and column-grant compatibility still require a separate migration/code review.
 
-## 8. Deployment gate and next reconciliation work
+## 9. Deployment gate and next reconciliation work
 
 **Current status: NO-GO for production migration execution.**
 
