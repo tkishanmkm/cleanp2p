@@ -40,7 +40,11 @@ async function handleSync(req: NextRequest) {
 
     return NextResponse.json(
       {
-        success: true,
+        success: !withdrawalSync.error,
+        ...(withdrawalSync.error ? {
+          code: 'WITHDRAWAL_DISPATCH_BLOCKED',
+          error: 'Deposit synchronization completed, but withdrawal dispatch could not safely claim or process the queue.',
+        } : {}),
         timestamp: new Date().toISOString(),
         durationMs: executionDurationMs,
         depositIngestion: {
@@ -61,7 +65,7 @@ async function handleSync(req: NextRequest) {
           newlyConfirmed: confirmationSync.confirmed,
         },
       },
-      { status: 200 }
+      { status: withdrawalSync.error ? 503 : 200 }
     );
   } catch (err: any) {
     console.error('[Blockchain Sync Cron] Unhandled error during sync cycle:', err);

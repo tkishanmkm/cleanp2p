@@ -27,6 +27,16 @@ export async function GET(req: NextRequest) {
   if (batch === 'true' || batch === '1') {
     const limit = parseInt(req.nextUrl.searchParams.get('limit') || '10', 10);
     const result = await processAllPendingWithdrawals(limit);
+    if (result.error) {
+      return NextResponse.json({
+        success: false,
+        code: 'WITHDRAWAL_DISPATCH_BLOCKED',
+        error: 'The withdrawal worker could not safely claim or process the queue.',
+        timestamp: new Date().toISOString(),
+        type: 'batch',
+        result,
+      }, { status: 503 });
+    }
     return NextResponse.json({
       success: true,
       timestamp: new Date().toISOString(),
@@ -37,6 +47,15 @@ export async function GET(req: NextRequest) {
 
   // Single-item runs must use the same singleton guard as batch dispatch.
   const result = await processAllPendingWithdrawals(1);
+  if (result.error) {
+    return NextResponse.json({
+      success: false,
+      code: 'WITHDRAWAL_DISPATCH_BLOCKED',
+      error: 'The withdrawal worker could not safely claim or process the queue.',
+      timestamp: new Date().toISOString(),
+      result,
+    }, { status: 503 });
+  }
   return NextResponse.json({
     success: true,
     timestamp: new Date().toISOString(),

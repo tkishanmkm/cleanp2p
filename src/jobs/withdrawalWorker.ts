@@ -116,7 +116,21 @@ export async function processWithdrawalQueue(workerId: string = randomUUID()): P
     p_worker_id: workerId,
   });
 
-  if (error || !queue || queue.length === 0) {
+  if (error) {
+    const databaseError = error as { code?: string; message?: string };
+    console.error("[Withdrawal Worker] Queue claim RPC failed:", {
+      code: databaseError.code || "UNKNOWN_DATABASE_ERROR",
+      message: databaseError.message || "No database error message was returned",
+    });
+    return { processed: false, error: "WITHDRAWAL_QUEUE_CLAIM_FAILED" };
+  }
+
+  if (!Array.isArray(queue)) {
+    console.error("[Withdrawal Worker] Queue claim RPC returned a non-array response.");
+    return { processed: false, error: "WITHDRAWAL_QUEUE_INVALID_RESPONSE" };
+  }
+
+  if (queue.length === 0) {
     return { processed: false };
   }
 
@@ -1005,6 +1019,7 @@ export async function processAllPendingWithdrawals(maxBatch: number = 20): Promi
   totalProcessed: number;
   results: WithdrawalProcessResult[];
   locked?: boolean;
+  error?: string;
 }> {
   // The canonical claim RPC performs SKIP LOCKED plus a per-withdrawal
   // worker_id/lease_expires_at fence. A process-wide advisory lease is not
@@ -1018,7 +1033,13 @@ export async function processAllPendingWithdrawals(maxBatch: number = 20): Promi
 
   while (count < batchLimit) {
     const result = await processWithdrawalQueue(workerId);
-    if (!result.processed) break;
+    if (!result.processed) {
+      if (result.error) {
+        results.push(result);
+        return { totalProcessed: count, results, error: result.error };
+      }
+      break;
+    }
     results.push(result);
     count++;
   }
@@ -1042,7 +1063,10 @@ export function startWithdrawalWorker(intervalMs: number = 15000): void {
   const runLoop = async () => {
     if (!isWorkerRunning) return;
     try {
-      await processAllPendingWithdrawals(10);
+      const batchResult = await processAllPendingWithdrawals(10);
+      if (batchResult.error) {
+        console.error("[Withdrawal Worker Loop] Dispatch stopped:", batchResult.error);
+      }
       await checkSubmittedWithdrawals();
     } catch (err) {
       console.error('[Withdrawal Worker Loop Error]:', err);
