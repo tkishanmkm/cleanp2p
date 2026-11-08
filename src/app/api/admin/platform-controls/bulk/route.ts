@@ -18,7 +18,7 @@ export async function POST(req: NextRequest) {
     if (!auth.authorized) {
       return auth.response!;
     }
-    if (auth.supportAdmin === true) {
+    if (auth.supportAdmin === true || auth.supportReadOnly === true) {
       return NextResponse.json(
         { success: false, error: "Support administrators cannot run bulk platform controls." },
         { status: 403 }
@@ -61,7 +61,7 @@ export async function POST(req: NextRequest) {
           partialFailure: res.partialFailure ?? false,
           failedStage: res.failedStage,
           message: res.success
-            ? `Successfully resumed ${res.affectedCount} eligible advertisements (${res.skippedCount} skipped due to user restrictions).`
+            ? `Successfully resumed ${res.affectedCount} eligible advertisements (${res.skippedCount} remained paused because owner eligibility or inventory rules were not satisfied).`
             : "Unable to confirm that all eligible advertisements were resumed. Check the error and reconcile advertisement states before retrying.",
           error: res.error,
         }, { status: res.success ? 200 : 500 });

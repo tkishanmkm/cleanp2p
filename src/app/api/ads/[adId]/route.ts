@@ -2,6 +2,7 @@ import { createClient, getSupabaseAdminClient } from '@/utils/supabase/server';
 import { NextRequest, NextResponse } from 'next/server';
 import { revalidatePath } from 'next/cache';
 import { findAdById, resolveBothTargetRows } from '@/lib/ad-lookup';
+import { setAdStatusAtomically } from '@/lib/ad-status';
 import { resolveTradeType } from '@/utils/p2p-helpers';
 import { verifyServerAdmin } from '@/lib/server-admin-auth';
 import { checkNewTradeEligibility } from '@/lib/account-action-guard';
@@ -269,7 +270,7 @@ export async function DELETE(
     const adOwnerId = existingAd.user_id || existingAd.userId;
     const isOwner = adOwnerId && String(adOwnerId) === String(user.id);
     const adminAuth = await verifyServerAdmin(request);
-    const isAdmin = adminAuth.authorized;
+    const isAdmin = adminAuth.authorized && adminAuth.supportAdmin !== true && adminAuth.supportReadOnly !== true;
 
     if (!isOwner && !isAdmin) {
       return NextResponse.json(
@@ -278,81 +279,21 @@ export async function DELETE(
       );
     }
 
-    // 4. Perform Soft-Delete & Deletion on independently resolved target IDs
-    const { p2pAdsRow, adsRow } = await resolveBothTargetRows(existingAd, adId, admin);
+    // Soft-delete both listing representations through one database transaction.
+    // Physical deletion would break historical trade/ad references and can split mirrors.
+    const deletion = await setAdStatusAtomically(
+      admin,
+      existingAd,
+      adId,
+      { id: user.id, email: user.email, isAdmin },
+      'DELETED'
+    );
 
-    let p2pMutated = false;
-    let adsMutated = false;
-
-    if (p2pAdsRow) {
-      try {
-        await admin
-          .from('p2p_ads')
-          .update({ status: 'DELETED', active: false, is_active: false, is_deleted: true })
-          .eq('id', p2pAdsRow.id);
-      } catch (softErr: any) {
-        console.warn('[DELETE /api/ads/[adId]] p2p_ads soft-delete warning:', softErr?.message);
-      }
-
-      const { data: p2pDel, error: p2pErr } = await admin
-        .from('p2p_ads')
-        .delete()
-        .eq('id', p2pAdsRow.id)
-        .select('id');
-
-      if (!p2pErr && p2pDel && p2pDel.length > 0) {
-        p2pMutated = true;
-      } else {
-        const { data: p2pCheck } = await admin
-          .from('p2p_ads')
-          .select('status')
-          .eq('id', p2pAdsRow.id)
-          .maybeSingle();
-        if (p2pCheck && p2pCheck.status === 'DELETED') {
-          p2pMutated = true;
-        }
-      }
-    }
-
-    if (adsRow) {
-      try {
-        await admin
-          .from('ads')
-          .update({ status: 'DELETED', active: false, is_active: false, is_deleted: true, updated_at: new Date().toISOString() })
-          .eq('id', adsRow.id);
-      } catch (softErr: any) {
-        console.warn('[DELETE /api/ads/[adId]] Legacy ads soft-delete warning:', softErr?.message);
-      }
-
-      const { data: adsDel, error: adsErr } = await admin
-        .from('ads')
-        .delete()
-        .eq('id', adsRow.id)
-        .select('id');
-
-      if (!adsErr && adsDel && adsDel.length > 0) {
-        adsMutated = true;
-      } else {
-        const { data: adsCheck } = await admin
-          .from('ads')
-          .select('status')
-          .eq('id', adsRow.id)
-          .maybeSingle();
-        if (adsCheck && adsCheck.status === 'DELETED') {
-          adsMutated = true;
-        }
-      }
-    }
-
-    if (!p2pAdsRow && !adsRow) {
-      return NextResponse.json({ error: 'Advertisement record not found.' }, { status: 404 });
-    }
-
-    const overallDeleteSuccess = p2pAdsRow ? p2pMutated : adsMutated;
-
-    if (!overallDeleteSuccess) {
-      console.error('[DELETE /api/ads/[adId]] Failed row mutation:', { p2pRowId: p2pAdsRow?.id, p2pMutated, adsRowId: adsRow?.id, adsMutated });
-      return NextResponse.json({ error: 'Failed to delete advertisement record.' }, { status: 500 });
+    if (!deletion.ok) {
+      return NextResponse.json(
+        { success: false, code: deletion.code, error: deletion.error },
+        { status: deletion.statusCode }
+      );
     }
 
     try {
@@ -419,11 +360,11 @@ export async function PATCH(
       return NextResponse.json({ error: 'Advertisement not found.' }, { status: 404 });
     }
 
-    // 3. Authorization Check: Ensure authenticated user is the ad owner or an authorized administrator
+    // Support admins and read-only admins cannot modify another user's listing.
     const adOwnerId = existingAd.user_id || existingAd.userId;
     const isOwner = adOwnerId && String(adOwnerId) === String(user.id);
     const adminAuth = await verifyServerAdmin(request);
-    const isAdmin = adminAuth.authorized;
+    const isAdmin = adminAuth.authorized && adminAuth.supportAdmin !== true && adminAuth.supportReadOnly !== true;
 
     if (!isOwner && !isAdmin) {
       return NextResponse.json(
@@ -495,64 +436,23 @@ export async function PATCH(
       }
     }
 
-    // 5. Independently resolve both target rows
-    const { p2pAdsRow, adsRow } = await resolveBothTargetRows(existingAd, adId, admin);
-
-    let p2pMutated = false;
-    let adsMutated = false;
-
-    if (p2pAdsRow) {
-      const { data: p2pRes, error: p2pErr } = await admin
-        .from('p2p_ads')
-        .update({
-          active: isActive,
-          is_active: isActive,
-          status: newStatus,
-        })
-        .eq('id', p2pAdsRow.id)
-        .select('id');
-
-      if (!p2pErr && p2pRes && p2pRes.length > 0) {
-        p2pMutated = true;
-      } else {
-        console.error('[PATCH /api/ads/[adId]] Canonical p2p_ads update failed:', p2pErr?.message);
-      }
+    if (!['ACTIVE', 'INACTIVE', 'PAUSED', 'HIDDEN', 'DRAFT'].includes(newStatus)) {
+      return NextResponse.json({ error: 'Invalid advertisement status.' }, { status: 400 });
     }
 
-    if (adsRow) {
-      try {
-        const { data: adsRes, error: adsErr } = await admin
-          .from('ads')
-          .update({
-            active: isActive,
-            is_active: isActive,
-            status: newStatus,
-            updated_at: new Date().toISOString(),
-          })
-          .eq('id', adsRow.id)
-          .select('id');
+    const statusUpdate = await setAdStatusAtomically(
+      admin,
+      existingAd,
+      adId,
+      { id: user.id, email: user.email, isAdmin },
+      newStatus as 'ACTIVE' | 'INACTIVE' | 'PAUSED' | 'HIDDEN' | 'DRAFT'
+    );
 
-        if (!adsErr && adsRes && adsRes.length > 0) {
-          adsMutated = true;
-        } else {
-          console.warn('[PATCH /api/ads/[adId]] Legacy ads table mirror update warning:', adsErr?.message);
-        }
-      } catch (legacyErr: any) {
-        console.warn('[PATCH /api/ads/[adId]] Legacy ads table update exception:', legacyErr?.message);
-      }
-    }
-
-    if (!p2pAdsRow && !adsRow) {
-      return NextResponse.json({ error: 'Advertisement not found.' }, { status: 404 });
-    }
-
-    // Canonical p2p_ads is authoritative. If p2pAdsRow exists, canonical p2p update must succeed.
-    // If only legacy adsRow exists, ads update must succeed.
-    const overallSuccess = p2pAdsRow ? p2pMutated : adsMutated;
-
-    if (!overallSuccess) {
-      console.error('[PATCH /api/ads/[adId]] Failed canonical row status update:', { p2pRowId: p2pAdsRow?.id, p2pMutated, adsRowId: adsRow?.id, adsMutated });
-      return NextResponse.json({ error: 'Failed to update advertisement status.' }, { status: 500 });
+    if (!statusUpdate.ok) {
+      return NextResponse.json(
+        { success: false, code: statusUpdate.code, error: statusUpdate.error },
+        { status: statusUpdate.statusCode }
+      );
     }
 
     try {
@@ -612,18 +512,27 @@ export async function PUT(
       return NextResponse.json({ error: 'Advertisement not found.' }, { status: 404 });
     }
 
-    // 3. Authorization Check: Ensure authenticated user is the ad owner or authorized admin
-    const adOwnerId = existingAd.user_id || existingAd.userId;
-    const isOwner = adOwnerId && String(adOwnerId) === String(user?.id);
+    // Only an authenticated owner or verified full administrator may edit.
     const adminAuth = await verifyServerAdmin(request);
-    const isAdmin = adminAuth.authorized;
+    const isAdmin = adminAuth.authorized &&
+      adminAuth.supportAdmin !== true &&
+      adminAuth.supportReadOnly !== true;
 
-    if (!user && !isAdmin) {
+    if (!user) {
       return NextResponse.json(
         { error: 'Unauthorized. Please log in to edit your advertisement.' },
         { status: 401 }
       );
     }
+
+    const adOwnerId = existingAd.user_id || existingAd.userId || existingAd.seller_id || existingAd.creator_id;
+    if (!adOwnerId) {
+      return NextResponse.json(
+        { error: 'Advertisement owner could not be verified.', code: 'AD_OWNER_UNRESOLVED' },
+        { status: 409 }
+      );
+    }
+    const isOwner = String(adOwnerId) === String(user.id);
 
     if (!isOwner && !isAdmin) {
       return NextResponse.json(
@@ -799,8 +708,26 @@ export async function PUT(
       }
     }
 
-    // 5. Build Table-Specific Payloads & Execute Update on Target Rows
-    const { p2pAdsRow, adsRow } = await resolveBothTargetRows(existingAd, adId, admin);
+    // 5. Resolve and validate every listing mirror before any content write.
+    const resolvedRows = await resolveBothTargetRows(existingAd, adId, admin);
+    if (resolvedRows.lookupErrors.p2p_ads || resolvedRows.lookupErrors.ads) {
+      return NextResponse.json(
+        { success: false, code: 'AD_MIRROR_LOOKUP_FAILED', error: 'Advertisement records could not be checked safely. No edit was attempted.' },
+        { status: 503 }
+      );
+    }
+    if (resolvedRows.ownerMismatches.p2p_ads || resolvedRows.ownerMismatches.ads ||
+        (resolvedRows.ownerId && String(resolvedRows.ownerId) !== String(adOwnerId))) {
+      return NextResponse.json(
+        { success: false, code: 'AD_IDENTIFIER_OWNER_MISMATCH', error: 'Advertisement records did not resolve to one consistent owner. No edit was attempted.' },
+        { status: 409 }
+      );
+    }
+
+    const { p2pAdsRow, adsRow } = resolvedRows;
+    if (!p2pAdsRow && !adsRow) {
+      return NextResponse.json({ error: 'Advertisement not found.' }, { status: 404 });
+    }
 
     let p2pUpdated = false;
     let adsUpdated = false;
@@ -851,6 +778,13 @@ export async function PUT(
       } else if (error) {
         console.error('[PUT /api/ads/[adId]] Canonical p2p_ads update error:', error);
       }
+    }
+
+    if (p2pAdsRow && !p2pUpdated) {
+      return NextResponse.json(
+        { success: false, code: 'CANONICAL_AD_UPDATE_FAILED', error: 'The canonical advertisement could not be updated. The legacy mirror was not changed.' },
+        { status: 503 }
+      );
     }
 
     // 5b. Update Legacy ads Table Mirror (Strictly limited to supported columns)
@@ -946,11 +880,18 @@ export async function PUT(
           adsUpdated = true;
           if (!lastUpdatedRow) lastUpdatedRow = data[0];
         } else if (error) {
-          console.warn('[PUT /api/ads/[adId]] Legacy ads mirror update warning (ignored for canonical result):', error.message);
+          console.error('[PUT /api/ads/[adId]] Legacy ads mirror update failed after canonical update:', error.code || 'unknown');
         }
       } catch (legacyErr: any) {
-        console.warn('[PUT /api/ads/[adId]] Legacy ads update exception (ignored for canonical result):', legacyErr?.message);
+        console.error('[PUT /api/ads/[adId]] Legacy ads update exception after canonical update:', legacyErr?.message);
       }
+    }
+
+    if (adsRow && !adsUpdated) {
+      return NextResponse.json(
+        { success: false, code: 'AD_MIRROR_UPDATE_FAILED', error: 'The canonical advertisement may have updated, but its legacy mirror failed. Reconcile the listing before retrying.' },
+        { status: 503 }
+      );
     }
 
     if (!p2pAdsRow && !adsRow) {
@@ -960,7 +901,10 @@ export async function PUT(
     // Authoritative Success Check:
     // If canonical p2p_ads row exists, canonical update MUST succeed.
     // If only legacy ads row exists, legacy update MUST succeed.
-    const overallSuccess = p2pAdsRow ? p2pUpdated : adsUpdated;
+    const overallSuccess =
+      (!p2pAdsRow || p2pUpdated) &&
+      (!adsRow || adsUpdated) &&
+      Boolean(p2pAdsRow || adsRow);
 
     if (!overallSuccess) {
       console.error('[PUT /api/ads/[adId]] Canonical advertisement record update failed:', {

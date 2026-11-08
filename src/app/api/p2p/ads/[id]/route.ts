@@ -1,6 +1,7 @@
 import { createClient, createBearerClient, getSupabaseAdminClient } from '@/utils/supabase/server';
 import { NextResponse, type NextRequest } from 'next/server';
 import { findAdById, resolveBothTargetRows } from '@/lib/ad-lookup';
+import { setAdStatusAtomically } from '@/lib/ad-status';
 import { checkNewTradeEligibility } from '@/lib/account-action-guard';
 import { verifyServerAdmin } from '@/lib/server-admin-auth';
 
@@ -166,8 +167,14 @@ export async function PATCH(
       return NextResponse.json({ error: 'Advertisement not found.' }, { status: 404 });
     }
 
-    const adOwnerId = existingAd.user_id || existingAd.userId;
-    if (adOwnerId && String(adOwnerId) !== String(user.id)) {
+    const adOwnerId = existingAd.user_id || existingAd.userId || existingAd.seller_id || existingAd.creator_id;
+    if (!adOwnerId) {
+      return NextResponse.json(
+        { error: 'Advertisement owner could not be verified.', code: 'AD_OWNER_UNRESOLVED' },
+        { status: 409 }
+      );
+    }
+    if (String(adOwnerId) !== String(user.id)) {
       return NextResponse.json({ error: 'Forbidden. You do not own this advertisement.' }, { status: 403 });
     }
 
@@ -191,26 +198,60 @@ export async function PATCH(
 
     const supabaseAdmin = getSupabaseAdminClient();
 
-    const { p2pAdsRow, adsRow } = await resolveBothTargetRows(existingAd, id, supabaseAdmin);
+    const resolvedRows = await resolveBothTargetRows(existingAd, id, supabaseAdmin);
+    if (resolvedRows.lookupErrors.p2p_ads || resolvedRows.lookupErrors.ads) {
+      return NextResponse.json(
+        { success: false, code: 'AD_MIRROR_LOOKUP_FAILED', error: 'Advertisement records could not be checked safely. No edit was attempted.' },
+        { status: 503 }
+      );
+    }
+    if (resolvedRows.ownerMismatches.p2p_ads || resolvedRows.ownerMismatches.ads) {
+      return NextResponse.json(
+        { success: false, code: 'AD_IDENTIFIER_OWNER_MISMATCH', error: 'Advertisement records did not resolve to one consistent owner. No edit was attempted.' },
+        { status: 409 }
+      );
+    }
+
+    const { p2pAdsRow, adsRow } = resolvedRows;
+    if (!p2pAdsRow && !adsRow) {
+      return NextResponse.json({ error: 'Advertisement not found.' }, { status: 404 });
+    }
 
     let p2pMutated = false;
     let adsMutated = false;
     let updatedResult: any = null;
 
     const hasStatus = body.status !== undefined || body.active !== undefined || body.is_active !== undefined;
-    let newStatus: string | undefined = undefined;
-    let isActive: boolean | undefined = undefined;
+    let newStatus: string | undefined;
+    let isActive: boolean | undefined;
+
+    if (body.active !== undefined && typeof body.active !== 'boolean') {
+      return NextResponse.json({ error: 'The active field must be a boolean.' }, { status: 400 });
+    }
+    if (body.is_active !== undefined && typeof body.is_active !== 'boolean') {
+      return NextResponse.json({ error: 'The is_active field must be a boolean.' }, { status: 400 });
+    }
+    if (body.active !== undefined && body.is_active !== undefined && body.active !== body.is_active) {
+      return NextResponse.json({ error: 'Conflicting advertisement status fields were supplied.' }, { status: 400 });
+    }
+    if (body.status !== undefined && (body.active !== undefined || body.is_active !== undefined)) {
+      const statusValue = typeof body.status === 'string' ? body.status.toUpperCase().trim() : '';
+      const statusActive = statusValue === 'ACTIVE';
+      if (!['ACTIVE', 'INACTIVE'].includes(statusValue) ||
+          statusActive !== (body.active ?? body.is_active)) {
+        return NextResponse.json({ error: 'The status and active fields conflict or contain an unsupported value.' }, { status: 400 });
+      }
+    }
 
     if (hasStatus) {
-      if (body.active !== undefined) {
-        isActive = Boolean(body.active);
+      if (body.active !== undefined || body.is_active !== undefined) {
+        isActive = body.active ?? body.is_active;
         newStatus = isActive ? 'ACTIVE' : 'INACTIVE';
-      } else if (body.is_active !== undefined) {
-        isActive = Boolean(body.is_active);
-        newStatus = isActive ? 'ACTIVE' : 'INACTIVE';
-      } else if (body.status !== undefined) {
-        newStatus = String(body.status).toUpperCase().trim();
+      } else if (typeof body.status === 'string') {
+        newStatus = body.status.toUpperCase().trim();
         isActive = newStatus === 'ACTIVE';
+      } else {
+        return NextResponse.json({ error: 'A valid advertisement status is required.' }, { status: 400 });
       }
     }
 
@@ -221,9 +262,81 @@ export async function PATCH(
       (key) => !['status', 'active', 'is_active'].includes(key)
     );
 
+    if (hasStatus && hasNonStatusEdits) {
+      const currentStatus = String(
+        existingAd.status || (existingAd.active === true && existingAd.is_active !== false ? 'ACTIVE' : 'INACTIVE')
+      ).toUpperCase().trim();
+      const currentIsActive =
+        existingAd.active === true &&
+        existingAd.is_active !== false &&
+        !['DELETED', 'PAUSED', 'HIDDEN', 'DRAFT', 'INACTIVE'].includes(currentStatus);
+      const statusIsUnchanged =
+        body.active !== undefined || body.is_active !== undefined
+          ? isActive === currentIsActive
+          : newStatus === currentStatus;
+
+      // The edit form sends its current active flag with other listing fields.
+      // Ignore that unchanged flag, but never mix a real status transition with
+      // separate non-transactional listing edits.
+      if (!statusIsUnchanged) {
+        return NextResponse.json(
+          { error: 'Change advertisement status separately before editing its other details.', code: 'SEPARATE_AD_STATUS_CHANGE_REQUIRED' },
+          { status: 409 }
+        );
+      }
+
+      delete body.status;
+      delete body.active;
+      delete body.is_active;
+      newStatus = undefined;
+      isActive = undefined;
+    } else if (hasStatus) {
+      if (!['ACTIVE', 'INACTIVE'].includes(newStatus || '')) {
+        return NextResponse.json({ error: 'Advertisement owners may only activate or deactivate their own listings.' }, { status: 403 });
+      }
+
+      if (isActive === true && existingDirection === 'SELL') {
+        return NextResponse.json(
+          {
+            success: false,
+            error: 'SELL advertisements cannot be activated until their crypto inventory is reserved atomically.',
+            code: 'SELL_AD_INVENTORY_RESERVATION_UNVERIFIED',
+          },
+          { status: 503 }
+        );
+      }
+
+      if (isActive === true) {
+        const eligibility = await checkNewTradeEligibility(user.id);
+        if (!eligibility.allowed) {
+          return NextResponse.json({ error: "Restricted accounts cannot activate advertisements.", code: eligibility.code }, { status: eligibility.statusCode });
+        }
+      }
+
+      const statusUpdate = await setAdStatusAtomically(
+        supabaseAdmin,
+        existingAd,
+        id,
+        { id: user.id, email: user.email, isAdmin: false },
+        newStatus as 'ACTIVE' | 'INACTIVE'
+      );
+
+      if (!statusUpdate.ok) {
+        return NextResponse.json(
+          { success: false, code: statusUpdate.code, error: statusUpdate.error },
+          { status: statusUpdate.statusCode }
+        );
+      }
+
+      return NextResponse.json({
+        success: true,
+        data: { ...existingAd, status: statusUpdate.status, active: statusUpdate.status === 'ACTIVE', is_active: statusUpdate.status === 'ACTIVE' },
+      });
+    }
+
     if (
       requestedDirection === 'SELL' ||
-      (existingDirection === 'SELL' && (isActive === true || hasNonStatusEdits))
+      (existingDirection === 'SELL' && hasNonStatusEdits)
     ) {
       return NextResponse.json(
         {
@@ -235,23 +348,11 @@ export async function PATCH(
       );
     }
 
-    if (isActive === true) {
-      const eligibility = await checkNewTradeEligibility(user.id);
-      if (!eligibility.allowed) {
-        return NextResponse.json({ error: "Restricted accounts cannot activate advertisements.", code: eligibility.code }, { status: eligibility.statusCode });
-      }
-    }
-
     if (p2pAdsRow) {
       // Explicit allowlisted update payload for canonical public.p2p_ads
       const p2pPayload: Record<string, any> = {
         updated_at: new Date().toISOString(),
       };
-
-      if (newStatus !== undefined && isActive !== undefined) {
-        p2pPayload.status = newStatus;
-        p2pPayload.active = isActive;
-      }
 
       if (body.price !== undefined) {
         p2pPayload.price = body.price;
@@ -306,15 +407,18 @@ export async function PATCH(
       }
     }
 
+    if (p2pAdsRow && !p2pMutated) {
+      return NextResponse.json(
+        { success: false, code: 'CANONICAL_AD_UPDATE_FAILED', error: 'The canonical advertisement could not be updated. The legacy mirror was not changed.' },
+        { status: 503 }
+      );
+    }
+
     if (adsRow) {
       try {
         const adsPayload: Record<string, any> = {
           updated_at: new Date().toISOString(),
         };
-        if (newStatus !== undefined && isActive !== undefined) {
-          adsPayload.status = newStatus;
-          adsPayload.is_active = isActive;
-        }
         if (body.price !== undefined) adsPayload.price = body.price;
         if (body.min_limit !== undefined || body.min_amount !== undefined) adsPayload.min_limit = body.min_limit ?? body.min_amount;
         if (body.max_limit !== undefined || body.max_amount !== undefined) adsPayload.max_limit = body.max_limit ?? body.max_amount;
@@ -333,11 +437,18 @@ export async function PATCH(
           adsMutated = true;
           if (!updatedResult) updatedResult = adsRes;
         } else {
-          console.warn('[PATCH /api/p2p/ads/[id]] Legacy ads mirror update warning:', adsErr?.message);
+          console.error('[PATCH /api/p2p/ads/[id]] Legacy ads mirror update failed after canonical update:', adsErr?.code || 'unknown');
         }
       } catch (legacyErr: any) {
-        console.warn('[PATCH /api/p2p/ads/[id]] Legacy ads update exception:', legacyErr?.message);
+        console.error('[PATCH /api/p2p/ads/[id]] Legacy ads update exception after canonical update:', legacyErr?.message);
       }
+    }
+
+    if (adsRow && !adsMutated) {
+      return NextResponse.json(
+        { success: false, code: 'AD_MIRROR_UPDATE_FAILED', error: 'The canonical advertisement may have updated, but its legacy mirror failed. Reconcile the listing before retrying.' },
+        { status: 503 }
+      );
     }
 
     if (!p2pAdsRow && !adsRow) {
@@ -346,7 +457,10 @@ export async function PATCH(
 
     // Canonical p2p_ads is authoritative. If p2pAdsRow exists, canonical p2p update must succeed.
     // If only legacy adsRow exists, ads update must succeed.
-    const overallSuccess = p2pAdsRow ? p2pMutated : adsMutated;
+    const overallSuccess =
+      (!p2pAdsRow || p2pMutated) &&
+      (!adsRow || adsMutated) &&
+      Boolean(p2pAdsRow || adsRow);
 
     if (!overallSuccess) {
       console.error('[PATCH /api/p2p/ads/[id]] Target update failed:', { p2pRowId: p2pAdsRow?.id, p2pMutated, adsRowId: adsRow?.id, adsMutated });
@@ -401,87 +515,34 @@ export async function DELETE(
       return NextResponse.json({ error: 'Advertisement not found.' }, { status: 404 });
     }
 
-    const adOwnerId = existingAd.user_id || existingAd.userId;
-    if (adOwnerId && String(adOwnerId) !== String(user.id)) {
+    const adOwnerId = existingAd.user_id || existingAd.userId || existingAd.seller_id || existingAd.creator_id;
+    if (!adOwnerId) {
+      return NextResponse.json(
+        { error: 'Advertisement owner could not be verified.', code: 'AD_OWNER_UNRESOLVED' },
+        { status: 409 }
+      );
+    }
+    if (String(adOwnerId) !== String(user.id)) {
       return NextResponse.json({ error: 'Forbidden. You do not own this advertisement.' }, { status: 403 });
     }
 
     const supabaseAdmin = getSupabaseAdminClient();
 
-    const { p2pAdsRow, adsRow } = await resolveBothTargetRows(existingAd, id, supabaseAdmin);
+    // Keep the historical ad rows and trade references; atomically make both
+    // listing representations unavailable through the trusted status RPC.
+    const deletion = await setAdStatusAtomically(
+      supabaseAdmin,
+      existingAd,
+      id,
+      { id: user.id, email: user.email, isAdmin: false },
+      'DELETED'
+    );
 
-    let p2pMutated = false;
-    let adsMutated = false;
-
-    if (p2pAdsRow) {
-      try {
-        await supabaseAdmin
-          .from('p2p_ads')
-          .update({ status: 'DELETED', active: false, updated_at: new Date().toISOString() })
-          .eq('id', p2pAdsRow.id);
-      } catch (softErr: any) {
-        console.warn('[DELETE /api/p2p/ads/[id]] p2p_ads soft-delete warning:', softErr?.message);
-      }
-
-      const { data: p2pDel, error: p2pErr } = await supabaseAdmin
-        .from('p2p_ads')
-        .delete()
-        .eq('id', p2pAdsRow.id)
-        .select('id');
-
-      if (!p2pErr && p2pDel && p2pDel.length > 0) {
-        p2pMutated = true;
-      } else {
-        const { data: p2pCheck } = await supabaseAdmin
-          .from('p2p_ads')
-          .select('status')
-          .eq('id', p2pAdsRow.id)
-          .maybeSingle();
-        if (p2pCheck && p2pCheck.status === 'DELETED') {
-          p2pMutated = true;
-        }
-      }
-    }
-
-    if (adsRow) {
-      try {
-        await supabaseAdmin
-          .from('ads')
-          .update({ status: 'DELETED', is_active: false, updated_at: new Date().toISOString() })
-          .eq('id', adsRow.id);
-      } catch (softErr: any) {
-        console.warn('[DELETE /api/p2p/ads/[id]] Legacy ads soft-delete warning:', softErr?.message);
-      }
-
-      const { data: adsDel, error: adsErr } = await supabaseAdmin
-        .from('ads')
-        .delete()
-        .eq('id', adsRow.id)
-        .select('id');
-
-      if (!adsErr && adsDel && adsDel.length > 0) {
-        adsMutated = true;
-      } else {
-        const { data: adsCheck } = await supabaseAdmin
-          .from('ads')
-          .select('status')
-          .eq('id', adsRow.id)
-          .maybeSingle();
-        if (adsCheck && adsCheck.status === 'DELETED') {
-          adsMutated = true;
-        }
-      }
-    }
-
-    if (!p2pAdsRow && !adsRow) {
-      return NextResponse.json({ error: 'Advertisement not found.' }, { status: 404 });
-    }
-
-    const overallDeleteSuccess = p2pAdsRow ? p2pMutated : adsMutated;
-
-    if (!overallDeleteSuccess) {
-      console.error('[DELETE /api/p2p/ads/[id]] Target delete failed:', { p2pRowId: p2pAdsRow?.id, p2pMutated, adsRowId: adsRow?.id, adsMutated });
-      return NextResponse.json({ error: 'Failed to delete advertisement record.' }, { status: 500 });
+    if (!deletion.ok) {
+      return NextResponse.json(
+        { success: false, code: deletion.code, error: deletion.error },
+        { status: deletion.statusCode }
+      );
     }
 
     return NextResponse.json({ success: true, message: 'Ad deleted successfully.' });

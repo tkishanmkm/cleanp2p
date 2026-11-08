@@ -194,27 +194,32 @@ export async function PATCH(
       });
 
       const missingRpc = statusError?.code === 'PGRST202' || statusError?.code === '42883';
-      const inventoryBlocked = statusError?.code === '23514';
+      const isTerminalDeletedAd = statusError?.code === '23514' &&
+        String(statusError.message || '').includes('Deleted advertisements cannot be reactivated or changed');
+      const inventoryBlocked = statusError?.code === '23514' && !isTerminalDeletedAd;
       const mirrorMismatch = statusError?.code === '22023';
       const status = statusError?.code === '42501' ? 403
         : statusError?.code === 'P0002' ? 404
-        : inventoryBlocked || mirrorMismatch ? 409
+        : inventoryBlocked || mirrorMismatch || isTerminalDeletedAd ? 409
         : 503;
 
       return NextResponse.json(
         {
           success: false,
-          code: inventoryBlocked ? 'SELL_AD_INVENTORY_RESERVATION_UNVERIFIED'
+          code: isTerminalDeletedAd ? 'AD_DELETED_TERMINAL'
+            : inventoryBlocked ? 'SELL_AD_INVENTORY_RESERVATION_UNVERIFIED'
             : mirrorMismatch ? 'AD_MIRROR_IDENTITY_MISMATCH'
             : missingRpc ? 'ATOMIC_AD_STATUS_RPC_NOT_INSTALLED'
             : 'ATOMIC_AD_STATUS_UPDATE_FAILED',
-          error: inventoryBlocked
-            ? 'SELL advertisements cannot be activated until their crypto inventory is reserved atomically.'
-            : mirrorMismatch
-              ? 'The canonical and legacy advertisement records failed their identity consistency check.'
-              : missingRpc
-                ? 'The approved atomic advertisement status migration must be applied before this operation is available.'
-                : 'Advertisement status and its legacy mirror could not be updated atomically.',
+          error: isTerminalDeletedAd
+            ? 'A deleted advertisement cannot be reactivated or changed.'
+            : inventoryBlocked
+              ? 'SELL advertisements cannot be activated until their crypto inventory is reserved atomically.'
+              : mirrorMismatch
+                ? 'The canonical and legacy advertisement records failed their identity consistency check.'
+                : missingRpc
+                  ? 'The approved atomic advertisement status migration must be applied before this operation is available.'
+                  : 'Advertisement status and its legacy mirror could not be updated atomically.',
         },
         { status }
       );

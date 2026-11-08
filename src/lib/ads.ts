@@ -67,7 +67,7 @@ export async function updateAdStatus(_db: any, adId: string, active: boolean) {
   }
 
   // Call canonical status update endpoint
-  const res = await fetch(`/api/ads/${adId}`, {
+  const res = await fetch(`/api/ads/${encodeURIComponent(adId)}/toggle`, {
     method: 'PATCH',
     headers,
     credentials: 'include',
@@ -120,7 +120,10 @@ export async function getMarketplaceAds(
     .from('p2p_ads')
     .select('*')
     .eq('type', queryType)
-    .ilike('status', 'active');
+    .ilike('status', 'active')
+    .eq('active', true)
+    .eq('is_active', true)
+    .eq('is_deleted', false);
 
   if (coin && coin !== 'ALL') {
     query = query.eq('coin', coin.toUpperCase());
