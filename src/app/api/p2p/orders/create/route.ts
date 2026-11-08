@@ -7,6 +7,7 @@ import { isTier2User } from '@/lib/kyc';
 import { checkNewTradeEligibility } from '@/lib/account-action-guard';
 import { validateAdFiatLimits } from '@/lib/trade-ad-limits';
 import { validateEscrowTradeReceipt } from '@/lib/escrow-trade-response';
+import { checkAdOwnerAvailability } from '@/lib/ad-owner-availability';
 
 function isValidUUID(str: any): boolean {
   if (!str || typeof str !== 'string') return false;
@@ -98,19 +99,28 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Trade reference is invalid.', code: 'INVALID_TRADE_REFERENCE' }, { status: 400 });
     }
 
-    if (!adId || !cryptoAmount || Number(cryptoAmount) <= 0) {
-      return NextResponse.json({ error: 'Invalid order parameters. adId and positive cryptoAmount are required.' }, { status: 400 });
+    const cleanAdId = typeof adId === 'string' ? adId.trim().replace(/^#/, '') : '';
+    if (!/^[A-Za-z0-9._:-]{1,128}$/.test(cleanAdId)) {
+      return NextResponse.json({ error: 'Advertisement identifier is invalid.', code: 'INVALID_ADVERTISEMENT_ID' }, { status: 400 });
+    }
+    const parsedCryptoInput = Number(cryptoAmount);
+    const parsedFiatInput = Number(fiatAmount);
+    if (
+      (!Number.isFinite(parsedCryptoInput) || parsedCryptoInput <= 0) &&
+      (!Number.isFinite(parsedFiatInput) || parsedFiatInput <= 0)
+    ) {
+      return NextResponse.json({ error: 'A positive crypto or fiat amount is required.' }, { status: 400 });
     }
 
-    const isIdUUID = isValidUUID(adId);
+    const isIdUUID = isValidUUID(cleanAdId);
 
     // 1. Fetch Ad safely to read metadata & verification rules
     let ad: any = null;
     let p2pQuery = supabase.from('p2p_ads').select('*');
     if (isIdUUID) {
-      p2pQuery = p2pQuery.or(`id.eq.${adId},public_ad_id.eq.${adId}`);
+      p2pQuery = p2pQuery.or(`id.eq.${cleanAdId},public_ad_id.eq.${cleanAdId}`);
     } else {
-      p2pQuery = p2pQuery.or(`public_ad_id.eq.${adId},id.eq.${adId}`);
+      p2pQuery = p2pQuery.or(`public_ad_id.eq.${cleanAdId},id.eq.${cleanAdId}`);
     }
     const { data: p2pAd } = await p2pQuery.maybeSingle();
 
@@ -118,10 +128,10 @@ export async function POST(req: NextRequest) {
       ad = p2pAd;
     } else {
       if (isIdUUID) {
-        const { data: primaryAd } = await supabase.from('ads').select('*').eq('id', adId).maybeSingle();
+        const { data: primaryAd } = await supabase.from('ads').select('*').eq('id', cleanAdId).maybeSingle();
         if (primaryAd) ad = primaryAd;
       } else {
-        const { data: primaryAd } = await supabase.from('ads').select('*').or(`public_ad_id.eq.${adId},id.eq.${adId}`).maybeSingle();
+        const { data: primaryAd } = await supabase.from('ads').select('*').or(`public_ad_id.eq.${cleanAdId},id.eq.${cleanAdId}`).maybeSingle();
         if (primaryAd) ad = primaryAd;
       }
     }
@@ -182,21 +192,24 @@ export async function POST(req: NextRequest) {
     if (!rawStoredPrice || !Number.isFinite(unitPrice) || unitPrice <= 0) {
       return NextResponse.json({ error: 'Advertisement unit price is invalid or unavailable.' }, { status: 400 });
     }
-    let calculatedCrypto = parseFloat(cryptoAmount);
-    let numericFiat = parseFloat(fiatAmount);
+    let calculatedCrypto = parsedCryptoInput;
+    let numericFiat = parsedFiatInput;
 
-    if (isNaN(calculatedCrypto) || calculatedCrypto <= 0) {
-      if (!isNaN(numericFiat) && numericFiat > 0 && unitPrice > 0) {
+    if (!Number.isFinite(calculatedCrypto) || calculatedCrypto <= 0) {
+      if (Number.isFinite(numericFiat) && numericFiat > 0 && unitPrice > 0) {
         calculatedCrypto = numericFiat / unitPrice;
       }
     }
 
-    if (isNaN(calculatedCrypto) || calculatedCrypto <= 0) {
+    if (!Number.isFinite(calculatedCrypto) || calculatedCrypto <= 0) {
       return NextResponse.json({ error: 'Invalid crypto amount.' }, { status: 400 });
     }
 
     calculatedCrypto = Number(calculatedCrypto.toFixed(8));
     numericFiat = Number((calculatedCrypto * unitPrice).toFixed(2));
+    if (!Number.isFinite(calculatedCrypto) || calculatedCrypto <= 0 || !Number.isFinite(numericFiat) || numericFiat <= 0) {
+      return NextResponse.json({ error: 'Trade amount is outside the supported numeric range.' }, { status: 400 });
+    }
     const limitError = validateAdFiatLimits(ad, numericFiat);
     if (limitError) return NextResponse.json({ error: limitError }, { status: 400 });
 
@@ -228,7 +241,10 @@ export async function POST(req: NextRequest) {
     const shortRef = typeof tradeRef === 'string' && tradeRef.trim()
       ? tradeRef.trim()
       : generateTradeId();
-    const adIdentifier = String(ad.id || ad.public_ad_id || adId);
+    const adIdentifier = String(ad.id || ad.public_ad_id || cleanAdId);
+
+    const availabilityResponse = await checkAdOwnerAvailability(supabase, adIdentifier, resolvedIdempotencyKey);
+    if (availabilityResponse) return availabilityResponse;
 
     // 3. Call Atomic Database RPC initiate_trade_with_escrow
     const { data, error } = await supabase.rpc('initiate_trade_with_escrow', {
@@ -244,8 +260,12 @@ export async function POST(req: NextRequest) {
     });
 
     if (error) {
-      console.error('[POST /api/p2p/orders/create] RPC error:', error);
-      return NextResponse.json({ error: error.message || 'Failed to initiate trade with escrow.' }, { status: 400 });
+      console.error('[POST /api/p2p/orders/create] RPC error:', { code: error.code || 'UNKNOWN' });
+      return NextResponse.json({
+        success: false,
+        error: 'Unable to initiate this trade. Please review the trade details and try again.',
+        code: error.code === 'P0001' ? 'ESCROW_ERROR' : 'RPC_ERROR',
+      }, { status: 400 });
     }
 
     const receipt = validateEscrowTradeReceipt(data, {

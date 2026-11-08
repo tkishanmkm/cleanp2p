@@ -96,19 +96,25 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Invalid idempotency key format.', code: 'INVALID_IDEMPOTENCY_KEY' }, { status: 400 });
     }
 
-    if (!ad_id) {
-      return NextResponse.json({ error: 'Advertisement ID is required.' }, { status: 400 });
+    const cleanAdId = typeof ad_id === 'string' ? ad_id.trim().replace(/^#/, '') : '';
+    if (!/^[A-Za-z0-9._:-]{1,128}$/.test(cleanAdId)) {
+      return NextResponse.json({ error: 'Advertisement identifier is invalid.', code: 'INVALID_ADVERTISEMENT_ID' }, { status: 400 });
+    }
+    if (trade_ref !== undefined && trade_ref !== null &&
+        (typeof trade_ref !== 'string' || trade_ref.trim().length === 0 ||
+         trade_ref.trim().length > 128 || !/^[A-Za-z0-9._:-]+$/.test(trade_ref.trim()))) {
+      return NextResponse.json({ error: 'Trade reference is invalid.', code: 'INVALID_TRADE_REFERENCE' }, { status: 400 });
     }
 
-    const isIdUUID = isValidUUID(ad_id);
+    const isIdUUID = isValidUUID(cleanAdId);
 
     // 1. Fetch Ad safely to read metadata & parameters
     let ad: any = null;
     let p2pQuery = supabase.from('p2p_ads').select('*');
     if (isIdUUID) {
-      p2pQuery = p2pQuery.or(`id.eq.${ad_id},public_ad_id.eq.${ad_id}`);
+      p2pQuery = p2pQuery.or(`id.eq.${cleanAdId},public_ad_id.eq.${cleanAdId}`);
     } else {
-      p2pQuery = p2pQuery.or(`public_ad_id.eq.${ad_id},id.eq.${ad_id}`);
+      p2pQuery = p2pQuery.or(`public_ad_id.eq.${cleanAdId},id.eq.${cleanAdId}`);
     }
     const { data: p2pAd } = await p2pQuery.maybeSingle();
 
@@ -116,10 +122,10 @@ export async function POST(req: NextRequest) {
       ad = p2pAd;
     } else {
       if (isIdUUID) {
-        const { data: primaryAd } = await supabase.from('ads').select('*').eq('id', ad_id).maybeSingle();
+        const { data: primaryAd } = await supabase.from('ads').select('*').eq('id', cleanAdId).maybeSingle();
         if (primaryAd) ad = primaryAd;
       } else {
-        const { data: primaryAd } = await supabase.from('ads').select('*').or(`public_ad_id.eq.${ad_id},id.eq.${ad_id}`).maybeSingle();
+        const { data: primaryAd } = await supabase.from('ads').select('*').or(`public_ad_id.eq.${cleanAdId},id.eq.${cleanAdId}`).maybeSingle();
         if (primaryAd) ad = primaryAd;
       }
     }
@@ -140,28 +146,31 @@ export async function POST(req: NextRequest) {
     // Pricing is authoritative on the stored advertisement, never client input.
     const rawPrice = ad.fixed_rate ?? ad.price;
     const unitPrice = Number(rawPrice);
-    if (!rawPrice || isNaN(unitPrice) || unitPrice <= 0) {
+    if (!rawPrice || !Number.isFinite(unitPrice) || unitPrice <= 0) {
       return NextResponse.json(
         { error: 'Advertisement unit price is invalid or market price is unavailable.' },
         { status: 400 }
       );
     }
-    let calculatedCrypto = parseFloat(crypto_amount);
-    let numericFiat = parseFloat(fiat_amount);
+    let calculatedCrypto = Number(crypto_amount);
+    let numericFiat = Number(fiat_amount);
 
-    if (isNaN(calculatedCrypto) || calculatedCrypto <= 0) {
-      if (!isNaN(numericFiat) && numericFiat > 0 && unitPrice > 0) {
+    if (!Number.isFinite(calculatedCrypto) || calculatedCrypto <= 0) {
+      if (Number.isFinite(numericFiat) && numericFiat > 0 && unitPrice > 0) {
         calculatedCrypto = numericFiat / unitPrice;
       }
     }
 
-    if (isNaN(calculatedCrypto) || calculatedCrypto <= 0) {
+    if (!Number.isFinite(calculatedCrypto) || calculatedCrypto <= 0) {
       return NextResponse.json({ error: 'Invalid crypto amount.' }, { status: 400 });
     }
 
     calculatedCrypto = Number(calculatedCrypto.toFixed(8));
     // Exact fiat amount invariant: fiat_amount = ROUND(crypto_amount * price, 2)
     numericFiat = Number((calculatedCrypto * unitPrice).toFixed(2));
+    if (!Number.isFinite(calculatedCrypto) || calculatedCrypto <= 0 || !Number.isFinite(numericFiat) || numericFiat <= 0) {
+      return NextResponse.json({ error: 'Trade amount is outside the supported numeric range.' }, { status: 400 });
+    }
 
     // 4. Verify the stored advertisement's min/max limits using the shared validator.
     const limitError = validateAdFiatLimits(ad, numericFiat);
@@ -204,47 +213,8 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // 6. Enforce $1,000 USD Cumulative Limit for Unverified Accounts
-    if (!isKycVerified) {
-      const userFiatCurrency = (ad.fiat_currency || ad.fiat || 'USD').toUpperCase();
-      let fiatToUsdRate = 1.0;
-      if (userFiatCurrency === 'INR') fiatToUsdRate = 1 / 85.0;
-      else if (userFiatCurrency === 'EUR') fiatToUsdRate = 1.08;
-      else if (userFiatCurrency === 'GBP') fiatToUsdRate = 1.28;
-      else if (userFiatCurrency === 'CAD' || userFiatCurrency === 'AUD') fiatToUsdRate = 0.68;
-      else if (userFiatCurrency === 'AED') fiatToUsdRate = 0.27;
-
-      const currentTradeUsd = numericFiat * fiatToUsdRate;
-
-      const { data: pastTrades } = await supabase
-        .from('trades')
-        .select('fiat_amount, fiat_currency, status')
-        .or(`buyer_id.eq.${user.id},seller_id.eq.${user.id}`)
-        .in('status', ['COMPLETED', 'completed', 'PAID', 'paid', 'ESCROW_LOCKED', 'in_escrow', 'DISPUTED']);
-
-      let priorTradedUsd = 0;
-      if (pastTrades && pastTrades.length > 0) {
-        for (const t of pastTrades) {
-          const curr = (t.fiat_currency || 'USD').toUpperCase();
-          let rate = 1.0;
-          if (curr === 'INR') rate = 1 / 85.0;
-          else if (curr === 'EUR') rate = 1.08;
-          else if (curr === 'GBP') rate = 1.28;
-          else if (curr === 'CAD' || curr === 'AUD') rate = 0.68;
-          else if (curr === 'AED') rate = 0.27;
-          priorTradedUsd += (Number(t.fiat_amount) || 0) * rate;
-        }
-      }
-
-      if (priorTradedUsd + currentTradeUsd > 1000) {
-        return NextResponse.json(
-          {
-            error: `Unverified accounts have a cumulative limit of $1,000 USD in total trades (Current history: $${priorTradedUsd.toFixed(2)} USD). Please complete Identity Verification in Settings to trade without limits.`,
-          },
-          { status: 403 }
-        );
-      }
-    }
+    // Cumulative Tier 1 BUY volume and USD conversion are enforced transactionally by the escrow RPC.
+    // Do not repeat them here using client-side FX snapshots or both sides of historical trades.
 
     // 7. Resolve Payment Method & Currency
     let rawPaymentMethods: unknown[] = [];
@@ -276,8 +246,8 @@ export async function POST(req: NextRequest) {
     const resolvedPaymentMethod = matchedPaymentMethod;
     // Fiat currency is also canonicalized from the stored advertisement.
     const resolvedFiatCurrency = ad.fiat_currency || ad.fiat || 'USD';
-    const shortRef = trade_ref || generateTradeId();
-    const adIdentifier = String(ad.id || ad.public_ad_id || ad_id);
+    const shortRef = typeof trade_ref === 'string' && trade_ref.trim() ? trade_ref.trim() : generateTradeId();
+    const adIdentifier = String(ad.id || ad.public_ad_id || cleanAdId);
     const availabilityResponse = await checkAdOwnerAvailability(supabase, adIdentifier, idempotencyKey);
     if (availabilityResponse) return availabilityResponse;
 
