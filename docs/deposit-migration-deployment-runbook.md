@@ -32,9 +32,9 @@ The canonical `process_deposit_atomic(...)` function is currently executable by 
 
 The local working tree was inventoried against the live latest migration version:
 
-- 72 tracked SQL migration files were already present with versions newer than the production head before this infrastructure batch; that inventory includes the previous presence, trade-opening, 2FA/support and admin-action forward migrations.
+- 90 tracked SQL migration files are mapped with versions newer than the production head in the current local release inventory, including the search-path hardening candidate added in this batch.
 - 90 untracked historical SQL migration files have versions at or before the production head.
-- This infrastructure batch adds four more forward migrations after the production head, bringing the newer tracked release inventory from 72 to **76** once this batch is committed.
+- These counts describe separate sets: the newer tracked release candidates are not proof that any migration has been applied or approved for production.
 - Two older SQL migration files are modified locally:
   - `20260928020000_withdrawal_hardened_rpcs.sql`
   - `20260928070000_canonical_p2p_state_machine_and_rpcs.sql`
@@ -83,8 +83,9 @@ After the full migration-history reconciliation, execute all approved pending mi
 | 31 | `20261108170000_allow_authorized_offline_ad_replay.sql` | Lets an already-created trade participant reach escrow replay before current advertiser-online checks, while restricting the bypass to the authenticated participant and requiring fully active caller eligibility before offline-attempt side effects |
 | 32 | `20261108180000_empty_trade_dependency_search_paths.sql` | Sets empty search_path on the two KYC-volume helpers, pending-withdrawal helper and both trade-expiry SECURITY DEFINER functions after verifying qualified references; preserves bodies, owners and grants |
 | 33 | `20261108190000_empty_profile_trigger_search_paths.sql` | Sets empty search_path on 13 profile/KYC/trigger SECURITY DEFINER helpers after checking exact source anchors; preserves function bodies, owners and grants |
+| 34 | `20261108200000_empty_wallet_provisioning_search_path.sql` | Sets empty search_path on the active service-role-only `provision_user_wallets_atomic` RPC after checking all wallet/address table and custom-type references; preserves its body, owner and grants |
 
-This table shows the currently mapped ordered deposit, trade-opening, identity, support-admin, administrator-action, supporting-table, Wayones-branding, profile-privacy, wallet-index, administrator KYC/withdrawal-lock, atomic BUY-ad creation, marketplace DML lock-down, atomic advertisement status, terminal soft-delete, trade-opening row-lock, atomic bulk-ad-control, atomic content-edit, escrow replay eligibility, deterministic ad locking, offline-guard idempotent retry, trade/KYC dependency and profile/trigger search-path hardening sequence, **not permission to skip other pending migrations**. In the actual release, all approved migration versions between the current production head and the latest listed migration must be reconciled and applied in ascending order. In particular, the direct-credit ACL revocation must complete before any deposit scanner or confirmation worker is restarted.
+This table shows the currently mapped ordered deposit, trade-opening, identity, support-admin, administrator-action, supporting-table, Wayones-branding, profile-privacy, wallet-index, administrator KYC/withdrawal-lock, atomic BUY-ad creation, marketplace DML lock-down, atomic advertisement status, terminal soft-delete, trade-opening row-lock, atomic bulk-ad-control, atomic content-edit, escrow replay eligibility, deterministic ad locking, offline-guard idempotent retry, trade/KYC dependency, profile/trigger and wallet-provisioning search-path hardening sequence, **not permission to skip other pending migrations**. In the actual release, all approved migration versions between the current production head and the latest listed migration must be reconciled and applied in ascending order. In particular, the direct-credit ACL revocation must complete before any deposit scanner or confirmation worker is restarted.
 
 Apply each migration file separately using the approved Supabase migration mechanism and confirm its version appears in migration history before proceeding. The enum-only `20261108040000_add_restricted_user_status.sql` is a standalone migration and must be fully committed before `20261108041000` is applied. Stop on the first error; do not continue with later migrations.
 
@@ -137,11 +138,12 @@ If any pre-deployment gate cannot be verified, stop without applying migrations.
 28. Apply `20261108162000_harden_trade_escrow_replay_and_ad_lock.sql` after the canonical escrow function and its established security/grant contract are present. It adds caller eligibility checks before idempotency replay, requires active profile/account state and clears ban/restriction/on-hold/suspension/minor restriction/emergency freeze, caps idempotency keys at 200 characters, selects the exact ad identifier deterministically and locks the selected `public.ads` row with `FOR UPDATE`, validates caller and counterparty account status after locks, and tightens replay price equality. It preserves function owner, SECURITY DEFINER, empty `search_path`, grants, fee calculations, wallet updates and escrow accounting.
 29. Apply `20261108170000_allow_authorized_offline_ad_replay.sql` only after `20261108020000_guard_offline_ad_trade_opening.sql` and the canonical `trades.idempotency_key`/participant columns are present. It lets an existing trade participant reach escrow replay even when the advertisement has since paused or its owner went offline. Caller eligibility is still checked first; new trades still require the normal online flag and fresh heartbeat, and escrow performs its full fingerprint, ad, participant and amount checks. The patch preserves the availability RPC's owner, SECURITY DEFINER, empty `search_path` and grants.
 30. Apply `20261108180000_empty_trade_dependency_search_paths.sql` after confirming all five target functions have the exact existing owner, SECURITY DEFINER, current search_path, schema-qualified object references and role grants. It sets only their search_path to empty for the two KYC-volume helpers, pending-withdrawal helper and both trade-expiry functions. It does not replace function bodies or change ownership, execution ACLs or financial behavior.
-31. Apply `20261108190000_empty_profile_trigger_search_paths.sql` after confirming all 13 target helpers retain the exact owner, SECURITY DEFINER, previous search_path and grants. The reviewed references are schema-qualified or are trigger-record/builtin-only; the migration changes only the search_path and verifies that function bodies, owners and grants remain unchanged. Financial movement, deposit-credit, wallet-provisioning and sweep RPCs are deliberately outside this batch pending their separate source, ACL and migration-order review.
-32. After the Vault configuration is complete, schedule the media cleanup cron once by running `SELECT public.schedule_account_deletion_media_cleanup();` as `postgres`. Do not expose this helper to application roles.
-33. After every approved migration is applied, run all twenty-four SQL preflights in Section 5. Do not resume workers or trade-opening routes on a failure.
-34. Deploy the compatible application release containing the public-profile projection reads, atomic wallet-index allocator, atomic admin KYC/withdrawal-lock operations, atomic ad status mirroring, soft deletion, trade-opening row locking, bulk ad controls, atomic ad content edits, serialized ten-ad BUY creation, cross-store public ad ID trade resolution, pre-replay account eligibility and deterministic escrow ad-row locking, consistent advertiser availability checks across all trade entry points, authoritative Tier 1 BUY-volume gating, the offline idempotent-replay bypass, empty search_path on the reviewed trade/KYC dependency and profile/trigger helpers, leased deposit worker path, integrity monitor/quorum logic, 2FA, support-admin, admin-action, table dependencies and Wayones global branding.
-35. Confirm the deployed worker is running the intended release, then resume deposit ingestion, confirmation workers and trade-opening routes gradually while observing logs and database errors.
+31. Apply `20261108190000_empty_profile_trigger_search_paths.sql` after confirming all 13 target helpers retain the exact owner, SECURITY DEFINER, previous search_path and grants. The reviewed references are schema-qualified or are trigger-record/builtin-only; the migration changes only the search_path and verifies that function bodies, owners and grants remain unchanged. Financial movement, deposit-credit and sweep RPCs remain outside this batch pending their separate source, ACL and migration-order review.
+32. Apply `20261108200000_empty_wallet_provisioning_search_path.sql` after confirming `provision_user_wallets_atomic(uuid,integer,text,text,text,text)` retains its exact postgres owner, SECURITY DEFINER flag, `public, auth, pg_temp` path and service-role-only grant. Its wallet/address tables, `public.chain_network` type and non-catalog references are schema-qualified; the migration changes only the path and asserts the original function body and grants are unchanged.
+33. After the Vault configuration is complete, schedule the media cleanup cron once by running `SELECT public.schedule_account_deletion_media_cleanup();` as `postgres`. Do not expose this helper to application roles.
+34. After every approved migration is applied, run all twenty-five SQL preflights in Section 5. Do not resume workers or trade-opening routes on a failure.
+35. Deploy the compatible application release containing the public-profile projection reads, atomic wallet-index allocator, atomic admin KYC/withdrawal-lock operations, atomic ad status mirroring, soft deletion, trade-opening row locking, bulk ad controls, atomic ad content edits, serialized ten-ad BUY creation, cross-store public ad ID trade resolution, pre-replay account eligibility and deterministic escrow ad-row locking, consistent advertiser availability checks across all trade entry points, authoritative Tier 1 BUY-volume gating, the offline idempotent-replay bypass, empty search_path on the reviewed trade/KYC dependency, profile/trigger helpers and wallet provisioning RPC, leased deposit worker path, integrity monitor/quorum logic, 2FA, support-admin, admin-action, table dependencies and Wayones global branding.
+36. Confirm the deployed worker is running the intended release, then resume deposit ingestion, confirmation workers and trade-opening routes gradually while observing logs and database errors.
 
 Do not roll the application back to a version that calls the raw canonical credit RPC after the ACL migration has revoked that permission. If the new release fails after the ACL migration, leave deposit workers paused and deploy a forward fix.
 
@@ -173,6 +175,7 @@ Run these read-only preflights only after all approved migrations in Section 2 h
 22. `supabase/tests/offline_attempt_replay_preflight.sql`
 23. `supabase/tests/trade_dependency_search_path_preflight.sql`
 24. `supabase/tests/profile_trigger_search_path_preflight.sql`
+25. `supabase/tests/wallet_provisioning_search_path_preflight.sql`
 
 The first preflight also asserts the final server-only credit ACL, so do not use it as a pass criterion immediately after migration 1; run it after migration 3.
 
@@ -191,6 +194,7 @@ Verify all of the following:
 - The Tier 1 cumulative USD buy limit is enforced by the escrow RPC using its authoritative USD valuation and BUY-side volume. API routes do not estimate prior activity from both buyer and seller sides or apply hardcoded FX snapshots.
 - `get_user_kyc_tier(uuid)`, `get_user_cumulative_buy_volume(uuid)`, `has_pending_withdrawal_approval(uuid)`, `expire_p2p_trade(uuid)` and `cancel_expired_p2p_trades()` are postgres-owned SECURITY DEFINER functions with empty `search_path`, fully schema-qualified object references and their established role grants. The search-path migration changes no function body or execution ACL.
 - The 13 profile/KYC/trigger functions listed in `profile_trigger_search_path_preflight.sql` are postgres-owned SECURITY DEFINER functions with empty `search_path`; their existing bodies, ownership, SECURITY DEFINER status and grants are preserved.
+- `provision_user_wallets_atomic(uuid,integer,text,text,text,text)` is postgres-owned SECURITY DEFINER with empty `search_path`; its service-role-only execution boundary and function body are preserved.
 - `admin_bulk_ads_action_atomic(uuid,text,text)` is a postgres-owned, empty-search-path SECURITY DEFINER RPC executable only by `service_role`; each PAUSE/RESUME/DELETE action updates `ads`, `p2p_ads`, and `advertisements`, the global-pause setting and its administrator audit row in one transaction.
 - `advertisements.status`, `advertisements.is_deleted`, `advertisements.updated_at` and the validated `advertisements_status_state_check` exist; no global pause path attempts to write the previously missing status column.
 - Bulk resume only restores rows marked `GLOBAL_PAUSED`, whose owner is active and unrestricted, and whose direction is not SELL while atomic crypto inventory reservation remains unavailable.
@@ -256,7 +260,7 @@ Backup sources must be independent providers on the same mainnet and expose the 
 Resume the deposit workers only when:
 
 - migration history is reconciled and the approved ordered release is fully applied;
-- all twenty-four SQL preflights pass;
+- all twenty-five SQL preflights pass;
 - the direct raw-credit grant is absent and guarded wrapper grants are correct;
 - the compatible application commit is deployed;
 - the required provider quorum variables are configured for the supported chains;
@@ -271,13 +275,13 @@ No live financial transaction is required to establish these database and code-l
 
 ---
 
-**Current decision:** **NO-GO for production migration execution.** The historical migration-file reconciliation gate remains open, and confirmed application dependencies (deposit confirmation/integrity RPCs, presence, offline-ad trade-opening, atomic BUY-ad creation and marketplace DML hardening, canonical escrow replay/account/row-lock hardening, offline-guard idempotent retry hardening, 2FA lifecycle/rate-limit, support-admin, guarded admin account/trade RPCs, supporting tables and the public-profile projection) remain absent in production. The listed forward migrations and twenty-four preflight scripts are prepared locally only; no migration in this local release batch has been applied to production. Supabase Vault lacks `paxones_app_url` and `paxones_cron_secret`, so account-deletion media cleanup is not enabled. Keep admin dispute settlement feature-disabled.
+**Current decision:** **NO-GO for production migration execution.** The historical migration-file reconciliation gate remains open, and confirmed application dependencies (deposit confirmation/integrity RPCs, presence, offline-ad trade-opening, atomic BUY-ad creation and marketplace DML hardening, canonical escrow replay/account/row-lock hardening, offline-guard idempotent retry hardening, 2FA lifecycle/rate-limit, support-admin, guarded admin account/trade RPCs, supporting tables and the public-profile projection) remain absent in production. The listed forward migrations and twenty-five preflight scripts are prepared locally only; no migration in this local release batch has been applied to production. Supabase Vault lacks `paxones_app_url` and `paxones_cron_secret`, so account-deletion media cleanup is not enabled. Keep admin dispute settlement feature-disabled.
 
 See [the production migration reconciliation audit](production-migration-reconciliation.md) for confirmed missing RPC/table dependencies and superseded historical candidates.
 
 ## Appendix A. Tracked local migration files newer than the production head
 
-Inventory only; this list records the 89 tracked local SQL files with versions greater than `20261103204401` after the current ad-lifecycle forward migrations are committed. It is **not** a blanket approval to apply them. Each file remains subject to the historical-file reconciliation and review gates above. If the release inventory changes, regenerate this list before a production window.
+Inventory only; this list records the 90 tracked local SQL files with versions greater than `20261103204401` after the current ad-lifecycle forward migrations are committed. It is **not** a blanket approval to apply them. Each file remains subject to the historical-file reconciliation and review gates above. If the release inventory changes, regenerate this list before a production window.
 
 ```text
 20261104120000_withdrawal_confirmation_and_control_flags.sql
@@ -369,4 +373,5 @@ Inventory only; this list records the 89 tracked local SQL files with versions g
 20261108170000_allow_authorized_offline_ad_replay.sql
 20261108180000_empty_trade_dependency_search_paths.sql
 20261108190000_empty_profile_trigger_search_paths.sql
+20261108200000_empty_wallet_provisioning_search_path.sql
 ```

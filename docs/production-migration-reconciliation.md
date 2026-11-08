@@ -284,7 +284,7 @@ Before applying anything:
 3. Replay the exact approved migration release against a schema-faithful disposable database; do not mark historical migrations applied just to bypass history gaps.
 4. Include all approved intervening migrations in version order. The presence, offline-ad, 2FA, support-admin, restricted-enum, admin/trade and supporting-table forward candidates must be applied only after the prior historical-release reconciliation and in exact version order. Configure Vault and match the deployed `CRON_SECRET` before scheduling account-deletion media cleanup.
 5. Keep `PAXONES_ATOMIC_DISPUTE_SETTLEMENT_ENABLED` disabled until a separately approved isolated financial validation of the admin dispute wrapper has been completed.
-6. Deploy compatible application code and verify all twenty-four SQL preflights before resuming routes/workers.
+6. Deploy compatible application code and verify all twenty-five SQL preflights before resuming routes/workers.
 
 A production migration being absent does not authorize a code workaround that bypasses authorization, idempotency, financial fencing, or audit guarantees. Preserve fail-closed behavior until the matching database contract is installed.
 
@@ -360,11 +360,17 @@ Covers 13 reviewed profile/KYC/trigger helpers:
 
 The read-only production precondition query confirmed all 13 have the expected postgres owner, SECURITY DEFINER flag, exact existing search_path, execution grants and no PUBLIC EXECUTE. Exact body anchors for their schema-qualified references or trigger/builtin-only behavior were checked. The apparent EXECUTE match in fn_update_user_trade_metrics() is a comment phrase, not a dynamic SQL statement. supabase/tests/profile_trigger_search_path_preflight.sql asserts the post-change configuration and grants.
 
-Both prepared batches alter only each function's search_path; they preserve prosrc, owner, SECURITY DEFINER status and proacl. Both migration files and both preflights parse as PostgreSQL statements. These are local release candidates only: neither batch has been applied or DDL-rehearsed on production.
+The first two batches alter only each function's search_path; they preserve prosrc, owner, SECURITY DEFINER status and proacl. Both migration files and both preflights parse as PostgreSQL statements.
 
-### Remaining 27 functions for separate review
+**Batch 3 — 20261108200000_empty_wallet_provisioning_search_path.sql**
 
-The following 27 functions still have one of the inventoried public/auth/temp paths and were deliberately excluded from the two batches above:
+Covers the active application RPC `provision_user_wallets_atomic(uuid,integer,text,text,text,text)`. The production precondition query confirmed its postgres owner, SECURITY DEFINER flag, exact prior `search_path=public, auth, pg_temp`, service_role execute grant, no anon/authenticated/PUBLIC execute, all 11 required schema-qualified dependency anchors, no `auth.` source dependency and no dynamic SQL token. Its application callsite in `src/lib/hd-derivation-engine.ts` uses the service-role client. The migration alters only the function search_path and verifies that `prosrc`, owner, SECURITY DEFINER status and ACL are unchanged. `supabase/tests/wallet_provisioning_search_path_preflight.sql` checks the post-change source anchors, path and grant boundary.
+
+All three new migrations and their three SQL preflights parse as PostgreSQL statements. These are local release candidates only: none has been applied or DDL-rehearsed against production.
+
+### Remaining 26 functions with existing migration dependencies or retirement review
+
+The following 26 functions still have one of the inventoried public/auth/temp paths and are not included in the three new search-path-only batches above. Several already have dedicated hardening or retirement migrations in the ordered release; they must be reconciled against those migrations rather than patched a second time:
 
 - acquire_withdrawal_worker_lock()
 - admin_adjust_balance(text,uuid,text,text,numeric)
@@ -385,7 +391,6 @@ The following 27 functions still have one of the inventoried public/auth/temp pa
 - process_deposit_atomic(text,text,text,numeric,text,integer,bigint,text,text,integer,text)
 - process_user_deposit(uuid,text,numeric,text,text,text,text)
 - process_user_deposit(uuid,text,text,text,numeric,text)
-- provision_user_wallets_atomic(uuid,integer,text,text,text,text)
 - record_platform_ledger_entry(text,text,numeric,text,uuid,text,text,text,text,text,jsonb)
 - release_withdrawal_worker_lock()
 - reserve_utxos_for_sweep(uuid,text,jsonb,integer)
@@ -394,8 +399,71 @@ The following 27 functions still have one of the inventoried public/auth/temp pa
 - verify_and_lock_pre_broadcast_cleanup(uuid,text)
 - verify_sweep_ownership(uuid,text,text)
 
-These remaining functions include direct deposit-credit, transfer, admin-balance, wallet-provisioning, sweep, gas-funding and signed-transaction state paths. They require a separate review of all relation/type/function resolution, dynamic or generated SQL, call chains, execution ACLs and exact financial migration order before any search-path change. Do not batch them based on the absence of an obvious unqualified table reference alone.
+These remaining functions include direct deposit-credit, transfer, admin-balance, sweep, gas-funding, signed-transaction and legacy state paths. A subset is already covered by explicit, ordered forward candidates documented in Section 12; the others remain legacy/owner-only or require caller-graph review. Do not add a duplicate path-only migration or batch them based on the absence of an obvious unqualified table reference alone.
 
 The local audit also corrected false positives from simple text scanning: SQL aliases, trigger NEW/OLD fields, SET clauses, comment text and parameter names can look like unqualified relation references. A function is not approved for an empty path solely because a regex scan returns no obvious table name.
 
-**Current inventory disposition:** 18 of the 45 public/auth/temp-path functions have prepared search-path-only forward candidates; the remaining 27 are retained for separate review. The audit does not replace the 90-file historical migration reconciliation requirement and does not change the production NO-GO decision.
+**Current inventory disposition:** 19 of the 45 public/auth/temp-path functions have prepared search-path-only forward candidates across three new migrations; the remaining 26 are either mapped to earlier forward hardening/retirement candidates or retained for caller-graph review. The audit does not replace the 90-file historical migration reconciliation requirement and does not change the production NO-GO decision.
+
+## 12. Financial SECURITY DEFINER functions: existing forward-migration mapping
+
+The remaining path findings are not a reason to create one blanket ALTER FUNCTION migration. The current local release already contains ordered candidates that change search paths, replace obsolete signatures, or revoke direct execution. The following mappings were reconciled against the checked-in migration sources and the read-only production catalog where noted.
+
+### Canonical deposit credit and legacy credit routines
+
+process_deposit_atomic(text,text,text,numeric,text,integer,bigint,text,text,integer,text)
+
+- Production currently reports postgres ownership, SECURITY DEFINER, search_path=public, pg_temp, and service_role execution. The registration and lease-protected credit wrappers are absent in the live catalog.
+- 20261104130000_deposit_confirmation_contract.sql creates the pending-registration, claim/release and lease-protected credit wrappers, and changes the canonical credit function to search_path=pg_catalog.
+- 20261107210306_guard_terminal_deposit_registration_replay.sql is the dependent terminal-replay guard. Its live read-only preflight markers were checked: the exact current definition path marker, ledger replay guard, ledger reference identity, pending state and existing-row replay markers are present. Normalize CRLF to LF when comparing pg_get_functiondef; a raw line-ending comparison falsely reports the valid source anchors as missing.
+- 20261107211754_revoke_direct_deposit_credit_rpc_execution.sql then removes service_role from the raw credit primitive. It requires the wrappers and the postgres-owned SECURITY DEFINER/pg_catalog path to exist first.
+- Do not add another path migration or apply the direct-credit ACL revocation early. The three candidates are ordered as wrapper installation, terminal replay hardening, then direct service-role ACL revocation. Keep all deposit workers paused until the wrappers and final ACL preflight are present.
+
+The legacy credit_confirmed_deposit(...), ingest_and_credit_deposit(...) and both listed process_user_deposit(...) overloads currently have no anon/authenticated/service-role execution grant in the production catalog; their execution boundary is postgres-only. The older candidate 20261013231919_revoke_unverified_legacy_deposit_credit_rpcs.sql records their direct-service revocation. A source search found no direct application callsite for these legacy RPC names in src. Preserve the postgres-only boundary and complete a database caller-graph check before considering deletion or any body change.
+
+### Canonical internal transfer and legacy wallet-transfer retirement
+
+execute_internal_transfer(uuid,text,text,numeric,text)
+
+- Production currently reports postgres ownership, SECURITY DEFINER, search_path=public, pg_temp, and service_role execution.
+- 20261105220000_reconcile_authoritative_fee_configuration.sql is the configured-fee/receipt migration. Its production preconditions were checked read-only: public.app_settings and its unique key contract exist, and every exact source anchor in the live transfer definition matched after normalizing CRLF to LF. Those anchors include the search-path marker, caller identity guard, fee-rate declaration, replay guard/receipt, calculation block, request fingerprint and final receipt.
+- That migration changes the function path to pg_catalog, enforces the caller-identity guard, reads the configured fee from public.app_settings, and aligns replay and receipt fields. 20261107170000_snapshot_transfer_fee_rate_in_authoritative_receipt.sql depends on that configured-fee and receipt contract.
+- 20261107160000_restrict_legacy_financial_mutation_helpers.sql and 20261107180000_restrict_legacy_trade_kyc_helper_execution.sql provide later path/ACL restrictions on the canonical transfer and its supporting helpers. Do not replace these with a duplicate path-only patch.
+
+execute_wallet_transfer(uuid,uuid,text,numeric,numeric,text)
+
+- Production still contains the legacy postgres-owned SECURITY DEFINER routine with search_path=pg_catalog, public, pg_temp and service_role execution.
+- 20261106050000_retire_legacy_wallet_transfer_rpc_and_verify_transfer_contract.sql explicitly retires it by revoking execution from public client roles and service_role; its preconditions require the configured-fee canonical transfer receipt, search_path=pg_catalog, and the unique sender/idempotency index. The live unique index was confirmed present. A source search found no application callsite for this legacy RPC.
+- Do not apply this retirement before 20261105220000 and its required downstream contract. The retirement is safer than trying to rehabilitate a second balance/receipt implementation.
+
+### Shared legacy financial mutation helpers
+
+20261107160000_restrict_legacy_financial_mutation_helpers.sql is the mapped hardening candidate for:
+- admin_adjust_balance(...) overloads
+- ensure_user_balance_wallet(uuid,text)
+- mark_gas_funded(uuid,text)
+- mark_swept(uuid,text)
+- record_platform_ledger_entry(...)
+
+The live read-only preconditions were checked: the overload owners are postgres; the legacy helper caller scan found no PL/pgSQL function callers for the first four names; and the ledger-entry helper is called by complete_onchain_withdrawal and process_failed_withdrawal, both postgres-owned SECURITY DEFINER functions. The migration sets reviewed paths to empty and restricts direct service-role access. It must be kept in the ordered release; do not add a second generic helper migration.
+
+### Wallet nonce, sweep lifecycle and signed-transaction routines
+
+The following checked-in candidates already implement empty-path hardening, stronger state/lease fencing, replacement signatures, or direct-execution revocation. They must be reconciled/applied in their existing dependency order rather than copied into a new path migration:
+
+- allocate_hot_wallet_nonce(integer) and allocate_hot_wallet_nonce(text,text,bigint) — 20261107120000_revoke_direct_hot_wallet_nonce_allocators.sql; pins their paths and removes direct service-role execution in favour of the server-owned allocation flow.
+- claim_next_deposit_sweep(text,integer), extend_sweep_lease(uuid,text,integer) and verify_sweep_ownership(uuid,text,text) — 20261106114027_fence_sweeper_worker_leases_and_gas_funding_claims.sql.
+- update_sweep_operation_status(...), verify_and_lock_pre_broadcast_cleanup(uuid,text) and initialize_resource_delegation(...) — 20261107150000_harden_sweep_status_and_tron_cleanup_rpcs.sql.
+- persist_signed_evm_transaction(...) — the older seven-argument signature is replaced by the intent-bound signature in 20261105110000_bind_evm_sweep_intent.sql; do not harden an obsolete overload instead of reconciling the replacement.
+- reserve_utxos_for_sweep(...) — later UTXO lifecycle migrations use the intent-bound overload and preserve reserved values; reconcile the old four-argument compatibility signature separately rather than broadening its execution grants.
+- acquire_withdrawal_worker_lock() and release_withdrawal_worker_lock() — 20261103094840_retire_orphaned_withdrawal_helpers_and_restrict_networks.sql is the historical retirement/restriction candidate. The live catalog currently shows no anon/authenticated/service-role execute grant; do not revive these helpers for worker coordination.
+
+The matching source files contain empty-search-path settings for the intended hardened implementations, but the local catalog review in this step did not execute or DDL-rehearse those migrations. Their exact dependencies and signatures still require the normal production-catalog preflight at the time the approved release is reconciled.
+
+### Legacy KYC status writer
+
+sync_didit_kyc_status(uuid,text,text,jsonb) is covered by 20261108001000_retire_legacy_didit_kyc_status_writer.sql, which checks callers, retires the old status writer, pins the path and revokes direct execution. Do not create a competing path-only change; apply the retirement only after its replacement webhook/session contract is installed.
+
+initiate_p2p_trade(...) is similarly a legacy wrapper covered by 20261107180000_restrict_legacy_trade_kyc_helper_execution.sql; that migration hardens its path and removes direct execution so trade creation flows through the canonical escrow RPC.
+
+Result: the new empty-path batches now cover 19 of the 45 inventoried functions (5 trade dependencies, 13 profile/trigger helpers and the active wallet-provisioning RPC). The remaining 26 are mapped above to existing ordered forward hardening/retirement candidates or explicitly retained for legacy caller-graph review. This is an inventory and dependency mapping only: no migration from this section was applied to production, no production DDL was run, and the overall release remains NO-GO pending historical migration reconciliation and full ordered preflight.
