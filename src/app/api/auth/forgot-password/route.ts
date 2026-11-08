@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { getSupabaseAdminClient } from '@/lib/supabase/server';
 import { hashSecurityAnswer, verifySecurityAnswer } from '@/lib/security-answer';
+import { getURL } from '@/lib/utils';
 
 export const dynamic = 'force-dynamic';
 
@@ -43,8 +44,7 @@ async function readBoundedBody(req: Request): Promise<string | null> {
 }
 
 function getTrustedRecoveryOrigin(): string {
-  const configured = process.env.NEXT_PUBLIC_SITE_URL || process.env.NEXT_PUBLIC_APP_URL || 'https://paxones.com';
-  const parsed = new URL(configured);
+  const parsed = new URL(getURL());
   const isLocalDevelopment = process.env.NODE_ENV === 'development'
     && (parsed.hostname === 'localhost' || parsed.hostname === '127.0.0.1');
   if (parsed.protocol !== 'https:' && !isLocalDevelopment) {

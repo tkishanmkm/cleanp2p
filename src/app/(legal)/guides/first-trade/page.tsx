@@ -3,8 +3,8 @@ import { ArrowLeft, ArrowRight, CheckCircle2, AlertTriangle, Clock, MessageSquar
 import { Button } from '@/components/ui/button';
 
 export const metadata = {
-  title: 'Your First Trade | Paxones Trading Guide',
-  description: 'Step-by-step walkthrough for completing your first buy or sell trade safely on Paxones P2P.',
+  title: 'Your First Trade | Trading Guide',
+  description: 'Step-by-step walkthrough for completing your first buy or sell trade safely on Wayones P2P.',
 };
 
 export default function FirstTradeGuidePage() {
@@ -21,7 +21,7 @@ export default function FirstTradeGuidePage() {
           <Wallet className="h-3.5 w-3.5" /> Guide 02 • Practical Walkthrough
         </div>
         <h1 className="text-3xl sm:text-4xl font-black tracking-tight text-slate-900 dark:text-white">
-          Your First Trade on Paxones
+          Your First Trade on Wayones
         </h1>
         <p className="mt-3 text-lg text-slate-600 dark:text-slate-300 leading-relaxed">
           Master the complete process of buying or selling cryptocurrency with local fiat payment methods in a few simple, protected steps.
@@ -71,7 +71,7 @@ export default function FirstTradeGuidePage() {
           </p>
           <div className="p-4 bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-900/50 rounded-xl text-rose-900 dark:text-rose-200 text-xs flex items-start gap-2">
             <AlertTriangle className="h-4 w-4 shrink-0 mt-0.5 text-rose-600" />
-            <span><strong>CRITICAL PAYMENT RULE:</strong> Do NOT mention words like "crypto", "Bitcoin", "USDT", or "Paxones" in the bank transfer remarks or reference. Use only your name or the Trade ID number to avoid bank flags.</span>
+            <span><strong>CRITICAL PAYMENT RULE:</strong> Do NOT mention words like "crypto", "Bitcoin", "USDT", or "Wayones" in the bank transfer remarks or reference. Use only your name or the Trade ID number to avoid bank flags.</span>
           </div>
         </div>
 
@@ -93,7 +93,7 @@ export default function FirstTradeGuidePage() {
             <h2 className="text-xl font-bold text-slate-900 dark:text-white">Receive Crypto & Leave Feedback</h2>
           </div>
           <p className="text-sm text-slate-600 dark:text-slate-400">
-            The seller checks their actual bank account or wallet application. Once they verify the funds, they click <strong>"Release Crypto"</strong>. The cryptocurrency is instantly credited to your Paxones wallet balance. Leave a friendly positive rating to build community trust!
+            The seller checks their actual bank account or wallet application. Once they verify the funds, they click <strong>"Release Crypto"</strong>. The cryptocurrency is instantly credited to your Wayones wallet balance. Leave a friendly positive rating to build community trust!
           </p>
         </div>
 

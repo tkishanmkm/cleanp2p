@@ -357,7 +357,7 @@ export async function POST(
       .insert({
         trade_id: actualTradeId,
         sender_id: '00000000-0000-0000-0000-000000000000',
-        sender_username: 'Paxones System',
+        sender_username: 'Wayones System',
         type: eventType,
         message: text,
         metadata: payload as unknown as Record<string, unknown>,

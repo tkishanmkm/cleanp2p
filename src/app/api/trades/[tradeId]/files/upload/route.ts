@@ -142,7 +142,7 @@ export async function POST(
     if ((messageCount.count || 0) + (legacyMessageCount.count || 0) >= 100) {
       return NextResponse.json({
         error: 'TRADE_CHAT_LIMIT_REACHED',
-        message: `You have reached your 100-message limit for this trade. Contact support@paxones.com with Trade ID ${trade.id} and explain what moderators should review.`,
+        message: `You have reached your 100-message limit for this trade. Contact support@wayones.com with Trade ID ${trade.id} and explain what moderators should review.`,
       }, { status: 429 });
     }
 
@@ -328,7 +328,7 @@ export async function POST(
               .sub { fill: rgba(255, 255, 255, 0.9); font-size: 16px; font-family: sans-serif; }
             </style>
             <rect width="100%" height="100%" fill="rgba(0,0,0,0.5)" rx="6" />
-            <text x="20" y="45" class="title">PAXONES TRADE PROOF</text>
+            <text x="20" y="45" class="title">Wayones TRADE PROOF</text>
             <text x="20" y="85" class="sub">Trade ID: ${tradeId}</text>
             <text x="20" y="120" class="sub">Time: ${timestamp}</text>
           </svg>
@@ -409,7 +409,7 @@ export async function POST(
       if (fileRollbackError) console.error('Trade attachment metadata rollback failed:', fileRollbackError.code || 'unknown');
       if (!objectDeleted) console.error('Private trade object cleanup failed after chat insert rejection.');
       return NextResponse.json({
-        error: 'The file was uploaded, but could not be posted to chat. Please contact support@paxones.com with the trade ID.',
+        error: 'The file was uploaded, but could not be posted to chat. Please contact support@wayones.com with the trade ID.',
         code: chatError.code === 'P0001' ? 'TRADE_CHAT_LIMIT_REACHED' : 'TRADE_CHAT_INSERT_FAILED',
       }, { status: chatError.code === 'P0001' ? 429 : 503 });
     }

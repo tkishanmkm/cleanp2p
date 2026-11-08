@@ -8,7 +8,7 @@ function extractAvatarObjectKey(rawUrl: unknown, userId: string): string | null 
   if (typeof rawUrl !== 'string' || !rawUrl.trim()) return null;
 
   if (rawUrl.startsWith('/api/media/avatar/')) {
-    const parsed = new URL(rawUrl, 'https://paxones.invalid');
+    const parsed = new URL(rawUrl, 'https://Wayones.invalid');
     const extension = String(parsed.searchParams.get('ext') || '').toLowerCase();
     if (ALLOWED_AVATAR_EXTENSIONS.has(extension)) return `avatars/${userId}.${extension}`;
     const filename = decodeURIComponent(parsed.pathname.split('/').pop() || '');

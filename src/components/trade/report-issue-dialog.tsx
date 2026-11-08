@@ -149,7 +149,7 @@ export function ReportIssueDialog({
             <CheckCircle2 className="w-12 h-12 text-green-500 animate-in zoom-in" />
             <div className="text-base font-semibold text-foreground">Report Received</div>
             <p className="text-sm text-muted-foreground max-w-xs">
-              Thank you for keeping Paxones safe. An administrative officer has been assigned to this case.
+              Thank you for keeping Wayones safe. An administrative officer has been assigned to this case.
             </p>
           </div>
         ) : (

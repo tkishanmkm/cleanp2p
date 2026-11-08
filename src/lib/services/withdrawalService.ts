@@ -230,7 +230,7 @@ export async function executeCanonicalWithdrawal(input: WithdrawalRequestInput):
     return {
       success: false,
       status: 'ACCOUNT_RESTRICTED',
-      error: 'ACCOUNT_RESTRICTED: Withdrawals are restricted on your account. Please contact support@paxones.com.',
+      error: 'ACCOUNT_RESTRICTED: Withdrawals are restricted on your account. Please contact support@wayones.com.',
       message: 'Account restricted. Contact support.',
       statusCode: 403,
     };

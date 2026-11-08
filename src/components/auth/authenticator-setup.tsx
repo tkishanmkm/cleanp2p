@@ -14,7 +14,7 @@ interface AuthenticatorSetupProps {
 export default function AuthenticatorSetup({
   onSuccess,
   onCancel,
-  issuer = 'Paxones',
+  issuer = 'Wayones',
   accountName = 'User',
 }: AuthenticatorSetupProps) {
   const [manualSecret, setManualSecret] = useState('');

@@ -307,7 +307,7 @@ export default function MyTradesPage() {
       const link = document.createElement('a');
       const url = URL.createObjectURL(blob);
       link.setAttribute('href', url);
-      link.setAttribute('download', `paxones_activity_history_${Date.now()}.csv`);
+      link.setAttribute('download', `wayones_activity_history_${Date.now()}.csv`);
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);

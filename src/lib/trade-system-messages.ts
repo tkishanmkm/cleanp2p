@@ -1508,7 +1508,7 @@ export async function sendTradeSystemMessage(
         `📥 BUYER INSTRUCTIONS (@${metadata.buyerUsername}):\n` +
         `${buyerSteps.join('\n')}\n\n` +
         `⚠️ SELLER INSTRUCTIONS (@${metadata.sellerUsername}):\n` +
-        `• The crypto funds (${amount} ${asset} + escrow fee) are securely locked in Paxones Escrow.\n` +
+        `• The crypto funds (${amount} ${asset} + escrow fee) are securely locked in Wayones Escrow.\n` +
         `• Do NOT transfer crypto outside of this platform. Wait for the buyer to mark as paid and verify the receiving account directly.`;
       break;
 
@@ -1529,7 +1529,7 @@ export async function sendTradeSystemMessage(
         `✅ TRADE COMPLETED SUCCESSFULLY\n` +
         `----------------------------------------\n` +
         `Seller @${metadata.sellerUsername} confirmed receipt and released ${amount} ${asset} from escrow.\n` +
-        `• ${amount} ${asset} has been credited to @${metadata.buyerUsername}'s Paxones wallet.\n` +
+        `• ${amount} ${asset} has been credited to @${metadata.buyerUsername}'s Wayones wallet.\n` +
         `• Please leave trade feedback below using only Positive or Negative.`;
       break;
 
@@ -1548,7 +1548,7 @@ export async function sendTradeSystemMessage(
         `----------------------------------------\n` +
         `This trade has expired because the payment timer elapsed without confirmed payment.\n` +
         `• DO NOT MAKE PAYMENT: Coin is no longer held in escrow.\n` +
-        `• IF YOU ALREADY PAID: Do not make another payment. Open a new trade again immediately with this seller or contact Paxones Support with your payment proof.`;
+        `• IF YOU ALREADY PAID: Do not make another payment. Open a new trade again immediately with this seller or contact Wayones Support with your payment proof.`;
       break;
 
     case 'TRADE_DISPUTED':
@@ -1759,7 +1759,7 @@ export function formatSystemMessageContent(
       return (
         `🔒 TRADE INITIATED\n` +
         `------------------------\n` +
-        `• ${formattedAmount} ${cleanCoin} is safely held in Paxones Escrow.\n` +
+        `• ${formattedAmount} ${cleanCoin} is safely held in Wayones Escrow.\n` +
         `• Buyer (@${buyerUsername}): Please transfer payment according to the seller's payment instructions before the timer expires, then click "I have paid".\n` +
         `• Seller (@${sellerUsername}): Do NOT release escrow until you have verified incoming funds in your own account/statement.\n` +
         `• Security: Never share passwords, OTPs, or communicate off-platform.`
@@ -1773,7 +1773,7 @@ export function formatSystemMessageContent(
       );
 
     case 'TRADE_CANCELLED':
-      return `Trade cancelled. Do not send or pay for this trade. If you have already made a payment, do not cancel or abandon the situation. Open a new trade immediately and contact Paxones Support if assistance is required.`;
+      return `Trade cancelled. Do not send or pay for this trade. If you have already made a payment, do not cancel or abandon the situation. Open a new trade immediately and contact Wayones Support if assistance is required.`;
 
     case 'TRADE_EXPIRED':
       return (
@@ -1781,7 +1781,7 @@ export function formatSystemMessageContent(
         `----------------------------------------\n` +
         `This trade has expired because the payment timer elapsed without confirmed payment.\n` +
         `• DO NOT MAKE PAYMENT: Coin is no longer held in escrow.\n` +
-        `• IF YOU ALREADY PAID: Do not make another payment. Open a new trade again immediately with this seller or contact Paxones Support with your payment proof.`
+        `• IF YOU ALREADY PAID: Do not make another payment. Open a new trade again immediately with this seller or contact Wayones Support with your payment proof.`
       );
 
     case 'TRADE_DISPUTED': {
@@ -1880,16 +1880,16 @@ export function formatSystemMessageContent(
       );
 
     case 'MODERATOR_JOINED':
-      return 'Paxones Moderator joined the trade chat.';
+      return 'Wayones Moderator joined the trade chat.';
 
     case 'MESSAGE_BLOCKED':
-      return `Message blocked: For your security, off-platform communication or trading instructions are not permitted in Paxones Trade Chat. Please keep all trade-related communication within Paxones.`;
+      return `Message blocked: For your security, off-platform communication or trading instructions are not permitted in Wayones Trade Chat. Please keep all trade-related communication within Wayones.`;
 
     case 'SECURITY_REMINDER':
-      return `Paxones Security Reminder: Never share your password, 2FA code, private key, seed phrase, or recovery phrase with another user. Paxones Support will not ask you to disclose these credentials.`;
+      return `Wayones Security Reminder: Never share your password, 2FA code, private key, seed phrase, or recovery phrase with another user. Wayones Support will not ask you to disclose these credentials.`;
 
     default:
-      return customText || 'Paxones System Notification';
+      return customText || 'Wayones System Notification';
   }
 }
 
@@ -1914,7 +1914,7 @@ export async function insertPaxonesSystemMessage(
         id,
         tradeId: payload.tradeId,
         senderId: 'system',
-        senderUsername: 'Paxones System',
+        senderUsername: 'Wayones System',
         type: payload.type,
         metadata: payload as unknown as Record<string, unknown>,
         message: text,
@@ -1953,7 +1953,7 @@ export async function insertPaxonesSystemMessage(
     const { error } = await supabase.from('trade_system_events').upsert({
       trade_id: payload.tradeId,
       sender_id: '00000000-0000-0000-0000-000000000000',
-      sender_username: 'Paxones System',
+      sender_username: 'Wayones System',
       type: payload.type,
       message: text,
       metadata: payload as unknown as Record<string, unknown>,

@@ -306,7 +306,7 @@ export async function POST(req: NextRequest) {
     // on the first page of the Auth admin user listing.
 
     if (!recipientProfile) {
-      return NextResponse.json({ error: `Recipient "${targetIdentifier}" not found on Paxones.` }, { status: 404 });
+      return NextResponse.json({ error: `Recipient "${targetIdentifier}" not found on Wayones.` }, { status: 404 });
     }
 
     if (recipientProfile.id === user.id) {

@@ -3,6 +3,7 @@ import { createClient, getSupabaseAdminClient } from '@/lib/supabase/server';
 import { verifyServerAdmin } from '@/lib/server-admin-auth';
 import { saveKycAddressToB2 } from '@/lib/b2';
 import { isTier2User } from '@/lib/kyc';
+import { getURL } from '@/lib/utils';
 
 export const dynamic = 'force-dynamic';
 
@@ -246,7 +247,7 @@ export async function POST(req: NextRequest) {
     const diditBase = parsedDiditBaseUrl.toString().replace(/\/+$/, '');
     const targetUrl = new URL('session/', diditBase.endsWith('/') ? diditBase : diditBase + '/').toString();
 
-    const rawSiteUrl = (process.env.NEXT_PUBLIC_SITE_URL || process.env.NEXT_PUBLIC_APP_URL || 'https://paxones.com').trim();
+    const rawSiteUrl = getURL();
     let parsedSiteUrl: URL;
     try {
       parsedSiteUrl = new URL(rawSiteUrl);

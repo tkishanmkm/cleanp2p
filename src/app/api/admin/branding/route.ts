@@ -9,17 +9,37 @@ const BRANDING_KEYS = new Set([
   'primaryColor', 'accentColor', 'btcLogo', 'ethLogo', 'ltcLogo', 'usdtLogo',
 ]);
 
+const WAYONES_DEFAULT_BRANDING: Record<string, string> = {
+  appName: 'Wayones',
+  appLogo: '/logo-desktop.webp',
+  appLogoDesktop: '/logo-desktop.webp',
+  appLogoMobile: '/logo-mobile.webp',
+};
+
 function parseBranding(value: unknown): Record<string, string> {
-  if (typeof value !== 'string') return {};
-  try {
-    const parsed: unknown = JSON.parse(value);
-    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {};
-    return Object.fromEntries(
-      Object.entries(parsed).filter(([key, item]) => BRANDING_KEYS.has(key) && typeof item === 'string')
-    ) as Record<string, string>;
-  } catch {
-    return {};
+  let parsed: Record<string, string> = {};
+  if (typeof value === 'string') {
+    try {
+      const decoded: unknown = JSON.parse(value);
+      if (decoded && typeof decoded === 'object' && !Array.isArray(decoded)) {
+        parsed = Object.fromEntries(
+          Object.entries(decoded).filter(([key, item]) => BRANDING_KEYS.has(key) && typeof item === 'string')
+        ) as Record<string, string>;
+      }
+    } catch {
+      parsed = {};
+    }
   }
+
+  // A previous release could have persisted the former brand name and logo.
+  // Replace that one-time legacy configuration with the supplied Wayones
+  // assets. Subsequent admin-managed Wayones logo changes remain supported.
+  const hasWayonesBrand = parsed.appName?.trim().toLowerCase() === 'wayones';
+  return {
+    ...parsed,
+    ...(!hasWayonesBrand ? WAYONES_DEFAULT_BRANDING : {}),
+    appName: 'Wayones',
+  };
 }
 
 // Branding is public display configuration; app_settings is service-role-only.
@@ -57,7 +77,10 @@ export async function PUT(req: NextRequest) {
       return NextResponse.json({ error: 'Branding contains an unsupported or oversized value.' }, { status: 400 });
     }
 
-    const branding = Object.fromEntries(entries) as Record<string, string>;
+    const branding = {
+      ...(Object.fromEntries(entries) as Record<string, string>),
+      appName: 'Wayones',
+    };
     const supabaseAdmin = getSupabaseAdminClient();
     const { error } = await supabaseAdmin
       .from('app_settings')

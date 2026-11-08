@@ -54,7 +54,7 @@ export async function POST(req: Request) {
       if (prof?.username) reporterUsername = prof.username;
     } catch {}
 
-    // Post official Paxones system message to trade chat
+    // Post official Wayones system message to trade chat
     await insertPaxonesSystemMessage(getSupabaseAdminClient(), {
       tradeId,
       type: 'ISSUE_REPORTED',

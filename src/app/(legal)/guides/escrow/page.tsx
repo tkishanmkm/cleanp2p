@@ -3,8 +3,8 @@ import { ArrowLeft, Lock, ShieldCheck, Clock, CheckCircle2, AlertTriangle, Layer
 import { Button } from '@/components/ui/button';
 
 export const metadata = {
-  title: 'Understanding Escrow | Paxones Guides',
-  description: 'How the Paxones cryptographic escrow vault protects both buyers and sellers from fraud during every trade.',
+  title: 'Understanding Escrow | Guides',
+  description: 'How the Wayones cryptographic escrow vault protects both buyers and sellers from fraud during every trade.',
 };
 
 export default function EscrowGuidePage() {
@@ -34,7 +34,7 @@ export default function EscrowGuidePage() {
             <ShieldCheck className="h-6 w-6 text-emerald-600" /> What is an Escrow?
           </h2>
           <p>
-            An escrow is an impartial third-party holding mechanism. On Paxones, when a buyer initiates an order to purchase cryptocurrency from a seller, that exact amount of cryptocurrency is automatically deducted from the seller’s wallet and locked into the secure Paxones Escrow Vault.
+            An escrow is an impartial third-party holding mechanism. On Wayones, when a buyer initiates an order to purchase cryptocurrency from a seller, that exact amount of cryptocurrency is automatically deducted from the seller’s wallet and locked into the secure Wayones Escrow Vault.
           </p>
           <p>
             Neither the buyer nor the seller can withdraw or transfer these coins while the escrow is active. The cryptocurrency remains safely suspended until either:
@@ -42,7 +42,7 @@ export default function EscrowGuidePage() {
           <ul className="list-disc list-inside space-y-1 pl-2 text-slate-600 dark:text-slate-400">
             <li>The seller confirms receipt of fiat payment and unlocks the escrow to the buyer.</li>
             <li>The payment window expires without payment and the crypto safely reverts to the seller.</li>
-            <li>A dispute is opened and a Paxones compliance moderator evaluates proof and issues the coins to the rightful owner.</li>
+            <li>A dispute is opened and a Wayones compliance moderator evaluates proof and issues the coins to the rightful owner.</li>
           </ul>
         </section>
 
@@ -53,7 +53,7 @@ export default function EscrowGuidePage() {
               <CheckCircle2 className="h-5 w-5 text-emerald-600" /> How Escrow Protects Buyers
             </h3>
             <p className="text-sm text-slate-600 dark:text-slate-400">
-              When you send fiat money through your bank or payment app, the seller cannot run away with your cash. The cryptocurrency is already locked on our platform. Even if the seller goes offline or refuses to release, a Paxones moderator can inspect your payment receipt and release the crypto to your wallet.
+              When you send fiat money through your bank or payment app, the seller cannot run away with your cash. The cryptocurrency is already locked on our platform. Even if the seller goes offline or refuses to release, a Wayones moderator can inspect your payment receipt and release the crypto to your wallet.
             </p>
           </div>
 

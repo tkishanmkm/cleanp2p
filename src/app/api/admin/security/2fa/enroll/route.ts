@@ -46,8 +46,8 @@ export async function POST(req: NextRequest) {
     // Generate TOTP secret
     const secret = speakeasy.generateSecret({
       length: 20,
-      name: `Paxones Admin (${adminEmail})`,
-      issuer: 'Paxones Exchange',
+      name: `Wayones Admin (${adminEmail})`,
+      issuer: 'Wayones Exchange',
     });
 
     const otpauthUrl = secret.otpauth_url || '';

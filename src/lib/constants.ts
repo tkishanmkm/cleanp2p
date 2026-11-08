@@ -1,7 +1,7 @@
 import { ethers } from 'ethers';
 import type { CryptoCurrency, SupportedCrypto, Language } from './types';
 
-export const APP_NAME = 'Paxones';
+export const APP_NAME = 'Wayones';
 
 export const SUPPORTED_CRYPTOS: SupportedCrypto[] = [
   { name: 'USDT', chains: ["ERC20", "TRC20", "BEP20"] },

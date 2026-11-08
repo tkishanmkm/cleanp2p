@@ -67,8 +67,9 @@ After the full migration-history reconciliation, execute all approved pending mi
 | 15 | `20261108050000_restore_trade_event_and_chat_limit_tables.sql` | Restores server-only trade system-event persistence and chat-limit support-request idempotency tables |
 | 16 | `20261108051000_restore_admin_wallet_and_deposit_address_registries.sql` | Restores admin-only platform wallet reads and the strict full-admin rotating deposit-address registry |
 | 17 | `20261108052000_restore_account_deletion_grace_period.sql` | Restores the 20-day deletion schedule, server-only cleanup queue, fail-closed finalizer, and postgres-only cleanup scheduler; media cron remains gated on Vault secrets |
+| 18 | `20261108060000_rebrand_wayones_database_messages_and_callbacks.sql` | Rebrands deployed database-generated moderator/system labels and asynchronous callback URLs without changing function security or historical chat rows |
 
-This table shows the currently mapped ordered deposit, trade-opening, identity, support-admin, administrator-action and supporting-table remediation sequence, **not permission to skip other pending migrations**. In the actual release, all approved migration versions between the current production head and the latest listed migration must be reconciled and applied in ascending order. In particular, the direct-credit ACL revocation must complete before any deposit scanner or confirmation worker is restarted.
+This table shows the currently mapped ordered deposit, trade-opening, identity, support-admin, administrator-action, supporting-table and Wayones-branding remediation sequence, **not permission to skip other pending migrations**. In the actual release, all approved migration versions between the current production head and the latest listed migration must be reconciled and applied in ascending order. In particular, the direct-credit ACL revocation must complete before any deposit scanner or confirmation worker is restarted.
 
 Apply each migration file separately using the approved Supabase migration mechanism and confirm its version appears in migration history before proceeding. The enum-only `20261108040000_add_restricted_user_status.sql` is a standalone migration and must be fully committed before `20261108041000` is applied. Stop on the first error; do not continue with later migrations.
 
@@ -107,10 +108,11 @@ If any pre-deployment gate cannot be verified, stop without applying migrations.
 15. Apply `20261108050000_restore_trade_event_and_chat_limit_tables.sql` to restore server-only system events and chat-limit support idempotency.
 16. Apply `20261108051000_restore_admin_wallet_and_deposit_address_registries.sql` after the strict full-admin helper from `20261108033000` is present.
 17. Apply `20261108052000_restore_account_deletion_grace_period.sql`; its finalizer cron is postgres-owned and fails closed while either Vault secret is missing. Do not schedule media cleanup until the Vault app URL and cron secret are configured and the cron secret matches the deployed `CRON_SECRET`.
-18. After the Vault configuration is complete, schedule the media cleanup cron once by running `SELECT public.schedule_account_deletion_media_cleanup();` as `postgres`. Do not expose this helper to application roles.
-19. Run all ten SQL preflights in Section 5. Do not resume workers or trade-opening routes on a failure.
-20. Deploy the compatible application release containing the leased deposit worker path, integrity monitor/quorum logic, 2FA, support-admin, admin-action and table dependencies.
-21. Confirm the deployed worker is running the intended release, then resume deposit ingestion, confirmation workers and trade-opening routes gradually while observing logs and database errors.
+18. Apply `20261108060000_rebrand_wayones_database_messages_and_callbacks.sql` after the earlier migration files have been reconciled and applied in version order.
+19. After the Vault configuration is complete, schedule the media cleanup cron once by running `SELECT public.schedule_account_deletion_media_cleanup();` as `postgres`. Do not expose this helper to application roles.
+20. Run all eleven SQL preflights in Section 5. Do not resume workers or trade-opening routes on a failure.
+21. Deploy the compatible application release containing the leased deposit worker path, integrity monitor/quorum logic, 2FA, support-admin, admin-action, table dependencies and Wayones global branding.
+22. Confirm the deployed worker is running the intended release, then resume deposit ingestion, confirmation workers and trade-opening routes gradually while observing logs and database errors.
 
 Do not roll the application back to a version that calls the raw canonical credit RPC after the ACL migration has revoked that permission. If the new release fails after the ACL migration, leave deposit workers paused and deploy a forward fix.
 
@@ -128,6 +130,7 @@ Run these read-only preflights only after all approved migrations in Section 2 h
 8. `supabase/tests/admin_user_trade_action_contract_preflight.sql`
 9. `supabase/tests/trade_admin_registry_contract_preflight.sql`
 10. `supabase/tests/account_deletion_grace_period_preflight.sql`
+11. `supabase/tests/wayones_database_branding_preflight.sql`
 
 The first preflight also asserts the final server-only credit ACL, so do not use it as a pass criterion immediately after migration 1; run it after migration 3.
 
@@ -156,6 +159,7 @@ Verify all of the following:
 - Restricted/suspended/banned statuses and emergency freeze pause offers in `advertisements`, `ads` and `p2p_ads`; unfreeze does not reactivate them.
 - Admin mark-paid uses the canonical mark-paid transition and writes the required audit without a direct wallet mutation.
 - Admin dispute settlement checks the final dispute/trade state and has mandatory same-transaction audit; its runtime feature flag remains disabled pending separately approved isolated financial validation.
+- Database-generated moderator/system messages use Wayones and asynchronous wallet/withdrawal callback URLs target `https://wayones.com`; the forward branding preflight verifies that all ten function signatures retain postgres ownership, SECURITY DEFINER and empty `search_path`.
 - Trade-system events are stored in a service-role-only table outside Supabase Realtime and use a unique `(trade_id, dedupe_key)` contract.
 - Chat-limit support reservations use a unique `(trade_id, user_id)` key and service-role-only table access.
 - Platform wallet addresses are read-only to authenticated administrators under a strict full-admin policy; rotating deposit-address sets allow authenticated CRUD only under the same strict policy.
@@ -194,7 +198,7 @@ Backup sources must be independent providers on the same mainnet and expose the 
 Resume the deposit workers only when:
 
 - migration history is reconciled and the approved ordered release is fully applied;
-- all ten SQL preflights pass;
+- all eleven SQL preflights pass;
 - the direct raw-credit grant is absent and guarded wrapper grants are correct;
 - the compatible application commit is deployed;
 - the required provider quorum variables are configured for the supported chains;
@@ -209,13 +213,13 @@ No live financial transaction is required to establish these database and code-l
 
 ---
 
-**Current decision:** **NO-GO for production migration execution.** The historical migration-file reconciliation gate remains open, and confirmed application dependencies (deposit confirmation/integrity RPCs, presence, offline-ad trade-opening, 2FA lifecycle/rate-limit, support-admin, guarded admin account/trade RPCs and supporting tables) remain absent in production. The thirteen forward migrations and ten preflights are prepared and rollback-rehearsed only; no production migration has been applied. Supabase Vault lacks `paxones_app_url` and `paxones_cron_secret`, so account-deletion media cleanup is not enabled. Keep admin dispute settlement feature-disabled.
+**Current decision:** **NO-GO for production migration execution.** The historical migration-file reconciliation gate remains open, and confirmed application dependencies (deposit confirmation/integrity RPCs, presence, offline-ad trade-opening, 2FA lifecycle/rate-limit, support-admin, guarded admin account/trade RPCs and supporting tables) remain absent in production. The fourteen forward migrations and eleven preflights are prepared and rollback-rehearsed only; no production migration has been applied. Supabase Vault lacks `paxones_app_url` and `paxones_cron_secret`, so account-deletion media cleanup is not enabled. Keep admin dispute settlement feature-disabled.
 
 See [the production migration reconciliation audit](production-migration-reconciliation.md) for confirmed missing RPC/table dependencies and superseded historical candidates.
 
 ## Appendix A. Tracked local migration files newer than the production head
 
-Inventory only; this list records the 75 tracked local SQL files with versions greater than `20261103204401` after the current forward migrations are committed. It is **not** a blanket approval to apply them. Each file remains subject to the historical-file reconciliation and review gates above. If the release inventory changes, regenerate this list before a production window.
+Inventory only; this list records the 76 tracked local SQL files with versions greater than `20261103204401` after the current forward migrations are committed. It is **not** a blanket approval to apply them. Each file remains subject to the historical-file reconciliation and review gates above. If the release inventory changes, regenerate this list before a production window.
 
 ```text
 20261104120000_withdrawal_confirmation_and_control_flags.sql
@@ -293,4 +297,5 @@ Inventory only; this list records the 75 tracked local SQL files with versions g
 20261108050000_restore_trade_event_and_chat_limit_tables.sql
 20261108051000_restore_admin_wallet_and_deposit_address_registries.sql
 20261108052000_restore_account_deletion_grace_period.sql
+20261108060000_rebrand_wayones_database_messages_and_callbacks.sql
 ```

@@ -2,7 +2,6 @@
 
 import React, { createContext, useContext, ReactNode, useState, useEffect } from 'react';
 
-
 export interface BrandingConfig {
   appLogo?: string;
   appLogoDesktop?: string;
@@ -22,12 +21,53 @@ interface BrandingContextType {
   setBrandingConfig: (config: Partial<BrandingConfig>) => void;
 }
 
+const BRANDING_CACHE_KEY = 'app_branding_config';
+const BRANDING_VERSION_KEY = 'wayones_branding_version';
+const BRANDING_VERSION = '1';
+
 const defaultBranding: BrandingConfig = {
-  appName: 'Paxones',
+  appName: 'Wayones',
   appLogo: '/logo-desktop.webp',
   appLogoDesktop: '/logo-desktop.webp',
   appLogoMobile: '/logo-mobile.webp',
 };
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return !!value && typeof value === 'object' && !Array.isArray(value);
+}
+
+function readCachedBranding(): BrandingConfig {
+  try {
+    const cached = localStorage.getItem(BRANDING_CACHE_KEY);
+    const parsed: unknown = cached ? JSON.parse(cached) : {};
+    if (!isRecord(parsed)) return defaultBranding;
+
+    if (localStorage.getItem(BRANDING_VERSION_KEY) !== BRANDING_VERSION) {
+      // One-time migration: discard stale app name and old app-logo overrides,
+      // but preserve crypto icons and appearance colors selected by the user.
+      const migrated: BrandingConfig = {
+        ...defaultBranding,
+        ...(typeof parsed.primaryColor === 'string' ? { primaryColor: parsed.primaryColor } : {}),
+        ...(typeof parsed.accentColor === 'string' ? { accentColor: parsed.accentColor } : {}),
+        ...(typeof parsed.btcLogo === 'string' ? { btcLogo: parsed.btcLogo } : {}),
+        ...(typeof parsed.ethLogo === 'string' ? { ethLogo: parsed.ethLogo } : {}),
+        ...(typeof parsed.ltcLogo === 'string' ? { ltcLogo: parsed.ltcLogo } : {}),
+        ...(typeof parsed.usdtLogo === 'string' ? { usdtLogo: parsed.usdtLogo } : {}),
+      };
+      localStorage.setItem(BRANDING_CACHE_KEY, JSON.stringify(migrated));
+      localStorage.setItem(BRANDING_VERSION_KEY, BRANDING_VERSION);
+      return migrated;
+    }
+
+    return {
+      ...defaultBranding,
+      ...parsed,
+      appName: 'Wayones',
+    } as BrandingConfig;
+  } catch {
+    return defaultBranding;
+  }
+}
 
 const BrandingContext = createContext<BrandingContextType>({
   branding: defaultBranding,
@@ -40,25 +80,23 @@ export function BrandingProvider({ children }: { children: ReactNode }) {
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
-    // 1. Initial check from localStorage for fast local persistence
     try {
-      const cached = localStorage.getItem('app_branding_config');
-      if (cached) {
-        const parsed = JSON.parse(cached);
-        setBranding((prev) => ({ ...prev, ...parsed }));
-      }
-    } catch (e) {
-      console.warn('Could not read cached branding from localStorage');
+      setBranding(readCachedBranding());
+    } catch {
+      setBranding(defaultBranding);
     }
 
-    // 2. Fetch the public branding payload through the server API.
     async function fetchBranding() {
       try {
         const response = await fetch('/api/admin/branding', { cache: 'no-store' });
         if (!response.ok) throw new Error(`Branding request failed (${response.status})`);
         const result = await response.json();
-        if (result?.success && result.branding && typeof result.branding === 'object') {
-          setBranding((prev) => ({ ...prev, ...result.branding }));
+        if (result?.success && isRecord(result.branding)) {
+          setBranding((prev) => ({
+            ...prev,
+            ...result.branding,
+            appName: 'Wayones',
+          }));
         }
       } catch (err) {
         console.warn('Notice loading branding config from server:', err);
@@ -67,12 +105,12 @@ export function BrandingProvider({ children }: { children: ReactNode }) {
       }
     }
 
-    fetchBranding();
+    void fetchBranding();
 
-    // 3. Listen for window storage/custom events
-    const handleCustomBranding = (e: any) => {
-      if (e.detail) {
-        setBranding((prev) => ({ ...prev, ...e.detail }));
+    const handleCustomBranding = (event: Event) => {
+      const config = (event as CustomEvent<Partial<BrandingConfig>>).detail;
+      if (isRecord(config)) {
+        setBranding((prev) => ({ ...prev, ...config, appName: 'Wayones' }));
       }
     };
     window.addEventListener('branding_updated', handleCustomBranding);
@@ -84,10 +122,13 @@ export function BrandingProvider({ children }: { children: ReactNode }) {
 
   const setBrandingConfig = (config: Partial<BrandingConfig>) => {
     setBranding((prev) => {
-      const updated = { ...prev, ...config };
+      const updated: BrandingConfig = { ...prev, ...config, appName: 'Wayones' };
       try {
-        localStorage.setItem('app_branding_config', JSON.stringify(updated));
-      } catch (e) {}
+        localStorage.setItem(BRANDING_CACHE_KEY, JSON.stringify(updated));
+        localStorage.setItem(BRANDING_VERSION_KEY, BRANDING_VERSION);
+      } catch {
+        // Brand defaults remain available from the bundled application assets.
+      }
       return updated;
     });
   };

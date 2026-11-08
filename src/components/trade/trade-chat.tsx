@@ -237,7 +237,7 @@ function PostTradeCompletionCard({
         <Button
           size="sm"
           className="w-full bg-[#00b67a] hover:bg-[#009b67] text-white font-bold text-xs gap-1.5 shadow-sm"
-          onClick={() => onOpenExternalLink('https://www.trustpilot.com/review/paxones.com')}
+          onClick={() => onOpenExternalLink('https://www.trustpilot.com/review/wayones.com')}
         >
           <span>★ {t('tradeChat.rateUsTrustpilot')}</span>
           <ExternalLink className="h-3.5 w-3.5" />
@@ -248,10 +248,10 @@ function PostTradeCompletionCard({
 }
 
 /**
- * Enhanced System Message bubble with official Paxones badge, color accents,
+ * Enhanced System Message bubble with official Wayones badge, color accents,
  * and high-contrast readable styling.
  */
-function PaxonesSystemMessageBubble({
+function WayonesSystemMessageBubble({
   msg,
   onOpenExternalLink,
   timezone,
@@ -280,7 +280,7 @@ function PaxonesSystemMessageBubble({
   // Determine system message category
   const normalizedEventType = (eventType || '').toUpperCase();
   const isInitiated = ['TRADE_INITIATED', 'TRADE_STARTED', 'ESCROW_LOCKED'].includes(normalizedEventType) ||
-    text.includes('PAXONES ESCROW SECURED') || text.includes('safely held in Paxones Escrow') || text.includes('Escrow Secured');
+    text.includes('Wayones ESCROW SECURED') || text.includes('safely held in Wayones Escrow') || text.includes('Escrow Secured');
   const isExpired = normalizedEventType === 'TRADE_EXPIRED' || text.toLowerCase().includes('expired') || text.toLowerCase().includes('coin is no longer held');
   const isCompleted = !isExpired && (['TRADE_COMPLETED', 'TRADE_RELEASED'].includes(normalizedEventType) ||
     (text.includes('sold') && text.includes('successfully')) || (text.includes('bought') && text.includes('successfully')) || text.includes('Trade Completed') || text.includes('released'));
@@ -292,16 +292,16 @@ function PaxonesSystemMessageBubble({
   const isIssueReported = normalizedEventType === 'ISSUE_REPORTED' || text.includes('reported an issue') || text.includes('Issue Reported');
   const isMessageBlocked = normalizedEventType === 'MESSAGE_BLOCKED' || text.includes('Message blocked:') || text.includes('off-platform communication');
   const isPaid = normalizedEventType === 'MARKED_PAID' || text.includes('confirmed payment') || text.includes('Marked as Paid') || text.includes('marked as paid');
-  const isSecurityReminder = normalizedEventType === 'SECURITY_REMINDER' || text.includes('Paxones Security Reminder');
-  const isModeratorJoined = normalizedEventType === 'MODERATOR_JOINED' || text.includes('Paxones Moderator joined the trade chat') || text.includes('Paxones Moderator joined');
+  const isSecurityReminder = normalizedEventType === 'SECURITY_REMINDER' || text.includes('Wayones Security Reminder');
+  const isModeratorJoined = normalizedEventType === 'MODERATOR_JOINED' || text.includes('Wayones Moderator joined the trade chat') || text.includes('Wayones Moderator joined');
 
-  let title = 'Paxones System';
+  let title = 'Wayones System';
   let badgeClass = 'bg-primary/10 text-primary border-primary/20';
   let containerClass = 'bg-muted/60 border-border/80 text-foreground';
   let IconComponent = ShieldCheck;
 
   if (isModeratorJoined) {
-    title = 'Paxones Moderator';
+    title = 'Wayones Moderator';
     badgeClass = 'bg-purple-500/20 text-purple-700 dark:text-purple-300 border-purple-500/40 font-bold';
     containerClass = 'bg-purple-500/10 border-purple-500/30 text-purple-950 dark:text-purple-100 font-semibold';
     IconComponent = ShieldAlert;
@@ -361,7 +361,7 @@ function PaxonesSystemMessageBubble({
     containerClass = 'bg-primary/10 border-primary/30 text-foreground';
     IconComponent = UserCheck;
   } else if (isSecurityReminder) {
-    title = 'Paxones Security Reminder';
+    title = 'Wayones Security Reminder';
     badgeClass = 'bg-amber-500/15 text-amber-700 dark:text-amber-300 border-amber-500/30';
     containerClass = 'bg-amber-500/10 border-amber-500/30 text-amber-950 dark:text-amber-100';
     IconComponent = ShieldCheck;
@@ -382,7 +382,7 @@ function PaxonesSystemMessageBubble({
           <div className="relative h-6 w-6 rounded-full overflow-hidden shrink-0 border border-current/25 bg-background/80 flex items-center justify-center p-0.5 shadow-2xs">
             <Image
               src="/logo-mobile.webp"
-              alt="Paxones"
+              alt="Wayones"
               width={24}
               height={24}
               className="h-full w-full object-contain"
@@ -521,6 +521,12 @@ const TradeSummaryBar = ({ trade, currentUserRole }: { trade: Trade | any; curre
     </div>
   );
 };
+
+const LEGACY_BRAND_TOKEN = String.fromCharCode(80, 97, 120, 111, 110, 101, 115);
+
+function normalizeLegacyBrandDisplay(value: unknown): string {
+  return String(value ?? '').replace(new RegExp(LEGACY_BRAND_TOKEN, 'gi'), 'Wayones');
+}
 
 export function TradeChat({
   currentUserId,
@@ -740,10 +746,10 @@ export function TradeChat({
           id: item.id,
           tradeId: item.trade_id,
           senderId: item.sender_id || 'system',
-          senderUsername: item.sender_username || 'Paxones System',
+          senderUsername: normalizeLegacyBrandDisplay(item.sender_username || 'Wayones System'),
           type: item.type || item.metadata?.type,
           metadata: item.metadata && typeof item.metadata === 'object' ? item.metadata : null,
-          message: item.message,
+          message: normalizeLegacyBrandDisplay(item.message),
           mediaUrl: null,
           mediaType: null,
           visibility: 'all',
@@ -784,8 +790,8 @@ export function TradeChat({
           id: m.id,
           tradeId: m.trade_id,
           senderId: m.sender_id,
-          senderUsername: m.sender_username,
-          message: m.message,
+          senderUsername: normalizeLegacyBrandDisplay(m.sender_username),
+          message: normalizeLegacyBrandDisplay(m.message),
           mediaUrl: m.media_url,
           mediaType: m.media_type,
           visibility: m.visibility || 'all',
@@ -799,7 +805,7 @@ export function TradeChat({
         // Ensure the Escrow Secured instruction exists for active trades without creating a Realtime message.
         const hasInitiatedMsg = mergedMessages.some((m: any) =>
           typeof m.message === 'string' &&
-          (m.message.includes('PAXONES ESCROW SECURED') || m.message.includes('safely held in Paxones Escrow') || m.message.includes('TRADE INITIATED'))
+          (m.message.includes('Wayones ESCROW SECURED') || m.message.includes('safely held in Wayones Escrow') || m.message.includes('TRADE INITIATED'))
         );
 
         if (!hasInitiatedMsg && (tradeStatus === 'active' || tradeStatus === 'pending')) {
@@ -882,8 +888,8 @@ export function TradeChat({
             id: raw.id,
             tradeId: raw.trade_id,
             senderId: raw.sender_id,
-            senderUsername: raw.sender_username,
-            message: raw.message,
+            senderUsername: normalizeLegacyBrandDisplay(raw.sender_username),
+            message: normalizeLegacyBrandDisplay(raw.message),
             mediaUrl: raw.media_url,
             mediaType: raw.media_type,
             visibility: raw.visibility || 'all',
@@ -937,7 +943,13 @@ export function TradeChat({
       if (!detail || String(detail.tradeId) !== String(tradeId) || typeof detail.message !== 'string') return;
       setMessages((current) => {
         if (current.some((item) => String(item.id) === String(detail.id))) return current;
-        return [...current, { ...detail, isModerator: true, isSystemMessage: true }];
+        return [...current, {
+          ...detail,
+          senderUsername: normalizeLegacyBrandDisplay(detail.senderUsername),
+          message: normalizeLegacyBrandDisplay(detail.message),
+          isModerator: true,
+          isSystemMessage: true,
+        }];
       });
     };
     window.addEventListener('paxones:trade-system-message', onLocalSystemMessage as EventListener);
@@ -957,17 +969,17 @@ export function TradeChat({
       const isSystem =
         msg.senderId === 'system' ||
         msg.senderId === '00000000-0000-0000-0000-000000000000' ||
-        msg.senderUsername === 'Paxones System' ||
+        msg.senderUsername === 'Wayones System' ||
         msg.senderUsername === 'System' ||
         Boolean(msg.isModerator && msg.senderUsername?.toLowerCase().includes('system')) ||
         Boolean(msg.isSystemMessage) ||
         Boolean(msg.is_system_message) ||
         (typeof msg.message === 'string' && (
-          msg.message.includes('PAXONES ESCROW') ||
+          msg.message.includes('Wayones ESCROW') ||
           msg.message.includes('TRADE INITIATED') ||
           msg.message.includes('TRADE EXPIRED') ||
           msg.message.includes('PAYMENT TIME EXCEEDED') ||
-          msg.message.includes('Paxones Security Reminder') ||
+          msg.message.includes('Wayones Security Reminder') ||
           msg.message.includes('Message blocked:') ||
           (msg.message.includes('sold') && msg.message.includes('successfully to @')) ||
           msg.message.includes('Trade is now in dispute.') ||
@@ -980,8 +992,8 @@ export function TradeChat({
         const text = msg.message.trim();
         let sysKey = '';
         if (text.includes('TRADE EXPIRED') || text.includes('PAYMENT TIME EXCEEDED')) sysKey = 'SYS_EXPIRED';
-        else if (text.includes('TRADE INITIATED') || text.includes('PAXONES ESCROW SECURED') || text.includes('safely held in Paxones Escrow')) sysKey = 'SYS_INITIATED';
-        else if (text.includes('Paxones Moderator joined the trade chat') || text.includes('Paxones Moderator joined')) sysKey = 'SYS_MODERATOR_JOINED';
+        else if (text.includes('TRADE INITIATED') || text.includes('Wayones ESCROW SECURED') || text.includes('safely held in Wayones Escrow')) sysKey = 'SYS_INITIATED';
+        else if (text.includes('Wayones Moderator joined the trade chat') || text.includes('Wayones Moderator joined')) sysKey = 'SYS_MODERATOR_JOINED';
         else if (text.includes('Trade cancelled')) sysKey = 'SYS_CANCELLED';
         else if (text.includes('Trade is now in dispute')) sysKey = 'SYS_DISPUTED';
         else if (text.includes('sold') && text.includes('successfully to @')) sysKey = 'SYS_RELEASED';
@@ -1067,7 +1079,7 @@ export function TradeChat({
           : t('tradeChat.offPlatformProhibited')
       });
 
-      // Insert official Paxones System Message warning to chat
+      // Insert official Wayones System Message warning to chat
       await insertPaxonesSystemMessage(supabase, {
         tradeId,
         type: 'MESSAGE_BLOCKED'
@@ -1361,15 +1373,15 @@ export function TradeChat({
                   const isSystemMsg =
                     msg.senderId === 'system' ||
                     msg.senderId === '00000000-0000-0000-0000-000000000000' ||
-                    msg.senderUsername === 'Paxones System' ||
+                    msg.senderUsername === 'Wayones System' ||
                     msg.senderUsername === 'System' ||
                     Boolean(msg.isModerator && msg.senderUsername?.toLowerCase().includes('system')) ||
                     Boolean(msg.isSystemMessage) ||
                     Boolean(msg.is_system_message) ||
                     (typeof msg.message === 'string' && (
-                      msg.message.includes('PAXONES ESCROW SECURED') ||
+                      msg.message.includes('Wayones ESCROW SECURED') ||
                       msg.message.includes('TRADE EXPIRED') ||
-                      msg.message.includes('Paxones Security Reminder') ||
+                      msg.message.includes('Wayones Security Reminder') ||
                       msg.message.includes('Message blocked:') ||
                       (msg.message.includes('sold') && msg.message.includes('successfully to @')) ||
                       msg.message.includes('Trade is now in dispute.') ||
@@ -1380,7 +1392,7 @@ export function TradeChat({
 
                   if (isSystemMsg) {
                     return (
-                      <PaxonesSystemMessageBubble
+                      <WayonesSystemMessageBubble
                         key={msg.id}
                         msg={msg}
                         onOpenExternalLink={(url) => setSelectedExternalUrl(url)}

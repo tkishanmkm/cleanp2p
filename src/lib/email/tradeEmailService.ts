@@ -112,11 +112,11 @@ function buildTradeEmailPlainText(params: {
   const displayRefId = publicId || tradeId;
   const roleText =
     recipientRole === 'buyer'
-      ? 'Your P2P trade request has been successfully initiated on Paxones. The crypto asset is safely locked in escrow.'
-      : 'A new P2P trade request has been initiated with you on Paxones. The crypto asset is safely locked in escrow.';
+      ? 'Your P2P trade request has been successfully initiated on Wayones. The crypto asset is safely locked in escrow.'
+      : 'A new P2P trade request has been initiated with you on Wayones. The crypto asset is safely locked in escrow.';
 
   return `
-New P2P Trade Initiated — Paxones
+New P2P Trade Initiated — Wayones
 
 ${roleText}
 
@@ -131,14 +131,14 @@ Exchange Rate:  ${formattedPrice} ${formattedFiatCurrency} / ${formattedAsset}
 Payment Method: ${paymentMethod || 'Bank Transfer'}
 Created (UTC):  ${dateFormattedUtc}
 
-View and manage your trade securely on Paxones:
+View and manage your trade securely on Wayones:
 ${tradeUrl}
 
 Security Notice:
 Never share your password, private keys, seed phrase, or 2FA codes with anyone.
-If you didn't initiate or expect this trade, please review your account and contact support@paxones.com.
+If you didn't initiate or expect this trade, please review your account and contact support@wayones.com.
 
-© 2026 Paxones. Secure Peer-to-Peer Crypto Marketplace.
+© 2026 Wayones. Secure Peer-to-Peer Crypto Marketplace.
 `.trim();
 }
 
@@ -175,8 +175,8 @@ function buildTradeEmailHtml(params: {
 
   const subtitle =
     recipientRole === 'buyer'
-      ? 'Your P2P trade request has been successfully initiated on Paxones. The crypto asset is safely locked in escrow.'
-      : 'A new P2P trade request has been initiated with you on Paxones. The crypto asset is safely locked in escrow.';
+      ? 'Your P2P trade request has been successfully initiated on Wayones. The crypto asset is safely locked in escrow.'
+      : 'A new P2P trade request has been initiated with you on Wayones. The crypto asset is safely locked in escrow.';
 
   const displayRefId = escapeHtml(publicId || tradeId);
   const displayBuyer = escapeHtml(buyerUsername);
@@ -207,7 +207,7 @@ function buildTradeEmailHtml(params: {
           <!-- Header Card / Logo -->
           <tr>
             <td align="center" style="padding-bottom: 24px; background: linear-gradient(180deg, #131b31 0%, #0f1423 100%); padding-top: 12px; border-radius: 12px;">
-              <img src="https://eaiwgfxoiwxepinvcykg.supabase.co/storage/v1/object/public/public-assets/paxones%20win.png" alt="Paxones Logo" width="160" style="display: block; width: 160px; max-width: 100%; height: auto; border: 0;" />
+              <img src="https://wayones.com/logo-desktop.webp" alt="Wayones Logo" width="160" style="display: block; width: 160px; max-width: 100%; height: auto; border: 0;" />
             </td>
           </tr>
 
@@ -289,8 +289,8 @@ function buildTradeEmailHtml(params: {
           <!-- Footer -->
           <tr>
             <td align="center" style="padding-top: 28px; border-top: 1px solid #1e2640; font-size: 12px; color: #64748b; line-height: 1.6;">
-              <p style="margin: 0 0 6px 0;">Need help? Contact <a href="mailto:support@paxones.com" style="color: #a78bfa; text-decoration: none;">support@paxones.com</a></p>
-              <p style="margin: 0;">&copy; 2026 Paxones. Secure Peer-to-Peer Crypto Marketplace.</p>
+              <p style="margin: 0 0 6px 0;">Need help? Contact <a href="mailto:support@wayones.com" style="color: #a78bfa; text-decoration: none;">support@wayones.com</a></p>
+              <p style="margin: 0;">&copy; 2026 Wayones. Secure Peer-to-Peer Crypto Marketplace.</p>
             </td>
           </tr>
 
@@ -361,9 +361,9 @@ export async function sendNewTradeNotificationEmail(
     const buyerUsername = formatUsername(rawBuyerUsername, 'Buyer');
 
     // 2. Construct Canonical Authenticated Trade URL
-    // The production URL MUST always resolve to https://paxones.com/trade/{canonicalPublicTradeId}
-    // Customer-facing trade links always use the canonical Paxones origin.
-    const baseSiteUrl = 'https://paxones.com';
+    // The production URL MUST always resolve to https://wayones.com/trade/{canonicalPublicTradeId}
+    // Customer-facing trade links always use the canonical Wayones origin.
+    const baseSiteUrl = 'https://wayones.com';
     const canonicalPublicTradeId = String(publicId || tradeId);
     const tradeUrl = new URL(`/trade/${encodeURIComponent(canonicalPublicTradeId)}`, baseSiteUrl).toString();
 
@@ -482,7 +482,7 @@ export async function sendNewTradeNotificationEmail(
           },
           body: JSON.stringify({
             to: target.email,
-            subject: `Paxones P2P Trade Initiated — ${publicId || tradeId}`,
+            subject: `Wayones P2P Trade Initiated — ${publicId || tradeId}`,
             html,
             text: plainText,
           }),

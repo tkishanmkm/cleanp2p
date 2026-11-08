@@ -13,7 +13,7 @@ import { reconcileLedgerVsChain } from './jobs/reconciliationWorker';
 import { SUPPORTED_EVM_CHAINS, getEvmProvider } from './lib/blockchain/providers';
 
 console.log('====================================================');
-console.log('  PAXONES CRYPTO & ESCROW BACKGROUND WORKER DAEMON  ');
+console.log('  Wayones CRYPTO & ESCROW BACKGROUND WORKER DAEMON  ');
 console.log('====================================================');
 
 interface WorkerState {
@@ -214,7 +214,7 @@ function handleGracefulShutdown(signal: string): void {
  * Main Worker Entry Point
  */
 export async function startWorkerDaemon(): Promise<void> {
-  console.log('[Worker] Starting Paxones Background Daemon...');
+  console.log('[Worker] Starting Wayones Background Daemon...');
   const databaseReady = await initializeDatabaseConnection();
   if (!databaseReady) {
     throw new Error('WORKER_STARTUP_ABORTED_DATABASE_NOT_READY');

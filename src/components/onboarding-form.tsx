@@ -151,7 +151,7 @@ export default function OnboardingForm({ user }: OnboardingProps) {
         </div>
         <CardTitle className="text-2xl font-bold">Complete Your Profile</CardTitle>
         <CardDescription className="text-sm text-muted-foreground">
-          Welcome to Paxones! Your unique trading handle is ready. Please complete your identity details to activate your account.
+          Welcome to Wayones! Your unique trading handle is ready. Please complete your identity details to activate your account.
         </CardDescription>
       </CardHeader>
 
@@ -175,7 +175,7 @@ export default function OnboardingForm({ user }: OnboardingProps) {
           <div className="space-y-1.5">
             <Label htmlFor="systemUsername" className="text-xs font-semibold flex items-center gap-1.5">
               <AtSign className="w-3.5 h-3.5 text-muted-foreground" />
-              <span>Paxones Handle (Auto-Generated Username)</span>
+              <span>Wayones Handle (Auto-Generated Username)</span>
             </Label>
             <div className="relative">
               <Input
@@ -297,7 +297,7 @@ export default function OnboardingForm({ user }: OnboardingProps) {
               Age Requirement Notice (18+ Only)
             </h3>
             <p className="text-sm text-slate-600 dark:text-slate-300 leading-relaxed">
-              Paxones is a peer-to-peer cryptocurrency financial exchange and is strictly restricted to individuals 18 years of age or older for child safety and regulatory compliance.
+              Wayones is a peer-to-peer cryptocurrency financial exchange and is strictly restricted to individuals 18 years of age or older for child safety and regulatory compliance.
             </p>
             <p className="text-xs text-rose-600 dark:text-rose-400 font-semibold pt-1">
               The date of birth you entered indicates you are under 18 years old.

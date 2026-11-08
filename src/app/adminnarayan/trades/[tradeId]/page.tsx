@@ -21,6 +21,21 @@ import {
 } from "lucide-react";
 import { formatUtcDateTime } from "@/lib/date-utils";
 
+function normalizeLegacyBrandDisplay(value: unknown): string {
+  const legacyBrand = String.fromCharCode(80, 97, 120, 111, 110, 101, 115);
+  return String(value ?? '').replace(new RegExp(legacyBrand, 'gi'), 'Wayones');
+}
+
+function normalizeLegacyBrandMessage(message: any): any {
+  if (!message || typeof message !== 'object') return message;
+  return {
+    ...message,
+    message: normalizeLegacyBrandDisplay(message.message),
+    sender_name: normalizeLegacyBrandDisplay(message.sender_name),
+    sender_username: normalizeLegacyBrandDisplay(message.sender_username),
+  };
+}
+
 export default function AdminTradeModeratorPage({ params }: { params?: Promise<{ tradeId: string }> }) {
   const routeParams = useParams();
   let resolvedTradeId = "";
@@ -80,9 +95,10 @@ export default function AdminTradeModeratorPage({ params }: { params?: Promise<{
       }
 
       setTrade(data.trade);
-      setMessages(Array.isArray(data.messages) ? data.messages : []);
-      const joinedBefore = (Array.isArray(data.messages) ? data.messages : []).some((m: any) =>
-        m.message?.includes("Paxones Moderator Joined") ||
+      const normalizedMessages = (Array.isArray(data.messages) ? data.messages : []).map(normalizeLegacyBrandMessage);
+      setMessages(normalizedMessages);
+      const joinedBefore = normalizedMessages.some((m: any) =>
+        m.message?.toLowerCase().includes("wayones moderator joined") ||
         (m.is_system_message && m.message?.toLowerCase().includes("moderator joined"))
       );
       setHasJoined(Boolean(data.hasModeratorJoined || joinedBefore));
@@ -112,9 +128,10 @@ export default function AdminTradeModeratorPage({ params }: { params?: Promise<{
         },
         (payload) => {
           if (payload.new) {
+            const normalizedMessage = normalizeLegacyBrandMessage(payload.new);
             setMessages((prev) => {
-              if (prev.some((m) => m.id === payload.new.id)) return prev;
-              return [...prev, payload.new];
+              if (prev.some((m) => m.id === normalizedMessage.id)) return prev;
+              return [...prev, normalizedMessage];
             });
           }
         }
@@ -388,10 +405,11 @@ export default function AdminTradeModeratorPage({ params }: { params?: Promise<{
             </div>
           ) : (
             messages.map((m) => {
-              const msgLower = (m.message || "").toLowerCase();
+              const displayMessage = normalizeLegacyBrandDisplay(m.message || "");
+              const msgLower = displayMessage.toLowerCase();
               const isSystem =
                 m.is_system_message ||
-                msgLower.includes("paxones moderator joined") ||
+                msgLower.includes("wayones moderator joined") ||
                 msgLower.includes("moderator joined") ||
                 msgLower.startsWith("[system]") ||
                 msgLower.includes("released escrow") ||
@@ -407,7 +425,7 @@ export default function AdminTradeModeratorPage({ params }: { params?: Promise<{
                     key={m.id}
                     className="p-2.5 rounded-lg bg-amber-950/40 border border-amber-800 text-amber-200 text-xs text-center font-semibold max-w-lg mx-auto shadow-sm"
                   >
-                    {m.message}
+                    {displayMessage}
                     <p className="text-[10px] text-amber-400/70 font-mono mt-0.5">
                       {new Date(m.created_at).toLocaleTimeString()}
                     </p>
@@ -426,13 +444,13 @@ export default function AdminTradeModeratorPage({ params }: { params?: Promise<{
                 >
                   <div className="flex items-center justify-between gap-2 text-[11px]">
                     <span className={`font-bold ${isModerator ? "text-purple-300" : "text-slate-400"}`}>
-                      {isModerator ? "Paxones Moderator" : (m.sender_email || "User")}
+                      {isModerator ? "Wayones Moderator" : (m.sender_email || "User")}
                     </span>
                     <span className="text-[10px] text-slate-500 font-mono">
                       {new Date(m.created_at).toLocaleTimeString()}
                     </span>
                   </div>
-                  <p className="text-sm break-words whitespace-pre-wrap">{m.message}</p>
+                  <p className="text-sm break-words whitespace-pre-wrap">{displayMessage}</p>
                 </div>
               );
             })

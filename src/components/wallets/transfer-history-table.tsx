@@ -487,7 +487,7 @@ export function TransferHistoryList({ userId, type = 'all', onRowClick }: Transf
                 <>
                   <div className="flex justify-between items-center pt-3">
                     <span className="text-xs font-medium text-muted-foreground">
-                      <span>{translate('transferHistory.paxOnesFee')}</span>
+                      <span>{translate('transferHistory.WayonesFee')}</span>
                     </span>
                     <span className="font-mono text-xs font-semibold text-amber-600 dark:text-amber-400">
                       {selectedTransfer.fee} {selectedTransfer.crypto}

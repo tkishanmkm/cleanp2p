@@ -962,7 +962,7 @@ export default function SettingsPage() {
 
       setManualSecret(data.secret);
       setTwoFactorSecret(data.secret);
-      const uri = data.otpauth_url || `otpauth://totp/Paxones:${encodeURIComponent(username || userEmail || 'User')}?secret=${data.secret}&issuer=Paxones`;
+      const uri = data.otpauth_url || `otpauth://totp/Wayones:${encodeURIComponent(username || userEmail || 'User')}?secret=${data.secret}&issuer=Wayones`;
       setTotpUri(uri);
     } catch (err: any) {
       console.error('MFA generate error:', err);
@@ -3066,7 +3066,7 @@ export default function SettingsPage() {
                           Please contact our Compliance Support team to request a manual identity review.
                         </p>
                         <a
-                          href="mailto:support@paxones.com?subject=KYC%20Verification%20Appeal"
+                          href="mailto:support@wayones.com?subject=KYC%20Verification%20Appeal"
                           className="px-3.5 py-1.5 rounded-xl bg-destructive text-destructive-foreground text-xs font-bold hover:opacity-90 transition-opacity"
                         >
                           Contact Support
@@ -3344,14 +3344,14 @@ export default function SettingsPage() {
                         </div>
                       </div>
 
-                      {/* Biometric & Identity Verification Flow (No file upload on PaxOnes) */}
+                      {/* Biometric & Identity Verification Flow (No file upload on Wayones) */}
                       <div className="p-4 rounded-xl border border-primary/20 bg-primary/5 space-y-3">
                         <div className="flex items-center gap-2 text-xs font-bold text-foreground">
                           <ShieldCheck className="w-4 h-4 text-primary" />
                           <span>Automated Biometric & ID Verification</span>
                         </div>
                         <p className="text-xs text-muted-foreground leading-relaxed">
-                          For bank-grade security and fraud prevention, PaxOnes does not store or process raw document file uploads on our servers. Your government-issued ID, 3D biometric liveness, and face match are verified live in an encrypted verification session.
+                          For bank-grade security and fraud prevention, Wayones does not store or process raw document file uploads on our servers. Your government-issued ID, 3D biometric liveness, and face match are verified live in an encrypted verification session.
                         </p>
                         <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 pt-1">
                           <div className="p-2.5 rounded-lg border border-border bg-background flex items-center gap-2">
@@ -3409,7 +3409,7 @@ export default function SettingsPage() {
                     <div className="space-y-1">
                       <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-amber-500/10 border border-amber-500/20 text-amber-600 dark:text-amber-400 text-xs font-bold">
                         <Award className="w-3.5 h-3.5" />
-                        <span>PaxOnes Verified Merchant Program</span>
+                        <span>Wayones Verified Merchant Program</span>
                       </div>
                       <h2 className="text-xl sm:text-2xl font-black text-foreground tracking-tight pt-1">
                         Accelerate Your P2P Volume with Verified Trust
@@ -3611,7 +3611,7 @@ export default function SettingsPage() {
               Age Restriction: 18+ Required
             </DialogTitle>
             <DialogDescription className="text-xs text-muted-foreground leading-relaxed pt-1">
-              PaxOnes strictly prohibits minors under 18 years of age from creating accounts, holding balances, or trading digital assets. The date of birth you selected indicates you are {calculatedAge > 0 ? `${calculatedAge} years old` : 'under 18'}.
+              Wayones strictly prohibits minors under 18 years of age from creating accounts, holding balances, or trading digital assets. The date of birth you selected indicates you are {calculatedAge > 0 ? `${calculatedAge} years old` : 'under 18'}.
             </DialogDescription>
           </DialogHeader>
 

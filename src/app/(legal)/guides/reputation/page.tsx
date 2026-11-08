@@ -3,8 +3,8 @@ import { ArrowLeft, Star, Award, TrendingUp, ThumbsUp, ShieldCheck, Zap, CheckCi
 import { Button } from '@/components/ui/button';
 
 export const metadata = {
-  title: 'Building Your Reputation | Paxones Guides',
-  description: 'Learn how to gain 100% positive feedback, increase trade volume, earn trust badges, and become a top P2P merchant on Paxones.',
+  title: 'Building Your Reputation | Guides',
+  description: 'Learn how to gain 100% positive feedback, increase trade volume, earn trust badges, and become a top P2P merchant on Wayones.',
 };
 
 export default function ReputationGuidePage() {
@@ -35,7 +35,7 @@ export default function ReputationGuidePage() {
             <Award className="h-6 w-6 text-amber-600" /> Key Metrics Visible on Your Profile
           </h2>
           <p>
-            Every trader profile and ad card on Paxones displays authentic, database-backed statistics that buyers and sellers evaluate before engaging in a trade:
+            Every trader profile and ad card on Wayones displays authentic, database-backed statistics that buyers and sellers evaluate before engaging in a trade:
           </p>
 
           <div className="grid sm:grid-cols-2 gap-4 pt-1">
@@ -80,7 +80,7 @@ export default function ReputationGuidePage() {
         {/* Actionable tips */}
         <section className="space-y-4">
           <h2 className="text-2xl font-bold text-slate-900 dark:text-white flex items-center gap-2">
-            <Star className="h-6 w-6 text-amber-600" /> 5 Habits of Top Paxones Merchants
+            <Star className="h-6 w-6 text-amber-600" /> 5 Habits of Top Wayones Merchants
           </h2>
           <div className="space-y-3">
             <div className="p-4 rounded-xl border border-slate-200 dark:border-[#1e2640] flex items-start gap-3">

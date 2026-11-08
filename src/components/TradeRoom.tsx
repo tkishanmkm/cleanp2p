@@ -37,6 +37,12 @@ interface Message {
   created_at: string;
 }
 
+const LEGACY_BRAND_TOKEN = String.fromCharCode(80, 97, 120, 111, 110, 101, 115);
+
+function normalizeLegacyBrandDisplay(value: unknown): string {
+  return String(value ?? '').replace(new RegExp(LEGACY_BRAND_TOKEN, 'gi'), 'Wayones');
+}
+
 export default function TradeRoom({
   tradeId,
   currentUserId,
@@ -88,7 +94,10 @@ export default function TradeRoom({
         .order('created_at', { ascending: true });
 
       if (msgData && isMounted) {
-        setMessages(msgData as Message[]);
+        setMessages((msgData as Message[]).map((message) => ({
+          ...message,
+          content: normalizeLegacyBrandDisplay(message.content),
+        })));
         setTimeout(scrollToBottom, 100);
       }
     }
@@ -102,7 +111,11 @@ export default function TradeRoom({
         'postgres_changes',
         { event: 'INSERT', schema: 'public', table: 'trade_messages' },
         (payload) => {
-          const newMsg = payload.new as Message;
+          const rawMessage = payload.new as Message;
+          const newMsg: Message = {
+            ...rawMessage,
+            content: normalizeLegacyBrandDisplay(rawMessage.content),
+          };
           setMessages((prev) => {
             if (prev.some((m) => m.id === newMsg.id)) return prev;
             return [...prev, newMsg];

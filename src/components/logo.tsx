@@ -40,19 +40,19 @@ export function Logo({
           className="h-8 w-8 sm:h-9 sm:w-9 drop-shadow-sm"
         >
           <defs>
-            <linearGradient id="paxonesGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+            <linearGradient id="WayonesGrad" x1="0%" y1="0%" x2="100%" y2="100%">
               <stop offset="0%" stopColor="#9273FC" />
               <stop offset="50%" stopColor="#6366F1" />
               <stop offset="100%" stopColor="#2563EB" />
             </linearGradient>
-            <linearGradient id="paxonesAccent" x1="0%" y1="100%" x2="100%" y2="0%">
+            <linearGradient id="WayonesAccent" x1="0%" y1="100%" x2="100%" y2="0%">
               <stop offset="0%" stopColor="#38BDF8" />
               <stop offset="100%" stopColor="#818CF8" />
             </linearGradient>
           </defs>
-          <rect x="2" y="2" width="32" height="32" rx="10" fill="url(#paxonesGrad)" />
+          <rect x="2" y="2" width="32" height="32" rx="10" fill="url(#WayonesGrad)" />
           <path d="M12 15L18 9L24 15M18 10V21" stroke="white" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" />
-          <path d="M24 21L18 27L12 21M18 26V15" stroke="url(#paxonesAccent)" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" />
+          <path d="M24 21L18 27L12 21M18 26V15" stroke="url(#WayonesAccent)" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" />
           <circle cx="18" cy="18" r="2.2" fill="white" />
         </svg>
       </div>

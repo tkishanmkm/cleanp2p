@@ -3,7 +3,7 @@ import { createClient, getSupabaseAdminClient } from '@/lib/supabase/server';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
-const SUPPORT_EMAIL = 'support@paxones.com';
+const SUPPORT_EMAIL = 'support@wayones.com';
 
 async function sendSupportEmail(to: string, subject: string, text: string): Promise<boolean> {
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL;
@@ -98,7 +98,7 @@ export async function POST(request: Request, context: { params: Promise<{ tradeI
               `User email: ${user.email || '(not available)'}`,
               `User details: ${reason || 'User requested moderator assistance after reaching the chat limit.'}`,
             ].join(String.fromCharCode(10));
-            emailSent = await sendSupportEmail(SUPPORT_EMAIL, `[Paxones Support] Trade chat limit reached — ${String(trade.trade_id || trade.id)}`, retryText);
+            emailSent = await sendSupportEmail(SUPPORT_EMAIL, `[Wayones Support] Trade chat limit reached — ${String(trade.trade_id || trade.id)}`, retryText);
             await admin.from('trade_chat_limit_requests').update({ email_status: emailSent ? 'sent' : 'failed', updated_at: new Date().toISOString() }).eq('id', existing.id);
           }
           return NextResponse.json({ success: true, alreadySubmitted: true, emailSent, message: emailSent ? 'A support request is recorded and the moderation team has been emailed.' : `Support request is recorded, but email delivery could not be confirmed. Please contact ${SUPPORT_EMAIL} with the trade ID.` });
@@ -139,7 +139,7 @@ export async function POST(request: Request, context: { params: Promise<{ tradeI
     ].join('\n');
     const emailSent = await sendSupportEmail(
       SUPPORT_EMAIL,
-      `[Paxones Support] Trade chat limit reached — ${publicTradeId}`,
+      `[Wayones Support] Trade chat limit reached — ${publicTradeId}`,
       emailText,
     );
     const { error: emailStatusError } = await admin.from('trade_chat_limit_requests')

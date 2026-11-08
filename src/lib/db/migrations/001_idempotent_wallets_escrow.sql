@@ -1,5 +1,5 @@
 /**
- * Idempotent PostgreSQL Migration for Paxones P2P Escrow & Wallets
+ * Idempotent PostgreSQL Migration for Wayones P2P Escrow & Wallets
  * 
  * Fixes:
  * 1. PostgreSQL error 42701 ("column total_balance of relation wallets already exists") using idempotent IF NOT EXISTS checks.

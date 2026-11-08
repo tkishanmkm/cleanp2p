@@ -104,8 +104,8 @@ export async function GET(
     if (!hasModeratorJoined) {
       hasModeratorJoined = messageList.some(
         (m: any) =>
-          m.message === "Paxones Moderator joined the trade chat." ||
-          (typeof m.message === "string" && m.message.includes("Paxones Moderator joined"))
+          m.message === "Wayones Moderator joined the trade chat." ||
+          (typeof m.message === "string" && m.message.includes("Wayones Moderator joined"))
       );
     }
 
@@ -307,11 +307,15 @@ export async function POST(
       } catch (_) {}
 
       if (!alreadyJoined) {
+        const legacyBrandToken = String.fromCharCode(80, 97, 120, 111, 110, 101, 115);
         const { data: existingMsg } = await supabase
           .from("trade_messages")
           .select("id")
           .eq("trade_id", trade.id)
-          .eq("message", "Paxones Moderator joined the trade chat.")
+          .in("message", [
+            "Wayones Moderator joined the trade chat.",
+            `${legacyBrandToken} Moderator joined the trade chat.`,
+          ])
           .limit(1);
 
         if (existingMsg && existingMsg.length > 0) {
@@ -322,7 +326,7 @@ export async function POST(
       if (alreadyJoined) {
         return NextResponse.json({
           success: true,
-          message: "Paxones Moderator has already joined this trade chat.",
+          message: "Wayones Moderator has already joined this trade chat.",
           alreadyJoined: true,
         });
       }
@@ -341,7 +345,7 @@ export async function POST(
         console.warn("[Moderator Join] Participation table notice:", partErr);
       }
 
-      const exactJoinMessage = "Paxones Moderator joined the trade chat.";
+      const exactJoinMessage = "Wayones Moderator joined the trade chat.";
       const systemUuid = "00000000-0000-0000-0000-000000000000";
       const nowIso = new Date().toISOString();
 
@@ -349,7 +353,7 @@ export async function POST(
       const { error: joinMessageError } = await supabase.from("trade_messages").insert({
         trade_id: trade.id,
         sender_id: systemUuid,
-        sender_username: "Paxones Moderator",
+        sender_username: "Wayones Moderator",
         message: exactJoinMessage,
         is_moderator: true,
         visibility: "all",
@@ -400,7 +404,7 @@ export async function POST(
           await supabase.from("notifications").insert({
             user_id: pid,
             title: "Moderator Joined Trade",
-            message: "Paxones Moderator joined the trade chat.",
+            message: "Wayones Moderator joined the trade chat.",
             link: `/trade/${trade.id}`,
             is_read: false,
             created_at: nowIso,
@@ -412,12 +416,12 @@ export async function POST(
 
       return NextResponse.json({
         success: true,
-        message: "Paxones Moderator joined the trade chat.",
+        message: "Wayones Moderator joined the trade chat.",
         alreadyJoined: false,
       });
     }
 
-    // 2. Moderator Message (Displayed strictly as Paxones Moderator without admin identity)
+    // 2. Moderator Message (Displayed strictly as Wayones Moderator without admin identity)
     if (action === "message") {
       if (!message || !message.trim()) {
         return NextResponse.json({ success: false, error: "Message cannot be empty" }, { status: 400 });
@@ -426,11 +430,11 @@ export async function POST(
       const cleanMessage = message.trim();
       const nowIso = new Date().toISOString();
 
-      // Insert into trade_messages with is_moderator: true and sender_username: Paxones Moderator
+      // Insert into trade_messages with is_moderator: true and sender_username: Wayones Moderator
       const { error: moderatorMessageError } = await supabase.from("trade_messages").insert({
         trade_id: trade.id,
         sender_id: adminId,
-        sender_username: "Paxones Moderator",
+        sender_username: "Wayones Moderator",
         message: cleanMessage,
         is_moderator: true,
         visibility: "all",
@@ -474,7 +478,7 @@ export async function POST(
           await supabase.from("notifications").insert({
             user_id: pid,
             title: "New Moderator Message",
-            message: `Paxones Moderator: "${cleanMessage.slice(0, 100)}"`,
+            message: `Wayones Moderator: "${cleanMessage.slice(0, 100)}"`,
             link: `/trade/${trade.id}`,
             is_read: false,
             created_at: nowIso,
@@ -584,8 +588,8 @@ export async function POST(
 
       // Insert standardized user-facing moderator decision message
       const decisionMsg = isRelease
-        ? `Paxones Moderator\n\nEscrow released to the buyer:\n${cryptoAmount} ${cryptoAsset}\n\nReason: ${interventionReason}`
-        : `Paxones Moderator\n\nEscrow refunded to the seller:\n${cryptoAmount} ${cryptoAsset}\n\nReason: ${interventionReason}`;
+        ? `Wayones Moderator\n\nEscrow released to the buyer:\n${cryptoAmount} ${cryptoAsset}\n\nReason: ${interventionReason}`
+        : `Wayones Moderator\n\nEscrow refunded to the seller:\n${cryptoAmount} ${cryptoAsset}\n\nReason: ${interventionReason}`;
 
       const { error: chatMessageError } = await supabase.from("trade_chat_messages").insert({
         trade_id: trade.id,

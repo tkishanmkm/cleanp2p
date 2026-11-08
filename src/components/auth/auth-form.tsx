@@ -378,7 +378,7 @@ export function AuthForm({ mode }: AuthFormProps) {
         </div>
         <h2 className="text-xl font-bold text-slate-900 dark:text-white">Verify Your Email</h2>
         <p className="text-sm text-slate-600 dark:text-slate-300 leading-relaxed">
-          We&apos;ve dispatched a confirmation link to <span className="font-semibold text-blue-600 dark:text-blue-400">{email}</span>. Click the link inside to activate your Paxones account and begin peer-to-peer trading.
+          We&apos;ve dispatched a confirmation link to <span className="font-semibold text-blue-600 dark:text-blue-400">{email}</span>. Click the link inside to activate your Wayones account and begin peer-to-peer trading.
         </p>
         <div className="pt-2">
           <Link
@@ -475,7 +475,7 @@ export function AuthForm({ mode }: AuthFormProps) {
         <p className="text-xs text-slate-500 dark:text-slate-400 text-center mt-1">
           {mode === 'login'
             ? 'Access your secure P2P cryptocurrency wallet and trades'
-            : 'Join thousands of traders globally on Paxones P2P'}
+            : 'Join thousands of traders globally on Wayones P2P'}
         </p>
       </div>
 
@@ -806,7 +806,7 @@ export function AuthForm({ mode }: AuthFormProps) {
                 Age Requirement Notice (18+ Only)
               </h3>
               <p className="text-sm text-slate-600 dark:text-slate-300 leading-relaxed">
-                Paxones is a peer-to-peer cryptocurrency financial exchange and is strictly restricted to individuals 18 years of age or older for child safety and regulatory compliance.
+                Wayones is a peer-to-peer cryptocurrency financial exchange and is strictly restricted to individuals 18 years of age or older for child safety and regulatory compliance.
               </p>
               <p className="text-xs text-rose-600 dark:text-rose-400 font-semibold pt-1">
                 The date of birth you entered indicates you are under 18 years old.

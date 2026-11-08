@@ -260,7 +260,7 @@ Deno.serve(async (req: Request) => {
 
     // 5. Send Transactional Email
     const info = await transporter.sendMail({
-      from: `Paxones <${smtpFrom}>`,
+      from: `Wayones <${smtpFrom}>`,
       to: to.trim(),
       subject: subject.trim(),
       html: html,

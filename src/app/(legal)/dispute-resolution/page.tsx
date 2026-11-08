@@ -7,7 +7,7 @@ export default function DisputeResolutionPage() {
     <div className="prose dark:prose-invert max-w-4xl mx-auto">
       <h1>Dispute Resolution Process</h1>
       <p className="lead">
-        At Paxones, we strive to ensure every trade is smooth and successful. However, disagreements can sometimes occur. Our dispute resolution process is designed to provide a fair and impartial outcome when they do.
+        At Wayones, we strive to ensure every trade is smooth and successful. However, disagreements can sometimes occur. Our dispute resolution process is designed to provide a fair and impartial outcome when they do.
       </p>
 
       <h2>
@@ -33,7 +33,7 @@ export default function DisputeResolutionPage() {
           <strong>Opening a Dispute:</strong> Within the trade chat, click the "Open Dispute" button. You will be asked to provide a reason for the dispute. This action freezes the trade and notifies our moderation team.
         </li>
         <li>
-          <strong>Moderator Joins:</strong> A Paxones moderator will join the trade chat. They will have access to all trade details, chat history, and timestamps.
+          <strong>Moderator Joins:</strong> A Wayones moderator will join the trade chat. They will have access to all trade details, chat history, and timestamps.
         </li>
         <li>
           <strong>Evidence Submission:</strong> The moderator will ask both parties to provide evidence. For buyers, this is typically a clear proof of payment (e.g., a bank transaction receipt with a transaction ID). For sellers, this may be a statement showing the payment has not been received.
@@ -54,7 +54,7 @@ export default function DisputeResolutionPage() {
         <li><strong>Be Honest and Clear:</strong> Provide truthful information and clear, unedited evidence.</li>
         <li><strong>Stay Professional:</strong> Communicate respectfully with the moderator and the other party. Abusive language will not be tolerated.</li>
         <li><strong>Be Patient:</strong> Our moderators handle cases as quickly as possible, but a thorough investigation takes time.</li>
-        <li><strong>Keep Everything on Paxones:</strong> Our moderators can only consider evidence from within the Paxones platform (trade chat, payment details). Any communication outside the platform cannot be used.</li>
+        <li><strong>Keep Everything on Wayones:</strong> Our moderators can only consider evidence from within the Wayones platform (trade chat, payment details). Any communication outside the platform cannot be used.</li>
       </ul>
       
       <div className="not-prose mt-8">

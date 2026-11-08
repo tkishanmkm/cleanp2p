@@ -111,7 +111,7 @@ export async function POST(req: Request) {
     if (todayMonth < month || (todayMonth === month && todayDay < day)) age--;
     if (age < 18) {
       return NextResponse.json({
-        error: 'Child Safety Policy: You must be at least 18 years old to use Paxones.',
+        error: 'Child Safety Policy: You must be at least 18 years old to use Wayones.',
         isMinor: true,
         code: 'UNDER_18_PROHIBITED',
       }, { status: 403 });

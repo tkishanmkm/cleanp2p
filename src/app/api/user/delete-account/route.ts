@@ -139,7 +139,7 @@ export async function POST() {
           success: false,
           code: 'DELETION_SCHEDULED_BUT_LOGIN_LOCK_NEEDS_REVIEW',
           deletionScheduledFor: scheduledForIso,
-          error: 'Your deletion request is recorded and app access is restricted, but the sign-in lock needs support review. Contact support@paxones.com.',
+          error: 'Your deletion request is recorded and app access is restricted, but the sign-in lock needs support review. Contact support@wayones.com.',
         },
         { status: 503 }
       );
@@ -151,7 +151,7 @@ export async function POST() {
           success: false,
           code: 'DELETION_SCHEDULED_AD_DEACTIVATION_FAILED',
           deletionScheduledFor: scheduledForIso,
-          error: 'Your account is locked and deletion is scheduled, but some advertisements could not be paused. Contact support@paxones.com.',
+          error: 'Your account is locked and deletion is scheduled, but some advertisements could not be paused. Contact support@wayones.com.',
         },
         { status: 503 }
       );
@@ -167,7 +167,7 @@ export async function POST() {
   } catch (err: any) {
     console.error('Account deletion request error:', err);
     return NextResponse.json(
-      { error: 'Failed to process account deletion request. Please contact support@paxones.com.' },
+      { error: 'Failed to process account deletion request. Please contact support@wayones.com.' },
       { status: 500 }
     );
   }

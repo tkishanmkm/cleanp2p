@@ -358,7 +358,7 @@ export async function PATCH(req: NextRequest) {
             if (currentMonth < month || (currentMonth === month && currentDay < day)) age--;
             if (age < 18) {
               return NextResponse.json({
-                error: 'No minors allowed: You must be at least 18 years old to trade on PaxOnes.',
+                error: 'No minors allowed: You must be at least 18 years old to trade on Wayones.',
                 isMinor: true,
               }, { status: 400 });
             }

@@ -15,7 +15,7 @@ function sanitizeModeratorMessage(text: string): string {
 
   // Replace legacy join strings
   if (sanitized.includes('Moderator Joined') || sanitized.includes('joined the trade discussion')) {
-    return 'Paxones Moderator joined the trade.';
+    return 'Wayones Moderator joined the trade.';
   }
 
   // Remove prefix like [MODERATOR - email@domain.com]: or [MODERATOR]:
@@ -218,7 +218,7 @@ export async function GET(
           id: msg.id,
           trade_id: msg.trade_id,
           sender_id: '00000000-0000-0000-0000-000000000000',
-          sender_name: 'Paxones Moderator',
+          sender_name: 'Wayones Moderator',
           message: sanitizeModeratorMessage(msg.message),
           attachment_url: msg.attachment_url || null,
           is_system: true,

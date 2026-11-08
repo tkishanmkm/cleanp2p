@@ -93,7 +93,7 @@ export async function POST(req: NextRequest) {
     const body = await req.json().catch(() => ({}));
     const { blockId, blockerId, blockedId } = body;
 
-    const adminEmail = auth.adminEmail || "admin@paxones.com";
+    const adminEmail = auth.adminEmail || "admin@wayones.com";
     const adminId = auth.adminId || auth.user.id;
 
     if (!blockId && (!blockerId || !blockedId)) {

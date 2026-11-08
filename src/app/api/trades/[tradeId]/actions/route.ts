@@ -256,7 +256,7 @@ export async function POST(
           .eq('id', actualTradeId);
       } catch (_) {}
 
-      // Post official Paxones system announcement
+      // Post official Wayones system announcement
       try {
         await insertPaxonesSystemMessage(adminClient, {
           tradeId: actualTradeId,

@@ -160,8 +160,8 @@ export async function POST(req: Request) {
     const email = user.email || 'user';
     const secret = speakeasy.generateSecret({
       length: 20,
-      name: `Paxones (${email})`,
-      issuer: 'Paxones',
+      name: `Wayones (${email})`,
+      issuer: 'Wayones',
     });
 
     const encryptedSecret = encryptUserTOTPSecret(secret.base32);
