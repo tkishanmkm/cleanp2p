@@ -100,11 +100,27 @@ export async function POST(req: Request) {
         })
       : false;
 
-    // Recovery codes are hashed here but only checked/consumed within the
-    // same database transaction as the disable operation.
+    // A failed six-digit TOTP is not a recovery code. Validate its format before
+    // invoking the hash helper so invalid OTPs are audited and return 400, not 500.
+    if (!isTotpValid && !/^[A-Z2-9]{8,64}$/i.test(cleanInput)) {
+      const { error: auditError } = await adminClient.from('user_security_audit_logs').insert({
+        user_id: user.id,
+        action: '2fa_disable_failed',
+        details: { reason: 'invalid_credentials', remainingAttempts: rateLimit.remainingAttempts },
+      });
+      if (auditError) {
+        return NextResponse.json({ error: 'Failed attempt could not be securely audited.' }, { status: 503 });
+      }
+      return NextResponse.json(
+        { error: 'Invalid authenticator code or recovery code', remainingAttempts: rateLimit.remainingAttempts },
+        { status: 400 }
+      );
+    }
+
+    // Recovery hashes are consumed only by the atomic database disable RPC.
     const method = isTotpValid ? 'totp' : 'recovery_code';
-    const recoveryHash = isTotpValid ? null : hashUserRecoveryCode(rawToken);
-    const legacyRecoveryHash = isTotpValid ? null : hashLegacyUserRecoveryCode(rawToken);
+    const recoveryHash = isTotpValid ? null : hashUserRecoveryCode(cleanInput);
+    const legacyRecoveryHash = isTotpValid ? null : hashLegacyUserRecoveryCode(cleanInput);
     const { data: disableResult, error: disableError } = await adminClient.rpc('disable_user_2fa_atomic', {
       p_user_id: user.id,
       p_recovery_code_hash: recoveryHash,

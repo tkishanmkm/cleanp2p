@@ -59,18 +59,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ success: false, error: "Support-admin configuration was rejected." }, { status: 409 });
   }
 
-  const { error: auditError } = await db.from("admin_audit_logs").insert({
-    admin_id: auth.adminId,
-    admin_email: auth.adminEmail || null,
-    action: "CONFIGURE_SUPPORT_ADMIN",
-    target_id: userId,
-    target_user_id: userId,
-    details: { enabled, addEmergencyUses },
-  });
-  if (auditError) {
-    console.error("[SUPPORT_ADMIN_MANAGEMENT] audit insert failed:", auditError.code || "unknown");
-    return NextResponse.json({ success: false, error: "Configuration applied, but audit logging needs administrator review." }, { status: 500 });
-  }
-
+  // The database RPC writes this audit row in the same transaction as the
+  // grant update, so no successful access change can commit without its audit.
   return NextResponse.json({ success: true });
 }

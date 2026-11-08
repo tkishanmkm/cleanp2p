@@ -9,7 +9,7 @@
 
 **Production migration execution remains NO-GO.** The Supabase migration ledger stops at `20261103204401` (137 recorded migrations). There are 90 untracked historical SQL files with versions at or before that recorded head, two modified older SQL files, and a long sequence of later tracked migrations. Their exact effects cannot be inferred safely from names or file presence.
 
-The audit also confirmed that several current application paths call RPCs/tables which are absent from the live catalog. These are real operational gaps, not merely untracked-file bookkeeping. Two narrow forward migrations have been prepared and rehearsed for the trade-opening path (presence heartbeat + seller-online guard), but neither has been applied.
+The audit also confirmed that several current application paths call RPCs/tables which are absent from the live catalog. These are real operational gaps, not merely untracked-file bookkeeping. Six narrow forward migrations now cover the presence heartbeat, seller-online guard, user/admin 2FA contracts and support-admin emergency mode. They are prepared and rollback-rehearsed only; none has been applied.
 
 No production DDL or financial operation was executed.
 
@@ -21,18 +21,24 @@ Live `supabase_migrations.schema_migrations`:
 - Latest version: `20261103204401`
 - Latest name: `lock_admin_audit_logs_to_verified_server_routes`
 
-Local inventory observed before the two new forward migrations in this audit:
+Local inventory immediately before the current 2FA/support batch:
 
-- **62** tracked, clean SQL files newer than the production head.
-- **90** untracked SQL files dated from `20261017010000` through `20261102000003`, all at or before the production head.
+- **64** tracked, clean SQL files newer than the production head (including the prior two forward trade-opening migrations).
+- **90** untracked historical SQL files dated from `20261017010000` through `20261102000003`, all at or before the production head.
 - **2** modified older SQL files:
   - `20260928020000_withdrawal_hardened_rpcs.sql`
   - `20260928070000_canonical_p2p_state_machine_and_rpcs.sql`
 
-Two new forward files prepared during this audit are newer than the production head:
+Six forward files are now prepared after the production head:
 
 - `20261108014000_restore_authenticated_presence_rpc.sql`
 - `20261108020000_guard_offline_ad_trade_opening.sql`
+- `20261108030000_restore_2fa_rate_limit_contracts.sql`
+- `20261108031000_restore_atomic_user_2fa_contracts.sql`
+- `20261108032000_restore_atomic_admin_2fa_contracts.sql`
+- `20261108033000_restore_support_admin_emergency_contracts.sql`
+
+The current batch adds four forward migration files to the 64-file newer inventory; after commit, the local release inventory will contain **68** files newer than the production head.
 
 The 90 historical file versions are absent from the production migration ledger. That establishes missing migration provenance, but not that every contained schema change is absent: some effects exist via other applied migrations or live catalog changes. Do not apply, delete, rename, or mark historical files applied without a file-by-file code/catalog comparison.
 
@@ -59,7 +65,7 @@ The following RPCs were found in application code, but the exact RPCs were absen
 | `admin_mark_trade_paid_authorized` | `src/app/api/admin/trades/[tradeId]/route.ts` | Admin mark-paid action fails. |
 | `admin_resolve_trade_dispute_atomic` | `src/lib/admin-dispute-settlement.ts` | Atomic admin dispute settlement path unavailable. |
 | `admin_update_user_role_authorized`, `admin_update_user_status_authorized` | `src/app/api/admin/users/[userId]/route.ts` | Actor-bound admin account mutations fail. |
-| `configure_support_admin` | `src/app/api/admin/support-admins/route.ts` | Support-admin configuration fails. |
+| `configure_support_admin`, `activate_support_admin_emergency`, `revoke_support_admin_emergency`, `is_active_full_admin_actor` | `src/app/api/admin/support-admins/*` | Support-admin grants, emergency activation/revocation and full-admin actor checks are unavailable. |
 
 The application code uses these direct RPC names. The audit did not execute the routes or perform live financial actions.
 
@@ -116,13 +122,47 @@ Preflights:
 
 The two forward migrations and both preflights passed a combined rollback-only rehearsal against the production schema. After rollback, the presence RPC, offline-attempt table, offline-attempt RPC, seller-guard function/trigger and cron job were all still absent. No production object was retained.
 
-## 4. Profile public projection remains a separate review
+## 4. 2FA lifecycle and support-admin contract gaps
+
+The live database catalog confirmed that all four rate-limit RPCs, user/admin lifecycle RPCs, support-admin RPCs and the three support-admin tables were absent. The existing user enrollment/recovery tables and profile 2FA columns were present, with RLS enabled and no browser-role SELECT access.
+
+### Prepared forward migrations
+
+1. `20261108030000_restore_2fa_rate_limit_contracts.sql`
+   - Creates persistent user/admin attempt-counter tables and four server-only rate-limit RPCs.
+   - Uses atomic upserts to reserve each challenge attempt, a 15-minute window and a five-attempt limit; successful verification clears the actor's counter.
+   - Tables use RLS and have no direct browser-role grants. Functions are postgres-owned SECURITY DEFINER functions with empty search paths and service-role-only execution.
+
+2. `20261108031000_restore_atomic_user_2fa_contracts.sql`
+   - Restores atomic user enrollment/rotation, disable and recovery-code consumption RPCs.
+   - Enrollment requires a current, unexpired pending secret and exactly eight distinct 64-hex recovery hashes; profile flags, encrypted secret, recovery rows, pending-row deletion and audit are committed together.
+   - Adds a partial unique index over active recovery hashes. The disable RPC consumes both legacy/current aliases in a single transaction when the same code has both representations, avoiding a false result after a recovery row has already been mutated.
+   - The current API also had a code-path defect: a wrong six-digit TOTP was passed to the recovery-code hash helper and could return HTTP 500. The route now validates recovery-code format first, writes the failed-attempt audit and returns HTTP 400 instead.
+
+3. `20261108032000_restore_atomic_admin_2fa_contracts.sql`
+   - Restores admin 2FA enable, disable, recovery and recovery-password rotation RPCs.
+   - Each function verifies the actor through the canonical `verify_admin_login` function, locks the profile row, and rejects banned, suspended, restricted, on-hold, frozen, minor-restricted or non-active admin accounts.
+   - The functions are postgres-owned SECURITY DEFINER functions with empty search paths and service-role-only execution.
+
+4. `20261108033000_restore_support_admin_emergency_contracts.sql`
+   - Creates `support_admin_grants`, `support_admin_emergency_sessions` and `support_admin_activity` with RLS and service-role-only direct table access.
+   - Full-admin actors are verified through canonical admin resolution and active account state; support targets are checked for active status and excluded if they resolve as full administrators.
+   - Enforces one unrevoked emergency session per support user, a maximum three-hour session, one-use counter accounting and mandatory 2FA.
+   - Disabling a support-admin grant revokes every unrevoked emergency session before the grant update; re-enabling cannot resurrect the old session.
+   - The grant change and its `admin_audit_logs` entry are written in the same database transaction. The API no longer performs a separate follow-up audit insert.
+
+Preflight:
+- `supabase/tests/two_factor_support_admin_contract_preflight.sql`
+
+A read-only live catalog check found zero duplicate active user recovery-hash groups before adding the partial unique index. The four migrations plus the combined preflight passed a rollback-only rehearsal against the production schema. A subsequent read-only catalog check confirmed the new rate-limit/support tables, recovery index and representative user/admin/support RPCs were all absent after rollback. No production object was retained and no production migration was applied.
+
+## 5. Profile public projection remains a separate review
 
 Production `profiles` has RLS enabled but still has a broad `Public profiles are viewable by everyone` SELECT policy. Anon has column-level SELECT grants for trader-card fields; authenticated has column-level SELECT and UPDATE grants for profile fields. Production lacks the `public_profiles` view and the `set_my_presence` RPC.
 
 The old `20261101125944_secure_profile_public_projection.sql` combines several profile policy/grant changes with the presence RPC. Do not apply the whole historical migration merely to restore presence. The new narrow `20261108014000` migration restores the heartbeat without changing the public profile projection. The app's public-profile query paths and column-grant compatibility still require a separate migration/code review.
 
-## 5. Deployment gate and next reconciliation work
+## 6. Deployment gate and next reconciliation work
 
 **Current status: NO-GO for production migration execution.**
 
@@ -130,7 +170,7 @@ Before applying anything:
 1. Reconcile the 90 historical untracked SQL files one by one against the applied ledger, live catalog, current source references and later replacement migrations.
 2. Review the two modified older migrations separately.
 3. Replay the exact approved migration release against a schema-faithful disposable database; do not mark historical migrations applied just to bypass history gaps.
-4. Include all approved intervening migrations in version order. The presence and offline-ad forward candidates must be applied after the prior historical-release reconciliation and before restarting trade-opening APIs.
-5. Deploy compatible application code and verify the SQL preflights before resuming routes/workers.
+4. Include all approved intervening migrations in version order. The presence, offline-ad, 2FA and support-admin forward candidates must be applied only after the prior historical-release reconciliation and before enabling the matching routes/workers.
+5. Deploy compatible application code and verify all seven SQL preflights before resuming routes/workers.
 
 A production migration being absent does not authorize a code workaround that bypasses authorization, idempotency, financial fencing, or audit guarantees. Preserve fail-closed behavior until the matching database contract is installed.

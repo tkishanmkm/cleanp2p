@@ -34,14 +34,14 @@ The local working tree was inventoried against the live latest migration version
 
 - 62 pre-existing tracked SQL migration files have versions newer than the production head.
 - 90 untracked historical SQL migration files have versions at or before the production head.
-- This release also prepares two new forward migrations after the production head, bringing the newer tracked release inventory to 64 once the new files are committed.
+- The prior release preparation already included two forward migrations; this batch adds four more after the production head, bringing the newer tracked release inventory to 68 once this batch is committed.
 - Two older SQL migration files are modified locally:
   - `20260928020000_withdrawal_hardened_rpcs.sql`
   - `20260928070000_canonical_p2p_state_machine_and_rpcs.sql`
 
 Those 90 older files may be unapplied historical changes, superseded scripts, or local drafts. Their presence alone does not prove which case applies. Reconcile every file against `supabase_migrations.schema_migrations` and the live catalog before deployment. Do not apply them blindly, delete them, mark them as applied, or skip them based on filename alone. Review the two modified migrations separately.
 
-**STOP:** Do not run `supabase db push`, apply only the four deposit migrations, or resume financial workers until this inventory is reconciled and the exact ordered release set is committed and approved. A newer migration can depend on an older schema change even when the older file is absent from the recorded history.
+**STOP:** Do not run `supabase db push`, apply only a partial subset of the mapped deposit/trade/identity migrations, or resume financial workers until this inventory is reconciled and the exact ordered release set is committed and approved. A newer migration can depend on an older schema change even when the older file is absent from the recorded history.
 
 ## 2. Required deposit migration order
 
@@ -56,8 +56,12 @@ After the full migration-history reconciliation, execute all approved pending mi
 | 4 | `20261108013000_deposit_chain_integrity_monitor.sql` | Adds integrity-check leases, durable mismatch events, and deduplicated critical alerts |
 | 5 | `20261108014000_restore_authenticated_presence_rpc.sql` | Restores the authenticated, caller-bound presence heartbeat needed by seller availability checks |
 | 6 | `20261108020000_guard_offline_ad_trade_opening.sql` | Restores the missing pre-trade availability RPC, durable offline-attempt counter, seller-online DB trigger, and retention job |
+| 7 | `20261108030000_restore_2fa_rate_limit_contracts.sql` | Restores persistent, atomic user/admin 2FA challenge counters with server-only grants |
+| 8 | `20261108031000_restore_atomic_user_2fa_contracts.sql` | Restores atomic user 2FA enrollment, disable and recovery-code consumption; enforces unique active recovery hashes |
+| 9 | `20261108032000_restore_atomic_admin_2fa_contracts.sql` | Restores atomic admin 2FA enrollment, disable and recovery with canonical admin identity and account-state checks |
+| 10 | `20261108033000_restore_support_admin_emergency_contracts.sql` | Restores support grants, bounded emergency sessions, session revocation on disable, and transaction-bound audit |
 
-This table shows the ordered deposit and closely coupled trade-opening remediation sequence, **not permission to skip other pending migrations**. In the actual release, all approved migration versions between the current production head and the latest listed migration must be reconciled and applied in ascending order. In particular, the direct-credit ACL revocation must complete before any deposit scanner or confirmation worker is restarted.
+This table shows the currently mapped ordered deposit, trade-opening, identity and support-admin remediation sequence, **not permission to skip other pending migrations**. In the actual release, all approved migration versions between the current production head and the latest listed migration must be reconciled and applied in ascending order. In particular, the direct-credit ACL revocation must complete before any deposit scanner or confirmation worker is restarted.
 
 The SQL migration files are individually transactional. Apply each using the approved Supabase migration mechanism and confirm that its version appears in migration history before proceeding to the next file. Stop on the first error; do not continue with later migrations.
 
@@ -83,15 +87,19 @@ If any pre-deployment gate cannot be verified, stop without applying migrations.
 4. Apply `20261108013000_deposit_chain_integrity_monitor.sql` only after the block identity columns from `20261104130000` exist.
 5. Apply `20261108014000_restore_authenticated_presence_rpc.sql`.
 6. Apply `20261108020000_guard_offline_ad_trade_opening.sql` only after the presence RPC migration; its online decision depends on the fresh `last_seen_at` heartbeat.
-7. Run all six SQL preflights in Section 5. Do not resume workers or trade-opening routes on a failure.
-8. Deploy the compatible application release at or after commit `71e8ba77d1e3c5387e0c441b94ca21d6f84ca6e7`. This contains the leased deposit worker path, integrity monitor and quorum verification logic.
-9. Confirm the deployed worker is running the intended release, then resume deposit ingestion, confirmation workers and trade-opening routes gradually while observing logs and database errors.
+7. Apply `20261108030000_restore_2fa_rate_limit_contracts.sql` before enabling any user/admin 2FA challenge or support emergency flow.
+8. Apply `20261108031000_restore_atomic_user_2fa_contracts.sql` to install the user enrollment, disable and one-time recovery RPCs.
+9. Apply `20261108032000_restore_atomic_admin_2fa_contracts.sql` after confirming the canonical `verify_admin_login(uuid,uuid)` function is present.
+10. Apply `20261108033000_restore_support_admin_emergency_contracts.sql` after the 2FA rate-limit and admin lifecycle contracts; support configuration and session events are audited transactionally.
+11. Run all seven SQL preflights in Section 5. Do not resume workers or trade-opening routes on a failure.
+12. Deploy the compatible application release containing the leased deposit worker path, integrity monitor/quorum logic, 2FA callers and support-admin routes.
+13. Confirm the deployed worker is running the intended release, then resume deposit ingestion, confirmation workers and trade-opening routes gradually while observing logs and database errors.
 
 Do not roll the application back to a version that calls the raw canonical credit RPC after the ACL migration has revoked that permission. If the new release fails after the ACL migration, leave deposit workers paused and deploy a forward fix.
 
 ## 5. Required SQL preflights and post-deployment checks
 
-Run these read-only preflight files after the complete deposit and trade-opening remediation sequence, especially after the final ACL migration:
+Run these read-only preflights only after all approved migrations in Section 2 have been applied, especially after the final financial ACL migration:
 
 1. `supabase/tests/deposit_confirmation_contract_preflight.sql`
 2. `supabase/tests/terminal_deposit_registration_replay_preflight.sql`
@@ -99,6 +107,7 @@ Run these read-only preflight files after the complete deposit and trade-opening
 4. `supabase/tests/deposit_chain_integrity_monitor_preflight.sql`
 5. `supabase/tests/authenticated_presence_rpc_preflight.sql`
 6. `supabase/tests/offline_ad_trade_opening_preflight.sql`
+7. `supabase/tests/two_factor_support_admin_contract_preflight.sql`
 
 The first preflight also asserts the final server-only credit ACL, so do not use it as a pass criterion immediately after migration 1; run it after migration 3.
 
@@ -116,6 +125,11 @@ Verify all of the following:
 - `deposit_chain_integrity_events` exists with RLS enabled and no direct table grants to public client roles or `service_role`.
 - The active alert deduplication index `uq_system_alerts_active_dedupe_key` exists.
 - `idx_onchain_deposits_confirmation_claim`, `idx_onchain_deposits_confirmed_block_identity`, and `idx_onchain_deposits_integrity_claim` exist.
+- `admin_2fa_rate_limits` and `user_2fa_rate_limits` exist with RLS, service-role-only table access and the four exact rate-limit RPCs.
+- User 2FA enrollment, disable and recovery-code RPCs exist with the exact signatures listed in the new 2FA/support preflight; the active recovery-code hash index is unique.
+- Admin 2FA enable, disable, recovery and rotation RPCs exist and use canonical `verify_admin_login` actor resolution.
+- The three support-admin tables exist with RLS and service-only direct table access; emergency sessions are limited to three hours with one unrevoked session per support account.
+- Disabling a support-admin grant revokes its active sessions and the same RPC transaction writes the `CONFIGURE_SUPPORT_ADMIN` administrator audit entry.
 
 A successful migration command alone is not proof that the grants, function ownership, search paths and RLS state are correct. The SQL preflights must complete without exception.
 
@@ -149,7 +163,7 @@ Backup sources must be independent providers on the same mainnet and expose the 
 Resume the deposit workers only when:
 
 - migration history is reconciled and the approved ordered release is fully applied;
-- all six SQL preflights pass;
+- all seven SQL preflights pass;
 - the direct raw-credit grant is absent and guarded wrapper grants are correct;
 - the compatible application commit is deployed;
 - the required provider quorum variables are configured for the supported chains;
@@ -161,13 +175,13 @@ No live financial transaction is required to establish these database and code-l
 
 ---
 
-**Current decision:** **NO-GO for production migration execution.** The older migration-file reconciliation gate remains open, and confirmed application dependencies (including presence and offline-ad trade-opening RPCs) are still absent in production. The new forward migrations and preflights are prepared and rollback-rehearsed only; no production migration has been applied.
+**Current decision:** **NO-GO for production migration execution.** The older migration-file reconciliation gate remains open, and confirmed application dependencies (including deposit confirmation/integrity RPCs, presence, offline-ad trade-opening, 2FA lifecycle/rate-limit and support-admin contracts) remain absent in production. The new forward migrations and preflights are prepared for rollback-only rehearsal; no production migration has been applied.
 
 See [the production migration reconciliation audit](production-migration-reconciliation.md) for confirmed missing RPC/table dependencies and superseded historical candidates.
 
 ## Appendix A. Tracked local migration files newer than the production head
 
-Inventory only; this list records the 64 tracked local SQL files with versions greater than `20261103204401` after the current forward migrations are committed. It is **not** a blanket approval to apply them. Each file remains subject to the historical-file reconciliation and review gates above. If the release inventory changes, regenerate this list before a production window.
+Inventory only; this list records the 68 tracked local SQL files with versions greater than `20261103204401` after the current forward migrations are committed. It is **not** a blanket approval to apply them. Each file remains subject to the historical-file reconciliation and review gates above. If the release inventory changes, regenerate this list before a production window.
 
 ```text
 20261104120000_withdrawal_confirmation_and_control_flags.sql
@@ -234,4 +248,8 @@ Inventory only; this list records the 64 tracked local SQL files with versions g
 20261108013000_deposit_chain_integrity_monitor.sql
 20261108014000_restore_authenticated_presence_rpc.sql
 20261108020000_guard_offline_ad_trade_opening.sql
+20261108030000_restore_2fa_rate_limit_contracts.sql
+20261108031000_restore_atomic_user_2fa_contracts.sql
+20261108032000_restore_atomic_admin_2fa_contracts.sql
+20261108033000_restore_support_admin_emergency_contracts.sql
 ```
