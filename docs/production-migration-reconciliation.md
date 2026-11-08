@@ -9,7 +9,7 @@
 
 **Production migration execution remains NO-GO.** The Supabase migration ledger stops at `20261103204401` (137 recorded migrations). There are 90 untracked historical SQL files with versions at or before that recorded head, two modified older SQL files, and a long sequence of later tracked migrations. Their exact effects cannot be inferred safely from names or file presence.
 
-The audit also confirmed that several current application paths call RPCs/tables which are absent from the live catalog. These are real operational gaps, not merely untracked-file bookkeeping. Six narrow forward migrations now cover the presence heartbeat, seller-online guard, user/admin 2FA contracts and support-admin emergency mode. They are prepared and rollback-rehearsed only; none has been applied.
+The audit also confirmed that several current application paths call RPCs/tables which are absent from the live catalog. These are real operational gaps, not merely untracked-file bookkeeping. Ten narrow forward migrations now cover the presence heartbeat, seller-online guard, user/admin 2FA contracts, support-admin emergency mode, the missing restricted account enum and guarded administrator/trade actions. They are prepared and rollback-rehearsed only; none has been applied.
 
 No production DDL or financial operation was executed.
 
@@ -21,15 +21,15 @@ Live `supabase_migrations.schema_migrations`:
 - Latest version: `20261103204401`
 - Latest name: `lock_admin_audit_logs_to_verified_server_routes`
 
-Local inventory immediately before the current 2FA/support batch:
+Local inventory immediately before the current admin-action batch:
 
-- **64** tracked, clean SQL files newer than the production head (including the prior two forward trade-opening migrations).
+- **68** tracked, clean SQL files newer than the production head (including the prior presence, trade-opening and 2FA/support forward migrations).
 - **90** untracked historical SQL files dated from `20261017010000` through `20261102000003`, all at or before the production head.
 - **2** modified older SQL files:
   - `20260928020000_withdrawal_hardened_rpcs.sql`
   - `20260928070000_canonical_p2p_state_machine_and_rpcs.sql`
 
-Six forward files are now prepared after the production head:
+Ten forward files are now prepared after the production head:
 
 - `20261108014000_restore_authenticated_presence_rpc.sql`
 - `20261108020000_guard_offline_ad_trade_opening.sql`
@@ -37,8 +37,12 @@ Six forward files are now prepared after the production head:
 - `20261108031000_restore_atomic_user_2fa_contracts.sql`
 - `20261108032000_restore_atomic_admin_2fa_contracts.sql`
 - `20261108033000_restore_support_admin_emergency_contracts.sql`
+- `20261108040000_add_restricted_user_status.sql`
+- `20261108041000_restore_admin_user_action_contracts.sql`
+- `20261108042000_restore_admin_mark_paid_authorized_rpc.sql`
+- `20261108043000_restore_atomic_admin_dispute_settlement.sql`
 
-The current batch adds four forward migration files to the 64-file newer inventory; after commit, the local release inventory will contain **68** files newer than the production head.
+The current admin-action batch adds four forward migration files to the 68-file newer inventory; after commit, the local release inventory will contain **72** files newer than the production head.
 
 The 90 historical file versions are absent from the production migration ledger. That establishes missing migration provenance, but not that every contained schema change is absent: some effects exist via other applied migrations or live catalog changes. Do not apply, delete, rename, or mark historical files applied without a file-by-file code/catalog comparison.
 
@@ -156,13 +160,46 @@ Preflight:
 
 A read-only live catalog check found zero duplicate active user recovery-hash groups before adding the partial unique index. The four migrations plus the combined preflight passed a rollback-only rehearsal against the production schema. A subsequent read-only catalog check confirmed the new rate-limit/support tables, recovery index and representative user/admin/support RPCs were all absent after rollback. No production object was retained and no production migration was applied.
 
-## 5. Profile public projection remains a separate review
+## 5. Admin account, emergency-freeze and trade-action contracts
+
+The live catalog confirmed that the six current server-side admin-action RPCs were absent. It also exposed two schema mismatches between old candidates and the deployed database: `user_status_enum` did not contain the `restricted` label required by the current API, and the deployed `app_admins` registry has only `user_id` and `granted_at` (no `role` or `created_at` columns).
+
+### Prepared forward migrations
+
+1. `20261108040000_add_restricted_user_status.sql`
+   - Adds the `restricted` enum label used by `src/app/api/admin/users/[userId]/route.ts`.
+   - It is intentionally an enum-only migration and must be committed/applied before the next migration parses or casts that enum label.
+
+2. `20261108041000_restore_admin_user_action_contracts.sql`
+   - Restores `admin_update_user_role_authorized`, `admin_update_user_status_authorized`, `admin_freeze_user_authorized` and `admin_unfreeze_user_authorized`.
+   - All four use the strict internal `is_active_full_admin_actor(uuid)` helper, which resolves a canonical full-admin identity and rejects inactive, restricted, suspended, banned, on-hold, emergency-frozen or minor-restricted accounts.
+   - Role changes take a transaction-scoped advisory lock; demoting an administrator is rejected when it would leave no other active full administrator. Promotion is restricted to active, unrestricted accounts.
+   - The role mutation writes only the deployed `app_admins(user_id, granted_at)` columns, updates the profile and server-managed Auth app metadata in one transaction, and writes its audit row.
+   - Account-status changes reject full-admin targets (which must be demoted through the dedicated role operation), synchronize profile flags/account status, pause offers in all three deployed marketplace stores (`advertisements`, `ads`, and `p2p_ads`), and revoke/disable any support-admin emergency access for restricted/suspended/banned users.
+   - Emergency freeze uses the same strict actor guard, mandatory audit, pauses offers in all three marketplace stores and disables support-admin grants/sessions. Unfreeze invalidates stale sessions but deliberately does not reactivate offers; reactivation is a separate controlled action.
+
+3. `20261108042000_restore_admin_mark_paid_authorized_rpc.sql`
+   - Restores the service-only admin mark-paid wrapper with a strict active full-admin actor check, reason validation and mandatory audit.
+   - It delegates the trade state transition to the canonical `mark_p2p_trade_paid` RPC. It does not directly modify wallet balances or escrow ledger entries.
+
+4. `20261108043000_restore_atomic_admin_dispute_settlement.sql`
+   - Restores the service-only atomic dispute wrapper with strict active full-admin actor validation, one-open-dispute/trade/winner guards and mandatory same-transaction audit.
+   - It delegates buyer/seller settlement to the existing canonical dispute resolver, which uses the canonical escrow release/cancel functions; the wrapper checks the final dispute and trade state before committing.
+   - Optional system chat/notification writes are isolated from the mandatory settlement/audit transaction.
+   - **Runtime gate:** keep `PAXONES_ATOMIC_DISPUTE_SETTLEMENT_ENABLED` disabled until this path receives a separately approved isolated financial validation. No settlement path was invoked in this audit.
+
+Preflight:
+- `supabase/tests/admin_user_trade_action_contract_preflight.sql`
+
+The four migrations, together with the 2FA/support base migration required by the strict actor helper, passed a combined rollback-only schema rehearsal with the admin-action preflight. The preflight also verifies restricted/suspended/banned statuses and emergency freeze pause all three marketplace ad stores, while unfreeze does not silently reactivate offers. A read-only post-rollback catalog check confirmed the `restricted` enum value, six admin-action RPCs and support-admin tables were still absent and the production migration ledger remained at 137 records / `20261103204401`. No production DDL was retained and no financial function was called.
+
+## 6. Profile public projection remains a separate review
 
 Production `profiles` has RLS enabled but still has a broad `Public profiles are viewable by everyone` SELECT policy. Anon has column-level SELECT grants for trader-card fields; authenticated has column-level SELECT and UPDATE grants for profile fields. Production lacks the `public_profiles` view and the `set_my_presence` RPC.
 
 The old `20261101125944_secure_profile_public_projection.sql` combines several profile policy/grant changes with the presence RPC. Do not apply the whole historical migration merely to restore presence. The new narrow `20261108014000` migration restores the heartbeat without changing the public profile projection. The app's public-profile query paths and column-grant compatibility still require a separate migration/code review.
 
-## 6. Deployment gate and next reconciliation work
+## 7. Deployment gate and next reconciliation work
 
 **Current status: NO-GO for production migration execution.**
 
@@ -170,7 +207,8 @@ Before applying anything:
 1. Reconcile the 90 historical untracked SQL files one by one against the applied ledger, live catalog, current source references and later replacement migrations.
 2. Review the two modified older migrations separately.
 3. Replay the exact approved migration release against a schema-faithful disposable database; do not mark historical migrations applied just to bypass history gaps.
-4. Include all approved intervening migrations in version order. The presence, offline-ad, 2FA and support-admin forward candidates must be applied only after the prior historical-release reconciliation and before enabling the matching routes/workers.
-5. Deploy compatible application code and verify all seven SQL preflights before resuming routes/workers.
+4. Include all approved intervening migrations in version order. The presence, offline-ad, 2FA, support-admin, restricted-enum and admin/trade forward candidates must be applied only after the prior historical-release reconciliation and in exact version order.
+5. Keep `PAXONES_ATOMIC_DISPUTE_SETTLEMENT_ENABLED` disabled until a separately approved isolated financial validation of the admin dispute wrapper has been completed.
+6. Deploy compatible application code and verify all eight SQL preflights before resuming routes/workers.
 
 A production migration being absent does not authorize a code workaround that bypasses authorization, idempotency, financial fencing, or audit guarantees. Preserve fail-closed behavior until the matching database contract is installed.
