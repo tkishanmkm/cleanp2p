@@ -284,7 +284,7 @@ Before applying anything:
 3. Replay the exact approved migration release against a schema-faithful disposable database; do not mark historical migrations applied just to bypass history gaps.
 4. Include all approved intervening migrations in version order. The presence, offline-ad, 2FA, support-admin, restricted-enum, admin/trade and supporting-table forward candidates must be applied only after the prior historical-release reconciliation and in exact version order. Configure Vault and match the deployed `CRON_SECRET` before scheduling account-deletion media cleanup.
 5. Keep `PAXONES_ATOMIC_DISPUTE_SETTLEMENT_ENABLED` disabled until a separately approved isolated financial validation of the admin dispute wrapper has been completed.
-6. Deploy compatible application code and verify all twenty-three SQL preflights before resuming routes/workers.
+6. Deploy compatible application code and verify all twenty-four SQL preflights before resuming routes/workers.
 
 A production migration being absent does not authorize a code workaround that bypasses authorization, idempotency, financial fencing, or audit guarantees. Preserve fail-closed behavior until the matching database contract is installed.
 
@@ -317,3 +317,85 @@ The existing historical candidate 20261019150000_harden_security_definer_search_
   - Verifies expected schema-qualified object references and that anon/authenticated cannot execute them; service_role access matches the reviewed contract.
 
 The migration and preflight parse as PostgreSQL statements, and the read-only production precondition query passed for all five targets. No migration was applied or rehearsed with DDL against production. The broader set of SECURITY DEFINER functions using public search paths remains a separate database-wide audit item; this migration makes no claim to resolve all such functions.
+
+## 11. Database-wide SECURITY DEFINER search-path inventory
+
+A read-only catalog inventory on 8 November 2026 found:
+
+- **176** public-schema SECURITY DEFINER functions.
+- All 176 have an explicit function-level search_path setting; none relies on an unset/default function-level path.
+- **45** functions have an explicit path that includes public, auth or pg_temp.
+- For those 45 functions, anon and authenticated do not have execution permission and there is no PUBLIC EXECUTE grant. A subset is service-role executable; the rest are postgres-only. This is a path-hardening inventory, not a claim that all 45 are exploitable.
+- The catalog review did not find a reason to alter any function's business body as part of a search-path-only pass.
+
+### Prepared search-path-only batches
+
+**Batch 1 — 20261108180000_empty_trade_dependency_search_paths.sql**
+
+Covers the five trade/escrow dependencies:
+- get_user_kyc_tier(uuid)
+- get_user_cumulative_buy_volume(uuid)
+- has_pending_withdrawal_approval(uuid)
+- expire_p2p_trade(uuid)
+- cancel_expired_p2p_trades()
+
+Their production owners, SECURITY DEFINER flags, exact existing paths, grants and qualified references were checked read-only. supabase/tests/trade_dependency_search_path_preflight.sql checks the resulting empty paths and role boundaries.
+
+**Batch 2 — 20261108190000_empty_profile_trigger_search_paths.sql**
+
+Covers 13 reviewed profile/KYC/trigger helpers:
+- check_kyc_review_timeout(uuid)
+- generate_random_username()
+- generate_system_username()
+- get_admin_security_status(uuid)
+- get_user_remaining_buy_allowance(uuid)
+- handle_new_user_profile()
+- handle_new_user_wallets()
+- handle_new_user()
+- handle_profile_status_operation_ownership()
+- handle_trade_status_sync()
+- handle_trade_volume_update()
+- prevent_usd_value_at_trade_update()
+- fn_update_user_trade_metrics()
+
+The read-only production precondition query confirmed all 13 have the expected postgres owner, SECURITY DEFINER flag, exact existing search_path, execution grants and no PUBLIC EXECUTE. Exact body anchors for their schema-qualified references or trigger/builtin-only behavior were checked. The apparent EXECUTE match in fn_update_user_trade_metrics() is a comment phrase, not a dynamic SQL statement. supabase/tests/profile_trigger_search_path_preflight.sql asserts the post-change configuration and grants.
+
+Both prepared batches alter only each function's search_path; they preserve prosrc, owner, SECURITY DEFINER status and proacl. Both migration files and both preflights parse as PostgreSQL statements. These are local release candidates only: neither batch has been applied or DDL-rehearsed on production.
+
+### Remaining 27 functions for separate review
+
+The following 27 functions still have one of the inventoried public/auth/temp paths and were deliberately excluded from the two batches above:
+
+- acquire_withdrawal_worker_lock()
+- admin_adjust_balance(text,uuid,text,text,numeric)
+- allocate_hot_wallet_nonce(integer)
+- allocate_hot_wallet_nonce(text,text,bigint)
+- claim_next_deposit_sweep(text,integer)
+- credit_confirmed_deposit(character varying,integer,character varying,uuid,character varying,numeric)
+- ensure_user_balance_wallet(uuid,text)
+- execute_internal_transfer(uuid,text,text,numeric,text)
+- execute_wallet_transfer(uuid,uuid,text,numeric,numeric,text)
+- extend_sweep_lease(uuid,text,integer)
+- ingest_and_credit_deposit(text,integer,text,text,numeric,text,integer)
+- initialize_resource_delegation(uuid,text,text,text,bigint,bigint)
+- initiate_p2p_trade(uuid,uuid,uuid,numeric,text,numeric,numeric,text,text)
+- mark_gas_funded(uuid,text)
+- mark_swept(uuid,text)
+- persist_signed_evm_transaction(uuid,text,text,bigint,text,text,integer)
+- process_deposit_atomic(text,text,text,numeric,text,integer,bigint,text,text,integer,text)
+- process_user_deposit(uuid,text,numeric,text,text,text,text)
+- process_user_deposit(uuid,text,text,text,numeric,text)
+- provision_user_wallets_atomic(uuid,integer,text,text,text,text)
+- record_platform_ledger_entry(text,text,numeric,text,uuid,text,text,text,text,text,jsonb)
+- release_withdrawal_worker_lock()
+- reserve_utxos_for_sweep(uuid,text,jsonb,integer)
+- sync_didit_kyc_status(uuid,text,text,jsonb)
+- update_sweep_operation_status(uuid,text,text,text,text,numeric,text,integer)
+- verify_and_lock_pre_broadcast_cleanup(uuid,text)
+- verify_sweep_ownership(uuid,text,text)
+
+These remaining functions include direct deposit-credit, transfer, admin-balance, wallet-provisioning, sweep, gas-funding and signed-transaction state paths. They require a separate review of all relation/type/function resolution, dynamic or generated SQL, call chains, execution ACLs and exact financial migration order before any search-path change. Do not batch them based on the absence of an obvious unqualified table reference alone.
+
+The local audit also corrected false positives from simple text scanning: SQL aliases, trigger NEW/OLD fields, SET clauses, comment text and parameter names can look like unqualified relation references. A function is not approved for an empty path solely because a regex scan returns no obvious table name.
+
+**Current inventory disposition:** 18 of the 45 public/auth/temp-path functions have prepared search-path-only forward candidates; the remaining 27 are retained for separate review. The audit does not replace the 90-file historical migration reconciliation requirement and does not change the production NO-GO decision.
