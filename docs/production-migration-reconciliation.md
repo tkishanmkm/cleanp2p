@@ -62,7 +62,7 @@ The following RPCs were found in application code, but the exact RPCs were absen
 | Missing RPC | Current code reference | Impact |
 |---|---|---|
 | `register_pending_deposit(...)`, `claim_pending_deposit_confirmations(...)`, `release_pending_deposit_confirmation_claim(...)`, `process_deposit_atomic_with_lease(...)`, `claim_deposit_integrity_checks(...)`, `complete_deposit_integrity_check(...)` | Deposit scanners, `src/jobs/confirmationsWorker.ts`, `src/jobs/depositIntegrityWorker.ts` | Pending deposits cannot be registered/claimed/credited through the lease path, and chain-integrity checks cannot be claimed/completed. The raw legacy credit RPC remains directly executable by `service_role` until the ACL migration is applied. |
-| `record_ad_offline_open_attempt(text,text)` | `src/lib/ad-owner-availability.ts` | All three trade-opening API routes call this guard before escrow initiation; errors return HTTP 503. |
+| `record_ad_offline_open_attempt(text,text)` | `src/lib/ad-owner-availability.ts` | All four trade-opening API routes call this guard before escrow initiation; errors return HTTP 503. |
 | `set_my_presence(boolean)` | `src/components/providers/UserPresenceProvider.tsx`, `src/hooks/usePresence.ts`, `src/hooks/usePresenceHeartbeat.ts` | Presence heartbeat cannot update seller availability timestamps. |
 | `check_admin_2fa_rate_limit(uuid)`, `reset_admin_2fa_rate_limit(uuid)` | `src/lib/admin-2fa-rate-limit.ts` | Admin 2FA challenges/recovery fail closed when rate-limit state cannot be checked or reset. |
 | `check_user_2fa_rate_limit(uuid)`, `reset_user_2fa_rate_limit(uuid)` | `src/lib/user-2fa-rate-limit.ts` | User 2FA verification/enrollment protection fails closed. |
@@ -98,11 +98,12 @@ Other absent legacy-candidate tables were `ad_offline_open_attempts` (now addres
 
 ## 3. Core trade-opening blocker and safe forward fix
 
-Three current routes call `checkAdOwnerAvailability()` before calling `initiate_trade_with_escrow`:
+Four current routes call `checkAdOwnerAvailability()` before calling `initiate_trade_with_escrow`:
 
 - `src/app/api/trades/route.ts`
 - `src/app/api/trades/initiate/route.ts`
 - `src/app/api/trades/create/route.ts`
+- `src/app/api/p2p/orders/create/route.ts`
 
 That helper calls `record_ad_offline_open_attempt`. Production lacks the RPC and its backing table, so these trade-opening routes return HTTP 503 before escrow initiation.
 
@@ -283,6 +284,36 @@ Before applying anything:
 3. Replay the exact approved migration release against a schema-faithful disposable database; do not mark historical migrations applied just to bypass history gaps.
 4. Include all approved intervening migrations in version order. The presence, offline-ad, 2FA, support-admin, restricted-enum, admin/trade and supporting-table forward candidates must be applied only after the prior historical-release reconciliation and in exact version order. Configure Vault and match the deployed `CRON_SECRET` before scheduling account-deletion media cleanup.
 5. Keep `PAXONES_ATOMIC_DISPUTE_SETTLEMENT_ENABLED` disabled until a separately approved isolated financial validation of the admin dispute wrapper has been completed.
-6. Deploy compatible application code and verify all ten SQL preflights before resuming routes/workers.
+6. Deploy compatible application code and verify all twenty-three SQL preflights before resuming routes/workers.
 
 A production migration being absent does not authorize a code workaround that bypasses authorization, idempotency, financial fencing, or audit guarantees. Preserve fail-closed behavior until the matching database contract is installed.
+
+## 10. Trade/KYC SECURITY DEFINER dependency search paths
+
+A read-only production catalog review on 8 November 2026 found five functions used by the canonical escrow and trade-expiry paths that remain postgres-owned SECURITY DEFINER functions with a public/auth search path:
+
+| Function | Current production search path | Execution boundary |
+|---|---|---|
+| public.get_user_kyc_tier(uuid) | public, pg_temp | service_role and postgres |
+| public.get_user_cumulative_buy_volume(uuid) | public, pg_temp | service_role and postgres |
+| public.has_pending_withdrawal_approval(uuid) | public, auth, pg_temp | postgres only |
+| public.expire_p2p_trade(uuid) | public, pg_temp | service_role and postgres |
+| public.cancel_expired_p2p_trades() | public, pg_temp | service_role and postgres |
+
+The canonical initiate_trade_with_escrow already has an empty search path and calls the two KYC helpers plus the pending-withdrawal helper. The expiry functions are part of the same trade lifecycle. Read-only inspection confirmed all five function bodies use schema-qualified non-catalog references (public.* and, where applicable, auth.users/auth.*); their application object references do not rely on an implicit public or auth path.
+
+The existing historical candidate 20261019150000_harden_security_definer_search_paths.sql covers a different six-function set and does not include these five current escrow dependencies. It is not a substitute for this narrow forward fix.
+
+### Prepared forward hardening
+
+- 20261108180000_empty_trade_dependency_search_paths.sql
+  - Requires the exact production owner, SECURITY DEFINER flag, current search path, qualified source references and established grants before changing anything.
+  - Sets search_path to empty on exactly these five functions.
+  - Verifies prosrc (the function body), owner, SECURITY DEFINER flag and proacl are unchanged, and confirms the expected execution boundary after the change.
+  - Does not change financial behavior, table data, function signatures or execution grants.
+
+- supabase/tests/trade_dependency_search_path_preflight.sql
+  - Verifies all five functions are postgres-owned SECURITY DEFINER functions with an empty search_path.
+  - Verifies expected schema-qualified object references and that anon/authenticated cannot execute them; service_role access matches the reviewed contract.
+
+The migration and preflight parse as PostgreSQL statements, and the read-only production precondition query passed for all five targets. No migration was applied or rehearsed with DDL against production. The broader set of SECURITY DEFINER functions using public search paths remains a separate database-wide audit item; this migration makes no claim to resolve all such functions.
