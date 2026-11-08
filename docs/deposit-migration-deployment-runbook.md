@@ -1,4 +1,4 @@
-# Paxones deposit migration production runbook
+# Wayones deposit migration production runbook
 
 **Status:** Prepared; production changes have not been applied
 
