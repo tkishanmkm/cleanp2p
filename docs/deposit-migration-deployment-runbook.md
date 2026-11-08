@@ -8,7 +8,7 @@
 
 **Region:** `ap-northeast-1`
 
-**Application release required:** branch `fix/production-typecheck-batch-1`, current verified code baseline `a6e49f10bdcf4cc6e5581939233d5115a5ecf3f1` (ad-creation/trade-opening hardening batch; not deployed)
+**Application release required:** branch `fix/production-typecheck-batch-1`, current verified code baseline `d48111c0acc4f806bf3963415f4e51ebf2af5862` (escrow replay and ad-row locking hardening; not deployed)
 
 ## 1. Current production snapshot
 
