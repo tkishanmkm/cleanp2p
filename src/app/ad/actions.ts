@@ -8,6 +8,7 @@ import { findAdById } from '@/lib/ad-lookup';
 import { sendNewTradeNotificationEmail } from '@/lib/email/tradeEmailService';
 import { verifyServerAdmin } from '@/lib/server-admin-auth';
 import { assertPlatformControlAllowed } from '@/lib/platform-guard';
+import { checkAdOwnerAvailability } from '@/lib/ad-owner-availability';
 import { isTier2User } from '@/lib/kyc';
 
 export interface ActionResponse<T> {
@@ -444,8 +445,8 @@ export async function createTradeOrderWithEscrow(input: {
     const resolvedPublicId = String(ad.public_ad_id || ad.public_id || ad.id || cleanAdId);
 
 
-    // Rule: Users cannot open trades on their own ads (unless it is a system/demo ad)
-    if (ad.user_id === user.id && ad.user_id !== 'trader_verified_1') {
+    // Trade initiation is always restricted to a different advertisement owner.
+    if (String(ad.user_id || '') === user.id) {
       return {
         data: null,
         error: {
@@ -512,7 +513,7 @@ export async function createTradeOrderWithEscrow(input: {
         error: { message: `Minimum trade amount is ${minTradeAmount} USD.`, code: 'MIN_TRADE_AMOUNT_NOT_MET' },
       };
     }
-    const assetSymbol = (ad.asset_symbol || ad.crypto || ad.asset_code || 'BTC').toUpperCase();
+    const assetSymbol = (ad.asset_symbol || ad.crypto_currency || ad.coin || ad.crypto || ad.asset_code || 'BTC').toUpperCase();
     const fiatSymbol = (ad.fiat_symbol || ad.fiat || ad.fiat_currency || 'USD').toUpperCase();
 
     // 5. Determine who is providing crypto for escrow:
@@ -540,17 +541,26 @@ export async function createTradeOrderWithEscrow(input: {
     const resolvedSellerId = sellerId;
     const resolvedBuyerId = buyerId;
 
-    // 5.1 Enforce KYC Tier 1 / Tier 2 Business Rules
-    // Seller MUST be Tier 2
-    const { data: sellerProf } = await adminClient
+    // The canonical escrow RPC performs authoritative, transaction-safe KYC tier
+    // and cumulative BUY-volume checks. Avoid a second, stale profile/trade read here.
+
+    // SELLER Tier 2 is a prerequisite before recording an offline-open attempt.
+    // Use only the deployed kyc_status field; the escrow RPC rechecks Tier 2 itself.
+    const { data: sellerProfile, error: sellerProfileError } = await adminClient
       .from('profiles')
-      .select('is_verified, id_verified, kyc_status, verification_tier')
-      .eq('id', sellerId)
+      .select('kyc_status')
+      .eq('id', resolvedSellerId)
       .maybeSingle();
-
-    const isSellerTier2 = isTier2User(sellerProf);
-
-    if (!isSellerTier2) {
+    if (sellerProfileError || !sellerProfile) {
+      return {
+        data: null,
+        error: {
+          message: 'Seller verification status could not be confirmed. Please retry.',
+          code: 'SELLER_KYC_STATUS_UNAVAILABLE',
+        },
+      };
+    }
+    if (!isTier2User(sellerProfile)) {
       return {
         data: null,
         error: {
@@ -560,40 +570,8 @@ export async function createTradeOrderWithEscrow(input: {
       };
     }
 
-    // Buyer: If Tier 1, cumulative BUY volume capped at $1,000.00
-    const { data: buyerProf } = await adminClient
-      .from('profiles')
-      .select('is_verified, id_verified, kyc_status, verification_tier')
-      .eq('id', buyerId)
-      .maybeSingle();
-
-    const isBuyerTier2 = isTier2User(buyerProf);
-
-    if (!isBuyerTier2) {
-      const { data: existingBuyerTrades } = await adminClient
-        .from('trades')
-        .select('fiat_amount, crypto_amount, price, unit_price, status')
-        .eq('buyer_id', buyerId);
-
-      const NON_QUALIFYING = new Set(['cancelled', 'canceled', 'expired', 'failed', 'rejected']);
-      let cumBuys = 0;
-      for (const t of existingBuyerTrades || []) {
-        if (!NON_QUALIFYING.has(String(t.status || '').toLowerCase().trim())) {
-          cumBuys += Number(t.fiat_amount) || (Number(t.crypto_amount || 0) * Number(t.price ?? t.unit_price ?? 1.0));
-        }
-      }
-
-      if ((cumBuys + fiatAmount) > 1000.00) {
-        return {
-          data: null,
-          error: {
-            message: 'Tier 1 accounts can buy up to $1,000 cumulatively. Complete KYC to increase your buy limit.',
-            code: 'KYC_TIER1_BUY_LIMIT_EXCEEDED',
-          },
-        };
-      }
-    }
-
+    // Buyer cumulative KYC limits are enforced only by the escrow RPC, which
+    // computes its authoritative USD snapshot within the trade transaction.
     // Validate the advertisement's published order limits. The canonical database
     // RPC performs the authoritative concurrent wallet_assets lock and escrow check;
     // do not use a max-of-legacy-wallet-tables preflight as a substitute for that lock.
@@ -681,7 +659,25 @@ export async function createTradeOrderWithEscrow(input: {
         error: { message: 'Idempotency key is required to initiate trade order.', code: 'IDEMPOTENCY_KEY_REQUIRED' },
       };
     }
-    const adIdentifier = String(ad.id || ad.public_ad_id || ad.public_id || cleanAdId);
+    const adIdentifier = resolvedPublicId;
+
+    // Match the API trade path: an authenticated buyer must pass the online
+    // advertiser guard before the escrow RPC can open the trade.
+    const availabilityResponse = await checkAdOwnerAvailability(
+      supabase,
+      resolvedPublicId,
+      resolvedIdempotencyKey
+    );
+    if (availabilityResponse) {
+      const availabilityPayload = await availabilityResponse.json().catch(() => null);
+      return {
+        data: null,
+        error: {
+          message: availabilityPayload?.error || 'Advertiser availability could not be verified. Please retry.',
+          code: availabilityPayload?.code || 'AD_AVAILABILITY_CHECK_FAILED',
+        },
+      };
+    }
 
     const { data: rpcResult, error: rpcError } = await adminClient.rpc('initiate_trade_with_escrow', {
       p_ad_id: adIdentifier,

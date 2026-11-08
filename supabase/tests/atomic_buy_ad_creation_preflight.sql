@@ -1,4 +1,4 @@
--- Read-only production preflight for the canonical atomic BUY advertisement RPC.
+﻿-- Read-only production preflight for the canonical atomic BUY advertisement RPC.
 DO $preflight$
 DECLARE
     v_rpc regprocedure := to_regprocedure(
@@ -20,6 +20,9 @@ DECLARE
         'active','is_active','status','is_deleted','created_at','updated_at'
     ];
     v_column text;
+    v_profile_lock_position integer;
+    v_active_count_position integer;
+    v_ads_insert_position integer;
     v_p2p_required text[] := ARRAY[
         'public_ad_id','user_id','ad_type','type','crypto_currency',
         'fiat_currency','asset_symbol','fiat_symbol','coin','price',
@@ -172,6 +175,39 @@ BEGIN
        OR pg_catalog.strpos(v_definition,'''BUY''')=0
        OR pg_catalog.strpos(v_definition,'SELL')=0 THEN
         RAISE EXCEPTION 'Atomic BUY-ad function is missing authenticated actor, market/control/account guards or dual-table transaction writes';
+    END IF;
+
+    v_profile_lock_position := pg_catalog.strpos(
+        pg_catalog.upper(v_definition),
+        'WHERE P.ID = V_ACTOR'
+    );
+    v_active_count_position := pg_catalog.strpos(
+        pg_catalog.upper(v_definition),
+        'COUNT(DISTINCT ACTIVE_ADS.AD_KEY)'
+    );
+    v_ads_insert_position := pg_catalog.strpos(
+        pg_catalog.upper(v_definition),
+        'INSERT INTO PUBLIC.ADS'
+    );
+
+    IF v_profile_lock_position = 0
+       OR v_active_count_position = 0
+       OR v_ads_insert_position = 0
+       OR pg_catalog.strpos(
+            pg_catalog.upper(pg_catalog.substring(v_definition FROM v_profile_lock_position FOR 180)),
+            'FOR UPDATE;'
+          ) = 0
+       OR NOT (
+            v_profile_lock_position < v_active_count_position
+            AND v_active_count_position < v_ads_insert_position
+       )
+       OR pg_catalog.strpos(pg_catalog.upper(v_definition), 'V_ACTIVE_COUNT BIGINT') = 0
+       OR pg_catalog.strpos(pg_catalog.upper(v_definition), 'IS DISTINCT FROM ''ACTIVE''') = 0
+       OR pg_catalog.strpos(pg_catalog.upper(v_definition), 'FROM PUBLIC.ADS AS A') = 0
+       OR pg_catalog.strpos(pg_catalog.upper(v_definition), 'FROM PUBLIC.P2P_ADS AS P') = 0
+       OR pg_catalog.strpos(pg_catalog.upper(v_definition), 'V_ACTIVE_COUNT >= 10') = 0
+       OR pg_catalog.strpos(pg_catalog.upper(v_definition), 'USER_AD_LIMIT_REACHED') = 0 THEN
+        RAISE EXCEPTION 'BUY-ad creation must lock the owner profile before counting, require active account states, and enforce the ten-ad cap across both stores before either insert';
     END IF;
 END;
 $preflight$;

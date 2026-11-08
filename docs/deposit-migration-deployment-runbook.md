@@ -51,33 +51,36 @@ After the full migration-history reconciliation, execute all approved pending mi
 |---:|---|---|
 | Prior | `20261104120000_withdrawal_confirmation_and_control_flags.sql` | Earlier pending migration in the local release inventory; apply in version order before the deposit schema migration |
 | 1 | `20261104130000_deposit_confirmation_contract.sql` | Adds confirmation leases and canonical block identity; creates registration, claim, release and leased-credit RPCs |
-| 2 | `20261107210306_guard_terminal_deposit_registration_replay.sql` | Makes terminal deposit replay idempotent and fail-closed |
-| 3 | `20261107211754_revoke_direct_deposit_credit_rpc_execution.sql` | Removes direct `service_role` execution of the canonical credit primitive; leaves only guarded wrappers |
-| 4 | `20261108013000_deposit_chain_integrity_monitor.sql` | Adds integrity-check leases, durable mismatch events, and deduplicated critical alerts |
-| 5 | `20261108014000_restore_authenticated_presence_rpc.sql` | Restores the authenticated, caller-bound presence heartbeat needed by seller availability checks |
-| 6 | `20261108020000_guard_offline_ad_trade_opening.sql` | Restores the missing pre-trade availability RPC, durable offline-attempt counter, seller-online DB trigger, and retention job |
-| 7 | `20261108030000_restore_2fa_rate_limit_contracts.sql` | Restores persistent, atomic user/admin 2FA challenge counters with server-only grants |
-| 8 | `20261108031000_restore_atomic_user_2fa_contracts.sql` | Restores atomic user 2FA enrollment, disable and recovery-code consumption; enforces unique active recovery hashes |
-| 9 | `20261108032000_restore_atomic_admin_2fa_contracts.sql` | Restores atomic admin 2FA enrollment, disable and recovery with canonical admin identity and account-state checks |
-| 10 | `20261108033000_restore_support_admin_emergency_contracts.sql` | Restores support grants, bounded emergency sessions, session revocation on disable, and transaction-bound audit |
-| 11 | `20261108040000_add_restricted_user_status.sql` | Adds the `restricted` value already exposed by the admin API; this enum-only migration must commit before the status RPC migration |
-| 12 | `20261108041000_restore_admin_user_action_contracts.sql` | Restores strict-actor admin role/status and freeze/unfreeze wrappers; serializes role changes and protects the last active administrator |
-| 13 | `20261108042000_restore_admin_mark_paid_authorized_rpc.sql` | Restores the server-only mark-paid wrapper around the canonical trade state transition with mandatory audit |
-| 14 | `20261108043000_restore_atomic_admin_dispute_settlement.sql` | Restores audited admin dispute settlement via canonical release/cancel RPCs; its runtime feature flag must remain off pending isolated financial validation |
-| 15 | `20261108050000_restore_trade_event_and_chat_limit_tables.sql` | Restores server-only trade system-event persistence and chat-limit support-request idempotency tables |
-| 16 | `20261108051000_restore_admin_wallet_and_deposit_address_registries.sql` | Restores admin-only platform wallet reads and the strict full-admin rotating deposit-address registry |
-| 17 | `20261108052000_restore_account_deletion_grace_period.sql` | Restores the 20-day deletion schedule, server-only cleanup queue, fail-closed finalizer, and postgres-only cleanup scheduler; media cron remains gated on Vault secrets |
-| 18 | `20261108060000_rebrand_wayones_database_messages_and_callbacks.sql` | Rebrands deployed database-generated moderator/system labels and asynchronous callback URLs without changing function security or historical chat rows |
-| 19 | `20261108070000_secure_profile_public_projection.sql` | Removes public base-profile reads, grants authenticated users only an explicit non-secret own/admin column allowlist, and installs the sanitized public trader projection |
-| 20 | `20261108080000_unify_wallet_index_allocation.sql` | Reconciles the two drifting HD derivation sequences, removes the legacy minus-one allocator offset, and adds a service-role-only atomic allocator for missing profile indexes |
-| 21 | `20261108081000_restore_admin_kyc_action_contracts.sql` | Restores full-admin, row-locked KYC and withdrawal-lock RPCs with deployed column types and mandatory transaction-bound audit records |
-| 22 | `20261108082000_atomic_ad_status_mirror_updates.sql` | Replaces separate canonical/legacy ad status writes with one owner/full-admin-authorized transaction, row locks, activation eligibility and admin audit |
-| 23 | `20261108104511_atomic_ad_soft_delete_status.sql` | Adds terminal soft deletion to the atomic status RPC, setting both `is_deleted` flags in one transaction and preventing deleted listings from being reactivated |
-| 24 | `20261108111210_serialize_trade_open_with_ad_status_changes.sql` | Locks the authoritative `ads` row during escrow trade creation so pause/delete status updates serialize against new trade openings without changing escrow calculations |
-| 25 | `20261108121644_atomic_bulk_ad_controls.sql` | Adds missing lifecycle fields to legacy `advertisements` and installs one service-role-only transaction for bulk pause/resume/delete, owner eligibility, global-pause marker and audit |
-| 26 | `20261108135907_atomic_ad_content_mirror_updates.sql` | Replaces split canonical/legacy advertisement content writes with one service-role-only transaction, strict owner/full-admin authorization, BUY-only policy, field validation and same-transaction admin audit |
+| 2 | `20261105250000_atomic_buy_ad_creation.sql` | Installs the authenticated, transaction-atomic BUY-ad creation RPC across `ads` and `p2p_ads`, using current reference pricing and server-owned lifecycle fields; SELL remains blocked |
+| 3 | `20261105300000_harden_marketplace_rls_and_dml.sql` | Removes client INSERT/UPDATE/DELETE privileges on marketplace tables and preserves RLS-filtered public/owner reads plus the narrow authenticated creation RPC |
+| 4 | `20261107210306_guard_terminal_deposit_registration_replay.sql` | Makes terminal deposit replay idempotent and fail-closed |
+| 5 | `20261107211754_revoke_direct_deposit_credit_rpc_execution.sql` | Removes direct `service_role` execution of the canonical credit primitive; leaves only guarded wrappers |
+| 6 | `20261108013000_deposit_chain_integrity_monitor.sql` | Adds integrity-check leases, durable mismatch events, and deduplicated critical alerts |
+| 7 | `20261108014000_restore_authenticated_presence_rpc.sql` | Restores the authenticated, caller-bound presence heartbeat needed by seller availability checks |
+| 8 | `20261108020000_guard_offline_ad_trade_opening.sql` | Restores the missing pre-trade availability RPC, durable offline-attempt counter, seller-online DB trigger, and retention job |
+| 9 | `20261108030000_restore_2fa_rate_limit_contracts.sql` | Restores persistent, atomic user/admin 2FA challenge counters with server-only grants |
+| 10 | `20261108031000_restore_atomic_user_2fa_contracts.sql` | Restores atomic user 2FA enrollment, disable and recovery-code consumption; enforces unique active recovery hashes |
+| 11 | `20261108032000_restore_atomic_admin_2fa_contracts.sql` | Restores atomic admin 2FA enrollment, disable and recovery with canonical admin identity and account-state checks |
+| 12 | `20261108033000_restore_support_admin_emergency_contracts.sql` | Restores support grants, bounded emergency sessions, session revocation on disable, and transaction-bound audit |
+| 13 | `20261108040000_add_restricted_user_status.sql` | Adds the `restricted` value already exposed by the admin API; this enum-only migration must commit before the status RPC migration |
+| 14 | `20261108041000_restore_admin_user_action_contracts.sql` | Restores strict-actor admin role/status and freeze/unfreeze wrappers; serializes role changes and protects the last active administrator |
+| 15 | `20261108042000_restore_admin_mark_paid_authorized_rpc.sql` | Restores the server-only mark-paid wrapper around the canonical trade state transition with mandatory audit |
+| 16 | `20261108043000_restore_atomic_admin_dispute_settlement.sql` | Restores audited admin dispute settlement via canonical release/cancel RPCs; its runtime feature flag must remain off pending isolated financial validation |
+| 17 | `20261108050000_restore_trade_event_and_chat_limit_tables.sql` | Restores server-only trade system-event persistence and chat-limit support-request idempotency tables |
+| 18 | `20261108051000_restore_admin_wallet_and_deposit_address_registries.sql` | Restores admin-only platform wallet reads and the strict full-admin rotating deposit-address registry |
+| 19 | `20261108052000_restore_account_deletion_grace_period.sql` | Restores the 20-day deletion schedule, server-only cleanup queue, fail-closed finalizer, and postgres-only cleanup scheduler; media cron remains gated on Vault secrets |
+| 20 | `20261108060000_rebrand_wayones_database_messages_and_callbacks.sql` | Rebrands deployed database-generated moderator/system labels and asynchronous callback URLs without changing function security or historical chat rows |
+| 21 | `20261108070000_secure_profile_public_projection.sql` | Removes public base-profile reads, grants authenticated users only an explicit non-secret own/admin column allowlist, and installs the sanitized public trader projection |
+| 22 | `20261108080000_unify_wallet_index_allocation.sql` | Reconciles the two drifting HD derivation sequences, removes the legacy minus-one allocator offset, and adds a service-role-only atomic allocator for missing profile indexes |
+| 23 | `20261108081000_restore_admin_kyc_action_contracts.sql` | Restores full-admin, row-locked KYC and withdrawal-lock RPCs with deployed column types and mandatory transaction-bound audit records |
+| 24 | `20261108082000_atomic_ad_status_mirror_updates.sql` | Replaces separate canonical/legacy ad status writes with one owner/full-admin-authorized transaction, row locks, activation eligibility and admin audit |
+| 25 | `20261108104511_atomic_ad_soft_delete_status.sql` | Adds terminal soft deletion to the atomic status RPC, setting both `is_deleted` flags in one transaction and preventing deleted listings from being reactivated |
+| 26 | `20261108111210_serialize_trade_open_with_ad_status_changes.sql` | Locks the authoritative `ads` row during escrow trade creation so pause/delete status updates serialize against new trade openings without changing escrow calculations |
+| 27 | `20261108121644_atomic_bulk_ad_controls.sql` | Adds missing lifecycle fields to legacy `advertisements` and installs one service-role-only transaction for bulk pause/resume/delete, owner eligibility, global-pause marker and audit |
+| 28 | `20261108135907_atomic_ad_content_mirror_updates.sql` | Replaces split canonical/legacy advertisement content writes with one service-role-only transaction, strict owner/full-admin authorization, BUY-only policy, field validation and same-transaction admin audit |
+| 29 | `20261108151000_harden_atomic_buy_ad_creation_limits.sql` | Requires explicitly active profile/account state and enforces the ten-active-logical-ad limit across both marketplace stores under a serialized profile-row lock |
 
-This table shows the currently mapped ordered deposit, trade-opening, identity, support-admin, administrator-action, supporting-table, Wayones-branding, profile-privacy, wallet-index, administrator KYC/withdrawal-lock, atomic advertisement status, terminal soft-delete, trade-opening row-lock, atomic bulk-ad-control and atomic content-edit remediation sequence, **not permission to skip other pending migrations**. In the actual release, all approved migration versions between the current production head and the latest listed migration must be reconciled and applied in ascending order. In particular, the direct-credit ACL revocation must complete before any deposit scanner or confirmation worker is restarted.
+This table shows the currently mapped ordered deposit, trade-opening, identity, support-admin, administrator-action, supporting-table, Wayones-branding, profile-privacy, wallet-index, administrator KYC/withdrawal-lock, atomic BUY-ad creation, marketplace DML lock-down, atomic advertisement status, terminal soft-delete, trade-opening row-lock, atomic bulk-ad-control and atomic content-edit remediation sequence, **not permission to skip other pending migrations**. In the actual release, all approved migration versions between the current production head and the latest listed migration must be reconciled and applied in ascending order. In particular, the direct-credit ACL revocation must complete before any deposit scanner or confirmation worker is restarted.
 
 Apply each migration file separately using the approved Supabase migration mechanism and confirm its version appears in migration history before proceeding. The enum-only `20261108040000_add_restricted_user_status.sql` is a standalone migration and must be fully committed before `20261108041000` is applied. Stop on the first error; do not continue with later migrations.
 
@@ -101,6 +104,7 @@ If any pre-deployment gate cannot be verified, stop without applying migrations.
 
 1. Pause the deposit-related workers and the three trade-opening API routes. Preserve pending rows; do not manually edit deposit status or balances.
 2. Apply the full approved migration set in version order, including the three deposit contract/replay/ACL migrations above and the other approved intervening migrations.
+   In that ascending order, apply `20261105250000_atomic_buy_ad_creation.sql` when its version is reached, then apply the intervening `20261105260000` through `20261105280000` migrations, followed by `20261105300000_harden_marketplace_rls_and_dml.sql` and the remaining versions in order. Do not deploy ad creation while either the narrow RPC or marketplace DML restrictions are missing.
 3. Confirm `20261107211754_revoke_direct_deposit_credit_rpc_execution.sql` is recorded as applied. At this point `service_role` must no longer be able to execute the raw credit primitive.
 4. Apply `20261108013000_deposit_chain_integrity_monitor.sql` only after the block identity columns from `20261104130000` exist.
 5. Apply `20261108014000_restore_authenticated_presence_rpc.sql`.
@@ -125,13 +129,13 @@ If any pre-deployment gate cannot be verified, stop without applying migrations.
 24. Apply `20261108111210_serialize_trade_open_with_ad_status_changes.sql` after the canonical escrow function and atomic ad-status RPC are present. It adds `FOR UPDATE` to the selected `public.ads` row so a concurrent pause/delete cannot pass the trade function's active-state check on a stale row; it preserves the current actor, idempotency, security and grant contract.
 25. Apply `20261108121644_atomic_bulk_ad_controls.sql` after the durable admin registry, profile eligibility and all ad/audit dependencies pass. It adds the missing status, deletion and update fields to the legacy `advertisements` table, then makes global pause, resume and soft-delete a single transaction across all three ad stores. Resume leaves restricted-owner ads and SELL ads paused; it never bypasses the inventory-reservation guard.
 26. Apply `20261108135907_atomic_ad_content_mirror_updates.sql` only after the full-admin helper and exact canonical/legacy ad column guards pass. It installs `update_ad_content_atomic_authorized(uuid,text,uuid,text,jsonb)`, which locks the canonical row then its legacy mirror, validates owner/full-admin authority and BUY-only edit eligibility, applies the allowlisted content patch to both records in one transaction, and writes any full-admin audit in that transaction. It does not modify lifecycle status, available inventory, total inventory, wallets, trades or escrow. Edits requiring legacy-only fields fail closed when the legacy mirror is absent.
-27. After the Vault configuration is complete, schedule the media cleanup cron once by running `SELECT public.schedule_account_deletion_media_cleanup();` as `postgres`. Do not expose this helper to application roles.
-28. After every approved migration is applied, run all nineteen SQL preflights in Section 5. Do not resume workers or trade-opening routes on a failure.
-29. Deploy the compatible application release containing the public-profile projection reads, atomic wallet-index allocator, atomic admin KYC/withdrawal-lock operations, atomic ad status mirroring, soft deletion, trade-opening row locking, bulk ad controls and atomic ad content edits, leased deposit worker path, integrity monitor/quorum logic, 2FA, support-admin, admin-action, table dependencies and Wayones global branding.
-30. Confirm the deployed worker is running the intended release, then resume deposit ingestion, confirmation workers and trade-opening routes gradually while observing logs and database errors.
+27. Apply `20261108151000_harden_atomic_buy_ad_creation_limits.sql` only after `20261105250000_atomic_buy_ad_creation.sql` and `20261105300000_harden_marketplace_rls_and_dml.sql` are installed. It replaces the base creation function while preserving its postgres owner, SECURITY DEFINER, empty `search_path` and authenticated-only grant; it serializes creation on the owner profile row, requires both profile/account status to be active, and enforces the ten-logical-active-ad ceiling across `ads` and `p2p_ads` before either insert.
+28. After the Vault configuration is complete, schedule the media cleanup cron once by running `SELECT public.schedule_account_deletion_media_cleanup();` as `postgres`. Do not expose this helper to application roles.
+29. After every approved migration is applied, run all twenty SQL preflights in Section 5. Do not resume workers or trade-opening routes on a failure.
+30. Deploy the compatible application release containing the public-profile projection reads, atomic wallet-index allocator, atomic admin KYC/withdrawal-lock operations, atomic ad status mirroring, soft deletion, trade-opening row locking, bulk ad controls, atomic ad content edits, serialized ten-ad BUY creation and cross-store public ad ID trade resolution, leased deposit worker path, integrity monitor/quorum logic, 2FA, support-admin, admin-action, table dependencies and Wayones global branding.
+31. Confirm the deployed worker is running the intended release, then resume deposit ingestion, confirmation workers and trade-opening routes gradually while observing logs and database errors.
 
 Do not roll the application back to a version that calls the raw canonical credit RPC after the ACL migration has revoked that permission. If the new release fails after the ACL migration, leave deposit workers paused and deploy a forward fix.
-
 ## 5. Required SQL preflights and post-deployment checks
 
 Run these read-only preflights only after all approved migrations in Section 2 have been applied, especially after the final financial ACL migration:
@@ -155,6 +159,7 @@ Run these read-only preflights only after all approved migrations in Section 2 h
 17. `supabase/tests/trade_ad_row_lock_preflight.sql`
 18. `supabase/tests/atomic_bulk_ad_controls_preflight.sql`
 19. `supabase/tests/atomic_ad_content_mirror_preflight.sql`
+20. `supabase/tests/atomic_buy_ad_creation_preflight.sql`
 
 The first preflight also asserts the final server-only credit ACL, so do not use it as a pass criterion immediately after migration 1; run it after migration 3.
 
@@ -189,6 +194,7 @@ Verify all of the following:
 - Admin dispute settlement checks the final dispute/trade state and has mandatory same-transaction audit; its runtime feature flag remains disabled pending separately approved isolated financial validation.
 - Database-generated moderator/system messages use Wayones and asynchronous wallet/withdrawal callback URLs target `https://wayones.com`; the forward branding preflight verifies that all ten function signatures retain postgres ownership, SECURITY DEFINER and empty `search_path`.
 - Advertisement status changes lock the canonical `p2p_ads` row and any resolved legacy `ads` mirror, verify that both rows belong to the same owner and logical listing via `public_ad_id`/canonical ID, validate owner/full-admin identity and account eligibility, then update both rows in one transaction. An admin change must write `ADMIN_AD_STATUS_CHANGE` to `admin_audit_logs` in that same transaction. SELL advertisements remain non-activatable until an atomic inventory reservation is implemented and validated; the route does not bypass that guard. Deletion sets both `is_deleted` flags and `DELETED` status in that same transaction, preserves the rows for trade history, and cannot be reversed by a normal status toggle.
+- BUY advertisement creation calls `create_buy_ad_atomic(...)`, an authenticated-only postgres-owned SECURITY DEFINER function. The owner profile row is locked before the active-listing count, the count deduplicates the `ads`/`p2p_ads` pair by public ID, the ten-active-listing cap is checked before either insert, and both profile/account status values must be explicitly active. SELL remains unavailable pending inventory reservation.
 - Advertisement content edits call `update_ad_content_atomic_authorized(uuid,text,uuid,text,jsonb)`, a postgres-owned SECURITY DEFINER function with empty `search_path` and service-role-only execution. It independently verifies the actor/owner/full-admin email, locks canonical `p2p_ads` then legacy `ads`, checks paired ownership and logical identity, rejects deleted/SELL/non-BUY listings and invalid patches, updates both stores in one transaction, and audits full-admin edits atomically. It never writes lifecycle status, crypto inventory, wallets, trades or escrow; legacy-only fields require the corresponding `ads` mirror.
 - The KYC reset/verify/unverify and withdrawal-lock admin endpoints call postgres-owned, SECURITY DEFINER RPCs with empty `search_path`, strict full-admin identity verification, row locks, canonical Auth email matching and mandatory same-transaction audit. The deployed schema's `verification_tier` is text; no KYC write uses the nonexistent `is_id_verified` column. The preflight verifies both RPC identities, grants and actor/audit contracts.
 - The `user_wallet_index_seq` sequence is ahead of every existing profile index and every index value previously handed out by the legacy sequence; `claim_next_wallet_index()` and the missing-profile allocator both consume that one sequence directly. Both RPCs are postgres-owned SECURITY DEFINER functions with empty `search_path`, executable only by `service_role`; the profile `wallet_index` remains unique.
@@ -231,7 +237,7 @@ Backup sources must be independent providers on the same mainnet and expose the 
 Resume the deposit workers only when:
 
 - migration history is reconciled and the approved ordered release is fully applied;
-- all nineteen SQL preflights pass;
+- all twenty SQL preflights pass;
 - the direct raw-credit grant is absent and guarded wrapper grants are correct;
 - the compatible application commit is deployed;
 - the required provider quorum variables are configured for the supported chains;
@@ -246,13 +252,13 @@ No live financial transaction is required to establish these database and code-l
 
 ---
 
-**Current decision:** **NO-GO for production migration execution.** The historical migration-file reconciliation gate remains open, and confirmed application dependencies (deposit confirmation/integrity RPCs, presence, offline-ad trade-opening, 2FA lifecycle/rate-limit, support-admin, guarded admin account/trade RPCs, supporting tables and the public-profile projection) remain absent in production. The listed forward migrations and nineteen preflight scripts are prepared locally only; no migration in this local release batch has been applied to production. Supabase Vault lacks `paxones_app_url` and `paxones_cron_secret`, so account-deletion media cleanup is not enabled. Keep admin dispute settlement feature-disabled.
+**Current decision:** **NO-GO for production migration execution.** The historical migration-file reconciliation gate remains open, and confirmed application dependencies (deposit confirmation/integrity RPCs, presence, offline-ad trade-opening, atomic BUY-ad creation and marketplace DML hardening, 2FA lifecycle/rate-limit, support-admin, guarded admin account/trade RPCs, supporting tables and the public-profile projection) remain absent in production. The listed forward migrations and twenty preflight scripts are prepared locally only; no migration in this local release batch has been applied to production. Supabase Vault lacks `paxones_app_url` and `paxones_cron_secret`, so account-deletion media cleanup is not enabled. Keep admin dispute settlement feature-disabled.
 
 See [the production migration reconciliation audit](production-migration-reconciliation.md) for confirmed missing RPC/table dependencies and superseded historical candidates.
 
 ## Appendix A. Tracked local migration files newer than the production head
 
-Inventory only; this list records the 84 tracked local SQL files with versions greater than `20261103204401` after the current ad-lifecycle forward migrations are committed. It is **not** a blanket approval to apply them. Each file remains subject to the historical-file reconciliation and review gates above. If the release inventory changes, regenerate this list before a production window.
+Inventory only; this list records the 85 tracked local SQL files with versions greater than `20261103204401` after the current ad-lifecycle forward migrations are committed. It is **not** a blanket approval to apply them. Each file remains subject to the historical-file reconciliation and review gates above. If the release inventory changes, regenerate this list before a production window.
 
 ```text
 20261104120000_withdrawal_confirmation_and_control_flags.sql
@@ -339,4 +345,5 @@ Inventory only; this list records the 84 tracked local SQL files with versions g
 20261108111210_serialize_trade_open_with_ad_status_changes.sql
 20261108121644_atomic_bulk_ad_controls.sql
 20261108135907_atomic_ad_content_mirror_updates.sql
+20261108151000_harden_atomic_buy_ad_creation_limits.sql
 ```

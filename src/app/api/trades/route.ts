@@ -65,8 +65,9 @@ export async function GET(req: NextRequest) {
       'fiat_currency', 'fiat', 'fiat_amount', 'price', 'payment_method',
       'buyer_username', 'seller_username',
     ];
+    const publicTradeFieldSet = new Set(publicTradeFields);
     const safeTrades = (trades || []).map((trade: Record<string, unknown>) =>
-      Object.fromEntries(publicTradeFields.filter((field) => field in trade).map((field) => [field, trade[field]]))
+      Object.fromEntries(Object.entries(trade).filter(([field]) => publicTradeFieldSet.has(field)))
     );
     return NextResponse.json({ trades: safeTrades });
   } catch (err: any) {
@@ -126,7 +127,11 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Request body must be a JSON object.' }, { status: 400 });
     }
 
-    const adId = body.adId || body.ad_id;
+    const rawAdId = body.adId ?? body.ad_id;
+    if (typeof rawAdId !== 'string' || rawAdId.trim().length < 1 || rawAdId.trim().length > 128) {
+      return NextResponse.json({ error: 'Advertisement identifier is invalid.' }, { status: 400 });
+    }
+    const adId = rawAdId.trim().replace(/^#/, '');
     const rawCrypto = body.cryptoAmount ?? body.crypto_amount;
     const rawFiat = body.fiatAmount ?? body.fiat_amount;
     const customFiat = body.fiatCurrency || body.fiat_currency;
@@ -161,23 +166,41 @@ export async function POST(req: NextRequest) {
 
     // 1. Fetch Ad safely to read authoritative pricing & metadata
     let ad: any = null;
-    let p2pQuery = supabase.from('p2p_ads').select('*');
-    if (isIdUUID) {
-      p2pQuery = p2pQuery.or(`id.eq.${adId},public_ad_id.eq.${adId}`);
-    } else {
-      p2pQuery = p2pQuery.or(`public_ad_id.eq.${adId},id.eq.${adId}`);
+    const p2pQuery = isIdUUID
+      ? supabase.from('p2p_ads').select('*').eq('id', adId)
+      : supabase.from('p2p_ads').select('*').eq('public_ad_id', adId);
+    const { data: p2pAd, error: p2pLookupError } = await p2pQuery.maybeSingle();
+    if (p2pLookupError) {
+      console.error('[POST /api/trades] Canonical ad lookup failed:', { code: p2pLookupError.code || 'UNKNOWN' });
+      return NextResponse.json(
+        { error: 'Advertisement availability could not be verified. Please retry.', code: 'AD_LOOKUP_FAILED' },
+        { status: 503 }
+      );
     }
-    const { data: p2pAd } = await p2pQuery.maybeSingle();
 
     if (p2pAd) {
       ad = p2pAd;
     } else {
-      if (isIdUUID) {
-        const { data: primaryAd } = await supabase.from('ads').select('*').eq('id', adId).maybeSingle();
-        if (primaryAd) ad = primaryAd;
-      } else {
-        const { data: primaryAd } = await supabase.from('ads').select('*').or(`public_ad_id.eq.${adId},id.eq.${adId}`).maybeSingle();
-        if (primaryAd) ad = primaryAd;
+      const primaryQueries = isIdUUID
+        ? [supabase.from('ads').select('*').eq('id', adId)]
+        : [
+            supabase.from('ads').select('*').eq('public_ad_id', adId),
+            supabase.from('ads').select('*').eq('public_id', adId),
+            supabase.from('ads').select('*').eq('id', adId),
+          ];
+      for (const primaryQuery of primaryQueries) {
+        const { data: primaryAd, error: primaryLookupError } = await primaryQuery.maybeSingle();
+        if (primaryLookupError) {
+          console.error('[POST /api/trades] Legacy ad lookup failed:', { code: primaryLookupError.code || 'UNKNOWN' });
+          return NextResponse.json(
+            { error: 'Advertisement availability could not be verified. Please retry.', code: 'AD_LOOKUP_FAILED' },
+            { status: 503 }
+          );
+        }
+        if (primaryAd) {
+          ad = primaryAd;
+          break;
+        }
       }
     }
 
@@ -255,7 +278,7 @@ export async function POST(req: NextRequest) {
     }
     // Fiat currency is authoritative on the stored advertisement, never client input.
     const resolvedFiatCurrency = ad.fiat_currency || ad.fiat || 'USD';
-    const adIdentifier = String(ad.id || ad.public_ad_id || adId);
+    const adIdentifier = String(ad.public_ad_id || ad.public_id || ad.id || adId);
     const availabilityResponse = await checkAdOwnerAvailability(supabase, adIdentifier, idempotencyKey);
     if (availabilityResponse) return availabilityResponse;
 
@@ -321,7 +344,7 @@ export async function POST(req: NextRequest) {
           cryptoAmount: calculatedCrypto,
           fiatAmount: numericFiat,
           fiatCurrency: resolvedFiatCurrency,
-          asset: String(rpcResult.asset || ad.crypto || 'USDT'),
+          asset: String(rpcResult.asset || ad.asset_symbol || ad.crypto_currency || ad.crypto || ad.coin || 'USDT'),
           price: unitPrice,
           paymentMethod: resolvedPaymentMethod,
           status: 'pending',

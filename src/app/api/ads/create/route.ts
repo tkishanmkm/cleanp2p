@@ -141,7 +141,38 @@ export async function POST(req: Request) {
       );
     }
 
-    // 5. Sanitize and cast boolean/numeric payload fields before database operations
+    // 5. Validate pricing mode and optional booleans without JavaScript truthiness.
+    // Boolean("false") is true, so every supplied security/pricing flag is type-checked.
+    const rawFixedFlag = strippedFormData.is_fixed ??
+      (typeof strippedFormData.fixed_rate === 'boolean' ? strippedFormData.fixed_rate : undefined);
+    if (rawFixedFlag !== undefined && typeof rawFixedFlag !== 'boolean') {
+      return NextResponse.json({ error: 'is_fixed must be a boolean.' }, { status: 400 });
+    }
+    const rawPricingMode = strippedFormData.pricing_type ?? strippedFormData.rate_type;
+    let requestedPricingMode: 'FIXED' | 'FLOAT' | undefined;
+    if (rawPricingMode !== undefined && rawPricingMode !== null && rawPricingMode !== '') {
+      const normalizedMode = String(rawPricingMode).trim().toUpperCase();
+      if (normalizedMode === 'FIXED') requestedPricingMode = 'FIXED';
+      else if (normalizedMode === 'FLOAT' || normalizedMode === 'FLOATING' || normalizedMode === 'MARKET') requestedPricingMode = 'FLOAT';
+      else return NextResponse.json({ error: 'Pricing type must be FIXED or FLOAT.' }, { status: 400 });
+    }
+    if (requestedPricingMode !== undefined && rawFixedFlag !== undefined &&
+        (requestedPricingMode === 'FIXED') !== rawFixedFlag) {
+      return NextResponse.json({ error: 'Pricing type fields conflict.' }, { status: 400 });
+    }
+    const normalizedIsFixed = requestedPricingMode !== undefined
+      ? requestedPricingMode === 'FIXED'
+      : (rawFixedFlag === true);
+    const requireFullNameValue = strippedFormData.require_full_name_verified ?? strippedFormData.requireFullNameVerified;
+    const requireVerifiedUsersValue = strippedFormData.require_verified_users ?? strippedFormData.requireVerifiedUsers;
+    if (requireFullNameValue !== undefined && typeof requireFullNameValue !== 'boolean') {
+      return NextResponse.json({ error: 'require_full_name_verified must be a boolean.' }, { status: 400 });
+    }
+    if (requireVerifiedUsersValue !== undefined && typeof requireVerifiedUsersValue !== 'boolean') {
+      return NextResponse.json({ error: 'require_verified_users must be a boolean.' }, { status: 400 });
+    }
+
+    // Sanitize numeric fields before database operations.
     const cleanPayload: Record<string, any> = {
       ...strippedFormData,
       asset: rawAsset,
@@ -157,7 +188,10 @@ export async function POST(req: Request) {
       margin: strippedFormData.margin !== undefined && strippedFormData.margin !== null && strippedFormData.margin !== '' ? Number(strippedFormData.margin) : (strippedFormData.price_margin ? Number(strippedFormData.price_margin) : null),
       min_amount: strippedFormData.min_amount !== undefined && strippedFormData.min_amount !== null && strippedFormData.min_amount !== '' ? Number(strippedFormData.min_amount) : (strippedFormData.min_order ? Number(strippedFormData.min_order) : null),
       max_amount: strippedFormData.max_amount !== undefined && strippedFormData.max_amount !== null && strippedFormData.max_amount !== '' ? Number(strippedFormData.max_amount) : (strippedFormData.max_order ? Number(strippedFormData.max_order) : null),
-      is_fixed: Boolean(strippedFormData.is_fixed ?? (typeof strippedFormData.fixed_rate === 'boolean' ? strippedFormData.fixed_rate : false)),
+      is_fixed: normalizedIsFixed,
+      pricing_type: normalizedIsFixed ? 'FIXED' : 'FLOAT',
+      require_full_name_verified: requireFullNameValue === true,
+      require_verified_users: requireVerifiedUsersValue === true,
     };
 
     if (typeof cleanPayload.fixed_rate === 'boolean') {
@@ -171,8 +205,20 @@ export async function POST(req: Request) {
     if (cleanPayload.rate_percent !== undefined) cleanPayload.rate_percent = cleanPayload.rate_percent ? Number(cleanPayload.rate_percent) : 0;
     if (cleanPayload.rate_adjustment !== undefined) cleanPayload.rate_adjustment = cleanPayload.rate_adjustment ? Number(cleanPayload.rate_adjustment) : 0;
     if (cleanPayload.margin_percentage !== undefined) cleanPayload.margin_percentage = cleanPayload.margin_percentage ? Number(cleanPayload.margin_percentage) : 0;
-    if (cleanPayload.payment_window !== undefined) cleanPayload.payment_window = parseInt(String(cleanPayload.payment_window), 10) || 30;
-    if (cleanPayload.min_completed_trades !== undefined) cleanPayload.min_completed_trades = parseInt(String(cleanPayload.min_completed_trades), 10) || 0;
+    if (cleanPayload.payment_window !== undefined) {
+      const paymentWindow = Number(cleanPayload.payment_window);
+      if (!Number.isInteger(paymentWindow) || paymentWindow < 30 || paymentWindow > 1440) {
+        return NextResponse.json({ error: 'Payment window must be a whole number between 30 and 1440 minutes.' }, { status: 400 });
+      }
+      cleanPayload.payment_window = paymentWindow;
+    }
+    if (cleanPayload.min_completed_trades !== undefined) {
+      const minimumTrades = Number(cleanPayload.min_completed_trades);
+      if (!Number.isInteger(minimumTrades) || minimumTrades < 0 || minimumTrades > 1000000) {
+        return NextResponse.json({ error: 'Minimum completed trades must be a whole number from 0 to 1000000.' }, { status: 400 });
+      }
+      cleanPayload.min_completed_trades = minimumTrades;
+    }
 
     // This legacy endpoint is retained for compatibility, but callers cannot
     // choose a destination table or supply server-owned identity/lifecycle state.
@@ -237,22 +283,23 @@ export async function POST(req: Request) {
       }, { status: 400 });
     }
 
-    const rawMethods = Array.isArray(cleanPayload.payment_methods)
+    const rawMethods: unknown[] = Array.isArray(cleanPayload.payment_methods)
       ? cleanPayload.payment_methods
       : typeof cleanPayload.payment_methods === 'string'
         ? [cleanPayload.payment_methods]
         : Array.isArray(cleanPayload.paymentMethods)
           ? cleanPayload.paymentMethods
           : [];
-    const paymentMethods = rawMethods
-      .filter((method: unknown): method is string => typeof method === 'string')
-      .map((method: string) => method.trim())
-      .filter((method: string) => method.length > 0 && method.length <= 100);
+    if (rawMethods.length < 1 || rawMethods.length > 20 ||
+        rawMethods.some((method) => typeof method !== 'string' || !method.trim() || method.trim().length > 100)) {
+      return NextResponse.json({ error: 'Select between one and twenty valid payment methods.' }, { status: 400 });
+    }
+    const paymentMethods = Array.from(new Set(rawMethods.map((method) => (method as string).trim())));
     if (paymentMethods.length === 0 || paymentMethods.length > 20) {
       return NextResponse.json({ error: 'Select between one and twenty valid payment methods.' }, { status: 400 });
     }
 
-    const rawPaymentWindow = Number.parseInt(String(cleanPayload.payment_window ?? 30), 10);
+    const rawPaymentWindow = Number(cleanPayload.payment_window ?? 30);
     if (!Number.isInteger(rawPaymentWindow) || rawPaymentWindow < 30 || rawPaymentWindow > 1440) {
       return NextResponse.json({ error: 'Payment window must be between 30 and 1440 minutes.' }, { status: 400 });
     }
@@ -281,7 +328,7 @@ export async function POST(req: Request) {
     cleanPayload.is_deleted = false;
 
     // Authoritative Server-Side ±50% Reference Market Price Validation
-    const isFixedPricing = String(cleanPayload.pricing_type || cleanPayload.rate_type || '').toUpperCase() === 'FIXED' || Boolean(cleanPayload.is_fixed);
+    const isFixedPricing = normalizedIsFixed;
     const effectivePrice = priceValue;
 
     if (isFixedPricing) {
@@ -404,8 +451,8 @@ export async function POST(req: Request) {
       p_targeted_countries: targetedCountries,
       p_blocked_countries: blockedCountries,
       p_min_completed_trades: minimumTrades,
-      p_require_full_name_verified: cleanPayload.require_full_name_verified === true,
-      p_require_verified_users: cleanPayload.require_verified_users === true,
+      p_require_full_name_verified: cleanPayload.require_full_name_verified,
+      p_require_verified_users: cleanPayload.require_verified_users,
     });
 
     if (rpcError || !rpcResult || rpcResult.success !== true) {

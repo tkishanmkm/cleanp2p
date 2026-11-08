@@ -117,7 +117,7 @@ export async function POST(request: NextRequest) {
     if (
       requestedMin === null || requestedMax === null ||
       requestedMin <= 0 || requestedMax <= 0 || requestedMax < requestedMin ||
-      requestedMax >= 1e18
+      requestedMin >= 1e18 || requestedMax >= 1e18
     ) {
       return NextResponse.json({ error: 'Valid positive minimum and maximum trade limits are required.' }, { status: 400 });
     }
@@ -137,16 +137,38 @@ export async function POST(request: NextRequest) {
       }, { status: 400 });
     }
 
-    const pricingType = readString(body.pricing_type || (body.rate_type === 'fixed' || body.is_fixed === true ? 'FIXED' : 'FLOAT')).toUpperCase();
-    if (pricingType !== 'FIXED' && pricingType !== 'FLOAT') {
-      return NextResponse.json({ error: 'Invalid ad pricing type.' }, { status: 400 });
+    const rawFixedFlag = body.is_fixed;
+    if (rawFixedFlag !== undefined && typeof rawFixedFlag !== 'boolean') {
+      return NextResponse.json({ error: 'is_fixed must be a boolean.' }, { status: 400 });
+    }
+    const rawPricingMode = body.pricing_type ?? body.rate_type;
+    let pricingType: 'FIXED' | 'FLOAT';
+    if (rawPricingMode !== undefined && rawPricingMode !== null && rawPricingMode !== '') {
+      const normalizedMode = String(rawPricingMode).trim().toUpperCase();
+      if (normalizedMode === 'FIXED') pricingType = 'FIXED';
+      else if (normalizedMode === 'FLOAT' || normalizedMode === 'FLOATING' || normalizedMode === 'MARKET') pricingType = 'FLOAT';
+      else return NextResponse.json({ error: 'Pricing type must be FIXED or FLOAT.' }, { status: 400 });
+    } else {
+      pricingType = rawFixedFlag === true ? 'FIXED' : 'FLOAT';
+    }
+    if (rawFixedFlag !== undefined && (pricingType === 'FIXED') !== rawFixedFlag) {
+      return NextResponse.json({ error: 'Pricing type fields conflict.' }, { status: 400 });
+    }
+
+    const requireFullNameValue = body.require_full_name_verified ?? body.requireFullNameVerified;
+    const requireVerifiedUsersValue = body.require_verified_users ?? body.requireVerifiedUsers;
+    if (requireFullNameValue !== undefined && typeof requireFullNameValue !== 'boolean') {
+      return NextResponse.json({ error: 'require_full_name_verified must be a boolean.' }, { status: 400 });
+    }
+    if (requireVerifiedUsersValue !== undefined && typeof requireVerifiedUsersValue !== 'boolean') {
+      return NextResponse.json({ error: 'require_verified_users must be a boolean.' }, { status: 400 });
     }
     const marginVal = toFiniteNumber(body.margin ?? body.rate_percent ?? body.margin_percentage ?? body.price_margin ?? 0);
     if (marginVal === null || marginVal < -50 || marginVal > 50) {
       return NextResponse.json({ error: 'Margin percentage must be between -50% and +50%.' }, { status: 400 });
     }
 
-    const rawPaymentWindow = Number.parseInt(String(body.payment_window ?? body.payment_window_minutes ?? 30), 10);
+    const rawPaymentWindow = Number(body.payment_window ?? body.payment_window_minutes ?? 30);
     if (!Number.isInteger(rawPaymentWindow) || rawPaymentWindow < 30 || rawPaymentWindow > 1440) {
       return NextResponse.json({ error: 'Payment window must be between 30 and 1440 minutes.' }, { status: 400 });
     }
@@ -158,10 +180,11 @@ export async function POST(request: NextRequest) {
         : typeof body.payment_method === 'string'
           ? [body.payment_method]
           : [];
-    const paymentMethods = rawPaymentMethods
-      .filter((method): method is string => typeof method === 'string')
-      .map((method) => method.trim())
-      .filter((method) => method.length > 0 && method.length <= 100);
+    if (rawPaymentMethods.length < 1 || rawPaymentMethods.length > 20 ||
+        rawPaymentMethods.some((method) => typeof method !== 'string' || !method.trim() || method.trim().length > 100)) {
+      return NextResponse.json({ error: 'Select between one and twenty valid payment methods.' }, { status: 400 });
+    }
+    const paymentMethods = Array.from(new Set(rawPaymentMethods.map((method) => (method as string).trim())));
     if (paymentMethods.length < 1 || paymentMethods.length > 20) {
       return NextResponse.json({ error: 'Select between one and twenty valid payment methods.' }, { status: 400 });
     }
@@ -248,7 +271,7 @@ export async function POST(request: NextRequest) {
     }
     const tags = Array.from(new Set(tagsInput.map((tag: string) => tag.trim()).filter(Boolean)));
 
-    const rawMinimumTrades = Number.parseInt(String(body.min_completed_trades ?? body.min_completed_trades_req ?? 0), 10);
+    const rawMinimumTrades = Number(body.min_completed_trades ?? body.min_completed_trades_req ?? 0);
     if (!Number.isInteger(rawMinimumTrades) || rawMinimumTrades < 0 || rawMinimumTrades > 1000000) {
       return NextResponse.json({ error: 'Minimum completed trades must be a valid non-negative integer.' }, { status: 400 });
     }
@@ -272,8 +295,8 @@ export async function POST(request: NextRequest) {
       p_targeted_countries: targetedCountries,
       p_blocked_countries: blockedCountries,
       p_min_completed_trades: rawMinimumTrades,
-      p_require_full_name_verified: body.require_full_name_verified === true || body.requireFullNameVerified === true,
-      p_require_verified_users: body.require_verified_users === true || body.requireVerifiedUsers === true,
+      p_require_full_name_verified: requireFullNameValue === true,
+      p_require_verified_users: requireVerifiedUsersValue === true,
     });
 
     if (rpcError || !rpcResult || rpcResult.success !== true) {
