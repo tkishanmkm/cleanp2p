@@ -8,7 +8,7 @@
 
 **Region:** `ap-northeast-1`
 
-**Application release required:** branch `fix/production-typecheck-batch-1`, current verified code baseline `19f37685e6326641baefa6b8a90cbcb49756f1b5` (superseded by the current infrastructure batch commit after it is pushed)
+**Application release required:** branch `fix/production-typecheck-batch-1`, current verified code baseline `4201fdcfb66a0fb76399ea11a0801bd61a09387f` (ad-content atomic update batch; not deployed)
 
 ## 1. Current production snapshot
 
