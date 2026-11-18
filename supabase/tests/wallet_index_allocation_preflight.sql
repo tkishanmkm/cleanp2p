@@ -74,13 +74,24 @@ BEGIN
       AND pg_get_constraintdef(oid) = 'UNIQUE (wallet_index)'
   ) AND NOT EXISTS (
     SELECT 1
-    FROM pg_index
-    WHERE indrelid = 'public.profiles'::regclass
-      AND indisunique
-      AND indpred IS NULL
-      AND pg_get_indexdef(indexrelid) ILIKE '%(wallet_index)%'
+    FROM pg_index AS idx
+    WHERE idx.indrelid = 'public.profiles'::regclass
+      AND idx.indisunique
+      AND idx.indisvalid
+      AND idx.indisready
+      AND idx.indnatts = 1
+      AND idx.indnkeyatts = 1
+      AND idx.indexprs IS NULL
+      AND pg_get_indexdef(idx.indexrelid, 1, true) = 'wallet_index'
+      AND (
+        idx.indpred IS NULL
+        OR pg_get_expr(idx.indpred, idx.indrelid) IN (
+          '(wallet_index IS NOT NULL)',
+          'wallet_index IS NOT NULL'
+        )
+      )
   ) THEN
-    RAISE EXCEPTION 'A full unique wallet_index constraint/index is required.';
+    RAISE EXCEPTION 'A valid single-column unique wallet_index constraint/index is required; a full unique index or the canonical WHERE wallet_index IS NOT NULL partial index is accepted.';
   END IF;
 
   IF EXISTS (
