@@ -12,7 +12,14 @@ DECLARE
   v_claim_oid OID := to_regprocedure('public.claim_next_wallet_index()');
   v_assign_oid OID := to_regprocedure('public.assign_missing_profile_wallet_indexes()');
   v_provision_oid OID := to_regprocedure('public.provision_user_wallets_atomic(uuid,integer,text,text,text,text)');
+  v_signup_wallet_oid OID := to_regprocedure('public.handle_new_user_wallets()');
+  v_signup_profile_oid OID := to_regprocedure('public.handle_new_user()');
   v_function_definition TEXT;
+  v_signup_wallet_definition TEXT;
+  v_signup_owner TEXT;
+  v_signup_is_definer BOOLEAN;
+  v_wallet_insert_position INTEGER;
+  v_profile_insert_position INTEGER;
   v_conflict_count BIGINT := 0;
   v_rls BOOLEAN;
 BEGIN
@@ -54,7 +61,13 @@ BEGIN
       ('wallet_provisioning', 'asset_code'),
       ('wallet_provisioning', 'network_code'),
       ('wallet_provisioning', 'status'),
-      ('wallet_provisioning', 'idempotency_key')
+      ('wallet_provisioning', 'idempotency_key'),
+      ('deposit_addresses', 'user_id'),
+      ('deposit_addresses', 'wallet_id'),
+      ('deposit_addresses', 'address'),
+      ('deposit_addresses', 'asset_code'),
+      ('deposit_addresses', 'network_code'),
+      ('deposit_addresses', 'derivation_path')
   )
   SELECT string_agg(required_columns.table_name || '.' || required_columns.column_name, ', ' ORDER BY required_columns.table_name, required_columns.column_name)
     INTO v_missing_columns
@@ -161,13 +174,30 @@ BEGIN
     v_findings := array_append(v_findings, 'allocate_hot_wallet_nonce(text,text,bigint) EXECUTE grants are not service-role-only');
   END IF;
 
-  -- 5. Verify the provisioning RPC cannot reassign an existing address to a
-  --    different user through ON CONFLICT ... DO UPDATE SET user_id.
+  -- 5. The legacy provisioning RPC still contains an owner-upsert clause.
+  --    It is accepted only when the database-level immutable-identity trigger
+  --    is installed and enabled on the registry table.
   IF v_provision_oid IS NOT NULL THEN
     SELECT pg_get_functiondef(v_provision_oid) INTO v_function_definition;
 
-    IF v_function_definition ~* 'DO UPDATE SET[[:space:]]+user_id[[:space:]]*=[[:space:]]*EXCLUDED\.user_id' THEN
-      v_findings := array_append(v_findings, 'provision_user_wallets_atomic() can overwrite the owner of an existing deposit address');
+    IF v_function_definition ~* 'DO UPDATE SET[[:space:]]+user_id[[:space:]]*=[[:space:]]*EXCLUDED\.user_id'
+      AND NOT EXISTS (
+        SELECT 1
+        FROM pg_trigger t
+        JOIN pg_class c ON c.oid = t.tgrelid
+        JOIN pg_namespace n ON n.oid = c.relnamespace
+        JOIN pg_proc f ON f.oid = t.tgfoid
+        JOIN pg_namespace fn ON fn.oid = f.pronamespace
+        WHERE n.nspname = 'public'
+          AND c.relname = 'user_deposit_addresses'
+          AND t.tgname = 'wayones_user_deposit_address_identity_guard'
+          AND t.tgenabled IN ('O', 'A')
+          AND NOT t.tgisinternal
+          AND fn.nspname = 'private'
+          AND f.proname = 'guard_user_deposit_address_identity'
+      )
+    THEN
+      v_findings := array_append(v_findings, 'provision_user_wallets_atomic() can overwrite an existing deposit-address owner because the immutable-identity guard is missing or disabled');
     END IF;
 
     IF v_function_definition ~* 'ON CONFLICT[[:space:]]*\([[:space:]]*address[[:space:]]*,[[:space:]]*network[[:space:]]*\)'
@@ -186,7 +216,334 @@ BEGIN
           AND pg_get_indexdef(idx.indexrelid, 2, true) = 'network'
       )
     THEN
-      v_findings := array_append(v_findings, 'provision_user_wallets_atomic() uses ON CONFLICT(address, network) without a matching simple unique index; a normalized expression index is not a valid inference target');
+      v_findings := array_append(v_findings, 'provision_user_wallets_atomic() uses ON CONFLICT(address, network) without a matching simple unique index');
+    END IF;
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_index idx
+    WHERE idx.indrelid = 'public.profiles'::regclass
+      AND idx.indisunique
+      AND idx.indisvalid
+      AND idx.indisready
+      AND idx.indpred IS NULL
+      AND idx.indexprs IS NULL
+      AND idx.indnatts = 1
+      AND idx.indnkeyatts = 1
+      AND pg_get_indexdef(idx.indexrelid, 1, true) = 'wallet_index'
+  ) THEN
+    v_findings := array_append(v_findings, 'Full single-column profiles.wallet_index unique index is missing');
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_index idx
+    WHERE idx.indrelid = 'public.user_deposit_addresses'::regclass
+      AND idx.indisunique
+      AND idx.indisvalid
+      AND idx.indisready
+      AND idx.indpred IS NULL
+      AND idx.indnatts = 2
+      AND idx.indnkeyatts = 2
+      AND pg_get_expr(idx.indexprs, idx.indrelid) ILIKE '%CASE WHEN%'
+      AND pg_get_expr(idx.indexprs, idx.indrelid) ILIKE '%lower(btrim(address))%'
+      AND pg_get_expr(idx.indexprs, idx.indrelid) ILIKE '%upper(btrim(network))%'
+  ) THEN
+    v_findings := array_append(v_findings, 'Normalized address/network unique index is missing');
+  END IF;
+
+  -- Signup identity functions must run as postgres and the wallet helper
+  -- must create the profile before inserting its wallet row.
+  IF v_signup_profile_oid IS NOT NULL THEN
+    SELECT pg_get_userbyid(p.proowner), p.prosecdef
+      INTO v_signup_owner, v_signup_is_definer
+    FROM pg_proc p
+    WHERE p.oid = v_signup_profile_oid;
+
+    IF v_signup_owner IS DISTINCT FROM 'postgres'
+       OR v_signup_is_definer IS DISTINCT FROM TRUE THEN
+      v_findings := array_append(v_findings, 'handle_new_user() is not postgres-owned SECURITY DEFINER');
+    END IF;
+  END IF;
+
+  IF v_signup_wallet_oid IS NOT NULL THEN
+    SELECT pg_get_userbyid(p.proowner), p.prosecdef
+      INTO v_signup_owner, v_signup_is_definer
+    FROM pg_proc p
+    WHERE p.oid = v_signup_wallet_oid;
+
+    IF v_signup_owner IS DISTINCT FROM 'postgres'
+       OR v_signup_is_definer IS DISTINCT FROM TRUE THEN
+      v_findings := array_append(v_findings, 'handle_new_user_wallets() is not postgres-owned SECURITY DEFINER');
+    END IF;
+
+    SELECT lower(pg_get_functiondef(v_signup_wallet_oid))
+    INTO v_signup_wallet_definition;
+
+    v_wallet_insert_position := strpos(v_signup_wallet_definition, 'insert into public.wallets');
+    v_profile_insert_position := strpos(v_signup_wallet_definition, 'insert into public.profiles');
+
+    IF v_wallet_insert_position > 0
+       AND (
+         v_profile_insert_position = 0
+         OR v_wallet_insert_position < v_profile_insert_position
+       ) THEN
+      v_findings := array_append(v_findings, 'handle_new_user_wallets() inserts wallet rows before profiles; signup flow is incompatible with the wallet identity trigger');
+    END IF;
+  END IF;
+
+  -- 5A. All identity guards must be installed, enabled and remain SECURITY
+  --     INVOKER functions with an empty search_path and no direct API grants.
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_trigger t
+    JOIN pg_class c ON c.oid = t.tgrelid
+    JOIN pg_namespace n ON n.oid = c.relnamespace
+    JOIN pg_proc f ON f.oid = t.tgfoid
+    JOIN pg_namespace fn ON fn.oid = f.pronamespace
+    WHERE n.nspname = 'public'
+      AND c.relname = 'profiles'
+      AND t.tgname = 'wayones_profile_wallet_identity_guard'
+      AND t.tgenabled IN ('O', 'A')
+      AND pg_get_triggerdef(t.oid) ILIKE '%INSERT OR UPDATE%'
+      AND NOT t.tgisinternal
+      AND fn.nspname = 'private'
+      AND f.proname = 'guard_profile_wallet_identity'
+  ) THEN
+    v_findings := array_append(v_findings, 'Profile wallet identity guard trigger is missing or disabled');
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_trigger t
+    JOIN pg_class c ON c.oid = t.tgrelid
+    JOIN pg_namespace n ON n.oid = c.relnamespace
+    JOIN pg_proc f ON f.oid = t.tgfoid
+    JOIN pg_namespace fn ON fn.oid = f.pronamespace
+    WHERE n.nspname = 'public'
+      AND c.relname = 'wallets'
+      AND t.tgname = 'wayones_wallet_identity_guard'
+      AND t.tgenabled IN ('O', 'A')
+      AND pg_get_triggerdef(t.oid) ILIKE '%INSERT OR UPDATE%'
+      AND NOT t.tgisinternal
+      AND fn.nspname = 'private'
+      AND f.proname = 'guard_wallet_row_identity'
+  ) THEN
+    v_findings := array_append(v_findings, 'Wallet row identity guard trigger is missing or disabled');
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_trigger t
+    JOIN pg_class c ON c.oid = t.tgrelid
+    JOIN pg_namespace n ON n.oid = c.relnamespace
+    JOIN pg_proc f ON f.oid = t.tgfoid
+    JOIN pg_namespace fn ON fn.oid = f.pronamespace
+    WHERE n.nspname = 'public'
+      AND c.relname = 'user_deposit_addresses'
+      AND t.tgname = 'wayones_user_deposit_address_identity_guard'
+      AND t.tgenabled IN ('O', 'A')
+      AND pg_get_triggerdef(t.oid) ILIKE '%INSERT OR UPDATE%'
+      AND NOT t.tgisinternal
+      AND fn.nspname = 'private'
+      AND f.proname = 'guard_user_deposit_address_identity'
+  ) THEN
+    v_findings := array_append(v_findings, 'User deposit-address identity guard trigger is missing or disabled');
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_trigger t
+    JOIN pg_class c ON c.oid = t.tgrelid
+    JOIN pg_namespace n ON n.oid = c.relnamespace
+    JOIN pg_proc f ON f.oid = t.tgfoid
+    JOIN pg_namespace fn ON fn.oid = f.pronamespace
+    WHERE n.nspname = 'public'
+      AND c.relname = 'deposit_addresses'
+      AND t.tgname = 'wayones_deposit_address_identity_guard'
+      AND t.tgenabled IN ('O', 'A')
+      AND pg_get_triggerdef(t.oid) ILIKE '%INSERT OR UPDATE%'
+      AND NOT t.tgisinternal
+      AND fn.nspname = 'private'
+      AND f.proname = 'guard_deposit_address_identity'
+  ) THEN
+    v_findings := array_append(v_findings, 'Deposit-address identity guard trigger is missing or disabled');
+  END IF;
+
+  IF EXISTS (
+    SELECT 1
+    FROM pg_proc p
+    JOIN pg_namespace n ON n.oid = p.pronamespace
+    WHERE n.nspname = 'private'
+      AND p.proname IN (
+        'guard_profile_wallet_identity',
+        'guard_wallet_row_identity',
+        'guard_user_deposit_address_identity',
+        'guard_deposit_address_identity'
+      )
+      AND (
+        pg_get_userbyid(p.proowner) <> 'postgres'
+        OR p.prosecdef
+        OR NOT coalesce(p.proconfig @> ARRAY['search_path=""']::TEXT[], false)
+        OR has_function_privilege('anon', p.oid, 'EXECUTE')
+        OR has_function_privilege('authenticated', p.oid, 'EXECUTE')
+        OR has_function_privilege('service_role', p.oid, 'EXECUTE')
+      )
+  ) THEN
+    v_findings := array_append(v_findings, 'Identity guard functions are SECURITY DEFINER, use a non-empty search_path, or have direct API/service-role EXECUTE grants');
+  END IF;
+
+  IF EXISTS (
+    SELECT 1
+    FROM pg_proc p
+    JOIN pg_namespace n ON n.oid = p.pronamespace
+    WHERE n.nspname = 'private'
+      AND p.proname IN (
+        'guard_profile_wallet_identity',
+        'guard_wallet_row_identity',
+        'guard_user_deposit_address_identity',
+        'guard_deposit_address_identity'
+      )
+      AND position('current_user not in' IN lower(p.prosrc)) = 0
+  ) THEN
+    v_findings := array_append(v_findings, 'One or more identity guards do not restrict identity writes to postgres/service_role');
+  END IF;
+
+  IF to_regprocedure('private.guard_wallet_row_identity()') IS NULL THEN
+    v_findings := array_append(v_findings, 'Wallet-row identity guard function is missing');
+  ELSE
+    SELECT pg_get_functiondef(to_regprocedure('private.guard_wallet_row_identity()'))
+      INTO v_function_definition;
+    IF position('new.wallet_index is distinct from v_profile.wallet_index' IN lower(v_function_definition)) = 0
+       OR position('wallet ownership cannot be reassigned' IN lower(v_function_definition)) = 0 THEN
+      v_findings := array_append(v_findings, 'Wallet-row guard does not enforce exact profile-index matching and immutable owner identity');
+    END IF;
+  END IF;
+
+  IF to_regprocedure('private.guard_user_deposit_address_identity()') IS NULL THEN
+    v_findings := array_append(v_findings, 'User deposit-address identity guard function is missing');
+  ELSE
+    SELECT pg_get_functiondef(to_regprocedure('private.guard_user_deposit_address_identity()'))
+      INTO v_function_definition;
+    IF position('new.derivation_path is distinct from v_expected_path' IN lower(v_function_definition)) = 0
+       OR position('a registered user deposit address identity cannot be changed or reassigned' IN lower(v_function_definition)) = 0 THEN
+      v_findings := array_append(v_findings, 'User deposit-address guard does not enforce canonical path matching and immutable owner identity');
+    END IF;
+  END IF;
+
+  IF to_regprocedure('private.guard_deposit_address_identity()') IS NULL THEN
+    v_findings := array_append(v_findings, 'Legacy deposit-address identity guard function is missing');
+  ELSE
+    SELECT pg_get_functiondef(to_regprocedure('private.guard_deposit_address_identity()'))
+      INTO v_function_definition;
+    IF position('deposit address wallet link must belong to the same user' IN lower(v_function_definition)) = 0
+       OR position('a registered deposit address identity cannot be changed or reassigned' IN lower(v_function_definition)) = 0 THEN
+      v_findings := array_append(v_findings, 'Legacy deposit-address guard does not enforce immutable identity and same-user wallet links');
+    END IF;
+  END IF;
+
+  IF v_missing_columns IS NULL THEN
+    IF EXISTS (
+      SELECT 1
+      FROM public.wallets AS w
+      LEFT JOIN public.profiles AS p ON p.id = w.user_id
+      WHERE p.id IS NULL
+         OR p.wallet_index IS NULL
+         OR w.wallet_index IS DISTINCT FROM p.wallet_index
+         OR (p.evm_deposit_address IS NULL AND w.evm_address IS NOT NULL)
+         OR (p.evm_deposit_address IS NOT NULL
+             AND lower(btrim(w.evm_address)) IS DISTINCT FROM lower(btrim(p.evm_deposit_address)))
+         OR (p.tron_deposit_address IS NULL AND w.tron_address IS NOT NULL)
+         OR (p.tron_deposit_address IS NOT NULL
+             AND btrim(w.tron_address) IS DISTINCT FROM btrim(p.tron_deposit_address))
+         OR (p.btc_deposit_address IS NULL AND w.btc_address IS NOT NULL)
+         OR (p.btc_deposit_address IS NOT NULL
+             AND btrim(w.btc_address) IS DISTINCT FROM btrim(p.btc_deposit_address))
+         OR (p.ltc_deposit_address IS NULL AND w.ltc_address IS NOT NULL)
+         OR (p.ltc_deposit_address IS NOT NULL
+             AND btrim(w.ltc_address) IS DISTINCT FROM btrim(p.ltc_deposit_address))
+    ) THEN
+      v_findings := array_append(v_findings, 'Existing wallet rows do not match their owning profile index/address identity');
+    END IF;
+
+    IF EXISTS (
+      SELECT 1
+      FROM public.user_deposit_addresses AS uda
+      LEFT JOIN public.profiles AS p ON p.id = uda.user_id
+      WHERE p.id IS NULL
+         OR p.wallet_index IS NULL
+         OR upper(btrim(uda.asset_symbol)) IS DISTINCT FROM
+            CASE upper(btrim(uda.network))
+              WHEN 'BTC' THEN 'BTC'
+              WHEN 'ETH' THEN 'ETH'
+              WHEN 'LTC' THEN 'LTC'
+              WHEN 'ERC20' THEN 'USDT'
+              WHEN 'BEP20' THEN 'USDT'
+              WHEN 'TRC20' THEN 'USDT'
+              ELSE NULL
+            END
+         OR upper(btrim(uda.asset_code)) IS DISTINCT FROM
+            CASE upper(btrim(uda.network))
+              WHEN 'BTC' THEN 'BTC'
+              WHEN 'ETH' THEN 'ETH'
+              WHEN 'LTC' THEN 'LTC'
+              WHEN 'ERC20' THEN 'USDT'
+              WHEN 'BEP20' THEN 'USDT'
+              WHEN 'TRC20' THEN 'USDT'
+              ELSE NULL
+            END
+         OR upper(btrim(uda.chain)) IS DISTINCT FROM upper(btrim(uda.network))
+         OR upper(btrim(uda.network_code)) IS DISTINCT FROM upper(btrim(uda.network))
+         OR (
+            CASE upper(btrim(uda.network))
+              WHEN 'BTC' THEN btrim(uda.address) IS DISTINCT FROM btrim(p.btc_deposit_address)
+              WHEN 'ETH' THEN lower(btrim(uda.address)) IS DISTINCT FROM lower(btrim(p.evm_deposit_address))
+              WHEN 'LTC' THEN btrim(uda.address) IS DISTINCT FROM btrim(p.ltc_deposit_address)
+              WHEN 'ERC20' THEN lower(btrim(uda.address)) IS DISTINCT FROM lower(btrim(p.evm_deposit_address))
+              WHEN 'BEP20' THEN lower(btrim(uda.address)) IS DISTINCT FROM lower(btrim(p.evm_deposit_address))
+              WHEN 'TRC20' THEN btrim(uda.address) IS DISTINCT FROM btrim(p.tron_deposit_address)
+              ELSE TRUE
+            END
+         )
+         OR (
+           uda.derivation_path IS NOT NULL
+           AND uda.derivation_path IS DISTINCT FROM
+             CASE upper(btrim(uda.network))
+               WHEN 'BTC' THEN 'm/84''/0''/0''/0/' || p.wallet_index::TEXT
+               WHEN 'ETH' THEN 'm/44''/60''/0''/0/' || p.wallet_index::TEXT
+               WHEN 'LTC' THEN 'm/84''/2''/0''/0/' || p.wallet_index::TEXT
+               WHEN 'ERC20' THEN 'm/44''/60''/0''/0/' || p.wallet_index::TEXT
+               WHEN 'BEP20' THEN 'm/44''/60''/0''/0/' || p.wallet_index::TEXT
+               WHEN 'TRC20' THEN 'm/44''/195''/0''/0/' || p.wallet_index::TEXT
+               ELSE NULL
+             END
+         )
+    ) THEN
+      v_findings := array_append(v_findings, 'Existing user deposit-address rows do not match profile ownership, network, asset, address or derivation path');
+    END IF;
+
+    IF EXISTS (
+      SELECT 1
+      FROM public.user_deposit_addresses AS uda
+      LEFT JOIN public.wallets AS w ON w.id = uda.wallet_id
+      WHERE uda.wallet_id IS NOT NULL
+        AND (w.id IS NULL OR w.user_id IS DISTINCT FROM uda.user_id)
+    ) THEN
+      v_findings := array_append(v_findings, 'Existing user deposit-address wallet links do not belong to the same user');
+    END IF;
+
+    IF EXISTS (
+      SELECT 1
+      FROM public.deposit_addresses AS da
+      LEFT JOIN public.wallets AS w ON w.id = da.wallet_id
+      LEFT JOIN public.profiles AS p ON p.id = da.user_id
+      WHERE w.id IS NULL
+         OR w.user_id IS DISTINCT FROM da.user_id
+         OR p.id IS NULL
+         OR p.wallet_index IS NULL
+    ) THEN
+      v_findings := array_append(v_findings, 'Existing legacy deposit-address wallet/profile ownership links are incomplete or inconsistent');
     END IF;
   END IF;
 
