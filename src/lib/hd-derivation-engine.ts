@@ -1,6 +1,8 @@
 import crypto from 'crypto';
 import { HDKey } from '@scure/bip32';
 import * as bip39 from '@scure/bip39';
+import { requireDepositMnemonic, validateWalletDerivationIndex } from '@/lib/crypto/mnemonic-validation';
+export { isValidDepositMnemonic, validateWalletDerivationIndex } from '@/lib/crypto/mnemonic-validation';
 import { bech32 } from 'bech32';
 import { ethers } from 'ethers';
 import bs58 from 'bs58';
@@ -187,19 +189,20 @@ export function getAdminClient(): SupabaseClient {
 let cachedMasterHDKey: HDKey | null = null;
 
 /**
- * Derives master HDKey root from DEPOSIT_HD_MNEMONIC using @scure/bip39 and @scure/bip32.
+ * Derives master HDKey root from a checksum-validated DEPOSIT_HD_MNEMONIC.
  */
 export async function getMasterHDKey(): Promise<HDKey> {
   if (cachedMasterHDKey) return cachedMasterHDKey;
 
-  const mnemonic = process.env.DEPOSIT_HD_MNEMONIC;
-  if (!mnemonic || !mnemonic.trim()) {
-    throw new Error('DEPOSIT_HD_MNEMONIC environment variable is not configured');
+  const mnemonic = requireDepositMnemonic();
+  const seed: Uint8Array = await bip39.mnemonicToSeed(mnemonic);
+  try {
+    cachedMasterHDKey = HDKey.fromMasterSeed(seed);
+    return cachedMasterHDKey;
+  } finally {
+    // HDKey derives and retains its own key material; clear the temporary BIP-39 seed buffer.
+    seed.fill(0);
   }
-
-  const seed: Uint8Array = await bip39.mnemonicToSeed(mnemonic.trim());
-  cachedMasterHDKey = HDKey.fromMasterSeed(seed);
-  return cachedMasterHDKey;
 }
 
 /**
@@ -208,14 +211,14 @@ export async function getMasterHDKey(): Promise<HDKey> {
 export function getMasterHDKeySync(): HDKey {
   if (cachedMasterHDKey) return cachedMasterHDKey;
 
-  const mnemonic = process.env.DEPOSIT_HD_MNEMONIC;
-  if (!mnemonic || !mnemonic.trim()) {
-    throw new Error('DEPOSIT_HD_MNEMONIC environment variable is not configured');
+  const mnemonic = requireDepositMnemonic();
+  const seed: Uint8Array = bip39.mnemonicToSeedSync(mnemonic);
+  try {
+    cachedMasterHDKey = HDKey.fromMasterSeed(seed);
+    return cachedMasterHDKey;
+  } finally {
+    seed.fill(0);
   }
-
-  const seed: Uint8Array = bip39.mnemonicToSeedSync(mnemonic.trim());
-  cachedMasterHDKey = HDKey.fromMasterSeed(seed);
-  return cachedMasterHDKey;
 }
 
 /**
@@ -356,6 +359,7 @@ export function deriveTronAddress(masterKey: HDKey, index: number): string {
  * Derives all 6 crypto deposit addresses for a specific integer index.
  */
 export async function deriveAllAddressesAsync(walletIndex: number): Promise<CryptoDepositAddresses> {
+  validateWalletDerivationIndex(walletIndex);
   const masterKey = await getMasterHDKey();
 
   const btc = deriveBitcoinNativeSegwitAddress(masterKey, walletIndex);
@@ -377,6 +381,7 @@ export async function deriveAllAddressesAsync(walletIndex: number): Promise<Cryp
  * Synchronous address derivation helper.
  */
 export function deriveAllAddresses(walletIndex: number): CryptoDepositAddresses {
+  validateWalletDerivationIndex(walletIndex);
   const masterKey = getMasterHDKeySync();
 
   const btc = deriveBitcoinNativeSegwitAddress(masterKey, walletIndex);
@@ -428,8 +433,13 @@ export async function getOrDeriveUserDepositAddresses(
 
   // 2. Resolve wallet_index (Fail-closed if missing or invalid)
   const walletIndex = profile.wallet_index;
-  if (walletIndex === null || walletIndex === undefined || typeof walletIndex !== 'number' || walletIndex <= 0) {
-    throw new Error(`Fail-closed: User profile ${userId} has no valid allocated wallet_index. Address derivation cannot proceed.`);
+  if (
+    typeof walletIndex !== 'number' ||
+    !Number.isSafeInteger(walletIndex) ||
+    walletIndex <= 0 ||
+    walletIndex > 0x7fffffff
+  ) {
+    throw new Error(`Fail-closed: User profile ${userId} has no valid positive BIP-32 wallet_index. Address derivation cannot proceed.`);
   }
 
   // 3. Derive authoritative addresses for this walletIndex
