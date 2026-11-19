@@ -7,6 +7,7 @@ import { getSupabaseAdminClient } from '@/lib/supabase/server';
 import { isWalletProvisioningServiceBearer } from '@/lib/wallet/provisioning-auth';
 
 export const dynamic = 'force-dynamic';
+export const runtime = 'nodejs';
 
 const MAX_REQUEST_BYTES = 2048;
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
