@@ -69,10 +69,10 @@ The helper unit test file is added but has not been executed in this pass. No ap
 | Dedicated service bearer validation implemented in branch | Code prepared |
 | OAuth callback auth forwarding implemented in branch | Code prepared |
 | Guarded single-sequence migration authored | Prepared |
-| Production DDL execution and postcondition verification | Pending |
+| Production DDL execution and postcondition verification | Complete — migration recorded as `20261119174139`; profile default is NULL; claim and Auth allocation use `user_wallet_index_seq`; both sequence counters and all four legacy address rows were preserved |
 | Supabase Vault credential configured | Pending |
 | Hosted app environment credential configured | Pending |
 | Feature branch review / merge / deployment | Pending |
 | End-to-end provisioning confirmation | Pending; no customer/test account created |
 
-**Step 06 is not marked fully complete.** The code and SQL remediation are prepared; automatic provisioning remains blocked until the same service credential is configured in Vault and the hosted application environment, and the branch is deployed and verified. No credentials are included in this document.
+**Step 06 is not marked fully complete.** The production allocator migration is applied and verified, and the code correction is on the feature branch. Automatic service-trigger provisioning remains blocked until the same high-entropy credential is configured in Vault and the hosted application environment, the branch is reviewed/deployed, and the endpoint is verified. The OAuth callback path now forwards its own user session token, but it is not live until deployed. No credentials are included in this document.
