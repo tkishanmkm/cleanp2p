@@ -4,8 +4,12 @@ import { createServerClient } from '@supabase/ssr';
 import { createClient as createSupabaseClient } from '@supabase/supabase-js';
 import { getOrDeriveUserDepositAddresses } from '@/lib/hd-derivation-engine';
 import { getSupabaseAdminClient } from '@/lib/supabase/server';
+import { isWalletProvisioningServiceBearer } from '@/lib/wallet/provisioning-auth';
 
 export const dynamic = 'force-dynamic';
+
+const MAX_REQUEST_BYTES = 2048;
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 function getAuthClient() {
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL;
@@ -29,9 +33,10 @@ function getAuthClient() {
 async function resolveAuthenticatedUserId(req: NextRequest): Promise<string | null> {
   const authClient = getAuthClient();
 
-  // 1. Check Bearer Authorization Header
+  // 1. Check a Supabase user access token. User sessions are limited to their
+  // own wallet and are never treated as trusted service-to-service callers.
   const authHeader = req.headers.get('authorization');
-  if (authHeader && authHeader.startsWith('Bearer ')) {
+  if (authHeader && /^Bearer\s+/i.test(authHeader)) {
     const token = authHeader.replace(/^Bearer\s+/i, '').trim();
     try {
       const { data, error } = await authClient.auth.getUser(token);
@@ -39,16 +44,19 @@ async function resolveAuthenticatedUserId(req: NextRequest): Promise<string | nu
         return data.user.id;
       }
     } catch {
-      // Fall through to cookie check
+      // Fall through to cookie authentication.
     }
   }
 
-  // 2. Check SSR Cookies
+  // 2. Check the SSR cookie session.
   const supabaseUrl =
     process.env.NEXT_PUBLIC_SUPABASE_URL ||
     process.env.SUPABASE_URL ||
     '';
-  const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY || '';
+  const supabaseAnonKey =
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ||
+    process.env.SUPABASE_ANON_KEY ||
+    '';
 
   if (supabaseUrl && supabaseAnonKey) {
     try {
@@ -67,7 +75,7 @@ async function resolveAuthenticatedUserId(req: NextRequest): Promise<string | nu
         return user.id;
       }
     } catch {
-      // Failed to resolve cookie session
+      // No valid cookie session.
     }
   }
 
@@ -76,85 +84,158 @@ async function resolveAuthenticatedUserId(req: NextRequest): Promise<string | nu
 
 export async function POST(req: NextRequest) {
   try {
-    // 1. Authentication Check (Task 2)
-    const authenticatedUserId = await resolveAuthenticatedUserId(req);
-    if (!authenticatedUserId) {
+    // The database trigger sends the Vault secret as Authorization: Bearer.
+    // It is checked independently from Supabase user JWT authentication.
+    // Configure the same high-entropy value as Supabase Vault
+    // wallet_provisioning_bearer and the server-only app env
+    // WALLET_PROVISIONING_BEARER.
+    const isServiceRequest = isWalletProvisioningServiceBearer(
+      req.headers.get('authorization'),
+      process.env.WALLET_PROVISIONING_BEARER
+    );
+
+    const authenticatedUserId = isServiceRequest
+      ? null
+      : await resolveAuthenticatedUserId(req);
+
+    if (!isServiceRequest && !authenticatedUserId) {
       return NextResponse.json(
-        { error: 'Unauthorized. Authentication is required to provision wallets.' },
-        { status: 401 }
+        { error: 'Unauthorized. A valid user session or wallet provisioning service credential is required.' },
+        { status: 401, headers: { 'Cache-Control': 'no-store' } }
       );
     }
 
-    // 2. Authorization Check (Task 3)
-    let bodyUserId: string | null = null;
-    try {
-      const body = await req.json();
-      bodyUserId = body?.userId || null;
-    } catch {
-      // JSON body is optional; default to authenticated user
-    }
-
-    if (bodyUserId && bodyUserId !== authenticatedUserId) {
+    const contentLength = Number(req.headers.get('content-length') || 0);
+    if (Number.isFinite(contentLength) && contentLength > MAX_REQUEST_BYTES) {
       return NextResponse.json(
-        { error: 'Forbidden. Cannot provision wallets for another user.' },
-        { status: 403 }
+        { error: 'Wallet provisioning request is too large.' },
+        { status: 413, headers: { 'Cache-Control': 'no-store' } }
       );
     }
 
-    const targetUserId = authenticatedUserId;
+    const rawBody = await req.text();
+    if (new TextEncoder().encode(rawBody).byteLength > MAX_REQUEST_BYTES) {
+      return NextResponse.json(
+        { error: 'Wallet provisioning request is too large.' },
+        { status: 413, headers: { 'Cache-Control': 'no-store' } }
+      );
+    }
+
+    let body: Record<string, unknown> = {};
+    if (rawBody.trim()) {
+      let parsedBody: unknown;
+      try {
+        parsedBody = JSON.parse(rawBody);
+      } catch {
+        return NextResponse.json(
+          { error: 'A valid JSON object is required.' },
+          { status: 400, headers: { 'Cache-Control': 'no-store' } }
+        );
+      }
+
+      if (!parsedBody || typeof parsedBody !== 'object' || Array.isArray(parsedBody)) {
+        return NextResponse.json(
+          { error: 'A valid JSON object is required.' },
+          { status: 400, headers: { 'Cache-Control': 'no-store' } }
+        );
+      }
+      body = parsedBody as Record<string, unknown>;
+    }
+
+    const rawBodyUserId = body.userId;
+    if (rawBodyUserId !== undefined && rawBodyUserId !== null && typeof rawBodyUserId !== 'string') {
+      return NextResponse.json(
+        { error: 'userId must be a UUID string.' },
+        { status: 400, headers: { 'Cache-Control': 'no-store' } }
+      );
+    }
+
+    const bodyUserId = typeof rawBodyUserId === 'string' ? rawBodyUserId.trim() : '';
+
+    let targetUserId: string;
+    if (isServiceRequest) {
+      // The service credential may provision only an explicit, well-formed
+      // user ID supplied by the trusted database trigger.
+      if (!UUID_PATTERN.test(bodyUserId)) {
+        return NextResponse.json(
+          { error: 'A valid userId is required for service wallet provisioning.' },
+          { status: 400, headers: { 'Cache-Control': 'no-store' } }
+        );
+      }
+      targetUserId = bodyUserId;
+    } else {
+      // A normal signed-in user can only provision the wallet bound to their
+      // verified Supabase identity.
+      if (bodyUserId && bodyUserId !== authenticatedUserId) {
+        return NextResponse.json(
+          { error: 'Forbidden. Cannot provision wallets for another user.' },
+          { status: 403, headers: { 'Cache-Control': 'no-store' } }
+        );
+      }
+      targetUserId = authenticatedUserId!;
+    }
+
     const adminClient = getSupabaseAdminClient();
 
-    // 3. Inspect existing profile to verify wallet_index presence (Task 4)
+    // Verify the target profile and its allocated derivation index before
+    // invoking the atomic production provisioning RPC.
     const { data: profile, error: profileErr } = await adminClient
       .from('profiles')
-      .select('id, wallet_index, evm_deposit_address, tron_deposit_address, btc_deposit_address, ltc_deposit_address')
+      .select('id, wallet_index')
       .eq('id', targetUserId)
       .maybeSingle();
 
     if (profileErr || !profile) {
+      console.error('[POST /api/auth/provision-wallets] Profile lookup failed.', {
+        code: profileErr?.code || null,
+      });
       return NextResponse.json(
-        { error: 'User profile not found.' },
-        { status: 404 }
+        { error: 'User profile could not be verified for wallet provisioning.' },
+        { status: 404, headers: { 'Cache-Control': 'no-store' } }
       );
     }
 
-    // Strict validation: Fail closed if wallet_index is missing/null/invalid. NO FALLBACK TO 0.
-    if (profile.wallet_index === null || profile.wallet_index === undefined || typeof profile.wallet_index !== 'number' || profile.wallet_index <= 0) {
+    if (
+      !Number.isSafeInteger(profile.wallet_index) ||
+      profile.wallet_index <= 0 ||
+      profile.wallet_index > 0x7fffffff
+    ) {
       return NextResponse.json(
-        { 
-          error: 'Fail-closed: User profile has no valid allocated wallet_index. Address derivation cannot proceed without an assigned sequence index.' 
-        },
-        { status: 422 }
+        { error: 'The user profile has no valid allocated wallet index. Wallet provisioning is blocked.' },
+        { status: 422, headers: { 'Cache-Control': 'no-store' } }
       );
     }
 
-    // 4. Canonical Synchronized Provisioning via Atomic RPC
     const result = await getOrDeriveUserDepositAddresses(targetUserId);
 
-    return NextResponse.json({
-      success: true,
-      walletIndex: result.walletIndex,
-      addresses: {
-        evm: result.addresses.ETH,
-        tron: result.addresses.USDT_TRC20,
-        btc: result.addresses.BTC,
-        ltc: result.addresses.LTC,
-        BTC: result.addresses.BTC,
-        ETH: result.addresses.ETH,
-        LTC: result.addresses.LTC,
-        USDT_ERC20: result.addresses.USDT_ERC20,
-        USDT_BEP20: result.addresses.USDT_BEP20,
-        USDT_TRC20: result.addresses.USDT_TRC20,
-      },
-      userId: targetUserId,
-    });
-  } catch (err: unknown) {
-    const errorMsg = err instanceof Error ? err.message : String(err);
-    console.error('[POST /api/auth/provision-wallets] Error:', errorMsg);
     return NextResponse.json(
-      { error: errorMsg || 'Failed to provision wallets' },
-      { status: 500 }
+      {
+        success: true,
+        walletIndex: result.walletIndex,
+        addresses: {
+          evm: result.addresses.ETH,
+          tron: result.addresses.USDT_TRC20,
+          btc: result.addresses.BTC,
+          ltc: result.addresses.LTC,
+          BTC: result.addresses.BTC,
+          ETH: result.addresses.ETH,
+          LTC: result.addresses.LTC,
+          USDT_ERC20: result.addresses.USDT_ERC20,
+          USDT_BEP20: result.addresses.USDT_BEP20,
+          USDT_TRC20: result.addresses.USDT_TRC20,
+        },
+        userId: targetUserId,
+      },
+      { headers: { 'Cache-Control': 'no-store' } }
+    );
+  } catch (err: unknown) {
+    // Never write authorization headers, secret values or derived addresses to logs.
+    console.error('[POST /api/auth/provision-wallets] Provisioning failed.', {
+      errorName: err instanceof Error ? err.name : 'UnknownError',
+    });
+    return NextResponse.json(
+      { error: 'Wallet provisioning is temporarily unavailable. Please retry.' },
+      { status: 500, headers: { 'Cache-Control': 'no-store' } }
     );
   }
 }
-
