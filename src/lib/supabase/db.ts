@@ -393,7 +393,7 @@ export interface ProvisioningQueueMetrics {
 
 export interface AdminWalletMetrics {
   totalWallets: number;
-  totalBalances: Record<string, { available: number; locked_escrow: number; locked_withdrawal: number }>;
+  totalBalances: Record<string, { available: number; reserved: number; locked_escrow: number; locked_withdrawal: number }>;
   provisioningQueue: ProvisioningQueueMetrics;
   platformWallets: PlatformCustodyBalanceRecord[];
   totalDeposits?: { totalCount: number; byCurrency: Record<string, { count: number; volume: number }> };
@@ -429,6 +429,7 @@ export async function getAdminWalletOverview(): Promise<RpcResponse<AdminWalletM
       if (!currency) continue;
       totalBalances[currency] = {
         available: Number(row.available || 0),
+        reserved: Number(row.reserved || 0),
         locked_escrow: Number(row.escrow || 0),
         locked_withdrawal: Number(row.pendingWithdrawal || 0),
       };
