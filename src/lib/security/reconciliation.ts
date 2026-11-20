@@ -47,17 +47,10 @@ function formatRawUnits(raw: bigint, decimals: number): string {
 }
 
 function getEnabledReserveNetworks(): string[] {
-  const networks = ['BEP20'];
-
-  if (process.env.EVM_RPC_URL || process.env.ETH_RPC_URL || process.env.BSC_RPC_URL) {
-    networks.push('ERC20');
-  }
-
-  if (process.env.TRON_HOT_WALLET_ADDRESS) {
-    networks.push('TRC20');
-  }
-
-  return networks;
+  // Wallet liabilities are asset-wide, not chain-attributed in wallet_assets.
+  // Require every supported USDT reserve to be independently checked; a
+  // missing hot wallet/RPC on any supported network makes solvency unverified.
+  return ['ERC20', 'BEP20', 'TRC20'];
 }
 
 /**
@@ -209,7 +202,7 @@ async function upsertReconciliationAlert(alert: DiscrepancyAlert): Promise<void>
     user_id: alert.userId,
     asset: alert.assetSymbol,
     wallet_balance: alert.walletBalance,
-    ledger_balance_after: alert.ledgerSum,
+    ledger_balance_after: alert.ledgerBalanceAfter,
     discrepancy: alert.discrepancy,
     anomaly_type: alert.anomalyType,
   };
