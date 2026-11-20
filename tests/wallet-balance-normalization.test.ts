@@ -45,18 +45,28 @@ test('reservation mirror drift is invalid instead of being silently maxed', () =
   assert.equal(result.accountingValid, false);
 });
 
-test('negative, missing and non-finite accounting buckets are invalid', () => {
+test('nullable numeric buckets follow the database COALESCE(bucket, 0) contract', () => {
+  const result = normalizePrimaryWalletAssetBalance({
+    balance: null,
+    locked_balance: null,
+    reserved_balance: '0',
+    in_escrow: null,
+    in_withdrawal: null,
+  });
+
+  assert.equal(result.accountingValid, true);
+  assert.equal(result.available, 0);
+  assert.equal(result.reserved, 0);
+  assert.equal(result.inEscrow, 0);
+  assert.equal(result.inWithdrawal, 0);
+  assert.equal(result.total, 0);
+});
+
+test('negative and non-finite accounting buckets are invalid', () => {
   const negative = normalizePrimaryWalletAssetBalance({
     balance: '-1',
     locked_balance: '0',
     reserved_balance: '0',
-    in_escrow: '0',
-    in_withdrawal: '0',
-  });
-  const missing = normalizePrimaryWalletAssetBalance({
-    balance: '1',
-    locked_balance: '0',
-    reserved_balance: null,
     in_escrow: '0',
     in_withdrawal: '0',
   });
@@ -69,6 +79,5 @@ test('negative, missing and non-finite accounting buckets are invalid', () => {
   });
 
   assert.equal(negative.accountingValid, false);
-  assert.equal(missing.accountingValid, false);
   assert.equal(notFinite.accountingValid, false);
 });
