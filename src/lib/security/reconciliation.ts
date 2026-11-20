@@ -291,9 +291,14 @@ export async function runFinancialReconciliation(): Promise<ReconciliationReport
       totalHotWalletUnits += reserveUnits;
     }
 
+    const accountingBucketsInvalid = comparison.discrepancies.some((item) =>
+      item.anomalyType === 'NEGATIVE_BALANCE' ||
+      item.anomalyType === 'ACCOUNTING_BUCKET_INVALID'
+    );
     const solvencyVerified =
       hotWalletReserves.length > 0 &&
       solvencyReasons.length === 0 &&
+      !accountingBucketsInvalid &&
       hotWalletReserves.every((reserve) => reserve.status === 'ONLINE');
 
     const totalLiabilityUnits = parseNumericUnits(comparison.totalUsdtLiability) ?? 0n;
@@ -322,7 +327,7 @@ export async function runFinancialReconciliation(): Promise<ReconciliationReport
 
     const isBalanced = discrepancies.length === 0 && solvencyVerified;
     const report: ReconciliationReport = {
-      totalUsersAudited: comparison.totalWalletAssetsAudited,
+      totalUsersAudited: new Set(walletAssets.map((wallet) => wallet.user_id)).size,
       totalWalletAssetsAudited: comparison.totalWalletAssetsAudited,
       balancedWallets: comparison.balancedWallets,
       anomalousWallets: discrepancies.length,
