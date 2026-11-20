@@ -56,7 +56,7 @@ export function parseNumericUnits(value: string | number | null | undefined): bi
   const text = typeof value === 'number' ? String(value) : value.trim();
   if (!text || text.length > 128) return null;
 
-  const match = /^(-?)(\\d+)(?:\\.(\\d+))?(?:[eE]([+-]?\\d+))?$/.exec(text);
+  const match = /^(-?)(\d+)(?:\\.(\d+))?(?:[eE]([+-]?\d+))?$/.exec(text);
   if (!match) return null;
 
   const exponent = match[4] ? Number.parseInt(match[4], 10) : 0;
@@ -301,8 +301,29 @@ export function compareWalletAssetsToLedger(
   for (const [key, ledger] of latestLedgerByAsset) {
     if (walletKeys.has(key)) continue;
     const snapshot = parseNumericUnits(ledger.balance_after);
+    const [userId, assetSymbol] = key.split(':', 2);
+
+    if (ambiguousLedgerKeys.has(key)) {
+      discrepancies.push({
+        walletId: 'MISSING_WALLET_ASSET',
+        userId,
+        assetSymbol,
+        walletBalance: '0',
+        ledgerBalanceAfter: '0',
+        discrepancy: '0',
+        anomalyType: 'LEDGER_SNAPSHOT_AMBIGUOUS',
+        details: `Ledger snapshots for ${assetSymbol} cannot be ordered safely and no canonical wallet_assets row exists.`,
+      });
+      continue;
+    }
+
     if (snapshot !== null && snapshot !== 0n) {
-      const [userId, assetSymbol] = key.split(':', 2);
+      if (assetSymbol === 'USDT' && snapshot > 0n) {
+        // A positive ledger-only USDT snapshot is still a customer liability,
+        // even when its canonical wallet_assets row is missing.
+        totalUsdtLiabilityUnits += snapshot;
+      }
+
       discrepancies.push({
         walletId: 'MISSING_WALLET_ASSET',
         userId,
