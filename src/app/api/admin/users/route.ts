@@ -163,6 +163,16 @@ export async function GET(req: NextRequest) {
     }
     const ads = Array.from(adsByIdentity.values());
 
+    // Never present an unverified user wallet bucket set in a platform user report.
+    if (walletAssets.some((wallet: any) =>
+      !normalizePrimaryWalletAssetBalance(wallet).accountingValid
+    )) {
+      return NextResponse.json(
+        { success: false, error: "Wallet accounting buckets require reconciliation before user financial reports can be displayed.", users: [] },
+        { status: 503 }
+      );
+    }
+
     // Normalize canonical wallet buckets without merging their meanings;
     // balance is spendable, while reserve/escrow/withdrawal remain separate.
     const walletMap = new Map<string, any[]>();
