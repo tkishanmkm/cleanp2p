@@ -9,6 +9,7 @@ const alertDedupe = read('supabase/migrations/20261024160000_system_alert_active
 const reconciliationTotals = read('supabase/migrations/20261106115041_withdrawal_reconciliation_canonical_aggregation.sql');
 const legacyHelperRetirement = read('supabase/migrations/20261107160000_restrict_legacy_financial_mutation_helpers.sql');
 const adjustmentRepair = read('supabase/migrations/20261120201500_step_11_repair_admin_wallet_adjustment_ledger_contract.sql');
+const walletBucketInvariants = read('supabase/migrations/20261120213000_step_11_enforce_wallet_bucket_invariants.sql');
 const reconciliationWorker = read('src/jobs/reconciliationWorker.ts');
 const walletLedger = read('src/lib/security/wallet-ledger-reconciliation.ts');
 const reconciliationService = read('src/lib/security/reconciliation.ts');
@@ -55,6 +56,20 @@ test('legacy direct balance and ledger helpers are retired only after dependency
   assert.match(legacyHelperRetirement, /caller\.proowner\) <> 'postgres'/);
   assert.match(legacyHelperRetirement, /REVOKE ALL ON FUNCTION %s FROM PUBLIC, anon, authenticated, service_role/);
   assert.match(legacyHelperRetirement, /ALTER FUNCTION public\.execute_internal_transfer\(uuid,text,text,numeric,text\)[\s\S]*SET search_path = ''/);
+});
+
+test('wallet bucket database constraints reject negative/non-finite values and preserve reserve mirroring', () => {
+  assert.match(walletBucketInvariants, /wallet_assets_balance_nonnegative_finite_check/);
+  assert.match(walletBucketInvariants, /wallet_assets_locked_nonnegative_finite_check/);
+  assert.match(walletBucketInvariants, /wallet_assets_reserved_nonnegative_finite_check/);
+  assert.match(walletBucketInvariants, /wallet_assets_escrow_nonnegative_finite_check/);
+  assert.match(walletBucketInvariants, /wallet_assets_withdrawal_nonnegative_finite_check/);
+  assert.match(walletBucketInvariants, /wallet_assets_reserved_mirror_check/);
+  assert.match(walletBucketInvariants, /balance < 'Infinity'::numeric/);
+  assert.match(walletBucketInvariants, /COALESCE\(locked_balance, 0\) = reserved_balance/);
+  assert.match(walletBucketInvariants, /v_negative_rows <> 0 OR v_mirror_mismatch_rows <> 0/);
+  assert.match(walletBucketInvariants, /v_source_after IS DISTINCT FROM v_source_before/);
+  assert.match(walletBucketInvariants, /search_path=""/);
 });
 
 test('admin adjustment ledger event types and active-admin identity are made compatible atomically', () => {
