@@ -5,6 +5,7 @@ export type WalletLedgerAnomalyType =
   | 'UNDER_COLLATERALIZED'
   | 'ACCOUNTING_BUCKET_INVALID'
   | 'LEDGER_SNAPSHOT_MISSING'
+  | 'LEDGER_SNAPSHOT_AMBIGUOUS'
   | 'ORPHANED_LEDGER_ASSET';
 
 export interface WalletAssetBalanceRow {
@@ -79,18 +80,17 @@ function ledgerKey(userId: string, assetSymbol: string): string {
   return `${userId}:${assetSymbol}`;
 }
 
-function isLaterLedgerSnapshot(
-  candidate: LedgerBalanceSnapshotRow,
-  current: LedgerBalanceSnapshotRow
+function sameSnapshotValue(
+  left: LedgerBalanceSnapshotRow,
+  right: LedgerBalanceSnapshotRow
 ): boolean {
-  const candidateTime = candidate.created_at ? Date.parse(candidate.created_at) : Number.NaN;
-  const currentTime = current.created_at ? Date.parse(current.created_at) : Number.NaN;
-  if (Number.isFinite(candidateTime) && Number.isFinite(currentTime) && candidateTime !== currentTime) {
-    return candidateTime > currentTime;
-  }
-  if (Number.isFinite(candidateTime) && !Number.isFinite(currentTime)) return true;
-  if (!Number.isFinite(candidateTime) && Number.isFinite(currentTime)) return false;
-  return candidate.id.localeCompare(current.id) > 0;
+  const leftValue = parseNumericUnits(left.balance_after);
+  const rightValue = parseNumericUnits(right.balance_after);
+  return leftValue !== null && rightValue !== null && leftValue === rightValue;
+}
+
+function snapshotTime(value: LedgerBalanceSnapshotRow): number {
+  return value.created_at ? Date.parse(value.created_at) : Number.NaN;
 }
 
 function discrepancy(
@@ -124,6 +124,7 @@ export function compareWalletAssetsToLedger(
   ledgerEntries: LedgerBalanceSnapshotRow[]
 ): WalletLedgerComparison {
   const latestLedgerByAsset = new Map<string, LedgerBalanceSnapshotRow>();
+  const ambiguousLedgerKeys = new Set<string>();
 
   for (const entry of ledgerEntries) {
     const assetSymbol = normalizeAsset(entry.asset) || normalizeAsset(entry.crypto);
@@ -131,8 +132,27 @@ export function compareWalletAssetsToLedger(
 
     const key = ledgerKey(entry.user_id, assetSymbol);
     const current = latestLedgerByAsset.get(key);
-    if (!current || isLaterLedgerSnapshot(entry, current)) {
+    if (!current) {
       latestLedgerByAsset.set(key, entry);
+      if (!Number.isFinite(snapshotTime(entry))) ambiguousLedgerKeys.add(key);
+      continue;
+    }
+
+    const candidateTime = snapshotTime(entry);
+    const currentTime = snapshotTime(current);
+    if (!Number.isFinite(candidateTime) || !Number.isFinite(currentTime)) {
+      ambiguousLedgerKeys.add(key);
+      continue;
+    }
+
+    if (candidateTime > currentTime) {
+      latestLedgerByAsset.set(key, entry);
+      ambiguousLedgerKeys.delete(key);
+    } else if (candidateTime === currentTime && !sameSnapshotValue(entry, current)) {
+      // Postgres now() is transaction-scoped. If two balance snapshots for the
+      // same account share one timestamp but disagree, UUID ordering is not a
+      // reliable transaction order: surface the ambiguity instead of guessing.
+      ambiguousLedgerKeys.add(key);
     }
   }
 
@@ -169,11 +189,18 @@ export function compareWalletAssetsToLedger(
       continue;
     }
 
-    if (assetSymbol === 'USDT' && balance >= 0n) {
-      totalUsdtLiabilityUnits += balance;
+    const totalLiabilityUnits = balance + reserved + inEscrow + inWithdrawal;
+    const bucketsAreNonNegative =
+      balance >= 0n && locked >= 0n && reserved >= 0n && inEscrow >= 0n && inWithdrawal >= 0n;
+
+    // balance is the spendable bucket. Escrow, withdrawal and reserved amounts
+    // have already been moved out of balance and remain platform liabilities.
+    // locked_balance is a mirror of reserved_balance, so count that pair once.
+    if (assetSymbol === 'USDT' && bucketsAreNonNegative) {
+      totalUsdtLiabilityUnits += totalLiabilityUnits;
     }
 
-    if (balance < 0n || locked < 0n || reserved < 0n || inEscrow < 0n || inWithdrawal < 0n) {
+    if (!bucketsAreNonNegative) {
       discrepancies.push(discrepancy(
         wallet,
         'NEGATIVE_BALANCE',
@@ -198,14 +225,25 @@ export function compareWalletAssetsToLedger(
     }
 
     const ledger = latestLedgerByAsset.get(key);
+    if (ambiguousLedgerKeys.has(key)) {
+      discrepancies.push(discrepancy(
+        wallet,
+        'LEDGER_SNAPSHOT_AMBIGUOUS',
+        balance,
+        balance,
+        'Multiple ledger balance_after snapshots have equal or untrusted timestamps and cannot be safely ordered.'
+      ));
+      continue;
+    }
+
     if (!ledger) {
-      if (balance > 0n) {
+      if (totalLiabilityUnits > 0n) {
         discrepancies.push(discrepancy(
           wallet,
           'UNAUTHORIZED_CREDIT',
           balance,
           0n,
-          `Canonical wallet balance is ${formatNumericUnits(balance)} ${assetSymbol} but no ledger entry exists for this user and asset.`
+          `Canonical wallet has liabilities of ${formatNumericUnits(totalLiabilityUnits)} ${assetSymbol} across spendable/reserved/escrow/withdrawal buckets but no ledger entry exists for this user and asset.`
         ));
       } else {
         balancedWallets++;
