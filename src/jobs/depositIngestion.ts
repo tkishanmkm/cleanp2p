@@ -24,6 +24,63 @@ export const CANONICAL_USDT_CONTRACTS: Readonly<Record<string, string>> = Object
   TRC20: 'TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t',
 });
 
+/**
+ * Scanner RPCs may return a JSON rejection (for example ADDRESS_NOT_FOUND)
+ * without a PostgREST transport error. Treat only the canonical pending/replay
+ * response shapes as accepted; scanners must never silently swallow a rejected
+ * candidate or report a credit that only the confirmation worker may perform.
+ */
+function recordPendingDepositRegistration(
+  data: unknown,
+  error: { code?: string; message?: string } | null,
+  network: string,
+  txHash: string,
+  errors: string[]
+): void {
+  const reference = txHash.slice(0, 16);
+
+  if (error) {
+    const errorCode = typeof error.code === 'string' ? error.code : 'UNKNOWN';
+    errors.push(`Pending deposit registration RPC failed on ${network} (${errorCode}) for tx ${reference}.`);
+    return;
+  }
+
+  let payload: unknown = data;
+  if (typeof payload === 'string') {
+    try {
+      payload = JSON.parse(payload);
+    } catch {
+      errors.push(`Pending deposit registration returned invalid JSON on ${network} for tx ${reference}.`);
+      return;
+    }
+  }
+
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+    errors.push(`Pending deposit registration returned an invalid response on ${network} for tx ${reference}.`);
+    return;
+  }
+
+  const result = payload as Record<string, unknown>;
+  if (result.success !== true) {
+    const code = typeof result.code === 'string' ? result.code.slice(0, 64) : 'UNEXPECTED_REJECTION';
+    errors.push(`Pending deposit candidate rejected on ${network} (${code}) for tx ${reference}.`);
+    return;
+  }
+
+  const status = typeof result.status === 'string' ? result.status.toUpperCase() : '';
+  if (
+    status !== 'PENDING' &&
+    status !== 'ALREADY_CREDITED'
+  ) {
+    errors.push(`Pending deposit registration returned unexpected status on ${network} (${status || 'MISSING'}) for tx ${reference}.`);
+    return;
+  }
+
+  if (result.credited === true) {
+    errors.push(`Deposit ingestion invariant violation: scanner RPC reported a credit on ${network} for tx ${reference}.`);
+  }
+}
+
 export function getBtcMempoolApi(): string {
   if (
     process.env.BTC_MEMPOOL_API &&
@@ -73,7 +130,9 @@ export async function getMonitoredAddresses(): Promise<{
       .eq('is_active', true)
       .eq('status', 'active');
 
-    if (!pErr && primaryAddresses) {
+    if (pErr) {
+      console.error('[Deposit Ingestion] Could not load primary deposit addresses:', pErr.message);
+    } else if (primaryAddresses) {
       for (const row of primaryAddresses) {
         if (!row.address) continue;
         const clean = row.address.trim();
@@ -267,14 +326,7 @@ async function scanEvmTokenDeposits(
           p_provider: 'deposit_ingestion',
         });
 
-        if (error) {
-          errors.push(`RPC error on tx ${log.transactionHash}: ${error.message}`);
-        } else {
-          const res = typeof data === 'string' ? JSON.parse(data) : data;
-          if (res?.status === 'credited') {
-            credited++;
-          }
-        }
+        recordPendingDepositRegistration(data, error, normNet, log.transactionHash, errors);
       } catch (logErr: any) {
         errors.push(`Error processing EVM log ${log.transactionHash}: ${logErr.message}`);
       }
@@ -381,14 +433,7 @@ async function scanEvmNativeDeposits(
                   p_provider: 'deposit_ingestion',
                 });
 
-                if (!error) {
-                  const res = typeof data === 'string' ? JSON.parse(data) : data;
-                  if (res?.status === 'PENDING' && res?.credited === false) {
-                    // This process only registered a pending candidate; it never credits.
-                  }
-                } else {
-                  errors.push(`RPC error for native transfer ${txHash}: ${error.message}`);
-                }
+                recordPendingDepositRegistration(data, error, normNet, txHash, errors);
               }
             }
           } catch (_) {
@@ -429,14 +474,7 @@ async function scanEvmNativeDeposits(
             p_provider: 'deposit_ingestion',
           });
 
-          if (error) {
-            errors.push(`RPC error for native transfer ${tx.hash}: ${error.message}`);
-          } else {
-            const res = typeof data === 'string' ? JSON.parse(data) : data;
-            if (res?.status === 'credited') {
-              credited++;
-            }
-          }
+          recordPendingDepositRegistration(data, error, normNet, tx.hash, errors);
         }
       }
     }
@@ -633,14 +671,7 @@ async function scanTronDeposits(
               p_provider: 'deposit_ingestion',
             });
 
-            if (error) {
-              errors.push(`RPC error for TRON deposit ${txId}: ${error.message}`);
-            } else {
-              const r = typeof rpcData === 'string' ? JSON.parse(rpcData) : rpcData;
-              if (r?.status === 'credited') {
-                credited++;
-              }
-            }
+            recordPendingDepositRegistration(rpcData, error, 'TRC20', txId, errors);
           }
         }
       } catch (acctErr: any) {
@@ -705,14 +736,7 @@ async function scanTronDeposits(
               p_provider: 'deposit_ingestion',
             });
 
-            if (error) {
-              errors.push(`RPC error for TRON deposit ${txId}: ${error.message}`);
-            } else {
-              const r = typeof rpcData === 'string' ? JSON.parse(rpcData) : rpcData;
-              if (r?.status === 'credited') {
-                credited++;
-              }
-            }
+            recordPendingDepositRegistration(rpcData, error, 'TRC20', txId, errors);
           }
         }
       } catch (evtErr: any) {
@@ -832,14 +856,7 @@ async function scanTronDeposits(
             p_provider: 'deposit_ingestion',
           });
 
-          if (error) {
-            errors.push(`RPC error for TRON deposit ${txHash}: ${error.message}`);
-          } else {
-            const res = typeof rpcData === 'string' ? JSON.parse(rpcData) : rpcData;
-            if (res?.status === 'credited') {
-              credited++;
-            }
-          }
+          recordPendingDepositRegistration(rpcData, error, 'TRC20', txHash, errors);
         }
       } catch (rpcErr: any) {
         errors.push(`eth_getLogs query error: ${rpcErr.message}`);
@@ -891,12 +908,7 @@ async function scanBtcDeposits(
             p_block_number: blockHeight || null, p_from_address: null, p_token_contract: null,
             p_confirmations: 0, p_provider: 'deposit_ingestion',
           });
-          if (error) {
-            errors.push('RPC error for BTC deposit ' + tx.txid + ' output ' + i + ': ' + error.message);
-          } else {
-            const res = typeof data === 'string' ? JSON.parse(data) : data;
-            if (res?.status === 'credited') credited++;
-          }
+          recordPendingDepositRegistration(data, error, 'BTC', tx.txid, errors);
         }
       }
     } catch (err: any) {
@@ -946,12 +958,7 @@ async function scanLtcDeposits(
             p_block_number: blockHeight || null, p_from_address: null, p_token_contract: null,
             p_confirmations: 0, p_provider: 'deposit_ingestion',
           });
-          if (error) {
-            errors.push('RPC error for LTC deposit ' + tx.txid + ' output ' + i + ': ' + error.message);
-          } else {
-            const res = typeof data === 'string' ? JSON.parse(data) : data;
-            if (res?.status === 'credited') credited++;
-          }
+          recordPendingDepositRegistration(data, error, 'LTC', tx.txid, errors);
         }
       }
     } catch (err: any) {
