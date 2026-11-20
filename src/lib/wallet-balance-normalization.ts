@@ -25,11 +25,13 @@ export interface NormalizedWalletAssetBalance {
 export function normalizePrimaryWalletAssetBalance(
   row: WalletAssetBalanceRow,
 ): NormalizedWalletAssetBalance {
-  const available = finiteNonNegative(row.balance);
-  const reserved = finiteNonNegative(row.reserved_balance);
-  const lockedMirror = finiteNonNegative(row.locked_balance);
-  const inEscrow = finiteNonNegative(row.in_escrow);
-  const inWithdrawal = finiteNonNegative(row.in_withdrawal);
+  // The live schema permits NULL in legacy numeric buckets and its canonical
+  // aggregate uses COALESCE(bucket, 0). Mirror that exact accounting contract.
+  const available = finiteNonNegative(row.balance ?? 0);
+  const reserved = finiteNonNegative(row.reserved_balance ?? 0);
+  const lockedMirror = finiteNonNegative(row.locked_balance ?? 0);
+  const inEscrow = finiteNonNegative(row.in_escrow ?? 0);
+  const inWithdrawal = finiteNonNegative(row.in_withdrawal ?? 0);
 
   const valuesPresent =
     available !== null &&
