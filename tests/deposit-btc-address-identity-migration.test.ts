@@ -21,6 +21,7 @@ test('BTC ownership resolution changes only the four reviewed case-insensitive c
   assert.match(migration, /v_old TEXT := 'AND LOWER\(BTRIM\(address\)\) = LOWER\(v_address\)'/);
   assert.match(migration, /v_new TEXT := 'AND BTRIM\(address\) = v_address'/);
   assert.match(migration, /IF v_btc_matches <> 4 OR v_total_matches <> 4 THEN/);
+  assert.match(migration, /v_updated_matches <> v_new_matches_before \+ 4/);
   assert.match(migration, /EXECUTE v_updated/);
 });
 
