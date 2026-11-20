@@ -33,7 +33,7 @@ export interface WalletLedgerDiscrepancy {
   userId: string;
   assetSymbol: string;
   walletBalance: string;
-  ledgerSum: string;
+  ledgerBalanceAfter: string;
   discrepancy: string;
   anomalyType: WalletLedgerAnomalyType;
   details: string;
@@ -47,20 +47,40 @@ export interface WalletLedgerComparison {
 }
 
 const SCALE = 1_000_000_000_000_000_000n;
-const BALANCE_TOLERANCE = 100_000_000_000_000n; // 0.0001 at 18 decimal places.
+const BALANCE_TOLERANCE = 0n; // Exact ledger snapshots and wallet balances use the same DB numeric value.
 
 export function parseNumericUnits(value: string | number | null | undefined): bigint | null {
   if (value === null || value === undefined) return null;
-  const text = typeof value === 'number' ? String(value) : value.trim();
-  if (!text || /[eE]/.test(text)) return null;
+  if (typeof value === 'number' && !Number.isFinite(value)) return null;
 
-  const match = /^(-?)(\d+)(?:\.(\d{1,18}))?$/.exec(text);
+  const text = typeof value === 'number' ? String(value) : value.trim();
+  if (!text || text.length > 128) return null;
+
+  const match = /^(-?)(\d+)(?:\.(\d+))?(?:[eE]([+-]?\d+))?$/.exec(text);
   if (!match) return null;
 
-  const whole = BigInt(match[2]);
-  const fraction = BigInt((match[3] || '').padEnd(18, '0') || '0');
-  const units = whole * SCALE + fraction;
-  return match[1] === '-' ? -units : units;
+  const exponent = match[4] ? Number.parseInt(match[4], 10) : 0;
+  if (!Number.isSafeInteger(exponent) || Math.abs(exponent) > 36) return null;
+
+  let digits = match[2] + (match[3] || '');
+  let decimalPlaces = (match[3] || '').length - exponent;
+
+  // The ledger schema supports at most 18 fractional digits in this
+  // reconciliation. Extra digits may be discarded only when they are zeros.
+  if (decimalPlaces > 18) {
+    const excess = decimalPlaces - 18;
+    if (digits.length < excess || !digits.endsWith('0'.repeat(excess))) return null;
+    digits = digits.slice(0, -excess);
+    decimalPlaces = 18;
+  }
+
+  if (decimalPlaces < 0) {
+    digits += '0'.repeat(-decimalPlaces);
+    decimalPlaces = 0;
+  }
+
+  const magnitude = BigInt(digits || '0') * (10n ** BigInt(18 - decimalPlaces));
+  return match[1] === '-' ? -magnitude : magnitude;
 }
 
 export function formatNumericUnits(value: bigint): string {
@@ -106,7 +126,7 @@ function discrepancy(
     userId: wallet.user_id,
     assetSymbol: normalizeAsset(wallet.asset_symbol),
     walletBalance: formatNumericUnits(walletUnits),
-    ledgerSum: formatNumericUnits(ledgerUnits),
+    ledgerBalanceAfter: formatNumericUnits(ledgerUnits),
     discrepancy: formatNumericUnits(diff),
     anomalyType,
     details,
@@ -125,6 +145,7 @@ export function compareWalletAssetsToLedger(
 ): WalletLedgerComparison {
   const latestLedgerByAsset = new Map<string, LedgerBalanceSnapshotRow>();
   const ambiguousLedgerKeys = new Set<string>();
+  const unorderableLedgerKeys = new Set<string>();
 
   for (const entry of ledgerEntries) {
     const assetSymbol = normalizeAsset(entry.asset) || normalizeAsset(entry.crypto);
@@ -134,7 +155,6 @@ export function compareWalletAssetsToLedger(
     const current = latestLedgerByAsset.get(key);
     if (!current) {
       latestLedgerByAsset.set(key, entry);
-      if (!Number.isFinite(snapshotTime(entry))) ambiguousLedgerKeys.add(key);
       continue;
     }
 
@@ -142,6 +162,7 @@ export function compareWalletAssetsToLedger(
     const currentTime = snapshotTime(current);
     if (!Number.isFinite(candidateTime) || !Number.isFinite(currentTime)) {
       ambiguousLedgerKeys.add(key);
+      unorderableLedgerKeys.add(key);
       continue;
     }
 
@@ -288,7 +309,7 @@ export function compareWalletAssetsToLedger(
         userId,
         assetSymbol,
         walletBalance: '0',
-        ledgerSum: formatNumericUnits(snapshot),
+        ledgerBalanceAfter: formatNumericUnits(snapshot),
         discrepancy: formatNumericUnits(snapshot < 0n ? -snapshot : snapshot),
         anomalyType: 'ORPHANED_LEDGER_ASSET',
         details: `Ledger account snapshot ${formatNumericUnits(snapshot)} ${assetSymbol} has no canonical wallet_assets row.`,
