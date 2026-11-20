@@ -136,6 +136,7 @@ export async function GET(req: NextRequest) {
     const systemBalances: Record<string, {
       currency: string;
       available: number;
+      reserved: number;
       escrow: number;
       pendingWithdrawal: number;
       total: number;
@@ -146,6 +147,7 @@ export async function GET(req: NextRequest) {
       systemBalances[currency] = {
         currency,
         available: 0,
+        reserved: 0,
         escrow: 0,
         pendingWithdrawal: 0,
         total: 0,
@@ -161,7 +163,7 @@ export async function GET(req: NextRequest) {
         return NextResponse.json({ success: false, error: "A wallet asset has no currency code; reconciliation is required." }, { status: 503 });
       }
       if (!systemBalances[currency]) {
-        systemBalances[currency] = { currency, available: 0, escrow: 0, pendingWithdrawal: 0, total: 0, userCount: 0 };
+        systemBalances[currency] = { currency, available: 0, reserved: 0, escrow: 0, pendingWithdrawal: 0, total: 0, userCount: 0 };
       }
 
       const numericValues = [
@@ -179,7 +181,14 @@ export async function GET(req: NextRequest) {
       }
 
       const normalized = normalizePrimaryWalletAssetBalance(wallet);
+      if (!normalized.accountingValid) {
+        return NextResponse.json(
+          { success: false, error: "Wallet reserve mirror mismatch; reconciliation is required." },
+          { status: 503 }
+        );
+      }
       systemBalances[currency].available += normalized.available;
+      systemBalances[currency].reserved += normalized.reserved;
       systemBalances[currency].escrow += normalized.inEscrow;
       systemBalances[currency].pendingWithdrawal += normalized.inWithdrawal;
       if (normalized.total > 0) systemBalances[currency].userCount += 1;
@@ -187,7 +196,7 @@ export async function GET(req: NextRequest) {
 
     for (const currency of Object.keys(systemBalances)) {
       const item = systemBalances[currency];
-      item.total = item.available + item.escrow + item.pendingWithdrawal;
+      item.total = item.available + item.reserved + item.escrow + item.pendingWithdrawal;
     }
 
     // These history totals are informational only. Customer spendable balance
