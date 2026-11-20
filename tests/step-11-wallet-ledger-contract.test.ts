@@ -9,6 +9,9 @@ const alertDedupe = read('supabase/migrations/20261024160000_system_alert_active
 const reconciliationTotals = read('supabase/migrations/20261106115041_withdrawal_reconciliation_canonical_aggregation.sql');
 const legacyHelperRetirement = read('supabase/migrations/20261107160000_restrict_legacy_financial_mutation_helpers.sql');
 const adjustmentRepair = read('supabase/migrations/20261120201500_step_11_repair_admin_wallet_adjustment_ledger_contract.sql');
+const adjustmentWrapper = read('supabase/migrations/20261120220000_step_11_restore_atomic_admin_balance_api_rpc.sql');
+const adjustmentHelper = read('src/lib/admin-balance-adjustment.ts');
+const adjustmentRoute = read('src/app/api/admin/users/[userId]/balance/route.ts');
 const walletBucketInvariants = read('supabase/migrations/20261120213000_step_11_enforce_wallet_bucket_invariants.sql');
 const reconciliationWorker = read('src/jobs/reconciliationWorker.ts');
 const walletContext = read('src/context/wallet-context.tsx');
@@ -97,6 +100,21 @@ test('admin adjustment ledger event types and active-admin identity are made com
   assert.match(adjustmentRepair, /v_acl_after IS DISTINCT FROM v_acl_before/);
   assert.match(adjustmentRepair, /ledger_entries contains % pre-existing rows outside the current allowed transaction types/);
   assert.match(adjustmentRepair, /BEGIN;[\s\S]*COMMIT;/);
+});
+
+test('admin adjustment API is bridged only through the repaired service-only atomic RPC', () => {
+  assert.match(adjustmentHelper, /PAXONES_ATOMIC_ADMIN_BALANCE_ENABLED !== 'true'/);
+  assert.match(adjustmentHelper, /rpc\('admin_adjust_balance_atomic'/);
+  assert.match(adjustmentHelper, /audit_logged !== true/);
+  assert.match(adjustmentRoute, /auth\.supportAdmin === true/);
+  assert.match(adjustmentWrapper, /CREATE FUNCTION public\.admin_adjust_balance_atomic/);
+  assert.match(adjustmentWrapper, /public\.admin_adjust_wallet_asset_balance\(/);
+  assert.match(adjustmentWrapper, /admin_balance_adjust:/);
+  assert.match(adjustmentWrapper, /'audit_logged', TRUE/);
+  assert.match(adjustmentWrapper, /TO service_role, postgres/);
+  assert.match(adjustmentWrapper, /NOT pg_catalog\.has_function_privilege\('authenticated'/);
+  assert.match(adjustmentWrapper, /ledger_entries_type_check/);
+  assert.match(adjustmentWrapper, /public\.is_active_admin_identity\(p_admin_id\)/);
 });
 
 test('active reconciliation fails closed unless ERC20, BEP20 and TRC20 reserves can all be read', () => {
