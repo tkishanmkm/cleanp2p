@@ -307,7 +307,7 @@ export async function runFinancialReconciliation(): Promise<ReconciliationReport
         userId: 'SYSTEM',
         assetSymbol: 'USDT',
         walletBalance: formatNumericUnits(totalLiabilityUnits),
-        ledgerSum: formatNumericUnits(totalHotWalletUnits),
+        ledgerBalanceAfter: formatNumericUnits(totalHotWalletUnits),
         discrepancy: formatNumericUnits(shortfall),
         anomalyType: 'UNDER_COLLATERALIZED',
         details: `Verified hot wallet reserves (${formatNumericUnits(totalHotWalletUnits)} USDT) are below wallet liabilities (${formatNumericUnits(totalLiabilityUnits)} USDT).`,
