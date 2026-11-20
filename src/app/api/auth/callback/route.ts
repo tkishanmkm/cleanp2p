@@ -81,13 +81,34 @@ export async function GET(request: Request) {
         }
 
         try {
-          await fetch(`${requestUrl.origin}/api/auth/provision-wallets`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ userId: data.user.id }),
-          });
+          // This is a server-to-server fetch, so the browser's Supabase cookies
+          // are not forwarded automatically. Pass the access token returned by
+          // exchangeCodeForSession so the provisioning route can verify this
+          // same user and enforce its own-user authorization boundary.
+          const accessToken = data.session?.access_token;
+          if (!accessToken) {
+            console.error('[OAuth Callback] Wallet provisioning skipped: no authenticated session access token was returned.');
+          } else {
+            const provisionResponse = await fetch(`${requestUrl.origin}/api/auth/provision-wallets`, {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                Authorization: `Bearer ${accessToken}`,
+              },
+              body: JSON.stringify({ userId: data.user.id }),
+              cache: 'no-store',
+            });
+
+            if (!provisionResponse.ok) {
+              console.error('[OAuth Callback] Wallet provisioning endpoint rejected the request.', {
+                status: provisionResponse.status,
+              });
+            }
+          }
         } catch (provErr) {
-          console.error('[OAuth Callback] Auto-provisioning notice:', provErr);
+          console.error('[OAuth Callback] Auto-provisioning request failed.', {
+            errorName: provErr instanceof Error ? provErr.name : 'UnknownError',
+          });
         }
       }
     } catch (exchangeErr) {
