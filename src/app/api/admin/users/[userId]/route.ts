@@ -135,7 +135,8 @@ export async function GET(
         currency,
         balance: normalized.available,
         total_balance: normalized.total,
-        reserved_balance: normalized.inEscrow + normalized.inWithdrawal,
+        reserved_balance: normalized.reserved,
+        reserved_total: normalized.reserved + normalized.inEscrow + normalized.inWithdrawal,
         available_balance: normalized.available,
         in_escrow: normalized.inEscrow,
         in_withdrawal: normalized.inWithdrawal,
@@ -145,14 +146,15 @@ export async function GET(
       };
     });
 
-    const balances: Record<string, { balance: number; total: number; reserved: number; available: number; in_escrow: number; in_withdrawal: number }> = {};
+    const balances: Record<string, { balance: number; total: number; reserved: number; available: number; reserved_balance: number; in_escrow: number; in_withdrawal: number }> = {};
     for (const wallet of walletAssets || []) {
       const currency = String(wallet.asset_symbol || "USDT").trim().toUpperCase();
       const normalized = normalizePrimaryWalletAssetBalance(wallet);
       balances[currency] = {
         balance: normalized.available,
         total: normalized.total,
-        reserved: normalized.inEscrow + normalized.inWithdrawal,
+        reserved: normalized.reserved + normalized.inEscrow + normalized.inWithdrawal,
+        reserved_balance: normalized.reserved,
         available: normalized.available,
         in_escrow: normalized.inEscrow,
         in_withdrawal: normalized.inWithdrawal,
