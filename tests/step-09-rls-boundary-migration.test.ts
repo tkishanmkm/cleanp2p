@@ -20,7 +20,7 @@ test('legacy P2P mirror tables retain participant/owner SELECT but lose direct b
   assert.match(migration, /DROP POLICY "Users can manage their own p2p orders" ON public\.p2p_orders/);
   assert.match(migration, /CREATE POLICY "Users can view their own legacy p2p orders"[\s\S]*FOR SELECT[\s\S]*user_id = \(SELECT auth\.uid\(\)\)/);
   assert.match(migration, /GRANT SELECT ON TABLE public\.p2p_orders TO authenticated/);
-  assert.match(migration, /GRANT EXECUTE ON FUNCTION public\\.is_active_admin_for_status_snapshot_access\\(\\)[\\s\\S]*TO authenticated, postgres/);
+  assert.match(migration, /GRANT EXECUTE ON FUNCTION public\.is_active_admin_for_status_snapshot_access\(\)[\s\S]*TO authenticated, postgres/);
 });
 
 test('legacy P2P server compatibility reads remain available without browser write dependence', () => {
@@ -39,6 +39,8 @@ test('legacy P2P server compatibility reads remain available without browser wri
   assert.match(tradeActionsRoute, /adminClient\.rpc\('mark_p2p_trade_paid'/);
   assert.match(tradeActionsRoute, /\.from\('p2p_trades'\)[\s\S]*\.update\(\{ status: 'PAID'/);
   assert.match(legacyEscrowService, /getSupabaseAdminClient\(\)/);
+  assert.match(legacyEscrowService, /Legacy direct hot-wallet escrow release is disabled/);
+  assert.doesNotMatch(legacyEscrowService, /executeHotWalletWithdrawal/);
 });
 
 test('admin snapshot RLS delegates to the active-admin identity check, not profile flags alone', () => {
