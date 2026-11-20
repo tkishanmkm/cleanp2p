@@ -21,10 +21,14 @@ export async function POST(req: NextRequest) {
     const supabaseAdmin = getSupabaseAdminClient();
 
     // Parse request payload
-    const body = await req.json().catch(() => ({}));
-    const { withdrawalId } = body;
+    const body = await req.json().catch(() => null);
+    const withdrawalId = body && typeof body === 'object' && !Array.isArray(body)
+      ? (body as Record<string, unknown>).withdrawalId
+      : null;
+    const normalizedWithdrawalId = typeof withdrawalId === 'string' ? withdrawalId.trim() : '';
+    const isWithdrawalIdValid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(normalizedWithdrawalId);
 
-    if (!withdrawalId || typeof withdrawalId !== 'string') {
+    if (!isWithdrawalIdValid) {
       return NextResponse.json(
         { error: 'Bad Request: Missing or invalid withdrawalId.' },
         { status: 400 }
@@ -33,7 +37,7 @@ export async function POST(req: NextRequest) {
 
     // 4. Call authoritative approve_withdrawal RPC
     const { data: approvalResult, error: rpcError } = await supabaseAdmin.rpc('approve_withdrawal', {
-      p_withdrawal_id: withdrawalId,
+      p_withdrawal_id: normalizedWithdrawalId,
       p_admin_id: callerId,
     });
 
@@ -65,14 +69,17 @@ export async function POST(req: NextRequest) {
       success: true,
       data: parsedResult,
       status: parsedResult.status || 'QUEUED',
-      withdrawalId,
+      withdrawalId: normalizedWithdrawalId,
       approvedBy: callerId,
       message: 'Withdrawal approved and queued for broadcast.',
     });
   } catch (err: unknown) {
-    const message = err instanceof Error ? err.message : 'Unknown server error.';
+    console.error(
+      '[Admin Withdrawal Approval] Unexpected request failure:',
+      err instanceof Error ? err.name : 'UnknownError'
+    );
     return NextResponse.json(
-      { error: `Internal Server Error: ${message}` },
+      { error: 'Internal server error; verify withdrawal status before retrying.' },
       { status: 500 }
     );
   }
