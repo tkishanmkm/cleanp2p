@@ -123,7 +123,7 @@ BEGIN
   WHERE p.oid=v_signature;
 
   v_start := pg_catalog.strpos(v_definition,'SELECT EXISTS (');
-  v_end := pg_catalog.strpos(v_definition,'IF NOT v_is_admin THEN',v_start);
+  v_end := v_start + pg_catalog.strpos(pg_catalog.substr(v_definition,v_start),'IF NOT v_is_admin THEN') - 1;
 
   IF v_start=0 OR v_end<=v_start
      OR (
