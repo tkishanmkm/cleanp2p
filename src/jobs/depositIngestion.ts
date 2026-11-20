@@ -1103,7 +1103,26 @@ async function runScheduledDepositIngestion(): Promise<void> {
 
   ingestionRunInFlight = true;
   try {
-    await runDepositIngestion();
+    const result = await runDepositIngestion();
+    const summary = result.results.map(({ network, depositsDetected, depositsCredited, errors }) => ({
+      network,
+      depositsDetected,
+      depositsCredited,
+      errorCount: errors.length,
+    }));
+    const reportedErrors = result.results.flatMap((item) =>
+      item.errors.map((message) => `${item.network}: ${message.slice(0, 240)}`)
+    );
+
+    if (reportedErrors.length > 0) {
+      console.error('[Deposit Ingestion] Scan/registration errors reported.', {
+        summary,
+        errors: reportedErrors.slice(0, 50),
+        truncated: reportedErrors.length > 50,
+      });
+    } else {
+      console.log('[Deposit Ingestion] Scan cycle completed.', summary);
+    }
   } catch (e) {
     console.error('[Deposit Ingestion] Cycle failed:', e);
   } finally {
