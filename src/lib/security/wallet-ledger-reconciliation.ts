@@ -56,7 +56,7 @@ export function parseNumericUnits(value: string | number | null | undefined): bi
   const text = typeof value === 'number' ? String(value) : value.trim();
   if (!text || text.length > 128) return null;
 
-  const match = /^(-?)(\d+)(?:\\.(\d+))?(?:[eE]([+-]?\d+))?$/.exec(text);
+  const match = /^(-?)(\d+)(?:\.(\d+))?(?:[eE]([+-]?\d+))?$/.exec(text);
   if (!match) return null;
 
   const exponent = match[4] ? Number.parseInt(match[4], 10) : 0;
