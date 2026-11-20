@@ -56,7 +56,7 @@ export function parseNumericUnits(value: string | number | null | undefined): bi
   const text = typeof value === 'number' ? String(value) : value.trim();
   if (!text || text.length > 128) return null;
 
-  const match = /^(-?)(\d+)(?:\.(\d+))?(?:[eE]([+-]?\d+))?$/.exec(text);
+  const match = /^(-?)(\\d+)(?:\\.(\\d+))?(?:[eE]([+-]?\\d+))?$/.exec(text);
   if (!match) return null;
 
   const exponent = match[4] ? Number.parseInt(match[4], 10) : 0;
@@ -65,8 +65,8 @@ export function parseNumericUnits(value: string | number | null | undefined): bi
   let digits = match[2] + (match[3] || '');
   let decimalPlaces = (match[3] || '').length - exponent;
 
-  // The ledger schema supports at most 18 fractional digits in this
-  // reconciliation. Extra digits may be discarded only when they are zeros.
+  // Preserve exact decimal identity at 18 fractional digits. More trailing
+  // zeros are safe to trim; non-zero precision beyond the supported scale is not.
   if (decimalPlaces > 18) {
     const excess = decimalPlaces - 18;
     if (digits.length < excess || !digits.endsWith('0'.repeat(excess))) return null;
@@ -82,7 +82,6 @@ export function parseNumericUnits(value: string | number | null | undefined): bi
   const magnitude = BigInt(digits || '0') * (10n ** BigInt(18 - decimalPlaces));
   return match[1] === '-' ? -magnitude : magnitude;
 }
-
 export function formatNumericUnits(value: bigint): string {
   if (value === 0n) return '0';
   const negative = value < 0n;
@@ -168,7 +167,7 @@ export function compareWalletAssetsToLedger(
 
     if (candidateTime > currentTime) {
       latestLedgerByAsset.set(key, entry);
-      ambiguousLedgerKeys.delete(key);
+      if (!unorderableLedgerKeys.has(key)) ambiguousLedgerKeys.delete(key);
     } else if (candidateTime === currentTime && !sameSnapshotValue(entry, current)) {
       // Postgres now() is transaction-scoped. If two balance snapshots for the
       // same account share one timestamp but disagree, UUID ordering is not a
