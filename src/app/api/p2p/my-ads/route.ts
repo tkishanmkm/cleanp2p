@@ -2,6 +2,7 @@ import { createServerClient } from '@supabase/ssr';
 import { cookies } from 'next/headers';
 import { NextResponse, type NextRequest } from 'next/server';
 import { getSupabaseAdminClient } from '@/utils/supabase/server';
+import { normalizePrimaryWalletAssetBalance } from '@/lib/wallet-balance-normalization';
 
 export const dynamic = 'force-dynamic';
 
@@ -140,7 +141,7 @@ export async function GET(request: NextRequest) {
       // never be max-merged into this value because they can be stale.
       const { data: walletAssets, error: walletAssetsError } = await admin
         .from('wallet_assets')
-        .select('asset_symbol, balance, in_escrow, in_withdrawal')
+        .select('asset_symbol,balance,locked_balance,reserved_balance,in_escrow,in_withdrawal')
         .eq('user_id', user.id);
 
       if (walletAssetsError) {
@@ -151,21 +152,24 @@ export async function GET(request: NextRequest) {
         );
       }
 
+      const seenAssets = new Set<string>();
       for (const wallet of walletAssets || []) {
         const symbol = String(wallet.asset_symbol || '').trim().toUpperCase();
-        const balance = Number(wallet.balance);
-        if (!symbol || !Number.isFinite(balance) || balance < 0) {
-          console.error('Canonical wallet balance requires reconciliation:', {
-            asset: symbol || 'UNKNOWN',
-            userId: user.id,
-          });
+        const normalized = normalizePrimaryWalletAssetBalance(wallet);
+        if (
+          !symbol ||
+          seenAssets.has(symbol) ||
+          !normalized.accountingValid
+        ) {
+          console.error('Canonical wallet buckets require reconciliation before ad balances can be displayed.');
           return NextResponse.json(
             { success: false, code: 'WALLET_BALANCE_RECONCILIATION_REQUIRED', error: 'A wallet balance could not be verified. Ads were not assigned an available balance.' },
             { status: 503 }
           );
         }
 
-        balances[symbol] = balance;
+        seenAssets.add(symbol);
+        balances[symbol] = normalized.available;
       }
     } catch (balErr) {
       console.error('Canonical wallet balance lookup failed for my-ads:', balErr);
