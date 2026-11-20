@@ -15,15 +15,15 @@ const legacyEscrowService = read('src/lib/p2p/escrowService.ts');
 
 test('legacy P2P mirror tables retain participant/owner SELECT but lose direct browser mutations', () => {
   assert.match(migration, /DROP POLICY "Users can update their own trades" ON public\.p2p_trades/);
-  assert.match(migration, /REVOKE ALL ON TABLE public\\.p2p_trades[\\s\\S]*FROM PUBLIC, anon, authenticated/);
+  assert.match(migration, /REVOKE ALL ON TABLE public\.p2p_trades[\\s\\S]*FROM PUBLIC, anon, authenticated/);
   assert.match(migration, /GRANT SELECT ON TABLE public\.p2p_trades TO authenticated/);
-  assert.match(migration, /GRANT ALL ON TABLE public\\.p2p_trades TO service_role/);
-  assert.match(migration, /has_table_privilege\('anon','public\\.p2p_trades','SELECT'\)/);
+  assert.match(migration, /GRANT ALL ON TABLE public\.p2p_trades TO service_role/);
+  assert.match(migration, /has_table_privilege\('anon','public\.p2p_trades','SELECT'\)/);
   assert.match(migration, /DROP POLICY "Users can manage their own p2p orders" ON public\.p2p_orders/);
   assert.match(migration, /CREATE POLICY "Users can view their own legacy p2p orders"[\s\S]*FOR SELECT[\s\S]*user_id = \(SELECT auth\.uid\(\)\)/);
   assert.match(migration, /GRANT SELECT ON TABLE public\.p2p_orders TO authenticated/);
-  assert.match(migration, /GRANT ALL ON TABLE public\\.p2p_orders TO service_role/);
-  assert.match(migration, /has_table_privilege\('anon','public\\.p2p_orders','SELECT'\)/);
+  assert.match(migration, /GRANT ALL ON TABLE public\.p2p_orders TO service_role/);
+  assert.match(migration, /has_table_privilege\('anon','public\.p2p_orders','SELECT'\)/);
   assert.match(migration, /GRANT EXECUTE ON FUNCTION public\.is_active_admin_for_status_snapshot_access\(\)[\s\S]*TO authenticated, postgres/);
 });
 
@@ -60,6 +60,7 @@ test('admin snapshot RLS delegates to the active-admin identity check, not profi
 
 test('migration aborts on unreviewed policy/ACL drift and preserves the service-role path', () => {
   assert.match(migration, /p2p_trades mutation policy set differs/);
+  assert.match(migration, /snapshot helper function name already exists/);
   assert.match(migration, /p2p_orders policy set differs/);
   assert.match(migration, /admin_user_status_snapshots policy set differs/);
   assert.match(migration, /Required service_role table privileges have drifted/);
