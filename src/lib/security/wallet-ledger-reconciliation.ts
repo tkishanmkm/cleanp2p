@@ -48,7 +48,7 @@ export interface WalletLedgerComparison {
 const SCALE = 1_000_000_000_000_000_000n;
 const BALANCE_TOLERANCE = 100_000_000_000_000n; // 0.0001 at 18 decimal places.
 
-function parseNumericUnits(value: string | number | null | undefined): bigint | null {
+export function parseNumericUnits(value: string | number | null | undefined): bigint | null {
   if (value === null || value === undefined) return null;
   const text = typeof value === 'number' ? String(value) : value.trim();
   if (!text || /[eE]/.test(text)) return null;
@@ -62,7 +62,7 @@ function parseNumericUnits(value: string | number | null | undefined): bigint | 
   return match[1] === '-' ? -units : units;
 }
 
-function formatNumericUnits(value: bigint): string {
+export function formatNumericUnits(value: bigint): string {
   if (value === 0n) return '0';
   const negative = value < 0n;
   const absolute = negative ? -value : value;
