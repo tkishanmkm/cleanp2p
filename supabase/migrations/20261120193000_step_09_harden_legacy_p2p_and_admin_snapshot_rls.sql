@@ -54,9 +54,16 @@ BEGIN
     AND tablename='p2p_trades'
     AND cmd IN ('INSERT','UPDATE','DELETE','ALL');
 
-  IF v_p2p_trade_update_policy <> 1 OR v_p2p_trade_mutation_policies <> 1 THEN
+  -- Accept either the original participant UPDATE-only state or the
+  -- already-hardened state produced by 20261105320000. No other mutation
+  -- policy combination is accepted.
+  IF NOT (
+    (v_p2p_trade_update_policy = 1 AND v_p2p_trade_mutation_policies = 1)
+    OR
+    (v_p2p_trade_update_policy = 0 AND v_p2p_trade_mutation_policies = 0)
+  ) THEN
     RAISE EXCEPTION
-      'Step 09 refused: p2p_trades mutation policy set differs from the reviewed participant UPDATE-only contract (known update policy %, mutation policies %).',
+      'Step 09 refused: p2p_trades mutation policy set differs from both reviewed migration states (known update policy %, mutation policies %).',
       v_p2p_trade_update_policy,
       v_p2p_trade_mutation_policies;
   END IF;
@@ -171,7 +178,7 @@ $step_09_preflight$;
 -- browser role may mutate their status, counterparties, payment amounts or
 -- signed transaction hashes. Current application writers use service_role
 -- after the canonical trade RPC has authorized the state transition.
-DROP POLICY "Users can update their own trades" ON public.p2p_trades;
+DROP POLICY IF EXISTS "Users can update their own trades" ON public.p2p_trades;
 REVOKE ALL ON TABLE public.p2p_trades
   FROM PUBLIC, anon, authenticated;
 GRANT SELECT ON TABLE public.p2p_trades TO authenticated;

@@ -2,13 +2,43 @@
 
 import { useEffect, useState, useCallback } from 'react';
 import { supabase } from '@/lib/supabase/client';
-import type { CryptoCurrency } from '@/lib/types';
+import { normalizePrimaryWalletAssetBalance } from '@/lib/wallet-balance-normalization';
 
 export interface WalletAssetItem {
   asset_symbol: string;
   available: number;
+  reserved: number;
+  inEscrow: number;
+  inWithdrawal: number;
   locked: number;
   updated_at?: string;
+}
+
+const DEFAULT_ASSETS: WalletAssetItem[] = ['BTC', 'ETH', 'LTC', 'USDT'].map((asset_symbol) => ({
+  asset_symbol,
+  available: 0,
+  reserved: 0,
+  inEscrow: 0,
+  inWithdrawal: 0,
+  locked: 0,
+}));
+
+function mapWalletAsset(row: Record<string, unknown>): WalletAssetItem | null {
+  const assetSymbol = String(row.asset_symbol || '').trim().toUpperCase();
+  if (!assetSymbol) return null;
+
+  const normalized = normalizePrimaryWalletAssetBalance(row);
+  if (!normalized.accountingValid) return null;
+
+  return {
+    asset_symbol: assetSymbol,
+    available: normalized.available,
+    reserved: normalized.reserved,
+    inEscrow: normalized.inEscrow,
+    inWithdrawal: normalized.inWithdrawal,
+    locked: normalized.reserved + normalized.inEscrow + normalized.inWithdrawal,
+    updated_at: typeof row.updated_at === 'string' ? row.updated_at : undefined,
+  };
 }
 
 export function useRealtimeWallets(userId: string | undefined | null) {
@@ -20,29 +50,27 @@ export function useRealtimeWallets(userId: string | undefined | null) {
       setLoading(true);
       const { data, error } = await supabase
         .from('wallet_assets')
-        .select('asset_symbol, available, locked, updated_at')
-        .eq('user_id', uid);
+        .select('asset_symbol,balance,locked_balance,reserved_balance,in_escrow,in_withdrawal,updated_at')
+        .eq('user_id', uid)
+        .order('asset_symbol', { ascending: true });
 
-      if (!error && data && data.length > 0) {
-        setAssets(
-          data.map((item: any) => ({
-            asset_symbol: String(item.asset_symbol).toUpperCase(),
-            available: Number(item.available || 0),
-            locked: Number(item.locked || 0),
-            updated_at: item.updated_at,
-          }))
-        );
-      } else {
-        // Fallback default assets
-        setAssets([
-          { asset_symbol: 'BTC', available: 0, locked: 0 },
-          { asset_symbol: 'ETH', available: 0, locked: 0 },
-          { asset_symbol: 'LTC', available: 0, locked: 0 },
-          { asset_symbol: 'USDT', available: 0, locked: 0 },
-        ]);
+      if (error) {
+        console.error('[useRealtimeWallets] Canonical wallet asset query failed:', error.code || 'unknown');
+        setAssets(DEFAULT_ASSETS);
+        return;
       }
-    } catch (err) {
-      console.error('[useRealtimeWallets] Failed to fetch initial assets:', err);
+
+      const mapped = (data || [])
+        .map((item) => mapWalletAsset(item as unknown as Record<string, unknown>))
+        .filter((item): item is WalletAssetItem => item !== null);
+
+      setAssets(mapped.length > 0 ? mapped : DEFAULT_ASSETS);
+    } catch (error: unknown) {
+      console.error(
+        '[useRealtimeWallets] Canonical wallet asset query failed:',
+        error instanceof Error ? error.name : 'UnknownError'
+      );
+      setAssets(DEFAULT_ASSETS);
     } finally {
       setLoading(false);
     }
@@ -50,13 +78,13 @@ export function useRealtimeWallets(userId: string | undefined | null) {
 
   useEffect(() => {
     if (!userId) {
+      setAssets(DEFAULT_ASSETS);
       setLoading(false);
       return;
     }
 
     fetchInitialAssets(userId);
 
-    // 1. Subscribe to changes on wallet_assets for this specific user
     const channel = supabase
       .channel(`realtime_wallet_assets_${userId}`)
       .on(
@@ -68,40 +96,36 @@ export function useRealtimeWallets(userId: string | undefined | null) {
           filter: `user_id=eq.${userId}`,
         },
         (payload: any) => {
-          console.log('⚡ Realtime Balance Update Received:', payload.new || payload);
-
           if (payload.new && payload.new.asset_symbol) {
-            const sym = String(payload.new.asset_symbol).toUpperCase();
-            const avail = Number(payload.new.available || 0);
-            const lock = Number(payload.new.locked || 0);
+            const mapped = mapWalletAsset(payload.new as Record<string, unknown>);
+            if (!mapped) {
+              fetchInitialAssets(userId);
+              return;
+            }
 
-            // 2. Reactively update state with new available/locked values
-            setAssets((prevAssets) => {
-              const exists = prevAssets.some((a) => a.asset_symbol === sym);
-              if (exists) {
-                return prevAssets.map((asset) =>
-                  asset.asset_symbol === sym
-                    ? { ...asset, available: avail, locked: lock, updated_at: payload.new.updated_at }
-                    : asset
-                );
-              } else {
-                return [...prevAssets, { asset_symbol: sym, available: avail, locked: lock, updated_at: payload.new.updated_at }];
-              }
+            setAssets((previous) => {
+              const exists = previous.some((item) => item.asset_symbol === mapped.asset_symbol);
+              if (!exists) return [...previous, mapped];
+              return previous.map((item) =>
+                item.asset_symbol === mapped.asset_symbol ? mapped : item
+              );
             });
           } else {
-            // Re-fetch on other changes
             fetchInitialAssets(userId);
           }
         }
       )
-      .subscribe((status) => {
-        console.log('Realtime Channel Status:', status);
-      });
+      .subscribe();
 
     return () => {
       supabase.removeChannel(channel);
     };
   }, [userId, fetchInitialAssets]);
 
-  return { assets, setAssets, loading, refresh: () => userId && fetchInitialAssets(userId) };
+  return {
+    assets,
+    setAssets,
+    loading,
+    refresh: () => userId ? fetchInitialAssets(userId) : Promise.resolve(),
+  };
 }

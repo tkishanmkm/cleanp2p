@@ -615,78 +615,21 @@ export default function WalletPage() {
       const { data: authData } = await supabase.auth.getUser();
       const sessionRes = await supabase.auth.getSession();
       const currentUserId = user?.uid || authData?.user?.id || sessionRes.data?.session?.user?.id;
-      if (!currentUserId) return;
-
-      // 1. Primary: Server API /api/wallet/balance with active trade escrow lock calculations & reconciliation
-      try {
-        const res = await fetch(`/api/wallet/balance?userId=${encodeURIComponent(currentUserId)}`, { cache: 'no-store' });
-        if (res.ok) {
-          const apiData = await res.json();
-          if (apiData?.success && apiData?.balances) {
-            const balanceMap: { [key in CryptoCurrency]?: { balance: number; lockedBalance: number } } = {
-              BTC: { balance: 0, lockedBalance: 0 },
-              ETH: { balance: 0, lockedBalance: 0 },
-              LTC: { balance: 0, lockedBalance: 0 },
-              USDT: { balance: 0, lockedBalance: 0 },
-            };
-
-            (['BTC', 'ETH', 'LTC', 'USDT'] as CryptoCurrency[]).forEach((coin) => {
-              const coinData = apiData.balances[coin];
-              if (coinData) {
-                balanceMap[coin] = {
-                  balance: Number(coinData.available ?? 0),
-                  lockedBalance: Number(coinData.inEscrow ?? 0) + Number(coinData.inWithdrawal ?? 0),
-                };
-              }
-            });
-
-            setSupabaseBalances(balanceMap);
-            return;
-          }
-        }
-      } catch (apiErr) {
-        console.warn('API wallet balance fetch notice:', apiErr);
-      }
-
-      // 2. Direct query from wallet_assets using select('*')
-      const { data: walletAssets, error } = await supabase
-        .from('wallet_assets')
-        .select('*')
-        .eq('user_id', currentUserId);
-
-      if (!error && walletAssets && walletAssets.length > 0) {
-        const balanceMap: { [key in CryptoCurrency]?: { balance: number; lockedBalance: number } } = {
-          BTC: { balance: 0, lockedBalance: 0 },
-          ETH: { balance: 0, lockedBalance: 0 },
-          LTC: { balance: 0, lockedBalance: 0 },
-          USDT: { balance: 0, lockedBalance: 0 },
-        };
-
-        walletAssets.forEach((asset: any) => {
-          const rawSym = String(asset.asset_symbol || asset.asset_code || asset.symbol || '').toUpperCase();
-          const symbol = (['BTC', 'ETH', 'LTC', 'USDT'].includes(rawSym) ? rawSym : null) as CryptoCurrency | null;
-          const spendable = Number(asset.available ?? asset.balance ?? asset.amount ?? 0);
-          const locked = Number(asset.locked ?? asset.locked_balance ?? asset.locked_escrow ?? 0) + Number(asset.locked_withdrawal ?? 0);
-
-          if (symbol) {
-            balanceMap[symbol] = {
-              balance: isNaN(spendable) ? 0 : spendable,
-              lockedBalance: isNaN(locked) ? 0 : locked,
-            };
-          }
-        });
-
-        setSupabaseBalances(balanceMap);
+      if (!currentUserId) {
+        setSupabaseBalances(null);
         return;
       }
 
-      // 3. Fallback to getUserWalletBalances helper
-      const fallbackBalances = await getUserWalletBalances(currentUserId);
-      if (fallbackBalances && Object.keys(fallbackBalances).length > 0) {
-        setSupabaseBalances(fallbackBalances);
-      }
-    } catch (err) {
-      console.error('Could not load real-time wallet balances:', err);
+      // The shared helper uses only the canonical authenticated balance API.
+      // It never reads legacy balance tables when the canonical API is unavailable.
+      const balances = await getUserWalletBalances(currentUserId);
+      setSupabaseBalances(balances);
+    } catch (error: unknown) {
+      console.error(
+        '[WalletPage] Canonical wallet balance load failed:',
+        error instanceof Error ? error.name : 'UnknownError'
+      );
+      setSupabaseBalances(null);
     }
   }, [user?.uid]);
 
@@ -709,19 +652,9 @@ export default function WalletPage() {
         (payload: any) => {
           console.log('⚡ Realtime Balance Update Received:', payload.new || payload);
 
-          // 2. Reactively update state with new available/locked values
-          if (payload.new && payload.new.asset_symbol) {
-            const sym = String(payload.new.asset_symbol).toUpperCase() as CryptoCurrency;
-            const avail = Number(payload.new.available ?? 0);
-            const lock = Number(payload.new.locked ?? 0);
-
-            setSupabaseBalances((prev) => ({
-              ...prev,
-              [sym]: { balance: avail, lockedBalance: lock },
-            }));
-          } else {
-            loadBalances();
-          }
+          // Re-read the canonical API after every commit. Realtime payloads are
+          // not a substitute for the server's reserve/escrow bucket validation.
+          loadBalances();
         }
       )
       .on('postgres_changes', { event: '*', schema: 'public', table: 'user_wallets' }, () => loadBalances())

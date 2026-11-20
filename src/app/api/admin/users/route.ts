@@ -163,8 +163,18 @@ export async function GET(req: NextRequest) {
     }
     const ads = Array.from(adsByIdentity.values());
 
-    // Normalize wallet buckets using the same max-not-sum logic as customer
-    // balance reporting; spendable balance is not reduced twice.
+    // Never present an unverified user wallet bucket set in a platform user report.
+    if (walletAssets.some((wallet: any) =>
+      !normalizePrimaryWalletAssetBalance(wallet).accountingValid
+    )) {
+      return NextResponse.json(
+        { success: false, error: "Wallet accounting buckets require reconciliation before user financial reports can be displayed.", users: [] },
+        { status: 503 }
+      );
+    }
+
+    // Normalize canonical wallet buckets without merging their meanings;
+    // balance is spendable, while reserve/escrow/withdrawal remain separate.
     const walletMap = new Map<string, any[]>();
     for (const wallet of walletAssets) {
       if (!walletMap.has(wallet.user_id)) walletMap.set(wallet.user_id, []);
@@ -173,7 +183,9 @@ export async function GET(req: NextRequest) {
         currency: String(wallet.asset_symbol || "USDT").toUpperCase(),
         balance: normalized.available,
         total_balance: normalized.total,
-        locked_balance: normalized.inEscrow,
+        reserved_balance: normalized.reserved,
+        locked_balance: normalized.reserved,
+        reserved_total: normalized.reserved + normalized.inEscrow + normalized.inWithdrawal,
         in_escrow: normalized.inEscrow,
         in_withdrawal: normalized.inWithdrawal,
       });

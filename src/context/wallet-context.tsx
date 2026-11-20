@@ -10,6 +10,7 @@ import { clearPendingWithdrawalKey, getOrCreatePendingWithdrawalKeyDetails } fro
 
 export interface AssetBalanceData {
   available: number;
+  reserved: number;
   inEscrow: number;
   inWithdrawal: number;
   total: number;
@@ -42,12 +43,12 @@ interface WalletContextType {
 }
 
 const defaultBalances: WalletBalancesMap = {
-  BTC: { available: 0, inEscrow: 0, inWithdrawal: 0, total: 0, fiatValue: 0 },
-  ETH: { available: 0, inEscrow: 0, inWithdrawal: 0, total: 0, fiatValue: 0 },
-  LTC: { available: 0, inEscrow: 0, inWithdrawal: 0, total: 0, fiatValue: 0 },
-  USDT: { available: 0, inEscrow: 0, inWithdrawal: 0, total: 0, fiatValue: 0 },
-  BNB: { available: 0, inEscrow: 0, inWithdrawal: 0, total: 0, fiatValue: 0 },
-  TRX: { available: 0, inEscrow: 0, inWithdrawal: 0, total: 0, fiatValue: 0 },
+  BTC: { available: 0, reserved: 0, inEscrow: 0, inWithdrawal: 0, total: 0, fiatValue: 0 },
+  ETH: { available: 0, reserved: 0, inEscrow: 0, inWithdrawal: 0, total: 0, fiatValue: 0 },
+  LTC: { available: 0, reserved: 0, inEscrow: 0, inWithdrawal: 0, total: 0, fiatValue: 0 },
+  USDT: { available: 0, reserved: 0, inEscrow: 0, inWithdrawal: 0, total: 0, fiatValue: 0 },
+  BNB: { available: 0, reserved: 0, inEscrow: 0, inWithdrawal: 0, total: 0, fiatValue: 0 },
+  TRX: { available: 0, reserved: 0, inEscrow: 0, inWithdrawal: 0, total: 0, fiatValue: 0 },
 };
 
 const WalletContext = createContext<WalletContextType | undefined>(undefined);
@@ -57,14 +58,14 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
   const { prices = { BTC: 0, ETH: 0, LTC: 0, USDT: 1, BNB: 0, TRX: 0 }, fiatRates = { USD: 1 } } = usePrices();
 
   const [rawBalances, setRawBalances] = useState<{
-    [key in CryptoCurrency]: { available: number; inEscrow: number; inWithdrawal: number };
+    [key in CryptoCurrency]: { available: number; reserved: number; inEscrow: number; inWithdrawal: number };
   }>({
-    BTC: { available: 0, inEscrow: 0, inWithdrawal: 0 },
-    ETH: { available: 0, inEscrow: 0, inWithdrawal: 0 },
-    LTC: { available: 0, inEscrow: 0, inWithdrawal: 0 },
-    USDT: { available: 0, inEscrow: 0, inWithdrawal: 0 },
-    BNB: { available: 0, inEscrow: 0, inWithdrawal: 0 },
-    TRX: { available: 0, inEscrow: 0, inWithdrawal: 0 },
+    BTC: { available: 0, reserved: 0, inEscrow: 0, inWithdrawal: 0 },
+    ETH: { available: 0, reserved: 0, inEscrow: 0, inWithdrawal: 0 },
+    LTC: { available: 0, reserved: 0, inEscrow: 0, inWithdrawal: 0 },
+    USDT: { available: 0, reserved: 0, inEscrow: 0, inWithdrawal: 0 },
+    BNB: { available: 0, reserved: 0, inEscrow: 0, inWithdrawal: 0 },
+    TRX: { available: 0, reserved: 0, inEscrow: 0, inWithdrawal: 0 },
   });
 
   const [isLoading, setIsLoading] = useState<boolean>(true);
@@ -77,25 +78,25 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
   const fetchBalances = useCallback(async () => {
     if (!userId) {
       setRawBalances({
-        BTC: { available: 0, inEscrow: 0, inWithdrawal: 0 },
-        ETH: { available: 0, inEscrow: 0, inWithdrawal: 0 },
-        LTC: { available: 0, inEscrow: 0, inWithdrawal: 0 },
-        USDT: { available: 0, inEscrow: 0, inWithdrawal: 0 },
-        BNB: { available: 0, inEscrow: 0, inWithdrawal: 0 },
-        TRX: { available: 0, inEscrow: 0, inWithdrawal: 0 },
+        BTC: { available: 0, reserved: 0, inEscrow: 0, inWithdrawal: 0 },
+        ETH: { available: 0, reserved: 0, inEscrow: 0, inWithdrawal: 0 },
+        LTC: { available: 0, reserved: 0, inEscrow: 0, inWithdrawal: 0 },
+        USDT: { available: 0, reserved: 0, inEscrow: 0, inWithdrawal: 0 },
+        BNB: { available: 0, reserved: 0, inEscrow: 0, inWithdrawal: 0 },
+        TRX: { available: 0, reserved: 0, inEscrow: 0, inWithdrawal: 0 },
       });
       setIsLoading(false);
       return;
     }
 
     try {
-      const nextMap: { [key in CryptoCurrency]: { available: number; inEscrow: number; inWithdrawal: number } } = {
-        BTC: { available: 0, inEscrow: 0, inWithdrawal: 0 },
-        ETH: { available: 0, inEscrow: 0, inWithdrawal: 0 },
-        LTC: { available: 0, inEscrow: 0, inWithdrawal: 0 },
-        USDT: { available: 0, inEscrow: 0, inWithdrawal: 0 },
-        BNB: { available: 0, inEscrow: 0, inWithdrawal: 0 },
-        TRX: { available: 0, inEscrow: 0, inWithdrawal: 0 },
+      const nextMap: { [key in CryptoCurrency]: { available: number; reserved: number; inEscrow: number; inWithdrawal: number } } = {
+        BTC: { available: 0, reserved: 0, inEscrow: 0, inWithdrawal: 0 },
+        ETH: { available: 0, reserved: 0, inEscrow: 0, inWithdrawal: 0 },
+        LTC: { available: 0, reserved: 0, inEscrow: 0, inWithdrawal: 0 },
+        USDT: { available: 0, reserved: 0, inEscrow: 0, inWithdrawal: 0 },
+        BNB: { available: 0, reserved: 0, inEscrow: 0, inWithdrawal: 0 },
+        TRX: { available: 0, reserved: 0, inEscrow: 0, inWithdrawal: 0 },
       };
 
       // 1. Primary: Server-side API endpoint with admin privileges and RLS bypass
@@ -112,13 +113,20 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
                 if (nextMap[coin]) {
                   const coinItem = apiData.balances[coin];
                   const avail = Number(coinItem.available ?? 0);
+                  const reserved = Number(coinItem.reserved ?? 0);
                   const escrow = Number(coinItem.inEscrow ?? 0);
                   const withdraw = Number(coinItem.inWithdrawal ?? 0);
 
+                  const buckets = [avail, reserved, escrow, withdraw];
+                  if (buckets.some((value) => !Number.isFinite(value) || value < 0)) {
+                    throw new Error('Canonical wallet API returned an invalid accounting bucket.');
+                  }
+
                   nextMap[coin] = {
-                    available: Math.max(0, isNaN(avail) ? 0 : avail),
-                    inEscrow: Math.max(0, isNaN(escrow) ? 0 : escrow),
-                    inWithdrawal: Math.max(0, isNaN(withdraw) ? 0 : withdraw),
+                    available: avail,
+                    reserved,
+                    inEscrow: escrow,
+                    inWithdrawal: withdraw,
                   };
                 }
               });
@@ -251,13 +259,14 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
     const calculated: WalletBalancesMap = { ...defaultBalances };
 
     (Object.keys(rawBalances) as CryptoCurrency[]).forEach((coin) => {
-      const data = rawBalances[coin] || { available: 0, inEscrow: 0, inWithdrawal: 0 };
+      const data = rawBalances[coin] || { available: 0, reserved: 0, inEscrow: 0, inWithdrawal: 0 };
       const coinPrice = (prices as Record<string, number | undefined>)?.[coin] ?? (coin === 'USDT' ? 1 : 0);
-      const totalCoin = (data.available || 0) + (data.inEscrow || 0) + (data.inWithdrawal || 0);
+      const totalCoin = (data.available || 0) + (data.reserved || 0) + (data.inEscrow || 0) + (data.inWithdrawal || 0);
       const fiatVal = (data.available || 0) * (coinPrice || 0) * (exchangeRate || 1);
 
       calculated[coin] = {
         available: data.available || 0,
+        reserved: data.reserved || 0,
         inEscrow: data.inEscrow || 0,
         inWithdrawal: data.inWithdrawal || 0,
         total: totalCoin,
@@ -298,7 +307,7 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
 
   const totalFundedCoinsCount = useMemo(() => {
     return (Object.keys(balances) as CryptoCurrency[]).filter(
-      (c) => (balances[c]?.available || 0) > 0 || (balances[c]?.inEscrow || 0) > 0 || (balances[c]?.inWithdrawal || 0) > 0
+      (c) => (balances[c]?.available || 0) > 0 || (balances[c]?.reserved || 0) > 0 || (balances[c]?.inEscrow || 0) > 0 || (balances[c]?.inWithdrawal || 0) > 0
     ).length;
   }, [balances]);
 

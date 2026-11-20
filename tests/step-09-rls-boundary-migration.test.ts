@@ -14,7 +14,9 @@ const tradeActionsRoute = read('src/app/api/trades/[tradeId]/actions/route.ts');
 const legacyEscrowService = read('src/lib/p2p/escrowService.ts');
 
 test('legacy P2P mirror tables retain participant/owner SELECT but lose direct browser mutations', () => {
-  assert.match(migration, /DROP POLICY "Users can update their own trades" ON public\.p2p_trades/);
+  assert.match(migration, /DROP POLICY IF EXISTS "Users can update their own trades" ON public\.p2p_trades/);
+  assert.match(migration, /v_p2p_trade_update_policy = 0 AND v_p2p_trade_mutation_policies = 0/);
+  assert.match(migration, /both reviewed migration states/);
   assert.match(migration, /REVOKE ALL ON TABLE public\.p2p_trades[\\s\\S]*FROM PUBLIC, anon, authenticated/);
   assert.match(migration, /GRANT SELECT ON TABLE public\.p2p_trades TO authenticated/);
   assert.match(migration, /GRANT ALL ON TABLE public\.p2p_trades TO service_role/);

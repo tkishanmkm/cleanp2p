@@ -2,6 +2,7 @@ import { hasSupabaseServiceConfig, supabaseService as supabaseAdmin } from '@/li
 import { createHash } from 'node:crypto';
 import { ethers } from 'ethers';
 import { getUsdtConfig } from '../lib/constants';
+import { getTronWeb, isValidTronAddress, TRON_CONFIG } from '../lib/blockchain/tron';
 
 
 function hasServerSupabaseCredentials(): boolean {
@@ -9,20 +10,14 @@ function hasServerSupabaseCredentials(): boolean {
 }
 
 function resolveHotWalletAddress(): string {
-  if (process.env.HOT_WALLET_PUBLIC_ADDRESS) {
-    return process.env.HOT_WALLET_PUBLIC_ADDRESS;
-  }
-  if (process.env.EVM_HOT_WALLET_ADDRESS) {
-    return process.env.EVM_HOT_WALLET_ADDRESS;
-  }
-  const privKey = process.env.HOT_WALLET_PRIVATE_KEY || process.env.EVM_HOT_WALLET_PRIVATE_KEY;
-  if (privKey) {
-    try {
-      const formattedKey = privKey.startsWith('0x') ? privKey : `0x${privKey}`;
-      return new ethers.Wallet(formattedKey).address;
-    } catch (_) {}
-  }
-  return '';
+  // Reconciliation is a read-only process. It must never load or instantiate
+  // a signer/private key merely to derive a public address.
+  return (
+    process.env.HOT_WALLET_PUBLIC_ADDRESS?.trim() ||
+    process.env.EVM_HOT_WALLET_ADDRESS?.trim() ||
+    process.env.HOT_WALLET_ADDRESS?.trim() ||
+    ''
+  );
 }
 
 const HOT_WALLET_ADDRESS = resolveHotWalletAddress();
@@ -49,7 +44,25 @@ export async function createSystemAlert(
   }
 
   try {
-    // Deduplicate only active alerts. Once resolved, the same issue can raise a fresh alert.
+    // Older unresolved alerts may not have a dedupe_key yet. Check the
+    // human-readable identity first so the first post-migration run does not
+    // create a second active copy of each historical alert.
+    const { data: existing, error: lookupError } = await supabaseAdmin
+      .from('system_alerts')
+      .select('id')
+      .eq('alert_type', type)
+      .eq('title', title)
+      .eq('is_resolved', false)
+      .limit(1);
+
+    if (lookupError) {
+      console.error('[Alert Engine Error] Could not check for an existing active alert:', lookupError.message);
+      return;
+    }
+    if (existing && existing.length > 0) return;
+
+    // The partial unique index is the final concurrency guard. Once resolved,
+    // the same alert may be raised again with the same deterministic key.
     const dedupeKey = createHash('sha256')
       .update(`${type}:${title.trim().toLocaleLowerCase('en-US')}`)
       .digest('hex');
@@ -83,7 +96,9 @@ export interface GasStatus {
   network: string;
   nativeBalance: string;
   isSufficient: boolean;
+  status: 'ONLINE' | 'UNAVAILABLE';
   symbol: string;
+  error?: string;
 }
 
 const RECONCILIATION_DECIMAL_PLACES = 8;
@@ -184,6 +199,10 @@ export async function checkHotWalletGasLevels(): Promise<GasStatus[]> {
     if (!net.rpc) continue;
     try {
       const provider = createSafeProvider(net.rpc, net.chainId);
+      const actualChainId = BigInt(await provider.send('eth_chainId', []));
+      if (actualChainId !== BigInt(net.chainId)) {
+        throw new Error(`RPC chain ID mismatch for ${net.code}.`);
+      }
       const balance = await provider.getBalance(HOT_WALLET_ADDRESS);
       const minThreshold = MIN_GAS_THRESHOLDS[net.code] || ethers.parseEther('0.01');
 
@@ -198,15 +217,18 @@ export async function checkHotWalletGasLevels(): Promise<GasStatus[]> {
         network: net.code,
         nativeBalance: formatted,
         isSufficient,
+        status: 'ONLINE',
         symbol: net.symbol,
       });
     } catch (err: any) {
       console.error(`[Gas Monitor Error] Failed checking gas on ${net.code}:`, err.message);
       gasStatuses.push({
         network: net.code,
-        nativeBalance: '0.0',
+        nativeBalance: 'UNAVAILABLE',
         isSufficient: false,
+        status: 'UNAVAILABLE',
         symbol: net.symbol,
+        error: 'Read-only RPC gas balance verification failed.',
       });
     }
   }
@@ -302,9 +324,16 @@ export async function reconcileLedgerVsChain(assetSymbol = 'USDT'): Promise<Reco
   for (const item of networkConfigs) {
     try {
       const config = getUsdtConfig(item.net);
-      if (!item.rpc) continue;
+      if (!item.rpc) {
+        throw new Error(`No read-only RPC is configured for ${item.net}.`);
+      }
 
       const provider = createSafeProvider(item.rpc, item.chainId);
+      const actualChainId = BigInt(await provider.send('eth_chainId', []));
+      if (actualChainId !== BigInt(item.chainId)) {
+        throw new Error(`RPC chain ID mismatch for ${item.net}.`);
+      }
+
       const tokenContract = new ethers.Contract(
         config.contractAddress,
         ['function balanceOf(address) view returns (uint256)'],
@@ -317,6 +346,24 @@ export async function reconcileLedgerVsChain(assetSymbol = 'USDT'): Promise<Reco
       console.error(`[Reconciliation Error] Failed fetching ${item.net} on-chain balance:`, err.message);
       throw new Error(`Reconciliation incomplete: failed fetching ${item.net} reserve balance; refusing to calculate a potentially false balance result.`);
     }
+  }
+
+  // TRON/TRC20 holds a separate hot-wallet address and must be included in
+  // the same USDT reserve sum. Never use signer mode/private keys for a read.
+  const tronHotWalletAddress = process.env.TRON_HOT_WALLET_ADDRESS?.trim() || '';
+  if (!tronHotWalletAddress || !isValidTronAddress(tronHotWalletAddress)) {
+    throw new Error('Reconciliation incomplete: a valid TRON hot-wallet address is not configured.');
+  }
+
+  try {
+    const tronWeb = getTronWeb(false);
+    const tronUsdt = await tronWeb.contract().at(TRON_CONFIG.usdtContract);
+    const tronRawBalance = await tronUsdt.balanceOf(tronHotWalletAddress).call();
+    const tronBalance = BigInt(tronRawBalance.toString());
+    totalOnChainUnits += scaleTokenBalance(tronBalance, TRON_CONFIG.usdtDecimals);
+  } catch (err: any) {
+    console.error('[Reconciliation Error] Failed fetching TRC20 on-chain balance:', err.message);
+    throw new Error('Reconciliation incomplete: failed fetching TRC20 reserve balance; refusing to calculate a potentially false balance result.');
   }
 
   // 4. Compare exact fixed-point values. JavaScript numbers are created only
@@ -360,8 +407,21 @@ export async function reconcileLedgerVsChain(assetSymbol = 'USDT'): Promise<Reco
     );
   }
 
-  // 3. Log Low Gas Token Alerts
+  // A provider outage is not evidence of a zero hot-wallet balance.
+  // Record an operational alert for unavailable readings and reserve LOW_GAS
+  // for a successful online balance read that is genuinely below threshold.
   for (const gas of gasStatuses) {
+    if (gas.status === 'UNAVAILABLE') {
+      await createSystemAlert(
+        'WORKER_ERROR',
+        'WARNING',
+        `Native Gas Balance Check Unavailable on ${gas.network}`,
+        'The configured read-only RPC could not verify the hot-wallet native gas balance. No low-gas conclusion was made.',
+        { network: gas.network, status: gas.status, error: gas.error || 'RPC verification failed' }
+      );
+      continue;
+    }
+
     if (!gas.isSufficient) {
       await createSystemAlert(
         'LOW_GAS',

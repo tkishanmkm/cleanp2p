@@ -116,6 +116,17 @@ export async function GET(
       (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
     );
 
+    // Admin financial details must not display normalized values from a
+    // wallet whose reserved/locked mirror is inconsistent.
+    if ((walletAssets || []).some((wallet: any) =>
+      !normalizePrimaryWalletAssetBalance(wallet).accountingValid
+    )) {
+      return NextResponse.json(
+        { success: false, error: "Wallet accounting buckets require reconciliation before user financial details can be displayed." },
+        { status: 503 }
+      );
+    }
+
     // Compute balance dictionary and map wallets with provisioned addresses
     const addressMap = new Map<string, any>();
     (depositAddresses || []).forEach((addr: any) => {
@@ -135,7 +146,8 @@ export async function GET(
         currency,
         balance: normalized.available,
         total_balance: normalized.total,
-        reserved_balance: normalized.inEscrow + normalized.inWithdrawal,
+        reserved_balance: normalized.reserved,
+        reserved_total: normalized.reserved + normalized.inEscrow + normalized.inWithdrawal,
         available_balance: normalized.available,
         in_escrow: normalized.inEscrow,
         in_withdrawal: normalized.inWithdrawal,
@@ -145,14 +157,15 @@ export async function GET(
       };
     });
 
-    const balances: Record<string, { balance: number; total: number; reserved: number; available: number; in_escrow: number; in_withdrawal: number }> = {};
+    const balances: Record<string, { balance: number; total: number; reserved: number; available: number; reserved_balance: number; in_escrow: number; in_withdrawal: number }> = {};
     for (const wallet of walletAssets || []) {
       const currency = String(wallet.asset_symbol || "USDT").trim().toUpperCase();
       const normalized = normalizePrimaryWalletAssetBalance(wallet);
       balances[currency] = {
         balance: normalized.available,
         total: normalized.total,
-        reserved: normalized.inEscrow + normalized.inWithdrawal,
+        reserved: normalized.reserved + normalized.inEscrow + normalized.inWithdrawal,
+        reserved_balance: normalized.reserved,
         available: normalized.available,
         in_escrow: normalized.inEscrow,
         in_withdrawal: normalized.inWithdrawal,

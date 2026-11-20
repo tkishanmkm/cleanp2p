@@ -10,12 +10,10 @@ import Link from "next/link";
 import ManageAds, { AdItem } from "@/components/ManageAds";
 import { useEffect, useState, useCallback } from "react";
 import { useRouter } from "next/navigation";
-import { useWallet } from "@/context/wallet-context";
 import { useI18n } from "@/context/i18n-context";
 
 export default function MyAdsPage() {
   const { user, isUserLoading } = useAuth();
-  const { balances: walletContextBalances } = useWallet();
   const router = useRouter();
   const { toast } = useToast();
   const { t } = useI18n();
@@ -89,37 +87,10 @@ export default function MyAdsPage() {
         }
       }
 
-      // Also query live balances directly from client supabase to ensure accuracy
-      try {
-        const [
-          { data: walletAssets },
-          { data: userWallets }
-        ] = await Promise.all([
-          supabase.from('wallet_assets').select('*').eq('user_id', currentUser.id),
-          supabase.from('user_wallets').select('*').eq('user_id', currentUser.id),
-        ]);
-
-        if (walletAssets && Array.isArray(walletAssets)) {
-          walletAssets.forEach((wa: any) => {
-            const sym = String(wa.asset_symbol || wa.asset_code || wa.symbol || wa.crypto || '').toUpperCase();
-            const avail = Number(wa.available ?? wa.balance ?? 0) - Number(wa.locked_escrow ?? wa.locked_balance ?? 0);
-            if (sym && !isNaN(avail)) {
-              fetchedBalances[sym] = Math.max(fetchedBalances[sym] || 0, Math.max(0, avail));
-            }
-          });
-        }
-
-        if (userWallets && Array.isArray(userWallets)) {
-          userWallets.forEach((w: any) => {
-            const sym = String(w.asset_symbol || '').toUpperCase();
-            const avail = Number(w.available_balance ?? (Number(w.balance || 0) - Number(w.locked_balance || 0)));
-            if (sym && !isNaN(avail)) {
-              fetchedBalances[sym] = Math.max(fetchedBalances[sym] || 0, Math.max(0, avail));
-            }
-          });
-        }
-      } catch (balErr) {
-        console.warn('Live balance query error in my-ads:', balErr);
+      // /api/p2p/my-ads returns canonical wallet_assets.balance as the spendable
+      // value. Never max-merge legacy wallet tables or subtract escrow twice.
+      if (!hasAuthoritativeAdsResponse) {
+        fetchedBalances = {};
       }
 
       setUserCoinBalances(fetchedBalances);
@@ -184,19 +155,14 @@ export default function MyAdsPage() {
     const minLimit = Number(raw.min_limit ?? raw.min_amount ?? raw.minAmount ?? 0);
     const maxLimit = Number(raw.max_limit ?? raw.max_amount ?? raw.maxAmount ?? 0);
 
-    // Live available coin balance for Rule 3
-    const contextBal = walletContextBalances[coin as CryptoCurrency]?.available;
+    // Rule 3 reads only the authenticated /api/p2p/my-ads response, whose
+    // balance map comes from canonical wallet_assets.balance. Never override
+    // it with a cached context value or ad-published/legacy balance.
     const directBal = userCoinBalances[coin];
-    const adBal = raw.available_crypto ?? raw.available_amount;
-    
-    let liveCoinBalance = 0;
-    if (contextBal !== undefined && contextBal >= 0) {
-      liveCoinBalance = contextBal;
-    } else if (directBal !== undefined && directBal >= 0) {
-      liveCoinBalance = directBal;
-    } else if (adBal !== undefined && adBal >= 0) {
-      liveCoinBalance = Number(adBal);
-    }
+    const liveCoinBalance =
+      directBal !== undefined && Number.isFinite(directBal) && directBal >= 0
+        ? directBal
+        : 0;
 
     let pMethods: string[] = ['Bank Transfer'];
     if (Array.isArray(raw.payment_methods)) pMethods = raw.payment_methods;

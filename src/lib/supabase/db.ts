@@ -1,11 +1,13 @@
 import { supabase } from './client';
 
 export interface WalletAssetBalance {
-  wallet_id: string;
-  asset_code: string;
-  available: number;
-  locked_escrow: number;
-  locked_withdrawal: number;
+  user_id: string;
+  asset_symbol: string;
+  balance: number;
+  locked_balance: number;
+  reserved_balance: number;
+  in_escrow: number;
+  in_withdrawal: number;
   updated_at: string;
 }
 
@@ -147,68 +149,59 @@ export async function completeTrade(
  */
 export async function getUserWallets(userId: string): Promise<RpcResponse<UserWallet | null>> {
   try {
-    // 1. Direct query from wallet_assets by user_id
-    const { data: directAssets } = await supabase
-      .from('wallet_assets')
-      .select('asset_symbol, available, locked, updated_at')
-      .eq('user_id', userId);
+    if (!userId) return { data: null, error: new Error('User ID is required') };
 
-    if (directAssets && directAssets.length > 0) {
-      return {
-        data: {
-          id: userId,
-          user_id: userId,
-          status: 'active',
-          provisioning_status: 'completed',
-          created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
-          balances: directAssets.map((a: any) => ({
-            wallet_id: userId,
-            asset_code: a.asset_symbol || '',
-            available: Number(a.available || 0),
-            locked_escrow: Number(a.locked || 0),
-            locked_withdrawal: 0,
-            updated_at: a.updated_at || new Date().toISOString(),
-          })),
-        },
-        error: null,
-      };
-    }
-
-    const { data: walletData, error: walletError } = await supabase
-      .from('wallets')
-      .select('*')
-      .eq('user_id', userId)
-      .maybeSingle();
+    const [{ data: walletData, error: walletError }, { data: assetRows, error: assetError }] = await Promise.all([
+      supabase
+        .from('wallets')
+        .select('id,user_id,status,provisioning_status,created_at,updated_at')
+        .eq('user_id', userId)
+        .maybeSingle(),
+      supabase
+        .from('wallet_assets')
+        .select('user_id,asset_symbol,balance,locked_balance,reserved_balance,in_escrow,in_withdrawal,updated_at')
+        .eq('user_id', userId)
+        .order('asset_symbol', { ascending: true }),
+    ]);
 
     if (walletError && walletError.code !== 'PGRST116') {
       return { data: null, error: new Error(walletError.message) };
     }
-
-    if (walletData) {
-      const { data: balancesData } = await supabase
-        .from('wallet_assets')
-        .select('*')
-        .eq('wallet_id', walletData.id);
-
-      return {
-        data: {
-          ...walletData,
-          balances: (balancesData || []).map((b: any) => ({
-            ...b,
-            asset_code: b.asset_symbol || b.asset_code,
-            available: Number(b.available || b.balance || 0),
-            locked_escrow: Number(b.locked || b.locked_escrow || 0),
-            locked_withdrawal: Number(b.locked_withdrawal || 0),
-          })),
-        },
-        error: null,
-      };
+    if (assetError) {
+      return { data: null, error: new Error(assetError.message) };
     }
 
-    return { data: null, error: null };
-  } catch (err: unknown) {
-    return { data: null, error: err instanceof Error ? err : new Error(String(err)) };
+    const balances: WalletAssetBalance[] = (assetRows || []).map((row: any) => ({
+      user_id: row.user_id,
+      asset_symbol: row.asset_symbol,
+      balance: Number(row.balance ?? 0),
+      locked_balance: Number(row.locked_balance ?? 0),
+      reserved_balance: Number(row.reserved_balance ?? 0),
+      in_escrow: Number(row.in_escrow ?? 0),
+      in_withdrawal: Number(row.in_withdrawal ?? 0),
+      updated_at: row.updated_at || new Date().toISOString(),
+    }));
+
+    if (!walletData && balances.length === 0) {
+      return { data: null, error: null };
+    }
+
+    const now = new Date().toISOString();
+    const timestamps = balances.map((row) => row.updated_at).filter(Boolean).sort();
+    return {
+      data: {
+        id: walletData?.id || userId,
+        user_id: userId,
+        status: walletData?.status || 'active',
+        provisioning_status: walletData?.provisioning_status || (balances.length > 0 ? 'completed' : 'pending'),
+        created_at: walletData?.created_at || timestamps[0] || now,
+        updated_at: walletData?.updated_at || timestamps[timestamps.length - 1] || now,
+        balances,
+      },
+      error: null,
+    };
+  } catch (error: unknown) {
+    return { data: null, error: error instanceof Error ? error : new Error(String(error)) };
   }
 }
 
@@ -400,7 +393,7 @@ export interface ProvisioningQueueMetrics {
 
 export interface AdminWalletMetrics {
   totalWallets: number;
-  totalBalances: Record<string, { available: number; locked_escrow: number; locked_withdrawal: number }>;
+  totalBalances: Record<string, { available: number; reserved: number; locked_escrow: number; locked_withdrawal: number }>;
   provisioningQueue: ProvisioningQueueMetrics;
   platformWallets: PlatformCustodyBalanceRecord[];
   totalDeposits?: { totalCount: number; byCurrency: Record<string, { count: number; volume: number }> };
@@ -436,6 +429,7 @@ export async function getAdminWalletOverview(): Promise<RpcResponse<AdminWalletM
       if (!currency) continue;
       totalBalances[currency] = {
         available: Number(row.available || 0),
+        reserved: Number(row.reserved || 0),
         locked_escrow: Number(row.escrow || 0),
         locked_withdrawal: Number(row.pendingWithdrawal || 0),
       };

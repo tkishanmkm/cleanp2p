@@ -52,10 +52,10 @@ export default function AdminWalletsPage() {
   const [metrics, setMetrics] = useState<AdminWalletMetrics>({
     totalWallets: 0,
     totalBalances: {
-      BTC: { available: 0, locked_escrow: 0, locked_withdrawal: 0 },
-      ETH: { available: 0, locked_escrow: 0, locked_withdrawal: 0 },
-      LTC: { available: 0, locked_escrow: 0, locked_withdrawal: 0 },
-      USDT: { available: 0, locked_escrow: 0, locked_withdrawal: 0 },
+      BTC: { available: 0, reserved: 0, locked_escrow: 0, locked_withdrawal: 0 },
+      ETH: { available: 0, reserved: 0, locked_escrow: 0, locked_withdrawal: 0 },
+      LTC: { available: 0, reserved: 0, locked_escrow: 0, locked_withdrawal: 0 },
+      USDT: { available: 0, reserved: 0, locked_escrow: 0, locked_withdrawal: 0 },
     },
     provisioningQueue: {
       queued: 0,
@@ -79,11 +79,11 @@ export default function AdminWalletsPage() {
       }
 
       const defaults = {
-        BTC: { available: 0, locked_escrow: 0, locked_withdrawal: 0 },
-        ETH: { available: 0, locked_escrow: 0, locked_withdrawal: 0 },
-        LTC: { available: 0, locked_escrow: 0, locked_withdrawal: 0 },
-        USDT: { available: 0, locked_escrow: 0, locked_withdrawal: 0 },
-        TRX: { available: 0, locked_escrow: 0, locked_withdrawal: 0 },
+        BTC: { available: 0, reserved: 0, locked_escrow: 0, locked_withdrawal: 0 },
+        ETH: { available: 0, reserved: 0, locked_escrow: 0, locked_withdrawal: 0 },
+        LTC: { available: 0, reserved: 0, locked_escrow: 0, locked_withdrawal: 0 },
+        USDT: { available: 0, reserved: 0, locked_escrow: 0, locked_withdrawal: 0 },
+        TRX: { available: 0, reserved: 0, locked_escrow: 0, locked_withdrawal: 0 },
       };
 
       setMetrics({
@@ -235,6 +235,7 @@ export default function AdminWalletsPage() {
                   {(['BTC', 'ETH', 'USDT', 'LTC', 'TRX'] as const).map((asset) => {
                     const bal = (metrics.totalBalances as any)?.[asset] || {
                       available: 0,
+                      reserved: 0,
                       locked_escrow: 0,
                       locked_withdrawal: 0,
                     };
@@ -256,6 +257,12 @@ export default function AdminWalletsPage() {
                             </span>
                           </div>
                           <div className="flex justify-between">
+                            <span className="text-muted-foreground text-xs">Reserved:</span>
+                            <span className="font-mono font-medium text-amber-500 text-xs">
+                              {Number(bal.reserved || 0).toFixed(isUsdtOrTrx ? 2 : 6)}
+                            </span>
+                          </div>
+                          <div className="flex justify-between">
                             <span className="text-muted-foreground text-xs">In Escrow:</span>
                             <span className="font-mono font-medium text-amber-500 text-xs">
                               {Number(bal.locked_escrow || 0).toFixed(isUsdtOrTrx ? 2 : 6)}
@@ -270,7 +277,7 @@ export default function AdminWalletsPage() {
                           <div className="pt-2 border-t flex justify-between font-semibold">
                             <span className="text-xs">Total User:</span>
                             <span className="font-mono text-xs text-emerald-400">
-                              {(Number(bal.available || 0) + Number(bal.locked_escrow || 0) + Number(bal.locked_withdrawal || 0)).toFixed(
+                              {(Number(bal.available || 0) + Number(bal.reserved || 0) + Number(bal.locked_escrow || 0) + Number(bal.locked_withdrawal || 0)).toFixed(
                                 isUsdtOrTrx ? 2 : 6
                               )}
                             </span>
