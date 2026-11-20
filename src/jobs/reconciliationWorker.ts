@@ -2,6 +2,7 @@ import { hasSupabaseServiceConfig, supabaseService as supabaseAdmin } from '@/li
 import { createHash } from 'node:crypto';
 import { ethers } from 'ethers';
 import { getUsdtConfig } from '../lib/constants';
+import { getTronWeb, isValidTronAddress, TRON_CONFIG } from '../lib/blockchain/tron';
 
 
 function hasServerSupabaseCredentials(): boolean {
@@ -302,9 +303,16 @@ export async function reconcileLedgerVsChain(assetSymbol = 'USDT'): Promise<Reco
   for (const item of networkConfigs) {
     try {
       const config = getUsdtConfig(item.net);
-      if (!item.rpc) continue;
+      if (!item.rpc) {
+        throw new Error(`No read-only RPC is configured for ${item.net}.`);
+      }
 
       const provider = createSafeProvider(item.rpc, item.chainId);
+      const actualNetwork = await provider.getNetwork();
+      if (actualNetwork.chainId !== BigInt(item.chainId)) {
+        throw new Error(`RPC chain ID mismatch for ${item.net}.`);
+      }
+
       const tokenContract = new ethers.Contract(
         config.contractAddress,
         ['function balanceOf(address) view returns (uint256)'],
@@ -317,6 +325,24 @@ export async function reconcileLedgerVsChain(assetSymbol = 'USDT'): Promise<Reco
       console.error(`[Reconciliation Error] Failed fetching ${item.net} on-chain balance:`, err.message);
       throw new Error(`Reconciliation incomplete: failed fetching ${item.net} reserve balance; refusing to calculate a potentially false balance result.`);
     }
+  }
+
+  // TRON/TRC20 holds a separate hot-wallet address and must be included in
+  // the same USDT reserve sum. Never use signer mode/private keys for a read.
+  const tronHotWalletAddress = process.env.TRON_HOT_WALLET_ADDRESS?.trim() || '';
+  if (!tronHotWalletAddress || !isValidTronAddress(tronHotWalletAddress)) {
+    throw new Error('Reconciliation incomplete: a valid TRON hot-wallet address is not configured.');
+  }
+
+  try {
+    const tronWeb = getTronWeb(false);
+    const tronUsdt = await tronWeb.contract().at(TRON_CONFIG.usdtContract);
+    const tronRawBalance = await tronUsdt.balanceOf(tronHotWalletAddress).call();
+    const tronBalance = BigInt(tronRawBalance.toString());
+    totalOnChainUnits += scaleTokenBalance(tronBalance, TRON_CONFIG.usdtDecimals);
+  } catch (err: any) {
+    console.error('[Reconciliation Error] Failed fetching TRC20 on-chain balance:', err.message);
+    throw new Error('Reconciliation incomplete: failed fetching TRC20 reserve balance; refusing to calculate a potentially false balance result.');
   }
 
   // 4. Compare exact fixed-point values. JavaScript numbers are created only
