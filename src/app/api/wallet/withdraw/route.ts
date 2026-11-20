@@ -91,9 +91,10 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       totalDebited: result.totalDebited,
       message: result.message,
     });
-  } catch (err: any) {
+  } catch (err: unknown) {
+    console.error('[WITHDRAWAL_REQUEST] Unexpected failure while processing withdrawal request:', err instanceof Error ? err.name : 'UnknownError');
     return NextResponse.json(
-      { error: err.message || 'Internal server error' },
+      { error: 'Unable to process the withdrawal request. Please check your withdrawal history before retrying.' },
       { status: 500 }
     );
   }
