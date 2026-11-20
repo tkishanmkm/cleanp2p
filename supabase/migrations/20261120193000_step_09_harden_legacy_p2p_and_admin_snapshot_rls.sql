@@ -122,6 +122,11 @@ BEGIN
       'Step 09 refused: public.is_active_admin_identity(uuid) is missing.';
   END IF;
 
+  IF pg_catalog.to_regprocedure('public.is_active_admin_for_status_snapshot_access()') IS NOT NULL THEN
+    RAISE EXCEPTION
+      'Step 09 refused: snapshot helper function name already exists; review it before replacement.';
+  END IF;
+
   SELECT pg_catalog.pg_get_userbyid(p.proowner),p.prosecdef,p.proconfig
     INTO v_identity_owner,v_identity_definer,v_identity_config
   FROM pg_catalog.pg_proc p
