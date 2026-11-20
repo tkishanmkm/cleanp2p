@@ -75,6 +75,10 @@ test('active reconciliation fails closed unless ERC20, BEP20 and TRC20 reserves 
   assert.match(reconciliationWorker, /actualNetwork\.chainId !== BigInt\(item\.chainId\)/);
   assert.match(reconciliationWorker, /system_reconciliations/);
   assert.match(reconciliationWorker, /dedupe_key: dedupeKey/);
+  assert.match(reconciliationWorker, /\.eq\('alert_type', type\)/);
+  assert.match(reconciliationWorker, /\.eq\('title', title\)/);
+  assert.match(reconciliationWorker, /\.eq\('is_resolved', false\)/);
+  assert.match(reconciliationWorker, /existing && existing\.length > 0/);
 });
 
 test('exact ledger snapshot reconciliation never sums signed event amounts or double-counts mirrored buckets', () => {
