@@ -10,6 +10,7 @@ const remainingTradeSearchPaths = read('supabase/migrations/20261120194500_step_
 const legacyAdminRetirement = read('supabase/migrations/20261106030000_retire_legacy_admin_escrow_rpcs_and_harden_expiry_search_path.sql');
 const legacyEscrowRetirement = read('supabase/migrations/20261107200000_retire_legacy_trade_escrow_mutation_rpcs.sql');
 const adminDisputeSettlement = read('supabase/migrations/20261108043000_restore_atomic_admin_dispute_settlement.sql');
+const fullAdminHelper = read('supabase/migrations/20261108033000_restore_support_admin_emergency_contracts.sql');
 const adminMarkPaid = read('supabase/migrations/20261107230000_restore_admin_mark_paid_authorized_rpc.sql');
 
 const adminDisputeCaller = read('src/lib/admin-dispute-settlement.ts');
@@ -95,6 +96,10 @@ test('current admin dispute and mark-paid routes depend on server-only actor-bou
   assert.match(adminDisputeSettlement, /PAXONES_ATOMIC_DISPUTE_SETTLEMENT_ENABLED/);
   assert.match(adminDisputeSettlement, /COALESCE\(auth\.role\(\), ''\) <> 'service_role'/);
   assert.match(adminDisputeSettlement, /public\.is_active_full_admin_actor\(p_actor_id\)/);
+  assert.match(adminDisputeSettlement, /to_regprocedure\('public\.is_active_full_admin_actor\(uuid\)'\) IS NULL/);
+  assert.match(fullAdminHelper, /CREATE OR REPLACE FUNCTION public\.is_active_full_admin_actor/);
+  assert.match(fullAdminHelper, /public\.verify_admin_login\(p_user_id, NULL\)/);
+  assert.match(fullAdminHelper, /p\.account_status IS NULL OR LOWER\(p\.account_status\) = 'active'/);
   assert.match(adminDisputeSettlement, /mandatory audit insert is in the same transaction/i);
   assert.match(adminMarkPaid, /CREATE OR REPLACE FUNCTION public\.admin_mark_trade_paid_authorized/);
   assert.match(adminMarkPaid, /public\.is_active_admin_identity\(p_actor_id\)/);
