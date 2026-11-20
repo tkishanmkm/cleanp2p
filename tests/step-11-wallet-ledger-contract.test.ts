@@ -11,6 +11,15 @@ const legacyHelperRetirement = read('supabase/migrations/20261107160000_restrict
 const adjustmentRepair = read('supabase/migrations/20261120201500_step_11_repair_admin_wallet_adjustment_ledger_contract.sql');
 const walletBucketInvariants = read('supabase/migrations/20261120213000_step_11_enforce_wallet_bucket_invariants.sql');
 const reconciliationWorker = read('src/jobs/reconciliationWorker.ts');
+const walletContext = read('src/context/wallet-context.tsx');
+const myAdsPage = read('src/app/(dashboard)/my-ads/page.tsx');
+const myAdsRoute = read('src/app/api/p2p/my-ads/route.ts');
+const adminWalletsRoute = read('src/app/api/admin/wallets/route.ts');
+const adminMetricsRoute = read('src/app/api/admin/metrics/route.ts');
+const adminUserDetailRoute = read('src/app/api/admin/users/[userId]/route.ts');
+const adminUsersRoute = read('src/app/api/admin/users/route.ts');
+const adminWalletPage = read('src/app/adminnarayan/wallets/page.tsx');
+const sharedWalletDb = read('src/lib/supabase/db.ts');
 const walletLedger = read('src/lib/security/wallet-ledger-reconciliation.ts');
 const reconciliationService = read('src/lib/security/reconciliation.ts');
 const walletContext = read('src/context/wallet-context.tsx');
@@ -108,6 +117,11 @@ test('active reconciliation fails closed unless ERC20, BEP20 and TRC20 reserves 
   assert.match(reconciliationWorker, /\.eq\('title', title\)/);
   assert.match(reconciliationWorker, /\.eq\('is_resolved', false\)/);
   assert.match(reconciliationWorker, /existing && existing\.length > 0/);
+  assert.match(reconciliationWorker, /status: 'UNAVAILABLE'/);
+  assert.match(reconciliationWorker, /Native Gas Balance Check Unavailable/);
+  assert.match(reconciliationWorker, /gas\.status === 'UNAVAILABLE'/);
+  assert.match(reconciliationWorker, /gas\.status === 'ONLINE'/);
+  assert.doesNotMatch(reconciliationWorker, /nativeBalance: '0\.0'[\s\S]*isSufficient: false[\s\S]*status: 'ONLINE'/);
 });
 
 test('wallet read endpoints treat wallet_assets.balance as already spendable', () => {
@@ -172,6 +186,39 @@ test('shared wallet repository helper uses the production wallet_assets column c
   assert.match(sharedWalletDb, /\.select\('user_id,asset_symbol,balance,locked_balance,reserved_balance,in_escrow,in_withdrawal,updated_at'\)/);
   assert.doesNotMatch(sharedWalletDb, /\.select\('asset_symbol, available, locked, updated_at'\)/);
   assert.match(sharedWalletDb, /reserved_balance: Number\(row\.reserved_balance \?\? 0\)/);
+});
+
+test('wallet context portfolio totals include reserved amounts exactly once', () => {
+  assert.match(walletContext, /reserved: number/);
+  assert.match(walletContext, /coinItem\.reserved/);
+  assert.match(walletContext, /totalCoin = \(data\.available \|\| 0\) \+ \(data\.reserved \|\| 0\) \+ \(data\.inEscrow \|\| 0\) \+ \(data\.inWithdrawal \|\| 0\)/);
+});
+
+test('My Ads uses only the canonical server-provided available balance', () => {
+  assert.match(myAdsRoute, /normalizePrimaryWalletAssetBalance\(wallet\)/);
+  assert.match(myAdsRoute, /seenAssets\.has\(symbol\)/);
+  assert.match(myAdsRoute, /balances\[symbol\] = normalized\.available/);
+  assert.match(myAdsPage, /userCoinBalances\[coin\]/);
+  assert.doesNotMatch(myAdsPage, /walletContextBalances|raw\.available_crypto|raw\.available_amount/);
+  assert.doesNotMatch(myAdsPage, /from\('wallet_assets'\)|from\('user_wallets'\)/);
+});
+
+test('admin wallet reports preserve each canonical bucket and reject mirror drift', () => {
+  assert.match(adminWalletsRoute, /systemBalances\[currency\]\.reserved \+= normalized\.reserved/);
+  assert.match(adminWalletsRoute, /item\.available \+ item\.reserved \+ item\.escrow \+ item\.pendingWithdrawal/);
+  assert.match(adminMetricsRoute, /totalReserved/);
+  assert.match(adminMetricsRoute, /totalAvailable \+ totalReserved \+ totalLockedEscrow \+ totalLockedWithdrawal/);
+  assert.match(adminUserDetailRoute, /reserved_balance: normalized\.reserved/);
+  assert.match(adminUserDetailRoute, /normalized\.accountingValid/);
+  assert.match(adminUsersRoute, /reserved_balance: normalized\.reserved/);
+  assert.match(adminUsersRoute, /normalized\.accountingValid/);
+  assert.match(adminWalletPage, /Reserved:/);
+  assert.match(adminWalletPage, /bal\.reserved/);
+});
+
+test('shared wallet database contract matches production column names', () => {
+  assert.match(sharedWalletDb, /asset_symbol,balance,locked_balance,reserved_balance,in_escrow,in_withdrawal/);
+  assert.doesNotMatch(sharedWalletDb, /asset_code,available,locked_escrow/);
 });
 
 test('exact ledger snapshot reconciliation never sums signed event amounts or double-counts mirrored buckets', () => {
