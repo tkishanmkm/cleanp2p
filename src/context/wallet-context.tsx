@@ -261,7 +261,7 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
     (Object.keys(rawBalances) as CryptoCurrency[]).forEach((coin) => {
       const data = rawBalances[coin] || { available: 0, reserved: 0, inEscrow: 0, inWithdrawal: 0 };
       const coinPrice = (prices as Record<string, number | undefined>)?.[coin] ?? (coin === 'USDT' ? 1 : 0);
-      const totalCoin = (data.available || 0) + (data.inEscrow || 0) + (data.inWithdrawal || 0);
+      const totalCoin = (data.available || 0) + (data.reserved || 0) + (data.inEscrow || 0) + (data.inWithdrawal || 0);
       const fiatVal = (data.available || 0) * (coinPrice || 0) * (exchangeRate || 1);
 
       calculated[coin] = {
