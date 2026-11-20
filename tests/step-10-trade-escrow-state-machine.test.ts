@@ -90,7 +90,9 @@ test('legacy financial escrow RPC retirement waits for atomic dispute wrapper de
 });
 
 test('current admin dispute and mark-paid routes depend on server-only actor-bound wrappers', () => {
+  assert.match(adminDisputeCaller, /DISPUTE_ATOMIC_SETTLEMENT_UNVERIFIED/);
   assert.match(adminDisputeCaller, /rpc\('admin_resolve_trade_dispute_atomic'/);
+  assert.match(adminDisputeSettlement, /PAXONES_ATOMIC_DISPUTE_SETTLEMENT_ENABLED/);
   assert.match(adminDisputeSettlement, /COALESCE\(auth\.role\(\), ''\) <> 'service_role'/);
   assert.match(adminDisputeSettlement, /public\.is_active_full_admin_actor\(p_actor_id\)/);
   assert.match(adminDisputeSettlement, /mandatory audit insert is in the same transaction/i);
