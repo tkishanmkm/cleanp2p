@@ -20,6 +20,7 @@ DECLARE
   v_btc_matches INTEGER;
   v_total_matches INTEGER;
   v_updated_matches INTEGER;
+  v_new_matches_before INTEGER;
 BEGIN
   IF v_signature IS NULL THEN
     RAISE EXCEPTION
@@ -64,6 +65,11 @@ BEGIN
       v_total_matches;
   END IF;
 
+  v_new_matches_before :=
+    (pg_catalog.length(v_definition)
+      - pg_catalog.length(pg_catalog.replace(v_definition, v_new, '')))
+    / pg_catalog.length(v_new);
+
   v_updated := pg_catalog.replace(v_definition, v_old, v_new);
   v_updated_matches :=
     (pg_catalog.length(v_updated)
@@ -71,7 +77,7 @@ BEGIN
     / pg_catalog.length(v_new);
 
   IF pg_catalog.strpos(v_updated, v_old) > 0
-     OR v_updated_matches < 4 THEN
+     OR v_updated_matches <> v_new_matches_before + 4 THEN
     RAISE EXCEPTION
       'Step 07 failed postcondition: all four Bitcoin address comparisons were not converted to exact string equality.';
   END IF;
