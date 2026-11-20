@@ -87,7 +87,7 @@ export async function getHotWalletOnchainBalance(
     }
 
     try {
-      const tronWeb = getTronWeb();
+      const tronWeb = getTronWeb(false);
       const contract = await tronWeb.contract().at(TRON_CONFIG.usdtContract);
       const rawBalance = await contract.balanceOf(address).call();
       const rawUnits = BigInt(rawBalance.toString());
@@ -127,8 +127,10 @@ export async function getHotWalletOnchainBalance(
 
   try {
     const provider = getEvmProvider(normNet);
-    const actualNetwork = await provider.getNetwork();
-    if (actualNetwork.chainId !== BigInt(chainConfig.chainId)) {
+    // getEvmProvider uses a static expected network for tx signing/decoding;
+    // call the remote RPC directly so this is an actual node identity check.
+    const actualChainId = BigInt(await provider.send('eth_chainId', []));
+    if (actualChainId !== BigInt(chainConfig.chainId)) {
       throw new Error('Configured RPC chain ID does not match the expected network.');
     }
 
