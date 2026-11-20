@@ -116,6 +116,17 @@ export async function GET(
       (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
     );
 
+    // Admin financial details must not display normalized values from a
+    // wallet whose reserved/locked mirror is inconsistent.
+    if ((walletAssets || []).some((wallet: any) =>
+      !normalizePrimaryWalletAssetBalance(wallet).accountingValid
+    )) {
+      return NextResponse.json(
+        { success: false, error: "Wallet accounting buckets require reconciliation before user financial details can be displayed." },
+        { status: 503 }
+      );
+    }
+
     // Compute balance dictionary and map wallets with provisioned addresses
     const addressMap = new Map<string, any>();
     (depositAddresses || []).forEach((addr: any) => {
