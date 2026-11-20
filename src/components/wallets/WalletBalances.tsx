@@ -2,11 +2,32 @@
 
 import { useEffect, useState } from 'react';
 import { supabase } from '@/lib/supabase/client';
+import { normalizePrimaryWalletAssetBalance } from '@/lib/wallet-balance-normalization';
 
 export interface WalletAsset {
   asset_symbol: string;
   available: number;
+  reserved?: number;
+  inEscrow?: number;
+  inWithdrawal?: number;
   locked?: number;
+}
+
+function mapWalletAsset(row: Record<string, unknown>): WalletAsset | null {
+  const assetSymbol = String(row.asset_symbol || '').trim().toUpperCase();
+  if (!assetSymbol) return null;
+
+  const normalized = normalizePrimaryWalletAssetBalance(row);
+  if (!normalized.accountingValid) return null;
+
+  return {
+    asset_symbol: assetSymbol,
+    available: normalized.available,
+    reserved: normalized.reserved,
+    inEscrow: normalized.inEscrow,
+    inWithdrawal: normalized.inWithdrawal,
+    locked: normalized.reserved + normalized.inEscrow + normalized.inWithdrawal,
+  };
 }
 
 export default function WalletBalances({
@@ -21,7 +42,6 @@ export default function WalletBalances({
   useEffect(() => {
     if (!userId) return;
 
-    // 1. Subscribe to changes on wallet_assets for this specific user
     const channel = supabase
       .channel(`realtime_wallet_assets_${userId}`)
       .on(
@@ -33,41 +53,25 @@ export default function WalletBalances({
           filter: `user_id=eq.${userId}`,
         },
         (payload: any) => {
-          console.log('⚡ Realtime Balance Update Received:', payload.new);
-
           if (payload.new && payload.new.asset_symbol) {
-            // 2. Reactively update state with new available/locked values
-            setAssets((prevAssets) => {
-              const exists = prevAssets.some(
-                (a) => a.asset_symbol.toUpperCase() === String(payload.new.asset_symbol).toUpperCase()
+            const mapped = mapWalletAsset(payload.new as Record<string, unknown>);
+            if (!mapped) return;
+
+            setAssets((previous) => {
+              const exists = previous.some(
+                (asset) => asset.asset_symbol.toUpperCase() === mapped.asset_symbol
               );
               if (exists) {
-                return prevAssets.map((asset) =>
-                  asset.asset_symbol.toUpperCase() === String(payload.new.asset_symbol).toUpperCase()
-                    ? {
-                        ...asset,
-                        available: Number(payload.new.available || 0),
-                        locked: Number(payload.new.locked || 0),
-                      }
-                    : asset
+                return previous.map((asset) =>
+                  asset.asset_symbol.toUpperCase() === mapped.asset_symbol ? mapped : asset
                 );
-              } else {
-                return [
-                  ...prevAssets,
-                  {
-                    asset_symbol: String(payload.new.asset_symbol).toUpperCase(),
-                    available: Number(payload.new.available || 0),
-                    locked: Number(payload.new.locked || 0),
-                  },
-                ];
               }
+              return [...previous, mapped];
             });
           }
         }
       )
-      .subscribe((status) => {
-        console.log('Realtime Channel Status:', status);
-      });
+      .subscribe();
 
     return () => {
       supabase.removeChannel(channel);
@@ -84,7 +88,7 @@ export default function WalletBalances({
           </p>
           {typeof asset.locked === 'number' && asset.locked > 0 && (
             <p className="text-xs text-muted-foreground mt-1">
-              Locked: {asset.locked}
+              Held: {asset.locked}
             </p>
           )}
         </div>
