@@ -172,11 +172,10 @@ $step_09_preflight$;
 -- signed transaction hashes. Current application writers use service_role
 -- after the canonical trade RPC has authorized the state transition.
 DROP POLICY "Users can update their own trades" ON public.p2p_trades;
-REVOKE INSERT, UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER
-  ON TABLE public.p2p_trades
+REVOKE ALL ON TABLE public.p2p_trades
   FROM PUBLIC, anon, authenticated;
-REVOKE ALL ON TABLE public.p2p_trades FROM anon;
 GRANT SELECT ON TABLE public.p2p_trades TO authenticated;
+GRANT ALL ON TABLE public.p2p_trades TO service_role;
 
 -- The old order-book endpoint is retired. The active API only reads legacy
 -- p2p_orders for a compatibility fallback and performs the PAID compare/set
@@ -188,11 +187,10 @@ CREATE POLICY "Users can view their own legacy p2p orders"
   TO authenticated
   USING (user_id = (SELECT auth.uid()));
 
-REVOKE INSERT, UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER
-  ON TABLE public.p2p_orders
+REVOKE ALL ON TABLE public.p2p_orders
   FROM PUBLIC, anon, authenticated;
-REVOKE ALL ON TABLE public.p2p_orders FROM anon;
 GRANT SELECT ON TABLE public.p2p_orders TO authenticated;
+GRANT ALL ON TABLE public.p2p_orders TO service_role;
 
 -- Use the already-reviewed active-admin decision function. Do not reimplement
 -- role flags in RLS: the identity helper rejects banned, suspended, on-hold,
@@ -229,11 +227,10 @@ CREATE POLICY admin_user_status_snapshots_service_role_all
   USING (true)
   WITH CHECK (true);
 
-REVOKE INSERT, UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER
-  ON TABLE public.admin_user_status_snapshots
+REVOKE ALL ON TABLE public.admin_user_status_snapshots
   FROM PUBLIC, anon, authenticated;
-REVOKE ALL ON TABLE public.admin_user_status_snapshots FROM anon;
 GRANT SELECT ON TABLE public.admin_user_status_snapshots TO authenticated;
+GRANT ALL ON TABLE public.admin_user_status_snapshots TO service_role;
 
 -- Postconditions: participant reads and server writes survive, direct browser
 -- mutation is gone, and admin snapshots call the active-admin helper.
@@ -243,7 +240,8 @@ BEGIN
     SELECT 1 FROM pg_catalog.pg_policies
     WHERE schemaname='public' AND tablename='p2p_trades'
       AND cmd IN ('INSERT','UPDATE','DELETE','ALL')
-  ) OR has_table_privilege('anon','public.p2p_trades','INSERT')
+  ) OR has_table_privilege('anon','public.p2p_trades','SELECT')
+     OR has_table_privilege('anon','public.p2p_trades','INSERT')
      OR has_table_privilege('anon','public.p2p_trades','UPDATE')
      OR has_table_privilege('anon','public.p2p_trades','DELETE')
      OR has_table_privilege('authenticated','public.p2p_trades','INSERT')
@@ -258,7 +256,8 @@ BEGIN
     SELECT 1 FROM pg_catalog.pg_policies
     WHERE schemaname='public' AND tablename='p2p_orders'
       AND cmd IN ('INSERT','UPDATE','DELETE','ALL')
-  ) OR has_table_privilege('anon','public.p2p_orders','INSERT')
+  ) OR has_table_privilege('anon','public.p2p_orders','SELECT')
+     OR has_table_privilege('anon','public.p2p_orders','INSERT')
      OR has_table_privilege('anon','public.p2p_orders','UPDATE')
      OR has_table_privilege('anon','public.p2p_orders','DELETE')
      OR has_table_privilege('authenticated','public.p2p_orders','INSERT')
