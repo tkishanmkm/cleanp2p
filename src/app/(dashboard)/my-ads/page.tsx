@@ -89,37 +89,10 @@ export default function MyAdsPage() {
         }
       }
 
-      // Also query live balances directly from client supabase to ensure accuracy
-      try {
-        const [
-          { data: walletAssets },
-          { data: userWallets }
-        ] = await Promise.all([
-          supabase.from('wallet_assets').select('*').eq('user_id', currentUser.id),
-          supabase.from('user_wallets').select('*').eq('user_id', currentUser.id),
-        ]);
-
-        if (walletAssets && Array.isArray(walletAssets)) {
-          walletAssets.forEach((wa: any) => {
-            const sym = String(wa.asset_symbol || wa.asset_code || wa.symbol || wa.crypto || '').toUpperCase();
-            const avail = Number(wa.available ?? wa.balance ?? 0) - Number(wa.locked_escrow ?? wa.locked_balance ?? 0);
-            if (sym && !isNaN(avail)) {
-              fetchedBalances[sym] = Math.max(fetchedBalances[sym] || 0, Math.max(0, avail));
-            }
-          });
-        }
-
-        if (userWallets && Array.isArray(userWallets)) {
-          userWallets.forEach((w: any) => {
-            const sym = String(w.asset_symbol || '').toUpperCase();
-            const avail = Number(w.available_balance ?? (Number(w.balance || 0) - Number(w.locked_balance || 0)));
-            if (sym && !isNaN(avail)) {
-              fetchedBalances[sym] = Math.max(fetchedBalances[sym] || 0, Math.max(0, avail));
-            }
-          });
-        }
-      } catch (balErr) {
-        console.warn('Live balance query error in my-ads:', balErr);
+      // /api/p2p/my-ads returns canonical wallet_assets.balance as the spendable
+      // value. Never max-merge legacy wallet tables or subtract escrow twice.
+      if (!hasAuthoritativeAdsResponse) {
+        fetchedBalances = {};
       }
 
       setUserCoinBalances(fetchedBalances);
