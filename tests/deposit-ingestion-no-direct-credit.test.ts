@@ -24,4 +24,12 @@ test('every scanner registration response is classified and rejected candidates 
   assert.match(ingestion, /status !== 'ALREADY_CREDITED'/);
   assert.match(ingestion, /result\.credited === true/);
   assert.match(ingestion, /Pending deposit candidate rejected/);
+  assert.match(ingestion, /unexpected status on/);
+});
+
+test('canonical worker reports collected deposit ingestion and registration errors', () => {
+  assert.match(ingestion, /const result = await runDepositIngestion\(\)/);
+  assert.match(ingestion, /result\.results\.flatMap/);
+  assert.match(ingestion, /Deposit Ingestion\] Scan\/registration errors reported/);
+  assert.match(ingestion, /reportedErrors\.slice\(0, 50\)/);
 });
