@@ -984,8 +984,6 @@ export async function refreshPendingDepositConfirmations(): Promise<{
 
 /**
  * Main deposit ingestion cycle execution
- *//**
- * Main deposit ingestion cycle execution
  */
 export async function runDepositIngestion(): Promise<{
   results: IngestionResult[];
