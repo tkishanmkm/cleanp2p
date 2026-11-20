@@ -5,6 +5,8 @@ import { test } from 'node:test';
 const read = (path: string) => readFileSync(path, 'utf8');
 
 const service = read('src/lib/services/withdrawalService.ts');
+const idempotencyStore = read('src/lib/withdrawal-idempotency-store.ts');
+const walletContext = read('src/context/wallet-context.tsx');
 const withdrawRoute = read('src/app/api/withdraw/route.ts');
 const walletWithdrawRoute = read('src/app/api/wallet/withdraw/route.ts');
 const withdrawalRequestRoute = read('src/app/api/withdrawals/request/route.ts');
@@ -40,6 +42,21 @@ test('normal customer withdrawal routes converge on the canonical service and ca
   assert.match(service, /totpCode/);
   assert.match(service, /withdrawal_fee_multiplier/);
   assert.match(service, /daily_withdrawal_limit_usd/);
+  assert.match(service, /SUPPORTED_ASSETS/);
+  assert.match(service, /SUPPORTED_NETWORKS/);
+});
+
+test('withdrawal retry keys are intent-scoped, persisted before submission and only cleared after success', () => {
+  assert.match(idempotencyStore, /intentHash\(userId, fingerprint\)/);
+  assert.match(idempotencyStore, /crypto\.randomUUID\(\)/);
+  assert.match(idempotencyStore, /navigator\.locks\.request/);
+  assert.match(idempotencyStore, /Unable to persist withdrawal retry state/);
+  assert.match(idempotencyStore, /Clear only after a definitive successful response/);
+
+  assert.match(walletContext, /getOrCreatePendingWithdrawalKeyDetails\(userId, withdrawalFingerprint\)/);
+  assert.match(walletContext, /'x-idempotency-key': idempotencyKey/);
+  assert.match(walletContext, /Keep the key when the outcome is not definitively acknowledged/);
+  assert.match(walletContext, /clearPendingWithdrawalKey\(userId, withdrawalFingerprint, idempotencyKey\)/);
 });
 
 test('the idempotent reservation RPC and replay lookup use the same stable request fingerprint', () => {
