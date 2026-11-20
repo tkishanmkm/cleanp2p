@@ -12,6 +12,9 @@ const adjustmentRepair = read('supabase/migrations/20261120201500_step_11_repair
 const reconciliationWorker = read('src/jobs/reconciliationWorker.ts');
 const walletLedger = read('src/lib/security/wallet-ledger-reconciliation.ts');
 const reconciliationService = read('src/lib/security/reconciliation.ts');
+const balanceNormalizer = read('src/lib/wallet-balance-normalization.ts');
+const walletRoute = read('src/app/api/wallet/route.ts');
+const walletBalanceRoute = read('src/app/api/wallet/balance/route.ts');
 
 test('financial wallet tables retain authenticated owner reads but no direct browser DML', () => {
   assert.match(tableDml, /REVOKE ALL PRIVILEGES ON TABLE public\.wallet_assets[\s\S]*FROM PUBLIC, anon, authenticated/);
@@ -79,6 +82,33 @@ test('active reconciliation fails closed unless ERC20, BEP20 and TRC20 reserves 
   assert.match(reconciliationWorker, /\.eq\('title', title\)/);
   assert.match(reconciliationWorker, /\.eq\('is_resolved', false\)/);
   assert.match(reconciliationWorker, /existing && existing\.length > 0/);
+});
+
+test('wallet read endpoints treat wallet_assets.balance as already spendable', () => {
+  assert.match(walletRoute, /\.from\('wallet_assets'\)/);
+  assert.match(walletRoute, /\.select\('asset_symbol,balance,updated_at'\)/);
+  assert.match(walletRoute, /availableBalance = balance/);
+  assert.doesNotMatch(walletRoute, /balance - locked/);
+  assert.doesNotMatch(walletRoute, /from\('user_wallets'\)/);
+  assert.doesNotMatch(walletRoute, /from\('wallets'\)/);
+
+  assert.match(walletBalanceRoute, /\.from\('wallet_assets'\)/);
+  assert.match(walletBalanceRoute, /normalizePrimaryWalletAssetBalance\(row\)/);
+  assert.match(walletBalanceRoute, /normalized\.accountingValid/);
+  assert.match(walletBalanceRoute, /Duplicate canonical wallet asset row/);
+  assert.doesNotMatch(walletBalanceRoute, /from\('trades'\)/);
+  assert.doesNotMatch(walletBalanceRoute, /from\('p2p_trades'\)/);
+});
+
+test('wallet normalization keeps reserved, escrow and withdrawal buckets separate', () => {
+  assert.match(balanceNormalizer, /available = finiteNonNegative\(row\.balance\)/);
+  assert.match(balanceNormalizer, /reserved = finiteNonNegative\(row\.reserved_balance\)/);
+  assert.match(balanceNormalizer, /lockedMirror = finiteNonNegative\(row\.locked_balance\)/);
+  assert.match(balanceNormalizer, /inEscrow = finiteNonNegative\(row\.in_escrow\)/);
+  assert.match(balanceNormalizer, /inWithdrawal = finiteNonNegative\(row\.in_withdrawal\)/);
+  assert.match(balanceNormalizer, /lockedMirror === reserved/);
+  assert.match(balanceNormalizer, /safeAvailable \+ safeReserved \+ safeEscrow \+ safeWithdrawal/);
+  assert.doesNotMatch(balanceNormalizer, /activeEscrowFallback/);
 });
 
 test('exact ledger snapshot reconciliation never sums signed event amounts or double-counts mirrored buckets', () => {
