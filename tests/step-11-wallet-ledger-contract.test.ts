@@ -13,6 +13,15 @@ const walletBucketInvariants = read('supabase/migrations/20261120213000_step_11_
 const reconciliationWorker = read('src/jobs/reconciliationWorker.ts');
 const walletLedger = read('src/lib/security/wallet-ledger-reconciliation.ts');
 const reconciliationService = read('src/lib/security/reconciliation.ts');
+const walletContext = read('src/context/wallet-context.tsx');
+const myAdsPage = read('src/app/(dashboard)/my-ads/page.tsx');
+const myAdsRoute = read('src/app/api/p2p/my-ads/route.ts');
+const adminWalletsRoute = read('src/app/api/admin/wallets/route.ts');
+const adminMetricsRoute = read('src/app/api/admin/metrics/route.ts');
+const adminUserDetailRoute = read('src/app/api/admin/users/[userId]/route.ts');
+const adminUsersRoute = read('src/app/api/admin/users/route.ts');
+const adminWalletPage = read('src/app/adminnarayan/wallets/page.tsx');
+const sharedWalletDb = read('src/lib/supabase/db.ts');
 const balanceNormalizer = read('src/lib/wallet-balance-normalization.ts');
 const walletRoute = read('src/app/api/wallet/route.ts');
 const walletBalanceRoute = read('src/app/api/wallet/balance/route.ts');
@@ -126,6 +135,43 @@ test('wallet normalization keeps reserved, escrow and withdrawal buckets separat
   assert.match(balanceNormalizer, /lockedMirror === reserved/);
   assert.match(balanceNormalizer, /safeAvailable \+ safeReserved \+ safeEscrow \+ safeWithdrawal/);
   assert.doesNotMatch(balanceNormalizer, /activeEscrowFallback/);
+});
+
+test('wallet context portfolio totals include the reserved bucket exactly once', () => {
+  assert.match(walletContext, /reserved: number/);
+  assert.match(walletContext, /coinItem\.reserved/);
+  assert.match(walletContext, /totalCoin = \(data\.available \|\| 0\) \+ \(data\.reserved \|\| 0\) \+ \(data\.inEscrow \|\| 0\) \+ \(data\.inWithdrawal \|\| 0\)/);
+  assert.match(walletContext, /inWithdrawal: prev\[asset\]\.inWithdrawal \+ totalDeduction/);
+});
+
+test('My Ads never max-merges legacy wallet tables or ad-published availability', () => {
+  assert.match(myAdsRoute, /normalizePrimaryWalletAssetBalance\(wallet\)/);
+  assert.match(myAdsRoute, /seenAssets\.has\(symbol\)/);
+  assert.match(myAdsRoute, /balances\[symbol\] = normalized\.available/);
+  assert.match(myAdsPage, /userCoinBalances\[coin\]/);
+  assert.doesNotMatch(myAdsPage, /walletContextBalances/);
+  assert.doesNotMatch(myAdsPage, /raw\.available_crypto|raw\.available_amount/);
+  assert.doesNotMatch(myAdsPage, /from\('wallet_assets'\)|from\('user_wallets'\)/);
+});
+
+test('admin aggregate and user detail reports preserve reserved, escrow and withdrawal as separate buckets', () => {
+  assert.match(adminWalletsRoute, /reserved: number/);
+  assert.match(adminWalletsRoute, /systemBalances\[currency\]\.reserved \+= normalized\.reserved/);
+  assert.match(adminWalletsRoute, /item\.available \+ item\.reserved \+ item\.escrow \+ item\.pendingWithdrawal/);
+  assert.match(adminMetricsRoute, /totalReserved/);
+  assert.match(adminMetricsRoute, /totalAvailable \+ totalReserved \+ totalLockedEscrow \+ totalLockedWithdrawal/);
+  assert.match(adminUserDetailRoute, /reserved_balance: normalized\.reserved/);
+  assert.match(adminUserDetailRoute, /reserved_total: normalized\.reserved \+ normalized\.inEscrow \+ normalized\.inWithdrawal/);
+  assert.match(adminUsersRoute, /reserved_balance: normalized\.reserved/);
+  assert.match(adminUsersRoute, /normalized\.accountingValid/);
+  assert.match(adminWalletPage, /Reserved:/);
+  assert.match(adminWalletPage, /bal\.reserved/);
+});
+
+test('shared wallet repository helper uses the production wallet_assets column contract', () => {
+  assert.match(sharedWalletDb, /\.select\('user_id,asset_symbol,balance,locked_balance,reserved_balance,in_escrow,in_withdrawal,updated_at'\)/);
+  assert.doesNotMatch(sharedWalletDb, /\.select\('asset_symbol, available, locked, updated_at'\)/);
+  assert.match(sharedWalletDb, /reserved_balance: Number\(row\.reserved_balance \?\? 0\)/);
 });
 
 test('exact ledger snapshot reconciliation never sums signed event amounts or double-counts mirrored buckets', () => {
