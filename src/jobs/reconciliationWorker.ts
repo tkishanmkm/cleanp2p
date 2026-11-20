@@ -10,20 +10,14 @@ function hasServerSupabaseCredentials(): boolean {
 }
 
 function resolveHotWalletAddress(): string {
-  if (process.env.HOT_WALLET_PUBLIC_ADDRESS) {
-    return process.env.HOT_WALLET_PUBLIC_ADDRESS;
-  }
-  if (process.env.EVM_HOT_WALLET_ADDRESS) {
-    return process.env.EVM_HOT_WALLET_ADDRESS;
-  }
-  const privKey = process.env.HOT_WALLET_PRIVATE_KEY || process.env.EVM_HOT_WALLET_PRIVATE_KEY;
-  if (privKey) {
-    try {
-      const formattedKey = privKey.startsWith('0x') ? privKey : `0x${privKey}`;
-      return new ethers.Wallet(formattedKey).address;
-    } catch (_) {}
-  }
-  return '';
+  // Reconciliation is a read-only process. It must never load or instantiate
+  // a signer/private key merely to derive a public address.
+  return (
+    process.env.HOT_WALLET_PUBLIC_ADDRESS?.trim() ||
+    process.env.EVM_HOT_WALLET_ADDRESS?.trim() ||
+    process.env.HOT_WALLET_ADDRESS?.trim() ||
+    ''
+  );
 }
 
 const HOT_WALLET_ADDRESS = resolveHotWalletAddress();
@@ -203,6 +197,10 @@ export async function checkHotWalletGasLevels(): Promise<GasStatus[]> {
     if (!net.rpc) continue;
     try {
       const provider = createSafeProvider(net.rpc, net.chainId);
+      const actualChainId = BigInt(await provider.send('eth_chainId', []));
+      if (actualChainId !== BigInt(net.chainId)) {
+        throw new Error(`RPC chain ID mismatch for ${net.code}.`);
+      }
       const balance = await provider.getBalance(HOT_WALLET_ADDRESS);
       const minThreshold = MIN_GAS_THRESHOLDS[net.code] || ethers.parseEther('0.01');
 
@@ -326,8 +324,8 @@ export async function reconcileLedgerVsChain(assetSymbol = 'USDT'): Promise<Reco
       }
 
       const provider = createSafeProvider(item.rpc, item.chainId);
-      const actualNetwork = await provider.getNetwork();
-      if (actualNetwork.chainId !== BigInt(item.chainId)) {
+      const actualChainId = BigInt(await provider.send('eth_chainId', []));
+      if (actualChainId !== BigInt(item.chainId)) {
         throw new Error(`RPC chain ID mismatch for ${item.net}.`);
       }
 
