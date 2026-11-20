@@ -6,84 +6,67 @@ export const dynamic = 'force-dynamic';
 export async function GET() {
   try {
     const supabase = await createClient();
+    const { data: { user }, error: authError } = await supabase.auth.getUser();
 
-    // 1. Authenticate Request
-    const { data: { user }, error: authErr } = await supabase.auth.getUser();
-    if (authErr || !user) {
+    if (authError || !user?.id) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    // 2. Fetch Wallet Balances safely
-    let availableBalance = 0;
-    let assetSymbol = 'USDT';
-    let lastUpdated: string | null = null;
-
-    // Check wallet_assets first
-    const { data: assetRow } = await supabase
+    // wallet_assets.balance is already the spendable amount. Escrow, reserve
+    // and withdrawal balances are separate buckets and must not be subtracted
+    // from it a second time. Legacy wallet tables are not balance fallbacks.
+    const { data: assetRow, error: assetError } = await supabase
       .from('wallet_assets')
-      .select('*')
+      .select('asset_symbol,balance,updated_at')
       .eq('user_id', user.id)
       .eq('asset_symbol', 'USDT')
       .maybeSingle();
 
-    if (assetRow) {
-      const explicitAvailable = assetRow.available ?? assetRow.available_balance;
-      const balance = Number(assetRow.balance ?? 0);
-      const lockedEscrow = Number(assetRow.locked_escrow ?? assetRow.locked_balance ?? 0);
-      const lockedWithdrawal = Number(assetRow.locked_withdrawal ?? 0);
-      // wallet_assets.available is already spendable; only derive from total balance
-      // when the canonical available column is absent, to avoid subtracting escrow twice.
-      availableBalance = explicitAvailable !== null && explicitAvailable !== undefined
-        ? Math.max(0, Number.isFinite(Number(explicitAvailable)) ? Number(explicitAvailable) : 0)
-        : Math.max(0, balance - lockedEscrow - lockedWithdrawal);
-      assetSymbol = assetRow.asset_symbol || 'USDT';
-      lastUpdated = assetRow.updated_at || null;
-    } else {
-      // Check user_wallets
-      const { data: userWallet } = await supabase
-        .from('user_wallets')
-        .select('*')
-        .eq('user_id', user.id)
-        .eq('asset_symbol', 'USDT')
-        .maybeSingle();
-
-      if (userWallet) {
-        const explicitAvailable = userWallet.available_balance ?? userWallet.available;
-        const bal = Number(userWallet.balance ?? 0);
-        const locked = Number(userWallet.locked_balance ?? userWallet.locked ?? 0);
-        const lockedWithdrawal = Number(userWallet.locked_withdrawal ?? 0);
-        availableBalance = explicitAvailable !== null && explicitAvailable !== undefined
-          ? Math.max(0, Number.isFinite(Number(explicitAvailable)) ? Number(explicitAvailable) : 0)
-          : Math.max(0, bal - locked - lockedWithdrawal);
-        assetSymbol = userWallet.asset_symbol || 'USDT';
-        lastUpdated = userWallet.updated_at || null;
-      } else {
-        // Check wallets table
-        const { data: wallet } = await supabase
-          .from('wallets')
-          .select('user_id, currency, balance, available_balance, created_at')
-          .eq('user_id', user.id)
-          .eq('currency', 'USDT')
-          .maybeSingle();
-
-        if (wallet) {
-          availableBalance = Number(wallet.available_balance ?? wallet.balance ?? 0);
-          assetSymbol = wallet.currency || 'USDT';
-          lastUpdated = wallet.created_at || null;
-        }
-      }
+    if (assetError) {
+      console.error('[WALLET] Canonical USDT asset lookup failed:', assetError.code || 'unknown');
+      return NextResponse.json(
+        { error: 'Canonical wallet balance is temporarily unavailable.' },
+        { status: 503 }
+      );
     }
 
-    // 3. Return Sanitized Available Balance to Frontend
+    let availableBalance = 0;
+    let assetSymbol = 'USDT';
+    let lastUpdated: string | null = null;
+
+    if (assetRow) {
+      const balance = Number(assetRow.balance);
+      if (!Number.isFinite(balance) || balance < 0) {
+        console.error('[WALLET] Invalid canonical spendable balance encountered.');
+        return NextResponse.json(
+          { error: 'Wallet balance reconciliation is required.' },
+          { status: 503 }
+        );
+      }
+
+      availableBalance = balance;
+      assetSymbol = assetRow.asset_symbol || 'USDT';
+      lastUpdated = assetRow.updated_at || null;
+    }
+
     return NextResponse.json({
       userId: user.id,
       asset_symbol: assetSymbol,
       currency: assetSymbol,
-      balance: Math.max(0, availableBalance),
-      availableBalance: Math.max(0, availableBalance).toFixed(8),
+      balance: availableBalance,
+      availableBalance: availableBalance.toFixed(8),
       lastUpdated,
+    }, {
+      headers: { 'Cache-Control': 'no-store, max-age=0' },
     });
-  } catch (error: any) {
-    return NextResponse.json({ error: error.message || 'Internal Server Error' }, { status: 500 });
+  } catch (error: unknown) {
+    console.error(
+      '[WALLET] Unhandled wallet read error:',
+      error instanceof Error ? error.name : 'UnknownError'
+    );
+    return NextResponse.json(
+      { error: 'Canonical wallet balance is temporarily unavailable.' },
+      { status: 500 }
+    );
   }
 }
