@@ -4,40 +4,56 @@ function finiteNonNegative(value: unknown): number | null {
   if (value === null || value === undefined) return null;
   if (typeof value === 'string' && value.trim() === '') return null;
 
-  const parsed = Number(value);
-  return Number.isFinite(parsed) ? Math.max(0, parsed) : null;
+  const parsed = typeof value === 'number' ? value : Number(value);
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : null;
 }
 
-function maxFrom(row: WalletAssetBalanceRow, fields: string[]): number {
-  return fields.reduce((maximum, field) => {
-    const value = finiteNonNegative(row[field]);
-    return value === null ? maximum : Math.max(maximum, value);
-  }, 0);
+export interface NormalizedWalletAssetBalance {
+  available: number;
+  reserved: number;
+  inEscrow: number;
+  inWithdrawal: number;
+  total: number;
+  accountingValid: boolean;
 }
 
 /**
- * wallet_assets.balance is the spendable amount in the deployed financial RPCs:
- * escrow and withdrawal requests decrement it while increasing their matching
- * liability columns. Never subtract those liabilities from balance a second time.
+ * wallet_assets.balance is already the spendable balance. The deployed RPCs
+ * move amounts from balance into reserved_balance, in_escrow and in_withdrawal.
+ * locked_balance mirrors reserved_balance and is never an additional bucket.
  */
 export function normalizePrimaryWalletAssetBalance(
   row: WalletAssetBalanceRow,
-  activeEscrowFallback: unknown = 0,
-): { available: number; inEscrow: number; inWithdrawal: number; total: number } {
-  const explicitAvailable = finiteNonNegative(row.available);
-  const spendableBalance = finiteNonNegative(row.balance);
-  const available = explicitAvailable ?? spendableBalance ?? 0;
+): NormalizedWalletAssetBalance {
+  const available = finiteNonNegative(row.balance);
+  const reserved = finiteNonNegative(row.reserved_balance);
+  const lockedMirror = finiteNonNegative(row.locked_balance);
+  const inEscrow = finiteNonNegative(row.in_escrow);
+  const inWithdrawal = finiteNonNegative(row.in_withdrawal);
 
-  const inEscrow = Math.max(
-    maxFrom(row, ['locked_balance', 'locked_escrow', 'locked', 'in_escrow', 'reserved_balance']),
-    finiteNonNegative(activeEscrowFallback) ?? 0,
-  );
-  const inWithdrawal = maxFrom(row, ['locked_withdrawal', 'in_withdrawal']);
+  const valuesPresent =
+    available !== null &&
+    reserved !== null &&
+    lockedMirror !== null &&
+    inEscrow !== null &&
+    inWithdrawal !== null;
+
+  const mirrorMatches =
+    lockedMirror !== null &&
+    reserved !== null &&
+    lockedMirror === reserved;
+
+  const safeAvailable = available ?? 0;
+  const safeReserved = reserved ?? 0;
+  const safeEscrow = inEscrow ?? 0;
+  const safeWithdrawal = inWithdrawal ?? 0;
 
   return {
-    available,
-    inEscrow,
-    inWithdrawal,
-    total: available + inEscrow + inWithdrawal,
+    available: safeAvailable,
+    reserved: safeReserved,
+    inEscrow: safeEscrow,
+    inWithdrawal: safeWithdrawal,
+    total: safeAvailable + safeReserved + safeEscrow + safeWithdrawal,
+    accountingValid: valuesPresent && mirrorMatches,
   };
 }
