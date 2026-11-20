@@ -126,7 +126,10 @@ BEGIN
   v_end := pg_catalog.strpos(v_definition,'IF NOT v_is_admin THEN',v_start);
 
   IF v_start=0 OR v_end<=v_start
-     OR pg_catalog.strpos(v_definition,'SELECT EXISTS (',v_start+1)>0 THEN
+     OR (
+       pg_catalog.length(v_definition)
+       - pg_catalog.length(pg_catalog.replace(v_definition,'SELECT EXISTS (',''))
+     ) / pg_catalog.length('SELECT EXISTS (') <> 1 THEN
     RAISE EXCEPTION
       'Step 11 refused: admin adjustment identity-check fragment is missing or ambiguous.';
   END IF;
