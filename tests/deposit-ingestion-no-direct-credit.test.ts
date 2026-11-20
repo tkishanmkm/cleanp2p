@@ -20,9 +20,10 @@ test('deposit ingestion requires the configured service-role client without an a
 test('every scanner registration response is classified and rejected candidates become visible errors', () => {
   assert.equal((ingestion.match(/recordPendingDepositRegistration\(/g) || []).length, 9);
   assert.match(ingestion, /if \(result\.success !== true\)/);
-  assert.match(ingestion, /status !== 'PENDING'/);
-  assert.match(ingestion, /status !== 'ALREADY_CREDITED'/);
+  assert.match(ingestion, /const isPending = status === 'PENDING'/);
+  assert.match(ingestion, /const isReplay = status === 'ALREADY_CREDITED'/);
   assert.match(ingestion, /result\.credited === true/);
+  assert.match(ingestion, /result\.already_credited === true/);
   assert.match(ingestion, /Pending deposit candidate rejected/);
   assert.match(ingestion, /unexpected status on/);
 });
