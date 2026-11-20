@@ -52,6 +52,7 @@ export async function GET(req: NextRequest) {
     // escrow/withdrawal columns are separate liability buckets and must not be
     // subtracted from balance a second time. Alias columns are normalized with
     // the same max-not-sum rule used by the customer wallet balance layer.
+    let totalReserved = 0;
     let totalLockedEscrow = 0;
     let totalLockedWithdrawal = 0;
     let totalAvailable = 0;
@@ -84,7 +85,12 @@ export async function GET(req: NextRequest) {
         return NextResponse.json({ success: false, error: 'Wallet liability reconciliation is required.' }, { status: 503 });
       }
       const normalized = normalizePrimaryWalletAssetBalance(asset);
+      if (!normalized.accountingValid) {
+        console.error('[ADMIN_METRICS] Wallet locked/reserved mirror mismatch encountered.');
+        return NextResponse.json({ success: false, error: 'Wallet reserve reconciliation is required.' }, { status: 503 });
+      }
       totalAvailable += normalized.available;
+      totalReserved += normalized.reserved;
       totalLockedEscrow += normalized.inEscrow;
       totalLockedWithdrawal += normalized.inWithdrawal;
     }
@@ -159,9 +165,10 @@ export async function GET(req: NextRequest) {
         },
         liabilities: {
           totalAvailableUsdt: totalAvailable,
+          totalReservedUsdt: totalReserved,
           totalLockedEscrowUsdt: totalLockedEscrow,
           totalLockedWithdrawalUsdt: totalLockedWithdrawal,
-          totalPlatformLiabilityUsdt: totalAvailable + totalLockedEscrow + totalLockedWithdrawal,
+          totalPlatformLiabilityUsdt: totalAvailable + totalReserved + totalLockedEscrow + totalLockedWithdrawal,
         },
         hotWalletReserves: hotWallets,
         disputes: {
