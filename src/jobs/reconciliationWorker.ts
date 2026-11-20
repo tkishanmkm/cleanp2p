@@ -96,7 +96,9 @@ export interface GasStatus {
   network: string;
   nativeBalance: string;
   isSufficient: boolean;
+  status: 'ONLINE' | 'UNAVAILABLE';
   symbol: string;
+  error?: string;
 }
 
 const RECONCILIATION_DECIMAL_PLACES = 8;
@@ -215,15 +217,18 @@ export async function checkHotWalletGasLevels(): Promise<GasStatus[]> {
         network: net.code,
         nativeBalance: formatted,
         isSufficient,
+        status: 'ONLINE',
         symbol: net.symbol,
       });
     } catch (err: any) {
       console.error(`[Gas Monitor Error] Failed checking gas on ${net.code}:`, err.message);
       gasStatuses.push({
         network: net.code,
-        nativeBalance: '0.0',
+        nativeBalance: 'UNAVAILABLE',
         isSufficient: false,
+        status: 'UNAVAILABLE',
         symbol: net.symbol,
+        error: 'Read-only RPC gas balance verification failed.',
       });
     }
   }
@@ -402,8 +407,21 @@ export async function reconcileLedgerVsChain(assetSymbol = 'USDT'): Promise<Reco
     );
   }
 
-  // 3. Log Low Gas Token Alerts
+  // A provider outage is not evidence of a zero hot-wallet balance.
+  // Record an operational alert for unavailable readings and reserve LOW_GAS
+  // for a successful online balance read that is genuinely below threshold.
   for (const gas of gasStatuses) {
+    if (gas.status === 'UNAVAILABLE') {
+      await createSystemAlert(
+        'WORKER_ERROR',
+        'WARNING',
+        `Native Gas Balance Check Unavailable on ${gas.network}`,
+        'The configured read-only RPC could not verify the hot-wallet native gas balance. No low-gas conclusion was made.',
+        { network: gas.network, status: gas.status, error: gas.error || 'RPC verification failed' }
+      );
+      continue;
+    }
+
     if (!gas.isSufficient) {
       await createSystemAlert(
         'LOW_GAS',
