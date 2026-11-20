@@ -68,16 +68,21 @@ function recordPendingDepositRegistration(
   }
 
   const status = typeof result.status === 'string' ? result.status.toUpperCase() : '';
-  if (
-    status !== 'PENDING' &&
-    status !== 'ALREADY_CREDITED'
-  ) {
-    errors.push(`Pending deposit registration returned unexpected status on ${network} (${status || 'MISSING'}) for tx ${reference}.`);
-    return;
-  }
 
   if (result.credited === true) {
     errors.push(`Deposit ingestion invariant violation: scanner RPC reported a credit on ${network} for tx ${reference}.`);
+    return;
+  }
+
+  const isPending = status === 'PENDING'
+    && result.credited === false
+    && result.already_credited !== true;
+  const isReplay = status === 'ALREADY_CREDITED'
+    && result.credited === false
+    && result.already_credited === true;
+
+  if (!isPending && !isReplay) {
+    errors.push(`Pending deposit registration returned an unexpected receipt on ${network} (${status || 'MISSING'}) for tx ${reference}.`);
   }
 }
 
