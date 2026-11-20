@@ -50,7 +50,25 @@ export async function createSystemAlert(
   }
 
   try {
-    // Deduplicate only active alerts. Once resolved, the same issue can raise a fresh alert.
+    // Older unresolved alerts may not have a dedupe_key yet. Check the
+    // human-readable identity first so the first post-migration run does not
+    // create a second active copy of each historical alert.
+    const { data: existing, error: lookupError } = await supabaseAdmin
+      .from('system_alerts')
+      .select('id')
+      .eq('alert_type', type)
+      .eq('title', title)
+      .eq('is_resolved', false)
+      .limit(1);
+
+    if (lookupError) {
+      console.error('[Alert Engine Error] Could not check for an existing active alert:', lookupError.message);
+      return;
+    }
+    if (existing && existing.length > 0) return;
+
+    // The partial unique index is the final concurrency guard. Once resolved,
+    // the same alert may be raised again with the same deterministic key.
     const dedupeKey = createHash('sha256')
       .update(`${type}:${title.trim().toLocaleLowerCase('en-US')}`)
       .digest('hex');
