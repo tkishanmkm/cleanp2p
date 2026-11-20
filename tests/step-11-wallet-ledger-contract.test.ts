@@ -75,7 +75,9 @@ test('active reconciliation fails closed unless ERC20, BEP20 and TRC20 reserves 
   assert.match(reconciliationWorker, /tronWeb\.contract\(\)\.at\(TRON_CONFIG\.usdtContract\)/);
   assert.match(reconciliationWorker, /TRON_CONFIG\.usdtDecimals/);
   assert.match(reconciliationWorker, /Reconciliation incomplete: failed fetching TRC20 reserve balance/);
-  assert.match(reconciliationWorker, /actualNetwork\.chainId !== BigInt\(item\.chainId\)/);
+  assert.match(reconciliationWorker, /provider\.send\('eth_chainId', \[\]\)/);
+  assert.match(reconciliationWorker, /actualChainId !== BigInt\(item\.chainId\)/);
+  assert.doesNotMatch(reconciliationWorker, /HOT_WALLET_PRIVATE_KEY|EVM_HOT_WALLET_PRIVATE_KEY/);
   assert.match(reconciliationWorker, /system_reconciliations/);
   assert.match(reconciliationWorker, /dedupe_key: dedupeKey/);
   assert.match(reconciliationWorker, /\.eq\('alert_type', type\)/);
