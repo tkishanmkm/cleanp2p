@@ -383,14 +383,20 @@ export function deriveAllAddresses(walletIndex: number): CryptoDepositAddresses 
 // ============================================================================
 
 /**
- * Deterministically checks or provisions all 6 crypto deposit addresses for a user:
- * 1. Checks if 6 address rows exist in public.user_deposit_addresses for user_id.
- * 2. If missing:
- *    a. Fetches user's wallet_index from public.profiles (or provisions sequentially).
- *    b. Derives addresses for BTC (BIP-84), ETH/EVM (BIP-44), LTC (BIP-84), TRON (BIP-44).
- *    c. UPSERT all 6 asset rows into public.user_deposit_addresses.
- *    d. UPDATE public.profiles with evm_deposit_address, tron_deposit_address, btc_deposit_address, ltc_deposit_address.
- * 3. Returns the populated profile and address mapping object.
+ * Derives the six logical deposit asset/network addresses from the profile's
+ * already-assigned wallet_index and sends them to the atomic database RPC.
+ *
+ * The current production registry intentionally stores:
+ * - four chain wallet rows (EVM, TRON, BTC, LTC) in public.wallets;
+ * - three canonical public-address rows (BTC, EVM/ETH, TRC20) in
+ *   public.user_deposit_addresses;
+ * - four compatibility rows (BTC, ETH/EVM, LTC, USDT/TRC20) in
+ *   public.deposit_addresses.
+ *
+ * ERC20/BEP20 share the EVM address and are resolved by the deposit-credit
+ * RPC through the EVM wallet row. LTC is resolved through the LTC wallet row.
+ * The six records returned below describe logical asset/network choices; they
+ * are not six physical rows in user_deposit_addresses.
  */
 export async function getOrDeriveUserDepositAddresses(
   userId: string
