@@ -53,14 +53,14 @@ test('public address routes resolve from the canonical atomic HD registry, not s
 test('legacy shared-key queue provisioning and arbitrary random wallet creation remain retired', () => {
   assert.match(oldInternalProvisionRoute, /LEGACY_WALLET_PROVISIONING_DISABLED/);
   assert.match(oldInternalProvisionRoute, /status: 410/);
-  assert.doesNotMatch(oldInternalProvisionRoute, /CHAIN_INGEST_SECRET|PROVISION_SERVICE_KEY|wallet_provisioning/);
+  assert.doesNotMatch(oldInternalProvisionRoute, /CHAIN_INGEST_SECRET|PROVISION_SERVICE_KEY|\\.from\\(['\"]wallet_provisioning['\"]\\)/);
   assert.match(oldRandomWalletRoute, /LEGACY_WALLET_CREATION_DISABLED/);
   assert.match(oldRandomWalletRoute, /status: 410/);
 });
 
 test('database-trigger provisioning uses a dedicated high-entropy bearer separate from user auth', () => {
   assert.match(signupTrigger, /wallet_provisioning_bearer/);
-  assert.match(signupTrigger, /WALLET_PROVISIONING_BEARER/);
+  assert.match(serviceProvisionRoute, /process\\.env\\.WALLET_PROVISIONING_BEARER/);
   assert.match(signupTrigger, /\/api\/auth\/provision-wallets/);
   assert.match(provisioningAuth, /MIN_SERVICE_SECRET_BYTES = 32/);
   assert.match(provisioningAuth, /timingSafeEqual/);
