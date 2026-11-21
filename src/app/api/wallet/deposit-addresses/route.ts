@@ -103,14 +103,13 @@ export async function GET(req: NextRequest) {
       { status: 401 }
     );
   } catch (err: unknown) {
-    const errorMsg = err instanceof Error ? err.message : String(err);
-    console.error('[GET /api/wallet/deposit-addresses] Error:', errorMsg);
+    console.error(
+      '[GET /api/wallet/deposit-addresses] Canonical provisioning failed:',
+      err instanceof Error ? err.name : 'UnknownError'
+    );
     return NextResponse.json(
-      {
-        success: false,
-        error: errorMsg,
-      },
-      { status: 500 }
+      { success: false, error: 'Deposit addresses are temporarily unavailable. Please retry.' },
+      { status: 503, headers: { 'Cache-Control': 'no-store' } }
     );
   }
 }
