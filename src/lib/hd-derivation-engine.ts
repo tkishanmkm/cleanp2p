@@ -512,7 +512,7 @@ export async function getOrDeriveUserDepositAddresses(
   ];
 
   const records: UserDepositAddressesRecord[] = rawAssets.map((asset) => ({
-    user_id: userId,
+    user_id: normalizedUserId,
     asset_symbol: asset.symbol,
     chain: getChainEnum(asset.network),
     network: asset.network,
