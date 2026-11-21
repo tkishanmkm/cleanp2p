@@ -120,7 +120,16 @@ async function handleDepositAddressRequest(req: NextRequest) {
       }
 
       if (raw.trim()) {
-        const parsed: unknown = JSON.parse(raw);
+        let parsed: unknown;
+        try {
+          parsed = JSON.parse(raw);
+        } catch {
+          return NextResponse.json(
+            { success: false, error: 'A valid JSON object is required.' },
+            { status: 400, headers: { 'Cache-Control': 'no-store' } }
+          );
+        }
+
         if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
           return NextResponse.json(
             { success: false, error: 'A valid JSON object is required.' },
