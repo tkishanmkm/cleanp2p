@@ -12,8 +12,10 @@ DECLARE
   v_legacy_owner TEXT;
   v_canonical_service_usage BOOLEAN;
   v_canonical_service_select BOOLEAN;
+  v_canonical_service_update BOOLEAN;
   v_legacy_service_usage BOOLEAN;
   v_legacy_service_select BOOLEAN;
+  v_legacy_service_update BOOLEAN;
   v_canonical_last_before BIGINT;
   v_legacy_last_before BIGINT;
   v_canonical_last_after BIGINT;
@@ -42,13 +44,17 @@ BEGIN
 
   v_canonical_service_usage := pg_catalog.has_sequence_privilege('service_role',v_canonical,'USAGE');
   v_canonical_service_select := pg_catalog.has_sequence_privilege('service_role',v_canonical,'SELECT');
+  v_canonical_service_update := pg_catalog.has_sequence_privilege('service_role',v_canonical,'UPDATE');
   v_legacy_service_usage := pg_catalog.has_sequence_privilege('service_role',v_legacy,'USAGE');
   v_legacy_service_select := pg_catalog.has_sequence_privilege('service_role',v_legacy,'SELECT');
+  v_legacy_service_update := pg_catalog.has_sequence_privilege('service_role',v_legacy,'UPDATE');
 
   IF NOT v_canonical_service_usage
      OR NOT v_canonical_service_select
+     OR NOT v_canonical_service_update
      OR NOT v_legacy_service_usage
-     OR NOT v_legacy_service_select THEN
+     OR NOT v_legacy_service_select
+     OR NOT v_legacy_service_update THEN
     RAISE EXCEPTION
       'Step 13 refused: service_role sequence privileges differ from the reviewed live snapshot.';
   END IF;
@@ -70,22 +76,30 @@ BEGIN
      OR pg_catalog.has_sequence_privilege('anon',v_canonical,'SELECT')
      OR pg_catalog.has_sequence_privilege('authenticated',v_canonical,'USAGE')
      OR pg_catalog.has_sequence_privilege('authenticated',v_canonical,'SELECT')
+     OR pg_catalog.has_sequence_privilege('anon',v_canonical,'UPDATE')
+     OR pg_catalog.has_sequence_privilege('authenticated',v_canonical,'UPDATE')
      OR pg_catalog.has_sequence_privilege('anon',v_legacy,'USAGE')
      OR pg_catalog.has_sequence_privilege('anon',v_legacy,'SELECT')
      OR pg_catalog.has_sequence_privilege('authenticated',v_legacy,'USAGE')
-     OR pg_catalog.has_sequence_privilege('authenticated',v_legacy,'SELECT') THEN
+     OR pg_catalog.has_sequence_privilege('authenticated',v_legacy,'SELECT')
+     OR pg_catalog.has_sequence_privilege('anon',v_legacy,'UPDATE')
+     OR pg_catalog.has_sequence_privilege('authenticated',v_legacy,'UPDATE') THEN
     RAISE EXCEPTION
       'Step 13 failed postcondition: browser roles retain direct wallet-index sequence access.';
   END IF;
 
   IF NOT pg_catalog.has_sequence_privilege('service_role',v_canonical,'USAGE')
      OR NOT pg_catalog.has_sequence_privilege('service_role',v_canonical,'SELECT')
+     OR NOT pg_catalog.has_sequence_privilege('service_role',v_canonical,'UPDATE')
      OR NOT pg_catalog.has_sequence_privilege('service_role',v_legacy,'USAGE')
      OR NOT pg_catalog.has_sequence_privilege('service_role',v_legacy,'SELECT')
+     OR NOT pg_catalog.has_sequence_privilege('service_role',v_legacy,'UPDATE')
      OR NOT pg_catalog.has_sequence_privilege('postgres',v_canonical,'USAGE')
      OR NOT pg_catalog.has_sequence_privilege('postgres',v_canonical,'SELECT')
+     OR NOT pg_catalog.has_sequence_privilege('postgres',v_canonical,'UPDATE')
      OR NOT pg_catalog.has_sequence_privilege('postgres',v_legacy,'USAGE')
-     OR NOT pg_catalog.has_sequence_privilege('postgres',v_legacy,'SELECT') THEN
+     OR NOT pg_catalog.has_sequence_privilege('postgres',v_legacy,'SELECT')
+     OR NOT pg_catalog.has_sequence_privilege('postgres',v_legacy,'UPDATE') THEN
     RAISE EXCEPTION
       'Step 13 failed postcondition: service_role or postgres sequence access changed unexpectedly.';
   END IF;
