@@ -18,6 +18,7 @@ const adminIndexRoute = read('src/app/api/admin/wallet-index/assign/route.ts');
 const signupTrigger = read('supabase/migrations/20261011161643_secure_wallet_provisioning_trigger.sql');
 const allocatorMigration = read('supabase/migrations/20261119174139_step_06_unify_wallet_index_allocator.sql');
 const signupSearchPathMigration = read('supabase/migrations/20261120230000_step_13_harden_signup_wallet_index_trigger_search_path.sql');
+const sequenceAclMigration = read('supabase/migrations/20261121100000_step_13_restrict_wallet_index_sequence_access.sql');
 
 test('canonical HD provisioning requires a UUID and a previously allocated positive immutable index', () => {
   assert.match(engine, /A verified UUID user identity is required for wallet provisioning/);
@@ -98,6 +99,17 @@ test('wallet index allocation uses one monotonic sequence and never falls back t
   assert.match(adminIndexRoute, /WALLET_INDEX_ALLOCATOR_NOT_INSTALLED/);
   assert.match(adminIndexRoute, /No client-side fallback is permitted/);
   assert.doesNotMatch(adminIndexRoute, /nextval|sequence\.next/);
+});
+
+test('wallet-index sequences cannot be consumed or enumerated directly by browser roles', () => {
+  assert.match(sequenceAclMigration, /REVOKE ALL PRIVILEGES ON SEQUENCE public\.user_wallet_index_seq FROM PUBLIC, anon, authenticated/);
+  assert.match(sequenceAclMigration, /REVOKE ALL PRIVILEGES ON SEQUENCE public\.wallet_index_seq FROM PUBLIC, anon, authenticated/);
+  assert.match(sequenceAclMigration, /has_sequence_privilege\('anon'/);
+  assert.match(sequenceAclMigration, /has_sequence_privilege\('authenticated'/);
+  assert.match(sequenceAclMigration, /has_sequence_privilege\('service_role'/);
+  assert.match(sequenceAclMigration, /v_canonical_last_after IS DISTINCT FROM v_canonical_last_before/);
+  assert.match(sequenceAclMigration, /v_legacy_last_after IS DISTINCT FROM v_legacy_last_before/);
+  assert.doesNotMatch(sequenceAclMigration, /nextval\(|setval\(|RESTART WITH/);
 });
 
 test('signup SECURITY DEFINER wallet allocator is pinned to an empty search path without changing its body or ACL', () => {
