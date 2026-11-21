@@ -32,7 +32,7 @@ BEGIN
   IF v_owner IS DISTINCT FROM 'postgres'
      OR v_definer IS DISTINCT FROM TRUE
      OR v_config IS DISTINCT FROM ARRAY['search_path=public, auth, pg_temp']::TEXT[]
-     OR pg_catalog.strpos(v_source,'nextval(''public.user_wallet_index_seq'')')=0
+     OR pg_catalog.strpos(v_source,'public.user_wallet_index_seq')=0
      OR pg_catalog.strpos(v_source,'INSERT INTO public.profiles')=0
      OR pg_catalog.strpos(v_source,'public.generate_system_username()')=0
      OR pg_catalog.strpos(v_source,'ON CONFLICT (id) DO UPDATE')=0
@@ -139,7 +139,7 @@ BEGIN
          AND pg_catalog.pg_get_userbyid(p.proowner)='postgres'
          AND p.prosecdef IS TRUE
          AND p.proconfig IS NOT DISTINCT FROM ARRAY['search_path=""']::TEXT[]
-         AND pg_catalog.strpos(p.prosrc,'nextval(''public.user_wallet_index_seq'')')>0
+         AND pg_catalog.strpos(p.prosrc,'public.user_wallet_index_seq')>0
      ) THEN
     RAISE EXCEPTION
       'Step 13 failed postcondition: signup wallet index allocator or auth.users trigger binding is no longer valid.';
