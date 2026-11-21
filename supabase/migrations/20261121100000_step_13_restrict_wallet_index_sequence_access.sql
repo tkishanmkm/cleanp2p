@@ -4,7 +4,7 @@
 -- This migration does not call nextval(), setval(), RESTART or alter a value.
 BEGIN;
 
-DO $step_13_sequence_acl_preflight$
+DO $step_13_sequence_acl$
 DECLARE
   v_canonical REGCLASS := pg_catalog.to_regclass('public.user_wallet_index_seq');
   v_legacy REGCLASS := pg_catalog.to_regclass('public.wallet_index_seq');
@@ -14,8 +14,10 @@ DECLARE
   v_canonical_service_select BOOLEAN;
   v_legacy_service_usage BOOLEAN;
   v_legacy_service_select BOOLEAN;
-  v_canonical_last BIGINT;
-  v_legacy_last BIGINT;
+  v_canonical_last_before BIGINT;
+  v_legacy_last_before BIGINT;
+  v_canonical_last_after BIGINT;
+  v_legacy_last_after BIGINT;
 BEGIN
   IF v_canonical IS NULL OR v_legacy IS NULL THEN
     RAISE EXCEPTION
@@ -52,33 +54,18 @@ BEGIN
   END IF;
 
   EXECUTE 'SELECT last_value FROM public.user_wallet_index_seq'
-    INTO v_canonical_last;
+    INTO v_canonical_last_before;
   EXECUTE 'SELECT last_value FROM public.wallet_index_seq'
-    INTO v_legacy_last;
+    INTO v_legacy_last_before;
 
-  IF v_canonical_last < 1 OR v_legacy_last < 1 THEN
+  IF v_canonical_last_before < 1 OR v_legacy_last_before < 1 THEN
     RAISE EXCEPTION
       'Step 13 refused: a wallet index sequence has an invalid non-positive watermark.';
   END IF;
-END;
-$step_13_sequence_acl_preflight$;
 
-REVOKE ALL PRIVILEGES ON SEQUENCE public.user_wallet_index_seq
-  FROM PUBLIC, anon, authenticated;
-REVOKE ALL PRIVILEGES ON SEQUENCE public.wallet_index_seq
-  FROM PUBLIC, anon, authenticated;
+  EXECUTE 'REVOKE ALL PRIVILEGES ON SEQUENCE public.user_wallet_index_seq FROM PUBLIC, anon, authenticated';
+  EXECUTE 'REVOKE ALL PRIVILEGES ON SEQUENCE public.wallet_index_seq FROM PUBLIC, anon, authenticated';
 
-DO $step_13_sequence_acl_postconditions$
-DECLARE
-  v_canonical REGCLASS := pg_catalog.to_regclass('public.user_wallet_index_seq');
-  v_legacy REGCLASS := pg_catalog.to_regclass('public.wallet_index_seq');
-  v_canonical_last BIGINT;
-  v_legacy_last BIGINT;
-  v_canonical_service_usage BOOLEAN;
-  v_canonical_service_select BOOLEAN;
-  v_legacy_service_usage BOOLEAN;
-  v_legacy_service_select BOOLEAN;
-BEGIN
   IF pg_catalog.has_sequence_privilege('anon',v_canonical,'USAGE')
      OR pg_catalog.has_sequence_privilege('anon',v_canonical,'SELECT')
      OR pg_catalog.has_sequence_privilege('authenticated',v_canonical,'USAGE')
@@ -91,15 +78,10 @@ BEGIN
       'Step 13 failed postcondition: browser roles retain direct wallet-index sequence access.';
   END IF;
 
-  v_canonical_service_usage := pg_catalog.has_sequence_privilege('service_role',v_canonical,'USAGE');
-  v_canonical_service_select := pg_catalog.has_sequence_privilege('service_role',v_canonical,'SELECT');
-  v_legacy_service_usage := pg_catalog.has_sequence_privilege('service_role',v_legacy,'USAGE');
-  v_legacy_service_select := pg_catalog.has_sequence_privilege('service_role',v_legacy,'SELECT');
-
-  IF NOT v_canonical_service_usage
-     OR NOT v_canonical_service_select
-     OR NOT v_legacy_service_usage
-     OR NOT v_legacy_service_select
+  IF NOT pg_catalog.has_sequence_privilege('service_role',v_canonical,'USAGE')
+     OR NOT pg_catalog.has_sequence_privilege('service_role',v_canonical,'SELECT')
+     OR NOT pg_catalog.has_sequence_privilege('service_role',v_legacy,'USAGE')
+     OR NOT pg_catalog.has_sequence_privilege('service_role',v_legacy,'SELECT')
      OR NOT pg_catalog.has_sequence_privilege('postgres',v_canonical,'USAGE')
      OR NOT pg_catalog.has_sequence_privilege('postgres',v_canonical,'SELECT')
      OR NOT pg_catalog.has_sequence_privilege('postgres',v_legacy,'USAGE')
@@ -109,21 +91,16 @@ BEGIN
   END IF;
 
   EXECUTE 'SELECT last_value FROM public.user_wallet_index_seq'
-    INTO v_canonical_last;
+    INTO v_canonical_last_after;
   EXECUTE 'SELECT last_value FROM public.wallet_index_seq'
-    INTO v_legacy_last;
+    INTO v_legacy_last_after;
 
-  -- No allocation or watermark change is permitted in this ACL-only migration.
-  IF v_canonical_last IS DISTINCT FROM (
-       SELECT last_value FROM public.user_wallet_index_seq
-     )
-     OR v_legacy_last IS DISTINCT FROM (
-       SELECT last_value FROM public.wallet_index_seq
-     ) THEN
+  IF v_canonical_last_after IS DISTINCT FROM v_canonical_last_before
+     OR v_legacy_last_after IS DISTINCT FROM v_legacy_last_before THEN
     RAISE EXCEPTION
       'Step 13 failed postcondition: a sequence watermark changed during ACL hardening.';
   END IF;
 END;
-$step_13_sequence_acl_postconditions$;
+$step_13_sequence_acl$;
 
 COMMIT;
