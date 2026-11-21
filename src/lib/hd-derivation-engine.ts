@@ -160,7 +160,7 @@ export function buildDepositAddressRow(
 ): UserDepositAddressesRecord {
   const normNet = normalizeDepositNetwork(network) as SupportedNetwork;
   return {
-    user_id: userId,
+    user_id: normalizedUserId,
     asset_symbol: assetSymbol,
     chain: getChainEnum(normNet),
     network: normNet,
@@ -395,17 +395,23 @@ export function deriveAllAddresses(walletIndex: number): CryptoDepositAddresses 
 export async function getOrDeriveUserDepositAddresses(
   userId: string
 ): Promise<UserDepositAddressesResult> {
+  const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+  if (typeof userId !== 'string' || !UUID_PATTERN.test(userId.trim())) {
+    throw new Error('A verified UUID user identity is required for wallet provisioning.');
+  }
+
+  const normalizedUserId = userId.trim();
   const supabase = getAdminClient();
 
   // 1. Fetch user profile
   const { data: profileData, error: profileErr } = await supabase
     .from('profiles')
     .select('id, username, display_name, wallet_index')
-    .eq('id', userId)
+    .eq('id', normalizedUserId)
     .maybeSingle();
 
   if (profileErr || !profileData) {
-    throw new Error(`User profile not found for user ${userId}`);
+    throw new Error('User profile could not be verified for wallet provisioning.');
   }
 
   const profile: UserProfileRecord = profileData;
@@ -418,15 +424,15 @@ export async function getOrDeriveUserDepositAddresses(
     walletIndex <= 0 ||
     walletIndex > 0x7fffffff
   ) {
-    throw new Error(`Fail-closed: User profile ${userId} has no valid positive BIP-32 wallet_index. Address derivation cannot proceed.`);
+    throw new Error('Wallet provisioning is blocked because the profile has no valid allocated derivation index.');
   }
 
   // 3. Derive authoritative addresses for this walletIndex
   const addresses = await deriveAllAddressesAsync(walletIndex);
 
   // 4. Execute canonical atomic provisioning via database RPC
-  const { error: rpcError } = await supabase.rpc('provision_user_wallets_atomic', {
-    p_user_id: userId,
+  const { data: rpcResult, error: rpcError } = await supabase.rpc('provision_user_wallets_atomic', {
+    p_user_id: normalizedUserId,
     p_wallet_index: walletIndex,
     p_evm_address: addresses.ETH,
     p_tron_address: addresses.USDT_TRC20,
@@ -435,7 +441,29 @@ export async function getOrDeriveUserDepositAddresses(
   });
 
   if (rpcError) {
-    throw new Error(`Atomic provisioning RPC failed: ${rpcError.message}`);
+    console.error('[HD_PROVISIONING] Atomic address provisioning RPC failed:', rpcError.code || 'UNKNOWN');
+    throw new Error('Atomic wallet provisioning could not be confirmed.');
+  }
+
+  const committed = rpcResult && typeof rpcResult === 'object' && !Array.isArray(rpcResult)
+    ? rpcResult as Record<string, unknown>
+    : null;
+  const committedAddresses = committed?.addresses && typeof committed.addresses === 'object' && !Array.isArray(committed.addresses)
+    ? committed.addresses as Record<string, unknown>
+    : null;
+
+  if (
+    !committed ||
+    committed.success !== true ||
+    String(committed.user_id || '').toLowerCase() !== normalizedUserId.toLowerCase() ||
+    Number(committed.wallet_index) !== walletIndex ||
+    committedAddresses?.evm !== addresses.ETH ||
+    committedAddresses?.tron !== addresses.USDT_TRC20 ||
+    committedAddresses?.btc !== addresses.BTC ||
+    committedAddresses?.ltc !== addresses.LTC
+  ) {
+    console.error('[HD_PROVISIONING] Atomic RPC returned a mismatched commit result.');
+    throw new Error('Atomic wallet provisioning returned an unverified result.');
   }
 
   // 5. Build raw asset records for caller response
@@ -495,7 +523,7 @@ export async function getOrDeriveUserDepositAddresses(
   }));
 
   return {
-    userId,
+    userId: normalizedUserId,
     walletIndex,
     addresses,
     records,
