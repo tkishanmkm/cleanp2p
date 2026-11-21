@@ -36,6 +36,9 @@ test('canonical HD provisioning requires a UUID and a previously allocated posit
   assert.match(engine, /committedAddresses\?\.btc/);
   assert.match(engine, /committedAddresses\?\.ltc/);
   assert.match(engine, /user_id: normalizedUserId/);
+  const reusableRowHelper = engine.match(/export function buildDepositAddressRow\([\s\S]*?\n\}/)?.[0] || '';
+  assert.match(reusableRowHelper, /user_id: userId/);
+  assert.doesNotMatch(reusableRowHelper, /normalizedUserId/);
 });
 
 test('public address routes resolve from the canonical atomic HD registry, not stale legacy rows', () => {
