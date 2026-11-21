@@ -106,6 +106,10 @@ test('wallet-index sequences cannot be consumed or enumerated directly by browse
   assert.match(sequenceAclMigration, /REVOKE ALL PRIVILEGES ON SEQUENCE public\.wallet_index_seq FROM PUBLIC, anon, authenticated/);
   assert.match(sequenceAclMigration, /has_sequence_privilege\('anon'/);
   assert.match(sequenceAclMigration, /has_sequence_privilege\('authenticated'/);
+  assert.match(sequenceAclMigration, /has_sequence_privilege\('anon',v_canonical,'UPDATE'/);
+  assert.match(sequenceAclMigration, /has_sequence_privilege\('authenticated',v_legacy,'UPDATE'/);
+  assert.match(sequenceAclMigration, /has_sequence_privilege\('service_role',v_canonical,'UPDATE'/);
+  assert.match(sequenceAclMigration, /has_sequence_privilege\('postgres',v_legacy,'UPDATE'/);
   assert.match(sequenceAclMigration, /has_sequence_privilege\('service_role'/);
   assert.match(sequenceAclMigration, /v_canonical_last_after IS DISTINCT FROM v_canonical_last_before/);
   assert.match(sequenceAclMigration, /v_legacy_last_after IS DISTINCT FROM v_legacy_last_before/);
