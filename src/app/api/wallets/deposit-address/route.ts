@@ -86,75 +86,124 @@ async function getAuthenticatedUser(req: NextRequest) {
 
 async function handleDepositAddressRequest(req: NextRequest) {
   try {
-    // 1. Authenticate user session
     const user = await getAuthenticatedUser(req);
-    if (!user) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    if (!user?.id) {
+      return NextResponse.json(
+        { success: false, error: 'Unauthorized' },
+        { status: 401, headers: { 'Cache-Control': 'no-store' } }
+      );
     }
 
-    // 2. Parse asset and network from query params or JSON body
-    let assetParam = '';
-    let networkParam = '';
+    let body: Record<string, unknown> = {};
+    let assetInput = '';
+    let networkInput = '';
 
     if (req.method === 'GET') {
       const url = new URL(req.url);
-      assetParam = url.searchParams.get('asset') || url.searchParams.get('crypto') || url.searchParams.get('asset_code') || '';
-      networkParam = url.searchParams.get('network') || url.searchParams.get('chain') || url.searchParams.get('network_code') || '';
+      assetInput =
+        url.searchParams.get('asset') ||
+        url.searchParams.get('crypto') ||
+        url.searchParams.get('asset_code') ||
+        '';
+      networkInput =
+        url.searchParams.get('network') ||
+        url.searchParams.get('chain') ||
+        url.searchParams.get('network_code') ||
+        '';
     } else {
-      const body = await req.json().catch(() => ({}));
-      assetParam = body.asset || body.crypto || body.asset_code || '';
-      networkParam = body.network || body.chain || body.network_code || '';
-    }
-
-    const asset = (assetParam || 'USDT').toUpperCase().trim();
-    let network = (networkParam || (asset === 'ETH' ? 'ETH' : asset === 'BTC' ? 'BTC' : asset === 'LTC' ? 'LTC' : 'TRC20')).toUpperCase().trim();
-
-    if (asset === 'ETH' && !network) network = 'ETH';
-    if (asset === 'BTC') network = 'BTC';
-    if (asset === 'LTC') network = 'LTC';
-    if (asset === 'USDT' && (!network || network === 'USDT')) network = 'TRC20';
-
-    const supabaseAdmin = getSupabaseAdminClient();
-
-    // 3. Query public.deposit_addresses for existing active address
-    const { data: existingRecords, error: queryError } = await supabaseAdmin
-      .from('deposit_addresses')
-      .select('*')
-      .eq('user_id', user.id)
-      .eq('status', 'active');
-
-    if (!queryError && existingRecords && existingRecords.length > 0) {
-      // Find matching asset and network (handling both asset_code and asset field variations)
-      const match = existingRecords.find((rec: any) => {
-        const recAsset = (rec.asset_code || rec.asset || '').toUpperCase();
-        const recNetwork = (rec.network_code || rec.network || '').toUpperCase();
-        return (recAsset === asset || recAsset === '') && (recNetwork === network || recNetwork === '' || (!recNetwork && asset === network));
-      });
-
-      if (match?.address) {
-        return NextResponse.json({
-          address: match.address,
-          network: match.network_code || match.network || network,
-        }, { status: 200 });
+      const raw = await req.text();
+      if (new TextEncoder().encode(raw).byteLength > 2048) {
+        return NextResponse.json(
+          { success: false, error: 'Deposit-address request is too large.' },
+          { status: 413, headers: { 'Cache-Control': 'no-store' } }
+        );
       }
+
+      if (raw.trim()) {
+        const parsed: unknown = JSON.parse(raw);
+        if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+          return NextResponse.json(
+            { success: false, error: 'A valid JSON object is required.' },
+            { status: 400, headers: { 'Cache-Control': 'no-store' } }
+          );
+        }
+        body = parsed as Record<string, unknown>;
+      }
+
+      assetInput = String(body.asset || body.crypto || body.asset_code || '');
+      networkInput = String(body.network || body.chain || body.network_code || '');
     }
 
-    // 4. Trigger canonical provisioning via atomic RPC
-    const provisionResult = await getOrDeriveUserDepositAddresses(user.id);
-    let derivedAddress = provisionResult.addresses.ETH;
-    if (asset === 'BTC') derivedAddress = provisionResult.addresses.BTC;
-    if (asset === 'LTC') derivedAddress = provisionResult.addresses.LTC;
-    if (network === 'TRC20' || asset === 'TRX') derivedAddress = provisionResult.addresses.USDT_TRC20;
+    const asset = (assetInput || 'USDT').trim().toUpperCase();
+    const rawNetwork = (networkInput || (asset === 'BTC' ? 'BTC' : asset === 'LTC' ? 'LTC' : asset === 'ETH' ? 'ETH' : 'TRC20'))
+      .trim()
+      .toUpperCase();
 
-    return NextResponse.json({
-      address: derivedAddress,
-      network: network,
-    }, { status: 200 });
-  } catch (err: any) {
-    console.error("Deposit address error:", err);
+    let normalizedNetwork: 'BTC' | 'LTC' | 'ETH' | 'ERC20' | 'BEP20' | 'TRC20';
+    if (asset === 'BTC' && ['BTC', 'BITCOIN'].includes(rawNetwork)) {
+      normalizedNetwork = 'BTC';
+    } else if (asset === 'LTC' && ['LTC', 'LITECOIN'].includes(rawNetwork)) {
+      normalizedNetwork = 'LTC';
+    } else if (asset === 'ETH' && ['ETH', 'ETHEREUM', 'MAINNET'].includes(rawNetwork)) {
+      normalizedNetwork = 'ETH';
+    } else if (asset === 'USDT' && ['ERC20', 'USDT_ERC20', 'ETHEREUM'].includes(rawNetwork)) {
+      normalizedNetwork = 'ERC20';
+    } else if (asset === 'USDT' && ['BEP20', 'USDT_BEP20', 'BSC'].includes(rawNetwork)) {
+      normalizedNetwork = 'BEP20';
+    } else if (asset === 'USDT' && ['TRC20', 'USDT_TRC20', 'TRON'].includes(rawNetwork)) {
+      normalizedNetwork = 'TRC20';
+    } else {
+      return NextResponse.json(
+        { success: false, error: 'Unsupported asset/network combination.' },
+        { status: 400, headers: { 'Cache-Control': 'no-store' } }
+      );
+    }
+
+    // Always resolve through the assigned profile index and the atomic
+    // provisioning RPC. Do not serve legacy deposit_addresses rows first:
+    // historical rows may not belong to any current auth user/profile.
+    const provisionResult = await getOrDeriveUserDepositAddresses(user.id);
+    let address: string;
+
+    switch (normalizedNetwork) {
+      case 'BTC':
+        address = provisionResult.addresses.BTC;
+        break;
+      case 'LTC':
+        address = provisionResult.addresses.LTC;
+        break;
+      case 'ETH':
+        address = provisionResult.addresses.ETH;
+        break;
+      case 'ERC20':
+        address = provisionResult.addresses.USDT_ERC20;
+        break;
+      case 'BEP20':
+        address = provisionResult.addresses.USDT_BEP20;
+        break;
+      case 'TRC20':
+        address = provisionResult.addresses.USDT_TRC20;
+        break;
+    }
+
     return NextResponse.json(
-      { error: err?.message || 'An unexpected error occurred while generating deposit address.' },
-      { status: 500 }
+      {
+        success: true,
+        address,
+        asset,
+        network: normalizedNetwork,
+        derivationIndex: provisionResult.walletIndex,
+      },
+      { status: 200, headers: { 'Cache-Control': 'no-store' } }
+    );
+  } catch (error: unknown) {
+    console.error(
+      '[DEPOSIT_ADDRESS] Canonical address lookup failed:',
+      error instanceof Error ? error.name : 'UnknownError'
+    );
+    return NextResponse.json(
+      { success: false, error: 'Deposit address is temporarily unavailable. Please retry.' },
+      { status: 503, headers: { 'Cache-Control': 'no-store' } }
     );
   }
 }
