@@ -71,8 +71,15 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
         USDT_TRC20: result.addresses.USDT_TRC20,
       },
     });
-  } catch (err: any) {
-    return NextResponse.json({ error: err?.message || 'Failed to retrieve deposit address' }, { status: 500 });
+  } catch (err: unknown) {
+    console.error(
+      '[WALLET_DEPOSIT_ADDRESS] Canonical provisioning failed:',
+      err instanceof Error ? err.name : 'UnknownError'
+    );
+    return NextResponse.json(
+      { success: false, error: 'Deposit address is temporarily unavailable. Please retry.' },
+      { status: 503, headers: { 'Cache-Control': 'no-store' } }
+    );
   }
 }
 
