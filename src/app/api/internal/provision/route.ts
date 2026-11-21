@@ -1,215 +1,31 @@
-import { NextRequest, NextResponse } from 'next/server';
-import { getSupabaseAdminClient } from '@/lib/supabase/server';
-import { getOrProvisionHDDepositAddress, STANDARD_DERIVATION_PATHS } from '@/lib/hd-wallet';
+import { NextResponse } from 'next/server';
 
-// Recognized network and asset identifiers (Production networks only)
-const VALID_NETWORKS = new Set([
-  'BTC',
-  'ETH',
-  'ERC20',
-  'TRC20',
-  'TRX',
-  'LTC',
-  'BSC',
-  'BEP20',
-]);
+export const dynamic = 'force-dynamic';
 
-const VALID_ASSETS = new Set([
-  'BTC',
-  'ETH',
-  'USDT',
-  'USDC',
-  'TRX',
-  'LTC',
-  'BNB',
-]);
-
-export async function POST(req: NextRequest) {
-  try {
-    // 1. Authorization check: Internal service key or valid Bearer session
-    const providedSecret =
-      req.headers.get('x-provision-secret') ||
-      req.headers.get('x-service-key') ||
-      req.headers.get('x-api-key');
-    const configuredSecret = process.env.CHAIN_INGEST_SECRET || process.env.PROVISION_SERVICE_KEY;
-    const authHeader = req.headers.get('authorization');
-
-    let isAuthorized = false;
-    let authenticatedUserId: string | null = null;
-
-    if (configuredSecret && providedSecret === configuredSecret) {
-      isAuthorized = true;
-    } else if (authHeader && authHeader.startsWith('Bearer ')) {
-      const token = authHeader.slice('Bearer '.length).trim();
-      try {
-        const supabaseAdmin = getSupabaseAdminClient();
-        const { data: userData, error: authError } = await supabaseAdmin.auth.getUser(token);
-        if (!authError && userData?.user?.id) {
-          authenticatedUserId = userData.user.id;
-          isAuthorized = true;
-        }
-      } catch {
-        isAuthorized = false;
-      }
-    } else if (process.env.NODE_ENV === 'development' && !configuredSecret) {
-      // Local development only. Production requests must present a service key
-      // or a valid user session that is bound to its own userId below.
-      isAuthorized = true;
-    }
-
-    if (!isAuthorized) {
-      return NextResponse.json(
-        { error: 'Unauthorized: Missing or invalid authorization session token or service key.' },
-        { status: 401 }
-      );
-    }
-
-    // 2. Parse request payload
-    const body = await req.json().catch(() => ({}));
-    const userId = body?.userId || body?.user_id;
-
-    // A user session may provision only that same user's address. Queue/batch
-    // processing is service-only; a normal authenticated account is not a worker.
-    if (authenticatedUserId && (!userId || String(userId) !== authenticatedUserId)) {
-      return NextResponse.json(
-        { error: 'Forbidden: user sessions may provision addresses only for their own account.' },
-        { status: 403 }
-      );
-    }
-
-    const crypto = (body?.crypto || body?.asset || body?.asset_code || body?.cryptoCode || '')
-      .toString()
-      .trim()
-      .toUpperCase();
-    const network = (body?.network || body?.network_code || body?.networkCode || '')
-      .toString()
-      .trim()
-      .toUpperCase();
-
-    // 3. Handle single direct provisioning request
-    if (userId) {
-      // Validate asset and network
-      if (!crypto) {
-        return NextResponse.json(
-          { error: 'Bad Request: Missing required parameter "crypto".' },
-          { status: 400 }
-        );
-      }
-
-      if (!network) {
-        return NextResponse.json(
-          { error: 'Bad Request: Missing required parameter "network".' },
-          { status: 400 }
-        );
-      }
-
-      if (
-        !VALID_NETWORKS.has(network) &&
-        !VALID_NETWORKS.has(crypto) &&
-        !STANDARD_DERIVATION_PATHS[network] &&
-        !STANDARD_DERIVATION_PATHS[crypto]
-      ) {
-        return NextResponse.json(
-          {
-            error: `Bad Request: Unsupported network "${network}" or crypto "${crypto}". Supported networks: ${Array.from(
-              VALID_NETWORKS
-            ).join(', ')}`,
-          },
-          { status: 400 }
-        );
-      }
-
-      // Provision or retrieve HD deposit address
-      try {
-        const result = await getOrProvisionHDDepositAddress(userId, crypto, network);
-
-        return NextResponse.json({
-          success: true,
-          address: result.address,
-          path: result.path,
-          crypto,
-          network,
-          isNew: result.isNew,
-        });
-      } catch (provisionErr: unknown) {
-        const message = provisionErr instanceof Error ? provisionErr.message : String(provisionErr);
-        return NextResponse.json(
-          { error: `HD Wallet Provisioning Error: ${message}` },
-          { status: 500 }
-        );
-      }
-    }
-
-    // 4. Fallback: Process queued provisioning jobs if batch execution requested
-    const limit = Math.min(Math.max(Number(body?.limit) || 10, 1), 100);
-    const supabaseAdmin = getSupabaseAdminClient();
-
-    const { data: queuedJobs, error: fetchError } = await supabaseAdmin
-      .from('wallet_provisioning')
-      .select('id, user_id, wallet_id, asset_code, network_code, retry_count')
-      .eq('status', 'queued')
-      .order('created_at', { ascending: true })
-      .limit(limit);
-
-    if (fetchError) {
-      return NextResponse.json(
-        { error: `Database error fetching provisioning jobs: ${fetchError.message}` },
-        { status: 500 }
-      );
-    }
-
-    if (!queuedJobs || queuedJobs.length === 0) {
-      return NextResponse.json({
-        success: true,
-        processedCount: 0,
-        message: 'No queued provisioning jobs found.',
-      });
-    }
-
-    let processedCount = 0;
-    for (const job of queuedJobs) {
-      try {
-        await supabaseAdmin
-          .from('wallet_provisioning')
-          .update({ status: 'processing', updated_at: new Date().toISOString() })
-          .eq('id', job.id);
-
-        const result = await getOrProvisionHDDepositAddress(
-          job.user_id,
-          job.asset_code,
-          job.network_code
-        );
-
-        await supabaseAdmin
-          .from('wallet_provisioning')
-          .update({ status: 'completed', updated_at: new Date().toISOString() })
-          .eq('id', job.id);
-
-        processedCount++;
-      } catch (jobErr: unknown) {
-        const errorMsg = jobErr instanceof Error ? jobErr.message : String(jobErr);
-        await supabaseAdmin
-          .from('wallet_provisioning')
-          .update({
-            status: 'failed',
-            retry_count: (job.retry_count || 0) + 1,
-            error_message: errorMsg,
-            updated_at: new Date().toISOString(),
-          })
-          .eq('id', job.id);
-      }
-    }
-
-    return NextResponse.json({
-      success: true,
-      processedCount,
-    });
-  } catch (err: unknown) {
-    const message = err instanceof Error ? err.message : 'Unknown server error.';
-    return NextResponse.json(
-      { error: `Internal Server Error: ${message}` },
-      { status: 500 }
-    );
-  }
+/**
+ * Retired legacy provisioning endpoint.
+ *
+ * The former handler used the shared CHAIN_INGEST_SECRET/PROVISION_SERVICE_KEY
+ * to provision arbitrary user IDs and attempted to poll a wallet_provisioning
+ * queue table that is not present in the current schema. The active database
+ * profile trigger already targets /api/auth/provision-wallets with its
+ * dedicated WALLET_PROVISIONING_BEARER credential.
+ *
+ * Use the authenticated canonical deposit-address routes for user requests.
+ * Do not restore the legacy batch queue without an explicit schema and worker
+ * design review.
+ */
+export async function GET() {
+  return NextResponse.json(
+    {
+      success: false,
+      code: 'LEGACY_WALLET_PROVISIONING_DISABLED',
+      error: 'This legacy provisioning endpoint is retired. Use the authenticated canonical deposit-address API.',
+    },
+    { status: 410, headers: { 'Cache-Control': 'no-store' } }
+  );
 }
 
+export async function POST() {
+  return GET();
+}
