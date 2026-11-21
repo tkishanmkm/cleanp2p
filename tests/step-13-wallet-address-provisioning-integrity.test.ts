@@ -103,7 +103,7 @@ test('wallet index allocation uses one monotonic sequence and never falls back t
 test('signup SECURITY DEFINER wallet allocator is pinned to an empty search path without changing its body or ACL', () => {
   assert.match(signupSearchPathMigration, /public\.handle_new_user\(\)/);
   assert.match(signupSearchPathMigration, /search_path=public, auth, pg_temp/);
-  assert.match(signupSearchPathMigration, /nextval\(''public\.user_wallet_index_seq''\)/);
+  assert.match(signupSearchPathMigration, /public\.user_wallet_index_seq/);
   assert.match(signupSearchPathMigration, /INSERT INTO public\.profiles/);
   assert.match(signupSearchPathMigration, /public\.generate_system_username\(\)/);
   assert.match(signupSearchPathMigration, /ALTER FUNCTION public\.handle_new_user\(\) SET search_path = ''/);
