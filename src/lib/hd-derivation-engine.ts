@@ -160,7 +160,7 @@ export function buildDepositAddressRow(
 ): UserDepositAddressesRecord {
   const normNet = normalizeDepositNetwork(network) as SupportedNetwork;
   return {
-    user_id: normalizedUserId,
+    user_id: userId,
     asset_symbol: assetSymbol,
     chain: getChainEnum(normNet),
     network: normNet,
