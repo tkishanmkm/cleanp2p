@@ -93,7 +93,7 @@ test('wallet index allocation uses one monotonic sequence and never falls back t
   assert.match(allocatorMigration, /wallet_index_seq/);
   assert.match(allocatorMigration, /wallet_index_seq.*must increment|legacy allocator contract/);
   assert.match(allocatorMigration, /profile wallet_index must be a positive allocated integer/i);
-  assert.match(allocatorMigration, /idx_profiles_wallet_index_unique|unique.*wallet_index/i);
+  assert.match(allocatorMigration, /profiles\\.wallet_index lacks a valid single-column full unique index/i);
   assert.match(adminIndexRoute, /assign_missing_profile_wallet_indexes/);
   assert.match(adminIndexRoute, /WALLET_INDEX_ALLOCATOR_NOT_INSTALLED/);
   assert.match(adminIndexRoute, /No client-side fallback is permitted/);
