@@ -13,12 +13,14 @@ export async function GET(request: Request) {
   }
 
   let requires2FA = false;
+  let authSucceeded = false;
 
   if (code) {
     try {
       const supabase = await createClient();
       const { data, error: exchangeErr } = await supabase.auth.exchangeCodeForSession(code);
       if (!exchangeErr && data?.user) {
+        authSucceeded = true;
         const user = data.user;
 
         try {
@@ -97,6 +99,14 @@ export async function GET(request: Request) {
     }
   }
 
+  // Never report a successful callback when the authorization code could not be exchanged.
+  if (!authSucceeded) {
+    const failureUrl = new URL('/login', requestUrl.origin);
+    failureUrl.searchParams.set('error', 'oauth_callback_failed');
+    return Response.redirect(failureUrl, 303);
+  }
+
+  const trustedOrigin = JSON.stringify(requestUrl.origin);
   const html = `<!DOCTYPE html>
 <html>
 <head>
@@ -118,7 +128,7 @@ export async function GET(request: Request) {
     try {
       var req2FA = ${requires2FA ? 'true' : 'false'};
       if (window.opener) {
-        window.opener.postMessage({ type: req2FA ? 'OAUTH_2FA_REQUIRED' : 'OAUTH_AUTH_SUCCESS' }, '*');
+        window.opener.postMessage({ type: req2FA ? 'OAUTH_2FA_REQUIRED' : 'OAUTH_AUTH_SUCCESS' }, ${trustedOrigin});
         if (req2FA) {
           window.location.href = '/auth/2fa';
         } else {

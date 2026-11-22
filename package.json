@@ -17,7 +17,8 @@
     "test:blockchain": "tsx tests/blockchain-worker.test.ts",
     "test:reconcile": "tsx tests/reconciliation.test.ts",
     "test:security": "tsx tests/security-verification.test.ts",
-    "test:all": "tsx tests/p2p-trade-flow.test.ts && tsx tests/blockchain-worker.test.ts && tsx tests/reconciliation.test.ts && tsx tests/security-verification.test.ts && tsx tests/2fa-session-edge.test.ts",
+    "test:auth-hardening": "tsx tests/auth-hardening.test.ts",
+    "test:all": "tsx tests/p2p-trade-flow.test.ts && tsx tests/blockchain-worker.test.ts && tsx tests/reconciliation.test.ts && tsx tests/security-verification.test.ts && tsx tests/2fa-session-edge.test.ts && tsx tests/auth-hardening.test.ts",
     "test:e2e": "playwright test"
   },
   "dependencies": {

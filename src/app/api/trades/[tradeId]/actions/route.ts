@@ -291,7 +291,7 @@ export async function POST(
     if (action === 'RELEASE_ESCROW') {
       // Do not let user-editable metadata turn the participant release route into an
       // administrator dispute-settlement path. Admins must use verified admin APIs.
-      if (user.app_metadata?.role === 'admin' || user.user_metadata?.role === 'admin') {
+      if (user.app_metadata?.role === 'admin') {
         return NextResponse.json({ error: 'Use the authorized admin workflow for administrative trade actions.' }, { status: 403 });
       }
       if (!trade) {
@@ -401,7 +401,7 @@ export async function POST(
     if (action === 'CANCEL_TRADE') {
       // Admin escrow refunds belong to the verified dispute-resolution workflow,
       // not the participant cancellation endpoint.
-      if (user.app_metadata?.role === 'admin' || user.user_metadata?.role === 'admin') {
+      if (user.app_metadata?.role === 'admin') {
         return NextResponse.json({ error: 'Use the authorized admin workflow for administrative trade actions.' }, { status: 403 });
       }
       if (!trade) {
