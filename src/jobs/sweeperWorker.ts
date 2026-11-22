@@ -280,7 +280,7 @@ export interface SweepResult {
   network: string;
   amountSwept: string;
   txHash: string;
-  status: 'SUCCESS' | 'SKIPPED' | 'FAILED';
+  status: 'SUCCESS' | 'BROADCASTED' | 'SKIPPED' | 'FAILED';
   error?: string;
   nonceAllocated?: boolean;
 }
@@ -4870,7 +4870,7 @@ export async function runAutomatedSweeperJob(): Promise<SweepResult[]> {
       workerId
     );
 
-    if (result.status === 'SUCCESS') {
+    if (result.status === 'SUCCESS' || result.status === 'BROADCASTED') {
       const netCode = (network || '').toUpperCase().trim();
       if (['TRC20', 'TRON', 'BTC', 'LTC', 'ERC20', 'BEP20', 'ETH', 'BSC', 'ETHEREUM', 'BINANCE'].includes(netCode)) {
         console.log(
