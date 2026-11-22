@@ -1,4 +1,5 @@
 import { createClient } from '@/lib/supabase/server';
+import { normalizePrimaryWalletAssetBalance } from '@/lib/wallet-balance-normalization';
 import { NextResponse } from 'next/server';
 
 export const dynamic = 'force-dynamic';
@@ -27,15 +28,11 @@ export async function GET() {
       .maybeSingle();
 
     if (assetRow) {
-      const explicitAvailable = assetRow.available ?? assetRow.available_balance;
-      const balance = Number(assetRow.balance ?? 0);
-      const lockedEscrow = Number(assetRow.locked_escrow ?? assetRow.locked_balance ?? 0);
-      const lockedWithdrawal = Number(assetRow.locked_withdrawal ?? 0);
-      // wallet_assets.available is already spendable; only derive from total balance
-      // when the canonical available column is absent, to avoid subtracting escrow twice.
-      availableBalance = explicitAvailable !== null && explicitAvailable !== undefined
-        ? Math.max(0, Number.isFinite(Number(explicitAvailable)) ? Number(explicitAvailable) : 0)
-        : Math.max(0, balance - lockedEscrow - lockedWithdrawal);
+      // The deployed wallet RPCs already debit balance when funds move into
+      // escrow/withdrawal. Read the spendable value directly; do not subtract
+      // those locked liabilities for a second time.
+      const normalized = normalizePrimaryWalletAssetBalance(assetRow);
+      availableBalance = normalized.available;
       assetSymbol = assetRow.asset_symbol || 'USDT';
       lastUpdated = assetRow.updated_at || null;
     } else {

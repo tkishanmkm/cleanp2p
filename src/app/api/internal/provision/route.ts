@@ -1,43 +1,39 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { timingSafeEqual } from 'node:crypto';
 import { getSupabaseAdminClient } from '@/lib/supabase/server';
-import { getOrProvisionHDDepositAddress, STANDARD_DERIVATION_PATHS } from '@/lib/hd-wallet';
+import { getOrProvisionHDDepositAddress, SUPPORTED_ASSET_NETWORKS } from '@/lib/hd-wallet';
 
-// Recognized network and asset identifiers (Production networks only)
-const VALID_NETWORKS = new Set([
-  'BTC',
-  'ETH',
-  'ERC20',
-  'TRC20',
-  'TRX',
-  'LTC',
-  'BSC',
-  'BEP20',
-]);
-
-const VALID_ASSETS = new Set([
-  'BTC',
-  'ETH',
-  'USDT',
-  'USDC',
-  'TRX',
-  'LTC',
-  'BNB',
-]);
+// Asset/network compatibility is centrally enforced by the HD wallet module.
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 export async function POST(req: NextRequest) {
   try {
     // 1. Authorization check: Internal service key or valid Bearer session
+    const authHeader = req.headers.get('authorization') || '';
+    const bearerMatch = /^Bearer\s+(.+)$/i.exec(authHeader);
     const providedSecret =
       req.headers.get('x-provision-secret') ||
       req.headers.get('x-service-key') ||
-      req.headers.get('x-api-key');
-    const configuredSecret = process.env.CHAIN_INGEST_SECRET || process.env.PROVISION_SERVICE_KEY;
-    const authHeader = req.headers.get('authorization');
+      req.headers.get('x-api-key') ||
+      bearerMatch?.[1]?.trim() ||
+      null;
+    const configuredSecret =
+      process.env.WALLET_PROVISIONING_SECRET ||
+      process.env.CHAIN_INGEST_SECRET ||
+      process.env.PROVISION_SERVICE_KEY ||
+      '';
+
+    const expectedSecretBytes = Buffer.from(configuredSecret.trim(), 'utf8');
+    const providedSecretBytes = Buffer.from((providedSecret || '').trim(), 'utf8');
+    const hasValidServiceSecret =
+      expectedSecretBytes.length > 0 &&
+      expectedSecretBytes.length === providedSecretBytes.length &&
+      timingSafeEqual(expectedSecretBytes, providedSecretBytes);
 
     let isAuthorized = false;
     let authenticatedUserId: string | null = null;
 
-    if (configuredSecret && providedSecret === configuredSecret) {
+    if (hasValidServiceSecret) {
       isAuthorized = true;
     } else if (authHeader && authHeader.startsWith('Bearer ')) {
       const token = authHeader.slice('Bearer '.length).trim();
@@ -64,9 +60,76 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // 2. Parse request payload
-    const body = await req.json().catch(() => ({}));
-    const userId = body?.userId || body?.user_id;
+    // 2. Reject oversized requests while streaming; Content-Length is optional.
+    const declaredContentLength = Number(req.headers.get('content-length') || 0);
+    if (Number.isFinite(declaredContentLength) && declaredContentLength > 2048) {
+      return NextResponse.json(
+        { success: false, code: 'REQUEST_TOO_LARGE', error: 'Provisioning request body exceeds 2 KB.' },
+        { status: 413 }
+      );
+    }
+
+    const bodyReader = req.body?.getReader();
+    if (!bodyReader) {
+      return NextResponse.json(
+        { success: false, code: 'INVALID_REQUEST_BODY', error: 'A JSON object body is required.' },
+        { status: 400 }
+      );
+    }
+
+    const bodyChunks: Uint8Array[] = [];
+    let bodyByteLength = 0;
+    try {
+      while (true) {
+        const { done, value } = await bodyReader.read();
+        if (done) break;
+        bodyByteLength += value.byteLength;
+        if (bodyByteLength > 2048) {
+          await bodyReader.cancel().catch(() => undefined);
+          return NextResponse.json(
+            { success: false, code: 'REQUEST_TOO_LARGE', error: 'Provisioning request body exceeds 2 KB.' },
+            { status: 413 }
+          );
+        }
+        bodyChunks.push(value);
+      }
+    } catch {
+      return NextResponse.json(
+        { success: false, code: 'INVALID_REQUEST_BODY', error: 'Could not read the provisioning request body.' },
+        { status: 400 }
+      );
+    }
+
+    const bodyBytes = new Uint8Array(bodyByteLength);
+    let bodyOffset = 0;
+    for (const chunk of bodyChunks) {
+      bodyBytes.set(chunk, bodyOffset);
+      bodyOffset += chunk.byteLength;
+    }
+
+    let body: Record<string, unknown>;
+    try {
+      const rawBody = new TextDecoder('utf-8', { fatal: true }).decode(bodyBytes);
+      const parsedBody: unknown = JSON.parse(rawBody);
+      if (!parsedBody || typeof parsedBody !== 'object' || Array.isArray(parsedBody)) {
+        throw new Error('A JSON object is required.');
+      }
+      body = parsedBody as Record<string, unknown>;
+    } catch {
+      return NextResponse.json(
+        { success: false, code: 'INVALID_REQUEST_BODY', error: 'A valid JSON object is required.' },
+        { status: 400 }
+      );
+    }
+
+    const rawUserId = body.userId ?? body.user_id;
+    const userId = typeof rawUserId === 'string' ? rawUserId.trim() : null;
+    if (rawUserId != null && (!userId || !UUID_PATTERN.test(userId))) {
+      return NextResponse.json(
+        { success: false, code: 'INVALID_USER_ID', error: 'userId must be a valid UUID.' },
+        { status: 400 }
+      );
+    }
 
     // A user session may provision only that same user's address. Queue/batch
     // processing is service-only; a normal authenticated account is not a worker.
@@ -77,14 +140,10 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const crypto = (body?.crypto || body?.asset || body?.asset_code || body?.cryptoCode || '')
-      .toString()
-      .trim()
-      .toUpperCase();
-    const network = (body?.network || body?.network_code || body?.networkCode || '')
-      .toString()
-      .trim()
-      .toUpperCase();
+    const rawAsset = body.crypto ?? body.asset ?? body.asset_code ?? body.cryptoCode;
+    const rawNetwork = body.network ?? body.network_code ?? body.networkCode;
+    const crypto = typeof rawAsset === 'string' ? rawAsset.trim().toUpperCase() : '';
+    const network = typeof rawNetwork === 'string' ? rawNetwork.trim().toUpperCase() : '';
 
     // 3. Handle single direct provisioning request
     if (userId) {
@@ -103,17 +162,15 @@ export async function POST(req: NextRequest) {
         );
       }
 
-      if (
-        !VALID_NETWORKS.has(network) &&
-        !VALID_NETWORKS.has(crypto) &&
-        !STANDARD_DERIVATION_PATHS[network] &&
-        !STANDARD_DERIVATION_PATHS[crypto]
-      ) {
+      const allowedNetworks = SUPPORTED_ASSET_NETWORKS[crypto];
+      if (!allowedNetworks || !allowedNetworks.has(network)) {
         return NextResponse.json(
           {
-            error: `Bad Request: Unsupported network "${network}" or crypto "${crypto}". Supported networks: ${Array.from(
-              VALID_NETWORKS
-            ).join(', ')}`,
+            success: false,
+            code: 'UNSUPPORTED_ASSET_NETWORK_PAIR',
+            error: `Unsupported asset/network pair: ${crypto}/${network}.`,
+            supportedNetworks: allowedNetworks ? Array.from(allowedNetworks) : [],
+            supportedAssets: Object.keys(SUPPORTED_ASSET_NETWORKS),
           },
           { status: 400 }
         );
@@ -129,7 +186,6 @@ export async function POST(req: NextRequest) {
           path: result.path,
           crypto,
           network,
-          isNew: result.isNew,
         });
       } catch (provisionErr: unknown) {
         const message = provisionErr instanceof Error ? provisionErr.message : String(provisionErr);
@@ -146,14 +202,35 @@ export async function POST(req: NextRequest) {
 
     const { data: queuedJobs, error: fetchError } = await supabaseAdmin
       .from('wallet_provisioning')
-      .select('id, user_id, wallet_id, asset_code, network_code, retry_count')
+      .select('id, user_id, asset_code, network_code, retry_count')
       .eq('status', 'queued')
       .order('created_at', { ascending: true })
       .limit(limit);
 
     if (fetchError) {
+      const missingQueueTable =
+        fetchError.code === '42P01' ||
+        fetchError.code === 'PGRST205' ||
+        (/wallet_provisioning/i.test(fetchError.message) &&
+          /(does not exist|not found|schema cache)/i.test(fetchError.message));
+
+      if (missingQueueTable) {
+        return NextResponse.json(
+          {
+            success: false,
+            code: 'WALLET_PROVISIONING_QUEUE_UNAVAILABLE',
+            error: 'The wallet provisioning queue is not installed in this database. Direct user provisioning remains available.',
+          },
+          { status: 503 }
+        );
+      }
+
       return NextResponse.json(
-        { error: `Database error fetching provisioning jobs: ${fetchError.message}` },
+        {
+          success: false,
+          code: 'WALLET_PROVISIONING_QUEUE_READ_FAILED',
+          error: `Database error fetching provisioning jobs: ${fetchError.message}`,
+        },
         { status: 500 }
       );
     }
@@ -169,34 +246,73 @@ export async function POST(req: NextRequest) {
     let processedCount = 0;
     for (const job of queuedJobs) {
       try {
-        await supabaseAdmin
+        // Claim with a compare-and-set update. Two concurrent batch requests may
+        // read the same queued row, but only one can move it to processing.
+        const { data: claimedJob, error: claimError } = await supabaseAdmin
           .from('wallet_provisioning')
-          .update({ status: 'processing', updated_at: new Date().toISOString() })
-          .eq('id', job.id);
+          .update({
+            status: 'processing',
+            error_message: null,
+            updated_at: new Date().toISOString(),
+          })
+          .eq('id', job.id)
+          .eq('status', 'queued')
+          .select('id')
+          .maybeSingle();
 
-        const result = await getOrProvisionHDDepositAddress(
+        if (claimError) {
+          console.error(`[Wallet Provisioning] Could not claim queue job ${job.id}:`, claimError.message);
+          continue;
+        }
+        if (!claimedJob) {
+          // Another worker won the atomic claim, or the row is no longer queued.
+          continue;
+        }
+
+        await getOrProvisionHDDepositAddress(
           job.user_id,
           job.asset_code,
           job.network_code
         );
 
-        await supabaseAdmin
+        const { data: completedJob, error: completionError } = await supabaseAdmin
           .from('wallet_provisioning')
-          .update({ status: 'completed', updated_at: new Date().toISOString() })
-          .eq('id', job.id);
+          .update({
+            status: 'completed',
+            error_message: null,
+            updated_at: new Date().toISOString(),
+          })
+          .eq('id', job.id)
+          .eq('status', 'processing')
+          .select('id')
+          .maybeSingle();
+
+        if (completionError || !completedJob) {
+          throw new Error(
+            `Provisioning succeeded but queue completion was not persisted: ${completionError?.message || 'job is no longer processing'}`
+          );
+        }
 
         processedCount++;
       } catch (jobErr: unknown) {
-        const errorMsg = jobErr instanceof Error ? jobErr.message : String(jobErr);
-        await supabaseAdmin
+        const errorMsg = (jobErr instanceof Error ? jobErr.message : String(jobErr)).slice(0, 1000);
+        const { error: failureUpdateError } = await supabaseAdmin
           .from('wallet_provisioning')
           .update({
             status: 'failed',
-            retry_count: (job.retry_count || 0) + 1,
+            retry_count: (Number(job.retry_count) || 0) + 1,
             error_message: errorMsg,
             updated_at: new Date().toISOString(),
           })
-          .eq('id', job.id);
+          .eq('id', job.id)
+          .eq('status', 'processing');
+
+        if (failureUpdateError) {
+          console.error(
+            `[Wallet Provisioning] Could not persist failure for queue job ${job.id}:`,
+            failureUpdateError.message
+          );
+        }
       }
     }
 

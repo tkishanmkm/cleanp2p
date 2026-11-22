@@ -21,6 +21,7 @@ import { TransferDialog } from '@/components/wallets/transfer-dialog';
 import { BtcLogo, EthLogo, LtcLogo, UsdtLogo } from '@/components/icons';
 import { CoinBadgeLogo } from '@/components/wallets/coin-badge-logo';
 import { getUserWalletBalances } from '@/lib/wallet';
+import { normalizePrimaryWalletAssetBalance } from '@/lib/wallet-balance-normalization';
 import { getUserDeposits, getUserWithdrawals, type DepositRecord, type WithdrawalRecord } from '@/lib/supabase/db';
 import { supabase } from '@/lib/supabase/client';
 import { SUPPORTED_CRYPTOS } from '@/lib/constants';
@@ -665,15 +666,13 @@ export default function WalletPage() {
         walletAssets.forEach((asset: any) => {
           const rawSym = String(asset.asset_symbol || asset.asset_code || asset.symbol || '').toUpperCase();
           const symbol = (['BTC', 'ETH', 'LTC', 'USDT'].includes(rawSym) ? rawSym : null) as CryptoCurrency | null;
-          const spendable = Number(asset.available ?? asset.balance ?? asset.amount ?? 0);
-          const locked = Number(asset.locked ?? asset.locked_balance ?? asset.locked_escrow ?? 0) + Number(asset.locked_withdrawal ?? 0);
+          if (!symbol) return;
 
-          if (symbol) {
-            balanceMap[symbol] = {
-              balance: isNaN(spendable) ? 0 : spendable,
-              lockedBalance: isNaN(locked) ? 0 : locked,
-            };
-          }
+          const normalized = normalizePrimaryWalletAssetBalance(asset);
+          balanceMap[symbol] = {
+            balance: normalized.available,
+            lockedBalance: normalized.inEscrow + normalized.inWithdrawal,
+          };
         });
 
         setSupabaseBalances(balanceMap);
@@ -712,12 +711,14 @@ export default function WalletPage() {
           // 2. Reactively update state with new available/locked values
           if (payload.new && payload.new.asset_symbol) {
             const sym = String(payload.new.asset_symbol).toUpperCase() as CryptoCurrency;
-            const avail = Number(payload.new.available ?? 0);
-            const lock = Number(payload.new.locked ?? 0);
+            const normalized = normalizePrimaryWalletAssetBalance(payload.new);
 
             setSupabaseBalances((prev) => ({
               ...prev,
-              [sym]: { balance: avail, lockedBalance: lock },
+              [sym]: {
+                balance: normalized.available,
+                lockedBalance: normalized.inEscrow + normalized.inWithdrawal,
+              },
             }));
           } else {
             loadBalances();

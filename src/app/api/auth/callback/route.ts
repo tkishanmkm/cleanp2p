@@ -43,27 +43,10 @@ export async function GET(request: Request) {
             .maybeSingle();
 
           if (!profile) {
-            const shortId = user.id.replace(/-/g, '').slice(0, 8);
-            const generatedUsername = `user_${shortId}`;
-            const meta = user.user_metadata || {};
-            const fullName = meta.full_name || meta.name || '';
-            const avatarUrl = meta.avatar_url || meta.picture || null;
-
-            await supabase.from('profiles').insert({
-              id: user.id,
-              email: user.email,
-              username: generatedUsername,
-              full_name: fullName,
-              display_name: fullName || generatedUsername,
-              avatar_url: avatarUrl,
-              photo_url: avatarUrl,
-              username_changed: false, // Ensure 1-time change option is granted
-              username_changes_remaining: 1,
-              username_changed_count: 0,
-              role: 'user',
-              status: 'active',
-              created_at: new Date().toISOString(),
-              updated_at: new Date().toISOString(),
+            // Auth signup trigger owns profile creation and the sequence-backed
+            // wallet_index. Never synthesize an unindexed profile in an OAuth callback.
+            console.error('[OAuth Callback] Signup profile is missing; database allocator/trigger reconciliation is required.', {
+              userId: user.id,
             });
           } else if (profile.username_changed === null || profile.username_changed === undefined || profile.username_changes_remaining === null || profile.username_changes_remaining === undefined) {
             // Profile created by database trigger without explicit flags: grant 1-time username change
@@ -81,13 +64,32 @@ export async function GET(request: Request) {
         }
 
         try {
-          await fetch(`${requestUrl.origin}/api/auth/provision-wallets`, {
+          const accessToken = data.session?.access_token;
+          if (!accessToken) {
+            throw new Error('OAuth session access token is unavailable for authenticated wallet provisioning.');
+          }
+
+          const provisionResponse = await fetch(`${requestUrl.origin}/api/auth/provision-wallets`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: {
+              'Content-Type': 'application/json',
+              Authorization: `Bearer ${accessToken}`,
+            },
             body: JSON.stringify({ userId: data.user.id }),
+            cache: 'no-store',
           });
+
+          if (!provisionResponse.ok) {
+            const provisionResult = await provisionResponse.json().catch(() => null);
+            console.error('[OAuth Callback] Wallet provisioning was rejected:', {
+              status: provisionResponse.status,
+              code: provisionResult?.code || null,
+              error: provisionResult?.error || 'No error details returned',
+              userId: data.user.id,
+            });
+          }
         } catch (provErr) {
-          console.error('[OAuth Callback] Auto-provisioning notice:', provErr);
+          console.error('[OAuth Callback] Auto-provisioning failed:', provErr instanceof Error ? provErr.message : 'unknown error');
         }
       }
     } catch (exchangeErr) {

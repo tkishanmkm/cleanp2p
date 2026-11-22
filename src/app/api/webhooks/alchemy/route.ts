@@ -7,6 +7,7 @@ import { getEvmProvider } from '@/lib/blockchain/providers';
 import { resolveUniqueEvmTransferEvidence } from '@/lib/blockchain/resolve-evm-transfer-log-index';
 import crypto from 'crypto';
 import { ethers } from 'ethers';
+import { parseDepositRpcResult } from '@/lib/deposit-rpc-result';
 
 const MAX_ALCHEMY_WEBHOOK_BYTES = 2 * 1024 * 1024;
 
@@ -163,16 +164,36 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         });
 
         if (creditError) {
-          results.push({ txHash, status: 'error', error: 'Pending deposit registration failed' });
+          results.push({ txHash, status: 'registration_error', error: 'Pending deposit registration failed' });
         } else {
-          results.push({ txHash, status: 'pending', data: rpcData });
+          const parsedResult = parseDepositRpcResult(rpcData);
+          if (!parsedResult.success) {
+            results.push({
+              txHash,
+              status: 'registration_error',
+              error: parsedResult.code || parsedResult.message || 'Pending deposit registration was rejected',
+            });
+          } else {
+            results.push({
+              txHash,
+              status: parsedResult.alreadyCredited ? 'already_processed' : 'pending',
+              data: parsedResult.raw,
+            });
+          }
         }
       } catch {
         results.push({ txHash, status: 'error', error: 'Independent on-chain verification failed' });
       }
     }
 
-    return NextResponse.json({ success: results.every((result) => result.status === 'pending'), processed: results.length, results });
+    const registrationFailed = results.some((result) => result.status === 'registration_error');
+    const allActivitiesAccepted = results.every((result) =>
+      result.status === 'pending' || result.status === 'already_processed'
+    );
+    return NextResponse.json(
+      { success: allActivitiesAccepted, processed: results.length, results },
+      { status: registrationFailed ? 503 : 200 }
+    );
   } catch (err: any) {
     console.error('Webhook processing error:', err);
     return NextResponse.json(

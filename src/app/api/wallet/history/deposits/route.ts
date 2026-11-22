@@ -50,6 +50,7 @@ async function fetchDepositRows(
       .select('*', { count: 'exact' })
       .eq('user_id', userId)
       .order('created_at', { ascending: false })
+      .order('id', { ascending: true })
       .range(offset, offset + QUERY_BATCH_SIZE - 1);
 
     if (statusValues) query = query.in('status', statusValues);

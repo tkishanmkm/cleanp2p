@@ -3,6 +3,7 @@ import { getSupabaseAdminClient } from '@/lib/supabase/server';
 import { verifyWorkerAuth } from '@/lib/security/worker-auth';
 import { verifyUtxoDepositOutput } from '@/lib/blockchain/verify-utxo-deposit';
 import { readBoundedRequestBody } from '@/lib/security/read-bounded-request-body';
+import { parseDepositRpcResult } from '@/lib/deposit-rpc-result';
 
 export const dynamic = 'force-dynamic';
 
@@ -51,6 +52,7 @@ export async function POST(req: Request) {
 
   const supabaseAdmin = getSupabaseAdminClient();
   const results = [];
+  let registrationFailures = 0;
   for (const output of outputs) {
     const toAddress = output?.addresses?.[0];
     const outputIndex = output?.n;
@@ -82,14 +84,34 @@ export async function POST(req: Request) {
           code: rpcErr.code || 'UNKNOWN',
           outputIndex,
         });
-        results.push({ txHash, outputIndex, error: 'deposit_processing_failed' });
+        registrationFailures++;
+        results.push({ txHash, outputIndex, status: 'registration_error', error: 'deposit_processing_failed' });
       } else {
-        results.push({ txHash, outputIndex, result: rpcData });
+        const parsedResult = parseDepositRpcResult(rpcData);
+        if (!parsedResult.success) {
+          registrationFailures++;
+          results.push({
+            txHash,
+            outputIndex,
+            status: 'registration_error',
+            error: parsedResult.code || parsedResult.message || 'deposit_processing_rejected',
+          });
+        } else {
+          results.push({
+            txHash,
+            outputIndex,
+            status: parsedResult.alreadyCredited ? 'already_processed' : 'pending',
+            result: parsedResult.raw,
+          });
+        }
       }
     } catch {
       console.error('[Blockcypher Webhook] Independent chain verification failed.', { outputIndex });
       results.push({ txHash, outputIndex, status: 'verification_unavailable' });
     }
   }
-  return NextResponse.json({ status: 'accepted', processed: results.length, results }, { status: 200 });
+  return NextResponse.json(
+    { status: registrationFailures > 0 ? 'retry' : 'accepted', success: registrationFailures === 0, processed: results.length, results },
+    { status: registrationFailures > 0 ? 503 : 200 }
+  );
 }

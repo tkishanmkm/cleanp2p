@@ -192,34 +192,52 @@ export function TransferDialog({ open, onOpenChange, asset }: TransferDialogProp
 
       setIsResolving(true);
       try {
-        // 1. Check by username or UUID
-        const { data: prof } = await supabase
+        // 1. Resolve usernames with a parameterized filter. Never interpolate
+        // raw recipient input into a PostgREST .or() expression.
+        const escapedTarget = target.replace(/[\\%_]/g, '\\$&');
+        const { data: profByUsername } = await supabase
           .from('public_profiles')
           .select('id, username, is_trading_eligible')
-          .or(`username.ilike.${target},id.eq.${target}`)
+          .ilike('username', escapedTarget)
           .maybeSingle();
 
-        if (prof) {
-          setResolvedRecipient(prof as RecipientInfo);
+        if (profByUsername) {
+          setResolvedRecipient(profByUsername as RecipientInfo);
           return;
         }
 
-        // 2. Check by deposit address
-        const { data: dep } = await supabase
-          .from('deposit_addresses')
-          .select('user_id')
-          .eq('address', target)
-          .maybeSingle();
-
-        if (dep?.user_id) {
-          const { data: p } = await supabase
+        // 2. Resolve UUID recipients with a separate exact comparison.
+        const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(target);
+        if (isUuid) {
+          const { data: profileById } = await supabase
             .from('public_profiles')
             .select('id, username, is_trading_eligible')
-            .eq('id', dep.user_id)
+            .eq('id', target)
             .maybeSingle();
-          if (p) {
-            setResolvedRecipient(p as RecipientInfo);
+
+          if (profileById) {
+            setResolvedRecipient(profileById as RecipientInfo);
             return;
+          }
+        }
+
+        // 3. Address ownership is resolved on the server because RLS only
+        // permits users to read their own deposit-address rows.
+        if (/^(?:0x[0-9a-fA-F]{40}|[A-Za-z0-9]{20,128})$/.test(target)) {
+          const response = await fetch('/api/wallet/resolve-deposit-recipient', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ address: target }),
+          });
+
+          if (response.ok) {
+            const payload = await response.json();
+            if (payload?.recipient?.id && payload?.recipient?.username) {
+              setResolvedRecipient(payload.recipient as RecipientInfo);
+              return;
+            }
+          } else if (response.status !== 404) {
+            throw new Error('Recipient address ownership could not be verified.');
           }
         }
 

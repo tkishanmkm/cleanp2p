@@ -7,6 +7,7 @@ import { CANONICAL_USDT_CONTRACTS } from '@/jobs/depositIngestion';
 import { getEvmProvider } from '@/lib/blockchain/providers';
 import { resolveUniqueEvmTransferEvidence } from '@/lib/blockchain/resolve-evm-transfer-log-index';
 import { timingSafeEqualString } from '@/lib/security/worker-auth';
+import { parseDepositRpcResult } from '@/lib/deposit-rpc-result';
 
 export const dynamic = 'force-dynamic';
 
@@ -348,25 +349,38 @@ export async function POST(req: Request) {
         processedResults.push({
           txHash,
           logIndex: outputIndex,
-          status: 'error',
+          status: 'registration_error',
           error: rpcErr.message,
         });
       } else {
-        const parsed = typeof rpcData === 'string' ? JSON.parse(rpcData) : rpcData;
-        processedResults.push({
-          txHash,
-          logIndex: outputIndex,
-          status: parsed?.status || (parsed?.already_processed ? 'already_processed' : 'success'),
-          result: parsed,
-        });
+        const parsedResult = parseDepositRpcResult(rpcData);
+        if (!parsedResult.success) {
+          processedResults.push({
+            txHash,
+            logIndex: outputIndex,
+            status: 'registration_error',
+            error: parsedResult.code || parsedResult.message || 'Pending deposit registration was rejected',
+          });
+        } else {
+          processedResults.push({
+            txHash,
+            logIndex: outputIndex,
+            status: parsedResult.status || (parsedResult.alreadyCredited ? 'already_processed' : 'PENDING'),
+            result: parsedResult.raw,
+          });
+        }
       }
     }
 
+    const registrationFailed = processedResults.some((result) => result.status === 'registration_error');
+    const processingFailed = processedResults.some((result) =>
+      result.status === 'error' || result.status === 'registration_error'
+    );
     return NextResponse.json({
-      success: true,
+      success: !processingFailed,
       processed: processedResults.length,
       results: processedResults,
-    });
+    }, { status: registrationFailed ? 503 : 200 });
   } catch (error: any) {
     console.error('❌ [Deposit Webhook] Error processing event:', error);
     return NextResponse.json(

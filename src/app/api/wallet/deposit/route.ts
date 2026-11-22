@@ -7,6 +7,7 @@ import { getEvmProvider } from '@/lib/blockchain/providers';
 import { resolveUniqueEvmTransferEvidence } from '@/lib/blockchain/resolve-evm-transfer-log-index';
 import { verifyWorkerAuth } from '@/lib/security/worker-auth';
 import { readBoundedRequestBody } from '@/lib/security/read-bounded-request-body';
+import { parseDepositRpcResult } from '@/lib/deposit-rpc-result';
 
 const MAX_WALLET_DEPOSIT_BODY_BYTES = 256 * 1024;
 
@@ -249,10 +250,22 @@ export async function POST(req: Request) {
     });
 
     if (error) {
-      return NextResponse.json({ error: error.message }, { status: 400 });
+      return NextResponse.json({ success: false, error: error.message }, { status: 503 });
     }
 
-    return NextResponse.json(data);
+    const parsedResult = parseDepositRpcResult(data);
+    if (!parsedResult.success) {
+      return NextResponse.json({
+        success: false,
+        error: parsedResult.code || 'deposit_registration_rejected',
+        message: parsedResult.message || 'Canonical deposit RPC rejected the candidate.',
+        result: parsedResult.raw,
+      }, { status: 422 });
+    }
+
+    return NextResponse.json(parsedResult.raw, {
+      status: parsedResult.status === 'PENDING' ? 202 : 200,
+    });
   } catch (err: any) {
     return NextResponse.json({ error: err.message }, { status: 500 });
   }

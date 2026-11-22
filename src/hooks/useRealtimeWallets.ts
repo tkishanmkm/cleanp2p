@@ -3,6 +3,7 @@
 import { useEffect, useState, useCallback } from 'react';
 import { supabase } from '@/lib/supabase/client';
 import type { CryptoCurrency } from '@/lib/types';
+import { normalizePrimaryWalletAssetBalance } from '@/lib/wallet-balance-normalization';
 
 export interface WalletAssetItem {
   asset_symbol: string;
@@ -20,17 +21,20 @@ export function useRealtimeWallets(userId: string | undefined | null) {
       setLoading(true);
       const { data, error } = await supabase
         .from('wallet_assets')
-        .select('asset_symbol, available, locked, updated_at')
+        .select('asset_symbol, balance, locked_balance, reserved_balance, in_escrow, in_withdrawal, updated_at')
         .eq('user_id', uid);
 
       if (!error && data && data.length > 0) {
         setAssets(
-          data.map((item: any) => ({
-            asset_symbol: String(item.asset_symbol).toUpperCase(),
-            available: Number(item.available || 0),
-            locked: Number(item.locked || 0),
-            updated_at: item.updated_at,
-          }))
+          data.map((item: any) => {
+            const normalized = normalizePrimaryWalletAssetBalance(item);
+            return {
+              asset_symbol: String(item.asset_symbol).toUpperCase(),
+              available: normalized.available,
+              locked: normalized.inEscrow + normalized.inWithdrawal,
+              updated_at: item.updated_at,
+            };
+          })
         );
       } else {
         // Fallback default assets
@@ -72,8 +76,9 @@ export function useRealtimeWallets(userId: string | undefined | null) {
 
           if (payload.new && payload.new.asset_symbol) {
             const sym = String(payload.new.asset_symbol).toUpperCase();
-            const avail = Number(payload.new.available || 0);
-            const lock = Number(payload.new.locked || 0);
+            const normalized = normalizePrimaryWalletAssetBalance(payload.new);
+            const avail = normalized.available;
+            const lock = normalized.inEscrow + normalized.inWithdrawal;
 
             // 2. Reactively update state with new available/locked values
             setAssets((prevAssets) => {

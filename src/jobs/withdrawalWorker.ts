@@ -20,7 +20,9 @@ import {
   TRON_CONFIG,
   isValidTronAddress,
   getTronWeb,
+  parseUnitsTron,
 } from '@/lib/blockchain/tron';
+import { verifyTronSignedWithdrawalPayload } from '@/lib/blockchain/verify-tron-withdrawal';
 
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
 import { bitcoinLikePayoutMatches, hasRequiredConfirmations } from '@/lib/blockchain/utxo-withdrawal-validation';
@@ -94,6 +96,169 @@ export async function allocateEvmNonce(
     throw new Error(`Lease-bound nonce allocation returned an invalid or stale nonce for ${normNet}`);
   }
   return nonce;
+}
+
+async function verifyDurableTronWithdrawalPayload(
+  withdrawal: {
+    id: string;
+    tx_hash?: string | null;
+    network?: string | null;
+    asset_symbol?: string | null;
+    to_address?: string | null;
+    amount: string | number;
+  },
+  observedTransaction?: unknown,
+  signedTransactionOverride?: unknown
+): Promise<{ verified: true } | { verified: false; reason: string }> {
+  try {
+    const { data: durable, error } = await supabaseAdmin
+      .from('onchain_withdrawal_broadcasts')
+      .select('network, signed_tx, tx_hash, status')
+      .eq('withdrawal_id', withdrawal.id)
+      .maybeSingle();
+
+    if (error || !durable || !durable.signed_tx || !durable.tx_hash) {
+      return { verified: false, reason: error?.message || 'DURABLE_SIGNED_PAYLOAD_MISSING' };
+    }
+
+    const durableNetwork = normalizeNetworkCode(String(durable.network || ''));
+    const durableHash = String(durable.tx_hash || '').toLowerCase();
+    const expectedHash = withdrawal.tx_hash ? String(withdrawal.tx_hash).toLowerCase() : durableHash;
+    const durableStatus = String(durable.status || '').toUpperCase();
+    if (
+      durableNetwork !== 'TRC20' ||
+      durableHash !== expectedHash ||
+      !/^[a-f0-9]{64}$/.test(durableHash) ||
+      !['READY_TO_BROADCAST', 'BROADCASTED', 'RECOVERY_REQUIRED'].includes(durableStatus) ||
+      normalizeNetworkCode(String(withdrawal.network || '')) !== 'TRC20' ||
+      String(withdrawal.asset_symbol || '').toUpperCase() !== 'USDT' ||
+      !withdrawal.to_address ||
+      !isValidTronAddress(String(withdrawal.to_address))
+    ) {
+      return { verified: false, reason: 'DURABLE_WITHDRAWAL_IDENTITY_MISMATCH' };
+    }
+
+    const durableSignedTransaction = JSON.parse(String(durable.signed_tx)) as Record<string, unknown>;
+    const signedTransaction = (signedTransactionOverride ?? durableSignedTransaction) as Record<string, unknown>;
+    if (
+      String(signedTransaction.txID || '').toLowerCase() !== durableHash ||
+      String(signedTransaction.raw_data_hex || '').replace(/^0x/i, '').toLowerCase() !==
+        String(durableSignedTransaction.raw_data_hex || '').replace(/^0x/i, '').toLowerCase()
+    ) {
+      return { verified: false, reason: 'CANDIDATE_SIGNED_PAYLOAD_DIFFERS_FROM_DURABLE_RECORD' };
+    }
+    const tronWeb = getTronWeb(true);
+    const expectedSender = tronWeb.defaultAddress?.base58;
+    if (!expectedSender || !isValidTronAddress(expectedSender)) {
+      return { verified: false, reason: 'TRON_HOT_WALLET_ADDRESS_UNAVAILABLE' };
+    }
+    const transactionUtils = (tronWeb as any).utils?.transaction;
+    if (
+      typeof transactionUtils?.txJsonToPb !== 'function' ||
+      typeof transactionUtils?.txPbToRawDataHex !== 'function' ||
+      typeof transactionUtils?.txPbToTxID !== 'function'
+    ) {
+      return { verified: false, reason: 'TRON_TRANSACTION_PROTOBUF_VERIFIER_UNAVAILABLE' };
+    }
+    const transactionPb = transactionUtils.txJsonToPb(signedTransaction);
+    const canonicalRawDataHex = String(transactionUtils.txPbToRawDataHex(transactionPb) || '').toLowerCase();
+    const canonicalTxHash = String(transactionUtils.txPbToTxID(transactionPb) || '').replace(/^0x/i, '').toLowerCase();
+    if (
+      canonicalRawDataHex !== String(signedTransaction.raw_data_hex || '').replace(/^0x/i, '').toLowerCase() ||
+      canonicalTxHash !== durableHash
+    ) {
+      return { verified: false, reason: 'TRON_SIGNED_PROTOBUF_IDENTITY_MISMATCH' };
+    }
+
+    const expectedAmountUnits = parseUnitsTron(String(withdrawal.amount), TRON_CONFIG.usdtDecimals);
+    return verifyTronSignedWithdrawalPayload({
+      txHash: durableHash,
+      signedTransaction,
+      expectedSenderHex: tronWeb.address.toHex(expectedSender),
+      expectedDestinationHex: tronWeb.address.toHex(String(withdrawal.to_address)),
+      expectedTokenContractHex: tronWeb.address.toHex(TRON_CONFIG.usdtContract),
+      expectedAmountUnits,
+      ...(observedTransaction !== undefined ? { observedTransaction } : {}),
+    });
+  } catch (error) {
+    return {
+      verified: false,
+      reason: error instanceof Error ? error.message.slice(0, 300) : 'TRON_DURABLE_PAYLOAD_VALIDATION_FAILED',
+    };
+  }
+}
+
+function verifyPersistedEvmWithdrawalPayload(input: {
+  signedBytes: string;
+  txHash: string;
+  network: string;
+  assetSymbol: string;
+  amount: string;
+  destination: string;
+  expectedSender: string;
+  expectedNonce: number | null;
+}): { verified: true } | { verified: false; reason: string } {
+  try {
+    const {
+      signedBytes,
+      txHash,
+      network,
+      assetSymbol,
+      amount,
+      destination,
+      expectedSender,
+      expectedNonce,
+    } = input;
+    const normNet = normalizeNetworkCode(network);
+    const chain = SUPPORTED_EVM_CHAINS[normNet];
+    if (!chain || !expectedSender || !destination || expectedNonce === null || !Number.isSafeInteger(expectedNonce)) {
+      return { verified: false, reason: 'PERSISTED_EVM_WITHDRAWAL_IDENTITY_MISSING' };
+    }
+
+    const signed = ethers.Transaction.from(signedBytes);
+    const computedHash = ethers.keccak256(signedBytes).toLowerCase();
+    if (
+      computedHash !== txHash.toLowerCase() ||
+      signed.from?.toLowerCase() !== expectedSender.toLowerCase() ||
+      signed.chainId !== BigInt(chain.chainId) ||
+      signed.nonce !== expectedNonce
+    ) {
+      return { verified: false, reason: 'PERSISTED_EVM_SIGNED_TRANSACTION_IDENTITY_MISMATCH' };
+    }
+
+    if (assetSymbol === chain.nativeSymbol) {
+      const expectedValue = ethers.parseUnits(amount, chain.nativeDecimals);
+      if (
+        signed.to?.toLowerCase() !== destination.toLowerCase() ||
+        signed.value !== expectedValue ||
+        (signed.data && signed.data !== '0x')
+      ) {
+        return { verified: false, reason: 'PERSISTED_EVM_NATIVE_PAYOUT_MISMATCH' };
+      }
+      return { verified: true };
+    }
+
+    const tokenContract = getTokenContractAddress(network, assetSymbol);
+    if (!tokenContract || signed.to?.toLowerCase() !== tokenContract.toLowerCase() || signed.value !== 0n) {
+      return { verified: false, reason: 'PERSISTED_EVM_TOKEN_CONTRACT_MISMATCH' };
+    }
+
+    const tokenInterface = new ethers.Interface(ERC20_ABI);
+    const decoded = tokenInterface.decodeFunctionData('transfer', signed.data || '0x');
+    const decodedDestination = String(decoded[0] || '');
+    const decodedAmount = BigInt(decoded[1]);
+    const expectedAmount = ethers.parseUnits(amount, getTokenDecimals(network, assetSymbol));
+    if (
+      decodedDestination.toLowerCase() !== destination.toLowerCase() ||
+      decodedAmount !== expectedAmount
+    ) {
+      return { verified: false, reason: 'PERSISTED_EVM_TOKEN_PAYOUT_MISMATCH' };
+    }
+
+    return { verified: true };
+  } catch {
+    return { verified: false, reason: 'PERSISTED_EVM_SIGNED_TRANSACTION_INVALID' };
+  }
 }
 
 /**
@@ -204,12 +369,32 @@ export async function processWithdrawalQueue(workerId: string = randomUUID()): P
 
       if (expectedNetwork === 'TRC20') {
         const signedTron = JSON.parse(persistedBytes) as Record<string, unknown>;
+        const payloadCheck = await verifyDurableTronWithdrawalPayload(withdrawal, undefined, signedTron);
+        if (!payloadCheck.verified) {
+          throw new Error(`Persisted TRON payload failed payout-identity verification: ${payloadCheck.reason}`);
+        }
         const rebroadcast = await broadcastSignedTrc20Transfer(signedTron);
         if (rebroadcast.txHash.toLowerCase() !== persistedHash.toLowerCase()) {
           throw new Error('Rebroadcast TRON transaction ID does not match the persisted payload');
         }
       } else {
-        const { provider } = getEvmHotWalletSigner(network);
+        const { provider, address } = getEvmHotWalletSigner(network);
+        const expectedNonce = existingBroadcast.nonce === null || existingBroadcast.nonce === undefined
+          ? null
+          : Number(existingBroadcast.nonce);
+        const payloadCheck = verifyPersistedEvmWithdrawalPayload({
+          signedBytes: persistedBytes,
+          txHash: persistedHash,
+          network,
+          assetSymbol,
+          amount: amountStr,
+          destination,
+          expectedSender: address || '',
+          expectedNonce,
+        });
+        if (!payloadCheck.verified) {
+          throw new Error(`Persisted EVM payload failed payout-identity verification: ${payloadCheck.reason}`);
+        }
         const rebroadcast = await provider.broadcastTransaction(persistedBytes);
         if (rebroadcast.hash.toLowerCase() !== persistedHash.toLowerCase()) {
           throw new Error('Rebroadcast EVM transaction hash does not match the persisted payload');
@@ -656,13 +841,18 @@ export async function checkSubmittedWithdrawals(): Promise<{
       const normNet = normalizeNetworkCode(w.network);
 
       if (normNet === 'TRC20') {
-        const { isConfirmed, confirmations, success, actualCostTrx, blockNumber } = await getTronTransactionConfirmations(w.tx_hash);
+        const { isConfirmed, confirmations, success, actualCostTrx, blockNumber, blockHash, receiptResult } = await getTronTransactionConfirmations(w.tx_hash);
 
         if (isConfirmed && success) {
           // A successful transaction receipt alone does not prove this was the
           // requested payout. Verify the confirmed canonical USDT Transfer event.
-          if (!blockNumber || !/^[a-fA-F0-9]{64}$/.test(String(w.tx_hash || ''))) {
-            console.error(`[Withdrawal Worker] TRON payout evidence unavailable for ${w.id}; settlement withheld`);
+          if (
+            !blockNumber ||
+            !blockHash ||
+            !/^[a-fA-F0-9]{64}$/.test(String(blockHash)) ||
+            !/^[a-fA-F0-9]{64}$/.test(String(w.tx_hash || ''))
+          ) {
+            console.error(`[Withdrawal Worker] TRON payout block/transaction evidence unavailable for ${w.id}; settlement withheld`);
             continue;
           }
           const tronWeb = getTronWeb(true);
@@ -670,6 +860,12 @@ export async function checkSubmittedWithdrawals(): Promise<{
           const expectedSender = privateKey ? tronWeb.address.fromPrivateKey(privateKey) : false;
           if (!expectedSender) {
             console.error(`[Withdrawal Worker] TRON hot-wallet address unavailable for ${w.id}; settlement withheld`);
+            continue;
+          }
+          const observedTronTransaction = await tronWeb.trx.getTransaction(w.tx_hash);
+          const durablePayloadCheck = await verifyDurableTronWithdrawalPayload(w, observedTronTransaction);
+          if (!durablePayloadCheck.verified) {
+            console.error(`[Withdrawal Worker] TRON durable payout payload rejected for ${w.id}: ${durablePayloadCheck.reason}; settlement withheld`);
             continue;
           }
           const eventUrl = `${TRON_CONFIG.fullHost.replace(/\/$/, '')}/v1/transactions/${encodeURIComponent(w.tx_hash)}/events?only_confirmed=true`;
@@ -712,7 +908,25 @@ export async function checkSubmittedWithdrawals(): Promise<{
             confirmed++;
           }
         } else if (success === false && confirmations >= TRON_CONFIG.requiredConfirmations) {
-          // A reverted TRON receipt can be orphaned; do not refund before solid-block depth.
+          // A reverted TRON receipt can be orphaned; do not refund until the canonical block,
+          // failed receipt, and exact persisted signed payout bytes all match.
+          if (
+            !blockNumber ||
+            !blockHash ||
+            !/^[a-fA-F0-9]{64}$/.test(String(blockHash)) ||
+            !receiptResult ||
+            !/^[a-fA-F0-9]{64}$/.test(String(w.tx_hash || ''))
+          ) {
+            console.error(`[Withdrawal Worker] TRON revert finality evidence is incomplete for ${w.id}; refund held`);
+            continue;
+          }
+          const tronWeb = getTronWeb(true);
+          const observedTronTransaction = await tronWeb.trx.getTransaction(w.tx_hash);
+          const durablePayloadCheck = await verifyDurableTronWithdrawalPayload(w, observedTronTransaction);
+          if (!durablePayloadCheck.verified) {
+            console.error(`[Withdrawal Worker] TRON revert payload rejected for ${w.id}: ${durablePayloadCheck.reason}; refund held`);
+            continue;
+          }
           const measuredTrx = Number(actualCostTrx || 0);
           if (!Number.isFinite(measuredTrx) || measuredTrx <= 0) {
             console.error(`[Withdrawal Worker] TRON revert gas cost is unavailable for ${w.id}; refund held for reconciliation`);
@@ -1012,8 +1226,9 @@ export async function checkSubmittedWithdrawals(): Promise<{
 }
 
 /**
- * Processes all pending withdrawals in sequence up to maxBatch
- * Enforces a PostgreSQL owner-token lease to coordinate independent worker instances
+ * Processes all pending withdrawals in sequence up to maxBatch.
+ * The claim RPC supplies atomic per-withdrawal worker_id/lease_expires_at fencing;
+ * this worker intentionally does not use a process-wide advisory lease.
  */
 export async function processAllPendingWithdrawals(maxBatch: number = 20): Promise<{
   totalProcessed: number;

@@ -6,6 +6,7 @@ import { toDate } from '@/lib/utils';
 import { SUPPORTED_CRYPTOS, CHAINS } from './constants';
 import { clearPendingWithdrawalKey, getOrCreatePendingWithdrawalKey } from '@/lib/withdrawal-idempotency-store';
 import { supabase } from '@/lib/supabase/client';
+import { normalizePrimaryWalletAssetBalance } from '@/lib/wallet-balance-normalization';
 import { insertPaxonesSystemMessage } from '@/lib/trade-system-messages';
 import {
   getUserWallets as getSupabaseUserWallets,
@@ -64,35 +65,6 @@ export async function getUserWalletBalances(
     console.warn('/api/wallet/balance query notice:', err);
   }
 
-  // 2. Direct query from balances table
-  try {
-    const { data: balancesData, error: balancesError } = await supabase
-      .from('balances')
-      .select('*')
-      .eq('user_id', userId);
-
-    if (!balancesError && balancesData && balancesData.length > 0) {
-      balancesData.forEach((row: any) => {
-        const rawSym = String(row.asset || row.asset_symbol || row.symbol || '').toUpperCase();
-        const symbol = (['BTC', 'ETH', 'LTC', 'USDT'].includes(rawSym) ? rawSym : null) as CryptoCurrency | null;
-        const spendable = Number(row.available_balance ?? row.available ?? row.balance ?? 0);
-        const lockedAmount = Number(row.locked_balance ?? row.locked ?? 0);
-
-        if (symbol) {
-          balanceMap[symbol] = {
-            balance: isNaN(spendable) ? 0 : spendable,
-            lockedBalance: isNaN(lockedAmount) ? 0 : lockedAmount,
-          };
-        }
-      });
-      if (Object.values(balanceMap).some(b => b.balance > 0 || b.lockedBalance > 0)) {
-        return balanceMap;
-      }
-    }
-  } catch (err) {
-    console.warn('balances table query error:', err);
-  }
-
   // 2. Direct query from wallet_assets using select('*')
   try {
     const { data: walletAssets, error: assetsError } = await supabase
@@ -104,18 +76,15 @@ export async function getUserWalletBalances(
       walletAssets.forEach((asset: any) => {
         const rawSym = String(asset.asset_symbol || asset.asset_code || asset.symbol || '').toUpperCase();
         const symbol = (['BTC', 'ETH', 'LTC', 'USDT'].includes(rawSym) ? rawSym : null) as CryptoCurrency | null;
-        const totalBal = Number(asset.balance ?? asset.amount ?? 0);
-        const lockedEscrow = Number(asset.in_escrow ?? asset.locked_balance ?? asset.locked ?? 0);
-        const lockedWithdrawal = Number(asset.in_withdrawal ?? 0);
-        const totalLocked = lockedEscrow + lockedWithdrawal;
-        const spendable = Math.max(0, totalBal - totalLocked);
+        if (!symbol) return;
 
-        if (symbol) {
-          balanceMap[symbol] = {
-            balance: isNaN(spendable) ? 0 : spendable,
-            lockedBalance: isNaN(totalLocked) ? 0 : totalLocked,
-          };
-        }
+        // The deployed wallet RPCs already debit balance when funds move into
+        // escrow/withdrawal locks. Do not subtract those locked columns again.
+        const normalized = normalizePrimaryWalletAssetBalance(asset);
+        balanceMap[symbol] = {
+          balance: normalized.available,
+          lockedBalance: normalized.inEscrow + normalized.inWithdrawal,
+        };
       });
       return balanceMap;
     }
@@ -148,6 +117,35 @@ export async function getUserWalletBalances(
     }
   } catch (err) {
     console.warn("user_wallets query error:", err);
+  }
+
+  // Legacy compatibility fallback only; wallet_assets remains the balance authority.
+  try {
+    const { data: balancesData, error: balancesError } = await supabase
+      .from('balances')
+      .select('*')
+      .eq('user_id', userId);
+
+    if (!balancesError && balancesData && balancesData.length > 0) {
+      balancesData.forEach((row: any) => {
+        const rawSym = String(row.asset || row.asset_symbol || row.symbol || '').toUpperCase();
+        const symbol = (['BTC', 'ETH', 'LTC', 'USDT'].includes(rawSym) ? rawSym : null) as CryptoCurrency | null;
+        const spendable = Number(row.available_balance ?? row.available ?? row.balance ?? 0);
+        const lockedAmount = Number(row.locked_balance ?? row.locked ?? 0);
+
+        if (symbol) {
+          balanceMap[symbol] = {
+            balance: isNaN(spendable) ? 0 : spendable,
+            lockedBalance: isNaN(lockedAmount) ? 0 : lockedAmount,
+          };
+        }
+      });
+      if (Object.values(balanceMap).some(b => b.balance > 0 || b.lockedBalance > 0)) {
+        return balanceMap;
+      }
+    }
+  } catch (err) {
+    console.warn('balances table query error:', err);
   }
 
   // 4. Fallback: Check getSupabaseUserWallets

@@ -7,6 +7,7 @@ import {
 } from '@/lib/blockchain/providers';
 import { TRON_CONFIG, getTronWeb, isValidTronAddress } from '@/lib/blockchain/tron';
 import { normalizeDepositNetwork } from '@/lib/hd-derivation-engine';
+import { parseDepositRpcResult } from '@/lib/deposit-rpc-result';
 
 // Initialize Supabase admin client with service role
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL;
@@ -23,6 +24,20 @@ export const CANONICAL_USDT_CONTRACTS: Readonly<Record<string, string>> = Object
   BEP20: '0x55d398326f99059fF775485246999027B3197955',
   TRC20: 'TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t',
 });
+
+function recordPendingDepositRpcResult(
+  data: unknown,
+  errors: string[],
+  context: string,
+  onCredited: () => void
+): void {
+  const result = parseDepositRpcResult(data);
+  if (!result.success) {
+    errors.push(`${context}: ${result.code || result.message || 'canonical deposit RPC rejected the candidate'}`);
+    return;
+  }
+  if (result.credited) onCredited();
+}
 
 export function getBtcMempoolApi(): string {
   if (
@@ -59,116 +74,138 @@ export async function getMonitoredAddresses(): Promise<{
   const tronAddresses = new Set<string>();
   const btcAddresses = new Set<string>();
   const ltcAddresses = new Set<string>();
+  const emptyResult = { evmAddresses, tronAddresses, btcAddresses, ltcAddresses };
+  const db = supabaseAdmin;
 
-  if (!supabaseAdmin) {
+  if (!db) {
     console.error('[Deposit Ingestion] Missing Supabase URL or service-role key; refusing database access.');
-    return { evmAddresses, tronAddresses, btcAddresses, ltcAddresses };
+    return emptyResult;
   }
 
   try {
-    // 1. Fetch from deposit_addresses
-    const { data: primaryAddresses, error: pErr } = await supabaseAdmin
-      .from('deposit_addresses')
-      .select('address, network_code, asset_code')
-      .eq('is_active', true)
-      .eq('status', 'active');
+    // Page every registry; PostgREST's default row cap must not silently hide
+    // deposit addresses when the wallet population grows beyond one page.
+    const fetchAllRows = async (queryFactory: (from: number, to: number) => any): Promise<any[]> => {
+      const rows: any[] = [];
+      for (let from = 0; ; from += 500) {
+        const { data, error } = await queryFactory(from, from + 499);
+        if (error) throw new Error(error.message || 'Wallet address registry query failed.');
+        const page = Array.isArray(data) ? data : [];
+        rows.push(...page);
+        if (page.length < 500) return rows;
+      }
+    };
 
-    if (!pErr && primaryAddresses) {
-      for (const row of primaryAddresses) {
-        if (!row.address) continue;
-        const clean = row.address.trim();
-        const normNet = normalizeDepositNetwork(row.network_code || '');
-        const normAsset = (row.asset_code || '').toUpperCase().trim();
+    const [primaryAddresses, fallbackAddresses, userWallets] = await Promise.all([
+      fetchAllRows((from, to) => db
+        .from('deposit_addresses')
+        .select('user_id, address, network_code, asset_code')
+        .eq('status', 'active')
+        .order('id', { ascending: true })
+        .range(from, to)),
+      fetchAllRows((from, to) => db
+        .from('user_deposit_addresses')
+        .select('user_id, address, network, asset_symbol')
+        .order('id', { ascending: true })
+        .range(from, to)),
+      fetchAllRows((from, to) => db
+        .from('wallets')
+        .select('user_id, address, chain, currency, funding_status')
+        .order('id', { ascending: true })
+        .range(from, to)),
+    ]);
 
-        if (normNet === 'TRC20' || isValidTronAddress(clean)) {
-          tronAddresses.add(clean);
-        } else if (
-          normNet === 'BTC' ||
-          normAsset === 'BTC' ||
-          clean.startsWith('bc1') ||
-          clean.startsWith('1') ||
-          clean.startsWith('3')
-        ) {
-          btcAddresses.add(clean);
-        } else if (normNet === 'LTC' || normAsset === 'LTC' || clean.startsWith('ltc1') || clean.startsWith('L') || clean.startsWith('M')) {
-          ltcAddresses.add(clean);
-        } else if (clean.startsWith('0x')) {
-          evmAddresses.add(clean.toLowerCase());
+    const ownerIds = Array.from(new Set([
+      ...primaryAddresses.map((row) => row.user_id),
+      ...fallbackAddresses.map((row) => row.user_id),
+      ...userWallets.map((row) => row.user_id),
+    ].filter((ownerId): ownerId is string => typeof ownerId === 'string' && ownerId.length > 0)));
+
+    // Never monitor an address whose owner has no provisioned profile/index.
+    // This keeps orphaned legacy rows fail-closed instead of repeatedly scanning
+    // addresses that the canonical deposit-credit RPC cannot resolve.
+    const eligibleOwnerIds = new Set<string>();
+    for (let offset = 0; offset < ownerIds.length; offset += 200) {
+      const ownerBatch = ownerIds.slice(offset, offset + 200);
+      const { data: profiles, error: profileError } = await db
+        .from('profiles')
+        .select('id, wallet_index')
+        .in('id', ownerBatch);
+      if (profileError) {
+        throw new Error(profileError.message || 'Could not verify wallet owner profiles.');
+      }
+      for (const profile of profiles || []) {
+        const walletIndex = Number(profile.wallet_index);
+        if (typeof profile.id === 'string' && Number.isSafeInteger(walletIndex) && walletIndex > 0) {
+          eligibleOwnerIds.add(profile.id);
         }
       }
     }
 
-    // 2. Fetch from user_deposit_addresses
-    const { data: fallbackAddresses, error: fErr } = await supabaseAdmin
-      .from('user_deposit_addresses')
-      // asset_symbol exists in both the checked-in migration and the live schema;
-      // `coin` does not, so selecting it makes this entire fallback query fail.
-      .select('address, network, asset_symbol');
+    const allAddressRows = [...primaryAddresses, ...fallbackAddresses, ...userWallets];
+    const skippedOrphanRows = allAddressRows.filter((row) => !eligibleOwnerIds.has(row.user_id)).length;
+    if (skippedOrphanRows > 0) {
+      console.warn(`[Deposit Ingestion] Skipped ${skippedOrphanRows} address row(s) without a valid provisioned profile wallet_index.`);
+    }
 
-    if (fErr) {
-      console.error('[Deposit Ingestion] Could not load fallback deposit addresses:', fErr.message);
-    } else if (fallbackAddresses) {
-      for (const row of fallbackAddresses) {
-        if (!row.address) continue;
-        const clean = row.address.trim();
-        const normNet = normalizeDepositNetwork(row.network || '');
-        const normCoin = (row.asset_symbol || '').toUpperCase().trim();
+    for (const row of primaryAddresses) {
+      if (!eligibleOwnerIds.has(row.user_id) || !row.address) continue;
+      const clean = String(row.address).trim();
+      const normNet = normalizeDepositNetwork(row.network_code || '');
+      const normAsset = String(row.asset_code || '').toUpperCase().trim();
 
-        if (normNet === 'TRC20' || isValidTronAddress(clean)) {
-          tronAddresses.add(clean);
-        } else if (
-          normNet === 'BTC' ||
-          normCoin === 'BTC' ||
-          clean.startsWith('bc1') ||
-          clean.startsWith('1') ||
-          clean.startsWith('3')
-        ) {
-          btcAddresses.add(clean);
-        } else if (normNet === 'LTC' || normCoin === 'LTC' || clean.startsWith('ltc1') || clean.startsWith('L') || clean.startsWith('M')) {
-          ltcAddresses.add(clean);
-        } else if (clean.startsWith('0x')) {
-          evmAddresses.add(clean.toLowerCase());
-        }
+      if (normNet === 'TRC20' || isValidTronAddress(clean)) {
+        tronAddresses.add(clean);
+      } else if (normNet === 'BTC' || normAsset === 'BTC' || clean.startsWith('bc1') || clean.startsWith('1') || clean.startsWith('3')) {
+        btcAddresses.add(clean);
+      } else if (normNet === 'LTC' || normAsset === 'LTC' || clean.startsWith('ltc1') || clean.startsWith('L') || clean.startsWith('M')) {
+        ltcAddresses.add(clean);
+      } else if (clean.toLowerCase().startsWith('0x')) {
+        evmAddresses.add(clean.toLowerCase());
       }
     }
 
-    // 3. Fetch from wallets (User dashboard wallets)
-    const { data: userWallets, error: wErr } = await supabaseAdmin
-      .from('wallets')
-      .select('address, chain, currency, funding_status');
+    for (const row of fallbackAddresses) {
+      if (!eligibleOwnerIds.has(row.user_id) || !row.address) continue;
+      const clean = String(row.address).trim();
+      const normNet = normalizeDepositNetwork(row.network || '');
+      const normCoin = String(row.asset_symbol || '').toUpperCase().trim();
 
-    if (wErr) {
-      console.error('[Deposit Ingestion] Could not load wallet deposit addresses:', wErr.message);
-    } else if (userWallets) {
-      for (const row of userWallets) {
-        if (!row.address || String(row.funding_status || '').toUpperCase() !== 'ACTIVE') continue;
-        const clean = row.address.trim();
-        const normNet = normalizeDepositNetwork(row.chain || '');
-        const normCoin = (row.currency || '').toUpperCase().trim();
+      if (normNet === 'TRC20' || isValidTronAddress(clean)) {
+        tronAddresses.add(clean);
+      } else if (normNet === 'BTC' || normCoin === 'BTC' || clean.startsWith('bc1') || clean.startsWith('1') || clean.startsWith('3')) {
+        btcAddresses.add(clean);
+      } else if (normNet === 'LTC' || normCoin === 'LTC' || clean.startsWith('ltc1') || clean.startsWith('L') || clean.startsWith('M')) {
+        ltcAddresses.add(clean);
+      } else if (clean.toLowerCase().startsWith('0x')) {
+        evmAddresses.add(clean.toLowerCase());
+      }
+    }
 
-        if (normNet === 'TRC20' || isValidTronAddress(clean)) {
-          tronAddresses.add(clean);
-        } else if (
-          normNet === 'BTC' ||
-          normCoin === 'BTC' ||
-          clean.startsWith('bc1') ||
-          clean.startsWith('1') ||
-          clean.startsWith('3')
-        ) {
-          btcAddresses.add(clean);
-        } else if (normNet === 'LTC' || normCoin === 'LTC' || clean.startsWith('ltc1') || clean.startsWith('L') || clean.startsWith('M')) {
-          ltcAddresses.add(clean);
-        } else if (clean.startsWith('0x')) {
-          evmAddresses.add(clean.toLowerCase());
-        }
+    for (const row of userWallets) {
+      if (!eligibleOwnerIds.has(row.user_id) || !row.address || String(row.funding_status || '').toUpperCase() !== 'ACTIVE') continue;
+      const clean = String(row.address).trim();
+      const normNet = normalizeDepositNetwork(row.chain || '');
+      const normCoin = String(row.currency || '').toUpperCase().trim();
+
+      if (normNet === 'TRC20' || isValidTronAddress(clean)) {
+        tronAddresses.add(clean);
+      } else if (normNet === 'BTC' || normCoin === 'BTC' || clean.startsWith('bc1') || clean.startsWith('1') || clean.startsWith('3')) {
+        btcAddresses.add(clean);
+      } else if (normNet === 'LTC' || normCoin === 'LTC' || clean.startsWith('ltc1') || clean.startsWith('L') || clean.startsWith('M')) {
+        ltcAddresses.add(clean);
+      } else if (clean.toLowerCase().startsWith('0x')) {
+        evmAddresses.add(clean.toLowerCase());
       }
     }
   } catch (err) {
-    console.error('[Deposit Ingestion] Error querying monitored deposit addresses:', err);
+    console.error('[Deposit Ingestion] Error querying monitored deposit addresses; failing closed:', err);
+    return emptyResult;
   }
 
   return { evmAddresses, tronAddresses, btcAddresses, ltcAddresses };
 }
+
 
 /**
  * Scans EVM logs for incoming ERC-20 token transfers targeting monitored addresses
@@ -270,10 +307,12 @@ async function scanEvmTokenDeposits(
         if (error) {
           errors.push(`RPC error on tx ${log.transactionHash}: ${error.message}`);
         } else {
-          const res = typeof data === 'string' ? JSON.parse(data) : data;
-          if (res?.status === 'credited') {
-            credited++;
-          }
+          recordPendingDepositRpcResult(
+            data,
+            errors,
+            `RPC rejected EVM token deposit ${log.transactionHash}`,
+            () => { credited++; }
+          );
         }
       } catch (logErr: any) {
         errors.push(`Error processing EVM log ${log.transactionHash}: ${logErr.message}`);
@@ -381,13 +420,15 @@ async function scanEvmNativeDeposits(
                   p_provider: 'deposit_ingestion',
                 });
 
-                if (!error) {
-                  const res = typeof data === 'string' ? JSON.parse(data) : data;
-                  if (res?.status === 'PENDING' && res?.credited === false) {
-                    // This process only registered a pending candidate; it never credits.
-                  }
-                } else {
+                if (error) {
                   errors.push(`RPC error for native transfer ${txHash}: ${error.message}`);
+                } else {
+                  recordPendingDepositRpcResult(
+                    data,
+                    errors,
+                    `RPC rejected native transfer ${txHash}`,
+                    () => { credited++; }
+                  );
                 }
               }
             }
@@ -432,10 +473,12 @@ async function scanEvmNativeDeposits(
           if (error) {
             errors.push(`RPC error for native transfer ${tx.hash}: ${error.message}`);
           } else {
-            const res = typeof data === 'string' ? JSON.parse(data) : data;
-            if (res?.status === 'credited') {
-              credited++;
-            }
+            recordPendingDepositRpcResult(
+              data,
+              errors,
+              `RPC rejected native transfer ${tx.hash}`,
+              () => { credited++; }
+            );
           }
         }
       }
@@ -636,10 +679,12 @@ async function scanTronDeposits(
             if (error) {
               errors.push(`RPC error for TRON deposit ${txId}: ${error.message}`);
             } else {
-              const r = typeof rpcData === 'string' ? JSON.parse(rpcData) : rpcData;
-              if (r?.status === 'credited') {
-                credited++;
-              }
+              recordPendingDepositRpcResult(
+                rpcData,
+                errors,
+                `RPC rejected TRON deposit ${txId}`,
+                () => { credited++; }
+              );
             }
           }
         }
@@ -708,10 +753,12 @@ async function scanTronDeposits(
             if (error) {
               errors.push(`RPC error for TRON deposit ${txId}: ${error.message}`);
             } else {
-              const r = typeof rpcData === 'string' ? JSON.parse(rpcData) : rpcData;
-              if (r?.status === 'credited') {
-                credited++;
-              }
+              recordPendingDepositRpcResult(
+                rpcData,
+                errors,
+                `RPC rejected TRON deposit ${txId}`,
+                () => { credited++; }
+              );
             }
           }
         }
@@ -835,10 +882,12 @@ async function scanTronDeposits(
           if (error) {
             errors.push(`RPC error for TRON deposit ${txHash}: ${error.message}`);
           } else {
-            const res = typeof rpcData === 'string' ? JSON.parse(rpcData) : rpcData;
-            if (res?.status === 'credited') {
-              credited++;
-            }
+            recordPendingDepositRpcResult(
+              rpcData,
+              errors,
+              `RPC rejected TRON deposit ${txHash}`,
+              () => { credited++; }
+            );
           }
         }
       } catch (rpcErr: any) {
@@ -894,8 +943,12 @@ async function scanBtcDeposits(
           if (error) {
             errors.push('RPC error for BTC deposit ' + tx.txid + ' output ' + i + ': ' + error.message);
           } else {
-            const res = typeof data === 'string' ? JSON.parse(data) : data;
-            if (res?.status === 'credited') credited++;
+            recordPendingDepositRpcResult(
+              data,
+              errors,
+              `RPC rejected BTC deposit ${tx.txid} output ${i}`,
+              () => { credited++; }
+            );
           }
         }
       }
@@ -949,8 +1002,12 @@ async function scanLtcDeposits(
           if (error) {
             errors.push('RPC error for LTC deposit ' + tx.txid + ' output ' + i + ': ' + error.message);
           } else {
-            const res = typeof data === 'string' ? JSON.parse(data) : data;
-            if (res?.status === 'credited') credited++;
+            recordPendingDepositRpcResult(
+              data,
+              errors,
+              `RPC rejected LTC deposit ${tx.txid} output ${i}`,
+              () => { credited++; }
+            );
           }
         }
       }

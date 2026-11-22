@@ -171,6 +171,29 @@ export async function broadcastSignedTrc20Transfer(
     throw new Error('Cannot broadcast a TRON transaction without a valid signed txID');
   }
   const tronWeb = getTronWeb(false);
+  const transactionUtils = (tronWeb as any).utils?.transaction;
+  if (
+    typeof transactionUtils?.txJsonToPb !== 'function' ||
+    typeof transactionUtils?.txPbToRawDataHex !== 'function' ||
+    typeof transactionUtils?.txPbToTxID !== 'function'
+  ) {
+    throw new Error('TRON transaction protobuf verifier is unavailable; refusing to broadcast');
+  }
+  const transactionPb = transactionUtils.txJsonToPb(signedTransaction);
+  const canonicalRawDataHex = String(transactionUtils.txPbToRawDataHex(transactionPb) || '').toLowerCase();
+  const canonicalTxHash = String(transactionUtils.txPbToTxID(transactionPb) || '').replace(/^0x/i, '').toLowerCase();
+  const suppliedRawDataHex = String((signedTransaction as any).raw_data_hex || '').replace(/^0x/i, '').toLowerCase();
+  if (
+    !/^[a-f0-9]{64}$/.test(canonicalTxHash) ||
+    canonicalTxHash !== txHash ||
+    !suppliedRawDataHex ||
+    canonicalRawDataHex !== suppliedRawDataHex
+  ) {
+    throw new Error('TRON signed transaction protobuf does not match its persisted raw data and txID');
+  }
+  if (!Array.isArray((signedTransaction as any).signature) || (signedTransaction as any).signature.length === 0) {
+    throw new Error('TRON signed transaction has no signature; refusing to broadcast');
+  }
   const result = await tronWeb.trx.sendRawTransaction(signedTransaction as any);
   if (!result?.result) {
     throw new Error(`TRON broadcast was not acknowledged for ${txHash}: ${result?.message || 'unknown node response'}`);
@@ -179,69 +202,72 @@ export async function broadcastSignedTrc20Transfer(
 }
 
 /**
- * Compatibility wrapper for non-custody call sites. Custodial withdrawal workers
- * must use prepare -> persist -> broadcast instead of this convenience method.
+ * @deprecated Direct hot-wallet broadcasts bypass durable sweep/withdrawal state.
+ * Use the durable worker flow: prepare -> persist -> broadcast.
  */
-export async function sendTrc20Transfer(params: {
+export async function sendTrc20Transfer(_params: {
   toAddress: string;
   amount: string | number;
   contractAddress?: string;
 }): Promise<{ txHash: string; broadcasted: boolean }> {
-  const prepared = await prepareSignedTrc20Transfer(params);
-  return broadcastSignedTrc20Transfer(prepared.signedTransaction);
+  throw new Error('Direct TRC20 hot-wallet transfers are disabled; use the durable worker flow');
 }
 
 /**
- * Executes a native TRX transfer from the hot wallet
+ * @deprecated Direct native hot-wallet broadcasts bypass durable sweep/withdrawal state.
  */
-export async function sendTrxTransfer(params: {
+export async function sendTrxTransfer(_params: {
   toAddress: string;
   amountInTrx: string | number;
 }): Promise<{ txHash: string; broadcasted: boolean }> {
-  const { toAddress, amountInTrx } = params;
-
-  if (!isValidTronAddress(toAddress)) {
-    throw new Error(`Invalid TRON destination address: ${toAddress}`);
-  }
-
-  const tronWeb = getTronWeb(true);
-  if (!tronWeb.defaultPrivateKey) {
-    throw new Error('TRON hot wallet private key is not configured');
-  }
-
-  const sunAmount = parseUnitsTron(amountInTrx, 6).toString();
-  const tx = await tronWeb.trx.sendTransaction(toAddress, Number(sunAmount));
-
-  if (!tx.result || !tx.transaction?.txID) {
-    throw new Error('TRON native TRX transfer rejected by network');
-  }
-
-  return { txHash: tx.transaction.txID, broadcasted: true };
+  throw new Error('Direct TRX hot-wallet transfers are disabled; use the durable worker flow');
 }
 
 /**
  * Checks confirmations and execution status of a TRON transaction
  */
-export async function getTronTransactionConfirmations(txHash: string): Promise<{
+export async function getTronTransactionConfirmations(txHash: string, tronWebOverride?: any): Promise<{
   confirmations: number;
   isConfirmed: boolean;
   success: boolean | undefined;
   blockNumber?: number;
+  blockHash?: string;
+  receiptResult?: string;
   actualCostTrx?: string;
 }> {
   try {
-    const tronWeb = getTronWeb(false);
+    const tronWeb = tronWebOverride || getTronWeb(false);
 
     // Missing/indexing-lag responses are UNKNOWN, not proof of a reverted transaction.
     // An RPC outage must never trigger an automatic refund.
     const txInfo = await tronWeb.trx.getTransactionInfo(txHash);
-    if (!txInfo || !txInfo.blockNumber) {
+    if (
+      !txInfo ||
+      !txInfo.blockNumber ||
+      String((txInfo as any).id || '').toLowerCase() !== txHash.toLowerCase()
+    ) {
       return { confirmations: 0, isConfirmed: false, success: undefined };
     }
 
-    // Get current block
-    const currentBlock = await tronWeb.trx.getCurrentBlock();
+    // Confirm the transaction is present in the canonical block at its reported height.
+    const [currentBlock, canonicalBlock] = await Promise.all([
+      tronWeb.trx.getCurrentBlock(),
+      tronWeb.trx.getBlock(txInfo.blockNumber),
+    ]);
     const currentHeight = currentBlock.block_header?.raw_data?.number;
+    const blockHash = String((canonicalBlock as any)?.blockID || '').toLowerCase();
+    const blockNumber = Number((canonicalBlock as any)?.block_header?.raw_data?.number);
+    const blockContainsTransaction = Array.isArray((canonicalBlock as any)?.transactions)
+      && (canonicalBlock as any).transactions.some((transaction: any) =>
+        String(transaction?.txID || '').toLowerCase() === txHash.toLowerCase()
+      );
+    if (
+      !/^[a-f0-9]{64}$/.test(blockHash) ||
+      blockNumber !== Number(txInfo.blockNumber) ||
+      !blockContainsTransaction
+    ) {
+      return { confirmations: 0, isConfirmed: false, success: undefined, blockNumber: txInfo.blockNumber };
+    }
 
     // Actual burned TRX fee (fee in Sun / 1,000,000) using exact integer arithmetic
     const feeSun = BigInt(txInfo.fee || 0);
@@ -249,15 +275,28 @@ export async function getTronTransactionConfirmations(txHash: string): Promise<{
     const fractionSun = (feeSun % 1000000n).toString().padStart(6, '0');
     const actualCostTrx = `${wholeTrx}.${fractionSun}`;
 
-    const receiptResult = txInfo.receipt?.result;
+    const receiptResult = String(txInfo.receipt?.result ?? (txInfo as any).ret?.[0]?.contractRet ?? '').trim().toUpperCase();
+    const knownFailureResults = new Set([
+      'FAILED',
+      'REVERT',
+      'OUT_OF_ENERGY',
+      'OUT_OF_TIME',
+      'OUT_OF_BANDWIDTH',
+      'OUT_OF_MEMORY',
+      'CONTRACT_VALIDATE_ERROR',
+      'CONTRACT_EXE_ERROR',
+      'ILLEGAL_OPERATION',
+      'DUP_TRANSACTION_ERROR',
+      'BANDWIDTH_ERROR',
+    ]);
     const success = receiptResult === 'SUCCESS'
       ? true
-      : typeof receiptResult === 'string' && receiptResult.length > 0
+      : knownFailureResults.has(receiptResult)
         ? false
         : undefined;
 
     if (typeof currentHeight !== 'number') {
-      return { confirmations: 0, isConfirmed: false, success, blockNumber: txInfo.blockNumber, actualCostTrx };
+      return { confirmations: 0, isConfirmed: false, success: undefined, blockNumber: txInfo.blockNumber, blockHash, receiptResult, actualCostTrx };
     }
 
     const confirmations = Math.max(0, currentHeight - txInfo.blockNumber + 1);
@@ -267,6 +306,8 @@ export async function getTronTransactionConfirmations(txHash: string): Promise<{
       isConfirmed: confirmations >= TRON_CONFIG.requiredConfirmations && success === true,
       success,
       blockNumber: txInfo.blockNumber,
+      blockHash,
+      receiptResult,
       actualCostTrx,
     };
   } catch (err) {

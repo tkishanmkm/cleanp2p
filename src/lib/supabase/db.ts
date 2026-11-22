@@ -1,4 +1,5 @@
 import { supabase } from './client';
+import { normalizePrimaryWalletAssetBalance } from '@/lib/wallet-balance-normalization';
 
 export interface WalletAssetBalance {
   wallet_id: string;
@@ -147,66 +148,66 @@ export async function completeTrade(
  */
 export async function getUserWallets(userId: string): Promise<RpcResponse<UserWallet | null>> {
   try {
-    // 1. Direct query from wallet_assets by user_id
-    const { data: directAssets } = await supabase
+    if (!userId) {
+      return { data: null, error: new Error('A user ID is required to load wallet balances.') };
+    }
+
+    // WAYONES provisions four chain-specific rows in public.wallets, while
+    // public.wallet_assets is keyed by (user_id, asset_symbol). Read the
+    // authoritative asset rows directly; never assume one wallet row per user
+    // or a wallet_id foreign key on wallet_assets.
+    const { data: assetRows, error } = await supabase
       .from('wallet_assets')
-      .select('asset_symbol, available, locked, updated_at')
-      .eq('user_id', userId);
-
-    if (directAssets && directAssets.length > 0) {
-      return {
-        data: {
-          id: userId,
-          user_id: userId,
-          status: 'active',
-          provisioning_status: 'completed',
-          created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
-          balances: directAssets.map((a: any) => ({
-            wallet_id: userId,
-            asset_code: a.asset_symbol || '',
-            available: Number(a.available || 0),
-            locked_escrow: Number(a.locked || 0),
-            locked_withdrawal: 0,
-            updated_at: a.updated_at || new Date().toISOString(),
-          })),
-        },
-        error: null,
-      };
-    }
-
-    const { data: walletData, error: walletError } = await supabase
-      .from('wallets')
-      .select('*')
+      .select('asset_symbol, balance, locked_balance, reserved_balance, in_escrow, in_withdrawal, created_at, updated_at')
       .eq('user_id', userId)
-      .maybeSingle();
+      .order('asset_symbol', { ascending: true });
 
-    if (walletError && walletError.code !== 'PGRST116') {
-      return { data: null, error: new Error(walletError.message) };
+    if (error) {
+      return { data: null, error: new Error(error.message) };
     }
 
-    if (walletData) {
-      const { data: balancesData } = await supabase
-        .from('wallet_assets')
-        .select('*')
-        .eq('wallet_id', walletData.id);
+    if (!Array.isArray(assetRows) || assetRows.length === 0) {
+      return { data: null, error: null };
+    }
 
+    const now = new Date().toISOString();
+    const balances: WalletAssetBalance[] = assetRows.map((row: any) => {
+      const normalized = normalizePrimaryWalletAssetBalance(row);
       return {
-        data: {
-          ...walletData,
-          balances: (balancesData || []).map((b: any) => ({
-            ...b,
-            asset_code: b.asset_symbol || b.asset_code,
-            available: Number(b.available || b.balance || 0),
-            locked_escrow: Number(b.locked || b.locked_escrow || 0),
-            locked_withdrawal: Number(b.locked_withdrawal || 0),
-          })),
-        },
-        error: null,
+        wallet_id: userId,
+        asset_code: String(row.asset_symbol || '').trim().toUpperCase(),
+        available: normalized.available,
+        locked_escrow: normalized.inEscrow,
+        locked_withdrawal: normalized.inWithdrawal,
+        updated_at: typeof row.updated_at === 'string' ? row.updated_at : now,
       };
+    }).filter((row) => Boolean(row.asset_code));
+
+    if (balances.length === 0) {
+      return { data: null, error: null };
     }
 
-    return { data: null, error: null };
+    const createdTimestamps = assetRows
+      .map((row: any) => row.created_at)
+      .filter((value: unknown): value is string => typeof value === 'string')
+      .sort();
+    const updatedTimestamps = assetRows
+      .map((row: any) => row.updated_at)
+      .filter((value: unknown): value is string => typeof value === 'string')
+      .sort();
+
+    return {
+      data: {
+        id: userId,
+        user_id: userId,
+        status: 'active',
+        provisioning_status: 'completed',
+        created_at: createdTimestamps[0] || now,
+        updated_at: updatedTimestamps[updatedTimestamps.length - 1] || now,
+        balances,
+      },
+      error: null,
+    };
   } catch (err: unknown) {
     return { data: null, error: err instanceof Error ? err : new Error(String(err)) };
   }

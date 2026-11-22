@@ -7,6 +7,8 @@ import { isTier2User } from '@/lib/kyc';
 import { isTransferAccountBlocked } from '@/lib/transfer-account-status';
 import { isValidTransferRpcResponse } from '@/lib/transfer-rpc-validation';
 import { getPlatformFeeSettings } from '@/lib/platform-fees';
+import { resolveDepositAddressOwner } from '@/lib/wallet/deposit-address-owner.server';
+import { DepositAddressOwnershipConflictError } from '@/lib/wallet/deposit-address-owner';
 
 function hasValidTransferAmountFormat(decimal: string): boolean {
   if (!decimal || decimal.length > 27) return false;
@@ -280,23 +282,33 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // 3d. Check if targetIdentifier is a deposit address of another platform user
+    // 3d. Resolve exact deposit-address ownership across both private registries.
+    // The helper fails closed if the two registries disagree about the owner.
     if (!recipientProfile) {
-      const { data: depAddr } = await admin
-        .from('deposit_addresses')
-        .select('user_id')
-        .eq('address', targetIdentifier)
-        .maybeSingle();
+      let depositAddressOwner: string | null;
+      try {
+        depositAddressOwner = await resolveDepositAddressOwner(admin, cleanTarget);
+      } catch (lookupError) {
+        if (lookupError instanceof DepositAddressOwnershipConflictError) {
+          return NextResponse.json(
+            { error: 'This deposit address has conflicting ownership records. Contact support before sending funds.', code: lookupError.code },
+            { status: 409 }
+          );
+        }
+        throw lookupError;
+      }
 
-      if (depAddr?.user_id) {
-        const { data: profByAddr } = await admin
+      if (depositAddressOwner) {
+        const { data: profByAddr, error: profileLookupError } = await admin
           .from('profiles')
           .select('id, username, is_banned, is_restricted, is_suspended, is_minor_restricted, is_emergency_frozen, account_status, status')
-          .eq('id', depAddr.user_id)
+          .eq('id', depositAddressOwner)
           .maybeSingle();
-        if (profByAddr) {
-          recipientProfile = profByAddr;
+
+        if (profileLookupError) {
+          throw new Error('Recipient profile could not be verified for this deposit address.');
         }
+        if (profByAddr) recipientProfile = profByAddr;
       }
     }
 

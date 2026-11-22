@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { timingSafeEqual } from 'node:crypto';
 import { cookies } from 'next/headers';
 import { createServerClient } from '@supabase/ssr';
 import { createClient as createSupabaseClient } from '@supabase/supabase-js';
@@ -6,6 +7,30 @@ import { getOrDeriveUserDepositAddresses } from '@/lib/hd-derivation-engine';
 import { getSupabaseAdminClient } from '@/lib/supabase/server';
 
 export const dynamic = 'force-dynamic';
+
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+/**
+ * The database signup trigger sends the Vault-stored wallet_provisioning_bearer
+ * as an Authorization bearer token. It is not a Supabase user access token.
+ * Keep this secret server-only and compare it in constant time.
+ */
+function isInternalProvisionAuthorized(req: NextRequest): boolean {
+  const configuredSecret = (
+    process.env.WALLET_PROVISIONING_SECRET ||
+    process.env.PROVISION_SERVICE_KEY ||
+    ''
+  ).trim();
+  const authorization = req.headers.get('authorization') || '';
+  const bearerMatch = /^Bearer\s+(.+)$/i.exec(authorization);
+  const providedSecret = (bearerMatch?.[1] || req.headers.get('x-provision-secret') || '').trim();
+
+  if (!configuredSecret || !providedSecret) return false;
+
+  const expected = Buffer.from(configuredSecret, 'utf8');
+  const provided = Buffer.from(providedSecret, 'utf8');
+  return expected.length === provided.length && timingSafeEqual(expected, provided);
+}
 
 function getAuthClient() {
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL;
@@ -76,32 +101,90 @@ async function resolveAuthenticatedUserId(req: NextRequest): Promise<string | nu
 
 export async function POST(req: NextRequest) {
   try {
-    // 1. Authentication Check (Task 2)
-    const authenticatedUserId = await resolveAuthenticatedUserId(req);
-    if (!authenticatedUserId) {
+    const contentLength = Number(req.headers.get('content-length') || 0);
+    if (Number.isFinite(contentLength) && contentLength > 2048) {
+      return NextResponse.json({ error: 'Request body is too large.' }, { status: 413 });
+    }
+
+    const bodyReader = req.body?.getReader();
+    if (!bodyReader) {
+      return NextResponse.json({ error: 'A valid JSON object is required.' }, { status: 400 });
+    }
+
+    const chunks: Uint8Array[] = [];
+    let byteLength = 0;
+    try {
+      while (true) {
+        const { done, value } = await bodyReader.read();
+        if (done) break;
+        byteLength += value.byteLength;
+        if (byteLength > 2048) {
+          await bodyReader.cancel().catch(() => undefined);
+          return NextResponse.json({ error: 'Request body is too large.' }, { status: 413 });
+        }
+        chunks.push(value);
+      }
+    } catch {
+      return NextResponse.json({ error: 'Could not read request body.' }, { status: 400 });
+    }
+
+    const bodyBytes = new Uint8Array(byteLength);
+    let offset = 0;
+    for (const chunk of chunks) {
+      bodyBytes.set(chunk, offset);
+      offset += chunk.byteLength;
+    }
+
+    let body: Record<string, unknown>;
+    try {
+      const parsed: unknown = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bodyBytes));
+      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+        throw new Error('A JSON object is required.');
+      }
+      body = parsed as Record<string, unknown>;
+    } catch {
+      return NextResponse.json({ error: 'A valid JSON object is required.' }, { status: 400 });
+    }
+
+    const rawBodyUserId = body.userId;
+    const bodyUserId = typeof rawBodyUserId === 'string' ? rawBodyUserId.trim() : null;
+    if (rawBodyUserId != null && (!bodyUserId || !UUID_PATTERN.test(bodyUserId))) {
       return NextResponse.json(
-        { error: 'Unauthorized. Authentication is required to provision wallets.' },
+        { error: 'userId must be a valid UUID when supplied.' },
+        { status: 400 }
+      );
+    }
+
+    const internalAuthorized = isInternalProvisionAuthorized(req);
+
+    // Internal Vault bearer requests are service-authorized and may provision
+    // the signup-trigger's target user. Ordinary sessions remain self-only.
+    const authenticatedUserId = internalAuthorized
+      ? null
+      : await resolveAuthenticatedUserId(req);
+
+    if (!internalAuthorized && !authenticatedUserId) {
+      return NextResponse.json(
+        { error: 'Unauthorized. A valid user session or internal provisioning secret is required.' },
         { status: 401 }
       );
     }
 
-    // 2. Authorization Check (Task 3)
-    let bodyUserId: string | null = null;
-    try {
-      const body = await req.json();
-      bodyUserId = body?.userId || null;
-    } catch {
-      // JSON body is optional; default to authenticated user
+    if (internalAuthorized && (!bodyUserId || !UUID_PATTERN.test(bodyUserId))) {
+      return NextResponse.json(
+        { error: 'A valid userId is required for internal wallet provisioning.' },
+        { status: 400 }
+      );
     }
 
-    if (bodyUserId && bodyUserId !== authenticatedUserId) {
+    if (!internalAuthorized && bodyUserId && bodyUserId !== authenticatedUserId) {
       return NextResponse.json(
         { error: 'Forbidden. Cannot provision wallets for another user.' },
         { status: 403 }
       );
     }
 
-    const targetUserId = authenticatedUserId;
+    const targetUserId = internalAuthorized ? bodyUserId! : authenticatedUserId!;
     const adminClient = getSupabaseAdminClient();
 
     // 3. Inspect existing profile to verify wallet_index presence (Task 4)
@@ -119,7 +202,12 @@ export async function POST(req: NextRequest) {
     }
 
     // Strict validation: Fail closed if wallet_index is missing/null/invalid. NO FALLBACK TO 0.
-    if (profile.wallet_index === null || profile.wallet_index === undefined || typeof profile.wallet_index !== 'number' || profile.wallet_index <= 0) {
+    if (
+      typeof profile.wallet_index !== 'number' ||
+      !Number.isSafeInteger(profile.wallet_index) ||
+      profile.wallet_index <= 0 ||
+      profile.wallet_index > 0x7fffffff
+    ) {
       return NextResponse.json(
         { 
           error: 'Fail-closed: User profile has no valid allocated wallet_index. Address derivation cannot proceed without an assigned sequence index.' 

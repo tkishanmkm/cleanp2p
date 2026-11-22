@@ -72,11 +72,12 @@ export function requireDepositMnemonic(): string {
 }
 
 /**
- * Restrict child indices to the BIP-32 non-hardened child-index range.
- * Account provisioning separately requires a positive database-allocated index.
+ * Restrict database-allocated wallet indexes to the positive BIP-32
+ * non-hardened child-index range. Index zero is valid in BIP-32 generally,
+ * but reserved by this application so every customer wallet index is positive.
  */
 export function validateWalletDerivationIndex(index: number): void {
-  if (!Number.isSafeInteger(index) || index < 0 || index > 0x7fffffff) {
-    throw new Error('Wallet derivation index must be a safe non-negative BIP-32 child index');
+  if (!Number.isSafeInteger(index) || index < 1 || index > 0x7fffffff) {
+    throw new Error('Wallet derivation index must be a positive safe BIP-32 child index');
   }
 }

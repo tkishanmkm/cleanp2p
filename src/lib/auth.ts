@@ -308,19 +308,30 @@ export async function handleSignUp(formData: {
   // Update profile with full_name and auto-generated username as display name
   if (data.user) {
     try {
-      await supabase.from('profiles').upsert({
-        id: data.user.id,
-        email: data.user.email,
-        full_name: formData.fullName.trim(),
-        name: formData.fullName.trim(),
-        username: generatedUsername,
-        display_name: generatedUsername, // Profile username is display name
-        dob: formattedDob,
-        date_of_birth: formattedDob,
-        security_question: formData.securityQuestion,
-        country: formData.country,
-        updated_at: new Date().toISOString(),
-      });
+      const { data: updatedProfile, error: updateProfileError } = await supabase
+        .from('profiles')
+        .update({
+          email: data.user.email,
+          full_name: formData.fullName.trim(),
+          name: formData.fullName.trim(),
+          username: generatedUsername,
+          display_name: generatedUsername, // Profile username is display name
+          dob: formattedDob,
+          date_of_birth: formattedDob,
+          security_question: formData.securityQuestion,
+          country: formData.country,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', data.user.id)
+        .select('id')
+        .maybeSingle();
+
+      if (updateProfileError || !updatedProfile) {
+        console.warn('Signup profile update was not applied; sequence-backed auth trigger reconciliation is required.', {
+          code: updateProfileError?.code || null,
+          userId: data.user.id,
+        });
+      }
     } catch (e) {
       console.warn('Profile save note:', e);
     }
@@ -373,28 +384,35 @@ export async function signUpWithEmail(
       return { data: null, error: handleAuthError(error) };
     }
 
-    // Ensure profile row exists in profiles table with username and full_name
+    // Update only the profile created by the sequence-backed auth trigger.
     if (data.user) {
       try {
-        await supabase.from('profiles').upsert({
-          id: data.user.id,
-          email: data.user.email,
-          username: resolvedUsername,
-          display_name: resolvedDisplayName,
-          full_name: resolvedFullName,
-          name: resolvedFullName,
-          dob: metadata?.dob,
-          date_of_birth: metadata?.dob,
-          security_question: metadata?.securityQuestion || metadata?.security_question,
-          country: metadata?.country,
-          role: 'user',
-          is_admin: false,
-          status: 'active',
-          username_changed: false,
-          updated_at: new Date().toISOString(),
-        });
-      } catch (upsertErr) {
-        console.warn('Non-blocking profile upsert notice:', upsertErr);
+        const { data: updatedProfile, error: updateProfileError } = await supabase
+          .from('profiles')
+          .update({
+            email: data.user.email,
+            username: resolvedUsername,
+            display_name: resolvedDisplayName,
+            full_name: resolvedFullName,
+            name: resolvedFullName,
+            dob: metadata?.dob,
+            date_of_birth: metadata?.dob,
+            security_question: metadata?.securityQuestion || metadata?.security_question,
+            country: metadata?.country,
+            updated_at: new Date().toISOString(),
+          })
+          .eq('id', data.user.id)
+          .select('id')
+          .maybeSingle();
+
+        if (updateProfileError || !updatedProfile) {
+          console.warn('Signup profile update was not applied; sequence-backed auth trigger reconciliation is required.', {
+            code: updateProfileError?.code || null,
+            userId: data.user.id,
+          });
+        }
+      } catch (profileUpdateErr) {
+        console.warn('Non-blocking signup profile update notice:', profileUpdateErr);
       }
     }
 

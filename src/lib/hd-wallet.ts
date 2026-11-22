@@ -14,6 +14,16 @@ export const STANDARD_DERIVATION_PATHS: Record<string, string> = {
 const EVM_NETWORKS = new Set(['ETH', 'ERC20', 'BSC', 'BEP20']);
 const TRON_NETWORKS = new Set(['TRC20', 'TRX']);
 
+export const SUPPORTED_ASSET_NETWORKS: Readonly<Record<string, ReadonlySet<string>>> = {
+  BTC: new Set(['BTC']),
+  ETH: new Set(['ETH']),
+  USDT: new Set(['ERC20', 'BSC', 'BEP20', 'TRC20']),
+  USDC: new Set(['ETH', 'ERC20', 'BSC', 'BEP20']),
+  TRX: new Set(['TRX']),
+  LTC: new Set(['LTC']),
+  BNB: new Set(['BSC', 'BEP20']),
+};
+
 /**
  * Canonical deposit-address provisioning wrapper.
  *
@@ -26,9 +36,14 @@ export async function getOrProvisionHDDepositAddress(
   userId: string,
   cryptoCode: string,
   networkCode: string,
-): Promise<{ address: string; path: string; isNew: boolean }> {
+): Promise<{ address: string; path: string }> {
   const asset = String(cryptoCode || '').trim().toUpperCase();
   const network = String(networkCode || '').trim().toUpperCase();
+
+  const allowedNetworks = SUPPORTED_ASSET_NETWORKS[asset];
+  if (!allowedNetworks || !allowedNetworks.has(network)) {
+    throw new Error(`Unsupported deposit asset/network pair: ${asset}/${network}`);
+  }
 
   const pathPrefix = STANDARD_DERIVATION_PATHS[network] || STANDARD_DERIVATION_PATHS[asset];
   if (!pathPrefix) {
@@ -61,5 +76,5 @@ export async function getOrProvisionHDDepositAddress(
     throw new Error('Canonical wallet provisioning did not return a valid chain address');
   }
 
-  return { address, path, isNew: false };
+  return { address, path };
 }

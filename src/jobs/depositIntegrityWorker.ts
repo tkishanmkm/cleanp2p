@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { ethers } from 'ethers';
 import { normalizeNetworkCode, SUPPORTED_EVM_CHAINS } from '@/lib/blockchain/providers';
 import { hasSupabaseServiceConfig, supabaseService } from '@/lib/supabase/service-role';
+import { TRON_CONFIG } from '@/lib/blockchain/tron';
 
 type IntegrityOutcome = 'MATCH' | 'MISMATCH' | 'INCONCLUSIVE';
 
@@ -192,7 +193,7 @@ async function inspectUtxoBlock(
 }
 
 async function inspectTronBlock(height: number, expectedHash: string): Promise<IntegrityInspection> {
-  const primary = process.env.TRON_RPC_URL || 'https://api.trongrid.io';
+  const primary = TRON_CONFIG.fullHost;
   const backup = process.env.TRON_BACKUP_RPC_URL || '';
   const urls = distinctHttpsUrls([primary, backup]);
   if (urls.length < 2) {
@@ -202,7 +203,7 @@ async function inspectTronBlock(height: number, expectedHash: string): Promise<I
   const observations = await Promise.all(urls.map(async (host): Promise<ProviderObservation> => {
     const hostname = new URL(host).hostname;
     const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-    if (process.env.TRON_PRO_API_KEY) headers['TRON-PRO-API-KEY'] = process.env.TRON_PRO_API_KEY;
+    if (TRON_CONFIG.apiKey) headers['TRON-PRO-API-KEY'] = TRON_CONFIG.apiKey;
 
     try {
       const response = await fetch(`${host}/walletsolidity/getblockbynum`, {

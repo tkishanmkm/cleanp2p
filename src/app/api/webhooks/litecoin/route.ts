@@ -3,6 +3,7 @@ import { getSupabaseAdminClient } from '@/lib/supabase/server';
 import { verifyWorkerAuth } from '@/lib/security/worker-auth';
 import { verifyUtxoDepositOutput } from '@/lib/blockchain/verify-utxo-deposit';
 import { readBoundedRequestBody } from '@/lib/security/read-bounded-request-body';
+import { parseDepositRpcResult } from '@/lib/deposit-rpc-result';
 
 export const dynamic = 'force-dynamic';
 
@@ -87,6 +88,14 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ success: false, error: 'deposit_processing_failed' }, { status: 503 });
     }
 
+    const parsedResult = parseDepositRpcResult(rpcData);
+    if (!parsedResult.success) {
+      return NextResponse.json({
+        success: false,
+        error: parsedResult.code || parsedResult.message || 'deposit_processing_rejected',
+      }, { status: 503 });
+    }
+
     return NextResponse.json({
       success: true,
       event: typeof event === 'string' ? event : 'tx_confirmed',
@@ -95,7 +104,10 @@ export async function POST(req: NextRequest) {
       address: verified.address,
       amount: verified.amount,
       confirmations: verified.confirmations,
-      result: rpcData,
+      status: parsedResult.status,
+      credited: parsedResult.credited,
+      already_credited: parsedResult.alreadyCredited,
+      result: parsedResult.raw,
       processed_at: new Date().toISOString(),
     });
   } catch (err: unknown) {

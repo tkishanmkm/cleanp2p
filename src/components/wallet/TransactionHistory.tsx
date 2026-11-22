@@ -37,17 +37,25 @@ export function TransactionHistory() {
           .order('created_at', { ascending: false }),
       ]);
 
-      const formattedDeposits: Transaction[] = (depositsRes.deposits || []).map((d: any) => ({
-        id: d.id || d.tx_hash,
-        type: 'deposit',
-        asset: d.asset_symbol || d.asset || d.asset_code || 'ETH',
-        chain: d.network || d.chain || d.network_code || 'ERC20',
-        amount: Number(d.amount || 0),
-        status: (d.status === 'credited' || d.status === 'confirmed' || d.status === 'CONFIRMED') ? 'completed' : 'pending',
-        destination_address: d.address || d.to_address || d.deposit_address,
-        tx_hash: d.tx_hash || d.txid,
-        created_at: d.created_at || new Date().toISOString(),
-      }));
+      const depositRows = Array.isArray(depositsRes?.data)
+        ? depositsRes.data
+        : Array.isArray(depositsRes?.deposits)
+          ? depositsRes.deposits
+          : [];
+      const formattedDeposits: Transaction[] = depositRows.map((d: any) => {
+        const normalizedStatus = String(d.status || '').trim().toLowerCase();
+        return {
+          id: d.id || d.tx_hash,
+          type: 'deposit',
+          asset: d.asset_symbol || d.asset || d.asset_code || 'ETH',
+          chain: d.network || d.chain || d.network_code || 'ERC20',
+          amount: Number(d.amount || 0),
+          status: ['credited', 'confirmed', 'completed', 'already_credited'].includes(normalizedStatus) ? 'completed' : 'pending',
+          destination_address: d.address || d.to_address || d.deposit_address,
+          tx_hash: d.tx_hash || d.txid,
+          created_at: d.created_at || new Date().toISOString(),
+        };
+      });
 
       const formattedWithdrawals: Transaction[] = (withdrawalsRes.data || []).map((w) => ({
         id: w.id,
@@ -83,6 +91,7 @@ export function TransactionHistory() {
       .channel('wallet_updates')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'withdrawals' }, fetchTransactions)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'deposits' }, fetchTransactions)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'onchain_deposits' }, fetchTransactions)
       .subscribe();
 
     return () => {

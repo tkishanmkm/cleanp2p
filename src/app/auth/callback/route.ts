@@ -41,27 +41,10 @@ export async function GET(request: NextRequest) {
             .maybeSingle();
 
           if (!profile) {
-            const shortId = user.id.replace(/-/g, '').slice(0, 8);
-            const generatedUsername = `user_${shortId}`;
-            const meta = user.user_metadata || {};
-            const fullName = meta.full_name || meta.name || '';
-            const avatarUrl = meta.avatar_url || meta.picture || null;
-
-            await supabase.from('profiles').insert({
-              id: user.id,
-              email: user.email,
-              username: generatedUsername,
-              full_name: fullName,
-              display_name: fullName || generatedUsername,
-              avatar_url: avatarUrl,
-              photo_url: avatarUrl,
-              username_changed: false, // Ensure 1-time change option is granted
-              username_changes_remaining: 1,
-              username_changed_count: 0,
-              role: 'user',
-              status: 'active',
-              created_at: new Date().toISOString(),
-              updated_at: new Date().toISOString(),
+            // Auth signup trigger owns profile creation and the sequence-backed
+            // wallet_index. Never synthesize an unindexed profile in an OAuth callback.
+            console.error('[Auth Callback] Signup profile is missing; database allocator/trigger reconciliation is required.', {
+              userId: user.id,
             });
           } else if (profile.username_changed === null || profile.username_changed === undefined || profile.username_changes_remaining === null || profile.username_changes_remaining === undefined) {
             // Profile created by database trigger without explicit flags: grant 1-time username change
@@ -78,17 +61,35 @@ export async function GET(request: NextRequest) {
           console.error('[Auth Callback] Error checking/creating OAuth profile:', profileErr);
         }
 
-        // Provision deposit addresses asynchronously in the background
+        // Provision addresses with the user token returned by the code exchange.
+        // A server-side fetch does not inherit the browser's Supabase cookies.
         try {
-          fetch(`${origin}/api/auth/provision-wallets`, {
+          const accessToken = data.session?.access_token;
+          if (!accessToken) {
+            throw new Error('OAuth session access token is unavailable for authenticated wallet provisioning.');
+          }
+
+          const provisionResponse = await fetch(`${origin}/api/auth/provision-wallets`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: {
+              'Content-Type': 'application/json',
+              Authorization: `Bearer ${accessToken}`,
+            },
             body: JSON.stringify({ userId: data.user.id }),
-          }).catch((err) => {
-            console.error('[Auth Callback] Wallet provisioning fetch error:', err);
+            cache: 'no-store',
           });
+
+          if (!provisionResponse.ok) {
+            const provisionResult = await provisionResponse.json().catch(() => null);
+            console.error('[Auth Callback] Wallet provisioning was rejected:', {
+              status: provisionResponse.status,
+              code: provisionResult?.code || null,
+              error: provisionResult?.error || 'No error details returned',
+              userId: data.user.id,
+            });
+          }
         } catch (err) {
-          console.error('[Auth Callback] Failed to trigger wallet provisioning:', err);
+          console.error('[Auth Callback] Wallet provisioning failed:', err instanceof Error ? err.message : 'unknown error');
         }
 
         // Check if user has 2FA enabled; if so, redirect to 2FA challenge before protected routes

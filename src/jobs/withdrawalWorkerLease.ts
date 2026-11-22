@@ -1,3 +1,8 @@
+/**
+ * @deprecated Unused legacy process-wide lease. Current withdrawal processing uses
+ * atomic per-withdrawal worker_id/lease_expires_at fencing in claim_pending_withdrawals.
+ * The RPC names in this module are not part of the current database contract; do not import.
+ */
 import { randomUUID } from 'node:crypto';
 import { supabaseAdmin } from '@/lib/supabaseAdmin';
 

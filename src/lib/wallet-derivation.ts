@@ -1,5 +1,6 @@
+import 'server-only';
 import crypto from 'crypto';
-import { HDKey } from '@scure/bip32';
+import { parseDepositAccountXpub } from '@/lib/crypto/hd-derivation';
 import { bech32 } from 'bech32';
 import { ethers } from 'ethers';
 import bs58 from 'bs58';
@@ -65,22 +66,35 @@ function getAdminSupabaseClient(): SupabaseClient {
 // Deterministic HD Derivation Core (Extended Public Keys ONLY - No Private Keys)
 // ============================================================================
 
+function deriveValidatedAccountChildPublicKey(xpub: string, index: number, label: string): Uint8Array {
+  if (!Number.isSafeInteger(index) || index < 1 || index > 0x7fffffff) {
+    throw new Error('A positive, bounded wallet derivation index is required.');
+  }
+
+  const account = parseDepositAccountXpub(xpub, label);
+  try {
+    const externalChain = account.deriveChild(0);
+    const child = externalChain.deriveChild(index);
+    if (!child.publicKey) {
+      throw new Error(label + ' account xpub did not derive a child public key.');
+    }
+    return Uint8Array.from(child.publicKey);
+  } finally {
+    account.wipePrivateData();
+  }
+}
+
 /**
- * Derives an EVM deposit address from EVM_XPUB at child index m/44'/60'/0'/0/index.
+ * Derives an EVM deposit address from an account-level public xpub at
+ * m/44'/60'/0'/0/index.
  * Shared address for ETH, USDT ERC-20, and USDT BEP-20.
  */
 export function deriveEvmAddress(xpub: string, index: number): string {
   try {
-    const hdkey = HDKey.fromExtendedKey(xpub);
-    // Standard external change chain (0), child (index)
-    const child = hdkey.deriveChild(0).deriveChild(index);
-
-    if (!child.publicKey) {
-      throw new Error('Failed to derive EVM child public key');
-    }
+    const childPublicKey = deriveValidatedAccountChildPublicKey(xpub, index, 'EVM');
 
     // Compute uncompressed public key (65 bytes with 0x04 prefix)
-    const uncompressedHex = ethers.SigningKey.computePublicKey(child.publicKey, false);
+    const uncompressedHex = ethers.SigningKey.computePublicKey(childPublicKey, false);
     // Strip 0x04 prefix -> 64 bytes
     const pubBytes = Buffer.from(uncompressedHex.slice(4), 'hex');
     // Keccak-256 hash of uncompressed public key
@@ -97,15 +111,10 @@ export function deriveEvmAddress(xpub: string, index: number): string {
  */
 export function deriveBtcSegwitAddress(xpub: string, index: number): string {
   try {
-    const hdkey = HDKey.fromExtendedKey(xpub);
-    const child = hdkey.deriveChild(0).deriveChild(index);
-
-    if (!child.publicKey) {
-      throw new Error('Failed to derive BTC child public key');
-    }
+    const childPublicKey = deriveValidatedAccountChildPublicKey(xpub, index, 'BTC');
 
     // HASH160: RIPEMD160(SHA256(compressedPublicKey))
-    const sha256 = crypto.createHash('sha256').update(child.publicKey).digest();
+    const sha256 = crypto.createHash('sha256').update(childPublicKey).digest();
     const hash160 = crypto.createHash('ripemd160').update(sha256).digest();
 
     // Encode as Bech32 P2WPKH (witness version 0) - Mainnet 'bc'
@@ -123,15 +132,10 @@ export function deriveBtcSegwitAddress(xpub: string, index: number): string {
  */
 export function deriveLtcSegwitAddress(xpub: string, index: number): string {
   try {
-    const hdkey = HDKey.fromExtendedKey(xpub);
-    const child = hdkey.deriveChild(0).deriveChild(index);
-
-    if (!child.publicKey) {
-      throw new Error('Failed to derive LTC child public key');
-    }
+    const childPublicKey = deriveValidatedAccountChildPublicKey(xpub, index, 'LTC');
 
     // HASH160: RIPEMD160(SHA256(compressedPublicKey))
-    const sha256 = crypto.createHash('sha256').update(child.publicKey).digest();
+    const sha256 = crypto.createHash('sha256').update(childPublicKey).digest();
     const hash160 = crypto.createHash('ripemd160').update(sha256).digest();
 
     const words = bech32.toWords(hash160);
@@ -149,14 +153,9 @@ export function deriveLtcSegwitAddress(xpub: string, index: number): string {
  */
 export function deriveTronAddress(xpub: string, index: number): string {
   try {
-    const hdkey = HDKey.fromExtendedKey(xpub);
-    const child = hdkey.deriveChild(0).deriveChild(index);
+    const childPublicKey = deriveValidatedAccountChildPublicKey(xpub, index, 'TRON');
 
-    if (!child.publicKey) {
-      throw new Error('Failed to derive TRON child public key');
-    }
-
-    const uncompressedHex = ethers.SigningKey.computePublicKey(child.publicKey, false);
+    const uncompressedHex = ethers.SigningKey.computePublicKey(childPublicKey, false);
     const pubBytes = Buffer.from(uncompressedHex.slice(4), 'hex');
     const addressHash = ethers.keccak256(pubBytes);
 
@@ -187,8 +186,8 @@ export function generateAddressesForIndex(index: number): {
   tron: string;
   ltc: string;
 } {
-  if (!Number.isSafeInteger(index) || index < 0 || index > 2_147_483_647) {
-    throw new Error('A valid non-negative wallet derivation index is required.');
+  if (!Number.isSafeInteger(index) || index < 1 || index > 2_147_483_647) {
+    throw new Error('A positive, bounded wallet derivation index is required.');
   }
 
   const evmXpub = process.env.EVM_XPUB?.trim();

@@ -1,0 +1,7 @@
+-- DRAFT ONLY — DO NOT APPLY.
+-- The withdrawal worker still calls the legacy no-argument lock RPCs.
+-- This migration must remain inert until src/jobs/withdrawalWorker.ts is safely updated
+-- to pass a unique owner UUID, renew the lease, stop dispatch on lease loss, and release
+-- only its own lease. Applying a lease schema without that coordinated code change would
+-- break worker lock acquisition and could interrupt withdrawal dispatch.
+-- No SQL statements are intentionally executed from this file.

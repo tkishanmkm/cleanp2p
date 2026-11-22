@@ -6,6 +6,7 @@ import { CANONICAL_USDT_CONTRACTS } from '@/jobs/depositIngestion';
 import { verifyUtxoDepositOutput } from '@/lib/blockchain/verify-utxo-deposit';
 import { verifyEvmDepositEvidence } from '@/lib/blockchain/verify-evm-deposit';
 import { verifyTronTransferEvent } from '@/lib/blockchain/verify-tron-deposit';
+import { TRON_CONFIG } from '@/lib/blockchain/tron';
 
 // Initialize Supabase admin client with service role key
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL;
@@ -88,10 +89,10 @@ async function fetchOnChainConfirmations(
   // Handle Tron TRC-20
   if (norm === 'TRC20') {
     try {
-      const tronHost = (process.env.TRON_RPC_URL || 'https://api.trongrid.io').replace(/\/$/, '');
+      const tronHost = TRON_CONFIG.fullHost.replace(/\/$/, '');
       const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-      if (process.env.TRON_PRO_API_KEY) {
-        headers['TRON-PRO-API-KEY'] = process.env.TRON_PRO_API_KEY;
+      if (TRON_CONFIG.apiKey) {
+        headers['TRON-PRO-API-KEY'] = TRON_CONFIG.apiKey;
       }
 
       const res = await fetch(`${tronHost}/wallet/gettransactioninfobyid`, {

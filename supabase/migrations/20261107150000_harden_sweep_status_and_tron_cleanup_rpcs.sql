@@ -139,7 +139,7 @@ BEGIN
                 'CONFIRMED', 'FAILED', 'RECOVERY_REQUIRED'
             );
         WHEN 'RECOVERY_REQUIRED' THEN
-            v_valid_transition := v_new_status IN ('CONFIRMED', 'FAILED');
+            v_valid_transition := v_new_status IN ('BROADCASTED', 'CONFIRMED', 'FAILED');
         ELSE
             v_valid_transition := false;
     END CASE;
@@ -150,6 +150,18 @@ BEGIN
             'code', 'INVALID_STATE_TRANSITION',
             'current_status', v_sweep.status,
             'requested_status', v_new_status
+        );
+    END IF;
+
+    IF v_expected_status = 'RECOVERY_REQUIRED'
+       AND v_new_status = 'BROADCASTED'
+       AND (
+           nullif(pg_catalog.btrim(coalesce(v_sweep.signed_tx_hex, '')), '') IS NULL
+           OR nullif(pg_catalog.btrim(coalesce(v_sweep.sweep_tx_hash, '')), '') IS NULL
+       ) THEN
+        RETURN pg_catalog.jsonb_build_object(
+            'success', false,
+            'code', 'DURABLE_SIGNED_PAYLOAD_REQUIRED'
         );
     END IF;
 

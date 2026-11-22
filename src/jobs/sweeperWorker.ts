@@ -5,6 +5,9 @@ import * as bitcoin from 'bitcoinjs-lib';
 import ECPairFactory from 'ecpair';
 import * as ecc from 'tiny-secp256k1';
 import bs58 from 'bs58';
+import { getTronTransactionConfirmations, TRON_CONFIG, parseUnitsTron } from '@/lib/blockchain/tron';
+import { verifyTronSignedWithdrawalPayload, verifyTronWithdrawalEvidence } from '@/lib/blockchain/verify-tron-withdrawal';
+import { normalizeAndValidateDepositMnemonic } from '@/lib/crypto/mnemonic-validation';
 
 // Initialize ECPair library for BTC/LTC
 const ECPair = ECPairFactory(ecc);
@@ -138,60 +141,82 @@ async function getEvmSweepReceiptFinality(
   return receipt.status === 1 ? 'CONFIRMED' : 'REVERTED';
 }
 
+type SweepSigningNetwork = 'BTC' | 'LTC' | 'TRON' | 'EVM';
+
 /**
- * Derives user child keys from DEPOSIT_HD_MNEMONIC
+ * Derive only the one child key required by the current sweep.
+ * Validate the configured BIP-39 phrase and wipe seed/master/child key buffers
+ * after extracting the one signing key. Other chains' private keys are never
+ * materialized for an unrelated sweep operation.
  */
-async function deriveUserKeys(mnemonic: string, derivationIndex: number) {
+async function deriveSweepSigningKey(
+  mnemonic: string,
+  derivationIndex: number,
+  network: SweepSigningNetwork
+): Promise<{ privateKey: string; address: string }> {
+  if (!Number.isSafeInteger(derivationIndex) || derivationIndex < 1 || derivationIndex > 0x7fffffff) {
+    throw new Error('Sweep derivation index must be a positive, bounded BIP-32 child index.');
+  }
+
+  const normalizedMnemonic = normalizeAndValidateDepositMnemonic(mnemonic);
   const bip39 = await import('@scure/bip39');
   const { HDKey } = await import('@scure/bip32');
   const { bech32 } = await import('bech32');
-  const crypto = await import('crypto');
-  const seed = await bip39.mnemonicToSeed(mnemonic.trim());
-  const master = HDKey.fromMasterSeed(seed);
+  const crypto = await import('node:crypto');
 
-  // BTC BIP84: m/84'/0'/0'/0/index
-  const btcChild = master.derive(`m/84'/0'/0'/0/${derivationIndex}`);
-  const btcPriv = Buffer.from(btcChild.privateKey!).toString('hex');
-  const btcSha = crypto.createHash('sha256').update(btcChild.publicKey!).digest();
-  const btcHash = crypto.createHash('ripemd160').update(btcSha).digest();
-  const btcWords = bech32.toWords(btcHash);
-  btcWords.unshift(0x00);
-  const btcAddress = bech32.encode('bc', btcWords);
+  let seed: Uint8Array | undefined;
+  let master: any;
+  let child: any;
 
-  // LTC BIP84: m/84'/2'/0'/0/index
-  const ltcChild = master.derive(`m/84'/2'/0'/0/${derivationIndex}`);
-  const ltcPriv = Buffer.from(ltcChild.privateKey!).toString('hex');
-  const ltcSha = crypto.createHash('sha256').update(ltcChild.publicKey!).digest();
-  const ltcHash = crypto.createHash('ripemd160').update(ltcSha).digest();
-  const ltcWords = bech32.toWords(ltcHash);
-  ltcWords.unshift(0x00);
-  const ltcAddress = bech32.encode('ltc', ltcWords);
+  try {
+    seed = await bip39.mnemonicToSeed(normalizedMnemonic);
+    master = HDKey.fromMasterSeed(seed);
 
-  // TRON BIP44: m/44'/195'/0'/0/index
-  const tronChild = master.derive(`m/44'/195'/0'/0/${derivationIndex}`);
-  const tronPriv = Buffer.from(tronChild.privateKey!).toString('hex');
-  const tronUncompressedHex = ethers.SigningKey.computePublicKey(tronChild.publicKey!, false);
-  const tronPubBytes = Buffer.from(tronUncompressedHex.slice(4), 'hex');
-  const tronAddressHash = ethers.keccak256(tronPubBytes);
-  const tronRawAddress = Buffer.concat([Buffer.from([0x41]), Buffer.from(tronAddressHash.slice(-40), 'hex')]);
-  const h1 = crypto.createHash('sha256').update(tronRawAddress).digest();
-  const h2 = crypto.createHash('sha256').update(h1).digest();
-  const tronAddress = bs58.encode(Buffer.concat([tronRawAddress, h2.subarray(0, 4)]));
+    const path = network === 'BTC'
+      ? `m/84'/0'/0'/0/${derivationIndex}`
+      : network === 'LTC'
+        ? `m/84'/2'/0'/0/${derivationIndex}`
+        : network === 'TRON'
+          ? `m/44'/195'/0'/0/${derivationIndex}`
+          : `m/44'/60'/0'/0/${derivationIndex}`;
 
-  // EVM BIP44: m/44'/60'/0'/0/index
-  const evmChild = master.derive(`m/44'/60'/0'/0/${derivationIndex}`);
-  const evmPriv = Buffer.from(evmChild.privateKey!).toString('hex');
-  const evmUncompressedHex = ethers.SigningKey.computePublicKey(evmChild.publicKey!, false);
-  const evmPubBytes = Buffer.from(evmUncompressedHex.slice(4), 'hex');
-  const evmAddressHash = ethers.keccak256(evmPubBytes);
-  const evmAddress = ethers.getAddress(`0x${evmAddressHash.slice(-40)}`);
+    child = master.derive(path);
+    if (!child.privateKey || !child.publicKey) {
+      throw new Error(`The ${network} sweep child key could not be derived.`);
+    }
 
-  return {
-    btc: { privateKey: btcPriv, address: btcAddress },
-    ltc: { privateKey: ltcPriv, address: ltcAddress },
-    tron: { privateKey: tronPriv, address: tronAddress },
-    evm: { privateKey: evmPriv, address: evmAddress },
-  };
+    const privateKey = Buffer.from(child.privateKey).toString('hex');
+    let address: string;
+
+    if (network === 'BTC' || network === 'LTC') {
+      const sha256 = crypto.createHash('sha256').update(child.publicKey).digest();
+      const hash160 = crypto.createHash('ripemd160').update(sha256).digest();
+      const words = bech32.toWords(hash160);
+      words.unshift(0x00);
+      address = bech32.encode(network === 'BTC' ? 'bc' : 'ltc', words);
+    } else {
+      const uncompressedHex = ethers.SigningKey.computePublicKey(child.publicKey, false);
+      const publicKeyBytes = Buffer.from(uncompressedHex.slice(4), 'hex');
+      const addressHash = ethers.keccak256(publicKeyBytes);
+      if (network === 'TRON') {
+        const payload = Buffer.concat([
+          Buffer.from([0x41]),
+          Buffer.from(addressHash.slice(-40), 'hex'),
+        ]);
+        const firstHash = crypto.createHash('sha256').update(payload).digest();
+        const secondHash = crypto.createHash('sha256').update(firstHash).digest();
+        address = bs58.encode(Buffer.concat([payload, secondHash.subarray(0, 4)]));
+      } else {
+        address = ethers.getAddress(`0x${addressHash.slice(-40)}`);
+      }
+    }
+
+    return { privateKey, address };
+  } finally {
+    child?.wipePrivateData?.();
+    master?.wipePrivateData?.();
+    seed?.fill(0);
+  }
 }
 
 /**
@@ -213,7 +238,7 @@ function resolveTronHotWalletPrivateKey(): string {
  */
 function getTronWebInstance(fullHost: string, privateKey?: string) {
   const TronWeb = require('tronweb');
-  const apiKey = process.env.TRONGRID_API_KEY;
+  const apiKey = TRON_CONFIG.apiKey;
   const headers = apiKey ? { 'TRON-PRO-API-KEY': apiKey } : undefined;
 
   return new TronWeb({
@@ -279,18 +304,24 @@ export function getRpcUrlForNetwork(network: string): string {
 }
 
 /**
- * Derives the child wallet for a given index.
+ * Derives only the EVM child signer required by this EVM sweep.
+ * The shared derivation helper validates BIP-39/index and wipes its seed/HD nodes.
  */
-export function getDerivedEVMWallet(derivationIndex: number, provider: ethers.Provider): ethers.HDNodeWallet {
-  const path = `m/44'/60'/0'/0/${derivationIndex}`;
+export async function getDerivedEVMWallet(
+  derivationIndex: number,
+  provider: ethers.Provider
+): Promise<ethers.Wallet> {
   const mnemonic = process.env.DEPOSIT_HD_MNEMONIC;
-  
   if (!mnemonic || !mnemonic.trim()) {
     throw new Error('DEPOSIT_HD_MNEMONIC is not configured in environment');
   }
 
-  const hdNode = ethers.HDNodeWallet.fromMnemonic(ethers.Mnemonic.fromPhrase(mnemonic.trim()), path);
-  return hdNode.connect(provider);
+  const signingKey = await deriveSweepSigningKey(mnemonic, derivationIndex, 'EVM');
+  const wallet = new ethers.Wallet(signingKey.privateKey, provider);
+  if (wallet.address.toLowerCase() !== signingKey.address.toLowerCase()) {
+    throw new Error('Derived EVM private key does not match its independently computed address.');
+  }
+  return wallet;
 }
 
 /**
@@ -358,11 +389,11 @@ async function transitionSweepStatus(
   workerId: string,
   expectedStatus: string,
   newStatus: string,
-  txHashOrExtra?: string | { txHash?: string; amountSwept?: number; errorMessage?: string },
-  extraParam: { amountSwept?: number; errorMessage?: string } = {}
+  txHashOrExtra?: string | { txHash?: string; amountSwept?: number | string; errorMessage?: string },
+  extraParam: { amountSwept?: number | string; errorMessage?: string } = {}
 ): Promise<void> {
   let txHash: string | null = null;
-  let amountSwept: number | null = null;
+  let amountSwept: number | string | null = null;
   let errorMessage: string | null = null;
 
   if (typeof txHashOrExtra === 'string') {
@@ -1234,6 +1265,38 @@ export async function fundTronGasForAddress(
   }
 }
 
+function assertTronSignedTransactionProtoIntegrity(
+  tronWeb: any,
+  signedTransaction: Record<string, any>,
+  expectedTxHash: string
+): void {
+  const transactionUtils = tronWeb?.utils?.transaction;
+  if (
+    typeof transactionUtils?.txJsonToPb !== 'function' ||
+    typeof transactionUtils?.txPbToRawDataHex !== 'function' ||
+    typeof transactionUtils?.txPbToTxID !== 'function'
+  ) {
+    throw new Error('TRON transaction protobuf verifier is unavailable; refusing broadcast.');
+  }
+
+  const transactionPb = transactionUtils.txJsonToPb(signedTransaction);
+  const canonicalRawDataHex = String(transactionUtils.txPbToRawDataHex(transactionPb) || '').toLowerCase();
+  const canonicalTxHash = String(transactionUtils.txPbToTxID(transactionPb) || '').replace(/^0x/i, '').toLowerCase();
+  const suppliedRawDataHex = String(signedTransaction.raw_data_hex || '').replace(/^0x/i, '').toLowerCase();
+
+  if (
+    !/^[a-f0-9]{64}$/.test(canonicalTxHash) ||
+    canonicalTxHash !== expectedTxHash.toLowerCase() ||
+    String(signedTransaction.txID || '').toLowerCase() !== expectedTxHash.toLowerCase() ||
+    !suppliedRawDataHex ||
+    canonicalRawDataHex !== suppliedRawDataHex ||
+    !Array.isArray(signedTransaction.signature) ||
+    signedTransaction.signature.length === 0
+  ) {
+    throw new Error('TRON signed transaction protobuf, txID, raw data, or signature mismatch.');
+  }
+}
+
 type TronTransactionOutcome = 'CONFIRMED' | 'REVERTED' | 'UNKNOWN';
 
 /** Polls the exact deterministic TRON transaction; unknown is never treated as success. */
@@ -1250,12 +1313,17 @@ async function waitForTronTransactionOutcome(
   for (let attempt = 1; attempt <= attempts; attempt++) {
     await new Promise((resolve) => setTimeout(resolve, intervalMs));
     try {
-      const txInfo = await tronWeb.trx.getTransaction(txHash);
-      const contractRet = txInfo?.ret?.[0]?.contractRet;
-      if (contractRet === 'SUCCESS') return 'CONFIRMED';
-      if (contractRet && contractRet !== 'SUCCESS') return 'REVERTED';
+      const outcome = await getTronTransactionConfirmations(txHash, tronWeb);
+      if (outcome.isConfirmed) return 'CONFIRMED';
+      if (
+        outcome.success === false &&
+        outcome.confirmations >= TRON_CONFIG.requiredConfirmations &&
+        Boolean(outcome.blockHash)
+      ) {
+        return 'REVERTED';
+      }
     } catch {
-      // A query error is not proof of either execution or failure; keep checking.
+      // An RPC/indexing error is not proof of success or failure; keep checking.
     }
   }
 
@@ -1708,9 +1776,9 @@ export async function sweepTronDepositAddress(
       throw new Error('DEPOSIT_HD_MNEMONIC is not configured in environment');
     }
 
-    const userKeys = await deriveUserKeys(mnemonic.trim(), derivationIndex);
-    const childTronPrivKey = userKeys.tron.privateKey;
-    const childTronAddress = userKeys.tron.address;
+    const tronSigningKey = await deriveSweepSigningKey(mnemonic, derivationIndex, 'TRON');
+    const childTronPrivKey = tronSigningKey.privateKey;
+    const childTronAddress = tronSigningKey.address;
 
     if (childTronAddress.trim() !== depositAddress.trim()) {
       console.error(`[Tron Sweeper Error] Address mismatch for index ${derivationIndex}: derived ${childTronAddress} != stored ${depositAddress}`);
@@ -1724,6 +1792,9 @@ export async function sweepTronDepositAddress(
       };
     }
 
+    if (!sweepId || !workerId) {
+      throw new Error('Durable sweep operation ID and active worker lease are required for TRC20 hot-wallet sweeps');
+    }
     const tronHost = process.env.TRON_RPC_URL || 'https://api.trongrid.io';
     const tronWeb = getTronWebInstance(tronHost, childTronPrivKey);
 
@@ -1732,7 +1803,9 @@ export async function sweepTronDepositAddress(
 
     // Check TRC20 USDT balance
     const balanceSun = await contract.balanceOf(childTronAddress).call();
-    const balanceUsdt = Number(balanceSun) / 1_000_000;
+    const balanceSunRaw = BigInt(String(balanceSun));
+    const balanceUsdtExact = ethers.formatUnits(balanceSunRaw, TRON_CONFIG.usdtDecimals);
+    const balanceUsdt = Number(balanceUsdtExact);
 
     if (!(await meetsMinimumSweepUsdValue('USDT', balanceUsdt))) {
       stopHeartbeat();
@@ -1865,7 +1938,7 @@ export async function sweepTronDepositAddress(
         {},
         [
           { type: 'address', value: hotWalletDestination },
-          { type: 'uint256', value: balanceSun.toString() }
+          { type: 'uint256', value: balanceSunRaw.toString() }
         ],
         childTronAddress
       );
@@ -1911,7 +1984,7 @@ export async function sweepTronDepositAddress(
       { feeLimit: 30_000_000 },
       [
         { type: 'address', value: hotWalletDestination },
-        { type: 'uint256', value: balanceSun },
+        { type: 'uint256', value: balanceSunRaw.toString() },
       ],
       childTronAddress
     );
@@ -1919,11 +1992,36 @@ export async function sweepTronDepositAddress(
     const signedTx = await tronWeb.trx.sign(triggerTx.transaction, childTronPrivKey);
     const deterministicTxHash = signedTx.txID;
 
-    // Pre-broadcast status transition to READY_TO_BROADCAST with deterministic txHash
-    if (sweepId && workerId) {
-      await assertPreBroadcastOwnership(sweepId, workerId, currentStatus);
-      await transitionSweepStatus(sweepId, workerId, currentStatus, 'READY_TO_BROADCAST', deterministicTxHash);
+    const signedPayloadCheck = verifyTronSignedWithdrawalPayload({
+      txHash: deterministicTxHash,
+      signedTransaction: signedTx,
+      expectedSenderHex: tronWeb.address.toHex(childTronAddress),
+      expectedDestinationHex: tronWeb.address.toHex(hotWalletDestination),
+      expectedTokenContractHex: tronWeb.address.toHex(usdtContractAddress),
+      expectedAmountUnits: balanceSunRaw,
+    });
+    if (!signedPayloadCheck.verified) {
+      throw new Error(`TRC20 sweep signed payload does not match the intended deposit sweep: ${signedPayloadCheck.reason}`);
     }
+    assertTronSignedTransactionProtoIntegrity(tronWeb, signedTx as Record<string, any>, deterministicTxHash);
+
+    const { data: persistTronSweepRes, error: persistTronSweepErr } = await supabaseAdmin.rpc(
+      'persist_signed_tron_sweep_transaction_with_amount',
+      {
+        p_sweep_id: sweepId,
+        p_worker_id: workerId,
+        p_expected_status: currentStatus,
+        p_signed_tx_json: JSON.stringify(signedTx),
+        p_sweep_tx_hash: deterministicTxHash,
+        p_amount_swept: balanceUsdtExact,
+        p_extend_lease_seconds: 300,
+      }
+    );
+    if (persistTronSweepErr || !persistTronSweepRes || !persistTronSweepRes.success) {
+      throw new Error(`Failed to persist durable TRC20 sweep payload before broadcast: ${persistTronSweepErr?.message || 'RPC rejected persistence'}`);
+    }
+    currentStatus = 'READY_TO_BROADCAST';
+    await assertPreBroadcastOwnership(sweepId, workerId, currentStatus);
 
     let txid = deterministicTxHash;
     try {
@@ -1932,22 +2030,19 @@ export async function sweepTronDepositAddress(
       if (!broadcastRes || !broadcastRes.result) {
         throw new Error(`TRON raw broadcast rejected: ${JSON.stringify(broadcastRes)}`);
       }
-      if (sweepId && workerId) {
-        await transitionSweepStatus(sweepId, workerId, 'READY_TO_BROADCAST', 'BROADCASTED', deterministicTxHash);
-      }
+      await transitionSweepStatus(sweepId, workerId, 'READY_TO_BROADCAST', 'BROADCASTED', {
+        txHash: deterministicTxHash,
+        amountSwept: balanceUsdtExact,
+      });
     } catch (broadcastErr: any) {
       console.error(`[Tron Sweeper Broadcast Exception] ${depositAddress}:`, broadcastErr);
-      if (sweepId && workerId) {
-        // DO NOT undelegate here; state of broadcast is ambiguous.
-        await supabaseAdmin.rpc('update_sweep_operation_status', {
-          p_sweep_id: sweepId,
-          p_worker_id: workerId,
-          p_expected_status: 'READY_TO_BROADCAST',
-          p_new_status: 'RECOVERY_REQUIRED',
-          p_tx_hash: deterministicTxHash,
-          p_error_message: broadcastErr?.message || 'TRON broadcast ambiguous',
-        });
-      }
+      // DO NOT undelegate here; state of broadcast is ambiguous. Keep the exact
+      // signed bytes, tx hash, and amount attached to the recovery state.
+      await transitionSweepStatus(sweepId, workerId, 'READY_TO_BROADCAST', 'RECOVERY_REQUIRED', {
+        txHash: deterministicTxHash,
+        amountSwept: balanceUsdtExact,
+        errorMessage: broadcastErr?.message || 'TRON broadcast ambiguous',
+      });
       stopHeartbeat();
       throw broadcastErr;
     }
@@ -1956,9 +2051,9 @@ export async function sweepTronDepositAddress(
     return {
       address: childTronAddress,
       network: 'TRC20',
-      amountSwept: balanceUsdt.toString(),
+      amountSwept: balanceUsdtExact,
       txHash: txid,
-      status: 'SUCCESS',
+      status: 'BROADCASTED',
     };
   } catch (err: any) {
     stopHeartbeat();
@@ -2194,9 +2289,9 @@ export async function sweepBtcDepositAddress(
       throw new Error('DEPOSIT_HD_MNEMONIC is not configured in environment');
     }
 
-    const userKeys = await deriveUserKeys(mnemonic.trim(), derivationIndex);
-    const btcChildPrivKeyHex = userKeys.btc.privateKey;
-    const btcChildAddress = userKeys.btc.address;
+    const btcSigningKey = await deriveSweepSigningKey(mnemonic, derivationIndex, 'BTC');
+    const btcChildPrivKeyHex = btcSigningKey.privateKey;
+    const btcChildAddress = btcSigningKey.address;
 
     if (btcChildAddress.toLowerCase().trim() !== depositAddress.toLowerCase().trim()) {
       console.error(`[BTC Sweeper Error] Address mismatch for index ${derivationIndex}: derived ${btcChildAddress} != stored ${depositAddress}`);
@@ -2472,9 +2567,9 @@ export async function sweepLtcDepositAddress(
       throw new Error('DEPOSIT_HD_MNEMONIC is not configured in environment');
     }
 
-    const userKeys = await deriveUserKeys(mnemonic.trim(), derivationIndex);
-    const ltcChildPrivKeyHex = userKeys.ltc.privateKey;
-    const ltcChildAddress = userKeys.ltc.address;
+    const ltcSigningKey = await deriveSweepSigningKey(mnemonic, derivationIndex, 'LTC');
+    const ltcChildPrivKeyHex = ltcSigningKey.privateKey;
+    const ltcChildAddress = ltcSigningKey.address;
 
     if (ltcChildAddress.toLowerCase().trim() !== depositAddress.toLowerCase().trim()) {
       console.error(`[LTC Sweeper Error] Address mismatch for index ${derivationIndex}: derived ${ltcChildAddress} != stored ${depositAddress}`);
@@ -2774,7 +2869,7 @@ export async function sweepUserDepositAddress(
       );
     }
 
-    const derivedWallet = getDerivedEVMWallet(derivationIndex, provider);
+    const derivedWallet = await getDerivedEVMWallet(derivationIndex, provider);
 
     if (derivedWallet.address.toLowerCase() !== depositAddress.toLowerCase()) {
       throw new Error(`Address mismatch: Derived ${derivedWallet.address} != Expected ${depositAddress}`);
@@ -4022,6 +4117,148 @@ const txNonce = parsedTx.nonce;
     }
   }
 
+  if (
+    (status === 'READY_TO_BROADCAST' || status === 'RECOVERY_REQUIRED') &&
+    (net === 'TRC20' || net === 'TRON') &&
+    sweep_tx_hash
+  ) {
+    if (!signed_tx_hex || !amount_swept || !sweep.deposit_address) {
+      if (status !== 'RECOVERY_REQUIRED') {
+        await transitionSweepStatus(
+          sweepId,
+          workerId,
+          status,
+          'RECOVERY_REQUIRED',
+          { txHash: sweep_tx_hash, errorMessage: 'TRON sweep recovery is missing durable signed bytes, amount, or source address.' }
+        );
+      }
+      return false;
+    }
+
+    const tronHost = process.env.TRON_RPC_URL || 'https://api.trongrid.io';
+    const tronWeb = getTronWebInstance(tronHost);
+    const hotWalletDestination = resolveTronHotWalletAddress();
+    if (!hotWalletDestination) {
+      if (status !== 'RECOVERY_REQUIRED') {
+        await transitionSweepStatus(
+          sweepId,
+          workerId,
+          status,
+          'RECOVERY_REQUIRED',
+          { txHash: sweep_tx_hash, errorMessage: 'TRON hot-wallet destination is unavailable during recovery.' }
+        );
+      }
+      return false;
+    }
+
+    let signedTronTransaction: Record<string, any>;
+    let expectedAmountUnits: bigint;
+    try {
+      signedTronTransaction = JSON.parse(String(signed_tx_hex));
+      expectedAmountUnits = parseUnitsTron(String(amount_swept), TRON_CONFIG.usdtDecimals);
+      if (expectedAmountUnits <= 0n) throw new Error('non-positive persisted sweep amount');
+    } catch (error) {
+      if (status !== 'RECOVERY_REQUIRED') {
+        await transitionSweepStatus(
+          sweepId,
+          workerId,
+          status,
+          'RECOVERY_REQUIRED',
+          { txHash: sweep_tx_hash, errorMessage: 'TRON durable sweep payload or amount is invalid: ' + String(error).slice(0, 400) }
+        );
+      }
+      return false;
+    }
+
+    const signedPayloadCheck = verifyTronSignedWithdrawalPayload({
+      txHash: String(sweep_tx_hash),
+      signedTransaction: signedTronTransaction,
+      expectedSenderHex: tronWeb.address.toHex(String(sweep.deposit_address)),
+      expectedDestinationHex: tronWeb.address.toHex(hotWalletDestination),
+      expectedTokenContractHex: tronWeb.address.toHex(TRON_CONFIG.usdtContract),
+      expectedAmountUnits,
+    });
+    if (!signedPayloadCheck.verified) {
+      if (status !== 'RECOVERY_REQUIRED') {
+        await transitionSweepStatus(
+          sweepId,
+          workerId,
+          status,
+          'RECOVERY_REQUIRED',
+          { txHash: sweep_tx_hash, errorMessage: 'TRON signed sweep identity mismatch: ' + signedPayloadCheck.reason }
+        );
+      }
+      return false;
+    }
+
+    try {
+      assertTronSignedTransactionProtoIntegrity(tronWeb, signedTronTransaction, String(sweep_tx_hash));
+    } catch (error) {
+      if (status !== 'RECOVERY_REQUIRED') {
+        await transitionSweepStatus(
+          sweepId,
+          workerId,
+          status,
+          'RECOVERY_REQUIRED',
+          { txHash: sweep_tx_hash, errorMessage: 'TRON protobuf identity check failed: ' + String(error).slice(0, 400) }
+        );
+      }
+      return false;
+    }
+
+    const existingOutcome = await getTronTransactionConfirmations(String(sweep_tx_hash), tronWeb);
+    if (
+      (existingOutcome.success === true || existingOutcome.success === false) &&
+      existingOutcome.confirmations < TRON_CONFIG.requiredConfirmations
+    ) {
+      // The transaction is already included but not final. Do not create a new
+      // transfer or rebroadcast while the canonical receipt is still maturing.
+      return false;
+    }
+
+    if (
+      !(
+        existingOutcome.isConfirmed ||
+        (existingOutcome.success === false && existingOutcome.confirmations >= TRON_CONFIG.requiredConfirmations)
+      )
+    ) {
+      try {
+        await assertPreBroadcastOwnership(sweepId, workerId, status);
+        const broadcastRes = await tronWeb.trx.sendRawTransaction(signedTronTransaction);
+        if (!broadcastRes || !broadcastRes.result) {
+          const broadcastErrorText = JSON.stringify(broadcastRes || {});
+          if (!/DUP|already exist|ALREADY/i.test(broadcastErrorText)) {
+            throw new Error('TRON durable sweep rebroadcast rejected: ' + broadcastErrorText.slice(0, 500));
+          }
+        }
+        await transitionSweepStatus(
+          sweepId,
+          workerId,
+          status,
+          'BROADCASTED',
+          { txHash: sweep_tx_hash, amountSwept: String(amount_swept) }
+        );
+        return true;
+      } catch (broadcastError) {
+        if (status !== 'RECOVERY_REQUIRED') {
+          await transitionSweepStatus(
+            sweepId,
+            workerId,
+            status,
+            'RECOVERY_REQUIRED',
+            {
+              txHash: sweep_tx_hash,
+              amountSwept: String(amount_swept),
+              errorMessage: 'TRON recovery rebroadcast remains ambiguous: ' + String(broadcastError).slice(0, 400),
+            }
+          );
+        }
+        return false;
+      }
+    }
+    // A final receipt is handled by the canonical evidence checks below.
+  }
+
   if (status === 'READY_TO_BROADCAST' && !isEvmNetwork) {
     if (!signed_tx_hex) {
       await supabaseAdmin.rpc('update_sweep_operation_status', {
@@ -4221,11 +4458,78 @@ const txNonce = parsedTx.nonce;
       } else if (net === 'TRC20' || net === 'TRON') {
         const tronHost = process.env.TRON_RPC_URL || 'https://api.trongrid.io';
         const tronWeb = getTronWebInstance(tronHost);
-        const txInfo = await tronWeb.trx.getTransaction(sweep_tx_hash);
-        if (txInfo && txInfo.ret && txInfo.ret[0]?.contractRet === 'SUCCESS') {
-          isConfirmed = true;
-        } else if (txInfo && txInfo.ret && txInfo.ret[0]?.contractRet && txInfo.ret[0]?.contractRet !== 'SUCCESS') {
-          isFailed = true;
+        const tronOutcome = await getTronTransactionConfirmations(sweep_tx_hash, tronWeb);
+        const hasFinalCanonicalReceipt =
+          Number.isSafeInteger(tronOutcome.confirmations) &&
+          tronOutcome.confirmations >= TRON_CONFIG.requiredConfirmations &&
+          Number.isSafeInteger(tronOutcome.blockNumber) &&
+          Boolean(tronOutcome.blockHash && /^[a-fA-F0-9]{64}$/.test(tronOutcome.blockHash));
+
+        if (
+          hasFinalCanonicalReceipt &&
+          (tronOutcome.isConfirmed || tronOutcome.success === false)
+        ) {
+          if (!signed_tx_hex || !amount_swept || !sweep.deposit_address) {
+            throw new Error('TRON sweep finality cannot be accepted without its persisted signed payload, exact amount, and source address.');
+          }
+
+          const hotWalletDestination = resolveTronHotWalletAddress();
+          if (!hotWalletDestination) {
+            throw new Error('TRON hot-wallet destination is unavailable during sweep finality verification.');
+          }
+
+          const signedTronTransaction = JSON.parse(String(signed_tx_hex));
+          const expectedAmountUnits = parseUnitsTron(String(amount_swept), TRON_CONFIG.usdtDecimals);
+          const observedTronTransaction = await tronWeb.trx.getTransaction(sweep_tx_hash);
+          const signedPayloadCheck = verifyTronSignedWithdrawalPayload({
+            txHash: String(sweep_tx_hash),
+            signedTransaction: signedTronTransaction,
+            expectedSenderHex: tronWeb.address.toHex(String(sweep.deposit_address)),
+            expectedDestinationHex: tronWeb.address.toHex(hotWalletDestination),
+            expectedTokenContractHex: tronWeb.address.toHex(TRON_CONFIG.usdtContract),
+            expectedAmountUnits,
+            observedTransaction: observedTronTransaction,
+          });
+          if (!signedPayloadCheck.verified) {
+            throw new Error('TRON sweep signed/on-chain transaction identity rejected: ' + signedPayloadCheck.reason);
+          }
+          assertTronSignedTransactionProtoIntegrity(
+            tronWeb,
+            signedTronTransaction,
+            String(sweep_tx_hash)
+          );
+
+          if (tronOutcome.success === false) {
+            // A failed receipt is terminal only after canonical 19-confirmation
+            // finality and exact durable transaction identity verification.
+            isFailed = true;
+          } else {
+            const eventUrl = `${TRON_CONFIG.fullHost.replace(/\/$/, '')}/v1/transactions/${encodeURIComponent(sweep_tx_hash)}/events?only_confirmed=true`;
+            const eventHeaders: Record<string, string> = {};
+            if (TRON_CONFIG.apiKey) eventHeaders['TRON-PRO-API-KEY'] = TRON_CONFIG.apiKey;
+
+            const eventResponse = await fetch(eventUrl, {
+              headers: eventHeaders,
+              signal: AbortSignal.timeout(8000),
+            });
+            if (!eventResponse.ok) {
+              throw new Error(`TRON confirmed sweep event API returned HTTP ${eventResponse.status}`);
+            }
+            const eventPayload: unknown = await eventResponse.json();
+            const transferEvidence = verifyTronWithdrawalEvidence({
+              txHash: String(sweep_tx_hash),
+              destinationAddress: hotWalletDestination,
+              expectedAmount: String(amount_swept),
+              expectedSender: String(sweep.deposit_address),
+              blockNumber: Number(tronOutcome.blockNumber),
+              tokenContract: TRON_CONFIG.usdtContract,
+              events: eventPayload,
+            });
+            if (!transferEvidence.verified) {
+              throw new Error('TRON sweep transfer event rejected: ' + transferEvidence.reason);
+            }
+            isConfirmed = true;
+          }
         }
       } else if (net === 'BTC' || net === 'LTC') {
         utxoFinalityProof = await isUtxoSweepCanonicallyConfirmed(net, sweep_tx_hash);
@@ -4298,7 +4602,7 @@ const txNonce = parsedTx.nonce;
           workerId,
           recoveryStatus,
           'CONFIRMED',
-          { txHash: sweep_tx_hash, amountSwept: Number(amount_swept || 0) }
+          { txHash: sweep_tx_hash, amountSwept: String(amount_swept || '0') }
         );
         return true;
       }

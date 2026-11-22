@@ -246,14 +246,34 @@ export function WithdrawDialog({ open, onOpenChange, asset, userWallets }: Withd
         }
       }
 
-      // Check if the destination address belongs to another registered user on the platform
-      const { data: internalDep } = await supabase
-        .from('deposit_addresses')
-        .select('user_id')
-        .eq('address', targetAddress)
-        .maybeSingle();
+      // Resolve internal recipients through the authenticated server endpoint.
+      // Client-side RLS only exposes the signed-in user's own address rows.
+      const internalRecipientResponse = await fetch('/api/wallet/resolve-deposit-recipient', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ address: targetAddress }),
+      });
 
-      if (internalDep?.user_id && internalDep.user_id !== user.uid) {
+      let internalRecipientId: string | null = null;
+      if (internalRecipientResponse.status === 404) {
+        internalRecipientId = null;
+      } else if (internalRecipientResponse.ok) {
+        const internalRecipientPayload = await internalRecipientResponse.json();
+        const candidateId = internalRecipientPayload?.recipient?.id;
+        if (typeof candidateId !== 'string' || !candidateId) {
+          throw new Error('Internal recipient ownership could not be verified.');
+        }
+        internalRecipientId = candidateId;
+      } else {
+        // Never continue to an on-chain withdrawal when internal ownership
+        // lookup failed or reported ambiguous registry ownership.
+        const lookupPayload = await internalRecipientResponse.json().catch(() => null);
+        throw new Error(
+          lookupPayload?.error || 'Destination ownership could not be verified. Please retry.'
+        );
+      }
+
+      if (internalRecipientId && internalRecipientId !== (user.uid || user.id)) {
         // Internal transfer detected! Execute instantly via internal transfer API
         const transferFingerprint = JSON.stringify([targetAddress, asset, withdrawAmt]);
         const previousAttempt = internalTransferAttemptRef.current;

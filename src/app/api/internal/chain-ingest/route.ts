@@ -4,6 +4,7 @@ import { normalizeDepositNetwork } from '@/lib/hd-derivation-engine';
 import { CANONICAL_USDT_CONTRACTS } from '@/jobs/depositIngestion';
 import { timingSafeEqualString } from '@/lib/security/worker-auth';
 import { readBoundedRequestBody } from '@/lib/security/read-bounded-request-body';
+import { parseDepositRpcResult } from '@/lib/deposit-rpc-result';
 
 const MAX_CHAIN_INGEST_BODY_BYTES = 256 * 1024;
 
@@ -228,7 +229,20 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    return NextResponse.json({ success: true, result: rpcData }, {
+    const parsedResult = parseDepositRpcResult(rpcData);
+    if (!parsedResult.success) {
+      return NextResponse.json({
+        success: false,
+        error: parsedResult.code || 'deposit_registration_rejected',
+        message: parsedResult.message || 'Canonical deposit RPC rejected the candidate.',
+        result: parsedResult.raw,
+      }, {
+        status: 422,
+        headers: { 'Cache-Control': 'no-store, max-age=0' },
+      });
+    }
+
+    return NextResponse.json({ success: true, result: parsedResult.raw }, {
       headers: { 'Cache-Control': 'no-store, max-age=0' },
     });
   } catch (err: unknown) {
